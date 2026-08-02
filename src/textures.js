@@ -137,11 +137,16 @@ const SURFACES = {
 
   plaster(u, v, s) {
     const coarse = fbm(u * 10, v * 10, 10, 13, 4);
-    const fine = fbm(u * 60, v * 60, 60, 41, 3);
+    // The fine octave was 60 cycles across a 3 m tile at a quarter of the
+    // height range: 5 cm bumps, everywhere, evenly. On a ceiling that reads as
+    // sprayed artex rather than as lime plaster. Limewash over a float coat is
+    // a slow undulation with the odd trowel mark, so the coarse octave carries
+    // the relief now and the fine one only breaks up the sheen.
+    const fine = fbm(u * 38, v * 38, 38, 41, 3);
     const stain = clamp01(fbm(u * 3, v * 3 + 0.4, 3, 67, 3) * 1.6 - 0.55);
     const base = mix(rgb(0xc9bda3), rgb(0x9c9078), coarse * 0.55);
     s.color = mix(base, rgb(0x6e6350), stain * 0.5 * clamp01(1.25 - v * 1.6));
-    s.height = 0.5 + fine * 0.25 + coarse * 0.1;
+    s.height = 0.5 + fine * 0.08 + coarse * 0.20;
     s.rough = 0.88 + fine * 0.1;
   },
 
@@ -375,6 +380,10 @@ function toTexture(data, size, colorSpace) {
  * Material recipes: which surface, how many world units per texture tile, and
  * the PBR knobs that noise alone can't express.
  *
+ * `wet` is damp collecting in the low patches, which is right for a street
+ * and wrong for a floor: planks, marble and most flagstone are indoors, and
+ * the effect was putting rain puddles on the floorboards of a tavern.
+ *
  * `env` is how much of the environment cube the surface believes. It is not a
  * cheat: a limewashed wall really does reflect less of the sky than wet
  * flagstones do, and with a real environment map the difference between 0.6
@@ -386,12 +395,12 @@ function toTexture(data, size, colorSpace) {
 /** `scale` is how many world units one tile of the texture covers. */
 const RECIPES = {
   cobble: { surface: 'cobble', scale: 2.2, normalScale: 1.0, env: 1.15, wet: 0.5, detail: 0.5 },
-  flagstone: { surface: 'flagstone', scale: 2.6, normalScale: 0.85, env: 1.1, wet: 0.45, detail: 0.5 },
-  marble: { surface: 'marble', scale: 4, normalScale: 0.35, env: 1.35, wet: 0.2, detail: 0.3 },
-  plaster: { surface: 'plaster', scale: 3, normalScale: 0.5, env: 0.7, wet: 0, detail: 0.6 },
+  flagstone: { surface: 'flagstone', scale: 2.6, normalScale: 0.85, env: 1.1, wet: 0.16, detail: 0.5 },
+  marble: { surface: 'marble', scale: 4, normalScale: 0.35, env: 1.35, wet: 0, detail: 0.3 },
+  plaster: { surface: 'plaster', scale: 3, normalScale: 0.34, env: 0.7, wet: 0, detail: 0.45 },
   stonewall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.95, wet: 0, detail: 0.55 },
   timber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45 },
-  planks: { surface: 'planks', scale: 2.8, normalScale: 0.7, env: 0.85, wet: 0.2, detail: 0.45 },
+  planks: { surface: 'planks', scale: 2.8, normalScale: 0.7, env: 0.85, wet: 0, detail: 0.45 },
   rooftile: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0.35, detail: 0.5 },
   thatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7 },
   dirt: { surface: 'dirt', scale: 4.5, normalScale: 0.9, env: 0.7, wet: 0.3, detail: 0.6 },

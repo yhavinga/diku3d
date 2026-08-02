@@ -965,6 +965,7 @@ export function populate(world, layout, built, options = {}) {
 
   // --- lit windows --------------------------------------------------------
 
+  const windowLights = [];
   if (windows.length) {
     const panes = [];
     const frames = [];
@@ -995,13 +996,35 @@ export function populate(world, layout, built, options = {}) {
             const pz = cz + tz * spread;
             const out = (o) => at(px + f.nx * o, y, pz + f.nz * o, 0, f.ry, 0);
             const lit = hash3(Math.round(px * 4), Math.round(y * 4), Math.round(pz * 4), 71) > 0.42;
-            pushPart(lit ? panes : frames, G.box(PANE_W, PANE_H, 0.12), lit ? 0xffc47e : 0x14110e, out(0.06));
+            // A wall is half a metre thick, so a window is a hole with depth
+            // and the head of the reveal is always in shade. The pane used to
+            // sit *proud* of the wall with its frame proud of that, which is a
+            // card stuck on the outside -- the one thing a window can never
+            // read as. Now the glass is flush and the reveal stands 34 cm off
+            // the face, so the opening has a jamb, a head and a shadow.
+            const REVEAL = 0.34;
+            pushPart(lit ? panes : frames, G.box(PANE_W, PANE_H, 0.06), lit ? 0xffc47e : 0x14110e, out(0.03));
             for (const s of [-1, 1]) {
-              pushPart(frames, G.box(0.16, PANE_H + 0.3, 0.22), 0x36291d, at(px + tx * s * (PANE_W / 2 + 0.08) + f.nx * 0.1, y, pz + tz * s * (PANE_W / 2 + 0.08) + f.nz * 0.1, 0, f.ry, 0));
+              pushPart(frames, G.box(0.17, PANE_H + 0.34, REVEAL), 0x36291d,
+                at(px + tx * s * (PANE_W / 2 + 0.085) + f.nx * (REVEAL / 2),
+                   y, pz + tz * s * (PANE_W / 2 + 0.085) + f.nz * (REVEAL / 2), 0, f.ry, 0));
             }
-            pushPart(frames, G.box(PANE_W + 0.3, 0.16, 0.22), 0x36291d,
-              at(px + f.nx * 0.1, y + PANE_H / 2 + 0.08, pz + f.nz * 0.1, 0, f.ry, 0));
-            pushPart(frames, G.box(PANE_W + 0.5, 0.14, 0.36), 0x594a38, at(px + f.nx * 0.16, y - PANE_H / 2 - 0.09, pz + f.nz * 0.16, 0, f.ry, 0));
+            pushPart(frames, G.box(PANE_W + 0.34, 0.17, REVEAL), 0x36291d,
+              at(px + f.nx * (REVEAL / 2), y + PANE_H / 2 + 0.085, pz + f.nz * (REVEAL / 2), 0, f.ry, 0));
+            // The sill oversails the reveal and is what the rain runs off.
+            pushPart(frames, G.box(PANE_W + 0.56, 0.15, REVEAL + 0.14), 0x594a38,
+              at(px + f.nx * (REVEAL / 2 + 0.05), y - PANE_H / 2 - 0.095,
+                 pz + f.nz * (REVEAL / 2 + 0.05), 0, f.ry, 0));
+            // A window bright enough to see from thirty metres is spilling
+            // light on the wall under it. One candidate per lit pane; the pool
+            // only ever lights the nearest handful, so this costs nothing until
+            // you are standing in front of one.
+            if (lit) {
+              windowLights.push({
+                x: px + f.nx * 0.5, y, z: pz + f.nz * 0.5,
+                color: 0xffb063, intensity: 3.4, radius: 6.5, flicker: false,
+              });
+            }
           }
         }
       }
@@ -1301,7 +1324,7 @@ export function populate(world, layout, built, options = {}) {
 
   if (instances) instances.finish(group);
 
-  return { group, interactables, update, doors, figures, setSun };
+  return { group, interactables, update, doors, figures, setSun, lights: windowLights };
 }
 
 function shopSign(short) {

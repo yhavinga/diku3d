@@ -68,6 +68,10 @@ const TIMES = {
     // only thing giving a roofline a silhouette to be cut against.
     bloom: 0.42, bloomThreshold: 1.1, stars: 1, turbidity: 2.4, rayleigh: 2.2,
     shafts: 0, shaftTint: 0xaabbff,
+    // Read before the exposure of 1.25 and ACES, so it is well under what it
+    // looks like: this lands at roughly #0d1226 at the zenith and half a stop
+    // brighter along the horizon.
+    skyFloor: 0x2a3a6b, skyFloorGain: 0.085,
   },
 };
 
@@ -167,7 +171,7 @@ async function boot() {
 
   const sky = new Sky();
   sky.scale.setScalar(6000);
-  clampSkyHighlights(sky, 60);
+  const skyRange = clampSkyHighlights(sky, 60);
   scene.add(sky);
 
   const stars = makeStars();
@@ -199,7 +203,8 @@ async function boot() {
   const { composer, bloom, shafts } = pipeline;
   const environment = new SkyEnvironment(renderer);
 
-  const lightPool = new LightPool(scene, 14, built.lights);
+  // Torches and lamps from the builder, plus one behind every lit window.
+  const lightPool = new LightPool(scene, 14, built.lights.concat(actors.lights));
   const quality = new Quality({
     renderer, pipeline, sun, lightPool, materials,
     name: params.get('quality') || 'medium',
@@ -250,6 +255,7 @@ async function boot() {
     sky.material.uniforms.rayleigh.value = preset.rayleigh;
     sky.material.uniforms.mieCoefficient.value = 0.006;
     sky.material.uniforms.mieDirectionalG.value = 0.86;
+    skyRange.setFloor(preset.skyFloor ?? 0x000000, preset.skyFloorGain ?? 0);
     sun.position.copy(sunPosition).multiplyScalar(120);
     sun.color.setHex(preset.sun);
     sun.intensity = preset.sunIntensity;

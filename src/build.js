@@ -230,8 +230,13 @@ function pickMaterials(room, area) {
   let wallOut = 'stonewall';
   let roof = 'rooftile';
 
-  if (cave) { floor = 'rock'; wallIn = 'rock'; wallOut = 'rock'; }
-  else if (holy) { floor = 'marble'; wallIn = 'marble'; wallOut = 'marble'; roof = 'marble'; }
+  // What you are standing under. Only a vault or a cave has stone overhead:
+  // over an ordinary room it is the joists and floorboards of whatever is
+  // above, which is also why plastering it read as sprayed artex.
+  let ceil = 'planks';
+
+  if (cave) { floor = 'rock'; wallIn = 'rock'; wallOut = 'rock'; ceil = 'rock'; }
+  else if (holy) { floor = 'marble'; wallIn = 'marble'; wallOut = 'marble'; roof = 'marble'; ceil = 'marble'; }
   else if (wood) { floor = 'planks'; wallIn = 'plaster'; wallOut = 'timber'; }
 
   switch (room.sector) {
@@ -245,7 +250,7 @@ function pickMaterials(room, area) {
   }
   if (!holy && !cave && !wood && hash3(room.vnum, 0, 0, 9) > 0.6) wallOut = 'timber';
   if (!holy && hash3(room.vnum, 1, 0, 3) > 0.84) roof = 'thatch';
-  return { floor, wallIn, wallOut, roof, holy, cave };
+  return { floor, wallIn, wallOut, roof, ceil, holy, cave };
 }
 
 // ------------------------------------------------------------------ main ----
@@ -449,7 +454,7 @@ export function buildScene(world, layout, materials, assets = null) {
 
     if (!outdoor) {
       buildCeiling({
-        batcher, chunk, material: mats.wallIn, x: pos.x, y: pos.y + CEIL, z: pos.z,
+        batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + CEIL, z: pos.z,
         half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
       });
       if (kit === null) buildRoof({ batcher, chunk, mats, room, x: pos.x, y: pos.y + CEIL + SLAB, z: pos.z, decor });
@@ -745,7 +750,7 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
       addCollider(wx - (along ? t : CELL) / 2, wx + (along ? t : CELL) / 2,
         wz - (along ? CELL : t) / 2, wz + (along ? CELL : t) / 2, y, y + CEIL);
     }
-    batcher.add(box(CELL, SLAB, CELL), mats.wallIn, place(pos.x, y + CEIL + SLAB / 2, pos.z), { chunk, ao: () => 0.6 });
+    batcher.add(box(CELL, SLAB, CELL), mats.ceil, place(pos.x, y + CEIL + SLAB / 2, pos.z), { chunk, ao: () => 0.6 });
     if (hash3(c.x, c.z, level, 14) > 0.45) {
       const wallDir = [0, 1, 2, 3].find((d) => !openDirs.has(d));
       if (wallDir !== undefined) {

@@ -126,18 +126,36 @@ export class SkyEnvironment {
  * colour is scaled, not clipped per channel.
  */
 export function clampSkyHighlights(sky, ceiling = 60) {
+  // The other end of the same problem. With the sun below the horizon the
+  // shader returns very nearly zero everywhere, so night was RGB 0,0,0 and
+  // every roofline was a matte cut against void. A real night sky is deep
+  // blue-violet with a brighter band low down, and that band is the only thing
+  // a silhouette has to be read against. `skyFloor` is that band; it is a
+  // floor, not an add, so it does nothing at all once the sun is up.
+  const floor = new THREE.Vector3(0, 0, 0);
   sky.material.onBeforeCompile = (shader) => {
     shader.uniforms.skyCeiling = { value: ceiling };
+    shader.uniforms.skyFloor = { value: floor };
+    sky.material.userData.skyFloor = shader.uniforms.skyFloor;
     shader.fragmentShader = shader.fragmentShader
-      .replace('void main() {', 'uniform float skyCeiling;\n\t\t\tvoid main() {')
+      .replace('void main() {', 'uniform float skyCeiling;\n\t\t\tuniform vec3 skyFloor;\n\t\t\tvoid main() {')
       .replace(
         'gl_FragColor = vec4( texColor, 1.0 );',
         'float skyPeak = max( max( texColor.r, texColor.g ), texColor.b );\n'
         + '\t\t\ttexColor *= skyCeiling / max( skyCeiling, skyPeak );\n'
+        + '\t\t\tvec3 skyDir = normalize( vWorldPosition - cameraPosition );\n'
+        + '\t\t\tfloat skyHorizon = 1.0 - clamp( abs( skyDir.y ), 0.0, 1.0 );\n'
+        + '\t\t\ttexColor = max( texColor, skyFloor * ( 0.42 + skyHorizon * skyHorizon * 1.35 ) );\n'
         + '\t\t\tgl_FragColor = vec4( texColor, 1.0 );',
       );
   };
   sky.material.needsUpdate = true;
+  return {
+    setFloor(hex, scale) {
+      const c = new THREE.Color(hex);
+      floor.set(c.r * scale, c.g * scale, c.b * scale);
+    },
+  };
 }
 
 // ------------------------------------------------------------ light shafts --
