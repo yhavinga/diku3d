@@ -401,9 +401,15 @@ def build_stone_arch():
     # comes out lumpy in a way that is hard to see until you look along it.
     n = 11
     ring_r = r + 0.21
+    # The arc length has to be measured on the ring the blocks actually sit on,
+    # not on the opening radius inside it. Using `r` made every voussoir 0.512 m
+    # where the ring needs 0.517, and 11 blocks each 5 mm short leaves eleven
+    # visible gaps with lit wall behind them -- which read, three times over, as
+    # a fan of black plates floating in front of the gate rather than as an
+    # arch. Measured on `ring_r` and lapped 8%, so they close under the chamfer.
     for i in range(n):
         a = math.pi * (i + 0.5) / n
-        p.append(kit.timber((0.42, depth, r * math.pi / n * 1.12),
+        p.append(kit.timber((0.42, depth, ring_r * math.pi / n * 1.08),
                             (-math.cos(a) * ring_r, 0, spring + math.sin(a) * ring_r),
                             (0, a + math.pi, 0), "stonewall", 0.04, "voussoir"))
     p.append(kit.timber((0.5, depth + 0.14, 0.6), (0, 0, spring + r + 0.2), (0, 0, 0),

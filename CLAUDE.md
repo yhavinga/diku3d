@@ -104,6 +104,20 @@ them and never allocates its own — two doors in one wall is the failure mode.
   shin bone's world position into `figure.worldToLocal()` over a couple of
   seconds, and compare the range along local X against local Z. Forward must
   win. Nothing about this is visible in a still.
+- **To find what a black shape is, hide things, don't reason about it.** Three
+  rounds went into a "black bar" by theorising from screenshots. What settled it
+  in two minutes: `actors.group.visible = false` to halve the search space, then
+  hide meshes by bounding-box signature until the shape vanished. It was the
+  `stone_arch` voussoirs. Raycasting was actively misleading — it reported the
+  wall *behind* the thing.
+- **An arc length has to be measured on the radius the blocks sit on.**
+  `build_stone_arch()` sized its 11 voussoirs by the opening radius `r` while
+  placing them on `ring_r = r + 0.21`: 0.512 m blocks on a ring wanting 0.517.
+  Five millimetres each, eleven times, and the ring is a fan of separate plates
+  with lit wall showing between them. Regenerate assets after touching
+  `tools/blender/*.py` — running `props.build_stone_arch()` before the fix
+  produced a byte-identical file, which is how it was confirmed the committed
+  model matched the source and the source was at fault.
 - **Anything at RGB 0 is a bug, not a shade.** Three separate black rectangles
   were reported as one: a corridor built to a room that was never built, the
   plate behind a name label (`rgba(12,10,8,0.72)` — sprites are tone mapped, and
