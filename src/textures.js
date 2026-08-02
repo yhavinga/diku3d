@@ -81,20 +81,34 @@ function mix(c1, c2, t) {
  */
 const SURFACES = {
   cobble(u, v, s) {
-    const [, edge, id] = cellular(u * 7, v * 7, 7, 11, 0.38);
+    // 18 setts across a 2.2 m tile is 12 cm a stone, which is what a granite
+    // sett actually measures. It was 7 across 2.6 m -- 37 cm -- and at that
+    // size a single stone is wider than a stride, so the ground gave the eye
+    // no scale to measure people against and they read as toys.
+    const [, edge, id] = cellular(u * 18, v * 18, 18, 11, 0.38);
     const grout = clamp01((edge - 0.012) * 26);
     const grain = fbm(u * 34, v * 34, 34, 3, 3);
-    const stone = mix(rgb(0x6f6a61), rgb(0x958d80), id);
+    // Setts are cut from whatever the quarry yielded -- grey granite, pink
+    // granite, near-black basalt -- and a street of them is never one colour.
+    // `id` is the per-stone roll; the second stream picks the odd stone out.
+    const warm = (id * 7.13) % 1;
+    let stone = mix(rgb(0x6a655c), rgb(0x9d9488), id);
+    if (warm > 0.74) stone = mix(stone, rgb(0x8d6a5a), (warm - 0.74) * 2.6);
+    else if (warm < 0.17) stone = mix(stone, rgb(0x413f3c), (0.17 - warm) * 3.2);
     const wet = fbm(u * 5, v * 5, 5, 21, 3);
     const c = mix(rgb(0x413d38), stone, grout);
-    const shade = 0.9 + grain * 0.2;
+    // Every stone sits a little differently, so the whole face lifts or drops.
+    const shade = (0.9 + grain * 0.2) * (0.86 + ((id * 3.7) % 1) * 0.28);
     s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
     s.height = grout * (0.7 + id * 0.3) + grain * 0.06;
     s.rough = 0.92 - grout * 0.18 - wet * 0.15;
   },
 
   flagstone(u, v, s) {
-    const cols = 4; const rows = 4;
+    // 6 slabs across a 2.6 m tile is 43 cm, in the middle of the range a York
+    // stone flag is cut to. At 4 across 3.4 m they were 85 cm, which is a
+    // cathedral floor slab, not a shop floor.
+    const cols = 6; const rows = 6;
     const gx = u * cols; const gy = v * rows;
     const cx = Math.floor(gx); const cy = Math.floor(gy);
     const fx = gx - cx; const fy = gy - cy;
@@ -371,8 +385,8 @@ function toTexture(data, size, colorSpace) {
  */
 /** `scale` is how many world units one tile of the texture covers. */
 const RECIPES = {
-  cobble: { surface: 'cobble', scale: 2.6, normalScale: 1.0, env: 1.15, wet: 0.5, detail: 0.5 },
-  flagstone: { surface: 'flagstone', scale: 3.4, normalScale: 0.85, env: 1.1, wet: 0.45, detail: 0.5 },
+  cobble: { surface: 'cobble', scale: 2.2, normalScale: 1.0, env: 1.15, wet: 0.5, detail: 0.5 },
+  flagstone: { surface: 'flagstone', scale: 2.6, normalScale: 0.85, env: 1.1, wet: 0.45, detail: 0.5 },
   marble: { surface: 'marble', scale: 4, normalScale: 0.35, env: 1.35, wet: 0.2, detail: 0.3 },
   plaster: { surface: 'plaster', scale: 3, normalScale: 0.5, env: 0.7, wet: 0, detail: 0.6 },
   stonewall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.95, wet: 0, detail: 0.55 },
@@ -397,6 +411,42 @@ const RECIPES = {
  * makes a procedural town read as a game, and a texture repeating every three
  * metres under a mottle that repeats every thirty stops looking repeated.
  */
+/**
+ * The fine grain that fades in when you walk up to a surface. It has to be
+ * *structureless*: the detail layer used to be the material's own normal map
+ * sampled 6.3x smaller, which on anything with a bond -- masonry, planks, roof
+ * tiles -- stamped a miniature copy of that bond inside every block, so a wall
+ * read as 90 cm ashlar and 14 cm brick at the same time. No mason builds that.
+ * Isotropic noise instead: tooling marks and pitting, which is what you
+ * actually see from half a metre away and what no bond pattern should survive.
+ */
+function bakeGrain(size = 256) {
+  const height = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x + 0.5) / size; const v = (y + 0.5) / size;
+      height[y * size + x] = fbm(u * 12, v * 12, 12, 907, 4, 0.55);
+    }
+  }
+  const data = new Uint8ClampedArray(size * size * 4);
+  const at = (x, y) => height[(((y % size) + size) % size) * size + (((x % size) + size) % size)];
+  const strength = size / 30;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = at(x + 1, y) - at(x - 1, y);
+      const dy = at(x, y + 1) - at(x, y - 1);
+      let nx = -dx * strength; let ny = -dy * strength; let nz = 1;
+      const len = Math.hypot(nx, ny, nz);
+      const i = (y * size + x) * 4;
+      data[i] = (nx / len * 0.5 + 0.5) * 255;
+      data[i + 1] = (ny / len * 0.5 + 0.5) * 255;
+      data[i + 2] = (nz / len * 0.5 + 0.5) * 255;
+      data[i + 3] = 255;
+    }
+  }
+  return toTexture(data, size, THREE.NoColorSpace);
+}
+
 function bakeMacro(size = 128) {
   const data = new Uint8ClampedArray(size * size * 4);
   const spread = (v) => clamp01((v - 0.5) * 1.7 + 0.5) * 255;
@@ -435,12 +485,15 @@ function bakeMacro(size = 128) {
  *  - damp in the dips of anything facing up, which is most of what a street
  *    at golden hour is doing.
  */
-function decorate(material, recipe, macro) {
+function decorate(material, recipe, macro, grain) {
   material.userData.detailStrength = recipe.detail ?? 0.5;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.macroMap = { value: macro };
+    shader.uniforms.detailMap = { value: grain };
     shader.uniforms.macroScale = { value: 1 / 26 };
-    shader.uniforms.detailScale = { value: 6.3 };
+    // In world units now, not a multiple of the base tile: grain is grain
+    // whatever the surface, and at 1/0.22 it is about a centimetre a bump.
+    shader.uniforms.detailScale = { value: 1 / 0.22 };
     shader.uniforms.detailStrength = { value: material.userData.detailStrength };
     shader.uniforms.wetness = { value: recipe.wet ?? 0 };
 
@@ -456,6 +509,7 @@ function decorate(material, recipe, macro) {
         #include <common>
         varying vec3 vSurfacePos;
         uniform sampler2D macroMap;
+        uniform sampler2D detailMap;
         uniform float macroScale;
         uniform float detailScale;
         uniform float detailStrength;
@@ -472,6 +526,20 @@ function decorate(material, recipe, macro) {
         vec3 dikuMacro = texture2D( macroMap, dikuMacroUv ).rgb;
         diffuseColor.rgb *= ( 0.90 + dikuMacro.r * 0.21 )
           * mix( vec3( 1.030, 1.0, 0.962 ), vec3( 0.972, 0.997, 1.034 ), dikuMacro.g );
+
+        // Rain splash darkens the foot of a wall and the eaves keep the top of
+        // it dry, so no wall outdoors is one tone from the ground to the roof.
+        // Every wall here was, which is most of why the buildings read as
+        // new-built. Storeys are 7.6 m apart, so the foot of each one is found
+        // by taking the height modulo that -- which is right for a jettied
+        // building, where each floor has its own splash line.
+        float dikuUpness = abs( dot( viewMatrix[ 1 ].xyz, normalize( vNormal ) ) );
+        float dikuVertical = 1.0 - smoothstep( 0.25, 0.75, dikuUpness );
+        float dikuStorey = mod( vSurfacePos.y, 7.6 );
+        float dikuSplash = ( 1.0 - smoothstep( 0.0, 0.85, dikuStorey ) ) * dikuVertical;
+        float dikuSheltered = smoothstep( 5.6, 6.6, dikuStorey ) * dikuVertical;
+        diffuseColor.rgb *= 1.0 - dikuSplash * 0.24 * ( 0.6 + dikuMacro.r * 0.7 );
+        diffuseColor.rgb *= 1.0 + dikuSheltered * 0.06;
       `)
       .replace('#include <roughnessmap_fragment>', /* glsl */`
         #include <roughnessmap_fragment>
@@ -493,7 +561,13 @@ function decorate(material, recipe, macro) {
         #ifdef DIKU_DETAIL
           float dikuNear = detailStrength * ( 1.0 - smoothstep( 1.5, 9.0, length( vViewPosition ) ) );
           if ( dikuNear > 0.0 ) {
-            vec3 dikuN = texture2D( normalMap, vNormalMapUv * detailScale ).xyz * 2.0 - 1.0;
+            // World-space so the grain does not inherit the base tile's scale,
+            // and skewed the same way as the macro so it varies on all axes.
+            vec2 dikuDetailUv = vec2(
+              vSurfacePos.x * 0.92 + vSurfacePos.z * 0.31,
+              vSurfacePos.z * 0.86 - vSurfacePos.y * 0.74
+            ) * detailScale;
+            vec3 dikuN = texture2D( detailMap, dikuDetailUv ).xyz * 2.0 - 1.0;
             normal = normalize( normal + ( tbn[ 0 ] * dikuN.x + tbn[ 1 ] * dikuN.y ) * dikuNear );
           }
         #endif
@@ -513,6 +587,7 @@ function decorate(material, recipe, macro) {
 export function createMaterials(size = 512, onProgress = () => {}) {
   const materials = {};
   const macro = bakeMacro();
+  const grain = bakeGrain();
   const names = Object.keys(RECIPES);
   const surfaced = [];
   names.forEach((name, index) => {
@@ -531,7 +606,7 @@ export function createMaterials(size = 512, onProgress = () => {}) {
     });
     material.name = name;
     material.userData.uvScale = 1 / recipe.scale;
-    decorate(material, recipe, macro);
+    decorate(material, recipe, macro, grain);
     materials[name] = material;
     surfaced.push(material);
     onProgress((index + 1) / names.length, name);

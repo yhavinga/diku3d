@@ -135,11 +135,18 @@ export class AssetLibrary {
       // units over their tile size, and userData.uvScale is already 1/tile --
       // so this multiplies. Dividing tiles the texture tile-size-squared times
       // too often, which reads as a dark grid rather than as a wall.
+      //
+      // V is negated because glTF writes `v = 1 - v`, so out of Blender V runs
+      // *down* a wall while build.js projects it *up*. The normal map's green
+      // channel is a direction in that space, so leaving it flipped inverts the
+      // relief on every model: mortar stands proud of its blocks, and a chamfer
+      // that should fall into a joint climbs out of it instead. Negating rather
+      // than taking 1-v keeps the tiling phase arbitrary, which it already is.
       const uvScale = material.userData.uvScale ?? 1;
       const uv = geometry.attributes.uv;
       if (uv) {
         for (let i = 0; i < uv.count; i++) {
-          uv.setXY(i, uv.getX(i) * uvScale, uv.getY(i) * uvScale);
+          uv.setXY(i, uv.getX(i) * uvScale, -uv.getY(i) * uvScale);
         }
         uv.needsUpdate = true;
       } else {

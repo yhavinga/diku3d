@@ -545,6 +545,68 @@ function makeFlames(count) {
   return { mesh, material };
 }
 
+// ------------------------------------------------------- contact shadows ----
+
+/**
+ * Figures are deliberately kept out of the sun's shadow map -- they are skinned
+ * meshes, so each one there costs a second skinning pass -- which left every
+ * person in the town standing on nothing. Without a contact shadow the eye
+ * files a figure as a layer composited over the scene rather than as something
+ * occupying it, and no amount of work on the figure itself repairs that.
+ *
+ * So: one soft ellipse per figure, all of them in a single InstancedMesh, laid
+ * flat and stretched away from the sun. At noon it is a disc under the feet; at
+ * a ten-degree dusk sun it is a long smear pointing away from the light, which
+ * is what a real shadow does. It is a lie about occlusion, but it is a lie in
+ * the right direction, and it costs one draw call for the whole town.
+ */
+function shadowAlphaTexture(size = 64) {
+  const data = new Uint8ClampedArray(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = ((x + 0.5) / size) * 2 - 1;
+      const v = ((y + 0.5) / size) * 2 - 1;
+      const r = Math.hypot(u, v);
+      const t = Math.max(0, 1 - r);
+      // smoothstep, so the edge has no ring and the core stays dense
+      const a = t * t * (3 - 2 * t);
+      const i = (y * size + x) * 4;
+      data[i] = 255; data[i + 1] = a * 255; data[i + 2] = 255; data[i + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function makeContactShadows(count) {
+  const geometry = new THREE.PlaneGeometry(1, 1);
+  geometry.rotateX(-Math.PI / 2);   // flat, normal up, local +Z is the length
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    alphaMap: shadowAlphaTexture(),
+    transparent: true,
+    depthWrite: false,
+    fog: false,
+    // The quad sits a centimetre over the floor it darkens; the offset keeps it
+    // off the z-buffer's toes on ground that isn't perfectly flat.
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
+  const mesh = new THREE.InstancedMesh(geometry, material, count);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 2;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  return mesh;
+}
+
 // ------------------------------------------------------------------ water ----
 
 const WATER_VERT = `
@@ -655,7 +717,7 @@ export function populate(world, layout, built, options = {}) {
 
       const aggressive = !!(mob.proto.act & ACT_AGGRESSIVE);
       figures.push({
-        object: fig, head: headGroup, label, home: fig.position.clone(),
+        object: fig, head: headGroup, label, home: fig.position.clone(), height,
         mixer: built.mixer || null, actions: built.actions || null, legs: built.legs || null,
         last: fig.position.clone(), speed: 0,
         phase: strHash(mob.proto.short, 5) * 6.28, aggressive,
@@ -753,13 +815,21 @@ export function populate(world, layout, built, options = {}) {
   // of boards, a banner where the room sounds like a hall.
   {
     const props = [];
+    const WALL_VEC = [[0, -1], [1, 0], [0, 1], [-1, 0]];
     for (const item of clutter) {
       const kinds = Math.floor(item.seed * 3);
-      for (let i = 0; i < 2 + Math.floor(item.seed * 3); i++) {
-        const a = strHash(`${item.x},${item.z}`, i) * Math.PI * 2;
-        const r = 3.2 + strHash(`${item.z}`, i) * 2.2;
-        const px = item.x + Math.cos(a) * r;
-        const pz = item.z + Math.sin(a) * r;
+      const half = item.half || 6.5;
+      const walls = item.walls && item.walls.length ? item.walls : [0, 1, 2, 3];
+      const count = 2 + Math.floor(strHash(`${item.x},${item.z}`, 31) * 4);
+      for (let i = 0; i < count; i++) {
+        // Against a wall with no door in it, not scattered over the floor:
+        // people stack their barrels where they are out of the way, and the
+        // middle of the room is where the player arrives.
+        const [wx, wz] = WALL_VEC[walls[Math.floor(strHash(`${item.z}`, i + 17) * walls.length) % walls.length]];
+        const out = half - 0.95 - strHash(`${item.x}`, i + 23) * 0.7;
+        const along = (strHash(`${item.x},${item.z}`, i) - 0.5) * (half * 1.5);
+        const px = item.x + wx * out + wz * along;
+        const pz = item.z + wz * out + wx * along;
         const spin = strHash(`${item.x}`, i + 9) * Math.PI * 2;
         const prop = model([
           'barrel', 'crate', 'sack', 'hay_bale', 'bench', 'trough',
@@ -1050,6 +1120,69 @@ export function populate(world, layout, built, options = {}) {
 
   // --- per-frame ----------------------------------------------------------
 
+  const contactShadows = figures.length ? makeContactShadows(figures.length) : null;
+  if (contactShadows) group.add(contactShadows);
+
+  // Where the sun is, so the shadows know which way to lie. Direction points
+  // from the ground *towards* the sun, matching main.js's sunDirection; `lift`
+  // is how much of the light is the sun rather than sky, which is what decides
+  // whether there is a sharp shadow at all.
+  const sun = { x: 0.4, z: 0.4, elevation: 45, lift: 1 };
+  function setSun(direction, elevationDeg) {
+    const len = Math.hypot(direction.x, direction.z) || 1;
+    sun.x = direction.x / len;
+    sun.z = direction.z / len;
+    sun.elevation = elevationDeg;
+    // Below the horizon there is no sun shadow at all, only the soft darkening
+    // under the feet that any ambient occlusion would give you.
+    sun.lift = THREE.MathUtils.clamp((elevationDeg + 2) / 12, 0, 1);
+  }
+
+  const _shadowMatrix = new THREE.Matrix4();
+  const _shadowPos = new THREE.Vector3();
+  const _shadowQuat = new THREE.Quaternion();
+  const _shadowScale = new THREE.Vector3();
+  const _shadowAxis = new THREE.Vector3(0, 1, 0);
+
+  function updateContactShadows() {
+    if (!contactShadows) return;
+    // Away from the sun, on the ground.
+    const dirX = -sun.x;
+    const dirZ = -sun.z;
+    const yaw = Math.atan2(dirX, dirZ);
+    const tan = Math.tan(THREE.MathUtils.degToRad(Math.max(9, sun.elevation)));
+    for (let i = 0; i < figures.length; i++) {
+      const fig = figures[i];
+      if (!fig.object.visible) {
+        _shadowScale.set(0, 0, 0);
+        _shadowPos.set(0, -1000, 0);
+        _shadowQuat.identity();
+      } else {
+        const height = fig.height || 1.7;
+        const width = Math.max(0.5, height * 0.42);
+        // A shadow is height/tan(elevation) long. Clamped, because a sun ten
+        // degrees up makes one six times the figure's height and that stops
+        // reading as a shadow and starts reading as a stain.
+        const length = Math.min(height * 3.2, width + (height / tan) * sun.lift);
+        // Feet leaving the ground shrink and lighten it, which is the whole
+        // point: it is the cue that says how far up the figure is.
+        const lift = Math.max(0, fig.object.position.y - fig.home.y);
+        const shrink = Math.max(0.45, 1 - lift * 1.6);
+        _shadowScale.set(width * shrink, 1, length * shrink);
+        _shadowPos.set(
+          fig.object.position.x + dirX * (length / 2 - width * 0.35),
+          fig.home.y + 0.02,
+          fig.object.position.z + dirZ * (length / 2 - width * 0.35),
+        );
+        _shadowQuat.setFromAxisAngle(_shadowAxis, yaw);
+      }
+      contactShadows.setMatrixAt(i, _shadowMatrix.compose(_shadowPos, _shadowQuat, _shadowScale));
+    }
+    contactShadows.instanceMatrix.needsUpdate = true;
+    // A long shadow is a soft one: the same light spread over more ground.
+    contactShadows.material.opacity = 0.28 + 0.30 * sun.lift;
+  }
+
   const _look = new THREE.Vector3();
   // Beyond this a person is a few pixels tall and not worth a skinning pass.
   const FIGURE_RANGE = 46;
@@ -1162,11 +1295,13 @@ export function populate(world, layout, built, options = {}) {
         door.pivot.rotation.y = door.spec.rotY + door.t * (Math.PI / 2) * 0.95;
       }
     }
+
+    updateContactShadows();
   }
 
   if (instances) instances.finish(group);
 
-  return { group, interactables, update, doors, figures };
+  return { group, interactables, update, doors, figures, setSun };
 }
 
 function shopSign(short) {

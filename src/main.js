@@ -39,31 +39,34 @@ const AREA_URL = params.get('areaDir') || 'merc21/area';
  */
 const TIMES = {
   dawn: {
-    elevation: 8, azimuth: 95, exposure: 0.64, fog: 0x8f6f5c, density: 0.0034,
+    elevation: 8, azimuth: 95, exposure: 0.64, fog: 0xc9a586, density: 0.0050,
     sun: 0xffc089, sunIntensity: 5.6, sky: 0x9fb6d2, ground: 0x5f5142, ambient: 0.12,
     env: 0.45, bounce: 0x5e4f3d, haze: 0xc9a586,
-    bloom: 0.16, bloomThreshold: 2.6, stars: 0.22, turbidity: 5.5, rayleigh: 2.6,
+    bloom: 0.16, bloomThreshold: 5.5, stars: 0.22, turbidity: 5.5, rayleigh: 2.6,
     shafts: 0.5, shaftTint: 0xffd2a0,
   },
   noon: {
-    elevation: 58, azimuth: 175, exposure: 0.33, fog: 0x9fb4c8, density: 0.0018,
+    elevation: 58, azimuth: 175, exposure: 0.33, fog: 0xbcd2e6, density: 0.0042,
     sun: 0xfff4e2, sunIntensity: 5.4, sky: 0xa3c4e4, ground: 0x6f6455, ambient: 0.16,
     env: 0.55, bounce: 0x77694f, haze: 0xbcd2e6,
-    bloom: 0.14, bloomThreshold: 3.6, stars: 0, turbidity: 3.0, rayleigh: 1.3,
+    bloom: 0.14, bloomThreshold: 7.0, stars: 0, turbidity: 3.0, rayleigh: 1.3,
     shafts: 0, shaftTint: 0xffffff,
   },
   dusk: {
-    elevation: 9.5, azimuth: 258, exposure: 0.62, fog: 0x8a5a3e, density: 0.003,
+    elevation: 9.5, azimuth: 258, exposure: 0.62, fog: 0xb87b4e, density: 0.0050,
     sun: 0xff9448, sunIntensity: 6.2, sky: 0x7b8ea8, ground: 0x50412f, ambient: 0.12,
     env: 0.45, bounce: 0x574433, haze: 0xb87b4e,
-    bloom: 0.16, bloomThreshold: 2.8, stars: 0.32, turbidity: 6.5, rayleigh: 3.0,
+    bloom: 0.16, bloomThreshold: 5.5, stars: 0.32, turbidity: 6.5, rayleigh: 3.0,
     shafts: 0.55, shaftTint: 0xffb469,
   },
   night: {
-    elevation: -8, azimuth: 300, exposure: 1.25, fog: 0x0d1220, density: 0.0075,
+    elevation: -8, azimuth: 300, exposure: 1.25, fog: 0x1a2340, density: 0.0068,
     sun: 0x8ea6d6, sunIntensity: 0.8, sky: 0x2b3a5c, ground: 0x171a22, ambient: 0.18,
-    env: 1.0, bounce: 0x1a1e28, haze: 0x223050,
-    bloom: 0.5, bloomThreshold: 0.75, stars: 1, turbidity: 2, rayleigh: 0.6,
+    env: 1.0, bounce: 0x1a1e28, haze: 0x2c3c62,
+    // Rayleigh does the work a black sky cannot: a night sky is deep
+    // blue-violet with a brighter band at the horizon, and that band is the
+    // only thing giving a roofline a silhouette to be cut against.
+    bloom: 0.42, bloomThreshold: 1.1, stars: 1, turbidity: 2.4, rayleigh: 2.2,
     shafts: 0, shaftTint: 0xaabbff,
   },
 };
@@ -261,6 +264,9 @@ async function boot() {
     stars.visible = preset.stars > 0;
     shaftTint.setHex(preset.shaftTint);
     state.shaftGain = preset.shafts;
+    // Figures are kept out of the shadow map, so their contact shadows are
+    // placed by hand and have to be told where the light is coming from.
+    actors.setSun(sunPosition, preset.elevation);
 
     // Rebake the environment from the sky we just set up. This is the whole
     // ambient term, so it has to happen before the next frame -- and it is a

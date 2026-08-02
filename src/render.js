@@ -387,7 +387,12 @@ export function createPipeline({ renderer, scene, camera, width, height }) {
   // The threshold is set per time of day in main.js, and it has to be well
   // above 1: this buffer is linear HDR, where open sky at dusk runs into the
   // tens and a threshold near 1 blooms the entire sky over the whole street.
-  const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), 0.25, 0.55, 2.8);
+  // Radius was 0.55, which spread the sun over about 35 degrees of sky and ate
+  // whole buildings. Real glare is a tiny, extremely hot core with a halo that
+  // falls off fast; a wide gaussian just reads as a smeared lens. The threshold
+  // that goes with it is set per time of day, high enough that only the disc
+  // and genuine specular hits qualify.
+  const bloom = new UnrealBloomPass(new THREE.Vector2(width, height), 0.25, 0.30, 2.8);
 
   // SMAA works in linear-srgb, so it has to sit ahead of the output pass.
   const smaa = new SMAAPass();

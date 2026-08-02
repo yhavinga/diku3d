@@ -458,6 +458,18 @@ export function buildScene(world, layout, materials, assets = null) {
         w: SHELL * 2, d: SHELL * 2, h: CEIL + 1.1, seed: hash3(room.vnum, 2, 0, 11), doorSides: sides,
       });
       buildInteriorProps({ room, pos, sides, decor, mats });
+    } else {
+      // Out of doors the same thing, against the sides with no way out of
+      // them, so a square reads as somewhere people keep their things rather
+      // than as swept paving.
+      const blank = [];
+      for (let d = 0; d < 4; d++) if (!sides[d]) blank.push(d);
+      if (blank.length && hash3(room.vnum, 13, 0, 6) > 0.28) {
+        decor.push({
+          kind: 'clutter', x: pos.x, y: pos.y, z: pos.z, half: HALF,
+          walls: blank, seed: hash3(room.vnum, 12, 0, 5), indoor: false,
+        });
+      }
     }
 
     // upper floors need something underneath them
@@ -707,8 +719,16 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
     addPlatform(pos.x - HALF, pos.x + HALF, pos.z - HALF, pos.z + HALF, y);
 
     if (!enclosed) {
-      if (hash3(c.x, c.z, level, 12) > 0.86) {
-        decor.push({ kind: 'clutter', x: pos.x, y, z: pos.z, seed: hash3(c.x, c.z, level, 13) });
+      // Was 0.86 -- one street cell in seven carried anything at all, which is
+      // most of why the town read as a blockout. The two open ends of the
+      // passage are excluded so nothing lands in the middle of the way through.
+      if (hash3(c.x, c.z, level, 12) > 0.45) {
+        const walls = [0, 1, 2, 3].filter((d) => !openDirs.has(d));
+        decor.push({
+          kind: 'clutter', x: pos.x, y, z: pos.z, half: HALF,
+          walls: walls.length ? walls : [0, 1, 2, 3],
+          seed: hash3(c.x, c.z, level, 13), indoor: false,
+        });
       }
       continue;
     }
@@ -830,6 +850,15 @@ function buildInteriorProps({ room, pos, sides, decor, mats }) {
   for (let d = 0; d < 4; d++) if (!sides[d]) blank.push(d);
   if (blank.length && /temple|altar|sanctum|hall|throne/i.test(room.name)) {
     decor.push({ kind: 'banner', x: pos.x, y: pos.y, z: pos.z, dir: blank[0] });
+  }
+  // An inn with a named landlord was a bare stone box: eighteen prop models
+  // existed and only routed alley cells ever placed one. Rooms dress
+  // themselves now, against whichever walls have no door in them.
+  if (blank.length) {
+    decor.push({
+      kind: 'clutter', x: pos.x, y: pos.y, z: pos.z, half: SHELL,
+      walls: blank, seed: hash3(room.vnum, 12, 0, 5), indoor: true,
+    });
   }
   if (mats.floor === 'planks' && hash3(room.vnum, 9, 0, 7) > 0.45) {
     decor.push({

@@ -24,13 +24,16 @@ import * as THREE from 'three';
  * it used to be.
  *
  * `ao` and `shafts` are `{ scale, samples }`, where scale is the fraction of
- * the render resolution the effect runs at. Measured on an M4 Max at 1400x900
- * CSS, on the Market Square, ambient occlusion is by far the most expensive
- * thing here -- 1.5 ms of `high`'s 5.6 -- which is why `medium` does without
- * it. Light shafts are only 0.26 ms, but they are a *variable* 0.26 ms that
- * arrives whenever you turn towards a low sun, and a cost that appears when
- * you turn your head is exactly the kind that spins a fan up; `medium` is the
- * preset that has to stay cold, so they start at `high`.
+ * the render resolution the effect runs at. Remeasured at 1600x900 with the
+ * frame cap at 30: light shafts are the expensive item, about 4.3 ms of
+ * `high`'s ten, against ambient occlusion's 3.4. They are also a *variable*
+ * 4.3 ms that arrives whenever you turn towards a low sun, and a cost that
+ * appears when you turn your head is exactly the kind that spins a fan up.
+ *
+ * So `high` -- the default, and the preset that has to stay cold -- pays for
+ * ambient occlusion and the detail normal instead, which is where the money
+ * shows: they are what puts a figure on the ground and keeps a wall from
+ * going smooth as you walk up to it. Shafts are `max` only.
  *
  * Antialiasing is SMAA rather than 4x MSAA because on this half-float target
  * MSAA measured 7.4 ms against SMAA's 1.6.
@@ -47,7 +50,7 @@ export const PRESETS = {
   high: {
     dpr: 1.75, bloom: 'half', aa: 'smaa', shadow: 3072, span: 38,
     ao: { scale: 0.4, samples: 9, denoise: 4 },
-    shafts: { scale: 0.34, samples: 20 }, detail: true, lights: 14, fps: 60,
+    shafts: false, detail: true, lights: 14, fps: 60,
   },
   max: {
     dpr: 2.0, bloom: 'full', aa: 'smaa', shadow: 4096, span: 34,

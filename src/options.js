@@ -13,10 +13,19 @@
 
 const STORE = 'diku3d.options';
 
-/** null means "leave it to the preset"; anything else overrides it. */
+/**
+ * null means "leave it to the preset"; anything else overrides it.
+ *
+ * The default is `high` rather than `medium` because `medium` was chosen back
+ * when the frame cap was 60, and it bought its coolness by switching off the
+ * two things that do most for how close range looks: ambient occlusion, and
+ * the fine detail normal. At 30 fps there are 33 ms in a frame and `high`
+ * spends about six of them, so the caution it was protecting has expired.
+ * Anyone who wants the old behaviour still has `medium` on this screen.
+ */
 export const DEFAULTS = {
   targetFps: 30,
-  preset: 'medium',
+  preset: 'high',
   renderScale: 'auto',
   ao: null,
   shafts: null,
