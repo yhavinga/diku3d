@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 
 import { createPipeline, SkyEnvironment, clampSkyHighlights } from './render.js';
-import { parseArea, buildWorld, DIR_STEP, SECTOR_NAME } from './are.js';
+import { parseArea, buildWorld, DIR_STEP, DIR_NAME, SECTOR_NAME } from './are.js';
 import { layoutWorld } from './layout.js';
 import { createMaterials } from './textures.js';
 import { buildScene, CELL, LEVEL_H } from './build.js';
@@ -73,6 +73,17 @@ const TIMES = {
     // brighter along the horizon.
     skyFloor: 0x2a3a6b, skyFloorGain: 0.085,
   },
+};
+
+/**
+ * Diku's own direction order -- north, east, south, west, up, down -- on the
+ * arrow keys, with the two vertical ones where a keyboard already puts "further
+ * up" and "further down". WASD is taken by the body and every letter that would
+ * read as a compass point is spoken for: E examines, W walks, S walks back.
+ */
+const ARROW_DIR = {
+  ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3,
+  PageUp: 4, PageDown: 5,
 };
 
 const TONE_MAPPING = {
@@ -377,7 +388,50 @@ async function boot() {
       for (const door of actors.doors) { door.spec.locked = false; door.forced = true; }
       hud.toast('every lock in the world just gave way');
     }
+    const dir = ARROW_DIR[event.code];
+    if (dir !== undefined && !options.open) {
+      event.preventDefault();
+      step(dir);
+    }
   });
+
+  /**
+   * Walk an exit the way you would in the mud: north is north, not whichever
+   * way you happen to be facing. WASD is the body and this is the map -- the
+   * arrows take the exit itself, so a stair, an archway and a routed street all
+   * behave the same, and you can cross the town as fast as you can read.
+   *
+   * The refusals are the mud's own, because they carry information the geometry
+   * does not: an exit that leads off the loaded set is a real exit in Midgaard
+   * and a wall here, and that is worth saying out loud rather than pretending
+   * there is nothing there.
+   */
+  function step(dir) {
+    if (fadeTimer > 0) return;
+    const here = currentRoom();
+    const room = here && world.rooms.get(here);
+    if (!room) return;
+    const exit = room.exits[dir];
+    const name = DIR_NAME[dir];
+    if (!exit) { hud.toast(`no exit ${name}`); return; }
+    if (exit.offMap) { hud.toast(`${name}: outside the loaded world`); return; }
+    const target = built.rooms.get(exit.to);
+    if (!target || target.unbuilt) { hud.toast(`${name}: nothing built that way`); return; }
+    // A door in the way behaves as it looks: what you see shut, you cannot walk
+    // through. `door.open` is the live hinge, not the .are file's opinion.
+    const door = actors.doors.find((d) => d.spec.room === room.vnum && d.spec.dir === dir);
+    if (door && !door.open) {
+      const word = door.spec.keyword.split(/\s+/)[0] || 'door';
+      hud.toast(door.spec.locked && !door.forced ? `the ${word} is locked` : `the ${word} is closed`);
+      return;
+    }
+    fadeTimer = 0.34;
+    dom.fade.style.opacity = '1';
+    setTimeout(() => {
+      player.spawn(target.center.x, target.center.y, target.center.z, camera.rotation.y);
+      dom.fade.style.opacity = '0';
+    }, 120);
+  }
 
   function teleport(portal) {
     const target = built.rooms.get(portal.target);

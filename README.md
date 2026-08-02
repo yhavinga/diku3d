@@ -47,6 +47,8 @@ barred gate with a sign saying which vnum is on the other side.
 | | |
 |---|---|
 | `W A S D` | walk, `shift` to run, `space` to jump |
+| arrow keys | take the exit north, east, south or west — the mud's own navigation, so north is north whichever way you are facing |
+| `page up` / `page down` | take the exit up or down |
 | mouse | look, `E` to examine what you're looking at or open a door; `E` again closes it |
 | `1` – `4` | dawn, noon, dusk, night |
 | `P` | cycle quality: low, medium, high, max |
