@@ -1012,6 +1012,7 @@ export function populate(world, layout, built, options = {}) {
   // --- lit windows --------------------------------------------------------
 
   const windowLights = [];
+  let glassMaterial = null;
   if (windows.length) {
     const panes = [];
     const dark = [];
@@ -1057,15 +1058,22 @@ export function populate(world, layout, built, options = {}) {
             // cool mid grey, darker than the wall but nowhere near zero. Its
             // own material, so it can be smooth and see the environment.
             pushPart(lit ? panes : dark, G.box(PANE_W, PANE_H, 0.06), lit ? 0xffc47e : 0xffffff, out(0.03));
+            // Jamb, head and sill were 0x36291d, which is a dark enough brown
+            // that in a dim interior it tone maps to nothing and the window
+            // keeps its black rectangle -- only now as a thick border round a
+            // lit pane. That is backwards: the reveal is the piece of wall
+            // standing closest to a daylight opening, so it is the *best* lit
+            // surface in the room, not the worst. Weathered oak catching light
+            // off its own window.
             for (const s of [-1, 1]) {
-              pushPart(frames, G.box(0.17, PANE_H + 0.34, REVEAL), 0x36291d,
+              pushPart(frames, G.box(0.17, PANE_H + 0.34, REVEAL), 0x6f5b45,
                 at(px + tx * s * (PANE_W / 2 + 0.085) + f.nx * (REVEAL / 2),
                    y, pz + tz * s * (PANE_W / 2 + 0.085) + f.nz * (REVEAL / 2), 0, f.ry, 0));
             }
-            pushPart(frames, G.box(PANE_W + 0.34, 0.17, REVEAL), 0x36291d,
+            pushPart(frames, G.box(PANE_W + 0.34, 0.17, REVEAL), 0x6f5b45,
               at(px + f.nx * (REVEAL / 2), y + PANE_H / 2 + 0.085, pz + f.nz * (REVEAL / 2), 0, f.ry, 0));
             // The sill oversails the reveal and is what the rain runs off.
-            pushPart(frames, G.box(PANE_W + 0.56, 0.15, REVEAL + 0.14), 0x594a38,
+            pushPart(frames, G.box(PANE_W + 0.56, 0.15, REVEAL + 0.14), 0x806c54,
               at(px + f.nx * (REVEAL / 2 + 0.05), y - PANE_H / 2 - 0.095,
                  pz + f.nz * (REVEAL / 2 + 0.05), 0, f.ry, 0));
             // A window bright enough to see from thirty metres is spilling
@@ -1108,6 +1116,16 @@ export function populate(world, layout, built, options = {}) {
         envMapIntensity: 2.8,
       });
       glass.name = 'windowglass';
+      // The other half of the same window. Everything above is about how a
+      // pane looks from the street; from *inside* a room it was a black
+      // rectangle at head height, which is what got reported. A window is a
+      // hole: in daylight it is the brightest thing in a dark room, not the
+      // darkest. The buildings are solid boxes so there is no hole to see
+      // through, and the emissive is what stands in for one -- driven from
+      // the hour's haze colour by setDaylight(), so it goes out at night and
+      // the lit-window glow takes over.
+      glass.emissive = new THREE.Color(0x000000);
+      glassMaterial = glass;
       const mesh = new THREE.Mesh(mergeGeometries(dark, false), glass);
       mesh.receiveShadow = true;
       group.add(mesh);
@@ -1221,6 +1239,17 @@ export function populate(world, layout, built, options = {}) {
   // is how much of the light is the sun rather than sky, which is what decides
   // whether there is a sharp shadow at all.
   const sun = { x: 0.4, z: 0.4, elevation: 45, lift: 1 };
+  /**
+   * How much daylight a window is letting through. `level` is 0 at night and
+   * 1 in the middle of the day; the colour is the hour's haze, so a dawn pane
+   * is warm and a noon one is cold.
+   */
+  function setDaylight(colourHex, level) {
+    if (!glassMaterial) return;
+    glassMaterial.emissive.setHex(colourHex);
+    glassMaterial.emissiveIntensity = Math.max(0, level);
+  }
+
   function setSun(direction, elevationDeg) {
     const len = Math.hypot(direction.x, direction.z) || 1;
     sun.x = direction.x / len;
@@ -1411,7 +1440,10 @@ export function populate(world, layout, built, options = {}) {
 
   if (instances) instances.finish(group);
 
-  return { group, interactables, update, doors, figures, setSun, lights: windowLights };
+  return {
+    group, interactables, update, doors, figures,
+    setSun, setDaylight, lights: windowLights,
+  };
 }
 
 function shopSign(short) {

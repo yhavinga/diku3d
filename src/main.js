@@ -273,6 +273,9 @@ async function boot() {
     // Figures are kept out of the shadow map, so their contact shadows are
     // placed by hand and have to be told where the light is coming from.
     actors.setSun(sunPosition, preset.elevation);
+    // And the windows have to be told there is daylight outside them, or from
+    // inside a room they are black rectangles at head height.
+    actors.setDaylight(preset.haze, THREE.MathUtils.clamp(preset.elevation / 22, 0, 1) * 0.75);
 
     // Rebake the environment from the sky we just set up. This is the whole
     // ambient term, so it has to happen before the next frame -- and it is a

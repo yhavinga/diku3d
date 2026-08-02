@@ -104,6 +104,27 @@ them and never allocates its own — two doors in one wall is the failure mode.
   shin bone's world position into `figure.worldToLocal()` over a couple of
   seconds, and compare the range along local X against local Z. Forward must
   win. Nothing about this is visible in a still.
+- **Ambient occlusion with no floor annihilates interiors.** `GTAOPass` at
+  `blendIntensity = 1` multiplies the whole ambient term by its visibility
+  buffer. Out of doors that survives, because the sun is a separate direct term
+  AO never touches. Indoors there is no sun — ambient is the only light there
+  is — so an enclosed corner comes out at *literally RGB 0*, in hard-edged
+  rectangles that follow the geometry. Measured at 6.5% of the frame in the
+  temple. `blendIntensity = 0.78` leaves a fifth of the ambient standing and
+  takes that to 0.03%; the `scale` exponent came down 4.5 → 2.6 with it, since
+  4.5 was chosen when the blend could still hide the bottom end.
+  **Switching the default preset from `medium` to `high` is what turned this on
+  for everyone** — `medium` has `ao: false`. A change that only flips a setting
+  can still be the change that ships a bug.
+- **Measure the composited frame, not `renderer.render()`.** Five rounds of
+  "black bar" hunting were done with a detector that rendered the scene to an
+  offscreen target, bypassing `EffectComposer` — so it never saw GTAO, and GTAO
+  was the bug. At one camera it reported 0.07% near-black where the real frame
+  had 9.68%. The instrument said fixed five times while the user kept seeing it.
+  Read the real back buffer instead: `composer.render()` then `gl.readPixels`
+  in the *same task*, before the browser composites — that works without
+  `preserveDrawingBuffer`. Anything measured any other way is measuring a
+  different picture than the one being complained about.
 - **A `CanvasTexture` of text on transparency should not have mipmaps** — but
   for legibility, not because it makes black rectangles. three uploads it
   non-premultiplied and `glGenerateMipmap` averages RGB and alpha separately, so

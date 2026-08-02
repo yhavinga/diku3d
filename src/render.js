@@ -388,7 +388,22 @@ export function createPipeline({ renderer, scene, camera, width, height }) {
 
   const gtao = new ScaledGTAOPass(scene, camera, width, height, 0.5);
   gtao.enabled = false;
-  gtao.blendIntensity = 1;
+  // A floor under the occlusion, and it is not a nicety.
+  //
+  // At blendIntensity 1 the pass multiplies the whole ambient term by its
+  // visibility buffer. Out of doors that is survivable, because the sun is a
+  // separate direct term AO never touches. Indoors there is no sun: ambient is
+  // the only light there is, so an enclosed corner multiplied by a visibility
+  // of nearly zero comes out at *literally* RGB 0 -- measured at 6.5% of the
+  // frame in the temple, in hard-edged rectangles that follow the geometry.
+  // That is the black bar that was reported five times, and switching the
+  // default preset from medium to high is what turned it on for everyone.
+  //
+  // 0.78 leaves a fifth of the ambient standing wherever AO is blackest, which
+  // is enough that nothing reaches zero. The exponent comes down with it: 4.5
+  // was chosen to make the effect visible out of doors and it is far too
+  // contrasty once the blend can no longer hide the bottom end.
+  gtao.blendIntensity = 0.78;
   // `radius` and `thickness` are world metres, and the town's grid pitch is
   // 13m with 5.2m ceilings -- so the interesting question here is "how much of
   // the sky can this doorway see", which is a six-metre question, not the
@@ -396,7 +411,7 @@ export function createPipeline({ renderer, scene, camera, width, height }) {
   // result, not a gain: at 1.0 the buffer comes out very nearly white.
   gtao.updateGtaoMaterial({
     radius: 6, distanceExponent: 1, thickness: 12,
-    distanceFallOff: 1, scale: 4.5, samples: 16, screenSpaceRadius: false,
+    distanceFallOff: 1, scale: 2.6, samples: 16, screenSpaceRadius: false,
   });
   gtao.updatePdMaterial({ lumaPhi: 6, depthPhi: 2.5, normalPhi: 3.5, radius: 5, rings: 2, samples: 8 });
 
