@@ -96,11 +96,16 @@ export class AssetLibrary {
     return this.assets.get(name);
   }
 
-  /** Pick whichever of these variants exists, by a stable hash. */
-  choose(names, seed) {
+  /**
+   * Pick whichever of these variants exists, by a stable hash. The seed
+   * defaults because callers asking "is there one of these at all?" pass no
+   * seed, and `undefined * n` is NaN, which indexes nothing.
+   */
+  choose(names, seed = 0) {
     const available = names.filter((n) => this.assets.has(n));
     if (!available.length) return null;
-    return available[Math.floor(seed * available.length) % available.length];
+    const index = Math.floor((Number.isFinite(seed) ? seed : 0) * available.length);
+    return available[Math.min(available.length - 1, Math.max(0, index))];
   }
 
   /**
@@ -117,7 +122,7 @@ export class AssetLibrary {
     gltf.scene.traverse((node) => {
       if (!node.isMesh || !node.geometry) return;
       const materialName = tagOf(node.material);
-      const material = this.materials[materialName] || this.materials.stonewall;
+      const material = this.materialFor(materialName);
 
       const geometry = node.geometry.clone();
       geometry.applyMatrix4(node.matrixWorld);
@@ -234,6 +239,10 @@ const UP = new THREE.Vector3(0, 1, 0);
 /** Everything the world builder will ask for, so one call loads the lot. */
 export const ASSET_NAMES = [
   'house_a', 'house_b', 'house_c', 'house_stone_a', 'house_stone_b',
+  // room kits: panels span a full 11.4 m wall and are placed on the wall line
+  'temple_wall_solid', 'temple_wall_door', 'temple_corner', 'temple_roof',
+  'temple_steps', 'temple_column',
+  'wall_solid', 'wall_door', 'wall_corner', 'wall_roof',
   'temple', 'market_stall', 'well', 'fountain', 'lamp_post', 'hanging_sign',
   'signpost', 'stone_arch', 'portcullis', 'torch_sconce', 'chimney_pot',
   'barrel', 'crate', 'sack', 'hay_bale', 'handcart', 'bench', 'trough',

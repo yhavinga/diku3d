@@ -10,12 +10,14 @@ Everything here is authored on an 11.4 m room grid:
 
 * A panel is 11.4 m wide and spans the *full* width of its wall line, centred on
   it, with its origin at the base centre of the panel and its front at -Y. Four
-  panels at (0, -5.7), (5.7, 0), (0, 5.7), (-5.7, 0) -- yaw 0, 90, 180, 270 --
+  panels on the four wall lines at WALL_LINE = 5.35 -- yaw 0, 90, 180, 270 --
   close a room with no hole at any corner even with no corner pieces at all.
-* The four panel ends therefore interpenetrate by a quarter of the wall
-  thickness at each corner, which is exactly why there is a corner pier: a solid
-  1.12 m block that swallows all four ends and dresses the joint. It is square
-  and symmetric, so it needs no rotation.
+  Spanning the full width rather than stopping short is what buys that: a panel
+  covers its whole face on its own and does not depend on its neighbours.
+* The price is that the panel ends overshoot each other by 0.1 m at every
+  corner, which is exactly why there is a corner pier: a solid 1.12 m block that
+  swallows all four ends and dresses the joint. It is square and detailed alike
+  on all four faces, so it needs no rotation -- but it is not optional.
 * The bands stack to exactly 5.2 m, so the top of a panel *is* the eaves, and
   the roof is authored with its origin at eaves height. Drop it on at z = 5.2.
 
@@ -255,6 +257,17 @@ R_SPAN, R_RISE, R_EAVE, R_THICK = 13.0, 2.15, 0.2, 0.26
 ROOF_LIFT = 0.03
 
 
+def _ceiling(mat, thick, z, beam=0.16):
+    """Slab plus two crossing beams, wide enough to bury its edges in the walls."""
+    objs = [kit.timber((W + 0.9, W + 0.9, thick), (0, 0, z), (0, 0, 0), mat, 0.05, "ceiling")]
+    for s in (-1, 1):
+        objs.append(kit.timber((W + 0.9, 0.44, beam), (0, s * W / 4, z - thick / 2 - beam / 2),
+                               (0, 0, 0), mat, 0.04, "coffer"))
+        objs.append(kit.timber((0.44, W + 0.9, beam), (s * W / 4, 0, z - thick / 2 - beam / 2),
+                               (0, 0, 0), mat, 0.04, "coffer"))
+    return objs
+
+
 def _lift(objs, dz):
     bpy.context.view_layer.update()
     M = mathutils.Matrix.Translation((0, 0, dz))
@@ -302,13 +315,12 @@ def build_temple_roof():
                                 (0, 0, 0), "marble", 0.04, "antefix"))
     # Coffered ceiling. Without it you stand in the room and look out through the
     # eaves gap, which is the one thing a solid model never had to worry about.
-    p.append(kit.timber((W + 0.3, W + 0.3, 0.18), (0, 0, 0.19), (0, 0, 0),
-                        "marble", 0.05, "ceiling"))
-    for s in (-1, 1):
-        p.append(kit.timber((W + 0.3, 0.44, 0.16), (0, s * W / 4, 0.36),
-                            (0, 0, 0), "marble", 0.04, "coffer"))
-        p.append(kit.timber((0.44, W + 0.3, 0.16), (s * W / 4, 0, 0.36),
-                            (0, 0, 0), "marble", 0.04, "coffer"))
+    #
+    # It hangs *below* the datum, not above it. A roof plane leaves a wedge of
+    # daylight over the wall head that widens towards the middle of the room, so
+    # a ceiling level with the eaves seals nothing; this one overlaps the top of
+    # the wall cornice, which is where a ceiling meets a cornice anyway.
+    p += _ceiling("marble", 0.18, -0.14)
     _lift(p, ROOF_LIFT)
     return kit.deliver(p, "temple_roof")
 
@@ -416,11 +428,8 @@ def build_wall_roof():
                        mat="rooftile", trim="timber", tympanum="stonewall", along="x")
     p += _cover_tiles(span, span, rise, 0.0, 0.24, 0.45, 0.34, "rooftile", 5.6, n=11)
     kit.rotate_z(p, math.pi / 2)
-    p.append(kit.timber((W + 0.3, W + 0.3, 0.18), (0, 0, 0.19), (0, 0, 0),
-                        "timber", 0.05, "ceiling"))
-    for s in (-1, 1):
-        p.append(kit.timber((W + 0.3, 0.36, 0.20), (0, s * W / 4, 0.38),
-                            (0, 0, 0), "timber", 0.04, "beam"))
+    p += _ceiling("timber", 0.20, -0.15, beam=0.20)
+    _lift(p, ROOF_LIFT)
     return kit.deliver(p, "wall_roof")
 
 
@@ -480,6 +489,11 @@ def mock(parts=None, doors=("n", "s"), floor=0.45, human=True, columns=False):
         bpy.ops.import_scene.gltf(filepath=path)
         for obj in set(bpy.context.scene.objects) - before:
             if obj.parent is None:
+                # The importer leaves rotation_mode on QUATERNION, and assigning
+                # rotation_euler to a quaternion object is silently ignored --
+                # location takes, rotation does not, and every panel lands
+                # unrotated. North is the only side where that looks right.
+                obj.rotation_mode = "XYZ"
                 obj.location = (x, y, z)
                 obj.rotation_euler = (0, 0, yaw)
 

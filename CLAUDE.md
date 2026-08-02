@@ -66,7 +66,20 @@ them and never allocates its own — two doors in one wall is the failure mode.
   and both a fountain and a mobile have been stood on top of already.
 - A room placed directly above an open-air room turns that street into a tunnel.
   `layout.js` pushes anything reached by going *up* from open ground three levels
-  clear; Midgaard's "In the air..." rooms are why.
+  clear; Midgaard's "In the air..." rooms are why. Those rooms are then
+  unreachable, so `build.js` skips their geometry entirely — an archway and a
+  signpost built for one hang over the town, which a review duly reported as a
+  floating gate.
+- `assets.js` `choose(names, seed)` defaults its seed. Callers asking only "does
+  this model exist?" pass none, and `undefined * n` is `NaN`, which indexes
+  nothing — so the temple kit silently never placed.
+- UVs coming out of Blender are in metres and must be **multiplied** by
+  `material.userData.uvScale`, which is already `1/tile`. Dividing tiles the
+  texture tile-size-squared times too often and reads as a dark grid.
+- Figures are skinned meshes: one draw each, no instancing, and a second pass if
+  they cast shadows. They are kept out of the shadow map and culled past 46 m.
+- Large soft sprites are the most expensive thing per pixel in the scene. The
+  chimney smoke was 910 particles 3.2 m across; nothing else came close.
 
 ## merc21
 
@@ -79,10 +92,30 @@ rebuilt binary doesn't show up as a change in the parent. On macOS:
 `-Dunix` because Apple clang defines `__unix__` but not bare `unix`, which is
 what `merc.h` tests; `-DNOCRYPT` because macOS has no libcrypt.
 
+## Assets
+
+`assets/*.glb` are modelled, but not by hand: `tools/blender/*.py` generates
+them and is the source. Regenerate the lot from inside Blender with
+
+    import sys; sys.path.insert(0, ".../tools/blender")
+    import build_all; build_all.run()
+
+They carry **geometry only**. Every object is tagged with a material named
+`MAT:timber`, `MAT:rooftile` and so on, and `src/assets.js` swaps in the baked
+procedural material of that name at load. Blender owns silhouettes, bevels and
+clean normals; `textures.js` still owns every surface. A tag with no recipe in
+`textures.js` needs an alias or a flat material in `assets.js` — otherwise it
+silently comes out dressed as stone, which is how the townspeople ended up with
+skin made of masonry.
+
+Everything is placed as instances batched per chunk, and every placement falls
+back to the procedural geometry it replaces if the model is missing, so a
+half-built library still runs. `?assets=off` forces the fallback everywhere.
+
 ## Constraints
 
 - No dependencies beyond the vendored three.js in `vendor/`, which is committed
-  on purpose so a clone runs offline. Nothing is fetched at runtime and no
-  assets exist: every texture, mesh and sound is generated.
+  on purpose so a clone runs offline. Nothing is fetched at runtime, and every
+  texture and sound is still generated at boot.
 - The DikuMUD and Merc licences (in `merc21/`) forbid commercial use and require
   the credits to stay. They are reproduced on the title screen and in the README.

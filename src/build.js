@@ -28,6 +28,9 @@ export const CEIL = 5.2;        // interior clear height
 export const SLAB = 0.45;       // floor thickness
 export const LEVEL_H = 7.6;     // vertical pitch between levels
 
+/** Where a kit's wall panel is centred, measured from the room centre. */
+const KIT_LINE = 5.35;
+
 /** Rotation that turns a model's -Z front towards each direction. */
 const FACE_ROT = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
 
@@ -323,6 +326,13 @@ export function buildScene(world, layout, materials, assets = null) {
     const sides = layout.sides.get(cell.vnum);
     const roomHoles = holes.get(cell.vnum) || [];
 
+    // A modelled room kit, where one fits. Caves keep their procedural rock --
+    // the kits are dressed masonry and would look absurd in Moria.
+    const kit = (!outdoor && !mats.cave && instances)
+      ? (mats.holy && model(['temple_wall_solid']) ? 'temple_'
+        : (model(['wall_solid']) ? '' : null))
+      : null;
+
     // Nothing can reach an "In the air..." room now that its archways are not
     // built, so its floor is pure scenery -- and a translucent slab hanging
     // over the rooftops reads as a bug, which is what the review called it.
@@ -360,8 +370,9 @@ export function buildScene(world, layout, materials, assets = null) {
 
       if (!outdoor) {
         buildIndoorWall({
-          batcher, chunk, mats, x: wx, y: pos.y, z: wz, rotY, open,
+          batcher, chunk, mats, x: wx, y: pos.y, z: wz, rotY, open, kit, instances,
           width: ROOM + (WALL_IN + WALL_OUT) * 2, addCollider, dir, room, lights, decor,
+          cellX: pos.x, cellZ: pos.z,
         });
       } else if (!airborne) {
         buildOutdoorEdge({ batcher, chunk, room, cell, pos, dir, open, addCollider, decor, lights });
@@ -418,12 +429,30 @@ export function buildScene(world, layout, materials, assets = null) {
       }
     }
 
+    if (kit !== null) {
+      // Corner piers close the four panels; the roof sits on the eaves, which
+      // is exactly where a panel's cornice ends.
+      for (const sx of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          instances.add(`${kit}corner`, { x: pos.x + sx * KIT_LINE, y: pos.y, z: pos.z + sz * KIT_LINE, rotY: 0 }, chunk);
+        }
+      }
+      instances.add(`${kit}roof`, { x: pos.x, y: pos.y + CEIL, z: pos.z, rotY: 0 }, chunk);
+      if (kit === 'temple_') {
+        for (const sx of [-1, 1]) {
+          for (const sz of [-1, 1]) {
+            instances.add('temple_column', { x: pos.x + sx * 3.0, y: pos.y, z: pos.z + sz * 3.0, rotY: 0 }, chunk);
+          }
+        }
+      }
+    }
+
     if (!outdoor) {
       buildCeiling({
         batcher, chunk, material: mats.wallIn, x: pos.x, y: pos.y + CEIL, z: pos.z,
         half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
       });
-      buildRoof({ batcher, chunk, mats, room, x: pos.x, y: pos.y + CEIL + SLAB, z: pos.z, decor });
+      if (kit === null) buildRoof({ batcher, chunk, mats, room, x: pos.x, y: pos.y + CEIL + SLAB, z: pos.z, decor });
       decor.push({
         kind: 'windows', x: pos.x, y: pos.y, z: pos.z,
         w: SHELL * 2, d: SHELL * 2, h: CEIL + 1.1, seed: hash3(room.vnum, 2, 0, 11), doorSides: sides,
@@ -558,16 +587,25 @@ function buildCeiling({ batcher, chunk, material, x, y, z, half, holes }) {
  * One wall of an indoor room: an inner skin you see from inside, an outer skin
  * that is the face of the building, and a doorway punched through both.
  */
-function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, width, addCollider, dir, room, lights, decor }) {
+function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, instances, width, addCollider, dir, room, lights, decor, cellX, cellZ }) {
   const gap = open ? DOOR_W : 0;
   const eave = CEIL + 1.1;
   const [dx, , dz] = DIR_STEP[dir];
   const along = dir === 1 || dir === 3;
 
-  for (const skin of [
+  // A modelled panel spans the whole wall and carries its own doorway, so the
+  // two procedural skins are skipped -- but the colliders below are unchanged,
+  // because they describe the wall line, not the geometry sitting on it.
+  if (kit !== null && kit !== undefined && instances) {
+    instances.add(`${kit}${open ? 'wall_door' : 'wall_solid'}`, {
+      x: cellX + dx * KIT_LINE, y, z: cellZ + dz * KIT_LINE, rotY: FACE_ROT[dir],
+    }, chunk);
+  }
+
+  for (const skin of (kit !== null && kit !== undefined && instances ? [] : [
     { name: mats.wallIn, t: WALL_IN, offset: WALL_IN / 2, height: CEIL },
     { name: mats.wallOut, t: WALL_OUT, offset: WALL_IN + WALL_OUT / 2, height: eave },
-  ]) {
+  ])) {
     const sx = x + dx * skin.offset;
     const sz = z + dz * skin.offset;
     if (!gap) {

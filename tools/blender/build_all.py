@@ -27,6 +27,7 @@ MODULES = [
     "house_stone_a",
     "house_stone_b",
     "temple",
+    "roomkit",
     "props",
     "trees",
     "townsperson",
@@ -38,6 +39,12 @@ BUDGET = {
     "house_a": 4000, "house_b": 4000, "house_c": 4000,
     "house_stone_a": 4000, "house_stone_b": 4000,
     "temple": 8000, "townsperson": 3000,
+    # roomkit. These are instanced per wall rather than per building, so a room
+    # costs four panels plus four piers plus a roof -- read the caps as a sixth
+    # of a building each, not as one.
+    "temple_wall_solid": 2500, "temple_wall_door": 2500, "temple_corner": 600,
+    "temple_roof": 4000, "temple_steps": 400, "temple_column": 600,
+    "wall_solid": 2000, "wall_door": 2000, "wall_corner": 600, "wall_roof": 3000,
 }
 PROP_BUDGET = 800
 TREE_BUDGET = 1500
