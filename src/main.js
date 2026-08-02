@@ -589,6 +589,53 @@ async function boot() {
       return out;
     },
 
+    /**
+     * Informed-random vantage points: `count` rooms drawn at random from the
+     * ones actually worth standing in, with a camera already aimed at whatever
+     * makes each one worth a look.
+     *
+     * `places()` returns the same handful of exemplars every time, which is
+     * exactly wrong for a reviewer -- it means the same ten frames get looked
+     * at round after round and everything else in the town is never seen. This
+     * draws from the whole world instead, but not uniformly: a room scores for
+     * having mobiles, items, several exits, water, height, or prose suggesting
+     * something is there, and rooms that score nothing are not offered. Pass a
+     * seed to get the same walk twice.
+     */
+    roam(count = 8, seed = 1) {
+      const scored = [];
+      for (const [vnum, info] of built.rooms) {
+        if (info.unbuilt) continue;
+        const room = world.rooms.get(vnum);
+        let score = 1;
+        const why = [];
+        if (room.mobs.length) { score += 2 + room.mobs.length; why.push(`${room.mobs.length} mobile(s)`); }
+        if (room.items.length) { score += 1 + room.items.length; why.push(`${room.items.length} object(s)`); }
+        const exits = room.exits.filter(Boolean).length;
+        if (exits >= 4) { score += 2; why.push(`${exits} ways out`); }
+        if (room.sector === 6 || room.sector === 7) { score += 3; why.push('water'); }
+        if (room.sector === 3 || room.sector === 2) { score += 1; why.push(SECTOR_NAME[room.sector]); }
+        if (info.cell.level > 0) { score += 2; why.push(`level ${info.cell.level}`); }
+        if (/fountain|statue|altar|fire|forge|tree|pool|bridge|stair|gate/i.test(
+          `${room.name} ${room.description}`)) { score += 2; why.push('something named in the prose'); }
+        if (score <= 1) continue;
+        scored.push({ vnum, score, why, name: room.name, sector: SECTOR_NAME[room.sector] || '?' });
+      }
+      // Deterministic shuffle weighted by score: a hash per room, divided by its
+      // score, so a richer room sorts earlier more often without ever being
+      // certain to. Same seed, same order.
+      const roll = (n) => {
+        let h = Math.imul(n ^ seed, 2654435761);
+        h ^= h >>> 15;
+        return ((h >>> 0) % 100000) / 100000;
+      };
+      scored.sort((a, b) => roll(a.vnum) / a.score - roll(b.vnum) / b.score);
+      return scored.slice(0, count).map((s) => ({
+        ...s, why: s.why.join(', '),
+        go: `diku.goto(${s.vnum})`,
+      }));
+    },
+
     /** Rooms whose name, description, sector or contents match a word. */
     find(query) {
       const q = String(query).toLowerCase();

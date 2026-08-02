@@ -30,7 +30,22 @@ const strHash = (s, salt = 0) => {
 // ----------------------------------------------------------------- labels ----
 
 const labelCache = new Map();
-function labelTexture(text, { size = 44, colour = '#f3e6cf', accent = 'rgba(12,10,8,0.72)' } = {}) {
+/**
+ * A name, drawn as text on nothing.
+ *
+ * It used to sit on a rounded plate of `rgba(12,10,8,0.72)`, and the plate was
+ * the problem. Sprites are tone mapped like everything else, and ACES takes an
+ * sRGB 12 down to very nearly zero -- so the plate was not a dark glass panel,
+ * it was 72% opaque black. Close up you read the text and never notice. At any
+ * distance where the letters stop resolving, all that is left is a black bar
+ * hanging over someone's head, which is exactly what it was reported as, twice.
+ *
+ * So: no plate. The text carries its own legibility in a soft dark halo, the
+ * same trick the rest of the interface uses, and there is no rectangle left to
+ * read as anything. Tone mapping is off as well, so the cream stays cream
+ * instead of drifting with the exposure of whatever hour it is.
+ */
+function labelTexture(text, { size = 44, colour = '#f3e6cf' } = {}) {
   const key = `${text}|${size}|${colour}`;
   if (labelCache.has(key)) return labelCache.get(key);
   const canvas = document.createElement('canvas');
@@ -43,12 +58,19 @@ function labelTexture(text, { size = 44, colour = '#f3e6cf', accent = 'rgba(12,1
   ctx.font = font;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = accent;
-  const pad = 10;
-  roundRect(ctx, (canvas.width - width) / 2, canvas.height / 2 - size * 0.72, width, size * 1.44, pad);
-  ctx.fill();
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2 + 2;
+  // Three passes of blurred black under the glyphs: enough to hold the text off
+  // a lit wall without ever becoming a shape of its own.
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+  for (const blur of [10, 6, 3]) {
+    ctx.shadowBlur = blur;
+    ctx.fillText(text, cx, cy);
+  }
+  ctx.shadowBlur = 0;
   ctx.fillStyle = colour;
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 2);
+  ctx.fillText(text, cx, cy);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
@@ -57,20 +79,11 @@ function labelTexture(text, { size = 44, colour = '#f3e6cf', accent = 'rgba(12,1
   return record;
 }
 
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
 export function makeLabel(text, height = 0.5, options) {
   const { texture, aspect } = labelTexture(text, options);
   const material = new THREE.SpriteMaterial({
-    map: texture, transparent: true, depthWrite: false, sizeAttenuation: true, fog: false,
+    map: texture, transparent: true, depthWrite: false, sizeAttenuation: true,
+    fog: false, toneMapped: false,
   });
   const sprite = new THREE.Sprite(material);
   sprite.scale.set(height * aspect, height, 1);

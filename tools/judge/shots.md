@@ -36,6 +36,18 @@ diku.look(x, y, z, yaw, pitch)
 diku.applyTime('dawn' | 'noon' | 'dusk' | 'night')
 ```
 
+```js
+diku.roam(8, seed)     // eight informed-random vantage points, reproducible
+```
+
+`roam()` exists because `places()` returns the same handful of exemplars every
+time, so round after round looks at the same ten frames and the rest of the town
+is never seen. It draws from every built room instead, weighted by whether
+anything is there — mobiles, objects, several exits, water, height, or a noun in
+the prose — and rooms that score nothing are not offered. Same seed, same walk,
+so a finding can be gone back to. **Every round should spend at least half its
+shots in `roam()` and vary the seed.**
+
 `places()` is derived from whatever areas are loaded, so it keeps working
 outside Midgaard. It currently finds water, open water, a square, a street, a
 lit interior, a shop, forest, field, a sealed gate and a crowd. Each entry says
