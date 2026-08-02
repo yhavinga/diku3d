@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Midgaard — DikuMUD in three dimensions</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230b0a09'/><path d='M3 12V6l5-3 5 3v6z' fill='%23e0bd77'/></svg>">
+<style>
+  :root {
+    --ink: #f0e3c8;
+    --dim: #b5a284;
+    --gold: #e0bd77;
+    --panel: rgba(14, 12, 10, 0.62);
+    --edge: rgba(224, 189, 119, 0.22);
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05060a; }
+  body { font-family: var(--serif); color: var(--ink); -webkit-font-smoothing: antialiased; }
+  #view { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    backdrop-filter: blur(7px) saturate(120%);
+    -webkit-backdrop-filter: blur(7px) saturate(120%);
+    border-radius: 3px;
+  }
+
+  /* ---------------------------------------------------------------- hud -- */
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+
+  #room-block { position: absolute; left: 26px; top: 22px; max-width: 34vw; }
+  #room-title {
+    font-size: 30px; letter-spacing: 0.01em; margin: 0;
+    text-shadow: 0 2px 14px rgba(0,0,0,0.85), 0 0 2px rgba(0,0,0,0.9);
+  }
+  #room-area {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--gold); opacity: 0.82; margin-top: 5px;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.9);
+  }
+
+  #desc-block {
+    position: absolute; left: 26px; bottom: 26px; max-width: 40vw;
+    padding: 15px 18px 14px;
+  }
+  #room-desc { font-size: 15.5px; line-height: 1.58; margin: 0; color: #e7dcc4; }
+  #exits {
+    margin-top: 9px; font-family: var(--mono); font-size: 11px;
+    letter-spacing: 0.1em; color: var(--gold); opacity: 0.75;
+  }
+
+  #minimap-block { position: absolute; right: 24px; top: 22px; padding: 6px; line-height: 0; }
+  #minimap { width: 240px; height: 240px; border-radius: 2px; }
+  #compass {
+    text-align: center; font-family: var(--mono); font-size: 11px;
+    letter-spacing: 0.16em; color: var(--gold); padding: 7px 0 2px; line-height: 1;
+  }
+
+  #look {
+    position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%);
+    text-align: center; opacity: 0; transition: opacity 140ms ease;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.9);
+  }
+  .look-name { display: block; font-size: 19px; }
+  .look-sub { display: block; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; color: var(--gold); opacity: 0.8; margin-top: 3px; text-transform: uppercase; }
+  .look-key { display: block; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; opacity: 0.55; margin-top: 6px; }
+
+  #crosshair {
+    position: absolute; left: 50%; top: 50%; width: 5px; height: 5px;
+    margin: -2.5px 0 0 -2.5px; border-radius: 50%;
+    background: rgba(255,255,255,0.55); box-shadow: 0 0 4px rgba(0,0,0,0.8);
+  }
+
+  #examine {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -46%);
+    width: min(620px, 74vw); padding: 26px 30px 28px; opacity: 0; visibility: hidden;
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+  #examine.visible { opacity: 1; visibility: visible; transform: translate(-50%, -50%); }
+  #examine-title { font-size: 25px; margin: 0 0 12px; color: var(--gold); }
+  #examine-body { font-size: 16px; line-height: 1.62; margin: 0; white-space: pre-wrap; }
+  #examine-close { margin-top: 18px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; opacity: 0.5; }
+
+  #stats {
+    position: absolute; right: 24px; bottom: 22px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+    color: var(--gold); opacity: 0.7;
+  }
+
+  #toast {
+    position: absolute; left: 50%; top: 76px; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em;
+    text-transform: uppercase; padding: 8px 16px; opacity: 0;
+    transition: opacity 220ms ease; background: var(--panel);
+    border: 1px solid var(--edge); border-radius: 2px;
+  }
+  #toast.visible { opacity: 1; }
+
+  /* ------------------------------------------------------------ screens -- */
+  #loading, #title {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px;
+    background: radial-gradient(ellipse at 50% 42%, #17161c 0%, #07070a 72%);
+    z-index: 30; transition: opacity 700ms ease;
+  }
+  #loading.hidden, #title.hidden { opacity: 0; pointer-events: none; }
+  #loading-text { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; color: var(--gold); opacity: 0.8; text-align: center; }
+  #loading-track { width: min(360px, 60vw); height: 2px; background: rgba(224,189,119,0.16); }
+  #loading-bar { width: 2%; height: 100%; background: var(--gold); transition: width 220ms ease; }
+
+  #title h1 {
+    font-size: clamp(48px, 9vw, 104px); margin: 0; letter-spacing: 0.22em;
+    text-indent: 0.22em; font-weight: 400; color: #f4e7cb;
+    text-shadow: 0 0 42px rgba(224, 160, 80, 0.28);
+  }
+  #title h2 {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.34em;
+    text-transform: uppercase; color: var(--gold); opacity: 0.75; margin: -6px 0 0; font-weight: 400;
+  }
+  #title-stats { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; opacity: 0.45; margin-top: 6px; }
+  #enter {
+    margin-top: 20px; pointer-events: auto; cursor: pointer;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: #0d0c0a; background: var(--gold); border: none; padding: 13px 30px; border-radius: 2px;
+    transition: transform 140ms ease, box-shadow 140ms ease;
+  }
+  #enter:hover { transform: translateY(-1px); box-shadow: 0 8px 26px rgba(224,189,119,0.22); }
+  #keys {
+    margin-top: 26px; display: grid; grid-template-columns: auto auto; gap: 6px 20px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; opacity: 0.45;
+  }
+  #keys b { font-weight: 400; color: var(--gold); }
+  #credit {
+    position: absolute; bottom: 26px; font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.12em; opacity: 0.32; text-align: center; line-height: 1.7;
+  }
+
+  #hint {
+    position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+    background: rgba(6, 6, 9, 0.55); opacity: 0; visibility: hidden; transition: opacity 220ms ease;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase;
+    cursor: pointer; backdrop-filter: blur(3px);
+  }
+  #hint.visible { opacity: 1; visibility: visible; }
+
+  #fade {
+    position: fixed; inset: 0; background: #05060a; opacity: 0; pointer-events: none;
+    transition: opacity 260ms ease; z-index: 15;
+  }
+</style>
+</head>
+<body>
+<div id="view"></div>
+
+<div id="hud">
+  <div id="room-block">
+    <h1 id="room-title">&nbsp;</h1>
+    <div id="room-area"></div>
+  </div>
+
+  <div id="desc-block" class="panel">
+    <p id="room-desc"></p>
+    <div id="exits"></div>
+  </div>
+
+  <div id="minimap-block" class="panel">
+    <canvas id="minimap"></canvas>
+    <div id="compass">N 000°</div>
+  </div>
+
+  <div id="crosshair"></div>
+  <div id="look"></div>
+  <div id="toast"></div>
+  <div id="stats"></div>
+
+  <div id="examine" class="panel">
+    <h2 id="examine-title"></h2>
+    <p id="examine-body"></p>
+    <div id="examine-close">esc — close</div>
+  </div>
+</div>
+
+<div id="fade"></div>
+<div id="hint">click to look around</div>
+
+<div id="title" class="hidden">
+  <h1>MIDGAARD</h1>
+  <h2>DikuMUD · Merc 2.1 · in three dimensions</h2>
+  <div id="title-stats"></div>
+  <button id="enter">enter the temple</button>
+  <div id="keys">
+    <b>W A S D</b><span>walk · shift to run</span>
+    <b>mouse</b><span>look · E to examine</span>
+    <b>1 – 4</b><span>dawn, noon, dusk, night</span>
+    <b>F / V / M / G</b><span>stats · noclip · sound · unlock</span>
+  </div>
+  <div id="credit">
+    world by Hans Henrik Stærfeldt, Katja Nyboe, Tom Madsen, Michael Seifert and Sebastian Hammer, 1990–91<br>
+    Merc 2.1 by Furey, Hatchet and Kahn, 1 August 1993 — rooms, mobiles and objects read straight from the .are files
+  </div>
+</div>
+
+<div id="loading">
+  <div id="loading-text">reading area files</div>
+  <div id="loading-track"><div id="loading-bar"></div></div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/build/three.module.js",
+    "three/addons/": "./vendor/three/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

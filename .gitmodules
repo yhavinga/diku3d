@@ -1,0 +1,4 @@
+[submodule "merc21"]
+	path = merc21
+	url = https://github.com/alexmchale/merc-mud.git
+	ignore = dirty

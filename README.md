@@ -1,0 +1,155 @@
+# diku3d
+
+Walk through Midgaard. The world is read at load time from the stock Merc 2.1
+`.are` files — the same text DikuMUD has been booting off since 1991 — and built
+into a town you can walk around in a browser. Nothing is modelled by hand and
+nothing is downloaded: rooms, mobiles, objects, doors and their descriptions all
+come out of the area files, and every surface is noise baked into a texture at
+boot.
+
+    python3 serve.py            # http://localhost:8173/
+
+There is no build step. Three.js is vendored under `vendor/`; the app is plain
+ES modules.
+
+## What you are looking at
+
+A Diku world is a graph, not a plan. North-then-east does not have to land where
+east-then-north does, and in Midgaard it never does: of the 24 places you can
+test that on the Market Square, all 24 disagree. So the layout does not try to
+be faithful to geometry that isn't there. It does this instead:
+
+1. **Place** — breadth-first from the Temple of Midgaard (`#3001`), each room
+   taking the cell its exit asks for, or the nearest free one that satisfies the
+   most of its *other* exits.
+2. **Relax** — sweep back over the result offering every room the free cells
+   nearby, keeping any move that joins up more exits than it breaks.
+3. **Spread** — rooms keep the even coordinates, so every cell between two rooms
+   is free to build a street through.
+4. **Route** — each exit is walked through those free cells, at most six of them,
+   setting off in the direction the exit claims to go.
+
+What survives is a passage you walk. What doesn't is a stone archway with a
+shimmer in it that puts you where the exit says — honest about the fact that the
+mud's geography folds. For Midgaard that leaves **93% of exits walkable** and
+eight archways; across all 43 stock areas it averages 94%.
+
+    node tools/layout-check.mjs                    # every area
+    node tools/layout-check.mjs 3001 midgaard.are  # one, from a given room
+    node tools/parse-check.mjs                     # the reader, over everything
+
+Anything still unreachable — an exit into an area you haven't loaded — becomes a
+barred gate with a sign saying which vnum is on the other side.
+
+## Controls
+
+| | |
+|---|---|
+| `W A S D` | walk, `shift` to run, `space` to jump |
+| mouse | look, `E` to examine what you're looking at or open a door |
+| `1` – `4` | dawn, noon, dusk, night |
+| `P` | cycle quality: low, medium, high, max |
+| `F` | frame rate, draw calls, triangles, GPU milliseconds |
+| `V` | noclip |
+| `M` | sound |
+| `G` | force every lock in the world |
+| `esc` | release the mouse |
+
+## URL parameters
+
+| | |
+|---|---|
+| `?areas=midgaard,school` | which `.are` files to load (default `midgaard`) |
+| `?room=3001` | where to start, and what the layout is built around |
+| `?max=400` | stop placing after this many rooms |
+| `?time=dusk` | `dawn`, `noon`, `dusk`, `night` |
+| `?quality=medium` | `low`, `medium`, `high`, `max` |
+| `?fps=30` | override the preset's frame cap; `0` uncaps it |
+
+Try `?areas=moria&room=7000`, `?areas=sewer&room=7100`, `?areas=haon&room=6500`
+for somewhere that is not a town. Loading two areas that connect (`midgaard,school`)
+opens the gate between them.
+
+## Keeping the laptop cool
+
+The scene is about 300 draw calls, which is nothing — the cost is pixels, and
+how many times a second you pay for them. `src/quality.js` owns all four dials:
+render resolution, multisampling, the bloom chain, and the frame cap. It also
+measures the result on the GPU with `EXT_disjoint_timer_query_webgl2` rather
+than inferring it from wall time, and drops the render scale a step if a frame
+threatens its budget.
+
+Measured on an M4 Max at 1400×900 CSS, standing on the Market Square, with the
+render loop halted so nothing else is drawing:
+
+| preset | renders at | ms/frame | fps | GPU busy |
+|---|---|---|---|---|
+| low | 1400×900, no bloom, no shadows | 1.0 | 60 | 6% |
+| medium *(default)* | 1750×1125, half-res bloom, 1024 shadows | 1.6 | 60 | 10% |
+| high | 2450×1575, 4× MSAA, 2048 shadows | 6.6 | 60 | 39% |
+| max | 2800×1800, 4× MSAA, full-res bloom | 11.2 | uncapped | pegged |
+
+Release the mouse or switch tabs and it drops to 10 fps; hide the tab and it
+stops drawing altogether. The sun's shadow map is snapped to a six-metre grid
+and only redrawn when you cross a line or the time of day changes, instead of
+every frame.
+
+`F` shows the live GPU figure. On a lightly loaded frame it reads higher than
+the table above, because the GPU drops to a low clock between frames and the
+same work takes longer — which is the point.
+
+WebGPU would not help here. Its win is CPU-side driver overhead across thousands
+of draw calls; this scene submits ~300 in well under a millisecond. The port is
+also not free: the flame, water and sky shaders and the whole post-processing
+chain are WebGL-only and would have to be rewritten as TSL node materials.
+
+## Layout of the source
+
+| | |
+|---|---|
+| `src/are.js` | reader for the Diku/Merc area format, and the reset table |
+| `src/layout.js` | room graph → grid: place, relax, spread, route |
+| `src/textures.js` | every material, baked from noise into albedo/normal/roughness |
+| `src/build.js` | cells → geometry, merged per chunk per material |
+| `src/actors.js` | mobiles, objects, fire, foliage, doors, signage |
+| `src/player.js` | first-person movement over platforms and boxes |
+| `src/quality.js` | frame budget: resolution, bloom, shadows, frame cap, light pool |
+| `src/hud.js` | room text, minimap, compass |
+| `src/audio.js` | wind, footsteps, doors, a bell — synthesised, no files |
+| `merc21/` | Merc 2.1 as released on 1 August 1993, unmodified |
+
+`window.diku` is exposed in the console: `diku.goto(3014)`, `diku.look(x,y,z,yaw)`,
+`diku.applyTime('night')`, plus `layout`, `built` and `world`.
+
+## Running the mud itself
+
+The Merc server in `merc21/` still compiles. On macOS it needs two flags and no
+source changes:
+
+    cd merc21/src
+    make CC=cc NOCRYPT="-DNOCRYPT -Dunix" L_FLAGS="-O"
+    cd ../area && ../src/merc 4400        # telnet localhost 4400
+
+`-Dunix` because Apple clang defines `__unix__` but not bare `unix`, which is
+what `merc.h` tests when it picks `/dev/null` to hold a spare stream handle.
+`-DNOCRYPT` plus dropping `-lcrypt` because macOS has no libcrypt — passwords are
+then stored in the clear, which is fine on loopback and nowhere else.
+
+## Known limits
+
+- Mobiles stand where the reset table drops them and drift a little. They do not
+  walk their routes, and they cannot be fought or traded with. This renders the
+  world; it does not run it.
+- Two staircases in one room share a single opening in the ceiling.
+- An exit whose room has no free wall left ends up as an archway standing in the
+  middle of the floor.
+- The viewer never talks to the running mud. A websocket-to-telnet bridge would
+  make that possible; nothing here assumes it.
+
+## Credits
+
+DikuMUD is copyright 1990, 1991 Hans Henrik Stærfeldt, Katja Nyboe, Tom Madsen,
+Michael Seifert and Sebastian Hammer, of DIKU, the department of computer
+science at the University of Copenhagen. Merc 2.1 is by Furey, Hatchet and Kahn,
+released 1 August 1993. Their licences are in `merc21/README` and
+`merc21/doc/`, and both forbid commercial use — that applies to this too.
