@@ -428,7 +428,13 @@ async function boot() {
     fadeTimer = 0.34;
     dom.fade.style.opacity = '1';
     setTimeout(() => {
+      // `spawn` zeroes the velocity, which is right when you arrive through a
+      // portal and wrong here: stepping to the next room should move you, not
+      // stop you. Carry it across, so standing still stays standing still and
+      // a fall keeps falling onto the new floor.
+      const carried = player.velocity.clone();
       player.spawn(target.center.x, target.center.y, target.center.z, camera.rotation.y);
+      player.velocity.copy(carried);
       dom.fade.style.opacity = '0';
     }, 120);
   }

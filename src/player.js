@@ -106,11 +106,15 @@ export class Player {
     const sprint = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
     const speed = sprint ? SPRINT : WALK;
 
+    // WASD only. The arrows used to be aliases for these, and they are now the
+    // mud's compass navigation in main.js -- so leaving them here meant one
+    // press both stepped you into the next room *and* shoved you walking, which
+    // is a change in velocity you never asked for.
     let inputX = 0; let inputZ = 0;
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) inputZ += 1;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) inputZ -= 1;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) inputX += 1;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) inputX -= 1;
+    if (this.keys.has('KeyW')) inputZ += 1;
+    if (this.keys.has('KeyS')) inputZ -= 1;
+    if (this.keys.has('KeyD')) inputX += 1;
+    if (this.keys.has('KeyA')) inputX -= 1;
     const length = Math.hypot(inputX, inputZ) || 1;
     inputX /= length; inputZ /= length;
 
