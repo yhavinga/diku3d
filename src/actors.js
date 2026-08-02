@@ -60,14 +60,24 @@ function labelTexture(text, { size = 44, colour = '#f3e6cf' } = {}) {
   ctx.textBaseline = 'middle';
   const cx = canvas.width / 2;
   const cy = canvas.height / 2 + 2;
-  // Three passes of blurred black under the glyphs: enough to hold the text off
-  // a lit wall without ever becoming a shape of its own.
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-  for (const blur of [10, 6, 3]) {
-    ctx.shadowBlur = blur;
-    ctx.fillText(text, cx, cy);
-  }
+  // A thin outline and one soft shadow -- not a cloud.
+  //
+  // This started as a rounded plate, which tone mapped to 72% opaque black and
+  // was reported as a bar. Removing the plate, I replaced it with three passes
+  // of rgba(0,0,0,0.9) at blur 10, 6 and 3, which is a great deal of black ink
+  // spread over a wide, soft, roughly oval area -- so against a dim interior it
+  // still read as a dark blob above the figure's head, just with a softer edge.
+  // Measured: hiding one label lifted the patch around a figure by 3.4 of
+  // luminance.
+  //
+  // An outline does the same job for legibility with a fraction of the ink,
+  // because it only ever covers the couple of pixels either side of a stroke.
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+  ctx.shadowBlur = 4;
+  ctx.lineWidth = Math.max(2, size * 0.085);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.strokeText(text, cx, cy);
   ctx.shadowBlur = 0;
   ctx.fillStyle = colour;
   ctx.fillText(text, cx, cy);

@@ -104,6 +104,14 @@ them and never allocates its own — two doors in one wall is the failure mode.
   shin bone's world position into `figure.worldToLocal()` over a couple of
   seconds, and compare the range along local X against local Z. Forward must
   win. Nothing about this is visible in a still.
+- **A text halo is ink too.** The name-label plate was replaced with three
+  passes of `rgba(0,0,0,0.9)` at blur 10/6/3, which is a lot of black spread
+  over a wide soft oval — so against a dim interior it still read as a dark
+  blob over the figure's head, only with a rounder edge. Measured: hiding one
+  label *lifted* the patch around a figure by 3.4 of luminance. A thin
+  `strokeText` outline plus one soft shadow does the same job for legibility
+  and now the label lifts that patch by 1.2 instead. Test it that way: hide the
+  label and see which direction the local brightness moves.
 - **Ambient occlusion with no floor annihilates interiors.** `GTAOPass` at
   `blendIntensity = 1` multiplies the whole ambient term by its visibility
   buffer. Out of doors that survives, because the sun is a separate direct term
