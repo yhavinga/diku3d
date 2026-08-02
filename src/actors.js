@@ -12,6 +12,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ITEM, ACT_AGGRESSIVE, ACT_SENTINEL } from './are.js';
 import { hash3 } from './build.js';
+import { InstanceBatch } from './assets.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 const SKIN = [0xe8c39e, 0xd9a877, 0xb5834f, 0x8a5a33, 0x6d4526, 0xc9b7a0];
 const CLOTH = [
@@ -157,6 +159,44 @@ function figureTraits(proto) {
   if (proto.level > 25) traits.cloak = true;
   traits.scale *= 0.92 + strHash(proto.short, 3) * 0.18;
   return traits;
+}
+
+/**
+ * The modelled townsperson, dressed for this particular mobile. The mesh is
+ * shared geometry cloned per person because it is skinned and each one is on
+ * its own point in its own idle; the cloth and skin materials are cloned too,
+ * since the whole variety of a crowd comes from tinting those two.
+ */
+function buildModelledFigure(asset, proto) {
+  const t = figureTraits(proto);
+  const group = new THREE.Group();
+  const body = cloneSkinned(asset.scene);
+  const tint = new THREE.Color();
+  body.traverse((node) => {
+    if (!node.isMesh) return;
+    // Deliberately not casting: 55 skinned meshes in the shadow map cost more
+    // than the contact shadow of a person is worth, and the ambient occlusion
+    // still grounds them.
+    node.castShadow = false;
+    const tag = node.material && node.material.name ? node.material.name.replace(/^MAT:/, '') : '';
+    node.material = node.material.clone();
+    if (tag === 'cloth') node.material.color.copy(tint.setHex(t.cloth));
+    else if (tag === 'skin') node.material.color.copy(tint.setHex(t.skin));
+    else if (tag === 'iron') node.material.color.copy(tint.setHex(t.trim));
+  });
+  const scale = t.scale;
+  body.scale.setScalar(scale);
+  group.add(body);
+
+  let mixer = null;
+  const clip = asset.animations.find((a) => /idle/i.test(a.name)) || asset.animations[0];
+  if (clip) {
+    mixer = new THREE.AnimationMixer(body);
+    const action = mixer.clipAction(clip);
+    action.time = strHash(proto.short, 13) * clip.duration; // everyone on their own beat
+    action.play();
+  }
+  return { group, headGroup: group, height: asset.size.y * scale, scale, mixer };
 }
 
 function buildFigure(proto) {
@@ -456,6 +496,11 @@ function smokeTexture() {
 export function populate(world, layout, built, options = {}) {
   const group = new THREE.Group();
   group.name = 'actors';
+  // Modelled props are used where they exist and quietly skipped where they
+  // don't, so the library can be finished asset by asset.
+  const assets = options.assets || null;
+  const instances = assets ? new InstanceBatch(assets) : null;
+  const model = (names, seed = 0) => (assets ? assets.choose(names, seed) : null);
   const interactables = [];
   const updaters = [];
 
@@ -477,7 +522,11 @@ export function populate(world, layout, built, options = {}) {
     const count = room.mobs.length;
     room.mobs.forEach((mob, index) => {
       const proto = { ...mob.proto, equipment: mob.equipment };
-      const { group: fig, headGroup, height } = buildFigure(proto);
+      const person = model(['townsperson']);
+      const built = person && assets.get(person).animations.length
+        ? buildModelledFigure(assets.get(person), proto)
+        : buildFigure(proto);
+      const { group: fig, headGroup, height } = built;
       // Never at the centre of the room: that is where you arrive.
       const angle = (index / count) * Math.PI * 2 + strHash(mob.proto.keywords, 1) * 2;
       const radius = 2.1 + strHash(mob.proto.short, 2) * 1.5;
@@ -496,7 +545,7 @@ export function populate(world, layout, built, options = {}) {
 
       const aggressive = !!(mob.proto.act & ACT_AGGRESSIVE);
       figures.push({
-        object: fig, head: headGroup, label, home: fig.position.clone(),
+        object: fig, head: headGroup, label, home: fig.position.clone(), mixer: built.mixer || null,
         phase: strHash(mob.proto.short, 5) * 6.28, aggressive,
         sentinel: !!(mob.proto.act & ACT_SENTINEL),
         drift: 0.35 + strHash(mob.proto.keywords, 9) * 0.5,
@@ -525,7 +574,9 @@ export function populate(world, layout, built, options = {}) {
     const room = world.rooms.get(vnum);
     if (!room || !room.items.length) continue;
     room.items.forEach((item, index) => {
-      const mesh = buildObject(item.proto);
+      const modelled = item.proto.itemType === ITEM.FOUNTAIN ? model(['fountain'])
+        : (/\bwell\b/.test(item.proto.keywords) ? model(['well']) : null);
+      const mesh = modelled && instances ? new THREE.Group() : buildObject(item.proto);
       const angle = strHash(item.proto.keywords, index + 3) * Math.PI * 2;
       const radius = item.proto.itemType === ITEM.FOUNTAIN ? 0 : 2.4 + strHash(item.proto.short, index) * 2.4;
       mesh.position.set(
@@ -534,7 +585,11 @@ export function populate(world, layout, built, options = {}) {
         info.center.z + Math.sin(angle) * radius,
       );
       mesh.rotation.y = strHash(item.proto.short, 11) * Math.PI * 2;
-      group.add(mesh);
+      if (modelled && instances) {
+        instances.add(modelled, { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z, rotY: mesh.rotation.y }, 'props');
+      } else {
+        group.add(mesh);
+      }
       interactables.push({
         position: mesh.position.clone().setY(mesh.position.y + 0.6),
         radius: 2.0,
@@ -593,7 +648,12 @@ export function populate(world, layout, built, options = {}) {
         const r = 3.2 + strHash(`${item.z}`, i) * 2.2;
         const px = item.x + Math.cos(a) * r;
         const pz = item.z + Math.sin(a) * r;
-        const spin = strHash(`${item.x}`, i + 9) * Math.PI;
+        const spin = strHash(`${item.x}`, i + 9) * Math.PI * 2;
+        const prop = model(['barrel', 'crate', 'sack', 'hay_bale', 'bench', 'trough'], strHash(`${item.z}`, i));
+        if (prop && instances) {
+          instances.add(prop, { x: px, y: item.y, z: pz, rotY: spin }, 'props');
+          continue;
+        }
         if ((kinds + i) % 3 === 0) {
           pushPart(props, G.cylinder(0.32, 0.28, 0.82, 12), 0x6b4d31, at(px, item.y + 0.41, pz, 0, spin, 0));
           pushPart(props, G.cylinder(0.335, 0.335, 0.06, 12), 0x40403a, at(px, item.y + 0.62, pz));
@@ -638,6 +698,13 @@ export function populate(world, layout, built, options = {}) {
     const brackets = [];
     const posts = [];
     for (const f of flames) {
+      const lampModel = f.lamp ? model(['lamp_post']) : model(['torch_sconce']);
+      if (lampModel && instances) {
+        instances.add(lampModel, {
+          x: f.x, y: f.y - (f.lamp ? 4.25 : 0.1), z: f.z, rotY: f.rotY || 0,
+        }, 'props');
+        continue;
+      }
       if (f.lamp) {
         pushPart(posts, G.cylinder(0.09, 0.13, 4.3, 8), 0x2f2b26, at(f.x, f.y - 2.15, f.z));
         pushPart(posts, G.box(0.42, 0.5, 0.42), 0x1f1d1a, at(f.x, f.y + 0.12, f.z));
@@ -669,7 +736,17 @@ export function populate(world, layout, built, options = {}) {
 
   // --- trees --------------------------------------------------------------
 
-  if (trees.length) {
+  const treeModel = model(['tree_oak']);
+  if (trees.length && treeModel && instances) {
+    for (const t of trees) {
+      const kind = model(['tree_oak', 'tree_pine'], strHash(`${t.x},${t.z}`, 2)) || treeModel;
+      instances.add(kind, {
+        x: t.x, y: t.y, z: t.z,
+        rotY: strHash(`${t.x},${t.z}`, 4) * Math.PI * 2,
+        scale: t.scale * (0.85 + strHash(`${t.z}`, 6) * 0.35),
+      }, 'trees');
+    }
+  } else if (trees.length) {
     const trunkGeo = G.cylinder(0.22, 0.34, 4.2, 7);
     trunkGeo.translate(0, 2.1, 0);
     const trunkMat = new THREE.MeshStandardMaterial({ map: options.materials?.bark?.map, roughness: 0.95, color: 0x6a5540 });
@@ -786,7 +863,10 @@ export function populate(world, layout, built, options = {}) {
 
   let smokeSystem = null;
   if (smokes.length) {
-    const perEmitter = 14;
+    // Big soft sprites are pure overdraw: at 3.2 m across, a few of them near
+    // the camera cost more than the whole town behind them. Measured at 4.5 ms
+    // a frame on an M4 Max, against 1.8 for everything else put together.
+    const perEmitter = 6;
     const total = smokes.length * perEmitter;
     const positions = new Float32Array(total * 3);
     const seeds = new Float32Array(total);
@@ -803,8 +883,8 @@ export function populate(world, layout, built, options = {}) {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('seed', new THREE.BufferAttribute(seeds, 1));
     const material = new THREE.PointsMaterial({
-      size: 3.2, map: smokeTexture(), transparent: true, depthWrite: false,
-      color: 0x9a978f, opacity: 0.5, sizeAttenuation: true,
+      size: 1.3, map: smokeTexture(), transparent: true, depthWrite: false,
+      color: 0x9a978f, opacity: 0.42, sizeAttenuation: true,
     });
     const points = new THREE.Points(geo, material);
     points.frustumCulled = false;
@@ -855,11 +935,17 @@ export function populate(world, layout, built, options = {}) {
   // --- per-frame ----------------------------------------------------------
 
   const _look = new THREE.Vector3();
+  // Beyond this a person is a few pixels tall and not worth a skinning pass.
+  const FIGURE_RANGE = 46;
   function update(dt, time, camera) {
     if (flameSystem) flameSystem.material.uniforms.time.value = time;
     for (const material of waterMaterials) material.uniforms.time.value = time;
 
     for (const fig of figures) {
+      const far = fig.object.position.distanceToSquared(camera.position) > FIGURE_RANGE * FIGURE_RANGE;
+      fig.object.visible = !far;
+      if (far) continue;
+      if (fig.mixer) fig.mixer.update(dt);
       const bob = Math.sin(time * 1.7 + fig.phase) * 0.035;
       fig.object.position.y = fig.home.y + bob;
       if (!fig.sentinel) {
@@ -901,6 +987,8 @@ export function populate(world, layout, built, options = {}) {
       }
     }
   }
+
+  if (instances) instances.finish(group);
 
   return { group, interactables, update, doors, figures };
 }

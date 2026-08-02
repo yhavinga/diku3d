@@ -5,11 +5,8 @@
 
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
+import { createPipeline, SkyEnvironment, clampSkyHighlights } from './render.js';
 import { parseArea, buildWorld, DIR_STEP } from './are.js';
 import { layoutWorld } from './layout.js';
 import { createMaterials } from './textures.js';
@@ -19,6 +16,9 @@ import { Player } from './player.js';
 import { Hud } from './hud.js';
 import { Audio } from './audio.js';
 import { Quality, LightPool, PRESETS } from './quality.js';
+import { AssetLibrary, ASSET_NAMES } from './assets.js';
+import { createGame } from './game.js';
+import { createGameUi } from './game-ui.js';
 
 const params = new URLSearchParams(location.search);
 const AREA_FILES = (params.get('areas') || 'midgaard')
@@ -27,27 +27,50 @@ const START_VNUM = Number(params.get('room') || 3001);
 const MAX_ROOMS = Number(params.get('max') || 400);
 const AREA_URL = params.get('areaDir') || 'merc21/area';
 
+/**
+ * The sky is no longer only scenery: it is baked into an environment cube and
+ * is what most surfaces are actually lit by. So the hemisphere light that used
+ * to carry all the ambient is now a small floor under it (`ambient`), and the
+ * dials that matter are `env` -- how much of the baked sky to believe -- and
+ * `bounce`/`haze`, the colour of the ground and the horizon inside that bake.
+ *
+ * Exposures are set for ACES; see the note where the tone mapping is chosen.
+ */
 const TIMES = {
   dawn: {
-    elevation: 8, azimuth: 95, exposure: 0.95, fog: 0xc2a184, density: 0.0055,
-    sun: 0xffc48f, sunIntensity: 3.4, sky: 0xa8bcd4, ground: 0x6b5b48,
-    ambient: 1.5, bloom: 0.3, stars: 0.2, turbidity: 6, rayleigh: 2.4,
+    elevation: 8, azimuth: 95, exposure: 0.64, fog: 0x8f6f5c, density: 0.0034,
+    sun: 0xffc089, sunIntensity: 5.6, sky: 0x9fb6d2, ground: 0x5f5142, ambient: 0.12,
+    env: 0.45, bounce: 0x5e4f3d, haze: 0xc9a586,
+    bloom: 0.16, bloomThreshold: 2.6, stars: 0.22, turbidity: 5.5, rayleigh: 2.6,
+    shafts: 0.5, shaftTint: 0xffd2a0,
   },
   noon: {
-    elevation: 58, azimuth: 175, exposure: 0.48, fog: 0xc4d6e6, density: 0.0028,
-    sun: 0xfff2dd, sunIntensity: 4.2, sky: 0xaacbe8, ground: 0x7a6d59,
-    ambient: 2.1, bloom: 0.18, stars: 0, turbidity: 3.2, rayleigh: 1.4,
+    elevation: 58, azimuth: 175, exposure: 0.33, fog: 0x9fb4c8, density: 0.0018,
+    sun: 0xfff4e2, sunIntensity: 5.4, sky: 0xa3c4e4, ground: 0x6f6455, ambient: 0.16,
+    env: 0.55, bounce: 0x77694f, haze: 0xbcd2e6,
+    bloom: 0.14, bloomThreshold: 3.6, stars: 0, turbidity: 3.0, rayleigh: 1.3,
+    shafts: 0, shaftTint: 0xffffff,
   },
   dusk: {
-    elevation: 6.5, azimuth: 258, exposure: 1.02, fog: 0xb1764a, density: 0.0062,
-    sun: 0xffa055, sunIntensity: 3.6, sky: 0x8496b4, ground: 0x5b4a38,
-    ambient: 1.35, bloom: 0.34, stars: 0.3, turbidity: 7, rayleigh: 2.9,
+    elevation: 9.5, azimuth: 258, exposure: 0.62, fog: 0x8a5a3e, density: 0.003,
+    sun: 0xff9448, sunIntensity: 6.2, sky: 0x7b8ea8, ground: 0x50412f, ambient: 0.12,
+    env: 0.45, bounce: 0x574433, haze: 0xb87b4e,
+    bloom: 0.16, bloomThreshold: 2.8, stars: 0.32, turbidity: 6.5, rayleigh: 3.0,
+    shafts: 0.55, shaftTint: 0xffb469,
   },
   night: {
-    elevation: -8, azimuth: 300, exposure: 1.3, fog: 0x131a28, density: 0.0105,
-    sun: 0x9fb6e0, sunIntensity: 0.9, sky: 0x33456a, ground: 0x1e222b,
-    ambient: 0.62, bloom: 0.6, stars: 1, turbidity: 2, rayleigh: 0.6,
+    elevation: -8, azimuth: 300, exposure: 1.25, fog: 0x0d1220, density: 0.0075,
+    sun: 0x8ea6d6, sunIntensity: 0.8, sky: 0x2b3a5c, ground: 0x171a22, ambient: 0.18,
+    env: 1.0, bounce: 0x1a1e28, haze: 0x223050,
+    bloom: 0.5, bloomThreshold: 0.75, stars: 1, turbidity: 2, rayleigh: 0.6,
+    shafts: 0, shaftTint: 0xaabbff,
   },
+};
+
+const TONE_MAPPING = {
+  agx: THREE.AgXToneMapping,
+  aces: THREE.ACESFilmicToneMapping,
+  neutral: THREE.NeutralToneMapping,
 };
 
 const state = {
@@ -93,12 +116,23 @@ async function boot() {
   await progress(0.24, `laid out ${layout.stats.placed} rooms`);
 
   const materials = createMaterials(512, () => {});
-  await progress(0.5, 'baked materials');
+  await progress(0.44, 'baked materials');
 
-  const built = buildScene(world, layout, materials);
+  // Modelled assets are optional: anything missing falls back to the
+  // procedural geometry, so the viewer runs against a half-built library.
+  const assets = params.get('assets') === 'off' ? null
+    : await new AssetLibrary(materials).load(ASSET_NAMES);
+  if (assets) {
+    await progress(0.54, `${assets.assets.size} models, ${assets.missing.size} still procedural`);
+    if (assets.unknownTags.size) {
+      console.warn('assets: no material for tag(s)', [...assets.unknownTags].join(', '));
+    }
+  }
+
+  const built = buildScene(world, layout, materials, assets);
   await progress(0.72, `${built.stats.triangles.toLocaleString()} triangles`);
 
-  const actors = populate(world, layout, built, { materials });
+  const actors = populate(world, layout, built, { materials, assets });
   await progress(0.86, 'populating rooms');
 
   // ---------------------------------------------------------------- scene --
@@ -110,6 +144,11 @@ async function boot() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.shadowMap.autoUpdate = false;
+  // ACES, kept after measuring it against AgX at matched mid-grey. AgX holds a
+  // clipping sky better, but it desaturates on the way there, and at golden
+  // hour that costs the whole look: warm stone and cool shadow collapse into
+  // one beige. ACES keeps them apart. The clipping it was supposed to fix
+  // turned out to be the bloom threshold sitting below 1 on an HDR buffer.
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   // The composer renders several passes per frame; reset once so the counters
   // add up to the whole frame rather than just the last fullscreen quad.
@@ -124,6 +163,7 @@ async function boot() {
 
   const sky = new Sky();
   sky.scale.setScalar(6000);
+  clampSkyHighlights(sky, 60);
   scene.add(sky);
 
   const stars = makeStars();
@@ -134,34 +174,31 @@ async function boot() {
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 260;
-  sun.shadow.camera.left = -55;
-  sun.shadow.camera.right = 55;
-  sun.shadow.camera.top = 55;
-  sun.shadow.camera.bottom = -55;
-  sun.shadow.bias = -0.0006;
-  sun.shadow.normalBias = 0.05;
+  // The frustum's half-width belongs to the quality preset: it, not the map
+  // size, is what decides how many centimetres a shadow texel covers.
+  sun.shadow.bias = -0.00022;
+  sun.shadow.normalBias = 0.022;
   scene.add(sun, sun.target);
 
+  // Almost all of the ambient now comes from the environment cube. What is
+  // left of the hemisphere light is a floor, so nothing sealed away from the
+  // sky goes completely black.
   const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
   scene.add(hemi);
 
   // Where the shadow map was last drawn from; reset it and it gets redrawn.
   const shadowAnchor = new THREE.Vector3(Infinity, Infinity, Infinity);
 
-  const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(
-    window.innerWidth, window.innerHeight,
-    { samples: 0, type: THREE.HalfFloatType, colorSpace: THREE.LinearSRGBColorSpace },
-  ));
-  composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight), 0.35, 0.7, 0.98,
-  );
-  composer.addPass(bloom);
-  composer.addPass(new OutputPass());
+  const pipeline = createPipeline({
+    renderer, scene, camera, width: window.innerWidth, height: window.innerHeight,
+  });
+  const { composer, bloom, shafts } = pipeline;
+  const environment = new SkyEnvironment(renderer);
 
   const lightPool = new LightPool(scene, 14, built.lights);
   const quality = new Quality({
-    renderer, composer, bloom, sun, lightPool, name: params.get('quality') || 'medium',
+    renderer, pipeline, sun, lightPool, materials,
+    name: params.get('quality') || 'medium',
   });
   if (params.get('fps')) quality.preset.fps = Number(params.get('fps'));
 
@@ -170,6 +207,11 @@ async function boot() {
   const player = new Player(camera, renderer.domElement, built);
   const hud = new Hud(document.body, layout);
   const audio = new Audio();
+
+  const game = createGame({ world, layout, built, actors });
+  const gameUi = createGameUi(game);
+  game.onTeleport = (x, y, z) => player.spawn(x, y, z, camera.rotation.y);
+  game.setTimeOfDay(state.time);
 
   const startCell = layout.cells.get(START_VNUM) || layout.start;
   const startInfo = built.rooms.get(startCell.vnum);
@@ -183,14 +225,21 @@ async function boot() {
     audio.footstep(info ? info.materials.floor : 'flagstone', sprint);
   };
 
+  const sunDirection = new THREE.Vector3(0, 1, 0);
+  const shaftTint = new THREE.Color(1, 1, 1);
+  let sunElevation = 0;
+
   applyTime(state.time);
 
   function applyTime(name) {
     const preset = TIMES[name] || TIMES.dusk;
     state.time = name;
+    game.setTimeOfDay(name);
     const phi = THREE.MathUtils.degToRad(90 - preset.elevation);
     const theta = THREE.MathUtils.degToRad(preset.azimuth);
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
+    sunDirection.copy(sunPosition);
+    sunElevation = preset.elevation;
     sky.material.uniforms.sunPosition.value.copy(sunPosition);
     sky.material.uniforms.turbidity.value = preset.turbidity;
     sky.material.uniforms.rayleigh.value = preset.rayleigh;
@@ -205,8 +254,26 @@ async function boot() {
     scene.fog = new THREE.FogExp2(preset.fog, preset.density);
     renderer.toneMappingExposure = preset.exposure;
     bloom.strength = preset.bloom;
+    bloom.threshold = preset.bloomThreshold;
     stars.material.opacity = preset.stars;
     stars.visible = preset.stars > 0;
+    shaftTint.setHex(preset.shaftTint);
+    state.shaftGain = preset.shafts;
+
+    // Rebake the environment from the sky we just set up. This is the whole
+    // ambient term, so it has to happen before the next frame -- and it is a
+    // cube render plus a blur chain, so it must not happen during one.
+    environment.update(scene, {
+      sunPosition,
+      turbidity: preset.turbidity,
+      rayleigh: preset.rayleigh,
+      mieCoefficient: 0.006,
+      mieDirectionalG: 0.86,
+      ground: preset.bounce,
+      horizon: preset.haze,
+      intensity: preset.env,
+    });
+
     shadowAnchor.set(Infinity, Infinity, Infinity); // the sun moved: redraw shadows
     hud.toast(`${name}`);
   }
@@ -353,6 +420,9 @@ async function boot() {
     player.controls.lock();
   });
   dom.hint.addEventListener('click', () => player.controls.lock());
+  renderer.domElement.addEventListener('mousedown', (event) => {
+    if (event.button === 0 && !state.paused) game.attack();
+  });
 
   // ----------------------------------------------------------- frame loop --
 
@@ -374,6 +444,8 @@ async function boot() {
 
     if (!state.paused) player.update(dt);
     camera.updateMatrixWorld();
+    if (!state.paused) game.update(dt, player.position, camera.getWorldDirection(forward));
+    gameUi.update();
 
     const vnum = currentRoom();
     if (vnum !== undefined && vnum !== state.roomVnum) {
@@ -386,7 +458,6 @@ async function boot() {
     // The sun follows so its shadow map always covers where you are, but it is
     // snapped to a grid: the map is only redrawn every few metres of walking
     // instead of every frame, which also stops the shadow edges crawling.
-    const sunDirection = sky.material.uniforms.sunPosition.value;
     const snap = 6;
     const anchorX = Math.round(camera.position.x / snap) * snap;
     const anchorY = Math.round(camera.position.y / snap) * snap;
@@ -398,6 +469,10 @@ async function boot() {
       sun.target.updateMatrixWorld();
       renderer.shadowMap.needsUpdate = true;
     }
+
+    // God rays are aimed from where the sun ends up on screen, so this has to
+    // be after the camera has moved and before anything draws.
+    shafts.aim(camera, sunDirection, sunElevation, shaftTint, state.shaftGain);
 
     lightPool.update(camera.position, elapsed);
     actors.update(dt, elapsed, camera);
@@ -434,8 +509,18 @@ async function boot() {
 
   // Handy from the console, and how the screenshots for this were framed.
   window.diku = {
-    scene, camera, renderer, composer, bloom, sun, lightPool, quality,
-    player, hud, layout, built, actors, world, applyTime, state,
+    scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi,
+    pipeline, environment, materials,
+    player, hud, layout, built, actors, world, applyTime, state, times: TIMES,
+    /** Console A/B for the tone curve: 'agx', 'aces' or 'neutral'. */
+    setTone(name) {
+      renderer.toneMapping = TONE_MAPPING[name] ?? THREE.AgXToneMapping;
+      scene.traverse((o) => {
+        if (o.material) (Array.isArray(o.material) ? o.material : [o.material])
+          .forEach((m) => { m.needsUpdate = true; });
+      });
+      return name;
+    },
     look(x, y, z, yaw = 0, pitch = 0) {
       player.spawn(x, y, z, yaw);
       camera.rotation.set(pitch, yaw, 0);

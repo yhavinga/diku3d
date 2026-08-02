@@ -16,6 +16,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SECTOR, ROOM_INDOORS, EX_ISDOOR, EX_CLOSED, EX_LOCKED, DIR_STEP, DIR_NAME } from './are.js';
+import { InstanceBatch } from './assets.js';
 
 export const CELL = 13;         // grid pitch; rooms sit two cells apart
 export const ROOM = 10;         // interior span of an indoor room
@@ -26,6 +27,9 @@ export const DOOR_H = 3.1;
 export const CEIL = 5.2;        // interior clear height
 export const SLAB = 0.45;       // floor thickness
 export const LEVEL_H = 7.6;     // vertical pitch between levels
+
+/** Rotation that turns a model's -Z front towards each direction. */
+const FACE_ROT = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
 
 const HALF = CELL / 2;
 const SHELL = ROOM / 2 + WALL_IN + WALL_OUT;
@@ -243,10 +247,14 @@ function pickMaterials(room, area) {
 
 // ------------------------------------------------------------------ main ----
 
-export function buildScene(world, layout, materials) {
+export function buildScene(world, layout, materials, assets = null) {
   const group = new THREE.Group();
   group.name = 'world';
   const batcher = new Batcher(materials);
+  // Modelled assets are optional everywhere: if the library is absent or a
+  // particular model has not been made yet, the procedural geometry stands in.
+  const instances = assets ? new InstanceBatch(assets) : null;
+  const model = (names, seed) => (assets ? assets.choose(names, seed) : null);
 
   const colliders = [];   // {x0,x1,z0,z1,y0,y1}
   const platforms = [];   // {x0,x1,z0,z1,top}
@@ -291,10 +299,15 @@ export function buildScene(world, layout, materials) {
 
   const { bounds } = layout;
   const groundY = -SLAB - 0.02;
-  const pad = 4;
+  // Far enough out that the edge of the world is beyond the fog. It was four
+  // cells, which the thinner fog of the current lighting made visible as a
+  // brown line against the sky.
+  const pad = 60;
   const gx0 = (bounds.minX - pad) * CELL; const gx1 = (bounds.maxX + pad) * CELL;
   const gz0 = (bounds.minZ - pad) * CELL; const gz1 = (bounds.maxZ + pad) * CELL;
-  batcher.add(plane(gx1 - gx0, gz1 - gz0, 32), 'dirt',
+  // What lies outside the walls is fields, not bare earth: dirt read as desert
+  // once the fog thinned enough to see this far.
+  batcher.add(plane(gx1 - gx0, gz1 - gz0, 32), 'grass',
     place((gx0 + gx1) / 2, groundY, (gz0 + gz1) / 2), { chunk: 'ground' });
   addPlatform(gx0, gx1, gz0, gz1, groundY);
 
@@ -309,6 +322,17 @@ export function buildScene(world, layout, materials) {
     const mats = pickMaterials(room, room.area);
     const sides = layout.sides.get(cell.vnum);
     const roomHoles = holes.get(cell.vnum) || [];
+
+    // Nothing can reach an "In the air..." room now that its archways are not
+    // built, so its floor is pure scenery -- and a translucent slab hanging
+    // over the rooftops reads as a bug, which is what the review called it.
+    if (airborne) {
+      rooms.set(room.vnum, {
+        room, cell, center: new THREE.Vector3(pos.x, pos.y, pos.z), outdoor,
+        chunk, materials: mats, sides, unbuilt: true,
+      });
+      continue;
+    }
 
     rooms.set(room.vnum, {
       room, cell, center: new THREE.Vector3(pos.x, pos.y, pos.z), outdoor,
@@ -343,10 +367,13 @@ export function buildScene(world, layout, materials) {
         buildOutdoorEdge({ batcher, chunk, room, cell, pos, dir, open, addCollider, decor, lights });
       }
 
-      if (side && (side.kind === 'portal' || side.kind === 'gate')) {
+      // "In the air..." rooms sit three levels above the roofs. An archway
+      // built for one hangs over the town with its signpost floating beside it,
+      // which is exactly what it looks like. They are scenery; leave them bare.
+      if (side && (side.kind === 'portal' || side.kind === 'gate') && !airborne) {
         const ax = pos.x + dx * (distance - 0.1);
         const az = pos.z + dz * (distance - 0.1);
-        buildArch({ batcher, chunk, x: ax, y: pos.y, z: az, rotY, sealed: side.kind === 'gate' });
+        buildArch({ batcher, instances, model, chunk, x: ax, y: pos.y, z: az, rotY, sealed: side.kind === 'gate' });
         if (side.kind === 'portal') {
           portals.push({
             x: ax - dx * 0.8, y: pos.y, z: az - dz * 0.8, radius: 1.6,
@@ -377,10 +404,11 @@ export function buildScene(world, layout, materials) {
     // links that had no free wall left: an arch standing in the room itself
     for (const link of layout.links) {
       if (link.from !== cell || link.side !== null || link.kind === 'alley' || link.kind === 'stairs') continue;
+      if (airborne) continue;
       const angle = hash3(room.vnum, 5, 0, 1) * Math.PI * 2;
       const ax = pos.x + Math.cos(angle) * half * 0.4;
       const az = pos.z + Math.sin(angle) * half * 0.4;
-      buildArch({ batcher, chunk, x: ax, y: pos.y, z: az, rotY: -angle, sealed: link.kind === 'gate' });
+      buildArch({ batcher, instances, model, chunk, x: ax, y: pos.y, z: az, rotY: -angle, sealed: link.kind === 'gate' });
       if (link.kind === 'portal' && link.to) {
         portals.push({
           x: ax, y: pos.y, z: az, radius: 1.6, target: link.to.vnum,
@@ -454,14 +482,31 @@ export function buildScene(world, layout, materials) {
     }
   }
   for (const spot of frontage.values()) {
+    // Face the house at the street. Models are built fronting -Z, so the
+    // rotation that turns that front towards direction d is FACE_ROT[d]. It
+    // also keeps the jetties and hoist beams oversailing a road, not a
+    // neighbour's roof.
+    let faces = -1;
+    for (let dir = 0; dir < 4 && faces < 0; dir++) {
+      const [dx, , dz] = DIR_STEP[dir];
+      const nx = spot.x + dx; const nz = spot.z + dz;
+      if (layout.at(spot.level, nx, nz) !== undefined || layout.isPath(spot.level, nx, nz)) faces = dir;
+    }
     buildFiller({
-      batcher, chunk: `${spot.level}:${Math.floor(spot.x / 4)},${Math.floor(spot.z / 4)}`,
+      batcher, instances, model, faceRot: faces < 0 ? null : FACE_ROT[faces],
+      chunk: `${spot.level}:${Math.floor(spot.x / 4)},${Math.floor(spot.z / 4)}`,
       sector: spot.sector, x: spot.x * CELL, y: spot.level * LEVEL_H, z: spot.z * CELL,
       seed: hash3(spot.x, spot.z, spot.level, 17), addCollider, lights, decor,
     });
   }
 
   const stats = batcher.finish(group);
+  if (instances) {
+    const placed = instances.finish(group);
+    stats.meshes += placed.meshes;
+    stats.triangles += placed.triangles;
+    stats.instanced = placed.triangles;
+  }
   return { group, colliders, platforms, lights, portals, doors, rooms, decor, stats };
 }
 
@@ -657,7 +702,14 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
 }
 
 /** A stone archway: portals you step through, gates that are sealed. */
-function buildArch({ batcher, chunk, x, y, z, rotY, sealed }) {
+function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed }) {
+  const arch = model(['stone_arch'], 0);
+  if (arch && instances) {
+    instances.add(arch, { x, y, z, rotY }, chunk);
+    const bars = sealed ? model(['portcullis'], 0) : null;
+    if (bars) instances.add(bars, { x, y, z, rotY }, chunk);
+    if (bars || !sealed) return;
+  }
   const t = 0.8;
   const h = DOOR_H + 1.0;
   const post = 0.7;
@@ -751,13 +803,43 @@ function buildInteriorProps({ room, pos, sides, decor, mats }) {
 }
 
 /** Scenery for an empty cell: houses along a street, trees along a path. */
-function buildFiller({ batcher, chunk, sector, x, y, z, seed, addCollider, lights, decor }) {
+function buildFiller({ batcher, instances, model, faceRot, chunk, sector, x, y, z, seed, addCollider, lights, decor }) {
+  // Pave the cell to match its street before building on it. Without this the
+  // world's ground plane shows through around the footings -- which read as a
+  // lawn once that plane became grass.
+  const GROUND = {
+    [SECTOR.CITY]: 'cobble', [SECTOR.FIELD]: 'grass', [SECTOR.FOREST]: 'grass',
+    [SECTOR.HILLS]: 'grass', [SECTOR.MOUNTAIN]: 'rock', [SECTOR.DESERT]: 'sand',
+  };
+  const ground = GROUND[sector];
+  if (ground) {
+    batcher.add(plane(CELL, CELL, 3), ground, place(x, y, z), { chunk });
+  }
+
   switch (sector) {
     case SECTOR.CITY: {
       const w = CELL * 0.92;
       const d = CELL * 0.92;
       const h = 5.5 + seed * 6.5;
-      const material = hash3(x, z, 0, 22) > 0.5 ? 'timber' : 'stonewall';
+      const stone = hash3(x, z, 0, 22) > 0.5;
+      const house = model(stone
+        ? ['house_stone_a', 'house_stone_b', 'house_a', 'house_b', 'house_c']
+        : ['house_a', 'house_b', 'house_c', 'house_stone_a', 'house_stone_b'], seed);
+      if (house && instances) {
+        // A modelled house comes with its own roof, windows and chimney; the
+        // only thing left to decide is which way its front faces the street.
+        const modelled = instances.library.get(house);
+        const fit = Math.min(1.15, (CELL * 0.92) / Math.max(0.001, Math.max(modelled.size.x, modelled.size.z)));
+        instances.add(house, {
+          x, y, z, rotY: faceRot ?? Math.floor(hash3(x, z, 0, 25) * 4) * (Math.PI / 2),
+          scaleX: fit, scaleZ: fit, scaleY: fit * (0.85 + seed * 0.4),
+        }, chunk);
+        const height = modelled.size.y * fit * (0.85 + seed * 0.4);
+        addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2, y, y + height);
+        if (hash3(x, z, 0, 27) > 0.55) decor.push({ kind: 'smoke', x, y: y + height, z });
+        break;
+      }
+      const material = stone ? 'stonewall' : 'timber';
       batcher.add(box(w, h, d, 3, 4, 3), material, place(x, y + h / 2, z), { chunk, ao: wallAo(y) });
       const roofH = 2.0 + hash3(x, z, 0, 23) * 1.5;
       batcher.add(triPrism(w + 0.9, roofH, d + 0.9), hash3(x, z, 0, 24) > 0.82 ? 'thatch' : 'rooftile',

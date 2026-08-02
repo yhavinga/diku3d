@@ -360,26 +360,151 @@ function toTexture(data, size, colorSpace) {
 /**
  * Material recipes: which surface, how many world units per texture tile, and
  * the PBR knobs that noise alone can't express.
+ *
+ * `env` is how much of the environment cube the surface believes. It is not a
+ * cheat: a limewashed wall really does reflect less of the sky than wet
+ * flagstones do, and with a real environment map the difference between 0.6
+ * and 1.5 here is the difference between chalk and stone.
+ *
+ * `wet` is how far the low-lying patches of an upward-facing surface polish
+ * up. Streets hold water in their dips; walls do not.
  */
 /** `scale` is how many world units one tile of the texture covers. */
 const RECIPES = {
-  cobble: { surface: 'cobble', scale: 2.6, normalScale: 1.0 },
-  flagstone: { surface: 'flagstone', scale: 3.4, normalScale: 0.85 },
-  marble: { surface: 'marble', scale: 4, normalScale: 0.35 },
-  plaster: { surface: 'plaster', scale: 3, normalScale: 0.5 },
-  stonewall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0 },
-  timber: { surface: 'timber', scale: 5.2, normalScale: 0.9 },
-  planks: { surface: 'planks', scale: 2.8, normalScale: 0.7 },
-  rooftile: { surface: 'rooftile', scale: 2.6, normalScale: 1.1 },
-  thatch: { surface: 'thatch', scale: 3, normalScale: 1.2 },
-  dirt: { surface: 'dirt', scale: 4.5, normalScale: 0.9 },
-  grass: { surface: 'grass', scale: 5.5, normalScale: 0.55 },
-  rock: { surface: 'rock', scale: 5, normalScale: 1.2 },
-  sand: { surface: 'sand', scale: 6, normalScale: 0.6 },
-  iron: { surface: 'iron', scale: 1.6, normalScale: 0.5 },
-  bark: { surface: 'bark', scale: 1.6, normalScale: 1.0 },
-  water: { surface: 'water', scale: 7, normalScale: 0.5 },
+  cobble: { surface: 'cobble', scale: 2.6, normalScale: 1.0, env: 1.15, wet: 0.5, detail: 0.5 },
+  flagstone: { surface: 'flagstone', scale: 3.4, normalScale: 0.85, env: 1.1, wet: 0.45, detail: 0.5 },
+  marble: { surface: 'marble', scale: 4, normalScale: 0.35, env: 1.35, wet: 0.2, detail: 0.3 },
+  plaster: { surface: 'plaster', scale: 3, normalScale: 0.5, env: 0.7, wet: 0, detail: 0.6 },
+  stonewall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.95, wet: 0, detail: 0.55 },
+  timber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45 },
+  planks: { surface: 'planks', scale: 2.8, normalScale: 0.7, env: 0.85, wet: 0.2, detail: 0.45 },
+  rooftile: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0.35, detail: 0.5 },
+  thatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7 },
+  dirt: { surface: 'dirt', scale: 4.5, normalScale: 0.9, env: 0.7, wet: 0.3, detail: 0.6 },
+  grass: { surface: 'grass', scale: 5.5, normalScale: 0.55, env: 0.6, wet: 0, detail: 0.7 },
+  rock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0.25, detail: 0.6 },
+  sand: { surface: 'sand', scale: 6, normalScale: 0.6, env: 0.7, wet: 0, detail: 0.6 },
+  iron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1.4, wet: 0, detail: 0.3 },
+  bark: { surface: 'bark', scale: 1.6, normalScale: 1.0, env: 0.65, wet: 0, detail: 0.5 },
+  water: { surface: 'water', scale: 7, normalScale: 0.5, env: 1.6, wet: 0, detail: 0.2 },
 };
+
+// ------------------------------------------------------- surface detail ----
+
+/**
+ * One low-frequency map, sampled in world space, that every surface shares:
+ * red drifts the tone, green the warmth, blue the roughness. Tiling is what
+ * makes a procedural town read as a game, and a texture repeating every three
+ * metres under a mottle that repeats every thirty stops looking repeated.
+ */
+function bakeMacro(size = 128) {
+  const data = new Uint8ClampedArray(size * size * 4);
+  const spread = (v) => clamp01((v - 0.5) * 1.7 + 0.5) * 255;
+  // Two octaves at period 2, over a tile 26 metres wide: the finest thing in
+  // here is about four metres across. Any more detail and it stops reading as
+  // weathering and starts reading as camouflage over the top of the texture.
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x + 0.5) / size; const v = (y + 0.5) / size;
+      const i = (y * size + x) * 4;
+      data[i] = spread(fbm(u * 2, v * 2, 2, 211, 2, 0.45));
+      data[i + 1] = spread(fbm(u * 2, v * 2, 2, 223, 2, 0.45));
+      data[i + 2] = spread(fbm(u * 3, v * 3, 3, 227, 2, 0.45));
+      data[i + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * Everything the baked maps cannot say, said in the shader instead:
+ *
+ *  - macro variation in world space, so a wall thirty metres along the street
+ *    is not the same wall;
+ *  - a second, much finer copy of the normal map that fades in inside four
+ *    metres, so surfaces keep detail when you walk up to them instead of
+ *    going smooth (high and max only -- it is an extra texture read);
+ *  - damp in the dips of anything facing up, which is most of what a street
+ *    at golden hour is doing.
+ */
+function decorate(material, recipe, macro) {
+  material.userData.detailStrength = recipe.detail ?? 0.5;
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.macroMap = { value: macro };
+    shader.uniforms.macroScale = { value: 1 / 26 };
+    shader.uniforms.detailScale = { value: 6.3 };
+    shader.uniforms.detailStrength = { value: material.userData.detailStrength };
+    shader.uniforms.wetness = { value: recipe.wet ?? 0 };
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSurfacePos;')
+      .replace(
+        '#include <worldpos_vertex>',
+        '#include <worldpos_vertex>\n\tvSurfacePos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;',
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', /* glsl */`
+        #include <common>
+        varying vec3 vSurfacePos;
+        uniform sampler2D macroMap;
+        uniform float macroScale;
+        uniform float detailScale;
+        uniform float detailStrength;
+        uniform float wetness;
+      `)
+      .replace('#include <map_fragment>', /* glsl */`
+        #include <map_fragment>
+        // A skewed projection rather than a true triplanar one: this is
+        // mottling, and it only has to vary along all three axes.
+        vec2 dikuMacroUv = vec2(
+          vSurfacePos.x * 0.92 + vSurfacePos.z * 0.31,
+          vSurfacePos.z * 0.86 - vSurfacePos.y * 0.74
+        ) * macroScale;
+        vec3 dikuMacro = texture2D( macroMap, dikuMacroUv ).rgb;
+        diffuseColor.rgb *= ( 0.90 + dikuMacro.r * 0.21 )
+          * mix( vec3( 1.030, 1.0, 0.962 ), vec3( 0.972, 0.997, 1.034 ), dikuMacro.g );
+      `)
+      .replace('#include <roughnessmap_fragment>', /* glsl */`
+        #include <roughnessmap_fragment>
+        roughnessFactor *= 0.84 + dikuMacro.b * 0.32;
+        #ifdef DIKU_WET
+          // World normal, from the view normal and an orthonormal view matrix.
+          float dikuUp = clamp( dot( viewMatrix[ 1 ].xyz, vNormal ), 0.0, 1.0 );
+          // Water sits in the low patches, and the low patches are where the
+          // height field -- and so the macro tone -- is darkest.
+          float dikuDamp = wetness * dikuUp * dikuUp
+            * smoothstep( 0.58, 0.18, dikuMacro.r ) * smoothstep( 0.30, 0.62, dikuMacro.b );
+          roughnessFactor = mix( roughnessFactor, 0.11, dikuDamp );
+          diffuseColor.rgb *= 1.0 - dikuDamp * 0.42;
+        #endif
+        roughnessFactor = clamp( roughnessFactor, 0.045, 1.0 );
+      `)
+      .replace('#include <normal_fragment_maps>', /* glsl */`
+        #include <normal_fragment_maps>
+        #ifdef DIKU_DETAIL
+          float dikuNear = detailStrength * ( 1.0 - smoothstep( 1.5, 9.0, length( vViewPosition ) ) );
+          if ( dikuNear > 0.0 ) {
+            vec3 dikuN = texture2D( normalMap, vNormalMapUv * detailScale ).xyz * 2.0 - 1.0;
+            normal = normalize( normal + ( tbn[ 0 ] * dikuN.x + tbn[ 1 ] * dikuN.y ) * dikuNear );
+          }
+        #endif
+      `);
+  };
+  if (recipe.wet) material.defines = { ...material.defines, DIKU_WET: 1 };
+  // Our injected source differs from stock, so it needs a key of its own or
+  // three will hand us a program compiled for an undecorated material.
+  material.customProgramCacheKey = () => `diku|${material.defines?.DIKU_DETAIL ? 1 : 0}`
+    + `|${material.defines?.DIKU_WET ? 1 : 0}`;
+}
 
 /**
  * Bake every recipe into a MeshStandardMaterial. Triplanar would be nicer but
@@ -387,7 +512,9 @@ const RECIPES = {
  */
 export function createMaterials(size = 512, onProgress = () => {}) {
   const materials = {};
+  const macro = bakeMacro();
   const names = Object.keys(RECIPES);
+  const surfaced = [];
   names.forEach((name, index) => {
     const recipe = RECIPES[name];
     const baked = bake(recipe.surface, size);
@@ -398,14 +525,29 @@ export function createMaterials(size = 512, onProgress = () => {}) {
       metalnessMap: toTexture(baked.roughness, size, THREE.NoColorSpace),
       roughness: 1,
       metalness: 1,
+      envMapIntensity: recipe.env ?? 1,
       normalScale: new THREE.Vector2(recipe.normalScale, recipe.normalScale),
       vertexColors: true,
     });
     material.name = name;
     material.userData.uvScale = 1 / recipe.scale;
+    decorate(material, recipe, macro);
     materials[name] = material;
+    surfaced.push(material);
     onProgress((index + 1) / names.length, name);
   });
+
+  /** Close-range detail normals, on or off. Recompiles; only the P key does it. */
+  materials.setDetail = (on) => {
+    for (const material of surfaced) {
+      const has = !!material.defines?.DIKU_DETAIL;
+      if (has === !!on) continue;
+      material.defines = { ...material.defines };
+      if (on) material.defines.DIKU_DETAIL = 1;
+      else delete material.defines.DIKU_DETAIL;
+      material.needsUpdate = true;
+    }
+  };
 
   // Not baked: the floor of an "In the air..." room, which has to read as
   // something you could stand on without becoming a lid over the street below.

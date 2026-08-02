@@ -23,7 +23,11 @@ SEEDS = [
     "examples/jsm/postprocessing/RenderPass.js",
     "examples/jsm/postprocessing/UnrealBloomPass.js",
     "examples/jsm/postprocessing/OutputPass.js",
+    "examples/jsm/postprocessing/GTAOPass.js",
+    "examples/jsm/postprocessing/SMAAPass.js",
+    "examples/jsm/loaders/GLTFLoader.js",
     "examples/jsm/utils/BufferGeometryUtils.js",
+    "examples/jsm/utils/SkeletonUtils.js",
 ]
 
 IMPORT_RE = re.compile(r"""(?:from|import)\s*\(?\s*['"]([^'"]+)['"]""")
