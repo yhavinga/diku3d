@@ -127,7 +127,7 @@ export class AssetLibrary {
   digest(name, gltf) {
     const primitives = [];
     const bounds = new THREE.Box3();
-    let animations = gltf.animations || [];
+    let animations = (gltf.animations || []).map(uprightSwing);
 
     gltf.scene.updateMatrixWorld(true);
     gltf.scene.traverse((node) => {
@@ -188,6 +188,37 @@ export class AssetLibrary {
     const asset = this.assets.get(name);
     return asset ? Math.max(asset.size.x, asset.size.z) : 0;
   }
+}
+
+/**
+ * Turn a walk cycle a quarter turn back onto its own axis.
+ *
+ * `townsperson.py` rolls every bone so that rotating it about its local X
+ * swings it forward and back, and keyframes the walk as X rotations. What comes
+ * out of the exporter does not agree: the keyed axis lands on the bone's local
+ * Z, and measured on the running rig the left shin travels 0.247 m across the
+ * figure and 0.012 m along it. The legs scissor sideways -- the figure walks
+ * with its shoulder leading, which is what it was reported as.
+ *
+ * Conjugating each keyed rotation by a quarter turn about Y takes the rotation
+ * axis (a, b, c) to (c, b, -a), which is a proper rotation, not a mirror, so
+ * the cycle keeps its handedness and only changes the plane it happens in.
+ *
+ * This belongs in the bone rolls, not here. It is done at load because the
+ * models are committed and regenerating them needs Blender; the note is in
+ * CLAUDE.md so the next regeneration fixes it at the source and this can go.
+ */
+function uprightSwing(clip) {
+  for (const track of clip.tracks) {
+    if (!/\.quaternion$/.test(track.name)) continue;
+    const v = track.values;
+    for (let i = 0; i < v.length; i += 4) {
+      const x = v[i]; const z = v[i + 2];
+      v[i] = z;
+      v[i + 2] = -x;
+    }
+  }
+  return clip;
 }
 
 function tagOf(material) {

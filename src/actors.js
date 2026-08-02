@@ -995,6 +995,7 @@ export function populate(world, layout, built, options = {}) {
   const windowLights = [];
   if (windows.length) {
     const panes = [];
+    const dark = [];
     const frames = [];
     const PANE_W = 1.4;
     const PANE_H = 1.7;
@@ -1030,7 +1031,13 @@ export function populate(world, layout, built, options = {}) {
             // read as. Now the glass is flush and the reveal stands 34 cm off
             // the face, so the opening has a jamb, a head and a shadow.
             const REVEAL = 0.34;
-            pushPart(lit ? panes : frames, G.box(PANE_W, PANE_H, 0.06), lit ? 0xffc47e : 0x14110e, out(0.03));
+            // An unlit pane used to be 0x14110e in with the woodwork, which
+            // after tone mapping is pure black -- a hole cut in the wall, and
+            // the blackest thing in any frame it appears in. Real glass at
+            // this angle is mostly Fresnel: it mirrors the sky and reads as a
+            // cool mid grey, darker than the wall but nowhere near zero. Its
+            // own material, so it can be smooth and see the environment.
+            pushPart(lit ? panes : dark, G.box(PANE_W, PANE_H, 0.06), lit ? 0xffc47e : 0xffffff, out(0.03));
             for (const s of [-1, 1]) {
               pushPart(frames, G.box(0.17, PANE_H + 0.34, REVEAL), 0x36291d,
                 at(px + tx * s * (PANE_W / 2 + 0.085) + f.nx * (REVEAL / 2),
@@ -1067,6 +1074,23 @@ export function populate(world, layout, built, options = {}) {
         );
       };
       const mesh = new THREE.Mesh(mergeGeometries(panes, false), glow);
+      group.add(mesh);
+    }
+    if (dark.length) {
+      // Smooth, dark and almost entirely environment: at any angle off normal
+      // this reads as sky reflected in old glass rather than as a void.
+      // Metalness at 0.38 is not what glass is; it is what old glass *looks*
+      // like from the street. A true dielectric reflects 4% head-on, so a pane
+      // seen square stays almost black, and a wall of black rectangles is what
+      // this was reported as twice. Raising F0 buys the sky reflection that a
+      // real window gets from being slightly bowed and never quite flat.
+      const glass = new THREE.MeshStandardMaterial({
+        vertexColors: true, color: 0x1b212b, roughness: 0.06, metalness: 0.38,
+        envMapIntensity: 2.8,
+      });
+      glass.name = 'windowglass';
+      const mesh = new THREE.Mesh(mergeGeometries(dark, false), glass);
+      mesh.receiveShadow = true;
       group.add(mesh);
     }
     if (frames.length) group.add(new THREE.Mesh(mergeGeometries(frames, false), propMaterial));

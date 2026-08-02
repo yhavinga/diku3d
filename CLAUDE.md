@@ -90,6 +90,27 @@ them and never allocates its own — two doors in one wall is the failure mode.
 - `assets.js` `choose(names, seed)` defaults its seed. Callers asking only "does
   this model exist?" pass none, and `undefined * n` is `NaN`, which indexes
   nothing — so the temple kit silently never placed.
+- **The walk cycle comes out of Blender a quarter turn off.** `townsperson.py`
+  rolls every bone so that rotating about its local X swings forward and back,
+  and keys the walk that way; the exporter lands the keyed axis on local Z, and
+  measured on the running rig the left shin travelled 0.247 m *across* the
+  figure and 0.012 m along it. People walked with a shoulder leading.
+  `assets.js` `uprightSwing()` conjugates every keyed rotation by a quarter turn
+  about Y — `(x, y, z, w)` → `(z, y, -x, w)`, a proper rotation, not a mirror,
+  so the cycle keeps its handedness. **This belongs in the bone rolls**; it is
+  done at load because the models are committed. Fix it at the source at the
+  next regeneration and delete `uprightSwing`.
+  The measurement that settles it: force `actions.walk` to weight 1, sample a
+  shin bone's world position into `figure.worldToLocal()` over a couple of
+  seconds, and compare the range along local X against local Z. Forward must
+  win. Nothing about this is visible in a still.
+- **Anything at RGB 0 is a bug, not a shade.** Three separate black rectangles
+  were reported as one: a corridor built to a room that was never built, the
+  plate behind a name label (`rgba(12,10,8,0.72)` — sprites are tone mapped, and
+  ACES takes an sRGB 12 to nearly zero, so a "dark glass panel" was 72% opaque
+  black), and unlit window panes at `0x14110e`. Nothing outdoors under a sky is
+  ever zero; when something reads as a hole, measure the pixel before looking
+  for geometry.
 - **V runs the other way out of Blender.** glTF writes `v = 1 - v`, so on every
   model `uv.v` correlates `-1` with world Y while everything out of `Batcher`
   correlates `+1`. The normal map's green channel is a direction in that space,
