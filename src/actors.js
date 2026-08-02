@@ -188,15 +188,32 @@ function buildModelledFigure(asset, proto) {
   body.scale.setScalar(scale);
   group.add(body);
 
+  // Both clips run all the time at opposing weights, so moving off is a blend
+  // rather than a cut. Playing idle while the figure slides across the ground
+  // is exactly what reads as floating.
   let mixer = null;
-  const clip = asset.animations.find((a) => /idle/i.test(a.name)) || asset.animations[0];
-  if (clip) {
+  const actions = {};
+  const idleClip = asset.animations.find((a) => /idle/i.test(a.name)) || asset.animations[0];
+  const walkClip = asset.animations.find((a) => /walk/i.test(a.name));
+  if (idleClip) {
     mixer = new THREE.AnimationMixer(body);
-    const action = mixer.clipAction(clip);
-    action.time = strHash(proto.short, 13) * clip.duration; // everyone on their own beat
-    action.play();
+    const start = strHash(proto.short, 13);
+    for (const [name, clip] of [['idle', idleClip], ['walk', walkClip]]) {
+      if (!clip) continue;
+      const action = mixer.clipAction(clip);
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.enabled = true;
+      action.time = start * clip.duration; // everyone on their own beat
+      action.setEffectiveWeight(name === 'idle' ? 1 : 0);
+      action.play();
+      actions[name] = action;
+      if (name === 'walk') actions.walkCycle = clip.duration;
+    }
   }
-  return { group, headGroup: group, height: asset.size.y * scale, scale, mixer };
+  // No separate head group: the head is a bone inside a skinned mesh. Aliasing
+  // it to the body made the head-turn write the body's own rotation and then
+  // read it back as the error term, which flips between two poses every frame.
+  return { group, headGroup: null, height: asset.size.y * scale, scale, mixer, actions };
 }
 
 function buildFigure(proto) {
@@ -545,7 +562,9 @@ export function populate(world, layout, built, options = {}) {
 
       const aggressive = !!(mob.proto.act & ACT_AGGRESSIVE);
       figures.push({
-        object: fig, head: headGroup, label, home: fig.position.clone(), mixer: built.mixer || null,
+        object: fig, head: headGroup, label, home: fig.position.clone(),
+        mixer: built.mixer || null, actions: built.actions || null,
+        last: fig.position.clone(), speed: 0,
         phase: strHash(mob.proto.short, 5) * 6.28, aggressive,
         sentinel: !!(mob.proto.act & ACT_SENTINEL),
         drift: 0.35 + strHash(mob.proto.keywords, 9) * 0.5,
@@ -946,12 +965,43 @@ export function populate(world, layout, built, options = {}) {
       fig.object.visible = !far;
       if (far) continue;
       if (fig.mixer) fig.mixer.update(dt);
-      const bob = Math.sin(time * 1.7 + fig.phase) * 0.035;
+      const bob = fig.actions ? 0 : Math.sin(time * 1.7 + fig.phase) * 0.035;
       fig.object.position.y = fig.home.y + bob;
       if (!fig.sentinel) {
-        fig.object.position.x = fig.home.x + Math.sin(time * 0.25 + fig.phase) * fig.drift;
-        fig.object.position.z = fig.home.z + Math.cos(time * 0.19 + fig.phase * 1.3) * fig.drift;
+        // Fast enough that the movement reads as walking rather than sliding,
+        // and a sine so they slow to a stop at each turn and set off again.
+        fig.object.position.x = fig.home.x + Math.sin(time * 0.6 + fig.phase) * fig.drift;
+        fig.object.position.z = fig.home.z + Math.cos(time * 0.45 + fig.phase * 1.3) * fig.drift;
       }
+      // Drifting about while playing a standing animation is what reads as
+      // floating. Measure how fast the figure is actually travelling, blend to
+      // the walk clip, turn the feet over at the speed they are moving, and
+      // face the way they are going.
+      if (fig.actions && fig.actions.walk) {
+        const moved = Math.hypot(
+          fig.object.position.x - fig.last.x, fig.object.position.z - fig.last.z,
+        );
+        fig.speed += (moved / Math.max(dt, 1e-4) - fig.speed) * Math.min(1, dt * 6);
+        const walking = fig.speed > 0.16;
+        const blend = Math.min(1, dt * 5);
+        const walkW = fig.actions.walk.getEffectiveWeight();
+        const idleW = fig.actions.idle.getEffectiveWeight();
+        fig.actions.walk.setEffectiveWeight(walkW + ((walking ? 1 : 0) - walkW) * blend);
+        fig.actions.idle.setEffectiveWeight(idleW + ((walking ? 0 : 1) - idleW) * blend);
+        // One cycle covers about 1.2 m; match it so the feet don't skate.
+        fig.actions.walk.timeScale = walking
+          ? THREE.MathUtils.clamp(fig.speed * fig.actions.walkCycle / 1.2, 0.4, 2.2) : 1;
+        if (walking) {
+          const heading = Math.atan2(
+            fig.object.position.x - fig.last.x, fig.object.position.z - fig.last.z,
+          );
+          let turn = ((heading - fig.object.rotation.y + Math.PI) % (Math.PI * 2)) - Math.PI;
+          if (turn < -Math.PI) turn += Math.PI * 2;
+          fig.object.rotation.y += turn * Math.min(1, dt * 4);
+        }
+        fig.last.copy(fig.object.position);
+      }
+
       const dx = camera.position.x - fig.object.position.x;
       const dz = camera.position.z - fig.object.position.z;
       const distSq = dx * dx + dz * dz;
@@ -963,7 +1013,7 @@ export function populate(world, layout, built, options = {}) {
         const current = fig.object.rotation.y;
         let delta = ((want - current + Math.PI) % (Math.PI * 2)) - Math.PI;
         if (delta < -Math.PI) delta += Math.PI * 2;
-        fig.head.rotation.y = THREE.MathUtils.clamp(delta, -0.9, 0.9);
+        if (fig.head) fig.head.rotation.y = THREE.MathUtils.clamp(delta, -0.9, 0.9);
         if (fig.aggressive) fig.object.rotation.y += delta * Math.min(1, dt * 1.5);
       }
     }

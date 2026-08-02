@@ -56,7 +56,7 @@ export const PRESETS = {
   },
 };
 
-const SCALES = [0.55, 0.7, 0.85, 1.0];
+export const SCALES = [0.55, 0.7, 0.85, 1.0];
 const IDLE_FPS = 10;
 
 export class Quality {
@@ -69,6 +69,9 @@ export class Quality {
     this.lightPool = lightPool;
     this.materials = materials;
     this.scaleIndex = SCALES.length - 1;
+    // Per-setting overrides from the options screen, merged over the preset.
+    this.overrides = {};
+    this.autoScale = true;
     this.lastRender = 0;
     this.lastProbe = 0;
     this.gpuMs = null;
@@ -83,10 +86,11 @@ export class Quality {
   }
 
   apply(name) {
-    const preset = PRESETS[name] || PRESETS.high;
+    const base = PRESETS[name] || PRESETS.high;
     this.name = PRESETS[name] ? name : 'high';
+    const preset = { ...base, ...this.overrides };
     this.preset = preset;
-    this.scaleIndex = SCALES.length - 1;
+    if (this.autoScale) this.scaleIndex = SCALES.length - 1;
 
     this.bloom.enabled = preset.bloom !== false;
     this.pipeline.gtao.enabled = preset.ao !== false;
@@ -207,12 +211,25 @@ export class Quality {
     this.pending = null;
   }
 
+  /** Fix the render scale, or hand it back to the adaptive scaler. */
+  setScale(index) {
+    this.autoScale = index === null;
+    if (index !== null) this.scaleIndex = Math.max(0, Math.min(SCALES.length - 1, index));
+    this.resize();
+  }
+
+  /** Replace the per-setting overrides and re-apply the current preset. */
+  setOverrides(overrides) {
+    this.overrides = { ...overrides };
+    this.apply(this.name);
+  }
+
   /**
    * Keep the GPU comfortably inside the frame it has. Resolution is the only
    * dial turned here: it is the one that scales smoothly and shows least.
    */
   adapt() {
-    if (this.gpuMs === null) return;
+    if (!this.autoScale || this.gpuMs === null) return;
     const budget = 1000 / (this.preset.fps || 120);
     let index = this.scaleIndex;
     if (this.gpuMs > budget * 0.75 && index > 0) index--;

@@ -16,6 +16,7 @@ import { Player } from './player.js';
 import { Hud } from './hud.js';
 import { Audio } from './audio.js';
 import { Quality, LightPool, PRESETS } from './quality.js';
+import { createOptions } from './options.js';
 import { AssetLibrary, ASSET_NAMES } from './assets.js';
 import { createGame } from './game.js';
 import { createGameUi } from './game-ui.js';
@@ -208,6 +209,7 @@ async function boot() {
   const hud = new Hud(document.body, layout);
   const audio = new Audio();
 
+  const options = createOptions({ quality, applyTime: (n) => applyTime(n), audio, state });
   const game = createGame({ world, layout, built, actors });
   const gameUi = createGameUi(game);
   game.onTeleport = (x, y, z) => player.spawn(x, y, z, camera.rotation.y);
@@ -335,6 +337,10 @@ async function boot() {
     if (event.code === 'Digit2') applyTime('noon');
     if (event.code === 'Digit3') applyTime('dusk');
     if (event.code === 'Digit4') applyTime('night');
+    if (event.code === 'KeyO') {
+      if (options.toggle()) player.controls.unlock();
+    }
+    if (event.code === 'Escape' && options.open) options.close();
     if (event.code === 'KeyF') state.showStats = !state.showStats;
     if (event.code === 'KeyP') {
       const names = Object.keys(PRESETS);
@@ -492,6 +498,7 @@ async function boot() {
     }
     if (fadeTimer > 0) fadeTimer -= dt;
 
+    options.update(dt);
     hud.update(dt, camera, state.roomVnum);
     if (state.showStats) {
       const info = renderer.info.render;
@@ -509,7 +516,7 @@ async function boot() {
 
   // Handy from the console, and how the screenshots for this were framed.
   window.diku = {
-    scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi,
+    scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi, options,
     pipeline, environment, materials,
     player, hud, layout, built, actors, world, applyTime, state, times: TIMES,
     /** Console A/B for the tone curve: 'agx', 'aces' or 'neutral'. */
@@ -533,6 +540,8 @@ async function boot() {
       return info.room.name;
     },
   };
+
+  options.start();
 
   await progress(1, 'ready');
   dom.loading.classList.add('hidden');

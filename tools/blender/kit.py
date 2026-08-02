@@ -184,7 +184,10 @@ def framing(w, h, t, loc, rot, posts=3, braces=True, rail=0.0, sill=True,
     only a doorway actually breaks it, and a threshold you trip over is worse
     than a missing beam."""
     objs = []
-    d = t * 1.45
+    # 85 mm proud of the infill on each face. The old 1.45 * t left the studwork
+    # barely 50 mm out and at a low sun it cast nothing; this is the difference
+    # between a frame drawn on a wall and a frame standing on one.
+    d = t + 0.17
     if sill:
         for (lo, hi) in _spans(w, sill_skip):
             objs.append(timber((hi - lo, d, size), at(loc, rot, (lo + hi) / 2, size / 2),
@@ -217,90 +220,273 @@ def framing(w, h, t, loc, rot, posts=3, braces=True, rail=0.0, sill=True,
     return objs
 
 
-def jetty(w, d, z, out, size=0.3, joists=5, mat="oak"):
-    """Bressumer beams and the joist ends under an overhanging upper floor."""
+def jetty(w, d, z, out, size=0.32, joists=5, mat="oak", band=0.34, braces=3,
+          soffit=True):
+    """An overhanging upper floor built the way one is: joists cantilevered out
+    over the storey below, a bressumer laid on their ends, and curved corbel
+    braces from the wall up under it.
+
+    `out` wants to be 0.7 m or more. At 0.3 m the oversail is a moulding; at
+    0.8 m it is a roof over the pavement, the whole ground storey sits in its
+    shade, and the braces under it are the small isolated shadows that say the
+    building was assembled rather than extruded."""
     objs = []
     ow, od = w + 2 * out, d + 2 * out
-    for (span, loc, rot) in ((ow, (0, -od / 2 + size / 2, z), 0.0),
-                             (ow, (0, od / 2 - size / 2, z), 0.0),
-                             (od - 2 * size, (-ow / 2 + size / 2, 0, z), math.pi / 2),
-                             (od - 2 * size, (ow / 2 - size / 2, 0, z), math.pi / 2)):
-        objs.append(timber((span, size, size * 1.3), (loc[0], loc[1], loc[2] + size * 0.65),
-                           (0, 0, rot), mat, 0.05))
+    zb = z + band / 2 - 0.01
+    if soffit:
+        objs.append(lib.box((ow - 0.1, od - 0.1, 0.09), (0, 0, z + band - 0.05),
+                            name="soffit", mat="planks"))
+    for (span, loc, rot) in ((ow, (0, -od / 2 + size / 2, 0), 0.0),
+                             (ow, (0, od / 2 - size / 2, 0), 0.0),
+                             (od - 2 * size, (-ow / 2 + size / 2, 0, 0), math.pi / 2),
+                             (od - 2 * size, (ow / 2 - size / 2, 0, 0), math.pi / 2)):
+        objs.append(timber((span, size, band + 0.1), (loc[0], loc[1], zb),
+                           (0, 0, rot), mat, 0.05, "bressumer"))
+        # A fillet under the bressumer, stepped back: two lines instead of one,
+        # which is what a moulded beam reads as from the street.
+        objs.append(timber((span - 0.12, size * 0.62, 0.11),
+                           (loc[0] * 0.82, loc[1] * 0.82, z - 0.08),
+                           (0, 0, rot), mat, 0.025, "fillet"))
     for i in range(joists):
         fx = -w / 2 + w * (i + 0.5) / joists
+        run = out - size + 0.34
         for sy in (-1, 1):
-            objs.append(timber((size * 0.5, out * 1.1, size * 0.5),
-                               (fx, sy * (d / 2 + out * 0.45), z + size * 0.3), (0, 0, 0), mat, 0.02))
+            objs.append(timber((size * 0.46, run, 0.26),
+                               (fx, sy * (d / 2 + (out - size) / 2 - 0.09), z - 0.15),
+                               (0, 0, 0), mat, 0.02, "joist"))
+            objs.append(timber((run, size * 0.46, 0.26),
+                               (sy * (d / 2 + (out - size) / 2 - 0.09), fx, z - 0.15),
+                               (0, 0, 0), mat, 0.02, "joist"))
+    for i in range(braces):
+        bx = -w / 2 + w * (i + 0.5) / braces
+        reach = min(out * 1.5, 0.95)
+        for sy in (-1, 1):
+            objs.append(timber((0.19, reach * 1.42, 0.3),
+                               (bx, sy * (d / 2 + out * 0.45), z - reach * 0.62),
+                               (sy * math.radians(45), 0, 0), mat, 0.03, "corbel"))
+            objs.append(timber((reach * 1.42, 0.19, 0.3),
+                               (sy * (d / 2 + out * 0.45), bx, z - reach * 0.62),
+                               (0, -sy * math.radians(45), 0), mat, 0.03, "corbel"))
+    return objs
+
+
+def plinth(w, d, z0=0.0, height=0.5, proud=0.085, mat="stonewall", splay=True):
+    """The base course the wall stands on: 60-100 mm proud, with a chamfered
+    set-off on top so the rain is thrown clear.
+
+    A wall that runs straight into the ground has nothing at the bottom of it
+    and reads as pushed into the pavement. The set-off is the cheap half of
+    this -- it is the piece that catches the sun and puts a hard line right
+    round the building at knee height."""
+    objs = [slab((w + 2 * proud, d + 2 * proud, height), (0, 0, z0 + height / 2),
+                 mat=mat, name="plinth", width=0.05)]
+    if splay:
+        s = proud * 0.55
+        objs.append(slab((w + 2 * s, d + 2 * s, 0.16), (0, 0, z0 + height + 0.07),
+                         mat=mat, name="set_off", width=0.055))
+    return objs
+
+
+def string_course(w, d, z, proud=0.09, height=0.24, mat="stonewall",
+                  sides=("front", "back", "left", "right"), mould=True):
+    """A moulding carried round the building at a floor line. Two members, the
+    lower one narrower, because one flat band reads as a stripe and two read as
+    a cornice."""
+    objs = []
+    place = {"front": ((0, -d / 2 - proud / 2, z), 0.0, w + 2 * proud + 0.1),
+             "back": ((0, d / 2 + proud / 2, z), 0.0, w + 2 * proud + 0.1),
+             "left": ((-w / 2 - proud / 2, 0, z), math.pi / 2, d + 2 * proud + 0.1),
+             "right": ((w / 2 + proud / 2, 0, z), math.pi / 2, d + 2 * proud + 0.1)}
+    for key in sides:
+        (loc, rot, span) = place[key]
+        objs.append(timber((span, proud * 2 + 0.16, height), loc, (0, 0, rot),
+                           mat, 0.05, "course"))
+        if mould:
+            objs.append(timber((span - 0.16, proud * 1.3 + 0.16, 0.1),
+                               (loc[0] * 0.86, loc[1] * 0.86, z - height / 2 - 0.05),
+                               (0, 0, rot), mat, 0.025, "course_mould"))
+    return objs
+
+
+def bracket(loc, rot=0.0, reach=0.72, z=0.0, mat="iron", ring=True, name="bracket"):
+    """An arm, its diagonal stay and a ring on the end, bolted to a wall.
+
+    Nothing else in the library costs 100 triangles and does as much: it is the
+    one thing on a facade small enough to cast a shadow you can read as a
+    separate object, and a wall with one of these on it stops being a surface
+    and starts being somebody's house."""
+    objs = [timber((0.22, 0.12, 0.34), at(loc, rot, 0, z, 0.03), (0, 0, rot), mat, 0.02, name),
+            timber((0.09, reach, 0.11), at(loc, rot, 0, z + 0.12, -reach / 2), (0, 0, rot), mat, 0.02, name),
+            timber((0.07, reach * 0.85, 0.07),
+                   at(loc, rot, 0, z - 0.14, -reach * 0.36), (math.radians(38), 0, rot), mat, 0.015, name)]
+    if ring:
+        objs.append(lib.cylinder(0.075, 0.035, at(loc, rot, 0, z + 0.02, -reach + 0.06),
+                                 (math.pi / 2, 0, rot), verts=8, name=name, mat=mat))
+    return objs
+
+
+def beam_end(loc, rot=0.0, z=0.0, out=0.5, size=0.24, mat="oak", peg=True):
+    """A structural member left sticking out of the wall, chamfered and stopped.
+    Half of what a timber-framed street is made of is these."""
+    objs = [timber((size, out + 0.2, size * 1.15), at(loc, rot, 0, z, -out / 2 + 0.1),
+                   (0, 0, rot), mat, 0.035, "beam_end")]
+    if peg:
+        objs.append(lib.cylinder(0.045, size * 1.4, at(loc, rot, 0, z, -out + 0.16),
+                                 (0, 0, rot), verts=6, name="peg", mat=mat))
     return objs
 
 
 # --- openings -------------------------------------------------------------
 
 def window(cx, cz, ow, oh, loc, rot, t, mat="oak", glass=True, shutters=False,
-           mullions=1, sill_out=0.15, sill_mat=None):
-    """Frame, projecting sill, glazing bar, and shutters folded flat on the
-    wall. Fills the hole a panel() left; sizes are that hole's."""
+           mullions=1, sill_out=0.2, sill_mat=None, proud=0.085, surround=True,
+           frame_d=0.12, ledges=True, hood=False):
+    """A hole with depth in it.
+
+    The first version of this filled the opening flush with the wall, and the
+    whole facade read as printed on. Four things fix that and every one of them
+    is geometry, because at a low sun a texture casts nothing:
+
+    * a dressing standing `proud` of the wall all round the opening,
+    * the casement pushed back to the *inside* face, so the reveal from the
+      dressing to the glass is t - frame_d + proud, never under 150 mm,
+    * a sill that oversails the dressing by at least 40 mm with a drip mould
+      hung under its front lip, which is the line you see under every window in
+      a photograph of a real street,
+    * shutters hung 50 mm clear of the dressing so they cast their own edge
+      across it rather than lying on it.
+
+    Sizes are the hole's, as left by panel(). Local +Y is into the building on
+    every face, so -ly is always outward -- see faces_of().
+    """
     objs = []
-    j = 0.1
-    d = t * 1.6
-    # Jambs, head and glazing bar are plain boxes: at 100 mm section the chamfer
-    # on a timber() is invisible and costs more than twice the triangles. The
-    # sill is the one member that projects into the light, so it keeps its.
-    objs.append(lib.box((j, d, oh), at(loc, rot, cx - ow / 2 + j / 2, cz + oh / 2),
-                        (0, 0, rot), name="jamb", mat=mat))
-    objs.append(lib.box((j, d, oh), at(loc, rot, cx + ow / 2 - j / 2, cz + oh / 2),
-                        (0, 0, rot), name="jamb", mat=mat))
-    objs.append(lib.box((ow, d, j * 1.2), at(loc, rot, cx, cz + oh - j * 0.6),
+    hw = ow / 2.0
+    face = -t / 2.0                                 # outer face of the wall
+    frame_d = min(frame_d, max(0.055, t - 0.10))    # keep the reveal on thin walls
+    y_frame = t / 2.0 - frame_d / 2.0               # casement, flush inside
+    y_glass = t / 2.0 - frame_d + 0.055
+
+    if surround:
+        d_sur = proud + t * 0.55
+        y_sur = face - proud + d_sur / 2.0
+        jw = 0.17
+        for sx in (-1, 1):
+            objs.append(timber((jw, d_sur, oh + 0.2),
+                               at(loc, rot, cx + sx * (hw + jw / 2 - 0.04),
+                                  cz + oh / 2 + 0.06, y_sur),
+                               (0, 0, rot), mat, 0.03, "dressing"))
+        objs.append(timber((ow + 0.44, d_sur, 0.2),
+                           at(loc, rot, cx, cz + oh + 0.06, y_sur),
+                           (0, 0, rot), mat, 0.03, "lintel"))
+
+    j = 0.09
+    for sx in (-1, 1):
+        objs.append(lib.box((j, frame_d, oh), at(loc, rot, cx + sx * (hw - j / 2),
+                                                 cz + oh / 2, y_frame),
+                            (0, 0, rot), name="jamb", mat=mat))
+    objs.append(lib.box((ow, frame_d, 0.1), at(loc, rot, cx, cz + oh - 0.05, y_frame),
                         (0, 0, rot), name="head", mat=mat))
-    objs.append(timber((ow + 0.3, d + sill_out, 0.12),
-                       at(loc, rot, cx, cz + 0.03, -sill_out / 2), (0, 0, rot),
-                       sill_mat or mat, 0.03))
     for i in range(mullions):
-        mx = cx - ow / 2 + ow * (i + 1) / (mullions + 1)
-        objs.append(lib.box((0.075, d * 0.9, oh - j), at(loc, rot, mx, cz + (oh - j) / 2),
+        mx = cx - hw + ow * (i + 1) / (mullions + 1)
+        objs.append(lib.box((0.075, frame_d * 0.92, oh - j), at(loc, rot, mx, cz + (oh - j) / 2,
+                                                                y_frame),
                             (0, 0, rot), name="mullion", mat=mat))
     if glass:
         objs.append(lib.box((ow - 2 * j, 0.03, oh - j * 1.8),
-                            at(loc, rot, cx, cz + (oh - j * 0.8) / 2, t * 0.3),
+                            at(loc, rot, cx, cz + (oh - j * 0.8) / 2, y_glass),
                             (0, 0, rot), name="pane", mat="glass"))
-    if shutters:
+
+    sill_out = max(sill_out, proud + 0.055)
+    objs.append(timber((ow + 0.5, t + sill_out, 0.13),
+                       at(loc, rot, cx, cz + 0.02, -sill_out / 2), (0, 0, rot),
+                       sill_mat or mat, 0.03, "sill"))
+    objs.append(lib.box((ow + 0.5, 0.06, 0.075),
+                        at(loc, rot, cx, cz - 0.085, face - sill_out + 0.03),
+                        (0, 0, rot), name="drip", mat=sill_mat or mat))
+
+    if hood:
+        objs.append(timber((ow + 0.72, 0.46, 0.15),
+                           at(loc, rot, cx, cz + oh + 0.34, face - 0.19),
+                           (math.radians(-20), 0, rot), "rooftile", 0.03, "hood"))
         for sx in (-1, 1):
-            objs.append(timber((ow * 0.48, 0.07, oh * 0.9),
-                               at(loc, rot, cx + sx * (ow * 0.75), cz + oh / 2, -t * 0.9 - 0.05),
-                               (0, 0, rot), "planks", 0.02))
+            objs.append(timber((0.12, 0.42, 0.34),
+                               at(loc, rot, cx + sx * (hw + 0.16), cz + oh + 0.1, face - 0.16),
+                               (math.radians(34), 0, rot), mat, 0.025, "hood_corbel"))
+
+    if shutters:
+        lw, y_leaf = ow * 0.5, face - proud - 0.08
+        for sx in (-1, 1):
+            objs.append(timber((lw, 0.06, oh + 0.1),
+                               at(loc, rot, cx + sx * (hw + lw / 2 + 0.06), cz + oh / 2, y_leaf),
+                               (0, 0, rot), "planks", 0.02, "shutter"))
+            if ledges:
+                for lz in (oh * 0.22, oh * 0.8):
+                    objs.append(lib.box((lw + 0.04, 0.05, 0.11),
+                                        at(loc, rot, cx + sx * (hw + lw / 2 + 0.06),
+                                           cz + lz, y_leaf - 0.055),
+                                        (0, 0, rot), name="ledge", mat="oak"))
     return objs
 
 
-def door(cx, ow, oh, loc, rot, t, mat="planks", frame="oak", boards=5, arch=False):
-    """A plank door in a heavy frame, set back in its reveal."""
+def door(cx, ow, oh, loc, rot, t, mat="planks", frame="oak", boards=5, arch=False,
+         step=True, proud=0.1, z0=0.0):
+    """A plank door in a heavy surround, set back in its reveal, with a lintel
+    over it and a threshold you step up onto.
+
+    The leaf sits on the inside face and the surround stands `proud` of the
+    wall, so there is a good 250 mm of reveal for the sun to cut across. The
+    threshold is the piece that matters most from twenty metres: it is the only
+    horizontal in the lower facade, and its shadow is what stops the wall
+    looking as if it had been pushed into the pavement."""
     objs = []
-    j = 0.18
-    d = t * 1.8
-    objs.append(timber((j, d, oh + 0.3), at(loc, rot, cx - ow / 2 + j / 2, (oh + 0.3) / 2), (0, 0, rot), frame))
-    objs.append(timber((j, d, oh + 0.3), at(loc, rot, cx + ow / 2 - j / 2, (oh + 0.3) / 2), (0, 0, rot), frame))
-    objs.append(timber((ow + 0.36, d, 0.34), at(loc, rot, cx, oh + 0.17), (0, 0, rot), frame, 0.05))
+    j = 0.2
+    d = t * 0.6 + proud
+    face = -t / 2.0
+    y_sur = face - proud + d / 2.0
+    y_leaf = t / 2.0 - 0.09
+    for sx in (-1, 1):
+        objs.append(timber((j, d, oh + 0.36), at(loc, rot, cx + sx * (ow / 2 - j / 2 + 0.06),
+                                                 z0 + (oh + 0.36) / 2, y_sur),
+                           (0, 0, rot), frame))
+    objs.append(timber((ow + 0.5, d + 0.06, 0.36), at(loc, rot, cx, z0 + oh + 0.18, y_sur - 0.03),
+                       (0, 0, rot), frame, 0.05, "lintel"))
     leaf = (ow - 2 * j) / boards
     for i in range(boards):
         bx = cx - ow / 2 + j + leaf * (i + 0.5)
         objs.append(timber((leaf * 0.93, 0.1, oh - 0.05),
-                           at(loc, rot, bx, (oh - 0.05) / 2, t * 0.4), (0, 0, rot), mat, 0.018))
+                           at(loc, rot, bx, z0 + (oh - 0.05) / 2, y_leaf), (0, 0, rot), mat, 0.018))
     for hz in (oh * 0.2, oh * 0.76):
         objs.append(timber((ow - 2 * j - 0.08, 0.06, 0.15),
-                           at(loc, rot, cx, hz, t * 0.4 - 0.08), (0, 0, rot), "iron", 0.015))
+                           at(loc, rot, cx, z0 + hz, y_leaf - 0.08), (0, 0, rot), "iron", 0.015))
     if arch:
-        objs.append(timber((ow + 0.5, d, 0.3), at(loc, rot, cx, oh + 0.5), (0, 0, rot), frame, 0.05))
+        objs.append(timber((ow + 0.86, d + 0.12, 0.3), at(loc, rot, cx, z0 + oh + 0.51, y_sur - 0.06),
+                           (0, 0, rot), frame, 0.05, "hood"))
+        for sx in (-1, 1):
+            objs.append(timber((0.24, d + 0.1, 0.44),
+                               at(loc, rot, cx + sx * (ow / 2 + 0.28), z0 + oh + 0.14, y_sur - 0.05),
+                               (0, 0, rot), frame, 0.04, "corbel"))
+    if step:
+        objs.append(slab((ow + 0.7, t + 0.78, 0.15), at(loc, rot, cx, z0 + 0.075, -0.39),
+                         (0, 0, rot), mat=frame, name="threshold", width=0.035))
+        objs.append(slab((ow + 1.06, t + 1.16, 0.14), at(loc, rot, cx, z0 - 0.07, -0.58),
+                         (0, 0, rot), mat=frame, name="step", width=0.035))
     return objs
 
 
 # --- roofs ----------------------------------------------------------------
 
-def gable_roof(span, length, height, z0, thick=0.24, eave=0.5, verge=0.4,
+def gable_roof(span, length, height, z0, thick=0.24, eave=0.55, verge=0.55,
                mat="rooftile", trim="oak", tympanum="timber", half_hip=0.0,
-               along="x", barge=True, fascia=True):
-    """Two pitched planes, a ridge, barge boards, eaves fascia and the gable
-    wall behind. `span` is across the ridge, `length` along it; along='y' turns
-    the whole thing a quarter so the gable faces the street."""
+               along="x", barge=True, fascia=True, rafters=8, caps=9, gutter=False):
+    """Two pitched planes, a ridge, barge boards, eaves fascia, exposed rafter
+    tails and the gable wall behind. `span` is across the ridge, `length` along
+    it; along='y' turns the whole thing a quarter so the gable faces the street.
+
+    The eave is what the review was really complaining about. A roof that stops
+    at the wall plane has no soffit to be dark and nothing to cast; an eave of
+    550 mm with rafter tails under it gives a band of shade the full width of
+    the house plus eight little shadows inside it, and that band is the single
+    strongest line on the whole building."""
     objs = []
     half = span / 2
     pitch = math.atan2(height, half)
@@ -319,14 +505,31 @@ def gable_roof(span, length, height, z0, thick=0.24, eave=0.5, verge=0.4,
                            (-sy * pitch, 0, 0), mat, 0.05, "roof"))
         if barge:
             for sx in (-1, 1):
-                objs.append(timber((0.11, L, 0.3), (sx * total / 2, sy * run / 2, zc + lift - 0.11),
-                                   (-sy * pitch, 0, 0), trim, 0.025, "barge"))
+                objs.append(timber((0.13, L, 0.36), (sx * (total / 2 + 0.03), sy * run / 2,
+                                                     zc + lift - 0.14),
+                                   (-sy * pitch, 0, 0), trim, 0.03, "verge_board"))
         if fascia:
-            objs.append(timber((total, 0.13, 0.32), (0, sy * run, z0 - drop + 0.06),
-                               (0, 0, 0), trim, 0.025, "fascia"))
+            objs.append(timber((total, 0.14, 0.34), (0, sy * (run + 0.07), z0 - drop + 0.04),
+                               (0, 0, 0), trim, 0.03, "fascia"))
+        if gutter:
+            objs.append(timber((total - 0.1, 0.16, 0.16), (0, sy * (run + 0.2), z0 - drop + 0.14),
+                               (0, 0, 0), "iron", 0.05, "gutter"))
+        # Rafter tails: the piece nobody models and everybody notices missing.
+        for i in range(rafters):
+            rx = -length / 2 + length * (i + 0.5) / rafters
+            ry = half + eave / 2 - 0.11
+            rz = z0 - (ry - half) * math.tan(pitch) - 0.1 / math.cos(pitch)
+            objs.append(timber((0.1, (eave + 0.34) / math.cos(pitch), 0.18),
+                               (rx, sy * ry, rz), (-sy * pitch, 0, 0), trim, 0.02, "rafter"))
 
-    objs.append(timber((total + 0.08, 0.44, 0.32), (0, 0, z0 + height + 0.06),
+    objs.append(timber((total + 0.08, 0.44, 0.3), (0, 0, z0 + height + 0.06),
                        (0, 0, 0), mat, 0.08, "ridge"))
+    # Half-round ridge tiles, faked as short blocks with a wide chamfer. They
+    # break the ridge line into something with a rhythm instead of one long bar.
+    for i in range(caps):
+        objs.append(timber((total / caps * 0.9, 0.5, 0.2),
+                           (-total / 2 + total * (i + 0.5) / caps, 0, z0 + height + 0.28),
+                           (0, 0, 0), mat, 0.09, "ridge_cap"))
 
     if tympanum:
         for sx in (-1, 1):
@@ -534,6 +737,74 @@ def human(x=0.0, y=-8.0):
             lib.cylinder(0.1, 0.86, (x + 0.11, y, 0.43), verts=8, name="ref_leg", mat="cloth"),
             lib.sphere(0.12, (x, y, 1.62), 10, 7, name="ref_head", mat="skin")]
     return lib.join(objs, "REF_human")
+
+
+def rake(azim=68.0, elev=10.0, strength=5.0, fill=0.06):
+    """A sun ten degrees above the horizon, raking along the front of the
+    building, plus a ground plane for it to fall on.
+
+    This is the only test that says whether a facade has relief in it or paint
+    on it: at this angle a real cornice, sill or shutter draws a hard black line
+    across the wall under it, and a texture draws nothing at all. `azim` 0 puts
+    the sun straight down the -Y axis behind the viewer, which flattens
+    everything; 68 puts it round to the left so the front is grazed."""
+    for obj in list(bpy.data.objects):
+        if obj.name.startswith("RAKE_"):
+            bpy.data.objects.remove(obj, do_unlink=True)
+    sun_data = bpy.data.lights.new("RAKE_sun", type="SUN")
+    sun_data.energy = strength
+    sun_data.angle = math.radians(1.6)          # near-parallel: hard edges
+    sun = bpy.data.objects.new("RAKE_sun", sun_data)
+    bpy.context.collection.objects.link(sun)
+    sun.rotation_euler = (math.radians(90.0 - elev), 0.0, math.radians(azim))
+
+    bpy.ops.mesh.primitive_plane_add(size=120, location=(0, 0, -0.01))
+    ground = bpy.context.object
+    ground.name = "RAKE_ground"
+    lib.assign(ground, "cobble")
+
+    world = bpy.context.scene.world or bpy.data.worlds.new("World")
+    bpy.context.scene.world = world
+    world.use_nodes = True
+    bg = world.node_tree.nodes.get("Background")
+    if bg:
+        bg.inputs[0].default_value = (0.42, 0.52, 0.68, 1.0)
+        bg.inputs[1].default_value = fill      # keep the shadows nearly black
+    return sun
+
+
+def shot(path="/tmp/diku_rake.png", center=(0, 0, 5), dist=26.0, azim=-34.0,
+         elev=8.0, lens=52.0, res=1100, samples=24):
+    """Render what `rake` lit to a file, because the viewport screenshot is an
+    OpenGL preview and the shadow is the whole point of looking."""
+    scene = bpy.context.scene
+    for obj in list(bpy.data.objects):
+        if obj.name.startswith("RAKE_cam"):
+            bpy.data.objects.remove(obj, do_unlink=True)
+    cam_data = bpy.data.cameras.new("RAKE_cam")
+    cam_data.lens = lens
+    cam = bpy.data.objects.new("RAKE_cam", cam_data)
+    bpy.context.collection.objects.link(cam)
+    a, e = math.radians(azim), math.radians(elev)
+    cam.location = (center[0] + dist * math.sin(a) * math.cos(e),
+                    center[1] - dist * math.cos(a) * math.cos(e),
+                    center[2] + dist * math.sin(e))
+    cam.rotation_euler = (math.pi / 2 - e, 0.0, a)
+    scene.camera = cam
+    scene.render.resolution_x = res
+    scene.render.resolution_y = int(res * 0.72)
+    scene.render.resolution_percentage = 100
+    scene.render.filepath = path
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.film_transparent = False
+    try:
+        scene.eevee.taa_render_samples = samples
+        scene.eevee.use_shadows = True
+        scene.eevee.use_raytracing = True
+    except AttributeError:
+        pass
+    bpy.ops.render.render(write_still=True)
+    return path
 
 
 def look(center=(0, 0, 4), dist=30.0, azim=40.0, elev=16.0, shading="MATERIAL"):
