@@ -74,12 +74,18 @@ export class Hud {
       return;
     }
     this.el.look.style.opacity = '1';
-    const action = target.kind === 'door'
-      ? (target.door.open ? 'E — close' : 'E — open')
-      : 'E — examine';
+    const action = this.examineOpen ? 'E — close'
+      : (target.kind === 'door'
+        ? (target.door.open ? 'E — close' : 'E — open')
+        : 'E — examine');
     this.el.look.innerHTML = `<span class="look-name">${escapeHtml(target.title)}</span>`
       + (target.subtitle ? `<span class="look-sub">${escapeHtml(target.subtitle)}</span>` : '')
       + `<span class="look-key">${action}</span>`;
+  }
+
+  /** Is the examine panel up? The same key that opened it closes it. */
+  get examineOpen() {
+    return this.el.examine.classList.contains('visible');
   }
 
   showExamine(target) {

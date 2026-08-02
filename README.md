@@ -47,7 +47,7 @@ barred gate with a sign saying which vnum is on the other side.
 | | |
 |---|---|
 | `W A S D` | walk, `shift` to run, `space` to jump |
-| mouse | look, `E` to examine what you're looking at or open a door |
+| mouse | look, `E` to examine what you're looking at or open a door; `E` again closes it |
 | `1` – `4` | dawn, noon, dusk, night |
 | `P` | cycle quality: low, medium, high, max |
 | `F` | frame rate, draw calls, triangles, GPU milliseconds |

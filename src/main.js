@@ -320,6 +320,12 @@ async function boot() {
   let fadeTimer = 0;
 
   document.addEventListener('keydown', (event) => {
+    // The same key closes it. Escape works too, but Escape is the browser's own
+    // pointer-lock release, so relying on it costs you the mouse as well.
+    if (event.code === 'KeyE' && hud.examineOpen) {
+      hud.hideExamine();
+      return;
+    }
     if (event.code === 'KeyE' && lookTarget) {
       if (lookTarget.kind === 'door') {
         if (lookTarget.door.spec.locked && !lookTarget.door.forced) {
@@ -338,7 +344,9 @@ async function boot() {
     if (event.code === 'Digit3') applyTime('dusk');
     if (event.code === 'Digit4') applyTime('night');
     if (event.code === 'KeyO') {
+      // The options screen needs the mouse, so it gives it back on the way out.
       if (options.toggle()) player.controls.unlock();
+      else player.controls.lock();
     }
     if (event.code === 'Escape' && options.open) options.close();
     if (event.code === 'KeyF') state.showStats = !state.showStats;
@@ -607,18 +615,21 @@ async function boot() {
         if (d2 < best && d2 < 60) { best = d2; aim = item.position; }
       }
       const back = options.back ?? (aim ? 4.2 : 0);
+      // The camera looks down -Z at yaw 0, so its forward is (-sin, 0, -cos).
+      // Facing a point therefore needs atan2 of the *negated* offset, and
+      // standing back from it means moving along +(sin, cos).
       let yaw = options.yaw;
       if (yaw === undefined) {
-        if (aim) yaw = Math.atan2(aim.x - info.center.x, aim.z - info.center.z);
+        if (aim) yaw = Math.atan2(info.center.x - aim.x, info.center.z - aim.z);
         else {
           const dir = info.room.exits.findIndex((e, i) => e && i < 4);
           yaw = dir >= 0 ? Math.atan2(-DIR_STEP[dir][0], -DIR_STEP[dir][2]) : 0;
         }
       }
       this.look(
-        info.center.x - Math.sin(yaw) * back,
+        info.center.x + Math.sin(yaw) * back,
         info.center.y,
-        info.center.z - Math.cos(yaw) * back,
+        info.center.z + Math.cos(yaw) * back,
         yaw, options.pitch ?? -0.04,
       );
       return { vnum: place.vnum, room: info.room.name, why: place.why, facing: aim ? 'a subject' : 'an exit' };

@@ -70,6 +70,15 @@ them and never allocates its own — two doors in one wall is the failure mode.
   reset `shadowAnchor` or the shadows freeze pointing the old way.
 - `Batcher.add` takes geometry already transformed into world space and derives
   UVs from position and normal. Geometry handed in unpositioned gets garbage UVs.
+- Escape is the browser's own pointer-lock release and fires whatever you bind
+  it to, so anything that closes on Escape also costs you the mouse. Every panel
+  closes on the key that opened it -- `E` for examine, `I`/`B`/`K` for the game
+  sheets, `O` for options, which re-locks on the way out. Escape still works, but
+  nothing may depend on it.
+- The camera looks down -Z at yaw 0, so its forward is `(-sin, 0, -cos)`. Facing
+  a point needs `atan2` of the *negated* offset, and standing back from it means
+  moving along `+(sin, cos)`. Getting that backwards points `diku.shoot()` at the
+  wall behind you, which is how it shipped for an hour.
 - Never put anything at a room's exact centre. That is where the player arrives,
   and both a fountain and a mobile have been stood on top of already.
 - A room placed directly above an open-air room turns that street into a tunnel.
