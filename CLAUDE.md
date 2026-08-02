@@ -23,11 +23,19 @@ Anything touching `build.js`, `textures.js` or `actors.js` has to be looked at
 in a browser. Screenshots are how nearly every real defect here was found, and
 none of them would have shown up in a unit test.
 
-`window.diku` is exposed for exactly that: `diku.goto(3014, yaw, pitch)`,
-`diku.look(x, y, z, yaw, pitch)`, `diku.applyTime('night')`, plus `layout`,
-`built`, `world` and `quality`. Set `diku.state.benchmark = true` to halt the
-render loop when measuring, and `diku.state.paused = false` to move without
-grabbing the mouse.
+`window.diku` is exposed for exactly that. `diku.places()` works out somewhere
+worth standing from whatever areas are loaded — water, a square, a street, a lit
+interior, a shop, a sealed gate, a crowd — and `diku.shoot('water')` stands
+there and faces what makes it worth seeing. `diku.find('fountain')` searches
+room names, prose, sector and contents. Also `goto(vnum, yaw, pitch)`,
+`look(x, y, z, yaw, pitch)`, `applyTime('night')`, and the objects themselves:
+`layout`, `built`, `world`, `game`, `quality`, `options`. Set
+`diku.state.benchmark = true` to halt the render loop when measuring, and
+`diku.state.paused = false` to move without grabbing the mouse.
+
+`tools/judge/shots.md` is the judging protocol. The judge is an independent
+agent that drives the world through that API, looks up real references, and
+returns ranked faults. Its prompt is never softened to make a round pass.
 
 ## Understand this before touching the layout
 

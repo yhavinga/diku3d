@@ -50,6 +50,20 @@ def rotate_z(objs, angle):
     return objs
 
 
+def place(objs, loc=(0, 0, 0), rot=(0, 0, 0)):
+    """Move and turn a finished sub-assembly bodily, through the world matrix.
+
+    The alternative -- reassigning each part's rotation_euler -- silently throws
+    away whatever rotation it was built with, which is how a wheel's spokes all
+    ended up parallel."""
+    bpy.context.view_layer.update()
+    M = (mathutils.Matrix.Translation(loc) @
+         mathutils.Euler(rot, "XYZ").to_matrix().to_4x4())
+    for obj in objs:
+        obj.matrix_world = M @ obj.matrix_world
+    return objs
+
+
 def bev(obj, width=0.02, segments=1, angle=35):
     mod = obj.modifiers.new("bevel", "BEVEL")
     mod.width = width
@@ -257,15 +271,20 @@ def jetty(w, d, z, out, size=0.32, joists=5, mat="oak", band=0.34, braces=3,
             objs.append(timber((run, size * 0.46, 0.26),
                                (sy * (d / 2 + (out - size) / 2 - 0.09), fx, z - 0.15),
                                (0, 0, 0), mat, 0.02, "joist"))
-    for i in range(braces):
-        bx = -w / 2 + w * (i + 0.5) / braces
-        reach = min(out * 1.5, 0.95)
+    # Corbel braces. `braces` is either a count spread across the wall or the
+    # explicit x positions to use -- which is what you want as soon as there are
+    # windows below, because a brace landing on a window head is worse than no
+    # brace at all.
+    xs = braces if hasattr(braces, "__len__") else \
+        [-w / 2 + w * (i + 0.5) / braces for i in range(braces)]
+    run = min(out * 0.95, 0.62)
+    for bx in xs:
         for sy in (-1, 1):
-            objs.append(timber((0.19, reach * 1.42, 0.3),
-                               (bx, sy * (d / 2 + out * 0.45), z - reach * 0.62),
+            objs.append(timber((0.2, run * 1.5, 0.3),
+                               (bx, sy * (d / 2 + out * 0.45), z - run * 0.72),
                                (sy * math.radians(45), 0, 0), mat, 0.03, "corbel"))
-            objs.append(timber((reach * 1.42, 0.19, 0.3),
-                               (sy * (d / 2 + out * 0.45), bx, z - reach * 0.62),
+            objs.append(timber((run * 1.5, 0.2, 0.3),
+                               (sy * (d / 2 + out * 0.45), bx, z - run * 0.72),
                                (0, -sy * math.radians(45), 0), mat, 0.03, "corbel"))
     return objs
 
@@ -287,23 +306,27 @@ def plinth(w, d, z0=0.0, height=0.5, proud=0.085, mat="stonewall", splay=True):
     return objs
 
 
-def string_course(w, d, z, proud=0.09, height=0.24, mat="stonewall",
-                  sides=("front", "back", "left", "right"), mould=True):
-    """A moulding carried round the building at a floor line. Two members, the
-    lower one narrower, because one flat band reads as a stripe and two read as
-    a cornice."""
+def string_course(w, d, z, proud=0.22, height=0.24, mat="stonewall",
+                  sides=("front", "back", "left", "right"), mould=True, bury=0.2):
+    """A moulding carried round the building at a floor line, standing exactly
+    `proud` of the wall face. Two members, the lower one narrower, because one
+    flat band reads as a stripe and two read as a cornice."""
     objs = []
-    place = {"front": ((0, -d / 2 - proud / 2, z), 0.0, w + 2 * proud + 0.1),
-             "back": ((0, d / 2 + proud / 2, z), 0.0, w + 2 * proud + 0.1),
-             "left": ((-w / 2 - proud / 2, 0, z), math.pi / 2, d + 2 * proud + 0.1),
-             "right": ((w / 2 + proud / 2, 0, z), math.pi / 2, d + 2 * proud + 0.1)}
+    depth = proud + bury
+    off = depth / 2.0 - proud                       # centre offset from the face
+    m_depth = depth * 0.7
+    m_off = m_depth / 2.0 - proud * 0.55            # the fillet stands further back
+    span_w, span_d = w + 2 * proud + 0.1, d + 2 * proud + 0.1
+    place = {"front": (0, -1, 0.0, span_w), "back": (0, 1, 0.0, span_w),
+             "left": (-1, 0, math.pi / 2, span_d), "right": (1, 0, math.pi / 2, span_d)}
     for key in sides:
-        (loc, rot, span) = place[key]
-        objs.append(timber((span, proud * 2 + 0.16, height), loc, (0, 0, rot),
-                           mat, 0.05, "course"))
+        (ux, uy, rot, span) = place[key]
+        loc = (ux * (w / 2 - off), uy * (d / 2 - off), z)
+        objs.append(timber((span, depth, height), loc, (0, 0, rot), mat, 0.05, "course"))
         if mould:
-            objs.append(timber((span - 0.16, proud * 1.3 + 0.16, 0.1),
-                               (loc[0] * 0.86, loc[1] * 0.86, z - height / 2 - 0.05),
+            objs.append(timber((span - 0.18, m_depth, 0.11),
+                               (ux * (w / 2 - m_off), uy * (d / 2 - m_off),
+                                z - height / 2 - 0.055),
                                (0, 0, rot), mat, 0.025, "course_mould"))
     return objs
 
@@ -311,11 +334,14 @@ def string_course(w, d, z, proud=0.09, height=0.24, mat="stonewall",
 def bracket(loc, rot=0.0, reach=0.72, z=0.0, mat="iron", ring=True, name="bracket"):
     """An arm, its diagonal stay and a ring on the end, bolted to a wall.
 
+    `loc` is a point on the *outer face* of the wall, the same rule the wall
+    props follow, and everything reaches out into -ly from there.
+
     Nothing else in the library costs 100 triangles and does as much: it is the
     one thing on a facade small enough to cast a shadow you can read as a
     separate object, and a wall with one of these on it stops being a surface
     and starts being somebody's house."""
-    objs = [timber((0.22, 0.12, 0.34), at(loc, rot, 0, z, 0.03), (0, 0, rot), mat, 0.02, name),
+    objs = [timber((0.22, 0.14, 0.34), at(loc, rot, 0, z, -0.02), (0, 0, rot), mat, 0.02, name),
             timber((0.09, reach, 0.11), at(loc, rot, 0, z + 0.12, -reach / 2), (0, 0, rot), mat, 0.02, name),
             timber((0.07, reach * 0.85, 0.07),
                    at(loc, rot, 0, z - 0.14, -reach * 0.36), (math.radians(38), 0, rot), mat, 0.015, name)]
@@ -327,7 +353,8 @@ def bracket(loc, rot=0.0, reach=0.72, z=0.0, mat="iron", ring=True, name="bracke
 
 def beam_end(loc, rot=0.0, z=0.0, out=0.5, size=0.24, mat="oak", peg=True):
     """A structural member left sticking out of the wall, chamfered and stopped.
-    Half of what a timber-framed street is made of is these."""
+    Half of what a timber-framed street is made of is these. `loc` is on the
+    outer wall face, as for bracket()."""
     objs = [timber((size, out + 0.2, size * 1.15), at(loc, rot, 0, z, -out / 2 + 0.1),
                    (0, 0, rot), mat, 0.035, "beam_end")]
     if peg:
@@ -514,12 +541,14 @@ def gable_roof(span, length, height, z0, thick=0.24, eave=0.55, verge=0.55,
         if gutter:
             objs.append(timber((total - 0.1, 0.16, 0.16), (0, sy * (run + 0.2), z0 - drop + 0.14),
                                (0, 0, 0), "iron", 0.05, "gutter"))
-        # Rafter tails: the piece nobody models and everybody notices missing.
+        # Rafter tails. They have to come out past the fascia and hang below the
+        # soffit, or the fascia swallows them and the eave is one bar again --
+        # which is exactly what the first attempt at this looked like.
         for i in range(rafters):
             rx = -length / 2 + length * (i + 0.5) / rafters
-            ry = half + eave / 2 - 0.11
-            rz = z0 - (ry - half) * math.tan(pitch) - 0.1 / math.cos(pitch)
-            objs.append(timber((0.1, (eave + 0.34) / math.cos(pitch), 0.18),
+            ry = half + eave / 2 + 0.09
+            rz = z0 - (ry - half) * math.tan(pitch) - 0.19 / math.cos(pitch)
+            objs.append(timber((0.11, (eave + 0.56) / math.cos(pitch), 0.2),
                                (rx, sy * ry, rz), (-sy * pitch, 0, 0), trim, 0.02, "rafter"))
 
     objs.append(timber((total + 0.08, 0.44, 0.3), (0, 0, z0 + height + 0.06),

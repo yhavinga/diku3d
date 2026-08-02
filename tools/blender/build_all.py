@@ -36,8 +36,13 @@ MODULES = [
 # What each one is allowed to cost. The town instances all of these, so a
 # regression here is multiplied by however many of them Midgaard ends up with.
 BUDGET = {
-    "house_a": 4000, "house_b": 4000, "house_c": 4000,
-    "house_stone_a": 4000, "house_stone_b": 4000,
+    # Raised from 4000 when the houses were reworked for relief. Recessed
+    # reveals, sills with drips, shutters, rafter tails, plinths, string
+    # courses and braced jetties are all geometry, and geometry is the only
+    # thing that casts a shadow -- a flat wall with a texture on it cost 4000
+    # and read as printed.
+    "house_a": 7000, "house_b": 7000, "house_c": 7000,
+    "house_stone_a": 7000, "house_stone_b": 7000,
     "temple": 8000, "townsperson": 3000,
     # roomkit. These are instanced per wall rather than per building, so a room
     # costs four panels plus four piers plus a roof -- read the caps as a sixth

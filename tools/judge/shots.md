@@ -1,13 +1,34 @@
-# The shot list
+# Judging
 
-Every judging round uses the same eight frames, so rounds can be compared to
-each other rather than to a memory. Load `http://localhost:8173/`, wait for the
-world to build, then:
+The judge drives the world itself rather than being handed a fixed set of
+pictures. Load `http://localhost:8173/`, wait about ten seconds for the world to
+build, then:
 
 ```js
 document.getElementById('title').classList.add('hidden');
 diku.state.paused = false;
 ```
+
+## Going places
+
+```js
+diku.places()          // somewhere worth standing, worked out from the world
+diku.shoot('water')    // stand there and face what makes it worth seeing
+diku.shoot('street', { time: 'night', pitch: -0.1, back: 6 })
+diku.find('fountain')  // rooms matching a word in name, prose, sector or contents
+diku.goto(3014, yaw, pitch)   // a specific room by vnum
+diku.look(x, y, z, yaw, pitch)
+diku.applyTime('dawn' | 'noon' | 'dusk' | 'night')
+```
+
+`places()` is derived from whatever areas are loaded, so it keeps working
+outside Midgaard. It currently finds water, open water, a square, a street, a
+lit interior, a shop, forest, field, a sealed gate and a crowd. Each entry says
+why it is worth looking at.
+
+Everything else is still available: `diku.quality` for the frame budget,
+`diku.options` for the settings screen, `diku.state.benchmark = true` to halt
+the render loop before measuring.
 
 | # | Name | Camera | Time | What it is testing |
 |---|---|---|---|---|

@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 
 import { createPipeline, SkyEnvironment, clampSkyHighlights } from './render.js';
-import { parseArea, buildWorld, DIR_STEP } from './are.js';
+import { parseArea, buildWorld, DIR_STEP, SECTOR_NAME } from './are.js';
 import { layoutWorld } from './layout.js';
 import { createMaterials } from './textures.js';
 import { buildScene, CELL, LEVEL_H } from './build.js';
@@ -528,6 +528,102 @@ async function boot() {
       });
       return name;
     },
+    /**
+     * Somewhere worth standing, worked out from the world rather than listed by
+     * hand, so this keeps working whichever areas are loaded. Each entry says
+     * where to stand, which way to face, and why it is interesting.
+     */
+    places() {
+      const out = [];
+      const seen = new Set();
+      const add = (key, vnum, why, target = null, time = null) => {
+        if (vnum === undefined || seen.has(key) || !built.rooms.has(vnum)) return;
+        seen.add(key);
+        out.push({ key, vnum, room: built.rooms.get(vnum).room.name, why, target, time });
+      };
+      const rooms = [...built.rooms.entries()].filter(([, i]) => !i.unbuilt);
+      const find = (test) => (rooms.find(([vnum]) => test(world.rooms.get(vnum))) || [])[0];
+
+      for (const [vnum] of rooms) {
+        const room = world.rooms.get(vnum);
+        const fountain = room.items.find((o) => o.proto.itemType === 25
+          || /fountain|well|water/.test(o.proto.keywords));
+        if (fountain) { add('water', vnum, 'a fountain: animated water, refraction, wet stone'); break; }
+      }
+      add('watersector', find((r) => r.sector === 6 || r.sector === 7), 'open water');
+      add('square', find((r) => r.exits.filter(Boolean).length >= 4 && r.sector === 1),
+        'the widest open space: pavement, frontage, silhouettes');
+      add('street', find((r) => r.sector === 1 && r.exits.filter(Boolean).length === 2),
+        'a street between two frontages, for receding perspective');
+      add('interior', find((r) => r.sector === 0 && /temple|hall|sanctum/i.test(r.name)),
+        'a lit stone interior: light falloff, torches, shadowed material');
+      add('shop', find((r) => r.mobs.some((m) => m.shop)), 'a shopkeeper and their stock');
+      add('forest', find((r) => r.sector === 3), 'trees and undergrowth');
+      add('field', find((r) => r.sector === 2), 'open ground and horizon');
+      add('gate', find((r) => r.exits.some((e) => e && e.offMap)), 'a sealed gate out of the world');
+      const beast = actors.interactables.find((i) => i.kind === 'mob' && i.subtitle);
+      for (const [vnum] of rooms) {
+        if (world.rooms.get(vnum).mobs.length >= 2) { add('crowd', vnum, 'several mobiles together'); break; }
+      }
+      void beast;
+      return out;
+    },
+
+    /** Rooms whose name, description, sector or contents match a word. */
+    find(query) {
+      const q = String(query).toLowerCase();
+      const hits = [];
+      for (const [vnum, info] of built.rooms) {
+        if (info.unbuilt) continue;
+        const room = world.rooms.get(vnum);
+        const hay = [
+          room.name, room.description, SECTOR_NAME[room.sector] || '',
+          ...room.items.map((o) => o.proto.short), ...room.mobs.map((m) => m.proto.short),
+        ].join(' ').toLowerCase();
+        if (hay.includes(q)) hits.push({ vnum, name: room.name, sector: SECTOR_NAME[room.sector] });
+        if (hits.length >= 40) break;
+      }
+      return hits;
+    },
+
+    /**
+     * Stand in a place from places() and face what makes it worth seeing. Pass
+     * a vnum instead to frame that room the same way.
+     */
+    shoot(keyOrVnum, options = {}) {
+      const place = typeof keyOrVnum === 'string'
+        ? this.places().find((p) => p.key === keyOrVnum) : { vnum: keyOrVnum };
+      if (!place) return `no such place: ${keyOrVnum}`;
+      const info = built.rooms.get(place.vnum);
+      if (!info) return `room ${place.vnum} is not built`;
+      if (options.time) applyTime(options.time);
+
+      // Face whatever is worth looking at: a prop or mobile in the room if
+      // there is one, otherwise down the room's first exit.
+      let aim = null;
+      let best = Infinity;
+      for (const item of actors.interactables) {
+        const d2 = item.position.distanceToSquared(info.center);
+        if (d2 < best && d2 < 60) { best = d2; aim = item.position; }
+      }
+      const back = options.back ?? (aim ? 4.2 : 0);
+      let yaw = options.yaw;
+      if (yaw === undefined) {
+        if (aim) yaw = Math.atan2(aim.x - info.center.x, aim.z - info.center.z);
+        else {
+          const dir = info.room.exits.findIndex((e, i) => e && i < 4);
+          yaw = dir >= 0 ? Math.atan2(-DIR_STEP[dir][0], -DIR_STEP[dir][2]) : 0;
+        }
+      }
+      this.look(
+        info.center.x - Math.sin(yaw) * back,
+        info.center.y,
+        info.center.z - Math.cos(yaw) * back,
+        yaw, options.pitch ?? -0.04,
+      );
+      return { vnum: place.vnum, room: info.room.name, why: place.why, facing: aim ? 'a subject' : 'an exit' };
+    },
+
     look(x, y, z, yaw = 0, pitch = 0) {
       player.spawn(x, y, z, yaw);
       camera.rotation.set(pitch, yaw, 0);

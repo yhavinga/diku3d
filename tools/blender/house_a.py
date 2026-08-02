@@ -68,7 +68,10 @@ def build():
     # --- the jetty --------------------------------------------------------
     # 0.85 m out, on braced corbels: the ground storey now stands in its shade
     # for most of the day, which is the single biggest tonal break on the house.
-    parts += kit.jetty(GW, GW, gz + GH, JUT, size=0.34, joists=4, band=BAND, braces=3)
+    # Braces placed by hand between the openings below: the door surround
+    # reaches to 2.0 and the ground windows run 2.4 to 4.2.
+    parts += kit.jetty(GW, GW, gz + GH, JUT, size=0.34, joists=3, band=BAND,
+                       braces=(-4.6, -2.16, 2.16, 4.6))
 
     # --- upper storey -----------------------------------------------------
     uz = gz + GH + BAND
@@ -85,6 +88,11 @@ def build():
 
     parts += kit.framing(W, UH, T, uf["front"][1], 0.0, posts=4, rail=0.0, braces=False,
                          skip=[(-5.0, -2.2), (-1.4, 1.4), (2.2, 5.0)])
+    # A middle rail right across, under the sills. Without it the strip between
+    # the bressumer and the windows is 11.9 m of unbroken plaster and it is the
+    # one part of the front with nothing on it to cast.
+    parts.append(kit.timber((W, T + 0.15, 0.22), (0, -W / 2 + T / 2, uz + 0.36),
+                            (0, 0, 0), "oak", 0.03, "midrail"))
     for key in ("left", "right"):
         parts += kit.framing(W - 2 * T, UH, T, uf[key][1], uf[key][2], posts=2,
                              skip=[(-1.35, 1.35)], corner=False)
@@ -92,7 +100,7 @@ def build():
 
     # Wall-plate moulding at the eaves line, so the top of the wall is a course
     # and not just where the boxes stop.
-    parts += kit.string_course(W, W, uz + UH - 0.12, proud=0.075, height=0.2,
+    parts += kit.string_course(W, W, uz + UH - 0.12, proud=0.15, height=0.2,
                                mat="oak", sides=("front", "left", "right"), mould=False)
 
     # --- roof -------------------------------------------------------------
@@ -104,8 +112,8 @@ def build():
         parts += kit.gable_frame(W, ROOF_H, rz, sx * (W / 2 + 0.06))
     parts += kit.chimney(-4.1, 0.0, rz - 1.6, rz + ROOF_H + 1.5, w=1.4, pots=2)
 
-    # Somebody lives here: a lantern bracket by the door and a beam end left
-    # sticking out of the jetty over it.
-    parts += kit.bracket((0, -GW / 2 - T / 2, gz), 0.0, reach=0.78, z=3.15)
-    parts += kit.beam_end((2.0, -W / 2 - T / 2, uz), 0.0, z=UH - 0.55, out=0.55)
+    # Somebody lives here: a sign bracket hung in the gap between two upper
+    # windows, and a beam end left sticking out of the frame in the next gap.
+    parts += kit.bracket((-1.8, -W / 2, uz), 0.0, reach=0.84, z=1.95)
+    parts += kit.beam_end((1.8, -W / 2, uz), 0.0, z=UH - 0.62, out=0.58)
     return kit.deliver(parts, "house_a")

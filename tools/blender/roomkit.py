@@ -287,7 +287,7 @@ def build_temple_roof():
     span, rise = R_SPAN, R_RISE
     p += kit.gable_roof(span, span, rise, 0.0, thick=R_THICK, eave=R_EAVE, verge=R_EAVE,
                         mat="marble", trim="marble", tympanum=None, barge=False,
-                        fascia=False, along="x")
+                        fascia=False, along="x", rafters=0, caps=0)
     p += _cover_tiles(span, span, rise, 0.0, R_THICK, R_EAVE, R_EAVE, "marble", 5.55)
     kit.rotate_z(p, math.pi / 2)
 

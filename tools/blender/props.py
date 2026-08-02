@@ -1,11 +1,20 @@
-"""props -- the small things a town is furnished with. Sixteen assets plus the
-barrel, each under 800 triangles and each with its origin at the base centre so
-the viewer can drop it on the ground at (0, 0, 0).
+"""props -- the small things a town is furnished with, each under 800 triangles
+and each with its origin at the base centre so the viewer can drop it on the
+ground at (0, 0, 0).
 
-Two of these have no base to sit on: hanging_sign and torch_sconce go on a wall.
-They are modelled with the wall at y = 0 and the ironwork reaching out into -Y,
-with the origin on the ground directly below the fixing -- so the same "put it
-at the foot of the wall, facing -Y" rule places every asset in the library.
+Some of these have no base to sit on: hanging_sign and torch_sconce go on a
+wall, and the ladder, broom, cartwheel and nettles lean on one. They are all
+modelled with the wall at y = 0 and everything reaching out into -Y, with the
+origin on the ground at the wall line -- so the same "put it at the foot of the
+wall, facing -Y" rule places every asset in the library.
+
+The second batch -- crates, barrels, firewood, planks, pots, rope, nettles --
+exists because a review counted the shadows in a square and found none between
+0.1 and 2 m. Nothing that size means nothing to break up a big flat pavement,
+and a big flat pavement is what makes a square read as a texture rather than a
+place. These are deliberately clustered, leaning and stacked rather than single
+tidy objects: one barrel is a prop, three barrels and a chock is a corner
+somebody uses.
 
 Everything is checked against a 1.75 m figure: the bench seat is at 450 mm, the
 trough rim at 600, the well coping at 850, the market stall counter at 900, and
@@ -14,6 +23,7 @@ the lamp post's lantern is at 4.2 m so you walk under it, not into it.
 
 import math
 import importlib
+import random
 
 import lib
 import kit
@@ -47,9 +57,12 @@ def wheel(x, y, z, r=0.42, thick=0.14, spokes=6, mat="oak"):
                          name="hub", mat=mat)]
     for i in range(spokes):
         a = 2 * math.pi * i / spokes
+        # a - pi/2, not a: Rx(t) sends +Z to (0, -sin t, cos t), so plain `a`
+        # lays every spoke across its own radius instead of along it. Invisible
+        # behind the handcart's solid felloe, and unmissable on the cartwheel.
         objs.append(lib.box((thick * 0.55, 0.075, r * 0.82),
                             (x, y + r * 0.42 * math.cos(a), z + r * 0.42 * math.sin(a)),
-                            (a, 0, 0), name="spoke", mat=mat))
+                            (a - math.pi / 2, 0, 0), name="spoke", mat=mat))
     return objs
 
 
@@ -424,11 +437,295 @@ def build_chimney_pot():
     return kit.deliver(p, "chimney_pot")
 
 
+# --- street dressing, 0.1 to 2 m -----------------------------------------
+
+def cask(r, h, cx=0.0, cy=0.0, cz=0.0, axis="z", sides=10, mat="planks",
+         hoops=True, name="cask"):
+    """A barrel as one lofted solid, with the hoops modelled as steps in the
+    profile rather than as separate rings.
+
+    Three rings of their own cost 200 triangles and buy a colour change nobody
+    at three metres can see; a 20 mm step in the radius costs nothing extra and
+    buys the same band of shadow, which is the part you actually read."""
+    rb = r * 1.17
+    prof = [(0.00, r), (0.06, r), (0.09, rb * 0.94), (0.32, rb),
+            (0.68, rb), (0.91, rb * 0.94), (0.94, r), (1.00, r)]
+    if not hoops:
+        prof = [(0.0, r), (0.3, rb), (0.7, rb), (1.0, r)]
+    sec = []
+    for (t, rr) in prof:
+        # the belly swells between the hoops; the ends are held down to r
+        rad = rr + (rb - r) * 0.3 * math.sin(math.pi * t)
+        # loft's cross-axes are (x, y) for a Z barrel and (x, z) for a Y one
+        base, ca, cb = (cz, cx, cy) if axis == "z" else (cy, cx, cz)
+        sec.append((base + t * h, rad, rad, ca, cb))
+    return lib.loft(sec, sides=sides, axis=axis, name=name, mat=mat)
+
+
+def build_stacked_crates():
+    """Three crates, the top one turned and slid off centre. Square-on they are
+    a wall; skewed they are a heap, and the gap between the top one and the two
+    below is where the shadow gets in."""
+    lib.reset()
+    p = []
+    for (cx, cy, cz, s, rot) in ((-0.26, 0.04, 0.0, 0.80, 0.06),
+                                 (0.30, -0.08, 0.0, 0.72, -0.14),
+                                 (-0.10, -0.02, 0.80, 0.66, 0.62)):
+        p.append(kit.slab((s - 0.08, s - 0.08, s - 0.06), (cx, cy, cz + s / 2),
+                          (0, 0, rot), mat="planks", name="crate", width=0.02))
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                dx, dy = sx * (s / 2 - 0.05), sy * (s / 2 - 0.05)
+                c, sn = math.cos(rot), math.sin(rot)
+                p.append(kit.timber((0.09, 0.09, s), (cx + c * dx - sn * dy,
+                                                      cy + sn * dx + c * dy, cz + s / 2),
+                                    (0, 0, rot), "oak", 0.018, "post"))
+        for hz in (0.12, s - 0.12):
+            p.append(kit.timber((s, 0.08, 0.09),
+                                (cx - math.sin(rot) * (s / 2 - 0.03),
+                                 cy + math.cos(rot) * -(s / 2 - 0.03), cz + hz),
+                                (0, 0, rot), "oak", 0.018, "rail"))
+    return kit.deliver(p, "stacked_crates")
+
+
+def build_barrel_stack():
+    """Two standing, one on its side on chocks. The one lying down is the point:
+    a horizontal cylinder at knee height is the only thing in the library that
+    puts a curved shadow on the ground."""
+    lib.reset()
+    p = [cask(0.26, 0.86, -0.30, 0.30, 0.0),
+         cask(0.26, 0.86, 0.30, 0.38, 0.0)]
+    p.append(lib.loft([(0.86, 0.245, 0.245, -0.30, 0.30),
+                       (0.91, 0.25, 0.25, -0.30, 0.30)], sides=10, name="lid", mat="oak"))
+    # the one on its side lies in front of the pair, along Y and chocked. Behind
+    # them it is invisible, and inside them it is a mess -- the point of it is
+    # the curved shadow it puts on the ground where nothing else does.
+    p.append(cask(0.235, 0.74, 0.0, -0.78, 0.40, axis="y", name="cask_down"))
+    for cy in (-0.64, -0.18):
+        p.append(kit.timber((0.44, 0.15, 0.17), (0.0, cy, 0.085), (0, 0, 0),
+                            "oak", 0.03, "chock"))
+    return kit.deliver(p, "barrel_stack")
+
+
+def build_firewood_pile():
+    """Split logs stacked between two stakes. Twenty-five end grains at 0.1 m
+    each is exactly the frequency of detail a bare wall foot is missing."""
+    lib.reset()
+    p = []
+    rows, per = 5, 4
+    for r in range(rows):
+        n = per - (1 if r == rows - 1 else 0)
+        for i in range(n):
+            rad = 0.075 + 0.022 * ((i * 7 + r * 3) % 4)
+            p.append(lib.cylinder(rad, 0.95 + 0.06 * ((i + r) % 3),
+                                  (0.0, -0.315 + 0.21 * i + 0.03 * (r % 2),
+                                   0.09 + r * 0.175),
+                                  (0, math.pi / 2, 0.04 * ((i * 5 + r) % 3 - 1)),
+                                  verts=6, name="log", mat="bark"))
+    for sx in (-1, 1):
+        p.append(kit.timber((0.09, 0.09, 1.02), (sx * 0.54, 0.0, 0.51), (0, 0, 0),
+                            "oak", 0.02, "stake"))
+    return kit.deliver(p, "firewood_pile")
+
+
+def build_water_butt():
+    """A butt under a downpipe, on a stone pad, with a dipper hooked on the rim.
+    The pad matters: standing water on a barrel end is what makes it read as
+    used rather than delivered."""
+    lib.reset()
+    cy = -0.44                               # the wall is at y = 0, as ever
+    p = [kit.slab((0.92, 0.92, 0.11), (0, cy, 0.055), mat="stonewall", name="pad", width=0.03),
+         cask(0.31, 1.0, 0.0, cy, 0.11)]
+    p.append(lib.loft([(1.06, 0.30, 0.30, 0, cy), (1.10, 0.315, 0.315, 0, cy)],
+                      sides=10, name="water", mat="water"))
+    p.append(kit.timber((0.13, 0.13, 1.62), (0.0, -0.09, 0.81), (0, 0, 0), "iron", 0.025, "downpipe"))
+    p.append(kit.timber((0.1, 0.38, 0.1), (0.0, -0.24, 1.52),
+                        (math.radians(52), 0, 0), "iron", 0.02, "swanneck"))
+    # The dipper stands in the butt with its handle out over the rim, which is
+    # where one is left. Floating it above the rim reads as a second bucket.
+    p.append(lib.cone(0.11, 0.13, 0.2, (0.13, cy - 0.07, 1.0), verts=8, name="dipper",
+                      mat="planks"))
+    p.append(kit.timber((0.045, 0.42, 0.045), (0.13, cy - 0.17, 1.17),
+                        (math.radians(-56), 0, 0), "oak", 0.01, "haft"))
+    return kit.deliver(p, "water_butt")
+
+
+def build_bucket():
+    """250 mm across. It is the smallest thing in the library and it is here
+    because a pavement needs something at the scale of a boot."""
+    lib.reset()
+    p = [lib.loft([(0.0, 0.105, 0.105, 0, 0), (0.02, 0.108, 0.108, 0, 0),
+                   (0.20, 0.128, 0.128, 0, 0), (0.28, 0.134, 0.134, 0, 0),
+                   (0.30, 0.126, 0.126, 0, 0)], sides=10, name="body", mat="planks")]
+    p.append(lib.loft([(0.115, 0.132, 0.132, 0, 0), (0.155, 0.132, 0.132, 0, 0)],
+                      sides=10, name="hoop", mat="iron"))
+    p.append(lib.loft([(0.255, 0.121, 0.121, 0, 0), (0.275, 0.121, 0.121, 0, 0)],
+                      sides=10, name="water", mat="water"))
+    for sx in (-1, 1):
+        p.append(kit.timber((0.03, 0.03, 0.26), (sx * 0.115, 0.0, 0.40),
+                            (0, sx * math.radians(19), 0), "iron", 0.008, "bail"))
+    p.append(kit.timber((0.2, 0.03, 0.03), (0, 0, 0.52), (0, 0, 0), "iron", 0.008, "bail"))
+    return kit.deliver(p, "bucket")
+
+
+def build_rope_coil():
+    """Two turns of hawser dropped on the ground with a tail out of the middle.
+    A torus is the one primitive with a hole in it, and the hole is the reason
+    this reads as rope instead of a doughnut of mud."""
+    lib.reset()
+    p = [lib.torus(0.30, 0.048, (0, 0, 0.048), major_seg=14, minor_seg=5,
+                   name="coil", mat="cloth"),
+         lib.torus(0.26, 0.046, (0.03, -0.02, 0.132), major_seg=14, minor_seg=5,
+                   name="coil", mat="cloth")]
+    for (x, y, rot) in ((0.30, 0.09, 0.4), (0.46, 0.30, 1.1), (0.40, 0.56, 2.0)):
+        p.append(lib.cylinder(0.046, 0.34, (x, y, 0.046), (math.pi / 2, 0, rot),
+                              verts=6, name="tail", mat="cloth"))
+    return kit.deliver(p, "rope_coil")
+
+
+def build_ladder():
+    """Leaning on the wall at y = 0 with its feet out at -0.93, following the
+    same rule as the sconce and the sign. Nine rungs is nine isolated shadows
+    down a blank wall, which is the cheapest relief in the library.
+
+    The lean is -x about X, not +x: the other sign stands it on its head and
+    drops the top into the street, which looks entirely reasonable in plan."""
+    lib.reset()
+    p = []
+    lean = math.radians(15)                 # off vertical
+    L, w = 3.6, 0.52
+    foot = -math.sin(lean) * L
+    for sx in (-1, 1):
+        p.append(kit.timber((0.075, 0.11, L),
+                            (sx * w / 2, foot / 2, math.cos(lean) * L / 2),
+                            (-lean, 0, 0), "oak", 0.02, "stile"))
+    for i in range(9):
+        t = 0.16 + 0.42 * i
+        p.append(lib.cylinder(0.028, w, (0, foot + math.sin(lean) * t, math.cos(lean) * t),
+                              (0, math.pi / 2, 0), verts=6, name="rung", mat="oak"))
+    return kit.deliver(p, "ladder")
+
+
+def build_planks_pile():
+    """Sawn boards on two bearers, the top three slid out of line. Stacked dead
+    square they are a box; slid, the ends draw a little staircase of shadow."""
+    lib.reset()
+    p = []
+    for sx in (-1, 1):
+        p.append(kit.timber((0.16, 0.92, 0.12), (sx * 0.52, 0, 0.06), (0, 0, 0),
+                            "oak", 0.02, "bearer"))
+    for i in range(9):
+        dx = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.09, -0.13, 0.16)[i]
+        rot = (0, 0, 0, 0, 0, 0, 0.02, -0.03, 0.05)[i]
+        p.append(kit.timber((1.34, 0.34, 0.055),
+                            (dx, -0.19 + 0.38 * (i % 2), 0.15 + 0.062 * i),
+                            (0, 0, rot), "planks", 0.012, "plank"))
+    return kit.deliver(p, "planks_pile")
+
+
+def build_herb_pots():
+    """Three pots on the ground with something growing out of them. Not one pot:
+    a single object on a pavement reads as placed, three read as kept."""
+    lib.reset()
+    p = []
+    for (cx, cy, r, h) in ((-0.28, 0.06, 0.15, 0.26), (0.10, -0.14, 0.19, 0.32),
+                           (0.34, 0.16, 0.13, 0.22)):
+        p.append(lib.loft([(0.0, r * 0.68, r * 0.68, cx, cy),
+                           (h * 0.82, r, r, cx, cy),
+                           (h - 0.03, r * 1.1, r * 1.1, cx, cy),
+                           (h, r * 1.1, r * 1.1, cx, cy)],
+                          sides=8, name="pot", mat="rooftile"))
+        p.append(lib.loft([(h - 0.05, r * 0.92, r * 0.92, cx, cy),
+                           (h - 0.03, r * 0.92, r * 0.92, cx, cy)],
+                          sides=8, name="soil", mat="bark"))
+        for i in range(5):
+            a = 2 * math.pi * i / 5 + cx
+            p.append(kit.timber((0.045, 0.045, 0.3 + 0.06 * (i % 3)),
+                                (cx + r * 0.45 * math.cos(a), cy + r * 0.45 * math.sin(a),
+                                 h + 0.13),
+                                (math.radians(20) * math.sin(a), math.radians(20) * math.cos(a), 0),
+                                "leaves", 0.012, "stem"))
+    return kit.deliver(p, "herb_pots")
+
+
+def build_broom():
+    """A besom stood against the wall at y = 0. A hundred triangles, and it is
+    the single clearest signal in the library that a door belongs to somebody."""
+    lib.reset()
+    p = []
+    lean = math.radians(12)
+    L = 1.45
+    foot = -0.34
+    p.append(lib.cylinder(0.024, L, (0, foot + math.sin(lean) * L / 2, math.cos(lean) * L / 2),
+                          (-lean, 0, 0), verts=6, name="haft", mat="oak"))
+    p.append(lib.loft([(0.015, 0.05, 0.05, 0.0, foot - 0.01),
+                       (0.15, 0.10, 0.10, 0.0, foot + 0.02),
+                       (0.34, 0.078, 0.078, 0.0, foot + 0.06),
+                       (0.44, 0.05, 0.05, 0.0, foot + 0.08)],
+                      sides=8, name="head", mat="thatch"))
+    p.append(lib.loft([(0.31, 0.085, 0.085, 0.0, foot + 0.055),
+                       (0.35, 0.085, 0.085, 0.0, foot + 0.063)],
+                      sides=8, name="binding", mat="cloth"))
+    return kit.deliver(p, "broom")
+
+
+def build_cartwheel():
+    """A spare wheel leaning on the wall at y = 0. Same wheel as the handcart's,
+    stood on edge and tipped nine degrees so it is resting rather than glued.
+
+    kit.place() and not a loop over rotation_euler: the spokes are already
+    turned, and reassigning their rotation lays every one of them flat."""
+    lib.reset()
+    r = 0.62
+    p = [lib.torus(r - 0.035, 0.038, (0, 0, 0), (0, math.pi / 2, 0), 14, 4,
+                   name="tyre", mat="iron"),
+         lib.torus(r - 0.115, 0.08, (0, 0, 0), (0, math.pi / 2, 0), 14, 4,
+                   name="felloe", mat="oak"),
+         lib.cylinder(0.115, 0.26, (0, 0, 0), (0, math.pi / 2, 0), verts=8,
+                      name="hub", mat="oak")]
+    for i in range(8):
+        a = 2 * math.pi * i / 8
+        p.append(lib.box((0.09, 0.062, 0.40),
+                         (0, 0.28 * math.cos(a), 0.28 * math.sin(a)),
+                         (a - math.pi / 2, 0, 0), name="spoke", mat="oak"))
+    kit.place(p, (0.0, -0.30, 0.63), (math.radians(-9), 0.0, math.pi / 2))
+    p.append(kit.timber((0.34, 0.17, 0.1), (0.0, -0.38, 0.05), (0, 0, 0), "oak", 0.02, "chock"))
+    return kit.deliver(p, "cartwheel")
+
+
+def build_nettles():
+    """A clump of weeds for the foot of a wall. Every one of these is a flat
+    blade with a bend in it -- a wall that meets the ground on a clean line is
+    the tell that nothing has ever grown there."""
+    lib.reset()
+    random.seed(4711)
+    p = []
+    for i in range(13):
+        a = 2 * math.pi * i / 13 + 0.3
+        d = 0.09 + 0.16 * random.random()
+        h = 0.26 + 0.34 * random.random()
+        p.append(kit.timber((0.075, 0.02, h),
+                            (d * math.cos(a), -abs(d * math.sin(a)) * 0.7, h / 2),
+                            (math.radians(26) * random.uniform(-1, 1),
+                             math.radians(30) * random.uniform(-1, 1), a),
+                            "leaves", 0.008, "blade"))
+    for i in range(4):
+        a = 1.1 * i
+        p.append(kit.timber((0.03, 0.03, 0.5 + 0.1 * i),
+                            (0.05 * math.cos(a), -0.05 * abs(math.sin(a)), 0.25 + 0.05 * i),
+                            (0, math.radians(8) * (i - 1.5), 0), "grass", 0.008, "stem"))
+    return kit.deliver(p, "nettles")
+
+
 ASSETS = [
     build_barrel, build_crate, build_sack, build_hay_bale, build_handcart,
     build_well, build_market_stall, build_lamp_post, build_hanging_sign,
     build_bench, build_trough, build_fountain, build_signpost,
     build_portcullis, build_stone_arch, build_torch_sconce, build_chimney_pot,
+    build_stacked_crates, build_barrel_stack, build_firewood_pile,
+    build_water_butt, build_bucket, build_rope_coil, build_ladder,
+    build_planks_pile, build_herb_pots, build_broom, build_cartwheel,
+    build_nettles,
 ]
 
 

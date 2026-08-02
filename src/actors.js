@@ -198,7 +198,8 @@ function buildModelledFigure(asset, proto) {
   if (idleClip) {
     mixer = new THREE.AnimationMixer(body);
     const start = strHash(proto.short, 13);
-    for (const [name, clip] of [['idle', idleClip], ['walk', walkClip]]) {
+    const fightClip = asset.animations.find((a) => /fight|attack|combat/i.test(a.name));
+    for (const [name, clip] of [['idle', idleClip], ['walk', walkClip], ['fight', fightClip]]) {
       if (!clip) continue;
       const action = mixer.clipAction(clip);
       action.setLoop(THREE.LoopRepeat, Infinity);
@@ -214,6 +215,96 @@ function buildModelledFigure(asset, proto) {
   // it to the body made the head-turn write the body's own rotation and then
   // read it back as the error term, which flips between two poses every frame.
   return { group, headGroup: null, height: asset.size.y * scale, scale, mixer, actions };
+}
+
+
+/**
+ * Not everything in a mud is a person. Midgaard alone has a swan, a sparrow, a
+ * wolf, two puppies and a duckling, and dressing them all in the townsperson
+ * model is exactly as funny as it sounds. These are built from primitives like
+ * the old figures were, because a handful of beasts is not worth a rig.
+ */
+const BEASTS = {
+  // keyword test           shoulder  length  kind      colour
+  swan: [/swan/, 0.62, 0.9, 'bird', 0xf2f0ea],
+  duck: [/duckling/, 0.16, 0.24, 'bird', 0xc8b06a],
+  duck2: [/duck|goose|hen|chicken/, 0.28, 0.42, 'bird', 0xb9a06d],
+  sparrow: [/sparrow|pigeon|bird|raven|crow|gull/, 0.11, 0.17, 'bird', 0x6b5a45],
+  wolf: [/wolf|hound|mastiff/, 0.72, 1.15, 'quad', 0x5b5750],
+  rottweiler: [/rottweiler|doberman/, 0.62, 1.0, 'quad', 0x2e2622],
+  fido: [/fido|beagle|dog|cur|mutt/, 0.5, 0.85, 'quad', 0x7a6247],
+  puppy: [/puppy|pup\b/, 0.26, 0.42, 'quad', 0x8a7355],
+  kitten: [/kitten/, 0.2, 0.34, 'quad', 0x6f6558],
+  cat: [/\bcat\b|feline/, 0.3, 0.5, 'quad', 0x4a4038],
+  rat: [/\brat\b|mouse|rodent|vermin/, 0.14, 0.26, 'quad', 0x4d453c],
+  horse: [/horse|mare|pony|mule|donkey/, 1.45, 2.1, 'quad', 0x6b4f36],
+  pig: [/\bpig\b|boar|hog|sow/, 0.62, 1.0, 'quad', 0x9a7a6c],
+  bear: [/bear/, 1.0, 1.6, 'quad', 0x4a3728],
+};
+
+export function beastKind(proto) {
+  const words = `${proto.keywords} ${proto.short}`.toLowerCase();
+  for (const key of Object.keys(BEASTS)) {
+    if (BEASTS[key][0].test(words)) return BEASTS[key];
+  }
+  return null;
+}
+
+function buildBeastFigure(spec, proto) {
+  const [, shoulder, length, kind, colour] = spec;
+  const tint = new THREE.Color(colour);
+  const dark = tint.clone().multiplyScalar(0.7).getHex();
+  const parts = [];
+  const legs = [];
+  const group = new THREE.Group();
+  const r = shoulder * 0.34;
+
+  if (kind === 'bird') {
+    pushPart(parts, G.sphere(r * 1.5, 10), colour, at(0, shoulder * 0.62, 0, 0, 0, 0, 1, 0.95, 1.5));
+    pushPart(parts, G.sphere(r * 0.85, 10), colour, at(0, shoulder * 0.92, length * 0.3));
+    pushPart(parts, G.cone(r * 0.32, r * 0.9, 6), 0xc8a13c,
+      at(0, shoulder * 0.9, length * 0.42, Math.PI / 2, 0, 0));
+    pushPart(parts, G.cone(r * 1.1, length * 0.55, 5), dark,
+      at(0, shoulder * 0.66, -length * 0.42, -Math.PI / 2.2, 0, 0));
+    for (const side of [-1, 1]) {
+      pushPart(parts, G.sphere(r * 0.9, 8), dark,
+        at(side * r * 1.1, shoulder * 0.68, 0, 0, 0, 0, 0.35, 0.9, 1.5));
+    }
+  } else {
+    pushPart(parts, G.capsule(r, length * 0.55, 9), colour,
+      at(0, shoulder, 0, Math.PI / 2, 0, 0));
+    pushPart(parts, G.sphere(r * 0.95, 10), colour, at(0, shoulder * 1.08, length * 0.42));
+    pushPart(parts, G.capsule(r * 0.42, r * 0.7, 7), dark,
+      at(0, shoulder * 0.96, length * 0.58, Math.PI / 2, 0, 0));
+    for (const side of [-1, 1]) {
+      pushPart(parts, G.cone(r * 0.34, r * 0.7, 5), dark,
+        at(side * r * 0.5, shoulder * 1.32, length * 0.36));
+    }
+    pushPart(parts, G.capsule(r * 0.22, length * 0.34, 6), dark,
+      at(0, shoulder * 1.05, -length * 0.5, -0.7, 0, 0));
+  }
+
+  const bodyMesh = new THREE.Mesh(mergeGeometries(parts, false), figureMaterial);
+  bodyMesh.castShadow = true;
+  group.add(bodyMesh);
+
+  // Legs are their own groups so they can swing from the walk speed.
+  const legLen = kind === 'bird' ? shoulder * 0.38 : shoulder * 0.62;
+  const stance = kind === 'bird' ? [[0, 0]] : [[-1, 1], [1, 1], [-1, -1], [1, -1]];
+  const pairs = kind === 'bird' ? [[-1, 0], [1, 0]] : stance;
+  for (const [sx, sz] of pairs) {
+    const leg = new THREE.Group();
+    leg.position.set(sx * r * 0.62, shoulder - r * 0.2, sz * length * 0.3);
+    const geo = [];
+    pushPart(geo, G.capsule(r * 0.2, legLen * 0.8, 6), dark, at(0, -legLen / 2, 0));
+    const mesh = new THREE.Mesh(mergeGeometries(geo, false), figureMaterial);
+    mesh.castShadow = true;
+    leg.add(mesh);
+    group.add(leg);
+    legs.push(leg);
+  }
+
+  return { group, headGroup: null, height: shoulder * 1.5, scale: 1, mixer: null, actions: null, legs };
 }
 
 function buildFigure(proto) {
@@ -539,10 +630,12 @@ export function populate(world, layout, built, options = {}) {
     const count = room.mobs.length;
     room.mobs.forEach((mob, index) => {
       const proto = { ...mob.proto, equipment: mob.equipment };
-      const person = model(['townsperson']);
-      const built = person && assets.get(person).animations.length
-        ? buildModelledFigure(assets.get(person), proto)
-        : buildFigure(proto);
+      const beast = beastKind(mob.proto);
+      const person = beast ? null : model(['townsperson']);
+      const built = beast ? buildBeastFigure(beast, proto)
+        : (person && assets.get(person).animations.length
+          ? buildModelledFigure(assets.get(person), proto)
+          : buildFigure(proto));
       const { group: fig, headGroup, height } = built;
       // Never at the centre of the room: that is where you arrive.
       const angle = (index / count) * Math.PI * 2 + strHash(mob.proto.keywords, 1) * 2;
@@ -563,7 +656,7 @@ export function populate(world, layout, built, options = {}) {
       const aggressive = !!(mob.proto.act & ACT_AGGRESSIVE);
       figures.push({
         object: fig, head: headGroup, label, home: fig.position.clone(),
-        mixer: built.mixer || null, actions: built.actions || null,
+        mixer: built.mixer || null, actions: built.actions || null, legs: built.legs || null,
         last: fig.position.clone(), speed: 0,
         phase: strHash(mob.proto.short, 5) * 6.28, aggressive,
         sentinel: !!(mob.proto.act & ACT_SENTINEL),
@@ -668,7 +761,11 @@ export function populate(world, layout, built, options = {}) {
         const px = item.x + Math.cos(a) * r;
         const pz = item.z + Math.sin(a) * r;
         const spin = strHash(`${item.x}`, i + 9) * Math.PI * 2;
-        const prop = model(['barrel', 'crate', 'sack', 'hay_bale', 'bench', 'trough'], strHash(`${item.z}`, i));
+        const prop = model([
+          'barrel', 'crate', 'sack', 'hay_bale', 'bench', 'trough',
+          'stacked_crates', 'barrel_stack', 'firewood_pile', 'water_butt', 'bucket',
+          'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',
+        ], strHash(`${item.z}`, i));
         if (prop && instances) {
           instances.add(prop, { x: px, y: item.y, z: pz, rotY: spin }, 'props');
           continue;
@@ -982,16 +1079,45 @@ export function populate(world, layout, built, options = {}) {
           fig.object.position.x - fig.last.x, fig.object.position.z - fig.last.z,
         );
         fig.speed += (moved / Math.max(dt, 1e-4) - fig.speed) * Math.min(1, dt * 6);
-        const walking = fig.speed > 0.16;
+        // Fighting wins over walking wins over standing. Anything may set
+        // `fighting` on a figure -- the game does, when it joins combat.
+        const fighting = !!fig.fighting && !!fig.actions.fight;
+        const walking = !fighting && fig.speed > 0.16;
         const blend = Math.min(1, dt * 5);
-        const walkW = fig.actions.walk.getEffectiveWeight();
-        const idleW = fig.actions.idle.getEffectiveWeight();
-        fig.actions.walk.setEffectiveWeight(walkW + ((walking ? 1 : 0) - walkW) * blend);
-        fig.actions.idle.setEffectiveWeight(idleW + ((walking ? 0 : 1) - idleW) * blend);
+        const towards = (action, want) => {
+          if (!action) return;
+          const w = action.getEffectiveWeight();
+          action.setEffectiveWeight(w + (want - w) * blend);
+        };
+        towards(fig.actions.fight, fighting ? 1 : 0);
+        towards(fig.actions.walk, walking ? 1 : 0);
+        towards(fig.actions.idle, (fighting || walking) ? 0 : 1);
         // One cycle covers about 1.2 m; match it so the feet don't skate.
         fig.actions.walk.timeScale = walking
           ? THREE.MathUtils.clamp(fig.speed * fig.actions.walkCycle / 1.2, 0.4, 2.2) : 1;
         if (walking) {
+          const heading = Math.atan2(
+            fig.object.position.x - fig.last.x, fig.object.position.z - fig.last.z,
+          );
+          let turn = ((heading - fig.object.rotation.y + Math.PI) % (Math.PI * 2)) - Math.PI;
+          if (turn < -Math.PI) turn += Math.PI * 2;
+          fig.object.rotation.y += turn * Math.min(1, dt * 4);
+        }
+        fig.last.copy(fig.object.position);
+      }
+
+      // Beasts have no rig, so their legs swing from the same measured speed.
+      if (fig.legs) {
+        const moved = Math.hypot(
+          fig.object.position.x - fig.last.x, fig.object.position.z - fig.last.z,
+        );
+        fig.speed += (moved / Math.max(dt, 1e-4) - fig.speed) * Math.min(1, dt * 6);
+        fig.gait = (fig.gait || 0) + fig.speed * dt * 5;
+        const swing = Math.min(0.7, fig.speed * 1.6);
+        fig.legs.forEach((leg, i) => {
+          leg.rotation.x = Math.sin(fig.gait + (i % 2 ? Math.PI : 0) + (i > 1 ? Math.PI : 0)) * swing;
+        });
+        if (fig.speed > 0.14) {
           const heading = Math.atan2(
             fig.object.position.x - fig.last.x, fig.object.position.z - fig.last.z,
           );

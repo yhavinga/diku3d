@@ -114,11 +114,64 @@ def cone(radius1, radius2, depth, location=(0, 0, 0), rotation=(0, 0, 0), verts=
     return assign(obj, mat)
 
 
+def torus(major, minor, location=(0, 0, 0), rotation=(0, 0, 0), major_seg=14,
+          minor_seg=5, name="torus", mat="cloth"):
+    bpy.ops.mesh.primitive_torus_add(major_radius=major, minor_radius=minor,
+                                     major_segments=major_seg, minor_segments=minor_seg,
+                                     location=location, rotation=rotation)
+    obj = bpy.context.object
+    obj.name = name
+    return assign(obj, mat)
+
+
 def sphere(radius, location=(0, 0, 0), segments=16, rings=10, name="sph", mat="leaves"):
     bpy.ops.mesh.primitive_uv_sphere_add(radius=radius, segments=segments,
                                          ring_count=rings, location=location)
     obj = bpy.context.object
     obj.name = name
+    return assign(obj, mat)
+
+
+_LOFT_AXES = {"z": (0, 1, 2), "y": (0, 2, 1), "x": (2, 1, 0)}
+
+
+def loft(sections, sides=8, axis="z", name="loft", mat="skin", caps=True):
+    """A stack of elliptical rings skinned into one closed solid.
+
+    `sections` are (t, ra, rb, ca, cb): position along `axis`, the two radii,
+    and the offset of the ring's centre in the other two axes. Four triangles
+    per side per band and not an n-gon in it, which is why every organic shape
+    in the library -- a skull, a calf, a shoe, a sack -- is one of these rather
+    than a scaled sphere. A sphere spends its triangles at the poles, where
+    nothing is ever looking.
+
+    The y and x axes swap a pair of coordinates and so reverse the winding;
+    running the ring the other way round puts the normals back out."""
+    a_i, b_i, t_i = _LOFT_AXES[axis]
+    turn = 1.0 if axis == "z" else -1.0
+    verts, faces = [], []
+    for (t, ra, rb, ca, cb) in sections:
+        for i in range(sides):
+            ang = turn * 2.0 * math.pi * i / sides
+            v = [0.0, 0.0, 0.0]
+            v[a_i] = ca + ra * math.cos(ang)
+            v[b_i] = cb + rb * math.sin(ang)
+            v[t_i] = t
+            verts.append(tuple(v))
+    for k in range(len(sections) - 1):
+        base = k * sides
+        for i in range(sides):
+            j = (i + 1) % sides
+            faces.append((base + i, base + j, base + j + sides, base + i + sides))
+    if caps:
+        faces.append(tuple(range(sides - 1, -1, -1)))
+        faces.append(tuple(range(len(verts) - sides, len(verts))))
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.validate()
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
     return assign(obj, mat)
 
 

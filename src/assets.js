@@ -246,5 +246,7 @@ export const ASSET_NAMES = [
   'temple', 'market_stall', 'well', 'fountain', 'lamp_post', 'hanging_sign',
   'signpost', 'stone_arch', 'portcullis', 'torch_sconce', 'chimney_pot',
   'barrel', 'crate', 'sack', 'hay_bale', 'handcart', 'bench', 'trough',
+  'stacked_crates', 'barrel_stack', 'firewood_pile', 'water_butt', 'bucket',
+  'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',
   'tree_oak', 'tree_pine', 'bush', 'grass_tuft', 'townsperson',
 ];

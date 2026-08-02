@@ -1,11 +1,28 @@
-"""townsperson -- a 1.75 m humanoid with an armature and two baked actions.
+"""townsperson -- a 1.75 m human with an armature and three baked actions.
 
 The mesh is segmented: every limb is its own closed solid, bound rigidly to one
 bone at weight 1.0. That is deliberate rather than a shortcut. A single-skin
 humanoid at this triangle count has to be weighted across joints, and a joint
 weighted across six triangles pinches into an hourglass the first time you bend
-it. Separate solids cannot pinch, they are trivially clean topology, and at the
-distance a mobile is ever seen the gap at the elbow is not visible.
+it. Separate solids cannot pinch, they are trivially clean topology, and the
+seams are hidden by making each solid overlap the next -- a deltoid that laps
+over the top of the sleeve, a sleeve cuff that laps over the forearm, a tunic
+hem that laps over the hose.
+
+The first version of this was 644 triangles of primitives and read, correctly,
+as a shop mannequin: a sphere on a box, capsule arms hanging outside the
+shoulder line with daylight between, and legs that stopped at the ankle. The
+rebuild is laid out on a proper canon -- seven and a half heads at 1.75 m, so
+one head is 233 mm: chin 1.517, shoulder 1.42, waist 1.09, crotch 0.875, knee
+0.50, ankle 0.09 -- and every solid is a lib.loft() with a silhouette instead of
+a primitive.
+
+Clothing is its own geometry, not a colour: the tunic is a separate solid over
+the body with a flared hem and a lip under it, the sleeve ends in a cuff the
+skin forearm comes out of, and the hose are their own solids inside the hem.
+Only skin and cloth are tinted per person by the viewer, so the belt, the shoes
+and the hair are deliberately left as `oak` -- that is what stops a crowd of
+these looking like one man printed forty times.
 
 Bone rolls are all calculated to global +X, so rotating any bone about its local
 X swings it forward and back. Every keyframe in here is an X rotation in
@@ -48,49 +65,160 @@ BONES = [
 ]
 
 
-def limb(r, length, loc, bone, mat="cloth", verts=8, name=None):
-    obj = lib.cylinder(r, length, loc, verts=verts, name=name or bone, mat=mat)
+def part(sections, bone, mat="cloth", sides=8, axis="z", name=None, mirror=0.0):
+    """One lofted solid and the single bone it is welded to. `mirror` shifts
+    every ring sideways, which is how the left and right limbs are the same
+    table of numbers with one sign flipped."""
+    if mirror:
+        sections = [(t, ra, rb, ca + mirror, cb) if axis != "x" else (t + mirror, ra, rb, ca, cb)
+                    for (t, ra, rb, ca, cb) in sections]
+    obj = lib.loft(sections, sides=sides, axis=axis, name=name or bone, mat=mat)
     return obj, bone
 
 
-def block(size, loc, bone, mat="cloth", cham=0.03, name=None):
-    return kit.timber(size, loc, (0, 0, 0), mat, cham, name or bone), bone
+def head_parts():
+    """Skull, cap of hair, nose and ears. The skull is an egg with a jaw: the
+    silhouette a human head makes from behind is the one thing a sphere gets
+    wrong, and it is the only view you ever get of a mobile walking away."""
+    skull = [(1.500, 0.058, 0.062, 0.0, 0.010),
+             (1.540, 0.070, 0.082, 0.0, -0.004),
+             (1.585, 0.078, 0.094, 0.0, -0.010),
+             (1.640, 0.081, 0.096, 0.0, -0.006),
+             (1.692, 0.078, 0.090, 0.0, 0.002),
+             (1.732, 0.061, 0.068, 0.0, 0.008),
+             (1.751, 0.026, 0.028, 0.0, 0.010)]
+    hair = [(1.648, 0.085, 0.100, 0.0, -0.004),
+            (1.700, 0.083, 0.095, 0.0, 0.003),
+            (1.740, 0.066, 0.073, 0.0, 0.009),
+            (1.760, 0.028, 0.030, 0.0, 0.011)]
+    # A nose has to taper or it is a stripe down the face: four rings, widening
+    # and pushing further out as they fall, and 20 mm proud of the cheek at the
+    # tip. A square prism the same size read as a nameplate.
+    nose = [(1.664, 0.010, 0.009, 0.0, -0.090),
+            (1.632, 0.015, 0.015, 0.0, -0.100),
+            (1.602, 0.019, 0.021, 0.0, -0.104),
+            (1.590, 0.013, 0.011, 0.0, -0.096)]
+    parts = [part(skull, "head", "skin", sides=10, name="skull"),
+             part(hair, "head", "oak", sides=10, name="hair"),
+             part(nose, "head", "skin", sides=6, name="nose")]
+    # Ears sit behind the midline of the skull, not on it, and project 10 mm.
+    for sx in (-1, 1):
+        parts.append((kit.timber((0.013, 0.030, 0.044), (sx * 0.075, 0.012, 1.618),
+                                 (0, 0, 0), "skin", 0.008, "ear"), "head"))
+    return parts
+
+
+def arm_parts(sx, tag):
+    x = sx * 0.205
+    # The deltoid laps over the top of the sleeve and back onto the chest, which
+    # is the whole fix for "capsule arms floating outside the shoulder".
+    deltoid = [(1.505, 0.050, 0.062, sx * 0.120, 0.0),
+               (1.462, 0.068, 0.080, sx * 0.152, 0.0),
+               (1.402, 0.066, 0.078, sx * 0.180, 0.0),
+               (1.338, 0.056, 0.068, sx * 0.196, 0.0)]
+    sleeve = [(1.470, 0.060, 0.070, x, 0.0),
+              (1.390, 0.056, 0.064, x, 0.0),
+              (1.285, 0.051, 0.058, x, 0.0),
+              (1.200, 0.055, 0.061, x, 0.0),
+              (1.182, 0.048, 0.054, x, 0.0)]
+    forearm = [(1.196, 0.046, 0.050, x, 0.0),
+               (1.110, 0.042, 0.045, x, 0.0),
+               (1.010, 0.034, 0.037, x, 0.0),
+               (0.944, 0.029, 0.032, x, 0.0)]
+    hand = [(0.950, 0.030, 0.036, x, 0.0),
+            (0.905, 0.035, 0.046, x, -0.004),
+            (0.862, 0.033, 0.045, x, -0.004),
+            (0.818, 0.026, 0.035, x, -0.002)]
+    parts = [part(deltoid, "shoulder." + tag, "cloth", sides=8, name="deltoid"),
+             part(sleeve, "upperarm." + tag, "cloth", sides=8, name="sleeve"),
+             part(forearm, "forearm." + tag, "skin", sides=8, name="forearm"),
+             part(hand, "hand." + tag, "skin", sides=6, name="palm")]
+    # The thumb. 28 triangles, and without it a hand is a mitten.
+    parts.append((kit.timber((0.024, 0.030, 0.078),
+                             (x - sx * 0.024, -0.030, 0.906),
+                             (math.radians(28), sx * math.radians(22), 0),
+                             "skin", 0.01, "thumb"), "hand." + tag))
+    return parts
+
+
+def leg_parts(sx, tag):
+    x = sx * 0.092
+    thigh = [(0.985, 0.084, 0.089, x, 0.0),
+             (0.870, 0.078, 0.084, x, 0.0),
+             (0.700, 0.067, 0.072, x, 0.0),
+             (0.560, 0.057, 0.061, x, 0.0),
+             (0.512, 0.055, 0.059, x, 0.0)]
+    shin = [(0.535, 0.057, 0.061, x, 0.0),
+            (0.455, 0.061, 0.067, x, -0.006),
+            (0.310, 0.047, 0.051, x, -0.002),
+            (0.150, 0.035, 0.039, x, 0.0),
+            (0.088, 0.033, 0.037, x, 0.002)]
+    # The shoe is lofted along Y, because a foot is a long shape and rings
+    # stacked in Z would need twice as many to describe the same silhouette.
+    shoe = [(0.075, 0.034, 0.036, x, 0.046),
+            (0.020, 0.043, 0.047, x, 0.049),
+            (-0.060, 0.045, 0.045, x, 0.045),
+            (-0.140, 0.041, 0.033, x, 0.035),
+            (-0.205, 0.028, 0.019, x, 0.024)]
+    return [part(thigh, "thigh." + tag, "cloth", sides=8, name="hose"),
+            part(shin, "shin." + tag, "cloth", sides=8, name="hose"),
+            part(shoe, "foot." + tag, "oak", sides=6, axis="y", name="shoe"),
+            (kit.timber((0.088, 0.29, 0.024), (x, -0.062, 0.014), (0, 0, 0),
+                        "oak", 0.008, "sole"), "foot." + tag)]
 
 
 def body():
-    """(object, bone) for every solid. Sizes checked against a 1.75 m figure:
-    shoulders at 1.45, waist at 1.1, knee at 0.52, ankle at 0.095."""
-    parts = [
-        # head, with a skull cap of hair so the top is not a flat lid
-        block((0.165, 0.185, 0.215), (0, -0.005, 1.665), "head", "skin", 0.045),
-        block((0.175, 0.19, 0.075), (0, 0.002, 1.755), "head", "oak", 0.03, "hair"),
-        block((0.042, 0.05, 0.085), (0, -0.108, 1.638), "head", "skin", 0.018, "nose"),
-        limb(0.055, 0.11, (0, 0, 1.54), "neck", "skin"),
-        # torso: three blocks, so it can bend at the waist
-        block((0.32, 0.215, 0.24), (0, 0, 1.40), "chest"),
-        block((0.30, 0.195, 0.22), (0, 0, 1.19), "spine"),
-        block((0.31, 0.205, 0.15), (0, 0, 1.015), "hips"),
-        block((0.315, 0.215, 0.055), (0, 0, 1.075), "spine", "oak", 0.02, "belt"),
-        # Tunic skirt over the top of the thighs: the one thing that stops the
-        # silhouette reading as a shop mannequin.
-        block((0.36, 0.27, 0.30), (0, 0, 0.86), "hips", "cloth", 0.04, "tunic"),
-        # arms
-        block((0.135, 0.16, 0.135), (0.135, 0, 1.45), "shoulder.L"),
-        block((0.135, 0.16, 0.135), (-0.135, 0, 1.45), "shoulder.R"),
-        limb(0.058, 0.30, (0.205, 0, 1.315), "upperarm.L"),
-        limb(0.058, 0.30, (-0.205, 0, 1.315), "upperarm.R"),
-        limb(0.05, 0.25, (0.205, 0, 1.055), "forearm.L", "skin"),
-        limb(0.05, 0.25, (-0.205, 0, 1.055), "forearm.R", "skin"),
-        block((0.07, 0.055, 0.135), (0.205, -0.005, 0.875), "hand.L", "skin", 0.02),
-        block((0.07, 0.055, 0.135), (-0.205, -0.005, 0.875), "hand.R", "skin", 0.02),
-        # legs
-        limb(0.082, 0.44, (0.092, 0, 0.735), "thigh.L"),
-        limb(0.082, 0.44, (-0.092, 0, 0.735), "thigh.R"),
-        limb(0.065, 0.44, (0.092, 0, 0.305), "shin.L"),
-        limb(0.065, 0.44, (-0.092, 0, 0.305), "shin.R"),
-        block((0.10, 0.26, 0.09), (0.092, -0.055, 0.048), "foot.L", "oak", 0.025),
-        block((0.10, 0.26, 0.09), (-0.092, -0.055, 0.048), "foot.R", "oak", 0.025),
-    ]
+    """(object, bone) for every solid."""
+    chest = [(1.270, 0.150, 0.096, 0.0, 0.0),
+             (1.345, 0.168, 0.103, 0.0, 0.0),
+             (1.420, 0.180, 0.104, 0.0, -0.002),
+             (1.472, 0.152, 0.094, 0.0, -0.004),
+             (1.505, 0.100, 0.072, 0.0, -0.004)]
+    spine = [(1.075, 0.143, 0.097, 0.0, 0.0),
+             (1.160, 0.138, 0.095, 0.0, 0.0),
+             (1.240, 0.146, 0.097, 0.0, 0.0),
+             (1.292, 0.153, 0.099, 0.0, 0.0)]
+    hips = [(0.918, 0.142, 0.097, 0.0, 0.0),
+            (1.000, 0.151, 0.100, 0.0, 0.0),
+            (1.082, 0.147, 0.098, 0.0, 0.0)]
+    # Tunic: its own solid over the body, flared to a hem with a lip under it,
+    # so there is a real edge for the light to break on and the hose below it
+    # are visibly a different garment.
+    # The flare goes into the depth, not the width: the hands hang at x = 0.205
+    # and an evenly flared skirt buries them in cloth to the knuckle.
+    tunic = [(1.030, 0.150, 0.108, 0.0, 0.0),
+             (0.905, 0.161, 0.124, 0.0, 0.0),
+             (0.790, 0.170, 0.140, 0.0, 0.0),
+             (0.735, 0.175, 0.147, 0.0, 0.0),
+             (0.716, 0.166, 0.138, 0.0, 0.0)]
+    belt = [(1.086, 0.157, 0.104, 0.0, 0.0),
+            (1.126, 0.160, 0.107, 0.0, 0.0),
+            (1.146, 0.155, 0.103, 0.0, 0.0)]
+    collar = [(1.478, 0.088, 0.070, 0.0, -0.004),
+              (1.512, 0.079, 0.064, 0.0, -0.004),
+              (1.530, 0.068, 0.056, 0.0, -0.003)]
+    neck = [(1.430, 0.052, 0.055, 0.0, 0.0),
+            (1.490, 0.049, 0.052, 0.0, -0.002),
+            (1.528, 0.047, 0.050, 0.0, -0.004)]
+    parts = [part(chest, "chest", "cloth", sides=12, name="tunic_chest"),
+             part(spine, "spine", "cloth", sides=12, name="tunic_waist"),
+             part(hips, "hips", "cloth", sides=12, name="tunic_hip"),
+             part(tunic, "hips", "cloth", sides=12, name="tunic_skirt"),
+             part(belt, "spine", "oak", sides=12, name="belt"),
+             part(collar, "chest", "cloth", sides=10, name="collar"),
+             part(neck, "neck", "skin", sides=8, name="neck")]
+    parts.append((kit.timber((0.062, 0.036, 0.052), (0, -0.104, 1.116), (0, 0, 0),
+                             "iron", 0.012, "buckle"), "spine"))
+    # A purse on the hip. It is the only asymmetric thing on the figure and it
+    # is what tells you at a glance which way round a distant mobile is facing.
+    parts.append((lib.loft([(1.070, 0.036, 0.026, 0.132, -0.044),
+                            (1.010, 0.052, 0.036, 0.136, -0.048),
+                            (0.958, 0.048, 0.033, 0.138, -0.048)],
+                           sides=8, name="purse", mat="oak"), "spine"))
+    parts += head_parts()
+    for (sx, tag) in ((1, "L"), (-1, "R")):
+        parts += arm_parts(sx, tag)
+        parts += leg_parts(sx, tag)
     return parts
 
 
@@ -189,6 +317,43 @@ def anim_idle(arm):
     return act
 
 
+def anim_fight(arm):
+    """Forty frames: guard, a right-handed overhand cut on 13-19, recover.
+
+    Held in a side-on guard rather than square, because a figure that swings
+    from a shop-window stance reads as a puppet however good the swing is. The
+    weight goes forward on the cut and the hips lead the shoulders by three
+    frames, which is the only thing in here that makes it look like effort."""
+    act = action(arm, "fight", 41)
+    p = arm.pose.bones
+    for (f, turn, lean, dz) in ((1, 26, 0, -0.03), (10, 30, -2, -0.045), (16, 6, 9, -0.02),
+                                (22, 10, 6, -0.035), (32, 24, 1, -0.04), (41, 26, 0, -0.03)):
+        key(p["hips"], f, x=lean, z=turn, loc=(0, 0, dz))
+    for (f, turn, lean) in ((1, 14, -4), (10, 20, -8), (16, -14, 12), (22, -8, 8),
+                            (32, 12, -2), (41, 14, -4)):
+        key(p["chest"], f, x=lean, z=turn)
+        key(p["spine"], f, x=lean * 0.4, z=turn * 0.4)
+        key(p["head"], f, z=-turn * 0.8)
+    # Sword arm: cocked back over the shoulder, then through and down.
+    for (f, up, out, el) in ((1, -108, -26, -96), (10, -132, -34, -118), (16, 46, -8, -18),
+                             (22, 14, -12, -34), (32, -96, -22, -88), (41, -108, -26, -96)):
+        key(p["upperarm.R"], f, x=up, y=out)
+        key(p["forearm.R"], f, x=el)
+        key(p["hand.R"], f, x=-12)
+    # Shield arm stays up across the body the whole time.
+    for (f, a, b) in ((1, -62, -74), (16, -54, -86), (22, -58, -80), (41, -62, -74)):
+        key(p["upperarm.L"], f, x=a, y=-30)
+        key(p["forearm.L"], f, x=b)
+    for (f, l, r) in ((1, -14, 20), (10, -18, 26), (16, -30, 8), (22, -26, 12),
+                      (32, -16, 22), (41, -14, 20)):
+        key(p["thigh.L"], f, x=l)
+        key(p["thigh.R"], f, x=r)
+    for (f, l, r) in ((1, -22, -26), (16, -34, -14), (22, -30, -18), (41, -22, -26)):
+        key(p["shin.L"], f, x=l)
+        key(p["shin.R"], f, x=r)
+    return act
+
+
 def build():
     lib.reset()
     parts = body()
@@ -216,6 +381,7 @@ def build():
     bpy.ops.object.mode_set(mode="POSE")
     anim_idle(arm)
     anim_walk(arm)
+    anim_fight(arm)
     bpy.ops.object.mode_set(mode="OBJECT")
     arm.animation_data.action = bpy.data.actions["idle"]
 

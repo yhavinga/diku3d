@@ -145,9 +145,12 @@ def build():
     # --- pediments and roof ------------------------------------------------
     rz = ez + ARCH_H + FRIEZE_H + CORN_H
     span = outer + 0.9
+    # No rafter tails and no ridge tiles: those belong to a tiled timber roof,
+    # and a Doric cornice with joist ends poking out of it is a mistake, not a
+    # detail. The pediment below does all the shadow work here.
     parts += kit.gable_roof(span, span, PED_H, rz, thick=0.26, eave=0.16, verge=0.0,
                             mat="marble", trim="marble", tympanum=None, barge=False,
-                            fascia=False, along="y")
+                            fascia=False, along="y", rafters=0, caps=0)
     for sy in (-1, 1):
         parts += kit.pediment(span, PED_H, 0.42, rz, sy * (span / 2 - 0.21),
                               mat="marble", along="y")
