@@ -104,19 +104,24 @@ them and never allocates its own — two doors in one wall is the failure mode.
   shin bone's world position into `figure.worldToLocal()` over a couple of
   seconds, and compare the range along local X against local Z. Forward must
   win. Nothing about this is visible in a still.
-- **A `CanvasTexture` of text on transparency must not have mipmaps.** three
-  uploads it non-premultiplied, and `glGenerateMipmap` averages RGB and alpha
-  separately. A small run of dark text on a large field of `rgba(0,0,0,0)`
-  therefore mips down to *uniform black at moderate alpha over the whole quad* —
-  the label stops being text and becomes a black rectangle. The mip level comes
-  from the sprite's screen footprint, so it only appears at distance or at an
-  oblique angle, and every close-up check reads perfectly because that samples
-  level 0. `generateMipmaps = false` and `minFilter = LinearFilter`.
-  This cost four rounds. Three separate real black-rectangle bugs were found and
-  fixed on the way — a corridor to an unbuilt room, unlit window panes, the
-  arch's voussoirs — and none of them was the one being reported. **Reproduce
-  the reported symptom before believing a fix**; "I found a bug of the right
-  shape" is not the same as "I found this bug".
+- **A `CanvasTexture` of text on transparency should not have mipmaps** — but
+  for legibility, not because it makes black rectangles. three uploads it
+  non-premultiplied and `glGenerateMipmap` averages RGB and alpha separately, so
+  black glyph ink bleeds into transparent background and distant labels go
+  muddy. `generateMipmaps = false`, `minFilter = LinearFilter`.
+  A claim that used to sit here — that this mips down to a solid black plate —
+  is **wrong**, and an independent second opinion killed it with a measurement
+  worth remembering: **a box filter conserves the mean of every channel.** A
+  canvas that is a fifth ink stays a fifth ink at every level (mean alpha held
+  at 30/255 from level 0 to the 1×1), so minification can only ever produce a
+  faint veil. The solid dark card was the semi-opaque plate the text used to sit
+  on, tone-mapped to near-black.
+- **"A bug of the right shape" is not "this bug".** One reported black rectangle
+  turned up four different culprits — a corridor to an unbuilt room, unlit
+  window panes at `0x14110e`, the arch's voussoirs, and the label plate. All
+  four were real and all four are better fixed. Each time the fix was called
+  done without reproducing the reported symptom first, and three times it came
+  straight back. Reproduce, then fix, then reproduce again.
 - **To find what a black shape is, hide things, don't reason about it.** Three
   rounds went into a "black bar" by theorising from screenshots. What settled it
   in two minutes: `actors.group.visible = false` to halve the search space, then

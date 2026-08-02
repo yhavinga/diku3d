@@ -74,25 +74,23 @@ function labelTexture(text, { size = 44, colour = '#f3e6cf' } = {}) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
-  // No mip chain. This is the whole bug that was reported four times as a
-  // black bar over people's heads.
+  // No mip chain, because a mip chain over text on transparency is a footgun:
+  // three uploads the canvas non-premultiplied, and glGenerateMipmap averages
+  // RGB and alpha independently, so the black ink of the glyphs and their halo
+  // bleeds into the transparent background and distant labels go muddy.
   //
-  // The canvas is a small run of text on a large field of rgba(0,0,0,0), and
-  // three uploads it *non*-premultiplied. glGenerateMipmap averages RGB and
-  // alpha independently, so every level down mixes the black ink of the text
-  // and its halo with transparent black background: RGB stays at zero while
-  // alpha smears out across the whole quad. Two or three levels down the
-  // sprite is no longer text at all, it is a uniformly black rectangle at
-  // something like 40% alpha covering its entire 512x128 footprint.
+  // What it does *not* do -- and an earlier version of this comment claimed it
+  // did -- is turn the sprite into a solid black rectangle. A box filter
+  // conserves the mean of every channel, so a canvas that is a fifth ink stays
+  // a fifth ink all the way down: measured, mean alpha holds at 30/255 from
+  // level 0 to the 1x1. That is a faint veil, not a plate. Mips on versus off
+  // is worth about ten points of red against a lit background. The thing that
+  // really did read as a black card was the semi-opaque plate this label used
+  // to be drawn on, which ACES took to near-black; that is gone.
   //
-  // That is why it depended on where you stood -- the mip level is chosen from
-  // the sprite's screen footprint, so it only bites once the label is small or
-  // seen obliquely -- and it is why every close-up check I made looked fine:
-  // near the camera it samples level 0 and reads perfectly. Removing the dark
-  // plate behind the text did not help because the halo is black ink too.
-  //
-  // Labels are hidden past ten metres and are a couple of hundred pixels at
-  // most, so a single level with linear filtering is all they ever needed.
+  // So this stays for legibility, not as a cure. Labels are hidden past ten
+  // metres and are a couple of hundred pixels at most, so one level with
+  // linear filtering is all they ever needed.
   texture.generateMipmaps = false;
   texture.minFilter = THREE.LinearFilter;
   const record = { texture, aspect: canvas.width / canvas.height };
