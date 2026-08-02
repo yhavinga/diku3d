@@ -90,6 +90,29 @@ them and never allocates its own — two doors in one wall is the failure mode.
 - `assets.js` `choose(names, seed)` defaults its seed. Callers asking only "does
   this model exist?" pass none, and `undefined * n` is `NaN`, which indexes
   nothing — so the temple kit silently never placed.
+- **V runs the other way out of Blender.** glTF writes `v = 1 - v`, so on every
+  model `uv.v` correlates `-1` with world Y while everything out of `Batcher`
+  correlates `+1`. The normal map's green channel is a direction in that space,
+  so leaving it flipped inverts the relief on all fifty models — mortar stands
+  proud of its blocks, chamfers climb out of joints instead of falling into
+  them. `digest()` negates V for this reason. The check is three lines and worth
+  re-running after any asset change: correlate `uv.getY(i)` against
+  `position.getY(i)` over vertices whose normal is near-horizontal, on one
+  procedural mesh and one `InstancedMesh`. They must agree in sign.
+- A detail normal has to be **structureless**. It used to be the material's own
+  normal map sampled 6.3x smaller, which is fine for plaster and dirt and wrong
+  for anything with a bond: it stamps a miniature copy of the courses inside
+  every block, so one wall reads as 90 cm ashlar and 14 cm brick at once. It is
+  a separate isotropic grain map now, in world units, not a multiple of the tile.
+- `wet` in a recipe is damp collecting in the low patches. That is right for a
+  street and wrong for a floor, and `planks`, `marble` and `flagstone` are mostly
+  indoors — it was putting rain puddles on the floorboards of the tavern. They
+  are dry; `cobble` is not.
+- Figures are kept out of the sun's shadow map, so their contact shadows are
+  placed by hand in `actors.js` and have to be told where the sun is:
+  `applyTime()` calls `actors.setSun()`. Miss that and every person in the town
+  goes back to standing on nothing, which is exactly the fault that made a judge
+  call the whole scene a stack of composited layers.
 - UVs coming out of Blender are in metres and must be **multiplied** by
   `material.userData.uvScale`, which is already `1/tile`. Dividing tiles the
   texture tile-size-squared times too often and reads as a dark grid.
