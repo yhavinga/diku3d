@@ -87,10 +87,10 @@ render loop halted so nothing else is drawing:
 
 | preset | renders at | ms/frame | fps | GPU busy |
 |---|---|---|---|---|
-| low | 1400×900, no bloom, no shadows | 1.0 | 60 | 6% |
-| medium *(default)* | 1750×1125, half-res bloom, 1024 shadows | 1.6 | 60 | 10% |
-| high | 2450×1575, 4× MSAA, 2048 shadows | 6.6 | 60 | 39% |
-| max | 2800×1800, 4× MSAA, full-res bloom | 11.2 | uncapped | pegged |
+| low | 1400×900, no bloom, no shadows, no AO | 1.0 | 60 | 6% |
+| medium *(default)* | 1750×1125, half-res bloom, 2048 shadows | 2.5 | 60 | 15% |
+| high | 2450×1575, SMAA, GTAO, light shafts | 5.8 | 60 | 35% |
+| max | 2800×1800, full-res bloom, GTAO | 9.3 | uncapped | pegged |
 
 Release the mouse or switch tabs and it drops to 10 fps; hide the tab and it
 stops drawing altogether. The sun's shadow map is snapped to a six-metre grid
@@ -127,7 +127,8 @@ chain are WebGL-only and would have to be rewritten as TSL node materials.
 | `merc21/` | Merc 2.1 as released on 1 August 1993, unmodified |
 
 `window.diku` is exposed in the console: `diku.goto(3014)`, `diku.look(x,y,z,yaw)`,
-`diku.applyTime('night')`, plus `layout`, `built` and `world`.
+`diku.applyTime('night')`, plus `layout`, `built`, `world`, `game` and `quality`.
+Set `diku.state.benchmark = true` to halt the render loop before measuring.
 
 ## Running the mud itself
 
@@ -145,9 +146,12 @@ then stored in the clear, which is fine on loopback and nowhere else.
 
 ## Known limits
 
-- Mobiles stand where the reset table drops them and drift a little. They do not
-  walk their routes, and they cannot be fought or traded with. This renders the
-  world; it does not run it.
+- Mobiles fight, die, drop what the reset table gave them and trade at their
+  shop's own margins, but they do not walk their routes or run their spec_funs.
+- The judge that reviews the screenshots does not pass this build. Its ranked
+  faults are the work queue: too little relief on the buildings, no ambient
+  occlusion in the default preset, cobbles at several times their correct scale,
+  and almost nothing dressed at the 0.1-2 m scale.
 - Two staircases in one room share a single opening in the ceiling.
 - An exit whose room has no free wall left ends up as an archway standing in the
   middle of the floor.
