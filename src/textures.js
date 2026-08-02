@@ -642,6 +642,13 @@ export function createMaterials(size = 512, onProgress = () => {}) {
   materials.cloud.name = 'cloud';
   materials.cloud.userData.uvScale = 0.05;
 
+  // The fine grain, shared. assets.js hangs it on the flat materials that have
+  // no baked maps of their own -- cloth and skin -- so a person is not the one
+  // thing in frame with no surface at all while every wall behind them has
+  // albedo, normal and roughness. Not a material, so it is kept off the name
+  // lookup by a key no `MAT:` tag can be.
+  materials.$grain = grain;
+
   return materials;
 }
 

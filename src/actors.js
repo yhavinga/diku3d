@@ -167,7 +167,7 @@ function figureTraits(proto) {
  * its own point in its own idle; the cloth and skin materials are cloned too,
  * since the whole variety of a crowd comes from tinting those two.
  */
-function buildModelledFigure(asset, proto) {
+function buildModelledFigure(asset, proto, library) {
   const t = figureTraits(proto);
   const group = new THREE.Group();
   const body = cloneSkinned(asset.scene);
@@ -179,7 +179,18 @@ function buildModelledFigure(asset, proto) {
     // still grounds them.
     node.castShadow = false;
     const tag = node.material && node.material.name ? node.material.name.replace(/^MAT:/, '') : '';
-    node.material = node.material.clone();
+    // `digest()` swaps the MAT: tags for real materials, but it only does that
+    // for the batched primitives -- the skinned path clones `asset.scene`,
+    // which still carries the raw glTF materials. glTF defaults
+    // `metallicFactor` to 1.0, so every person in the town was a fully
+    // metallic, fully rough, unmapped surface: no diffuse at all, and with
+    // this little environment behind it that renders as a black silhouette.
+    // Same tag lookup as the buildings, so a belt gets oak and a buckle iron.
+    const resolved = library ? library.materialFor(tag) : null;
+    node.material = (resolved || node.material).clone();
+    // The baked materials expect a colour attribute; the figure meshes have
+    // none, and a missing one reads as black rather than as white.
+    if (!node.geometry.attributes.color) node.material.vertexColors = false;
     if (tag === 'cloth') node.material.color.copy(tint.setHex(t.cloth));
     else if (tag === 'skin') node.material.color.copy(tint.setHex(t.skin));
     else if (tag === 'iron') node.material.color.copy(tint.setHex(t.trim));
@@ -696,7 +707,7 @@ export function populate(world, layout, built, options = {}) {
       const person = beast ? null : model(['townsperson']);
       const built = beast ? buildBeastFigure(beast, proto)
         : (person && assets.get(person).animations.length
-          ? buildModelledFigure(assets.get(person), proto)
+          ? buildModelledFigure(assets.get(person), proto, assets)
           : buildFigure(proto));
       const { group: fig, headGroup, height } = built;
       // Never at the centre of the room: that is where you arrive.
@@ -720,9 +731,12 @@ export function populate(world, layout, built, options = {}) {
         object: fig, head: headGroup, label, home: fig.position.clone(), height,
         mixer: built.mixer || null, actions: built.actions || null, legs: built.legs || null,
         last: fig.position.clone(), speed: 0,
-        phase: strHash(mob.proto.short, 5) * 6.28, aggressive,
+        phase: strHash(mob.proto.short, 5) * 6.28, aggressive, walking: false,
         sentinel: !!(mob.proto.act & ACT_SENTINEL),
         drift: 0.35 + strHash(mob.proto.keywords, 9) * 0.5,
+        // How briskly this one paces, and how far from a circle its round is.
+        pace: 0.8 + strHash(mob.proto.short, 21) * 0.55,
+        oval: 0.55 + strHash(mob.proto.keywords, 27) * 0.8,
       });
 
       interactables.push({
@@ -1221,10 +1235,15 @@ export function populate(world, layout, built, options = {}) {
       const bob = fig.actions ? 0 : Math.sin(time * 1.7 + fig.phase) * 0.035;
       fig.object.position.y = fig.home.y + bob;
       if (!fig.sentinel) {
-        // Fast enough that the movement reads as walking rather than sliding,
-        // and a sine so they slow to a stop at each turn and set off again.
-        fig.object.position.x = fig.home.x + Math.sin(time * 0.6 + fig.phase) * fig.drift;
-        fig.object.position.z = fig.home.z + Math.cos(time * 0.45 + fig.phase * 1.3) * fig.drift;
+        // One frequency for both axes, so the path is an ellipse walked at a
+        // steady pace. It was 0.6 on x against 0.45 on z: a Lissajous figure,
+        // and a Lissajous figure has cusps. At each cusp the speed collapses,
+        // the walk blend drops out, the heading stops being updated -- and the
+        // figure keeps moving across a body still pointing the old way. That
+        // is what read as people stepping sideways.
+        const w = 0.52 * fig.pace;
+        fig.object.position.x = fig.home.x + Math.sin(w * time + fig.phase) * fig.drift;
+        fig.object.position.z = fig.home.z + Math.cos(w * time + fig.phase) * fig.drift * fig.oval;
       }
       // Drifting about while playing a standing animation is what reads as
       // floating. Measure how fast the figure is actually travelling, blend to
@@ -1239,6 +1258,7 @@ export function populate(world, layout, built, options = {}) {
         // `fighting` on a figure -- the game does, when it joins combat.
         const fighting = !!fig.fighting && !!fig.actions.fight;
         const walking = !fighting && fig.speed > 0.16;
+        fig.walking = walking;
         const blend = Math.min(1, dt * 5);
         const towards = (action, want) => {
           if (!action) return;
@@ -1251,13 +1271,18 @@ export function populate(world, layout, built, options = {}) {
         // One cycle covers about 1.2 m; match it so the feet don't skate.
         fig.actions.walk.timeScale = walking
           ? THREE.MathUtils.clamp(fig.speed * fig.actions.walkCycle / 1.2, 0.4, 2.2) : 1;
-        if (walking) {
+        // Face the way you are going whenever you are going anywhere. Gating
+        // this on the walk blend was the other half of the sideways problem:
+        // below 0.16 m/s the body stopped turning altogether while the feet
+        // kept carrying it somewhere else. The threshold here only has to be
+        // above the noise floor of a single frame's movement.
+        if (fig.speed > 0.04) {
           const heading = Math.atan2(
             fig.object.position.x - fig.last.x, fig.object.position.z - fig.last.z,
           );
           let turn = ((heading - fig.object.rotation.y + Math.PI) % (Math.PI * 2)) - Math.PI;
           if (turn < -Math.PI) turn += Math.PI * 2;
-          fig.object.rotation.y += turn * Math.min(1, dt * 4);
+          fig.object.rotation.y += turn * Math.min(1, dt * 5);
         }
         fig.last.copy(fig.object.position);
       }
@@ -1296,7 +1321,13 @@ export function populate(world, layout, built, options = {}) {
         let delta = ((want - current + Math.PI) % (Math.PI * 2)) - Math.PI;
         if (delta < -Math.PI) delta += Math.PI * 2;
         if (fig.head) fig.head.rotation.y = THREE.MathUtils.clamp(delta, -0.9, 0.9);
-        if (fig.aggressive) fig.object.rotation.y += delta * Math.min(1, dt * 1.5);
+        // Squaring up to you only while standing still. Turning to face the
+        // camera at the same time as turning to face the way you are walking
+        // settles the body between the two, which is a third way to end up
+        // stepping sideways.
+        if (fig.aggressive && !fig.walking) {
+          fig.object.rotation.y += delta * Math.min(1, dt * 1.5);
+        }
       }
     }
 

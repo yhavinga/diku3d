@@ -63,6 +63,17 @@ export class AssetLibrary {
       const material = new THREE.MeshStandardMaterial({ vertexColors: true, ...recipe });
       material.name = tag;
       material.userData.uvScale = 1;
+      // Flat does not have to mean featureless. Cloth and skin are tinted per
+      // person and would look wrong wearing a stone pattern, but with no map
+      // at all they are the only surfaces in the frame that catch the light
+      // evenly everywhere, which is what makes a figure read as a mannequin
+      // next to a wall that has real relief. The shared grain, weakly, is
+      // enough to break that up: weave on cloth, pores on skin.
+      const grain = this.materials.$grain;
+      if (grain && (tag === 'cloth' || tag === 'skin')) {
+        material.normalMap = grain;
+        material.normalScale = new THREE.Vector2(...(tag === 'cloth' ? [0.5, 0.5] : [0.22, 0.22]));
+      }
       this.extra.set(tag, material);
       return material;
     }

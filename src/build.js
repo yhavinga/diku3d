@@ -492,6 +492,14 @@ export function buildScene(world, layout, materials, assets = null) {
 
   for (const link of layout.links) {
     if (link.kind !== 'alley') continue;
+    // A corridor to a room that was never built is a corridor to nowhere, and
+    // it hangs in the sky: "In the air..." rooms are lifted three levels and
+    // then skipped, but their passages were still routed and walled. An
+    // enclosed one is a thirteen-metre box with a ceiling slab whose inside
+    // faces catch no light, which is what read as a black slab over the town.
+    const fromInfo = rooms.get(link.from.vnum);
+    const toInfo = rooms.get(link.to.vnum);
+    if ((fromInfo && fromInfo.unbuilt) || (toInfo && toInfo.unbuilt)) continue;
     buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor });
   }
 
@@ -519,6 +527,8 @@ export function buildScene(world, layout, materials, assets = null) {
   }
   for (const link of layout.links) {
     if (link.kind !== 'alley' || alleyEnclosed(link)) continue;
+    // Same reason as above: no frontage along a passage that does not exist.
+    if (rooms.get(link.from.vnum)?.unbuilt || rooms.get(link.to.vnum)?.unbuilt) continue;
     const sector = isOutdoor(link.from.room) ? link.from.room.sector : link.to.room.sector;
     for (const c of link.path) {
       for (let dir = 0; dir < 4; dir++) {
