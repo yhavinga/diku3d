@@ -687,7 +687,13 @@ function buildOutdoorEdge({ batcher, chunk, room, cell, pos, dir, open, addColli
       const lx = pos.x + (HALF - 1.3) * sx;
       const lz = pos.z + (HALF - 1.3) * sz;
       decor.push({ kind: 'lamp', x: lx, y: pos.y, z: lz });
-      lights.push({ x: lx, y: pos.y + 3.9, z: lz, color: 0xffc182, intensity: 26, radius: 21, flicker: true });
+      // `outdoor` so the pool can put it out at noon -- a street lamp burning
+      // in daylight was reported, and it is also the light the town has to be
+      // read by after dark, so it carries far more than a torch in a hall.
+      lights.push({
+        x: lx, y: pos.y + 3.9, z: lz, color: 0xffc182,
+        intensity: 26, radius: 26, flicker: true, outdoor: true,
+      });
       addCollider(lx - 0.3, lx + 0.3, lz - 0.3, lz + 0.3, pos.y, pos.y + 4.2);
     }
     return;

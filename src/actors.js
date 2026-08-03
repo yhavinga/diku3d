@@ -607,11 +607,17 @@ function makeFlames(count) {
  * files a figure as a layer composited over the scene rather than as something
  * occupying it, and no amount of work on the figure itself repairs that.
  *
- * So: one soft ellipse per figure, all of them in a single InstancedMesh, laid
- * flat and stretched away from the sun. At noon it is a disc under the feet; at
- * a ten-degree dusk sun it is a long smear pointing away from the light, which
- * is what a real shadow does. It is a lie about occlusion, but it is a lie in
- * the right direction, and it costs one draw call for the whole town.
+ * So: soft ellipses laid flat, all of them in a single InstancedMesh, which
+ * costs one draw call for the whole town.
+ *
+ * Two per figure, because one cannot do both jobs. A single ellipse stretched
+ * away from the sun spreads its density over its whole length, so the part that
+ * matters -- the hand's-breadth where the boot meets the paving -- ends up
+ * fainter the longer the shadow gets. Measured, one ellipse darkened 0.04% of
+ * the frame by a mean of 6 luma, which is why a review looking straight at a
+ * pair of feet reported no contact shadow at all. So: a tight dense patch under
+ * the feet that never stretches, and a long faint smear away from the sun that
+ * is only ever the cast shadow. The patch is the contact; the smear is the sun.
  */
 function shadowAlphaTexture(size = 64) {
   const data = new Uint8ClampedArray(size * size * 4);
@@ -636,13 +642,14 @@ function shadowAlphaTexture(size = 64) {
   return texture;
 }
 
-function makeContactShadows(count) {
+function makeContactShadows(count, opacity, renderOrder) {
   const geometry = new THREE.PlaneGeometry(1, 1);
   geometry.rotateX(-Math.PI / 2);   // flat, normal up, local +Z is the length
   const material = new THREE.MeshBasicMaterial({
     color: 0x000000,
     alphaMap: shadowAlphaTexture(),
     transparent: true,
+    opacity,
     depthWrite: false,
     fog: false,
     // The quad sits a centimetre over the floor it darkens; the offset keeps it
@@ -653,7 +660,7 @@ function makeContactShadows(count) {
   });
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.frustumCulled = false;
-  mesh.renderOrder = 2;
+  mesh.renderOrder = renderOrder;
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -1121,9 +1128,16 @@ export function populate(world, layout, built, options = {}) {
       // seen square stays almost black, and a wall of black rectangles is what
       // this was reported as twice. Raising F0 buys the sky reflection that a
       // real window gets from being slightly bowed and never quite flat.
+      // Env at 2.8 with no transparency made this a mirror, not a window: on a
+      // cloudless day every pane in town reflected the same patch of sky, so
+      // every building wore identical flat pale panels. Glass reflects the sky
+      // *and* lets you see the dark behind it, and the second half is what was
+      // missing -- so it is transparent now, the reflection is dialled back to
+      // something a bowed old pane would really give, and the depth comes from
+      // the tint rather than from opacity.
       const glass = new THREE.MeshStandardMaterial({
-        vertexColors: true, color: 0x1b212b, roughness: 0.06, metalness: 0.38,
-        envMapIntensity: 2.8,
+        vertexColors: true, color: 0x141a24, roughness: 0.10, metalness: 0.22,
+        envMapIntensity: 1.25, transparent: true, opacity: 0.82,
       });
       glass.name = 'windowglass';
       // The other half of the same window. Everything above is about how a
@@ -1241,7 +1255,11 @@ export function populate(world, layout, built, options = {}) {
 
   // --- per-frame ----------------------------------------------------------
 
-  const contactShadows = figures.length ? makeContactShadows(figures.length) : null;
+  // The cast smear first, then the contact patch over it, so the patch is not
+  // diluted by having the smear drawn on top of it.
+  const castShadows = figures.length ? makeContactShadows(figures.length, 0.34, 2) : null;
+  const contactShadows = figures.length ? makeContactShadows(figures.length, 0.62, 3) : null;
+  if (castShadows) group.add(castShadows);
   if (contactShadows) group.add(contactShadows);
 
   // Where the sun is, so the shadows know which way to lie. Direction points
@@ -1276,43 +1294,61 @@ export function populate(world, layout, built, options = {}) {
   const _shadowScale = new THREE.Vector3();
   const _shadowAxis = new THREE.Vector3(0, 1, 0);
 
+  const HIDDEN = { pos: new THREE.Vector3(0, -1000, 0), scale: new THREE.Vector3(0, 0, 0) };
+
   function updateContactShadows() {
     if (!contactShadows) return;
     // Away from the sun, on the ground.
     const dirX = -sun.x;
     const dirZ = -sun.z;
     const yaw = Math.atan2(dirX, dirZ);
-    const tan = Math.tan(THREE.MathUtils.degToRad(Math.max(9, sun.elevation)));
+    // No clamp on the elevation any more. A shadow is height/tan(elevation)
+    // long, and at a 9.5 degree dusk sun that is eleven metres for a grown
+    // figure -- which is exactly what the buildings in the same frame throw.
+    // Capping the figure at 3.2x its own height put it beside a building
+    // shadow three times longer, from the same sun, in the same shot.
+    const tan = Math.max(0.06, Math.tan(THREE.MathUtils.degToRad(Math.max(3, sun.elevation))));
     for (let i = 0; i < figures.length; i++) {
       const fig = figures[i];
-      if (!fig.object.visible) {
-        _shadowScale.set(0, 0, 0);
-        _shadowPos.set(0, -1000, 0);
-        _shadowQuat.identity();
-      } else {
-        const height = fig.height || 1.7;
-        const width = Math.max(0.5, height * 0.42);
-        // A shadow is height/tan(elevation) long. Clamped, because a sun ten
-        // degrees up makes one six times the figure's height and that stops
-        // reading as a shadow and starts reading as a stain.
-        const length = Math.min(height * 3.2, width + (height / tan) * sun.lift);
-        // Feet leaving the ground shrink and lighten it, which is the whole
-        // point: it is the cue that says how far up the figure is.
-        const lift = Math.max(0, fig.object.position.y - fig.home.y);
-        const shrink = Math.max(0.45, 1 - lift * 1.6);
-        _shadowScale.set(width * shrink, 1, length * shrink);
-        _shadowPos.set(
-          fig.object.position.x + dirX * (length / 2 - width * 0.35),
-          fig.home.y + 0.02,
-          fig.object.position.z + dirZ * (length / 2 - width * 0.35),
-        );
-        _shadowQuat.setFromAxisAngle(_shadowAxis, yaw);
-      }
+      const hidden = !fig.object.visible;
+      const height = fig.height || 1.7;
+      const width = Math.max(0.5, height * 0.42);
+      const lift = hidden ? 0 : Math.max(0, fig.object.position.y - fig.home.y);
+      // Feet leaving the ground shrink and lighten it, which is the whole
+      // point: it is the cue that says how far up the figure is.
+      const shrink = Math.max(0.45, 1 - lift * 1.6);
+      const px = hidden ? 0 : fig.object.position.x;
+      const pz = hidden ? 0 : fig.object.position.z;
+      const y = hidden ? -1000 : fig.home.y + 0.02;
+
+      // The contact: a small dense patch under the feet, which does not know
+      // where the sun is and does not stretch. This is the one that says the
+      // figure is touching the ground.
+      if (hidden) _shadowScale.copy(HIDDEN.scale);
+      else _shadowScale.set(width * 0.86 * shrink, 1, width * 0.94 * shrink);
+      _shadowPos.set(px, y, pz);
+      _shadowQuat.identity();
       contactShadows.setMatrixAt(i, _shadowMatrix.compose(_shadowPos, _shadowQuat, _shadowScale));
+
+      // The cast shadow: long, faint, pointing away from the light.
+      const length = width + (height / tan) * sun.lift;
+      if (hidden || sun.lift <= 0.001) _shadowScale.copy(HIDDEN.scale);
+      else _shadowScale.set(width * shrink, 1, length * shrink);
+      _shadowPos.set(
+        px + dirX * (length / 2 - width * 0.35),
+        y,
+        pz + dirZ * (length / 2 - width * 0.35),
+      );
+      _shadowQuat.setFromAxisAngle(_shadowAxis, yaw);
+      castShadows.setMatrixAt(i, _shadowMatrix.compose(_shadowPos, _shadowQuat, _shadowScale));
     }
     contactShadows.instanceMatrix.needsUpdate = true;
-    // A long shadow is a soft one: the same light spread over more ground.
-    contactShadows.material.opacity = 0.28 + 0.30 * sun.lift;
+    castShadows.instanceMatrix.needsUpdate = true;
+    // The contact patch is ambient occlusion and survives the sun going down;
+    // the cast smear is the sun, so it fades with it, and a long one is fainter
+    // because it is the same light spread over more ground.
+    contactShadows.material.opacity = 0.46 + 0.22 * sun.lift;
+    castShadows.material.opacity = (0.30 + 0.16 * sun.lift) * Math.min(1, 4 / (1 + tan * 14));
   }
 
   const _look = new THREE.Vector3();

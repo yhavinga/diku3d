@@ -27,15 +27,25 @@ const _scale = new THREE.Vector3();
  * and skin are small on screen, get tinted per person anyway, and read better
  * flat than wearing a stone pattern.
  */
-const TAG_ALIASES = { oak: 'planks', leaves: 'grass' };
+// `oak` used to alias to `planks`. That is floorboards on a 2.4 m tile, and the
+// things tagged oak are a shoe, a sole, a belt and a head of hair -- 25 cm
+// objects wearing a tenth of a floorboard, which is the wood grain that was
+// reported smeared across every townsperson's feet. Solid oak at this size has
+// no board and no seam: close grain and nothing else.
+const TAG_ALIASES = { leaves: 'grass' };
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
   skin: { color: 0xc79b76, roughness: 0.72, metalness: 0 },
+  oak: { color: 0x5a4330, roughness: 0.78, metalness: 0 },
+  leather: { color: 0x4a3524, roughness: 0.62, metalness: 0 },
+  hair: { color: 0x3a2a1c, roughness: 0.86, metalness: 0 },
   glass: {
     color: 0xd8c48a, roughness: 0.12, metalness: 0,
     transparent: true, opacity: 0.55, emissive: 0x000000,
   },
 };
+/** Tags whose flat material wants the shared grain, at this strength. */
+const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6 };
 
 export class AssetLibrary {
   constructor(materials, baseUrl = 'assets') {
@@ -70,15 +80,31 @@ export class AssetLibrary {
       // next to a wall that has real relief. The shared grain, weakly, is
       // enough to break that up: weave on cloth, pores on skin.
       const grain = this.materials.$grain;
-      if (grain && (tag === 'cloth' || tag === 'skin')) {
+      const strength = GRAINED[tag];
+      if (grain && strength) {
         material.normalMap = grain;
-        material.normalScale = new THREE.Vector2(...(tag === 'cloth' ? [0.5, 0.5] : [0.22, 0.22]));
+        material.normalScale = new THREE.Vector2(strength, strength);
       }
       this.extra.set(tag, material);
       return material;
     }
     this.unknownTags.add(tag);
     return this.materials.stonewall;
+  }
+
+  /**
+   * The glass on the models is one material over every pane in town, so it
+   * cannot be lit house by house the way the procedural windows are. It still
+   * has to know what hour it is: by day a pane shows the sky, and after dark it
+   * shows whatever is burning inside. Left at emissive 0x000000 -- which it was
+   * -- eighty-five panes are a tan panel that never lights, and a town at night
+   * has not one window on.
+   */
+  setWindowLight(colourHex, intensity) {
+    const glass = this.extra.get('glass');
+    if (!glass) return;
+    glass.emissive.setHex(colourHex);
+    glass.emissiveIntensity = Math.max(0, intensity);
   }
 
   /**

@@ -132,7 +132,11 @@ const SURFACES = {
     const base = mix(rgb(0xe6e1d5), rgb(0xd2ccbe), fine * 0.6);
     s.color = mix(base, rgb(0x9a958a), t);
     s.height = 0.5 + fine * 0.03;
-    s.rough = 0.3 + fine * 0.15;
+    // Weathered, not polished. At 0.30-0.45 this was glossy enough to mirror
+    // the sky, and the arch fifty metres off rendered as cyan plastic. Ancient
+    // marble that has stood in the weather sits around 0.6, and the veins --
+    // being harder stone -- stay a little smoother than the ground around them.
+    s.rough = 0.72 - t * 0.14 + fine * 0.12;
   },
 
   plaster(u, v, s) {
@@ -147,13 +151,20 @@ const SURFACES = {
     const base = mix(rgb(0xc9bda3), rgb(0x9c9078), coarse * 0.55);
     s.color = mix(base, rgb(0x6e6350), stain * 0.5 * clamp01(1.25 - v * 1.6));
     s.height = 0.5 + fine * 0.08 + coarse * 0.20;
-    s.rough = 0.88 + fine * 0.1;
+    // A limewashed wall is not uniformly matt: the raised trowel marks burnish
+    // and the stained low-lying patches drink the light. Held between 0.88 and
+    // 0.98 the whole wall caught the light identically everywhere, which is
+    // most of what made it read as one moulded object.
+    s.rough = 0.74 + coarse * 0.20 + stain * 0.08;
   },
 
   stonewall(u, v, s) {
     // Coursed rubble: alternating rows of blocks with a recessed mortar joint.
-    const rows = 6;
-    const cols = 4;
+    // Twelve courses over a 3.6 m tile is 0.30 m a course, with blocks 0.60
+    // long. Six courses read as 0.60 m ashlar -- cathedral stone on a cobbler's
+    // house, and everything indoors built like a crypt.
+    const rows = 12;
+    const cols = 6;
     const gy = v * rows;
     const row = Math.floor(gy);
     const gx = u * cols + (row % 2) * 0.5;
@@ -170,7 +181,9 @@ const SURFACES = {
       ? mix(block, rgb(0x6a6459), grain * 0.35 + (1 - bevel) * 0.3)
       : mix(rgb(0x5d574e), rgb(0x6d675e), grain);
     s.height = inBlock ? 0.62 + bevel * 0.3 + grain * 0.08 : 0.12;
-    s.rough = 0.86 + grain * 0.1;
+    // Dressed face against raw mortar: two different surfaces, and holding them
+    // both between 0.86 and 0.96 threw that away.
+    s.rough = inBlock ? 0.68 + grain * 0.22 : 0.93 + grain * 0.06;
   },
 
   timber(u, v, s) {
@@ -193,7 +206,9 @@ const SURFACES = {
   },
 
   planks(u, v, s) {
-    const boards = 6;
+    // Twelve boards over a 2.4 m tile is 0.20 m a board. Six over 2.8 was 0.47,
+    // and a floor laid in half-metre boards reads as decking.
+    const boards = 12;
     const gy = v * boards;
     const board = Math.floor(gy);
     const fy = gy - board;
@@ -233,7 +248,10 @@ const SURFACES = {
     const c = mix(rgb(0x776037), rgb(0xb99b5e), streak * 0.9);
     s.color = mix(c, rgb(0x4d3f24), (1 - rows) * 0.5);
     s.height = streak * 0.6 + rows * 0.3;
-    s.rough = 0.97;
+    // Weathered straw silvers and takes a slight sheen; the shaded gaps between
+    // the courses stay dead matt. A single value here is a single value over a
+    // whole roof.
+    s.rough = 0.84 + (1 - streak) * 0.14 + (1 - rows) * 0.02;
   },
 
   dirt(u, v, s) {
@@ -243,7 +261,8 @@ const SURFACES = {
     const c = mix(rgb(0x4b3d2c), rgb(0x796144), lumps * 0.85 + grit * 0.15);
     s.color = mix(c, rgb(0x6d675c), stone * 0.7);
     s.height = lumps * 0.5 + stone * 0.4 + grit * 0.1;
-    s.rough = 0.96;
+    // Damp trodden earth against dry dust and the odd embedded stone.
+    s.rough = 0.82 + (1 - lumps) * 0.14 - stone * 0.12;
   },
 
   grass(u, v, s) {
@@ -253,7 +272,8 @@ const SURFACES = {
     const green = mix(rgb(0x33421f), rgb(0x5c7033), clump * 0.8 + blades * 0.2);
     s.color = mix(green, rgb(0x8a7a45), dry * 0.55);
     s.height = blades * 0.6 + clump * 0.3;
-    s.rough = 0.94;
+    // Live blades are waxy and catch a sheen; the dried-off patches do not.
+    s.rough = 0.72 + dry * 0.24 + clump * 0.06;
   },
 
   rock(u, v, s) {
@@ -271,7 +291,7 @@ const SURFACES = {
     const grit = fbm(u * 90, v * 90, 90, 167, 2);
     s.color = mix(rgb(0xb8a172), rgb(0xd8c79a), ripple * 0.6 + grit * 0.4);
     s.height = ripple * 0.5 + grit * 0.2;
-    s.rough = 0.9;
+    s.rough = 0.84 + grit * 0.14;
   },
 
   iron(u, v, s) {
@@ -396,11 +416,11 @@ function toTexture(data, size, colorSpace) {
 const RECIPES = {
   cobble: { surface: 'cobble', scale: 2.2, normalScale: 1.0, env: 1.15, wet: 0.5, detail: 0.5 },
   flagstone: { surface: 'flagstone', scale: 2.6, normalScale: 0.85, env: 1.1, wet: 0.16, detail: 0.5 },
-  marble: { surface: 'marble', scale: 4, normalScale: 0.35, env: 1.35, wet: 0, detail: 0.3 },
+  marble: { surface: 'marble', scale: 4, normalScale: 0.35, env: 0.8, wet: 0, detail: 0.3 },
   plaster: { surface: 'plaster', scale: 3, normalScale: 0.34, env: 0.7, wet: 0, detail: 0.45 },
   stonewall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.95, wet: 0, detail: 0.55 },
   timber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45 },
-  planks: { surface: 'planks', scale: 2.8, normalScale: 0.7, env: 0.85, wet: 0, detail: 0.45 },
+  planks: { surface: 'planks', scale: 2.4, normalScale: 0.7, env: 0.85, wet: 0, detail: 0.45 },
   rooftile: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0.35, detail: 0.5 },
   thatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7 },
   dirt: { surface: 'dirt', scale: 4.5, normalScale: 0.9, env: 0.7, wet: 0.3, detail: 0.6 },

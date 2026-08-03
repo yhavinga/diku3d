@@ -258,6 +258,11 @@ export class LightPool {
   constructor(scene, count, candidates) {
     this.scene = scene;
     this.lights = [];
+    // 0 in the dark, 1 at midday. Street lamps go out as it rises -- one
+    // burning at noon was reported -- and everything gets a lift after dark,
+    // because the practicals are the only light there is then and a lamp
+    // calibrated to read against a sunlit street disappears against a black one.
+    this.daylight = 1;
     this.grid = new Map();
     for (const candidate of candidates) {
       const key = `${Math.floor(candidate.x / 16)},${Math.floor(candidate.z / 16)}`;
@@ -291,6 +296,9 @@ export class LightPool {
         const bucket = this.grid.get(`${cx + dx},${cz + dz}`);
         if (!bucket) continue;
         for (const candidate of bucket) {
+          // A lamp that is out should not hold a slot the hall torch behind it
+          // could have used.
+          if (candidate.outdoor && this.daylight >= 0.99) continue;
           const ddx = candidate.x - position.x;
           const ddy = candidate.y - position.y;
           const ddz = candidate.z - position.z;
@@ -304,6 +312,8 @@ export class LightPool {
       const light = this.lights[i];
       const candidate = this.near[i];
       if (!candidate) { light.visible = false; continue; }
+      const lit = candidate.outdoor ? 1 - this.daylight : 1;
+      if (lit <= 0.01) { light.visible = false; continue; }
       light.visible = true;
       light.position.set(candidate.x, candidate.y, candidate.z);
       light.color.setHex(candidate.color);
@@ -311,7 +321,16 @@ export class LightPool {
       const flicker = candidate.flicker
         ? 0.82 + Math.sin(time * 9.3 + candidate.x) * 0.09 + Math.sin(time * 17.7 + candidate.z) * 0.09
         : 1;
-      light.intensity = (candidate.intensity || 10) * flicker;
+      // Only the street lamps. A torch in a hall is the same torch at noon as
+      // at midnight -- the room it lights never had any sun in it -- and giving
+      // it the night boost blew the temple out at 2.7% of the frame clipped.
+      const afterDark = candidate.outdoor ? 1 + (1 - this.daylight) * 1.6 : 1;
+      light.intensity = (candidate.intensity || 10) * flicker * lit * afterDark;
     }
+  }
+
+  /** How much daylight there is, 0 to 1. Call it whenever the hour changes. */
+  setDaylight(level) {
+    this.daylight = Math.max(0, Math.min(1, level));
   }
 }

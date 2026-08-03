@@ -43,7 +43,13 @@ export class SkyEnvironment {
     this.sky.scale.setScalar(4000);
     // Same cap as the visible sky: an unbounded sun disc in the cube becomes a
     // hot spot that double-counts with the directional light.
-    clampSkyHighlights(this.sky, 60);
+    //
+    // And the same *floor*, which is not a nicety either. This setter used to
+    // be thrown away here while the visible sky kept its own, so after dark the
+    // sky you could see was deep blue and the sky everything was lit by was
+    // black. Nothing outdoors had any ambient at all: measured, 10.8% of the
+    // Temple Square at night came out at literally RGB 0.
+    this.range = clampSkyHighlights(this.sky, 60);
     this.scene.add(this.sky);
 
     // The sky shader has nothing to say below the horizon. Leave that black and
@@ -96,6 +102,7 @@ export class SkyEnvironment {
     uniforms.rayleigh.value = options.rayleigh;
     uniforms.mieCoefficient.value = options.mieCoefficient;
     uniforms.mieDirectionalG.value = options.mieDirectionalG;
+    this.range.setFloor(options.skyFloor ?? 0x000000, options.skyFloorGain ?? 0);
     this.paintGround(options.ground, options.horizon);
 
     const next = this.pmrem.fromScene(this.scene, 0, 1, 20000);
@@ -399,11 +406,17 @@ export function createPipeline({ renderer, scene, camera, width, height }) {
   // That is the black bar that was reported five times, and switching the
   // default preset from medium to high is what turned it on for everyone.
   //
-  // 0.78 leaves a fifth of the ambient standing wherever AO is blackest, which
-  // is enough that nothing reaches zero. The exponent comes down with it: 4.5
-  // was chosen to make the effect visible out of doors and it is far too
-  // contrasty once the blend can no longer hide the bottom end.
-  gtao.blendIntensity = 0.78;
+  // 0.78 left a fifth of the ambient standing, which was enough that nothing
+  // reached zero *at the ambient level of the time*. Then the light balance
+  // changed -- the sun went up fourfold and `env` came down with it -- and a
+  // fifth of the new, smaller ambient landed under the toe of the tone curve.
+  // Measured at the Temple Square at dusk: 0.193% of the frame at literally
+  // RGB 0, all of it on the shaded side of one half-timbered house, and gone
+  // the instant the pass was switched off. So this number is not a taste
+  // setting; it is tied to how much ambient there is to take away. At 0.55
+  // nothing reaches zero at any hour and the pass still does 17% of the frame
+  // in the temple, where it matters most.
+  gtao.blendIntensity = 0.55;
   // `radius` and `thickness` are world metres, and the town's grid pitch is
   // 13m with 5.2m ceilings -- so the interesting question here is "how much of
   // the sky can this doorway see", which is a six-metre question, not the
@@ -411,7 +424,7 @@ export function createPipeline({ renderer, scene, camera, width, height }) {
   // result, not a gain: at 1.0 the buffer comes out very nearly white.
   gtao.updateGtaoMaterial({
     radius: 6, distanceExponent: 1, thickness: 12,
-    distanceFallOff: 1, scale: 2.6, samples: 16, screenSpaceRadius: false,
+    distanceFallOff: 1, scale: 3.2, samples: 16, screenSpaceRadius: false,
   });
   gtao.updatePdMaterial({ lumaPhi: 6, depthPhi: 2.5, normalPhi: 3.5, radius: 5, rings: 2, samples: 8 });
 

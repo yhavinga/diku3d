@@ -35,43 +35,68 @@ const AREA_URL = params.get('areaDir') || 'merc21/area';
  * dials that matter are `env` -- how much of the baked sky to believe -- and
  * `bounce`/`haze`, the colour of the ground and the horizon inside that bake.
  *
+ * **How much of the light is the sun.** On a clear day the sun delivers roughly
+ * eight times what the whole sky does onto a horizontal surface. Here it used
+ * to deliver 0.4 times: measured on the composited frame by zeroing
+ * `sun.intensity` and re-reading it, the sun was **29% of the ground's
+ * luminance at noon** and 18% at dusk. That one number is most of why every
+ * frame read flat, and it is why disabling every shadow in the town changed a
+ * noon frame by a third of a percent -- there was hardly any direct light to
+ * withhold. The fix is not a brighter picture but a differently *balanced* one:
+ * the sun goes up about fourfold, `env` and `ambient` come down, and `exposure`
+ * halves to put the overall level back where it was. Noon now reads 72%.
+ *
+ * Two things move with it. Bloom thresholds are read in linear HDR *before*
+ * exposure, so quadrupling the sun without quadrupling them blooms every lit
+ * wall in town. And the ambient falling means interiors, which have no sun at
+ * all, go properly dim -- which is correct, and is why they need practical
+ * lights of their own rather than a raised floor under everything.
+ *
  * Exposures are set for ACES; see the note where the tone mapping is chosen.
  */
 const TIMES = {
   dawn: {
-    elevation: 8, azimuth: 95, exposure: 0.64, fog: 0xc9a586, density: 0.0050,
-    sun: 0xffc089, sunIntensity: 5.6, sky: 0x9fb6d2, ground: 0x5f5142, ambient: 0.12,
-    env: 0.45, bounce: 0x5e4f3d, haze: 0xc9a586,
-    bloom: 0.16, bloomThreshold: 5.5, stars: 0.22, turbidity: 5.5, rayleigh: 2.6,
+    elevation: 8, azimuth: 95, exposure: 0.50, fog: 0xc9a586, density: 0.0088,
+    sun: 0xffc089, sunIntensity: 23, sky: 0x9fb6d2, ground: 0x5f5142, ambient: 0.055,
+    env: 0.28, bounce: 0x5e4f3d, haze: 0xc9a586,
+    bloom: 0.16, bloomThreshold: 22, stars: 0.22, turbidity: 5.5, rayleigh: 2.6,
     shafts: 0.5, shaftTint: 0xffd2a0,
   },
   noon: {
-    elevation: 58, azimuth: 175, exposure: 0.33, fog: 0xbcd2e6, density: 0.0042,
-    sun: 0xfff4e2, sunIntensity: 5.4, sky: 0xa3c4e4, ground: 0x6f6455, ambient: 0.16,
-    env: 0.55, bounce: 0x77694f, haze: 0xbcd2e6,
-    bloom: 0.14, bloomThreshold: 7.0, stars: 0, turbidity: 3.0, rayleigh: 1.3,
+    elevation: 58, azimuth: 175, exposure: 0.165, fog: 0xbcd2e6, density: 0.0060,
+    sun: 0xfff4e2, sunIntensity: 22, sky: 0xa3c4e4, ground: 0x6f6455, ambient: 0.07,
+    env: 0.34, bounce: 0x77694f, haze: 0xbcd2e6,
+    bloom: 0.14, bloomThreshold: 28, stars: 0, turbidity: 3.0, rayleigh: 1.3,
     shafts: 0, shaftTint: 0xffffff,
   },
   dusk: {
-    elevation: 9.5, azimuth: 258, exposure: 0.62, fog: 0xb87b4e, density: 0.0050,
-    sun: 0xff9448, sunIntensity: 6.2, sky: 0x7b8ea8, ground: 0x50412f, ambient: 0.12,
-    env: 0.45, bounce: 0x574433, haze: 0xb87b4e,
-    bloom: 0.16, bloomThreshold: 5.5, stars: 0.32, turbidity: 6.5, rayleigh: 3.0,
+    elevation: 9.5, azimuth: 258, exposure: 0.55, fog: 0xb87b4e, density: 0.0088,
+    sun: 0xff9448, sunIntensity: 26, sky: 0x7b8ea8, ground: 0x50412f, ambient: 0.055,
+    env: 0.28, bounce: 0x574433, haze: 0xb87b4e,
+    bloom: 0.16, bloomThreshold: 22, stars: 0.32, turbidity: 6.5, rayleigh: 3.0,
     shafts: 0.55, shaftTint: 0xffb469,
   },
   night: {
-    elevation: -8, azimuth: 300, exposure: 1.25, fog: 0x1a2340, density: 0.0068,
-    sun: 0x8ea6d6, sunIntensity: 0.8, sky: 0x2b3a5c, ground: 0x171a22, ambient: 0.18,
+    // Night was a black screen rather than a dark one: mean luma 1.7 of 255,
+    // 5.6% of the frame at literally RGB 0 and 93% under luma 4, with the
+    // modelled street lamps not lit at all. Four things were wrong. The bake
+    // had no sky floor, so what you could see was deep blue and what you were
+    // lit by was black. The moon was 0.8 against a daytime sun of 22. The
+    // lamps were in the pool at their daylight strength. And there was no
+    // haze, which is the one thing that lifts a far wall off zero without
+    // lighting anything.
+    elevation: -8, azimuth: 300, exposure: 0.62, fog: 0x1a2340, density: 0.024,
+    sun: 0x8ea6d6, sunIntensity: 6.2, sky: 0x2b3a5c, ground: 0x171a22, ambient: 1.2,
     env: 1.0, bounce: 0x1a1e28, haze: 0x2c3c62,
     // Rayleigh does the work a black sky cannot: a night sky is deep
     // blue-violet with a brighter band at the horizon, and that band is the
     // only thing giving a roofline a silhouette to be cut against.
-    bloom: 0.42, bloomThreshold: 1.1, stars: 1, turbidity: 2.4, rayleigh: 2.2,
+    bloom: 0.42, bloomThreshold: 4.0, stars: 1, turbidity: 2.4, rayleigh: 2.2,
     shafts: 0, shaftTint: 0xaabbff,
-    // Read before the exposure of 1.25 and ACES, so it is well under what it
-    // looks like: this lands at roughly #0d1226 at the zenith and half a stop
-    // brighter along the horizon.
-    skyFloor: 0x2a3a6b, skyFloorGain: 0.085,
+    // Read before exposure and ACES, so it is well under what it looks like.
+    // This is now the town's whole ambient term after dark, not just a tint on
+    // the visible sky, which is why it is an order of magnitude up.
+    skyFloor: 0x2a3a6b, skyFloorGain: 1.2,
   },
 };
 
@@ -300,7 +325,20 @@ async function boot() {
     actors.setSun(sunPosition, preset.elevation);
     // And the windows have to be told there is daylight outside them, or from
     // inside a room they are black rectangles at head height.
-    actors.setDaylight(preset.haze, THREE.MathUtils.clamp(preset.elevation / 22, 0, 1) * 0.75);
+    const daylight = THREE.MathUtils.clamp(preset.elevation / 22, 0, 1) * 0.75;
+    actors.setDaylight(preset.haze, daylight);
+    // Whether it is day, for things that are lit *because* it is dark. Fully
+    // out above twelve degrees of sun, fully lit below two, so the lamps are a
+    // faint glow at golden hour, gone at noon, and the whole light of the town
+    // after dark.
+    lightPool.setDaylight(THREE.MathUtils.clamp((preset.elevation - 2) / 10, 0, 1));
+    // The panes on the modelled buildings are one material for the whole town,
+    // so they cannot be lit house by house. They still light: sky by day, and
+    // after dark the hearth behind them, or no window in Midgaard is ever on.
+    if (assets) {
+      assets.setWindowLight(daylight > 0.05 ? preset.haze : 0xff9c46,
+        daylight > 0.05 ? daylight : 0.85);
+    }
 
     // Rebake the environment from the sky we just set up. This is the whole
     // ambient term, so it has to happen before the next frame -- and it is a
@@ -314,6 +352,10 @@ async function boot() {
       ground: preset.bounce,
       horizon: preset.haze,
       intensity: preset.env,
+      // The same floor the visible sky gets. Without it the bake goes black
+      // after dark and the town has no ambient at all.
+      skyFloor: preset.skyFloor ?? 0x000000,
+      skyFloorGain: preset.skyFloorGain ?? 0,
     });
 
     shadowAnchor.set(Infinity, Infinity, Infinity); // the sun moved: redraw shadows
