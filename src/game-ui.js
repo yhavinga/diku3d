@@ -41,7 +41,8 @@ const CSS = `
   transition: width 300ms ease; }
 
 /* ------------------------------------------------------------- target -- */
-#g-target { position: absolute; right: 24px; top: 296px; width: 330px; padding: 11px 13px 10px;
+/* Clears the minimap block, which is the map plus the compass under it. */
+#g-target { position: absolute; right: 24px; top: 446px; width: 330px; padding: 11px 13px 10px;
   opacity: 0; transition: opacity 160ms ease; }
 #g-target.on { opacity: 1; }
 #g-target .name { font-size: 18px; line-height: 1.2; }

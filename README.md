@@ -89,6 +89,11 @@ layout grid, and the layout is a non-Euclidean graph forced flat, so cells end
 up adjacent that the mud never joined. Park Road sits directly south of the Dump
 on the map and there is no way to walk between them.
 
+Under the map is a mariner's card compass. The rose is fixed to the world and
+turns beneath the index at the top, so whatever point sits under the index is
+the way you are facing, and it reads upright there whichever one it is. North is
+the fleur-de-lis. The card is sprung, so it settles rather than snaps.
+
 ## Keeping the laptop cool
 
 The scene is about 300 draw calls, which is nothing — the cost is pixels, and

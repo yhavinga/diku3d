@@ -102,7 +102,13 @@ them and never allocates its own — two doors in one wall is the failure mode.
 - The camera looks down -Z at yaw 0, so its forward is `(-sin, 0, -cos)`. Facing
   a point needs `atan2` of the *negated* offset, and standing back from it means
   moving along `+(sin, cos)`. Getting that backwards points `diku.shoot()` at the
-  wall behind you, which is how it shipped for an hour.
+  wall behind you, which is how it shipped for an hour. The same sign shipped
+  wrong in `hud.js` for far longer: forward is `(-e8, -e10)` out of the world
+  matrix, but north is *-z*, so a bearing is `atan2(fx, -fz)` and not
+  `atan2(fx, fz)`. The compass read the reciprocal — north said south — and the
+  minimap wedge, fed the same value, came out mirrored and was right only facing
+  north or south. Check it against the layout, not against the algebra: face
+  yaw 0 at #3014 and the room the mud calls north of it must be at a smaller z.
 - Never put anything at a room's exact centre. That is where the player arrives,
   and both a fountain and a mobile have been stood on top of already.
 - A room placed directly above an open-air room turns that street into a tunnel.
