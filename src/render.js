@@ -103,6 +103,9 @@ export class SkyEnvironment {
     uniforms.mieCoefficient.value = options.mieCoefficient;
     uniforms.mieDirectionalG.value = options.mieDirectionalG;
     this.range.setFloor(options.skyFloor ?? 0x000000, options.skyFloorGain ?? 0);
+    // The same cloud the sky outside has, so what the town is lit by matches
+    // what is over it.
+    if (options.cloud) this.range.setCloud(...options.cloud);
     this.paintGround(options.ground, options.horizon);
 
     const next = this.pmrem.fromScene(this.scene, 0, 1, 20000);
@@ -132,6 +135,42 @@ export class SkyEnvironment {
  * see and gives the bloom a glow it can bound. Hue is preserved -- the whole
  * colour is scaled, not clipped per channel.
  */
+/**
+ * Cloud, in the sky shader rather than on geometry.
+ *
+ * A Preetham sky is a clean gradient and an empty one, and an empty sky is the
+ * easiest tell there is in an outdoor frame -- no shape, no scale, nothing for
+ * the eye to measure distance against. This is five octaves of value noise on
+ * the plane the view direction cuts at cloud height, thresholded into cover.
+ *
+ * The cloud colour is derived from the sky it is drawn over rather than set as
+ * a colour of its own, so it needs no tuning per hour: a cloud is the local sky
+ * desaturated towards its own luminance and gained up. At noon that is white
+ * against blue, at dusk it is orange against orange, and after dark it is a
+ * slightly paler blue-violet, all for free.
+ *
+ * It is deliberately still. Drifting it would mean a uniform write per frame on
+ * a material that is also used to bake the environment, and a sky that moves
+ * while the light on the town does not is worse than a sky that does not move.
+ */
+const SKY_CLOUD = /* glsl */`
+  float cloudHash(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+  float cloudNoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(cloudHash(i), cloudHash(i + vec2(1.0, 0.0)), f.x),
+               mix(cloudHash(i + vec2(0.0, 1.0)), cloudHash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  float cloudFbm(vec2 p) {
+    float v = 0.0, a = 0.5;
+    for (int i = 0; i < 5; i++) { v += a * cloudNoise(p); p *= 2.07; a *= 0.5; }
+    return v;
+  }`;
+
 export function clampSkyHighlights(sky, ceiling = 60) {
   // The other end of the same problem. With the sun below the horizon the
   // shader returns very nearly zero everywhere, so night was RGB 0,0,0 and
@@ -140,17 +179,37 @@ export function clampSkyHighlights(sky, ceiling = 60) {
   // a silhouette has to be read against. `skyFloor` is that band; it is a
   // floor, not an add, so it does nothing at all once the sun is up.
   const floor = new THREE.Vector3(0, 0, 0);
+  // x: cover threshold (higher is less cloud), y: how much of it to believe,
+  // z: gain over the sky behind it, w: drift, so the two skies are not identical
+  const cloud = new THREE.Vector4(0.62, 0.85, 1.9, 0);
   sky.material.onBeforeCompile = (shader) => {
     shader.uniforms.skyCeiling = { value: ceiling };
     shader.uniforms.skyFloor = { value: floor };
+    shader.uniforms.skyCloud = { value: cloud };
     sky.material.userData.skyFloor = shader.uniforms.skyFloor;
     shader.fragmentShader = shader.fragmentShader
-      .replace('void main() {', 'uniform float skyCeiling;\n\t\t\tuniform vec3 skyFloor;\n\t\t\tvoid main() {')
+      .replace('void main() {',
+        `uniform float skyCeiling;\n\t\t\tuniform vec3 skyFloor;\n\t\t\tuniform vec4 skyCloud;\n${SKY_CLOUD}\n\t\t\tvoid main() {`)
       .replace(
         'gl_FragColor = vec4( texColor, 1.0 );',
-        'float skyPeak = max( max( texColor.r, texColor.g ), texColor.b );\n'
+        '\t\t\tvec3 skyDir = normalize( vWorldPosition - cameraPosition );\n'
+        // Cloud first, so the ceiling below caps it too. Applied after the cap
+        // it multiplied a value already at 60 by its own gain, put the whole
+        // sky over the bloom threshold, and lifted 52% of the frame.
+        + '\t\t\tfloat up = skyDir.y;\n'
+        + '\t\t\tif ( up > 0.015 && skyCloud.y > 0.001 ) {\n'
+        + '\t\t\t\tvec2 cp = skyDir.xz / up * 0.55 + vec2( skyCloud.w, skyCloud.w * 0.7 );\n'
+        + '\t\t\t\tfloat n = cloudFbm( cp );\n'
+        + '\t\t\t\tfloat cover = smoothstep( skyCloud.x, skyCloud.x + 0.20, n );\n'
+        // The projection stretches without bound towards the horizon; fade it
+        // out before it turns into streaks lying on the rooftops.
+        + '\t\t\t\tcover *= smoothstep( 0.015, 0.20, up );\n'
+        + '\t\t\t\tfloat lum = dot( texColor, vec3( 0.2126, 0.7152, 0.0722 ) );\n'
+        + '\t\t\t\tvec3 cloudCol = mix( vec3( lum ), texColor, 0.35 ) * skyCloud.z * ( 0.62 + 0.7 * n );\n'
+        + '\t\t\t\ttexColor = mix( texColor, cloudCol, cover * skyCloud.y );\n'
+        + '\t\t\t}\n'
+        + '\t\t\tfloat skyPeak = max( max( texColor.r, texColor.g ), texColor.b );\n'
         + '\t\t\ttexColor *= skyCeiling / max( skyCeiling, skyPeak );\n'
-        + '\t\t\tvec3 skyDir = normalize( vWorldPosition - cameraPosition );\n'
         + '\t\t\tfloat skyHorizon = 1.0 - clamp( abs( skyDir.y ), 0.0, 1.0 );\n'
         + '\t\t\ttexColor = max( texColor, skyFloor * ( 0.42 + skyHorizon * skyHorizon * 1.35 ) );\n'
         + '\t\t\tgl_FragColor = vec4( texColor, 1.0 );',
@@ -161,6 +220,9 @@ export function clampSkyHighlights(sky, ceiling = 60) {
     setFloor(hex, scale) {
       const c = new THREE.Color(hex);
       floor.set(c.r * scale, c.g * scale, c.b * scale);
+    },
+    setCloud(coverage, amount, gain, drift) {
+      cloud.set(coverage, amount, gain, drift);
     },
   };
 }

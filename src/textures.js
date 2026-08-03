@@ -175,11 +175,16 @@ const SURFACES = {
     const jointY = joint * (cols / rows);
     const inBlock = fx > joint && fx < 1 - joint && fy > jointY && fy < 1 - jointY;
     const bevel = clamp01(Math.min(fx - joint, 1 - joint - fx, (fy - jointY) * 1.4, (1 - jointY - fy) * 1.4) / 0.06);
-    const grain = fbm(u * 26 + id * 7, v * 26, 26, 23, 3);
-    const block = mix(rgb(0x8b8478), rgb(0xa8a094), id);
+    // The grain used to run at 26 across a 3.6 m tile -- a 14 cm blotch, which
+    // on a 30 cm course is veining, and the whole wall read as polished granite
+    // rather than as a limestone town. Finer and weaker, and the block colours
+    // pulled together and warmed: real coursed rubble varies stone to stone by
+    // a shade, not by a value.
+    const grain = fbm(u * 62 + id * 7, v * 62, 62, 23, 3);
+    const block = mix(rgb(0x8d8474), rgb(0x9c9384), id);
     s.color = inBlock
-      ? mix(block, rgb(0x6a6459), grain * 0.35 + (1 - bevel) * 0.3)
-      : mix(rgb(0x5d574e), rgb(0x6d675e), grain);
+      ? mix(block, rgb(0x736a5c), grain * 0.20 + (1 - bevel) * 0.20)
+      : mix(rgb(0x635b4f), rgb(0x70685c), grain);
     s.height = inBlock ? 0.62 + bevel * 0.3 + grain * 0.08 : 0.12;
     // Dressed face against raw mortar: two different surfaces, and holding them
     // both between 0.86 and 0.96 threw that away.
@@ -418,7 +423,7 @@ const RECIPES = {
   flagstone: { surface: 'flagstone', scale: 2.6, normalScale: 0.85, env: 1.1, wet: 0.16, detail: 0.5 },
   marble: { surface: 'marble', scale: 4, normalScale: 0.35, env: 0.8, wet: 0, detail: 0.3 },
   plaster: { surface: 'plaster', scale: 3, normalScale: 0.34, env: 0.7, wet: 0, detail: 0.45 },
-  stonewall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.95, wet: 0, detail: 0.55 },
+  stonewall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55 },
   timber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45 },
   planks: { surface: 'planks', scale: 2.4, normalScale: 0.7, env: 0.85, wet: 0, detail: 0.45 },
   rooftile: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0.35, detail: 0.5 },

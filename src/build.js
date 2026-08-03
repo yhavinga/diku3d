@@ -358,6 +358,7 @@ export function buildScene(world, layout, materials, assets = null) {
     buildFloor({
       batcher, chunk, material: mats.floor, x: pos.x, y: pos.y, z: pos.z,
       half, holes: roomHoles.filter((h) => !h.ceiling), addPlatform, slab: !airborne,
+      shade: !outdoor,
     });
 
     if (room.sector === SECTOR.WATER_SWIM || room.sector === SECTOR.WATER_NOSWIM) {
@@ -575,10 +576,16 @@ const alleyEnclosed = (link) => !isOutdoor(link.from.room) && !isOutdoor(link.to
 
 // ---------------------------------------------------------------- pieces ----
 
-function buildFloor({ batcher, chunk, material, x, y, z, half, holes, addPlatform, slab = true }) {
+function buildFloor({ batcher, chunk, material, x, y, z, half, holes, addPlatform, slab = true, shade = true }) {
   const emit = (cx, cz, w, d) => {
     batcher.add(plane(w, d, Math.max(2, Math.round(w / 2))), material, place(cx, y, cz), {
-      chunk, ao: slab ? floorAo(x, z, half, half) : null,
+      // Darkening the perimeter is right in a room, where there is a wall all
+      // the way round it. Out of doors there is not, and the cell next door --
+      // a routed street, or a cell built on -- is painted flat, so the two meet
+      // at 0.55 against 1.0 and the join is a razor-straight rectangle on the
+      // ground, parallel to the world axes. That is the level editor showing
+      // through, and GTAO does the job properly anyway.
+      chunk, ao: (slab && shade) ? floorAo(x, z, half, half) : null,
     });
     if (slab) batcher.add(box(w, SLAB, d), material, place(cx, y - SLAB / 2 - 0.01, cz), { chunk });
     addPlatform(cx - w / 2, cx + w / 2, cz - d / 2, cz + d / 2, y);

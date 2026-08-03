@@ -61,6 +61,8 @@ const TIMES = {
     env: 0.28, bounce: 0x5e4f3d, haze: 0xc9a586,
     bloom: 0.16, bloomThreshold: 22, stars: 0.22, turbidity: 5.5, rayleigh: 2.6,
     shafts: 0.5, shaftTint: 0xffd2a0,
+    // cover threshold, how much to believe, gain over the sky behind, drift
+    cloud: [0.58, 0.9, 1.5, 11.3],
   },
   noon: {
     elevation: 58, azimuth: 175, exposure: 0.165, fog: 0xbcd2e6, density: 0.0060,
@@ -68,6 +70,7 @@ const TIMES = {
     env: 0.34, bounce: 0x77694f, haze: 0xbcd2e6,
     bloom: 0.14, bloomThreshold: 28, stars: 0, turbidity: 3.0, rayleigh: 1.3,
     shafts: 0, shaftTint: 0xffffff,
+    cloud: [0.63, 0.85, 1.45, 4.7],
   },
   dusk: {
     elevation: 9.5, azimuth: 258, exposure: 0.55, fog: 0xb87b4e, density: 0.0088,
@@ -75,6 +78,7 @@ const TIMES = {
     env: 0.28, bounce: 0x574433, haze: 0xb87b4e,
     bloom: 0.16, bloomThreshold: 22, stars: 0.32, turbidity: 6.5, rayleigh: 3.0,
     shafts: 0.55, shaftTint: 0xffb469,
+    cloud: [0.55, 0.95, 1.6, 27.1],
   },
   night: {
     // Night was a black screen rather than a dark one: mean luma 1.7 of 255,
@@ -93,6 +97,7 @@ const TIMES = {
     // only thing giving a roofline a silhouette to be cut against.
     bloom: 0.42, bloomThreshold: 4.0, stars: 1, turbidity: 2.4, rayleigh: 2.2,
     shafts: 0, shaftTint: 0xaabbff,
+    cloud: [0.66, 0.8, 1.7, 19.4],
     // Read before exposure and ACES, so it is well under what it looks like.
     // This is now the town's whole ambient term after dark, not just a tint on
     // the visible sky, which is why it is an order of magnitude up.
@@ -306,6 +311,7 @@ async function boot() {
     sky.material.uniforms.mieCoefficient.value = 0.006;
     sky.material.uniforms.mieDirectionalG.value = 0.86;
     skyRange.setFloor(preset.skyFloor ?? 0x000000, preset.skyFloorGain ?? 0);
+    skyRange.setCloud(...preset.cloud);
     sun.position.copy(sunPosition).multiplyScalar(120);
     sun.color.setHex(preset.sun);
     sun.intensity = preset.sunIntensity;
@@ -356,6 +362,7 @@ async function boot() {
       // after dark and the town has no ambient at all.
       skyFloor: preset.skyFloor ?? 0x000000,
       skyFloorGain: preset.skyFloorGain ?? 0,
+      cloud: preset.cloud,
     });
 
     shadowAnchor.set(Infinity, Infinity, Infinity); // the sun moved: redraw shadows
