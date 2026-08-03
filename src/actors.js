@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ITEM, ACT_AGGRESSIVE, ACT_SENTINEL } from './are.js';
-import { hash3 } from './build.js';
+import { hash3, ROOM, CEIL } from './build.js';
 import { InstanceBatch } from './assets.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
@@ -742,6 +742,10 @@ export function populate(world, layout, built, options = {}) {
   const clutter = [];
   const banners = [];
   const tables = [];
+  const fittings = [];
+  // Declared here rather than with the windows: the hearths built below push
+  // their fires into it, and those run first.
+  const windowLights = [];
 
   // --- mobiles ------------------------------------------------------------
 
@@ -864,6 +868,7 @@ export function populate(world, layout, built, options = {}) {
       case 'clutter': clutter.push(item); break;
       case 'banner': banners.push(item); break;
       case 'table': tables.push(item); break;
+      case 'fitting': fittings.push(item); break;
       case 'gateSign': {
         const sign = makeLabel(`${item.text} — beyond the map`, 0.55, { colour: '#cbb994' });
         sign.position.set(item.x, item.y, item.z);
@@ -916,15 +921,176 @@ export function populate(world, layout, built, options = {}) {
       }
     }
     for (const item of tables) {
-      pushPart(props, G.box(1.5, 0.1, 0.75), 0x6b4d31, at(item.x, item.y + 0.78, item.z));
+      const spin = item.spin || 0;
+      const s2 = Math.sin(spin); const c2 = Math.cos(spin);
+      const set = (lx, y, lz) => at(item.x + lx * c2 + lz * s2, y, item.z - lx * s2 + lz * c2, 0, spin, 0);
+      pushPart(props, G.box(1.5, 0.1, 0.75), 0x93714a, set(0, item.y + 0.78, 0));
       for (const [ox, oz] of [[-0.62, -0.28], [0.62, -0.28], [-0.62, 0.28], [0.62, 0.28]]) {
-        pushPart(props, G.box(0.09, 0.78, 0.09), 0x4a3421, at(item.x + ox, item.y + 0.39, item.z + oz));
+        pushPart(props, G.box(0.09, 0.78, 0.09), 0x6b4d31, set(ox, item.y + 0.39, oz));
       }
       for (const s of [-1, 1]) {
-        pushPart(props, G.box(0.5, 0.08, 0.4), 0x5c4227, at(item.x + s * 1.1, item.y + 0.45, item.z));
-        pushPart(props, G.box(0.08, 0.45, 0.08), 0x4a3421, at(item.x + s * 1.1, item.y + 0.22, item.z));
+        pushPart(props, G.box(1.4, 0.09, 0.34), 0x84633f, set(0, item.y + 0.46, s * 0.72));
+        for (const e of [-0.52, 0.52]) {
+          pushPart(props, G.box(0.09, 0.46, 0.28), 0x6b4d31, set(e, item.y + 0.23, s * 0.72));
+        }
+      }
+      // Tankards, because an empty table is furniture and a table with two
+      // mugs on it is somewhere two people were sitting a minute ago.
+      if (item.benches) {
+        const n = 1 + Math.floor(strHash(`${item.x},${item.z}`, 5) * 3);
+        for (let i = 0; i < n; i++) {
+          const tx = (strHash(`${item.x}`, i + 11) - 0.5) * 1.1;
+          const tz = (strHash(`${item.z}`, i + 13) - 0.5) * 0.44;
+          pushPart(props, G.cylinder(0.048, 0.042, 0.13, 8), 0x7d6a4a, set(tx, item.y + 0.895, tz));
+          pushPart(props, G.box(0.03, 0.07, 0.05), 0x7d6a4a, set(tx + 0.06, item.y + 0.895, tz));
+        }
+      }
+      built.colliders.push({
+        x0: item.x - 0.95, x1: item.x + 0.95, z0: item.z - 0.95, z1: item.z + 0.95,
+        y0: item.y, y1: item.y + 0.85,
+      });
+    }
+    // --- fittings the room's own description asks for ---------------------
+    //
+    // Built in the wall's own frame: local +x runs along the wall, local -z
+    // points into it, so the inner face is at z = -5 whichever wall it is.
+    const FACE = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
+    const WALL_Z = -ROOM / 2;
+    for (const item of fittings) {
+      const ry = FACE[item.dir];
+      const sin = Math.sin(ry); const cos = Math.cos(ry);
+      const put = (lx, y, lz, spin = 0) => at(
+        item.x + lx * cos + lz * sin, y, item.z - lx * sin + lz * cos, 0, ry + spin, 0,
+      );
+      const worldOf = (lx, lz) => [item.x + lx * cos + lz * sin, item.z - lx * sin + lz * cos];
+      // Clear the doorway if the mud put the fitting on the wall it also put
+      // the door in. Half the room is still free either side of a 3.2 m opening.
+      const shift = item.blocked ? -(1.6 + 1.55) : 0;
+      const solid = (lx, lz, halfX, halfZ, y0, y1) => {
+        const [wx, wz] = worldOf(lx, lz);
+        const ax = Math.abs(cos) * halfX + Math.abs(sin) * halfZ;
+        const az = Math.abs(sin) * halfX + Math.abs(cos) * halfZ;
+        built.colliders.push({
+          x0: wx - ax, x1: wx + ax, z0: wz - az, z1: wz + az,
+          y0: item.y + y0, y1: item.y + y1,
+        });
+      };
+
+      if (item.fitting === 'counter') {
+        const L = 4.4; const D = 0.72; const H = 1.06;
+        const front = WALL_Z + 0.45 + D / 2;
+        pushPart(props, G.box(L, H - 0.09, D), 0x8a6740, put(shift, item.y + (H - 0.09) / 2, front));
+        // The top is what the description is about: "old archaic writing,
+        // carvings and symbols cover its top". Darker than the carcase, worn
+        // pale along the edge where four hundred years of elbows have been.
+        pushPart(props, G.box(L + 0.18, 0.09, D + 0.24), 0x6b4c2c, put(shift, item.y + H, front));
+        for (let i = 0; i < 9; i++) {
+          const gx = shift + (i / 8 - 0.5) * (L - 0.5);
+          pushPart(props, G.box(0.035, 0.012, D * 0.62), 0x40301e,
+            put(gx, item.y + H + 0.046, front, (strHash(`${item.x}`, i) - 0.5) * 0.8));
+        }
+        pushPart(props, G.box(L, 0.07, 0.07), 0x5c4227, put(shift, item.y + 0.17, front + D / 2 + 0.14));
+        // Left on the counter: what somebody was just served.
+        for (let i = 0; i < 5; i++) {
+          const gx = shift + (strHash(`${item.x},c`, i) - 0.5) * (L - 0.8);
+          const gz = front + (strHash(`${item.z},c`, i) - 0.5) * (D - 0.35);
+          if (i === 4) {
+            pushPart(props, G.cylinder(0.10, 0.12, 0.30, 9), 0x55483a, put(gx, item.y + H + 0.20, gz));
+            pushPart(props, G.cylinder(0.045, 0.045, 0.08, 7), 0x55483a, put(gx, item.y + H + 0.39, gz));
+          } else {
+            pushPart(props, G.cylinder(0.048, 0.042, 0.13, 8), 0x7d6a4a, put(gx, item.y + H + 0.11, gz));
+            pushPart(props, G.box(0.03, 0.07, 0.05), 0x7d6a4a, put(gx + 0.06, item.y + H + 0.11, gz));
+          }
+        }
+        // The gantry behind it, and what stands on it.
+        for (const [sy, sd] of [[1.42, 0.30], [2.02, 0.26]]) {
+          pushPart(props, G.box(L * 0.86, 0.05, sd), 0x76583a, put(shift, item.y + sy, WALL_Z + sd / 2 + 0.06));
+          for (let i = 0; i < 7; i++) {
+            const gx = shift + (strHash(`${item.z},${sy}`, i) - 0.5) * (L * 0.76);
+            const h = 0.20 + strHash(`${item.x},${sy}`, i) * 0.16;
+            pushPart(props, G.cylinder(0.055, 0.07, h, 7), i % 3 === 0 ? 0x3d5340 : 0x6b4d31,
+              put(gx, item.y + sy + 0.025 + h / 2, WALL_Z + sd / 2 + 0.06));
+          }
+        }
+        // "A small sign with big letters is fastened to the bar."
+        pushPart(props, G.box(0.78, 0.34, 0.04), 0xc9b083, put(shift + L * 0.28, item.y + 0.74, front + D / 2 + 0.03));
+        pushPart(props, G.box(0.84, 0.05, 0.05), 0x5c4227, put(shift + L * 0.28, item.y + 0.93, front + D / 2 + 0.03));
+        // Stools, because a bar nobody can sit at is a counter.
+        for (let i = 0; i < 4; i++) {
+          const sx = shift + (i - 1.5) * 1.05;
+          const sz = front + D / 2 + 0.72 + strHash(`${item.z}`, i) * 0.22;
+          const spin = strHash(`${item.x}`, i + 3) * Math.PI;
+          pushPart(props, G.cylinder(0.19, 0.19, 0.07, 10), 0x7a5a38, put(sx, item.y + 0.63, sz, spin));
+          pushPart(props, G.cylinder(0.055, 0.075, 0.60, 8), 0x60472c, put(sx, item.y + 0.30, sz, spin));
+          pushPart(props, G.cylinder(0.17, 0.17, 0.04, 8), 0x60472c, put(sx, item.y + 0.05, sz, spin));
+        }
+        solid(shift, front, L / 2, D / 2 + 0.12, 0, H);
+      } else if (item.fitting === 'hearth') {
+        const OPEN_W = 1.5; const OPEN_H = 1.35; const BREAST = 2.5; const DEEP = 0.72;
+        const face = WALL_Z + DEEP / 2 + 0.02;
+        const jamb = (BREAST - OPEN_W) / 2;
+        // Pale: this is dressed stone standing in a dark room with a fire at
+        // the foot of it, and the whole point of a chimney breast is that it
+        // is the brightest thing in the room after the fire itself.
+        for (const s of [-1, 1]) {
+          pushPart(props, G.box(jamb, OPEN_H, DEEP), 0xc4bba6,
+            put(shift + s * (OPEN_W + jamb) / 2, item.y + OPEN_H / 2, face));
+        }
+        const above = CEIL - OPEN_H - 0.18;
+        pushPart(props, G.box(BREAST, 0.18, DEEP + 0.16), 0xa89e88, put(shift, item.y + OPEN_H + 0.09, face));
+        pushPart(props, G.box(BREAST * 0.78, above, DEEP), 0xbcb39e, put(shift, item.y + OPEN_H + 0.18 + above / 2, face));
+        // The fireback, sooted, and the hearth you would sweep.
+        pushPart(props, G.box(OPEN_W, OPEN_H, 0.10), 0x181410, put(shift, item.y + OPEN_H / 2, WALL_Z + 0.05));
+        pushPart(props, G.box(BREAST + 0.5, 0.09, 1.25), 0x6b6357, put(shift, item.y + 0.045, WALL_Z + 0.62));
+        pushPart(props, G.box(BREAST + 0.34, 0.11, DEEP + 0.34), 0x5a4a34, put(shift, item.y + OPEN_H + 0.24, face));
+        for (let i = 0; i < 4; i++) {
+          const lx = shift + (strHash(`${item.x},h`, i) - 0.5) * (OPEN_W - 0.4);
+          pushPart(props, G.cylinder(0.075, 0.09, 0.9, 7), i === 3 ? 0x2a211a : 0x5b4128,
+            put(lx, item.y + 0.16 + i * 0.08, WALL_Z + 0.42, 0.35 + i * 0.4));
+        }
+        // A fire, and a light to go with it. No sconce: this one is in a grate.
+        const [fx, fz] = worldOf(shift, WALL_Z + 0.42);
+        flames.push({ x: fx, y: item.y + 0.24, z: fz, rotY: ry, bare: true, hearth: true });
+        // The light sits at the mouth of the opening rather than up the flue.
+        // Back inside it lit the fireback to a bright rectangle and left the
+        // stone around the opening unlit, which is the wrong way round.
+        const [lx2, lz2] = worldOf(shift, WALL_Z + 0.95);
+        windowLights.push({
+          x: lx2, y: item.y + 0.55, z: lz2, color: 0xff9a4a,
+          intensity: 6.5, radius: 12, flicker: true,
+        });
+        solid(shift, face, BREAST / 2, DEEP / 2 + 0.3, 0, CEIL);
+      } else if (item.fitting === 'shelves') {
+        const L = 3.0;
+        for (let b = 0; b < 3; b++) {
+          const sy = 1.05 + b * 0.62;
+          pushPart(props, G.box(L, 0.055, 0.34), 0x8a6740, put(shift, item.y + sy, WALL_Z + 0.23));
+          for (const s of [-1, 1]) {
+            pushPart(props, G.box(0.07, 0.30, 0.28), 0x6b4d31,
+              put(shift + s * (L / 2 - 0.1), item.y + sy - 0.16, WALL_Z + 0.21));
+          }
+          for (let i = 0; i < 6; i++) {
+            const gx = shift + (strHash(`${item.z},${b}`, i) - 0.5) * (L - 0.5);
+            const h = 0.16 + strHash(`${item.x},${b}`, i) * 0.18;
+            pushPart(props, G.box(0.2, h, 0.24), 0x8e7448, put(gx, item.y + sy + 0.028 + h / 2, WALL_Z + 0.23));
+          }
+        }
+      } else if (item.fitting === 'altar') {
+        const W = 2.2; const D = 1.0; const H = 1.05;
+        const front = WALL_Z + 0.55 + D / 2;
+        for (let s = 0; s < 2; s++) {
+          pushPart(props, G.box(W + 1.1 - s * 0.55, 0.17, D + 1.1 - s * 0.55),
+            0xb3ab99, put(shift, item.y + 0.085 + s * 0.17, front));
+        }
+        pushPart(props, G.box(W * 0.66, H - 0.5, D * 0.62), 0xc3bba7, put(shift, item.y + 0.34 + (H - 0.5) / 2, front));
+        pushPart(props, G.box(W, 0.16, D), 0xd0c8b2, put(shift, item.y + H, front));
+        for (const s of [-1, 1]) {
+          pushPart(props, G.cylinder(0.07, 0.09, 0.42, 8), 0xb8a56a, put(shift + s * W * 0.34, item.y + H + 0.29, front));
+        }
+        solid(shift, front, W / 2 + 0.55, D / 2 + 0.55, 0, H);
       }
     }
+
     for (const item of banners) {
       const [dx, , dz] = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]][item.dir];
       const ry = (item.dir === 1 || item.dir === 3) ? Math.PI / 2 : 0;
@@ -947,6 +1113,8 @@ export function populate(world, layout, built, options = {}) {
     const brackets = [];
     const posts = [];
     for (const f of flames) {
+      // A fire in a grate has no bracket and wants no torch.
+      if (f.bare) continue;
       const lampModel = f.lamp ? model(['lamp_post']) : model(['torch_sconce']);
       if (lampModel && instances) {
         // The models come out of Blender with their origin on the floor, so a
@@ -985,8 +1153,11 @@ export function populate(world, layout, built, options = {}) {
     flameSystem = makeFlames(flames.length);
     const dummy = new THREE.Object3D();
     flames.forEach((f, i) => {
-      dummy.position.set(f.x, f.y + (f.lamp ? 0.05 : 0.2), f.z);
-      dummy.scale.setScalar(f.lamp ? 1.15 : 1);
+      // A hearth fire sits where it was put, and is wider and lower than a
+      // torch: it is a bed of logs, not a brand.
+      dummy.position.set(f.x, f.y + (f.hearth ? 0 : f.lamp ? 0.05 : 0.2), f.z);
+      if (f.hearth) dummy.scale.set(1.9, 1.15, 1.9);
+      else dummy.scale.setScalar(f.lamp ? 1.15 : 1);
       dummy.updateMatrix();
       flameSystem.mesh.setMatrixAt(i, dummy.matrix);
     });
@@ -1039,7 +1210,6 @@ export function populate(world, layout, built, options = {}) {
 
   // --- lit windows --------------------------------------------------------
 
-  const windowLights = [];
   let glassMaterial = null;
   let glowMaterial = null;
   if (windows.length) {

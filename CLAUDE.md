@@ -89,6 +89,19 @@ because a market square six metres across is not a market square.
 Wall sides are allocated once, in `layout.js` (`layout.sides`). `build.js` reads
 them and never allocates its own — two doors in one wall is the failure mode.
 
+**Rooms are furnished from their own prose.** Diku descriptions are formulaic
+about fittings and usually name the wall too — "the bar is set against the
+northern wall", "a fireplace is built into the western wall" — and that is a
+placement instruction, not scenery. `readFittings()` in `build.js` reads it, the
+same move `pickMaterials` already makes on the room name. Two things it has to
+guard: "a small entrance to *the bar* is in the northern wall" is a doorway
+(hence the lookbehind), and "to the east is the bar" is a direction, so a
+taproom is recognised by its own *name* and not by a room that points at one.
+Where the named wall is also the wall with the door in it — the Grunting Boar's
+fireplace is in the western wall and west is its only way out — the fitting
+slides along to clear the opening rather than moving to a wall the mud did not
+choose.
+
 ## Traps that have already cost time
 
 - `EffectComposer` applies its *own* pixel ratio to every pass. Hand it CSS

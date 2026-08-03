@@ -952,7 +952,95 @@ function buildRoof({ batcher, chunk, mats, room, x, y, z, decor }) {
   }
 }
 
+/**
+ * What the room says is in it.
+ *
+ * Diku prose is formulaic about fittings, and where it names one it usually
+ * names the wall too: "the bar is set against the northern wall", "a fireplace
+ * is built into the western wall". That is a placement instruction, not
+ * scenery, and reading it is the same move `pickMaterials` already makes on the
+ * room name. Across the 45 stock areas 107 rooms name a counter, a hearth,
+ * shelves or an altar and seven of them say which wall -- and it is the only
+ * way the Grunting Boar gets the bar its own description has always promised.
+ */
+const WALL_WORD = { north: 0, east: 1, south: 2, west: 3 };
+// The lookbehind is not decoration. "A small entrance to the bar is in the
+// northern wall" is a doorway, and without it the Cleric's Guild entrance hall
+// grew a counter out of the description of the room next door.
+const FITTING_ON_WALL = /(?<!(?:entrance|door|doorway|way|opening|stairs?|passage)\s+(?:to|into)\s+the\s+)\b(bar|counter|fireplace|hearth|forge|altar|shelves|shelf|bookcase)\b[^.]{0,90}?\b(?:against|into|in|on|by|along|beside)\s+the\s+(north|south|east|west)(?:ern)?\s+(?:wall|side|end)/gi;
+const FITTING_KIND = {
+  bar: 'counter', counter: 'counter',
+  fireplace: 'hearth', hearth: 'hearth', forge: 'hearth',
+  shelves: 'shelves', shelf: 'shelves', bookcase: 'shelves',
+  altar: 'altar',
+};
+// A room that *is* a bar, not one that mentions where the bar is: "to the east
+// is the bar" is a direction and "a little sand bar" is in a river. The name is
+// the reliable signal -- Cleric's Bar, The Thieves Bar, Nyles' House of Ale --
+// and the entrance halls and practice yards that point at one are not it.
+const TAPROOM = /\b(bar|inn|tavern|pub|alehouse|taproom|ale)\b/i;
+const NOT_THE_ROOM_ITSELF = /\b(entrance|hall|yard|street|road|square|gate|path|door)\b/i;
+
+function readFittings(room, sides) {
+  const text = `${room.name}. ${room.description}`.replace(/\s+/g, ' ');
+  const blank = [];
+  for (let d = 0; d < 4; d++) if (!sides[d]) blank.push(d);
+  const found = new Map();   // kind -> dir, first mention wins
+
+  FITTING_ON_WALL.lastIndex = 0;
+  let m;
+  while ((m = FITTING_ON_WALL.exec(text))) {
+    const kind = FITTING_KIND[m[1].toLowerCase()];
+    if (kind && !found.has(kind)) found.set(kind, WALL_WORD[m[2].toLowerCase()]);
+  }
+
+  // Named without a wall: put it somewhere there is no door, if there is one.
+  const loose = (pattern, kind) => {
+    if (found.has(kind) || !pattern.test(text)) return;
+    found.set(kind, blank.length ? blank[found.size % blank.length] : 0);
+  };
+  if (TAPROOM.test(room.name) && !NOT_THE_ROOM_ITSELF.test(room.name)) loose(/./, 'counter');
+  loose(/\bcounter\b/i, 'counter');
+  loose(/\b(fireplace|hearth|forge)\b/i, 'hearth');
+  loose(/\bshelves\b/i, 'shelves');
+  loose(/\baltar\b/i, 'altar');
+
+  return [...found].map(([kind, dir]) => ({ kind, dir }));
+}
+
 function buildInteriorProps({ room, pos, sides, decor, mats }) {
+  for (const f of readFittings(room, sides)) {
+    // A wall the text names may still be the one with the door in it -- the
+    // Grunting Boar's fireplace is in the western wall and west is its only way
+    // out. Slide the fitting along until it clears the opening rather than
+    // moving it to a wall the mud did not choose.
+    const blocked = !!sides[f.dir];
+    decor.push({
+      kind: 'fitting', fitting: f.kind, dir: f.dir, blocked,
+      x: pos.x, y: pos.y, z: pos.z, seed: hash3(room.vnum, f.dir, 0, 71),
+    });
+    // A bar with nowhere to sit and drink is a counter. The prose does not
+    // list the tables because nobody would think to; "this place makes you
+    // feel like home" is the line that stands in for them.
+    if (f.kind === 'counter') {
+      const [nx, , nz] = DIR_STEP[f.dir];
+      for (let i = 0; i < 3; i++) {
+        const along = (i - 1) * 2.9 + (hash3(room.vnum, i, 0, 73) - 0.5) * 0.8;
+        const back = 1.7 + hash3(room.vnum, i, 0, 74) * 1.7;
+        decor.push({
+          kind: 'table', benches: true,
+          x: pos.x - nx * back - nz * along,
+          y: pos.y,
+          z: pos.z - nz * back - nx * along,
+          spin: (hash3(room.vnum, i, 0, 75) - 0.5) * 0.5,
+        });
+      }
+    }
+  }
+  buildLooseProps({ room, pos, sides, decor, mats });
+}
+
+function buildLooseProps({ room, pos, sides, decor, mats }) {
   const blank = [];
   for (let d = 0; d < 4; d++) if (!sides[d]) blank.push(d);
   if (blank.length && /temple|altar|sanctum|hall|throne/i.test(room.name)) {
