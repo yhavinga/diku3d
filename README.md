@@ -75,6 +75,20 @@ Try `?areas=moria&room=7000`, `?areas=sewer&room=7100`, `?areas=haon&room=6500`
 for somewhere that is not a town. Loading two areas that connect (`midgaard,school`)
 opens the gate between them.
 
+Midgaard alone is a town with its edges cut off. Several of its exits lead into
+other area files, and with only `midgaard` loaded those say `#3504 is in an area
+not loaded`. They are real ways out of the city, not dead ends:
+
+    ?areas=midgaard,midennir,sewer
+
+opens the Dump's south exit onto the South Bridge and its down exit into the
+sewer, at 323 rooms — still inside the default `?max=400`.
+
+**A room drawn next to another on the minimap is not an exit.** The map is the
+layout grid, and the layout is a non-Euclidean graph forced flat, so cells end
+up adjacent that the mud never joined. Park Road sits directly south of the Dump
+on the map and there is no way to walk between them.
+
 ## Keeping the laptop cool
 
 The scene is about 300 draw calls, which is nothing — the cost is pixels, and

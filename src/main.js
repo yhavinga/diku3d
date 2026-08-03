@@ -428,7 +428,12 @@ async function boot() {
     const exit = room.exits[dir];
     const name = DIR_NAME[dir];
     if (!exit) { hud.toast(`no exit ${name}`); return; }
-    if (exit.offMap) { hud.toast(`${name}: outside the loaded world`); return; }
+    // Worth naming the room number. "Outside the loaded world" sounds like a
+    // dead end and is not one: the exit is real in the mud and leads into an
+    // area file this session did not load, so the vnum is exactly what you need
+    // to find it -- The Dump's south is #3504 in midennir.are. Load it with
+    // ?areas=midgaard,midennir and the exit works.
+    if (exit.offMap) { hud.toast(`${name}: #${exit.to} is in an area not loaded`); return; }
     const target = built.rooms.get(exit.to);
     if (!target || target.unbuilt) { hud.toast(`${name}: nothing built that way`); return; }
     // A door in the way behaves as it looks: what you see shut, you cannot walk
