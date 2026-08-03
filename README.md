@@ -35,6 +35,13 @@ shimmer in it that puts you where the exit says — honest about the fact that t
 mud's geography folds. For Midgaard that leaves **93% of exits walkable** and
 eight archways; across all 43 stock areas it averages 94%.
 
+A cell is thirteen metres, which is far too wide for a street, so an open-air
+city room does not pave all of it: every side with no way out of it brings the
+frontage behind it forward, and the corners between two ways out are built on
+too. Four exits leaves a crossroads with a block on each corner, two opposite
+exits leaves a lane between two terraces, and either way the facades finish
+6.6 m apart. Squares are exempt, by the mud's own name for them.
+
     node tools/layout-check.mjs                    # every area
     node tools/layout-check.mjs 3001 midgaard.are  # one, from a given room
     node tools/parse-check.mjs                     # the reader, over everything
@@ -96,8 +103,8 @@ the fleur-de-lis. The card is sprung, so it settles rather than snaps.
 
 ## Keeping the laptop cool
 
-The scene is about 300 draw calls, which is nothing — the cost is pixels, and
-how many times a second you pay for them. `src/quality.js` owns all four dials:
+The scene is around 1300 draw calls on the Market Square — still not much, and
+most of the cost is pixels rather than submissions. `src/quality.js` owns all four dials:
 render resolution, multisampling, the bloom chain, and the frame cap. It also
 measures the result on the GPU with `EXT_disjoint_timer_query_webgl2` rather
 than inferring it from wall time, and drops the render scale a step if a frame
@@ -109,9 +116,13 @@ render loop halted so nothing else is drawing:
 | preset | renders at | ms/frame | fps | GPU busy |
 |---|---|---|---|---|
 | low | 1400×900, no bloom, no shadows, no AO | 1.0 | 60 | 6% |
-| medium *(default)* | 1750×1125, half-res bloom, 2048 shadows | 2.5 | 60 | 15% |
-| high | 2450×1575, SMAA, GTAO, light shafts | 5.8 | 60 | 35% |
-| max | 2800×1800, full-res bloom, GTAO | 9.3 | uncapped | pegged |
+| medium | 1750×1125, half-res bloom, 2048 shadows | 2.5 | 60 | 15% |
+| high *(default)* | 2450×1575, SMAA, GTAO | 12.1 | 30 | 36% |
+| max | 2800×1800, full-res bloom, GTAO, shafts | 18 | uncapped | pegged |
+
+`high` was 5.8 ms before the streets were given two sides. Bringing the
+frontages forward roughly doubled the geometry — 2.0M triangles against 631k —
+which is a third of the 30 fps budget and worth every millisecond.
 
 Release the mouse or switch tabs and it drops to 10 fps; hide the tab and it
 stops drawing altogether. The sun's shadow map is snapped to a six-metre grid
@@ -169,10 +180,13 @@ then stored in the clear, which is fine on loopback and nowhere else.
 
 - Mobiles fight, die, drop what the reset table gave them and trade at their
   shop's own margins, but they do not walk their routes or run their spec_funs.
-- The judge that reviews the screenshots does not pass this build. Its ranked
-  faults are the work queue: too little relief on the buildings, no ambient
-  occlusion in the default preset, cobbles at several times their correct scale,
-  and almost nothing dressed at the 0.1-2 m scale.
+- The judge that reviews the screenshots does not pass this build. What is left
+  on its list: interiors are all 10.26 m square with a 5.2 m ceiling and are
+  empty of the furniture their own descriptions promise, the sun is still the
+  only shadow-casting light, water reflects nothing and the river is built from
+  stepped slabs with visible seams, the half-timbering is one module repeated,
+  and the trees are three ellipsoids on a stick. The last two need the Blender
+  scripts rerun, not a code change.
 - Two staircases in one room share a single opening in the ceiling.
 - An exit whose room has no free wall left ends up as an archway standing in the
   middle of the floor.

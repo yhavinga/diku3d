@@ -76,6 +76,16 @@ a routed street or gets built on. Collapsing that back to direct grid adjacency
 is the obvious "simplification" and it was measured: Midgaard goes from 93%
 walkable to 54%.
 
+**A cell is not a street.** The grid pitch is 13 m, and an open-air room used to
+pave every metre of its own cell, so a room, a routed street and another room
+came to 39 m of continuous ground — measured by a 36-ray sweep, against 6–12 m
+for a real town lane. Rooms cannot move, but a lane only needs a corridor: every
+side of an open-air city cell with no way out of it now brings the frontage
+behind it forward 3.2 m, and every corner between two ways out is built on too.
+Facades finish 6.6 m apart and Main Street's nearest one went 14.5 m → 5.1 m.
+Squares are exempt by the mud's own name for them (`SQUARE` in `build.js`),
+because a market square six metres across is not a market square.
+
 Wall sides are allocated once, in `layout.js` (`layout.sides`). `build.js` reads
 them and never allocates its own — two doors in one wall is the failure mode.
 
@@ -154,6 +164,41 @@ them and never allocates its own — two doors in one wall is the failure mode.
   **Switching the default preset from `medium` to `high` is what turned this on
   for everyone** — `medium` has `ao: false`. A change that only flips a setting
   can still be the change that ships a bug.
+- **How much of the light is the sun is a number, and it was wrong by an order
+  of magnitude.** On a clear day the sun delivers about eight times what the
+  whole sky does onto a horizontal surface. Measure it by zeroing
+  `sun.intensity` and re-reading the composited frame: it was 29% at noon, and
+  that one figure is most of why every frame read flat. The proof it matters:
+  with the sun that weak, switching off every shadow in town changed a noon
+  frame by 0.33%. It reads 72% now. Two things move with it — bloom thresholds
+  are read in linear HDR *before* exposure, so quadrupling the sun without
+  quadrupling them blooms every lit wall; and the ambient coming down means the
+  **GTAO floor no longer clears the toe of the tone curve**. `blendIntensity`
+  is not a taste setting, it is tied to how much ambient there is to take away.
+- **`SkyEnvironment` builds its own `Sky`.** It is a second material with a
+  second set of injected uniforms, and anything set on the visible sky has to
+  be set on it too or the town is lit by a different sky than the one over it.
+  This is how night came to be a black screen: the floor setter was kept for the
+  visible sky and thrown away for the bake, so the sky you could see was deep
+  blue and the sky everything was lit by was black.
+- **Order matters inside the sky shader injection.** Cloud added *after* the
+  ceiling that holds the sky to 60 multiplies an already-capped value by its own
+  gain, puts the whole sky over the bloom threshold and lifts half the frame.
+- **A probe that leaves `state.benchmark` on poisons the next measurement.**
+  The loop is what redraws the shadow map after `applyTime`, so with it halted
+  the next frame is measured against the *previous* hour's shadows. That is how
+  a dusk square that is entirely in shadow came out reading 53% sunlit.
+- **Measuring a post-processing pass by disabling it measures a different
+  picture.** `EffectComposer` ping-pongs buffers and a pass with `needsSwap`
+  changes the parity when it is skipped. Set its strength to 0 instead.
+- **Blender puts a model's origin on the floor.** A wall sconce's bracket is two
+  metres up its own bounding box, so placing the model at the height of the
+  flame hangs the bracket two metres above it — which is the floating flame that
+  was reported. Read `library.get(name).bounds` and align to that.
+- **Darkening a floor towards its perimeter belongs indoors only.** Out of doors
+  the cell next door is painted flat, so the two meet at 0.55 against 1.0 and
+  the join is a razor-straight rectangle on the ground, parallel to the world
+  axes. That is the level editor showing through.
 - **Measure the composited frame, not `renderer.render()`.** Five rounds of
   "black bar" hunting were done with a detector that rendered the scene to an
   offscreen target, bypassing `EffectComposer` — so it never saw GTAO, and GTAO
