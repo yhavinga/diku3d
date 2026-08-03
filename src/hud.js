@@ -67,25 +67,29 @@ function armOfTheRose(ctx, deg, len, half, light, dark) {
   ctx.lineWidth = 0.7; ctx.strokeStyle = 'rgba(224,189,119,0.38)'; ctx.stroke();
 }
 
-/** North, drawn the way every rose since the portolan charts has drawn it. */
+/**
+ * North, drawn the way every rose since Reinel has drawn it. Kept half again
+ * as tall as it is wide and pointed at the top: at this size the silhouette is
+ * all that survives, and lobes that splay sideways read as an insect.
+ */
 function fleurDeLis(ctx, s) {
   ctx.beginPath();
   ctx.moveTo(0, -s);
-  ctx.bezierCurveTo(0.30 * s, -0.60 * s, 0.22 * s, -0.28 * s, 0.15 * s, -0.05 * s);
-  ctx.lineTo(-0.15 * s, -0.05 * s);
-  ctx.bezierCurveTo(-0.22 * s, -0.28 * s, -0.30 * s, -0.60 * s, 0, -s);
+  ctx.bezierCurveTo(0.15 * s, -0.66 * s, 0.17 * s, -0.30 * s, 0.15 * s, -0.04 * s);
+  ctx.lineTo(-0.15 * s, -0.04 * s);
+  ctx.bezierCurveTo(-0.17 * s, -0.30 * s, -0.15 * s, -0.66 * s, 0, -s);
   ctx.closePath(); ctx.fill();
   for (const side of [1, -1]) {
     ctx.beginPath();
-    ctx.moveTo(side * 0.13 * s, -0.16 * s);
-    ctx.bezierCurveTo(side * 0.60 * s, -0.54 * s, side * 0.68 * s, -0.08 * s, side * 0.31 * s, -0.01 * s);
-    ctx.lineTo(side * 0.13 * s, -0.01 * s);
+    ctx.moveTo(side * 0.12 * s, -0.12 * s);
+    ctx.bezierCurveTo(side * 0.50 * s, -0.50 * s, side * 0.54 * s, -0.10 * s, side * 0.30 * s, 0);
+    ctx.lineTo(side * 0.12 * s, 0);
     ctx.closePath(); ctx.fill();
   }
-  ctx.fillRect(-0.33 * s, -0.02 * s, 0.66 * s, 0.11 * s);
+  ctx.fillRect(-0.32 * s, 0, 0.64 * s, 0.09 * s);
   ctx.beginPath();
-  ctx.moveTo(-0.12 * s, 0.11 * s); ctx.lineTo(0.12 * s, 0.11 * s);
-  ctx.lineTo(0.06 * s, 0.32 * s); ctx.lineTo(-0.06 * s, 0.32 * s);
+  ctx.moveTo(-0.10 * s, 0.09 * s); ctx.lineTo(0.10 * s, 0.09 * s);
+  ctx.lineTo(0.05 * s, 0.26 * s); ctx.lineTo(-0.05 * s, 0.26 * s);
   ctx.closePath(); ctx.fill();
 }
 
@@ -101,39 +105,44 @@ function drawCard(dpr) {
   ctx.beginPath(); ctx.arc(0, 0, CARD_R, 0, Math.PI * 2); ctx.fill();
 
   ctx.strokeStyle = 'rgba(224,189,119,0.055)';
-  ctx.lineWidth = 10;
-  ctx.beginPath(); ctx.arc(0, 0, 57, 0, Math.PI * 2); ctx.stroke();
+  ctx.lineWidth = 8;
+  ctx.beginPath(); ctx.arc(0, 0, 58, 0, Math.PI * 2); ctx.stroke();
 
-  for (const r of [62, 52, 38]) {
+  for (const r of [62, 54, 34]) {
     ctx.lineWidth = 0.8;
     ctx.strokeStyle = 'rgba(224,189,119,0.28)';
     ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
   }
 
+  // Ten and thirty, not five and fifteen. A marine card is graduated every 5°,
+  // but shown 136 px across that is 72 ticks five pixels apart, and a rotating
+  // card resolves a different subset of them every frame -- the ring crawls,
+  // which no still will ever show you. Fifteen matched no real card anyway.
   ctx.lineCap = 'butt';
-  for (let deg = 0; deg < 360; deg += 5) {
-    const major = deg % 45 === 0;
-    const medium = deg % 15 === 0;
+  for (let deg = 0; deg < 360; deg += 10) {
+    const major = deg % 30 === 0;
     const [x0, y0] = polar(deg, 62);
-    const [x1, y1] = polar(deg, major ? 52 : medium ? 56 : 58.5);
+    const [x1, y1] = polar(deg, major ? 54 : 58.5);
     ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
-    ctx.lineWidth = major ? 1.9 : medium ? 1.2 : 0.8;
-    ctx.strokeStyle = major ? 'rgba(243,220,160,0.95)'
-      : medium ? 'rgba(224,189,119,0.7)' : 'rgba(214,196,160,0.4)';
+    ctx.lineWidth = major ? 2 : 1.1;
+    ctx.strokeStyle = major ? 'rgba(243,220,160,0.95)' : 'rgba(224,196,150,0.55)';
     ctx.stroke();
   }
 
   // half-winds: hairlines only, or sixteen solid arms turn to mush at this size
   for (let i = 0; i < 8; i++) {
-    const [x0, y0] = polar(i * 45 + 22.5, 7);
-    const [x1, y1] = polar(i * 45 + 22.5, 30);
+    const [x0, y0] = polar(i * 45 + 22.5, 6);
+    const [x1, y1] = polar(i * 45 + 22.5, 16.5);
     ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
     ctx.lineWidth = 0.9; ctx.strokeStyle = 'rgba(224,189,119,0.34)'; ctx.stroke();
   }
 
-  for (let i = 0; i < 4; i++) armOfTheRose(ctx, i * 90 + 45, 21, 4.2, '#cdc0a4', '#3b342b');
-  for (const deg of [90, 180, 270]) armOfTheRose(ctx, deg, 36, 5.2, '#ece0c4', '#4a4136');
-  armOfTheRose(ctx, 0, 36, 5.2, '#f7dda6', '#8a6a2e');
+  // Every real rose runs cardinal > intercardinal > half-wind, strictly. Get
+  // that order wrong and it stops being a rose and becomes a four-armed burst
+  // with spikes between the arms.
+  for (let i = 0; i < 4; i++) armOfTheRose(ctx, i * 90 + 45, 26, 4.4, '#cdc0a4', '#4e4638');
+  for (const deg of [90, 180, 270]) armOfTheRose(ctx, deg, 33, 5.0, '#ece0c4', '#5d5445');
+  armOfTheRose(ctx, 0, 33, 5.0, '#f2d9a2', '#8a6a2e');
 
   // Letters stand with their tops outward, so whichever point is under the
   // lubber index reads upright -- which is the whole trick of a card compass.
@@ -143,7 +152,7 @@ function drawCard(dpr) {
     [90, 'E', 15, 0.95], [180, 'S', 15, 0.95], [270, 'W', 15, 0.95],
     [45, 'NE', 8, 0.6], [135, 'SE', 8, 0.6], [225, 'SW', 8, 0.6], [315, 'NW', 8, 0.6],
   ]) {
-    const [x, y] = polar(deg, 45);
+    const [x, y] = polar(deg, 44);
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate((deg * Math.PI) / 180);
@@ -153,10 +162,12 @@ function drawCard(dpr) {
     ctx.restore();
   }
 
+  // Sized and placed to sit inside the band between the two hairlines rather
+  // than across them: tip at 53, foot at 35.4, band 34 to 54.
   ctx.save();
-  ctx.translate(0, -44);
+  ctx.translate(0, -39);
   ctx.fillStyle = '#f2d492';
-  fleurDeLis(ctx, 16.5);
+  fleurDeLis(ctx, 14);
   ctx.restore();
 
   return canvas;
@@ -172,21 +183,29 @@ function drawHousing(dpr) {
   ctx.fillStyle = rim;
   ctx.beginPath(); ctx.arc(0, 0, RING_INNER, 0, Math.PI * 2); ctx.fill();
 
-  const cap = ctx.createRadialGradient(-1.6, -1.9, 0.3, 0, 0, 6);
-  cap.addColorStop(0, '#f7e7bf'); cap.addColorStop(0.5, '#a4823f'); cap.addColorStop(1, '#2a2010');
+  // The pivot cap. Small and dark, because a real one is agate or sapphire --
+  // and because the point where sixteen rays converge is the heart of a rose
+  // and should not be under a shiny ball.
+  const cap = ctx.createRadialGradient(-1.1, -1.3, 0.2, 0, 0, 4);
+  cap.addColorStop(0, '#dcc48c'); cap.addColorStop(0.5, '#856733'); cap.addColorStop(1, '#221a0d');
   ctx.fillStyle = cap;
-  ctx.beginPath(); ctx.arc(0, 0, 5.4, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, 0, 3.6, 0, Math.PI * 2); ctx.fill();
 
-  // One sheen. More than that and it stops reading as glass and starts
-  // reading as fog over the card.
+  // One sheen and one wet edge where the glass meets the lip. More than that
+  // and it stops reading as glass and starts reading as fog over the card.
   ctx.save();
   ctx.beginPath(); ctx.arc(0, 0, RING_INNER, 0, Math.PI * 2); ctx.clip();
   const sheen = ctx.createLinearGradient(-RING_INNER, -RING_INNER, RING_INNER * 0.4, RING_INNER * 0.25);
-  sheen.addColorStop(0, 'rgba(255,246,226,0.12)');
-  sheen.addColorStop(0.45, 'rgba(255,246,226,0.02)');
+  sheen.addColorStop(0, 'rgba(255,246,226,0.20)');
+  sheen.addColorStop(0.45, 'rgba(255,246,226,0.04)');
   sheen.addColorStop(1, 'rgba(255,246,226,0)');
   ctx.fillStyle = sheen;
   ctx.fillRect(-RING_INNER, -RING_INNER, RING_INNER * 2, RING_INNER * 2);
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = 'rgba(255,246,226,0.30)';
+  ctx.beginPath();
+  ctx.arc(0, 0, RING_INNER - 1, Math.PI * 0.94, Math.PI * 1.72);
+  ctx.stroke();
   ctx.restore();
 
   // Aged brass, lit from the upper left. Deep lows rather than bright highs --
@@ -206,20 +225,37 @@ function drawHousing(dpr) {
   ctx.beginPath(); ctx.arc(0, 0, (HOUSING_R + RING_INNER) / 2, 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
 
+  // A conic gradient alone is flat across the width of the ring, and a ring
+  // whose section has no profile reads as a painted band rather than a turned
+  // bezel. Crown a third of the way out, both flanks in shadow.
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(255,240,210,0.10)';
+  ctx.beginPath(); ctx.arc(0, 0, (HOUSING_R + RING_INNER) / 2 + 1.3, 0, Math.PI * 2); ctx.stroke();
+  ctx.lineWidth = 2.2;
+  ctx.strokeStyle = 'rgba(0,0,0,0.30)';
+  ctx.beginPath(); ctx.arc(0, 0, HOUSING_R - 1.2, 0, Math.PI * 2); ctx.stroke();
+  ctx.lineWidth = 1.8;
+  ctx.strokeStyle = 'rgba(0,0,0,0.24)';
+  ctx.beginPath(); ctx.arc(0, 0, RING_INNER + 1.1, 0, Math.PI * 2); ctx.stroke();
+
   ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(255,238,205,0.42)';
+  ctx.strokeStyle = 'rgba(250,232,198,0.30)';
   ctx.beginPath(); ctx.arc(0, 0, RING_INNER + 0.5, 0, Math.PI * 2); ctx.stroke();
   ctx.strokeStyle = 'rgba(0,0,0,0.65)';
   ctx.beginPath(); ctx.arc(0, 0, HOUSING_R - 0.5, 0, Math.PI * 2); ctx.stroke();
 
   for (let i = 0; i < 4; i++) {
     const [x, y] = polar(i * 90 + 45, (HOUSING_R + RING_INNER) / 2);
-    const head = ctx.createRadialGradient(x - 0.8, y - 0.9, 0.2, x, y, 3);
-    head.addColorStop(0, '#f2dfb2'); head.addColorStop(1, '#54401f');
+    const head = ctx.createRadialGradient(x - 0.9, y - 1, 0.2, x, y, 3.4);
+    head.addColorStop(0, '#f2dfb2'); head.addColorStop(1, '#4a381a');
     ctx.fillStyle = head;
-    ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = 'rgba(255,240,210,0.5)';
+    ctx.beginPath(); ctx.arc(x, y, 3, Math.PI * 1.05, Math.PI * 1.85); ctx.stroke();
     const slot = i * 0.7 + 0.3;   // no two driven home at the same angle
-    ctx.strokeStyle = 'rgba(18,12,4,0.8)'; ctx.lineWidth = 0.9;
+    // Genuinely dark, or four two-pixel specks read as dirt on the ring.
+    ctx.strokeStyle = 'rgba(10,7,2,0.92)'; ctx.lineWidth = 1.1;
     ctx.beginPath();
     ctx.moveTo(x - Math.cos(slot) * 1.7, y - Math.sin(slot) * 1.7);
     ctx.lineTo(x + Math.cos(slot) * 1.7, y + Math.sin(slot) * 1.7);
