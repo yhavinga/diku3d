@@ -381,6 +381,9 @@ export function buildScene(world, layout, materials, assets = null) {
         });
       } else if (!airborne) {
         buildOutdoorEdge({ batcher, chunk, room, cell, pos, dir, open, addCollider, decor, lights });
+        // Once, for the whole cell -- the corners need to know about all four
+        // sides, not one at a time.
+        if (dir === 3) buildCityFrontage({ batcher, chunk, room, cell, pos, sides, addCollider, decor });
       }
 
       // "In the air..." rooms sit three levels above the roofs. An archway
@@ -471,7 +474,9 @@ export function buildScene(world, layout, materials, assets = null) {
       for (let d = 0; d < 4; d++) if (!sides[d]) blank.push(d);
       if (blank.length && hash3(room.vnum, 13, 0, 6) > 0.28) {
         decor.push({
-          kind: 'clutter', x: pos.x, y: pos.y, z: pos.z, half: HALF,
+          // Against the new facade, not inside it.
+          kind: 'clutter', x: pos.x, y: pos.y, z: pos.z,
+          half: wantsFrontage(room) ? HALF - FRONTAGE_D : HALF,
           walls: blank, seed: hash3(room.vnum, 12, 0, 5), indoor: false,
         });
       }
@@ -678,14 +683,84 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
   }
 }
 
+/**
+ * How much of an open-air city cell is street rather than building.
+ *
+ * A cell is thirteen metres across and an open-air room used to pave every
+ * metre of it, so a room, a routed street and another room came to thirty-nine
+ * metres of uninterrupted ground -- measured by raycast, and the widest lane in
+ * Rothenburg is about twelve. Nothing was ever in shadow because nothing was
+ * near enough to shade anything: switching off every shadow in the town changed
+ * a noon frame by a third of a percent.
+ *
+ * The fix is not to move rooms, which the layout cannot afford. It is to stop
+ * treating a whole cell as street. A lane wants a corridor; the rest of the
+ * cell is where the buildings behind it come forward to meet the road.
+ */
+const FRONTAGE_D = 3.2;
+
+/** Rooms the mud itself calls open ground. Six metres is not a market square. */
+const SQUARE = /\b(square|plaza|piazza|courtyard|market|green|common|park|field|yard)\b/i;
+
+const wantsFrontage = (room) => room.sector === SECTOR.CITY && !SQUARE.test(room.name);
+
+/**
+ * Bring the frontage forward on every side of a city cell that is not a way
+ * out, and build the corners between two ways out as well. Four exits leaves a
+ * crossroads with a block on each corner; two opposite exits leaves a lane
+ * between two terraces. Either way the facades finish 6.6 m apart, which is
+ * inside the 5-9 m a real town street runs to, and the buildings now touch
+ * their neighbours in the cells behind instead of standing free on paving.
+ */
+function buildCityFrontage({ batcher, chunk, room, cell, pos, sides, addCollider, decor }) {
+  if (!wantsFrontage(room)) return;
+  const isOpen = (d) => {
+    const side = sides[d];
+    return !!(side && (side.kind === 'alley' || side.kind === 'portal' || side.kind === 'gate'));
+  };
+  const inset = HALF - FRONTAGE_D / 2;
+
+  const block = (bx, bz, sx, sz, salt) => {
+    const seed = hash3(cell.x * 7 + Math.round(bx), cell.z * 7 + Math.round(bz), cell.level, salt);
+    const h = 6.2 + seed * 4.6;
+    const stone = hash3(Math.round(bx), Math.round(bz), cell.level, 61) > 0.45;
+    batcher.add(box(sx, h, sz, 3, 4, 3), stone ? 'stonewall' : 'timber',
+      place(bx, pos.y + h / 2, bz), { chunk, ao: wallAo(pos.y) });
+    const roofH = 1.7 + seed * 1.4;
+    batcher.add(triPrism(sx + 0.7, roofH, sz + 0.7), seed > 0.86 ? 'thatch' : 'rooftile',
+      place(bx, pos.y + h, bz, sx > sz ? Math.PI / 2 : 0), { chunk });
+    addCollider(bx - sx / 2, bx + sx / 2, bz - sz / 2, bz + sz / 2, pos.y, pos.y + h);
+    // A blank three-storey wall along the street was reported; give it openings.
+    decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed });
+  };
+
+  for (let dir = 0; dir < 4; dir++) {
+    if (isOpen(dir)) continue;
+    const [dx, , dz] = DIR_STEP[dir];
+    const along = dir === 1 || dir === 3;
+    block(pos.x + dx * inset, pos.z + dz * inset,
+      along ? FRONTAGE_D : CELL, along ? CELL : FRONTAGE_D, 62 + dir);
+  }
+  // Corners, only where both of their sides are a way out -- otherwise the
+  // full-width block on the closed side already covers them.
+  for (const [dirA, dirB, sx, sz] of [[0, 1, 1, -1], [1, 2, 1, 1], [2, 3, -1, 1], [3, 0, -1, -1]]) {
+    if (!isOpen(dirA) || !isOpen(dirB)) continue;
+    block(pos.x + sx * inset, pos.z + sz * inset, FRONTAGE_D, FRONTAGE_D, 70 + dirA);
+  }
+}
+
 /** The boundary of an open-air room: an opening, or something to stop you. */
 function buildOutdoorEdge({ batcher, chunk, room, cell, pos, dir, open, addCollider, decor, lights }) {
   if (open) {
     if (room.sector === SECTOR.CITY && dir === 0 && hash3(cell.x, cell.z, cell.level, 5) > 0.5) {
       const sx = hash3(cell.x, cell.z, 1, 6) > 0.5 ? 1 : -1;
       const sz = hash3(cell.x, cell.z, 2, 7) > 0.5 ? 1 : -1;
-      const lx = pos.x + (HALF - 1.3) * sx;
-      const lz = pos.z + (HALF - 1.3) * sz;
+      // Against the kerb, not out in the road: with frontage brought forward
+      // the corridor is only 6.6 m and the old offset stood the post inside a
+      // wall.
+      const reach = wantsFrontage(room) ? HALF - FRONTAGE_D - 0.7 : HALF - 1.3;
+      const lx = pos.x + reach * sx;
+      const lz = pos.z + reach * sz;
       decor.push({ kind: 'lamp', x: lx, y: pos.y, z: lz });
       // `outdoor` so the pool can put it out at noon -- a street lamp burning
       // in daylight was reported, and it is also the light the town has to be
@@ -698,6 +773,10 @@ function buildOutdoorEdge({ batcher, chunk, room, cell, pos, dir, open, addColli
     }
     return;
   }
+
+  // A street with frontage has a building on this side already; a low garden
+  // wall in front of it is one wall too many.
+  if (wantsFrontage(room)) return;
 
   const [dx, , dz] = DIR_STEP[dir];
   const bx = pos.x + dx * (HALF - 0.3);

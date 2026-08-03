@@ -1030,12 +1030,16 @@ export function populate(world, layout, built, options = {}) {
 
   const windowLights = [];
   let glassMaterial = null;
+  let glowMaterial = null;
   if (windows.length) {
     const panes = [];
     const dark = [];
     const frames = [];
-    const PANE_W = 1.4;
-    const PANE_H = 1.7;
+    // 1.4 x 1.7 is a picture window. A casement in a town of this date is
+    // barely a metre across, and at five metres -- which is what a street is
+    // now -- the old size subtended sixteen degrees and read as a shop front.
+    const PANE_W = 1.02;
+    const PANE_H = 1.34;
     // The buildings are solid boxes, so a window is something laid onto the
     // face: the lit pane just proud of the wall, its frame and sill proud of
     // that. Read from a step away it sits in the wall convincingly enough.
@@ -1048,7 +1052,7 @@ export function populate(world, layout, built, options = {}) {
       for (const f of FACES) {
         const tx = f.nz; const tz = -f.nx;
         const span = (f.nx ? w.d : w.w);
-        const cols = Math.max(1, Math.floor(span / 3.6));
+        const cols = Math.max(1, Math.floor(span / 3.0));
         const cx = w.x + f.nx * (w.w / 2);
         const cz = w.z + f.nz * (w.d / 2);
         for (let row = 0; row < rows; row++) {
@@ -1075,6 +1079,12 @@ export function populate(world, layout, built, options = {}) {
             // cool mid grey, darker than the wall but nowhere near zero. Its
             // own material, so it can be smooth and see the environment.
             pushPart(lit ? panes : dark, G.box(PANE_W, PANE_H, 0.06), lit ? 0xffc47e : 0xffffff, out(0.03));
+            // Glazing bars. Without them a pane is one flat rectangle, which
+            // is the single thing that says "a texture of a window" rather
+            // than "a window" -- and a light of this date is a small leaded
+            // one, not a sheet. One mullion, one transom: four lights.
+            pushPart(frames, G.box(0.055, PANE_H, 0.05), 0x53442f, out(0.065));
+            pushPart(frames, G.box(PANE_W, 0.055, 0.05), 0x53442f, out(0.065));
             // Jamb, head and sill were 0x36291d, which is a dark enough brown
             // that in a dim interior it tone maps to nothing and the window
             // keeps its black rectangle -- only now as a thick border round a
@@ -1108,8 +1118,15 @@ export function populate(world, layout, built, options = {}) {
       }
     }
     if (panes.length) {
+      // A lit pane is glass that happens to have a fire behind it, not a lamp
+      // set into a wall. This used to be pure emissive at full strength around
+      // the clock, so at noon every window in Midgaard was a flat tan panel --
+      // which is exactly how they read. Same glass as the unlit ones, and the
+      // glow is driven by the hour: nearly nothing by day, everything at night.
       const glow = new THREE.MeshStandardMaterial({
-        vertexColors: true, emissive: 0xffffff, emissiveIntensity: 1.0, color: 0x000000, roughness: 1,
+        vertexColors: true, emissive: 0xffffff, emissiveIntensity: 0.08,
+        color: 0x141a24, roughness: 0.10, metalness: 0.22,
+        envMapIntensity: 1.25, transparent: true, opacity: 0.86,
       });
       glow.onBeforeCompile = (shader) => {
         shader.fragmentShader = shader.fragmentShader.replace(
@@ -1117,6 +1134,7 @@ export function populate(world, layout, built, options = {}) {
           '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance *= vColor.rgb;',
         );
       };
+      glowMaterial = glow;
       const mesh = new THREE.Mesh(mergeGeometries(panes, false), glow);
       group.add(mesh);
     }
@@ -1273,9 +1291,16 @@ export function populate(world, layout, built, options = {}) {
    * is warm and a noon one is cold.
    */
   function setDaylight(colourHex, level) {
-    if (!glassMaterial) return;
-    glassMaterial.emissive.setHex(colourHex);
-    glassMaterial.emissiveIntensity = Math.max(0, level);
+    if (glassMaterial) {
+      glassMaterial.emissive.setHex(colourHex);
+      glassMaterial.emissiveIntensity = Math.max(0, level);
+    }
+    // The other side of the same window. By day it is glass like any other and
+    // barely glows; once the sun is off it, the fire behind it is the only
+    // thing there is to see.
+    if (glowMaterial) {
+      glowMaterial.emissiveIntensity = 0.09 + 2.6 * Math.max(0, 1 - level / 0.55);
+    }
   }
 
   function setSun(direction, elevationDeg) {
