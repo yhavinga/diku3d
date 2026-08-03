@@ -86,6 +86,20 @@ const ARROW_DIR = {
   PageUp: 4, PageDown: 5,
 };
 
+/**
+ * Which way to be facing after stepping north, east, south or west. The camera
+ * looks down -Z at yaw 0, so this is the same table build.js uses to turn a
+ * model's -Z front toward a direction -- worth knowing, because getting it
+ * wrong here would be invisible until you noticed you always arrive backwards.
+ *
+ * Turning you is what keeps the speed honest. Walking is camera-relative, so a
+ * player holding W while stepping east carries the same pace into the new room
+ * and simply changes course, instead of being spun round and sent back the way
+ * they came. Up and down have no heading, so they leave you looking where you
+ * were.
+ */
+const DIR_YAW = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
+
 const TONE_MAPPING = {
   agx: THREE.AgXToneMapping,
   aces: THREE.ACESFilmicToneMapping,
@@ -433,7 +447,8 @@ async function boot() {
       // stop you. Carry it across, so standing still stays standing still and
       // a fall keeps falling onto the new floor.
       const carried = player.velocity.clone();
-      player.spawn(target.center.x, target.center.y, target.center.z, camera.rotation.y);
+      const yaw = DIR_YAW[dir] ?? camera.rotation.y;
+      player.spawn(target.center.x, target.center.y, target.center.z, yaw);
       player.velocity.copy(carried);
       dom.fade.style.opacity = '0';
     }, 120);
