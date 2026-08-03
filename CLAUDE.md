@@ -47,6 +47,30 @@ candidate cell by how many of the room's *other* exits it satisfies), **relax**
 **spread** (rooms take only the even coordinates), **route** (walk each exit
 through the free cells between).
 
+**How much room is there to do better? Almost none, and this is measured.**
+Label each direction with a vector (north = -z, east = +x, up = +y). A
+direction-consistent embedding exists exactly when every cycle in the graph
+sums to zero. Midgaard has 107 in-world edges over 100 reachable rooms, so a
+cycle space of dimension 8 — and **7 of those cycles do not close**. The
+residuals are small: (0,0,1), (1,0,0), (-2,0,1), (2,0,-1), (2,0,1), (1,0,6),
+(0,0,6), on the exits #3042s, #3104s, #3107s, #3114e, #3115e, #3120e, #3120s.
+
+Cut those 7 and every remaining cycle closes — verified by rebuilding the
+spanning tree on the remainder and counting. `layout.js` portals 8 edges (the
+8 archways in `layout-check`), so it is one edge off the floor. There is no
+clever layout waiting to be found.
+
+Two things that look like better answers and are not:
+
+- **A smaller cut.** A greedy hitting set finds 3 edges touching all 7 broken
+  cycles, which is *not* sufficient: two cycles sharing an edge have a sum that
+  avoids it, and 4 cycles were still open afterwards. Measured, not assumed.
+- **Unfolding into a covering space** — duplicating a room whenever a route
+  reaches it at a new coordinate. Every cycle closes by construction, but it
+  does not terminate here: the 7 bad cycles generate translations, so copies
+  spiral. Capped at 2, 4, 8 and 20 copies per room the totals are exactly
+  100×cap and the exits that still will not fit *grow* — 26, 48, 90, 212.
+
 Rooms only ever sit on even grid coordinates. Everything between them is either
 a routed street or gets built on. Collapsing that back to direct grid adjacency
 is the obvious "simplification" and it was measured: Midgaard goes from 93%
