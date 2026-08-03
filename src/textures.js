@@ -299,6 +299,40 @@ const SURFACES = {
     s.rough = 0.84 + grit * 0.14;
   },
 
+  /**
+   * Woven cloth. Not the weave -- a real one is sub-millimetre and invisible at
+   * any range you see a person from. What is visible on a dyed woollen is that
+   * the dye never took evenly, that the nap catches the light in bands, and
+   * that the cloth is worn thin where it rubs. Flat colour plus a grain normal
+   * was the only surface in the frame with no albedo at all, and it is most of
+   * why a figure read as a mannequin.
+   */
+  cloth(u, v, s) {
+    const dye = fbm(u * 4.5, v * 4.5, 5, 211, 4);
+    // The nap belongs in the relief, not in the colour. At 34 repeats over a
+    // 0.7 m tile it is a two-centimetre band, and putting it in the albedo put
+    // stripes down every townsperson.
+    const weft = fbm(u * 3.1, v * 26, 26, 233, 2);
+    const slub = fbm(u * 70, v * 26, 70, 251, 2);
+    const wear = clamp01(fbm(u * 7, v * 7, 7, 269, 3) * 1.5 - 0.55);
+    // Kept near neutral and narrow: every figure is tinted per person by vertex
+    // colour, and a dyed base would fight it.
+    const base = mix(rgb(0x9a9a9a), rgb(0xb0b0b0), dye);
+    s.color = mix(base, rgb(0xc0bdb6), wear * 0.35);
+    s.height = 0.5 + slub * 0.16 + weft * 0.06;
+    s.rough = 0.94 - wear * 0.16 + slub * 0.04;
+  },
+
+  /** Skin: nearly uniform, which is the point -- the little that is not. */
+  skin(u, v, s) {
+    const blotch = fbm(u * 6, v * 6, 6, 283, 3);
+    const pore = fbm(u * 120, v * 120, 120, 307, 2);
+    const base = mix(rgb(0xb0aeae), rgb(0xc4c0bc), blotch);
+    s.color = mix(base, rgb(0xbba49c), blotch * 0.35);
+    s.height = 0.5 + pore * 0.10 + blotch * 0.05;
+    s.rough = 0.66 + blotch * 0.14 + pore * 0.06;
+  },
+
   iron(u, v, s) {
     const brush = fbm(u * 8, v * 120, 8, 173, 3);
     const rust = clamp01(fbm(u * 9, v * 9, 9, 179, 4) * 1.7 - 0.8);
@@ -422,6 +456,10 @@ const RECIPES = {
   cobble: { surface: 'cobble', scale: 2.2, normalScale: 1.0, env: 1.15, wet: 0.5, detail: 0.5 },
   flagstone: { surface: 'flagstone', scale: 2.6, normalScale: 0.85, env: 1.1, wet: 0.16, detail: 0.5 },
   marble: { surface: 'marble', scale: 4, normalScale: 0.35, env: 0.8, wet: 0, detail: 0.3 },
+  // A person is 1.75 m, so a 0.7 m tile puts two and a half repeats down a
+  // sleeve -- close enough that nothing reads as a pattern.
+  cloth: { surface: 'cloth', scale: 0.7, normalScale: 0.55, env: 0.35, wet: 0, detail: 0.5 },
+  skin: { surface: 'skin', scale: 0.5, normalScale: 0.28, env: 0.5, wet: 0, detail: 0.35 },
   plaster: { surface: 'plaster', scale: 3, normalScale: 0.34, env: 0.7, wet: 0, detail: 0.45 },
   stonewall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55 },
   timber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45 },
