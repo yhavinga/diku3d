@@ -949,8 +949,19 @@ export function populate(world, layout, built, options = {}) {
     for (const f of flames) {
       const lampModel = f.lamp ? model(['lamp_post']) : model(['torch_sconce']);
       if (lampModel && instances) {
+        // The models come out of Blender with their origin on the floor, so a
+        // sconce's bracket sits two metres up its own bounding box. Placed at
+        // the height of the fire it hung the bracket 1.84 m *above* it, which
+        // is the flame burning in mid-air with nothing holding it that the
+        // review reported. Sit the model so the top of it meets the base of
+        // the flame instead of guessing an offset.
+        let dy = -4.25;                       // the lamp post is already right
+        if (!f.lamp) {
+          const top = instances.library?.get(lampModel)?.bounds?.max.y;
+          dy = top !== undefined ? 0.26 - top : -0.1;
+        }
         instances.add(lampModel, {
-          x: f.x, y: f.y - (f.lamp ? 4.25 : 0.1), z: f.z, rotY: f.rotY || 0,
+          x: f.x, y: f.y + dy, z: f.z, rotY: f.rotY || 0,
         }, 'props');
         continue;
       }
