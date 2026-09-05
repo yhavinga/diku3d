@@ -269,6 +269,15 @@ function buildModelledFigure(asset, proto, library) {
       actions[name] = action;
       if (name === 'walk') actions.walkCycle = clip.duration;
     }
+    // Stand them in the idle before anything draws. `play()` only arms an
+    // action; nothing reaches the skeleton until a mixer update, and until then
+    // the figure is in its bind pose -- limbs straight, arms locked, which is
+    // exactly the "T-pose in the wild" a review reported. The frame loop
+    // normally does that on the next tick, but not always: `state.benchmark`
+    // returns out of the whole loop before `actors.update`, and that is the
+    // switch the screenshot protocol itself sets. One update of zero seconds
+    // applies the pose without advancing anyone's clock.
+    if (mixer) mixer.update(0);
   }
   // No separate head group: the head is a bone inside a skinned mesh. Aliasing
   // it to the body made the head-turn write the body's own rotation and then

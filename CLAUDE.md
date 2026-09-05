@@ -143,20 +143,24 @@ choose.
 - `assets.js` `choose(names, seed)` defaults its seed. Callers asking only "does
   this model exist?" pass none, and `undefined * n` is `NaN`, which indexes
   nothing — so the temple kit silently never placed.
-- **The walk cycle comes out of Blender a quarter turn off.** `townsperson.py`
-  rolls every bone so that rotating about its local X swings forward and back,
-  and keys the walk that way; the exporter lands the keyed axis on local Z, and
-  measured on the running rig the left shin travelled 0.247 m *across* the
-  figure and 0.012 m along it. People walked with a shoulder leading.
-  `assets.js` `uprightSwing()` conjugates every keyed rotation by a quarter turn
-  about Y — `(x, y, z, w)` → `(z, y, -x, w)`, a proper rotation, not a mirror,
-  so the cycle keeps its handedness. **This belongs in the bone rolls**; it is
-  done at load because the models are committed. Fix it at the source at the
-  next regeneration and delete `uprightSwing`.
-  The measurement that settles it: force `actions.walk` to weight 1, sample a
-  shin bone's world position into `figure.worldToLocal()` over a couple of
-  seconds, and compare the range along local X against local Z. Forward must
-  win. Nothing about this is visible in a still.
+- **Blender's roll operators aim Z, not X.** `townsperson.py` meant to roll
+  every bone so its local X swings forward and back;
+  `calculate_roll(type="GLOBAL_POS_X")` aims the bone's **Z** axis there
+  instead, so the keyed axis was the sideways one — the exporter was innocent,
+  though an earlier version of this bullet blamed it. Measured then: the left
+  shin travelled 0.247 m *across* the figure and 0.012 m along it, and people
+  walked with a shoulder leading. Worse, the load-time patch (`uprightSwing`
+  in assets.js, now deleted) conjugated whole rotation tracks — rest pose
+  included, because a glTF track holds the bone's entire local rotation — and
+  that put one arm 0.16 m out of its socket and turned each foot a quarter
+  turn off its leg. The "detached foot" and the arm slot a judge reported were
+  the compensation, not the model. The rolls are set explicitly at the source
+  now; after the regeneration the same measurement (force `actions.walk` to
+  weight 1, sample a shin's world position into `figure.worldToLocal()` for a
+  couple of seconds) reads 0.286 m along against 0.048 across. Nothing about
+  this is visible in a still — and a still is also how a figure gets caught in
+  bind pose: `state.benchmark` halts the loop before `actors.update`, so the
+  mixer runs one `update(0)` at build time to pose the skeleton.
 - **A text halo is ink too.** The name-label plate was replaced with three
   passes of `rgba(0,0,0,0.9)` at blur 10/6/3, which is a lot of black spread
   over a wide soft oval — so against a dim interior it still read as a dark

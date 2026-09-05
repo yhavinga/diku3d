@@ -20,19 +20,42 @@ a primitive.
 Clothing is its own geometry, not a colour: the tunic is a separate solid over
 the body with a flared hem and a lip under it, the sleeve ends in a cuff the
 skin forearm comes out of, and the hose are their own solids inside the hem.
-Only skin and cloth are tinted per person by the viewer, so the belt, the shoes
-and the hair are deliberately left as `oak` -- that is what stops a crowd of
-these looking like one man printed forty times.
+Only skin and cloth are tinted per person by the viewer, so the belt, the boots
+and the hair are deliberately left untinted -- that is what stops a crowd of
+these looking like one man printed forty times. They are not all one tag
+either: the belt and purse are `oak`, the boots `leather` and the hair `hair`,
+which the viewer bakes at 0x4a3524 and 0x3a2a1c against oak's 0x5a4330. Boots
+in oak came back from a review as "orange wedges", and they were: a warm mid
+brown under a sun that is now four times what it was.
 
-Bone rolls are all calculated to global +X, so rotating any bone about its local
-X swings it forward and back. Every keyframe in here is an X rotation in
-degrees, which makes the walk cycle readable as a table rather than a puzzle.
+Bone rolls put every bone's local X on global +X, so rotating a bone about its
+local X swings it forward and back and the walk cycle reads as a table rather
+than a puzzle. Getting that took two goes. `calculate_roll(GLOBAL_POS_X)` does
+*not* do it: like every roll operator in Blender it aims the bone's **Z** axis
+at the vector you name, so it put local Z on +X and left local X on the
+figure's own facing -- which is the sideways-splay axis. Every limb in the walk
+therefore scissored across the figure instead of swinging along it, measured at
+0.247 m across against 0.012 m along, and the viewer carried a load-time
+`uprightSwing()` that conjugated every keyed quaternion a quarter turn to
+compensate. That compensation could only ever be half a fix, because a glTF
+track holds the bone's *whole* local rotation, rest included: conjugating it
+also swung both shoulders a quarter turn about the spine -- one arm in front of
+the chest, one behind it, 0.16 m out of its socket -- and turned each foot a
+quarter turn off its leg. Rolled from here with `align_roll`, which is the same
+Z-aiming operator handed `+X x direction`, and the keyed axis is the one the
+tables below say it is.
+
+The three axes then mean, for a bone hanging down (every limb): x swings it
+fore and aft, positive backwards; z swings it out from the body; y twists it.
+For a bone standing up (hips to head): x pitches it, positive forward; y turns
+it about the spine; z rolls it sideways.
 """
 
 import math
 import importlib
 
 import bpy
+import mathutils
 
 import lib
 import kit
@@ -77,9 +100,20 @@ def part(sections, bone, mat="cloth", sides=8, axis="z", name=None, mirror=0.0):
 
 
 def head_parts():
-    """Skull, cap of hair, nose and ears. The skull is an egg with a jaw: the
-    silhouette a human head makes from behind is the one thing a sphere gets
-    wrong, and it is the only view you ever get of a mobile walking away."""
+    """Skull, hair, nose, ears, brows, eyes and a mouth. The skull is an egg
+    with a jaw: the silhouette a human head makes from behind is the one thing a
+    sphere gets wrong, and it is the only view you ever get of a mobile walking
+    away.
+
+    A face at three metres is not a sculpt, it is four dark marks and one
+    shadow. Skin on skin reads as nothing at that distance -- the nose and ears
+    below have been there all along and a review still called the head a
+    featureless block -- so the features that carry are the ones in a different
+    material: brows and eyes in `hair`, a mouth in `leather`, and a brow that
+    stands 7 mm proud so the sun lays a bar of shade across the eyes under it.
+    They are set on the flats of the ten-sided skull rather than on the ellipse
+    it approximates, which is why the numbers are not symmetrical about the
+    nose: the front facet only runs to x = 0.024."""
     skull = [(1.500, 0.058, 0.062, 0.0, 0.010),
              (1.540, 0.070, 0.082, 0.0, -0.004),
              (1.585, 0.078, 0.094, 0.0, -0.010),
@@ -87,7 +121,14 @@ def head_parts():
              (1.692, 0.078, 0.090, 0.0, 0.002),
              (1.732, 0.061, 0.068, 0.0, 0.008),
              (1.751, 0.026, 0.028, 0.0, 0.010)]
-    hair = [(1.648, 0.085, 0.100, 0.0, -0.004),
+    # Hair down the sides and the nape, and a hairline across the front at 1.70.
+    # The lower rings are pushed back rather than dropped: at the sides and the
+    # back they stand 5 mm proud of the skull and show, at the front they sit
+    # 20 mm inside it and do not. The ring this replaces was at 1.648 with no
+    # offset, which is a hairline *below* the brow -- there was no forehead at
+    # all, and the eyes and brows below came out as dark marks on dark hair.
+    hair = [(1.598, 0.083, 0.080, 0.0, 0.020),
+            (1.652, 0.086, 0.092, 0.0, 0.014),
             (1.700, 0.083, 0.095, 0.0, 0.003),
             (1.740, 0.066, 0.073, 0.0, 0.009),
             (1.760, 0.028, 0.030, 0.0, 0.011)]
@@ -99,12 +140,24 @@ def head_parts():
             (1.602, 0.019, 0.021, 0.0, -0.104),
             (1.590, 0.013, 0.011, 0.0, -0.096)]
     parts = [part(skull, "head", "skin", sides=10, name="skull"),
-             part(hair, "head", "oak", sides=10, name="hair"),
+             part(hair, "head", "hair", sides=10, name="hair"),
              part(nose, "head", "skin", sides=6, name="nose")]
     # Ears sit behind the midline of the skull, not on it, and project 10 mm.
     for sx in (-1, 1):
         parts.append((kit.timber((0.013, 0.030, 0.044), (sx * 0.075, 0.012, 1.618),
                                  (0, 0, 0), "skin", 0.008, "ear"), "head"))
+    for sx in (-1, 1):
+        # Both are turned to lie along the cheek rather than across it: the
+        # skull falls away 12 mm over the width of an eye, and a mark left flat
+        # buries its outer end and floats its inner one.
+        parts.append((kit.timber((0.038, 0.016, 0.011), (sx * 0.032, -0.0795, 1.685),
+                                 (0, sx * math.radians(8), sx * math.radians(22)),
+                                 "hair", 0.003, "brow"), "head"))
+        parts.append((kit.timber((0.024, 0.012, 0.012), (sx * 0.028, -0.0855, 1.662),
+                                 (0, 0, sx * math.radians(24)),
+                                 "hair", 0.003, "eye"), "head"))
+    parts.append((kit.timber((0.034, 0.010, 0.008), (0.0, -0.089, 1.566), (0, 0, 0),
+                             "leather", 0.002, "mouth"), "head"))
     return parts
 
 
@@ -155,16 +208,30 @@ def leg_parts(sx, tag):
             (0.088, 0.033, 0.037, x, 0.002)]
     # The shoe is lofted along Y, because a foot is a long shape and rings
     # stacked in Z would need twice as many to describe the same silhouette.
-    shoe = [(0.075, 0.034, 0.036, x, 0.046),
-            (0.020, 0.043, 0.047, x, 0.049),
-            (-0.060, 0.045, 0.045, x, 0.045),
-            (-0.140, 0.041, 0.033, x, 0.035),
-            (-0.205, 0.028, 0.019, x, 0.024)]
+    # Eight sides rather than six, and a blunt toe made of two short rings
+    # instead of one long taper: at six sides tapering to a 19 mm point this
+    # read, correctly, as a wedge.
+    shoe = [(0.078, 0.036, 0.038, x, 0.044),
+            (0.020, 0.045, 0.049, x, 0.048),
+            (-0.060, 0.047, 0.047, x, 0.045),
+            (-0.140, 0.044, 0.038, x, 0.037),
+            (-0.196, 0.036, 0.030, x, 0.030),
+            (-0.216, 0.022, 0.021, x, 0.026)]
+    # The ankle was the one joint in the figure with no lap over it: the hose
+    # stopped at z = 0.088 and the shoe began below it, so every degree the foot
+    # turned opened daylight between them, and a review reported the left foot
+    # as detached and hanging. The cuff belongs to the shin, like the sleeve
+    # cuff over the forearm, so the shoe turns *inside* it and the joint is
+    # covered whatever the ankle is doing.
+    cuff = [(0.150, 0.038, 0.042, x, 0.000),
+            (0.104, 0.046, 0.050, x, 0.004),
+            (0.052, 0.051, 0.057, x, 0.008)]
     return [part(thigh, "thigh." + tag, "cloth", sides=8, name="hose"),
             part(shin, "shin." + tag, "cloth", sides=8, name="hose"),
-            part(shoe, "foot." + tag, "oak", sides=6, axis="y", name="shoe"),
-            (kit.timber((0.088, 0.29, 0.024), (x, -0.062, 0.014), (0, 0, 0),
-                        "oak", 0.008, "sole"), "foot." + tag)]
+            part(cuff, "shin." + tag, "leather", sides=8, name="cuff"),
+            part(shoe, "foot." + tag, "leather", sides=8, axis="y", name="shoe"),
+            (kit.timber((0.092, 0.30, 0.022), (x, -0.068, 0.012), (0, 0, 0),
+                        "leather", 0.008, "sole"), "foot." + tag)]
 
 
 def body():
@@ -235,9 +302,16 @@ def make_armature():
         if parent:
             bone.parent = eb[parent]
             bone.use_connect = tuple(eb[parent].tail) == tuple(head)
-    bpy.ops.armature.select_all(action="SELECT")
     # Roll every bone so its local X is world +X: then one axis means "forward".
-    bpy.ops.armature.calculate_roll(type="GLOBAL_POS_X")
+    # align_roll aims the bone's *Z* axis, so the target is +X x bone, which
+    # puts X = Y x Z back on +X. calculate_roll(GLOBAL_POS_X) aims the same Z
+    # axis and so does the opposite of what its name suggests -- see the module
+    # docstring. The two shoulders point along +-X themselves, the cross product
+    # degenerates, and neither is ever keyed; they get an upright frame.
+    for bone in eb:
+        direction = (bone.tail - bone.head).normalized()
+        target = mathutils.Vector((1.0, 0.0, 0.0)).cross(direction)
+        bone.align_roll(target if target.length > 1e-4 else mathutils.Vector((0.0, 0.0, 1.0)))
     bpy.ops.object.mode_set(mode="OBJECT")
     return arm
 
@@ -275,23 +349,45 @@ def anim_walk(arm):
         key(p["thigh.R"], f, x=-a)
         key(p["upperarm.L"], f, x=-a * 0.8)
         key(p["upperarm.R"], f, x=a * 0.8)
-    # The knee only ever bends one way, and it bends most just after passing.
-    for (f, l, r) in ((1, -5, -24), (7, -27, -5), (13, -24, -5), (19, -5, -27), (25, -5, -24)):
+    # The knee only ever bends one way -- positive, the heel towards the seat --
+    # and it bends most at mid-swing. The two frames it is not a free choice are
+    # the two the foot is flat on the ground: at mid-stance the leg has to be
+    # near straight, because a straight vertical leg is the *longest* the figure
+    # gets and anything else lifts the sole off the paving.
+    for (f, l, r) in ((1, 20, 4), (7, 34, 4), (13, 4, 20), (19, 4, 34), (25, 20, 4)):
         key(p["shin.L"], f, x=l)
         key(p["shin.R"], f, x=r)
-    for (f, l, r) in ((1, 12, -14), (7, -8, 8), (13, -14, 12), (19, 8, -8), (25, 12, -14)):
+    # The ankle is not free either. What has to look right is the sole against
+    # the ground, and that is thigh + shin + foot, not the foot on its own: at
+    # mid-stance the sum has to be 0 or the sole is not flat, at push-off it has
+    # to put the toe on the paving and not through it, and at heel strike the
+    # heel. A -1 here is a sole 14 degrees toe-up, because the thigh is already
+    # 17 degrees forward -- read the sums, not the numbers.
+    # The extra pair two frames before each contact is the ankle rolling up over
+    # the planted foot at the end of stance, and then snapping down into the
+    # push. Without it the sole is left tilted toe-down while the leg is still
+    # long, and the toe ploughs 25 mm of paving.
+    for (f, l, r) in ((1, -5, -1), (7, -16, -4), (11, -6, -13), (13, -1, -5),
+                      (19, -4, -16), (23, -13, -6), (25, -5, -1)):
         key(p["foot.L"], f, x=l)
         key(p["foot.R"], f, x=r)
     for (f, a) in ((1, -14), (7, -18), (13, -14), (19, -18), (25, -14)):
         key(p["forearm.L"], f, x=a)
         key(p["forearm.R"], f, x=a)
-    # Hips rise at the passing pose and roll towards the supporting leg.
-    for (f, dz, roll) in ((1, 0.0, 0.0), (7, 0.022, 3.0), (13, 0.0, 0.0),
-                          (19, 0.022, -3.0), (25, 0.0, 0.0)):
-        key(p["hips"], f, y=roll, loc=(0, 0, dz))
+    # The pelvis is highest at the passing pose, where one leg is straight under
+    # it, and lowest with the legs apart -- so this is a *drop* at contact, not
+    # a rise at passing. Keyed the other way round it holds the hips 22 mm above
+    # what the legs can reach and the supporting foot hangs in the air all the
+    # way through stance. `loc` is along the bone, which for the hips is up.
+    # The roll drops the side whose leg is in the air.
+    for (f, dy, roll) in ((1, -0.015, 0.0), (7, 0.0, -3.0), (13, -0.015, 0.0),
+                          (19, 0.0, 3.0), (25, -0.015, 0.0)):
+        key(p["hips"], f, z=roll, loc=(0, dy, 0))
+    # Shoulders counter the hips: the arm that is forward is the shoulder that
+    # is forward, and the head holds its line against both.
     for (f, a) in ((1, 4.0), (7, 0.0), (13, -4.0), (19, 0.0), (25, 4.0)):
-        key(p["chest"], f, z=a)
-        key(p["head"], f, z=-a * 0.6)
+        key(p["chest"], f, y=-a)
+        key(p["head"], f, y=a * 0.6)
     return act
 
 
@@ -300,17 +396,21 @@ def anim_idle(arm):
     to one side. Nothing symmetric, or it reads as a machine at rest."""
     act = action(arm, "idle", 61)
     p = arm.pose.bones
-    for (f, dz, roll) in ((1, 0.0, 0.0), (18, 0.008, 1.2), (34, 0.013, 1.6),
-                          (48, 0.005, 0.7), (61, 0.0, 0.0)):
-        key(p["hips"], f, y=roll, loc=(0, 0, dz))
+    # Weight shifted from foot to foot, and no vertical: the legs are straight
+    # here, so a hip that rises 13 mm takes both soles 13 mm off the ground with
+    # it. The breath is in the chest, which is where it shows anyway.
+    for (f, roll) in ((1, 0.0), (18, 1.2), (34, 1.6), (48, 0.7), (61, 0.0)):
+        key(p["hips"], f, z=roll)
     for (f, a) in ((1, 0.0), (20, -1.6), (40, 0.6), (61, 0.0)):
         key(p["chest"], f, x=a)
         key(p["spine"], f, x=a * 0.5)
-    for (f, x, z) in ((1, 0, 0), (16, -2, 9), (30, 1, 5), (44, -1, -7), (61, 0, 0)):
-        key(p["head"], f, x=x, z=z)
+    for (f, nod, turn) in ((1, 0, 0), (16, -2, 9), (30, 1, 5), (44, -1, -7), (61, 0, 0)):
+        key(p["head"], f, x=nod, y=turn)
+    # The arms are held a few degrees off the ribs -- z on a hanging bone is the
+    # axis that takes them out from the body, x the one that takes them forward.
     for (f, a, b) in ((1, 3, 3), (24, 5, 2), (46, 2, 4), (61, 3, 3)):
-        key(p["upperarm.L"], f, x=a, y=-4)
-        key(p["upperarm.R"], f, x=b, y=4)
+        key(p["upperarm.L"], f, x=a, z=-4)
+        key(p["upperarm.R"], f, x=b, z=4)
     for (f, a) in ((1, -8), (28, -12), (52, -6), (61, -8)):
         key(p["forearm.L"], f, x=a)
         key(p["forearm.R"], f, x=a * 0.8)
@@ -326,31 +426,42 @@ def anim_fight(arm):
     frames, which is the only thing in here that makes it look like effort."""
     act = action(arm, "fight", 41)
     p = arm.pose.bones
-    for (f, turn, lean, dz) in ((1, 26, 0, -0.03), (10, 30, -2, -0.045), (16, 6, 9, -0.02),
-                                (22, 10, 6, -0.035), (32, 24, 1, -0.04), (41, 26, 0, -0.03)):
-        key(p["hips"], f, x=lean, z=turn, loc=(0, 0, dz))
+    # How far the hips drop is not a taste setting: it is however much the front
+    # knee has taken out of that leg, or the front foot leaves the ground. The
+    # lean counts too -- a pelvis pitched 9 degrees into the cut swings both
+    # thighs with it, and leaving that out of the sum buries the front foot.
+    for (f, turn, lean, dy) in ((1, 26, 0, -0.017), (10, 30, -2, -0.031), (16, 6, 9, -0.040),
+                                (22, 10, 6, -0.032), (32, 24, 1, -0.022), (41, 26, 0, -0.017)):
+        key(p["hips"], f, x=lean, y=turn, loc=(0, dy, 0))
     for (f, turn, lean) in ((1, 14, -4), (10, 20, -8), (16, -14, 12), (22, -8, 8),
                             (32, 12, -2), (41, 14, -4)):
-        key(p["chest"], f, x=lean, z=turn)
-        key(p["spine"], f, x=lean * 0.4, z=turn * 0.4)
-        key(p["head"], f, z=-turn * 0.8)
+        key(p["chest"], f, x=lean, y=turn)
+        key(p["spine"], f, x=lean * 0.4, y=turn * 0.4)
+        key(p["head"], f, y=-turn * 0.8)
     # Sword arm: cocked back over the shoulder, then through and down.
     for (f, up, out, el) in ((1, -108, -26, -96), (10, -132, -34, -118), (16, 46, -8, -18),
                              (22, 14, -12, -34), (32, -96, -22, -88), (41, -108, -26, -96)):
-        key(p["upperarm.R"], f, x=up, y=out)
+        key(p["upperarm.R"], f, x=up, z=out)
         key(p["forearm.R"], f, x=el)
         key(p["hand.R"], f, x=-12)
     # Shield arm stays up across the body the whole time.
     for (f, a, b) in ((1, -62, -74), (16, -54, -86), (22, -58, -80), (41, -62, -74)):
-        key(p["upperarm.L"], f, x=a, y=-30)
+        key(p["upperarm.L"], f, x=a, z=-30)
         key(p["forearm.L"], f, x=b)
     for (f, l, r) in ((1, -14, 20), (10, -18, 26), (16, -30, 8), (22, -26, 12),
                       (32, -16, 22), (41, -14, 20)):
         key(p["thigh.L"], f, x=l)
         key(p["thigh.R"], f, x=r)
-    for (f, l, r) in ((1, -22, -26), (16, -34, -14), (22, -30, -18), (41, -22, -26)):
+    # Positive is the way a knee bends, and the front leg is the bent one. The
+    # back leg stays long, on the ball of the foot, which is what a stance is.
+    for (f, l, r) in ((1, 22, 4), (16, 34, 12), (22, 30, 8), (41, 22, 4)):
         key(p["shin.L"], f, x=l)
         key(p["shin.R"], f, x=r)
+    # Front sole flat on the ground (lean + thigh + shin + foot = 0), back heel
+    # up with only the ball of it down, which is what a stance is.
+    for (f, l, r) in ((1, -8, -10), (16, -13, -16), (22, -10, -14), (41, -8, -10)):
+        key(p["foot.L"], f, x=l)
+        key(p["foot.R"], f, x=r)
     return act
 
 
