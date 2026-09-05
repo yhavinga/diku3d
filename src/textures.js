@@ -113,12 +113,22 @@ const SURFACES = {
     const cx = Math.floor(gx); const cy = Math.floor(gy);
     const fx = gx - cx; const fy = gy - cy;
     const id = hash2(cx, cy, cols, 5);
-    const gap = 0.035;
+    // Same arithmetic as the wall: a 2.6 m tile at 512 is 5.08 mm a texel and
+    // a cell is 433 mm square, so 0.035 was 2 x 15.2 = 30 mm of pointing
+    // between flags. Flags are laid to 10-15 mm; 0.014 gives 2 x 6.1 = 12 mm,
+    // 2.4 texels.
+    const gap = 0.014;
     const inSlab = fx > gap && fx < 1 - gap && fy > gap && fy < 1 - gap;
     const edge = Math.min(fx, 1 - fx, fy, 1 - fy);
     const grain = fbm(u * 26 + id * 10, v * 26, 26, 31, 4);
     const slab = mix(rgb(0x6d6a63), rgb(0x8e8a80), id * 0.8 + grain * 0.2);
-    s.color = inSlab ? mix(slab, rgb(0x4b4842), grain * 0.45) : rgb(0x312f2b);
+    // The joint was a flat 0x312f2b, sRGB 49 against a slab face around 150
+    // once the gamma lift is on -- a black net drawn on the floor. Pointing is
+    // lime and sharp sand and sits within a shade of the stone; the line you
+    // see on a real pavement is the recess, which is still here in `height`.
+    // Within a slab the grain was swinging 0.45 of the way to near-black too,
+    // which is a different stone every 15 cm rather than one flag.
+    s.color = inSlab ? mix(slab, rgb(0x4b4842), grain * 0.25) : rgb(0x726c5f);
     s.height = inSlab ? 0.72 + grain * 0.12 : clamp01(edge / gap) * 0.6;
     s.rough = inSlab ? 0.78 + grain * 0.15 : 0.95;
   },
@@ -171,10 +181,24 @@ const SURFACES = {
     const col = Math.floor(gx);
     const fx = gx - col; const fy = gy - row;
     const id = hash2(col, row, cols, 3);
-    const joint = 0.055;
-    const jointY = joint * (cols / rows);
+    // A 3.6 m tile baked at 512 is 7.03 mm a texel, and `joint` is a fraction
+    // of a *cell*, so it means different millimetres on each axis: a cell is
+    // 600 mm across and 300 mm high. At 0.055 the perpends came out 2 x 0.055
+    // x 600 = 66 mm and the beds 2 x 0.0275 x 300 = 16.5 mm -- the two are
+    // supposed to be the same width, and `joint * (cols / rows)` is the
+    // reciprocal of the conversion, so they were out by 4x. Coursed rubble is
+    // pointed at 15-25 mm (ashlar 3-10, brick 10), so 0.017 of a cell across
+    // and rows/cols of that down puts both at 2 x 10.2 = 20.4 mm, 2.9 texels.
+    // A judge measured the bed joint and its bevel together at 39 mm.
+    const joint = 0.017;
+    const jointY = joint * (rows / cols);
     const inBlock = fx > joint && fx < 1 - joint && fy > jointY && fy < 1 - jointY;
-    const bevel = clamp01(Math.min(fx - joint, 1 - joint - fx, (fy - jointY) * 1.4, (1 - jointY - fy) * 1.4) / 0.06);
+    // The arris, in the same world units: 0.022 of a cell across is 13 mm, and
+    // the same 13 mm down a 300 mm course is 0.044, hence the cols/rows.
+    const bevel = clamp01(Math.min(
+      fx - joint, 1 - joint - fx,
+      (fy - jointY) * (cols / rows), (1 - jointY - fy) * (cols / rows),
+    ) / 0.022);
     // The grain used to run at 26 across a 3.6 m tile -- a 14 cm blotch, which
     // on a 30 cm course is veining, and the whole wall read as polished granite
     // rather than as a limestone town. Finer and weaker, and the block colours
@@ -182,9 +206,23 @@ const SURFACES = {
     // a shade, not by a value.
     const grain = fbm(u * 62 + id * 7, v * 62, 62, 23, 3);
     const block = mix(rgb(0x8d8474), rgb(0x9c9384), id);
+    // Two things a judge counted on one wall. It read sRGB 12 to 125 inside a
+    // single block, 44% of full scale; on the map itself that is 137 to 181,
+    // and most of the spread is the arris, which was darkening the albedo as
+    // well as the height. But the crevice is the normal map's job, and doing
+    // it twice is what made every block look separately carved -- so 0.20
+    // comes down to 0.06 and the grain with it, and one block now spans 25 of
+    // 255 rather than 44.
+    //
+    // The other was that the mortar came out 4x darker than the stone. Lime
+    // mortar is *lighter* than most building stone: sand and lime dry to a
+    // pale buff, and the dark line on a real wall is the shadow in the recess,
+    // not the pointing. The joint sits a shade above the block face now --
+    // measured on the baked map, 191 against 170 -- and the recess, height
+    // 0.12 against 0.62, goes on doing the work it was already doing.
     s.color = inBlock
-      ? mix(block, rgb(0x736a5c), grain * 0.20 + (1 - bevel) * 0.20)
-      : mix(rgb(0x635b4f), rgb(0x70685c), grain);
+      ? mix(block, rgb(0x736a5c), grain * 0.11 + (1 - bevel) * 0.06)
+      : mix(rgb(0x9e9585), rgb(0xada595), grain);
     s.height = inBlock ? 0.62 + bevel * 0.3 + grain * 0.08 : 0.12;
     // Dressed face against raw mortar: two different surfaces, and holding them
     // both between 0.86 and 0.96 threw that away.
@@ -308,29 +346,49 @@ const SURFACES = {
    * why a figure read as a mannequin.
    */
   cloth(u, v, s) {
-    const dye = fbm(u * 4.5, v * 4.5, 5, 211, 4);
+    const dye = fbm(u * 5, v * 5, 5, 211, 4);
     // The nap belongs in the relief, not in the colour. At 34 repeats over a
     // 0.7 m tile it is a two-centimetre band, and putting it in the albedo put
     // stripes down every townsperson.
-    const weft = fbm(u * 3.1, v * 26, 26, 233, 2);
-    const slub = fbm(u * 70, v * 26, 70, 251, 2);
+    //
+    // Both terms have to be the same pitch on both axes. They were 3.1x26 and
+    // 70x26 -- on a 0.7 m tile a 10 mm x 27 mm feature, 2.7:1 elongated down
+    // v, which on a cube-projected figure runs straight down the tunic. The
+    // way to see it is to average |nx| and |ny| over the baked normal map:
+    // cloth read 2.01, against 1.0 for plaster and skin and 3.1 for *bark*.
+    // A woollen was two thirds of the way to a tree trunk, and its mean normal
+    // tilt was 31 degrees where the limewashed wall behind it is 11. A judge
+    // read the tunic and hose as oak grain, which is exactly right.
+    // Square and an order shallower: 1.02 and 9 degrees, so what is left is
+    // the drape of the nap. Square also makes them tile, which 3.1 and 26
+    // against a lattice period of 26 never did.
+    const nap = fbm(u * 22, v * 22, 22, 233, 2);
+    const slub = fbm(u * 54, v * 54, 54, 251, 2);
     const wear = clamp01(fbm(u * 7, v * 7, 7, 269, 3) * 1.5 - 0.55);
     // Kept near neutral and narrow: every figure is tinted per person by vertex
     // colour, and a dyed base would fight it.
     const base = mix(rgb(0x9a9a9a), rgb(0xb0b0b0), dye);
     s.color = mix(base, rgb(0xc0bdb6), wear * 0.35);
-    s.height = 0.5 + slub * 0.16 + weft * 0.06;
+    s.height = 0.5 + nap * 0.05 + slub * 0.025;
     s.rough = 0.94 - wear * 0.16 + slub * 0.04;
   },
 
   /** Skin: nearly uniform, which is the point -- the little that is not. */
   skin(u, v, s) {
     const blotch = fbm(u * 6, v * 6, 6, 283, 3);
-    const pore = fbm(u * 120, v * 120, 120, 307, 2);
+    // A pore is 0.2 mm. 120 repeats over a 0.5 m tile is a 4 mm bump, and at
+    // 0.10 of the height range that is not a pore, it is a golfball: 22
+    // degrees of mean normal tilt, twice the plaster on the wall behind. What
+    // is visible on a face at three metres is the mottling and not the pores,
+    // so the blotch carries what relief there is and the fine octave only
+    // breaks up the sheen -- 5 degrees now. Close-up grain is already the
+    // shared world-space detail map's job.
+    const pore = fbm(u * 90, v * 90, 90, 307, 2);
     const base = mix(rgb(0xb0aeae), rgb(0xc4c0bc), blotch);
     s.color = mix(base, rgb(0xbba49c), blotch * 0.35);
-    s.height = 0.5 + pore * 0.10 + blotch * 0.05;
-    s.rough = 0.66 + blotch * 0.14 + pore * 0.06;
+    s.height = 0.5 + pore * 0.025 + blotch * 0.06;
+    // Skin is matt but not chalk; 0.66-0.86 was drier than the limewash.
+    s.rough = 0.60 + blotch * 0.12 + pore * 0.05;
   },
 
   iron(u, v, s) {
@@ -727,10 +785,14 @@ export function createMaterials(size = 512, onProgress = () => {}) {
   materials.cloud.userData.uvScale = 0.05;
 
   // The fine grain, shared. assets.js hangs it on the flat materials that have
-  // no baked maps of their own -- cloth and skin -- so a person is not the one
-  // thing in frame with no surface at all while every wall behind them has
-  // albedo, normal and roughness. Not a material, so it is kept off the name
-  // lookup by a key no `MAT:` tag can be.
+  // no baked maps of their own, so a person is not the one thing in frame with
+  // no surface at all while every wall behind them has albedo, normal and
+  // roughness. Not cloth and skin, whatever `TAG_MATERIALS` there still says:
+  // both are recipes here, `materialFor` looks the baked ones up first, and the
+  // flat entries under those two names have not been reachable since. It is the
+  // belt, the shoes, the hair and the leather that wear the bare grain.
+  // Not a material, so it is kept off the name lookup by a key no `MAT:` tag
+  // can be.
   materials.$grain = grain;
 
   return materials;

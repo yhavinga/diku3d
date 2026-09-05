@@ -307,7 +307,12 @@ export class LightPool {
         }
       }
     }
-    this.near.sort((a, b) => a._d - b._d);
+    // Rank by what a light would actually deliver, not by how close it is: a
+    // street frontage emits a dozen dim window candidates within a few metres,
+    // and sorted on bare distance they filled every slot and starved the one
+    // lamp on the kerb that was carrying the street. Distance over intensity
+    // is a crude irradiance, and crude is enough to keep the lamp lit.
+    this.near.sort((a, b) => a._d / (a.intensity || 1) - b._d / (b.intensity || 1));
     for (let i = 0; i < this.lights.length; i++) {
       const light = this.lights[i];
       const candidate = this.near[i];

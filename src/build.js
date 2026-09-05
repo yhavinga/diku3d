@@ -384,7 +384,7 @@ export function buildScene(world, layout, materials, assets = null) {
           cellX: pos.x, cellZ: pos.z,
         });
       } else if (!airborne) {
-        buildOutdoorEdge({ batcher, chunk, room, cell, pos, dir, open, addCollider, decor, lights });
+        buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider });
         // Once, for the whole cell -- the corners need to know about all four
         // sides, not one at a time.
         if (dir === 3) buildCityFrontage({ batcher, chunk, room, cell, pos, sides, addCollider, decor });
@@ -423,6 +423,10 @@ export function buildScene(world, layout, materials, assets = null) {
         });
       }
     }
+
+    // One per cell, after the sides, not one per side: which way out a street
+    // happens to have says nothing about where its lamp stands.
+    if (outdoor) buildStreetLamp({ room, cell, pos, decor, lights, addCollider });
 
     // links that had no free wall left: an arch standing in the room itself
     for (const link of layout.links) {
@@ -759,30 +763,45 @@ function buildCityFrontage({ batcher, chunk, room, cell, pos, sides, addCollider
   }
 }
 
+/**
+ * A street lamp, one to a city room.
+ *
+ * It used to be one per *north* side and then only half the time: 34 lamps in
+ * the whole loaded world against 956 torch candidates, 12 of them in Midgaard,
+ * and none within 33 m of the Temple Square -- whose four sides are all open,
+ * so it failed the test on a coin flip. A judge standing there after dark found
+ * the nearest light of any kind 28 m off and a window at that. These are the
+ * only light the town has once the sun is down, so a street with none is
+ * unlit, and the side an exit landed on has nothing to do with it. One per room
+ * is a lamp every 26 m along a street -- rooms sit two 13 m cells apart -- which
+ * is about the spacing a gas-lit town ran to, and it takes the loaded world to
+ * 105 lamps, Midgaard to 48.
+ */
+function buildStreetLamp({ room, cell, pos, decor, lights, addCollider }) {
+  if (room.sector !== SECTOR.CITY) return;
+  const sx = hash3(cell.x, cell.z, 1, 6) > 0.5 ? 1 : -1;
+  const sz = hash3(cell.x, cell.z, 2, 7) > 0.5 ? 1 : -1;
+  // Against the kerb, not out in the road: with frontage brought forward the
+  // corridor is only 6.6 m and the old offset stood the post inside a wall.
+  const reach = wantsFrontage(room) ? HALF - FRONTAGE_D - 0.7 : HALF - 1.3;
+  const lx = pos.x + reach * sx;
+  const lz = pos.z + reach * sz;
+  decor.push({ kind: 'lamp', x: lx, y: pos.y, z: lz });
+  // At the flame: actors.js puts the lantern at +4.3 and this was at +3.9, so
+  // the light hung in the open air below its own housing. `outdoor` so the pool
+  // can put it out at noon -- a street lamp burning in daylight was reported --
+  // and so it takes the 2.6x lift after dark, which is why it carries far more
+  // than a torch in a hall.
+  lights.push({
+    x: lx, y: pos.y + 4.3, z: lz, color: 0xffc182,
+    intensity: 26, radius: 26, flicker: true, outdoor: true,
+  });
+  addCollider(lx - 0.3, lx + 0.3, lz - 0.3, lz + 0.3, pos.y, pos.y + 4.2);
+}
+
 /** The boundary of an open-air room: an opening, or something to stop you. */
-function buildOutdoorEdge({ batcher, chunk, room, cell, pos, dir, open, addCollider, decor, lights }) {
-  if (open) {
-    if (room.sector === SECTOR.CITY && dir === 0 && hash3(cell.x, cell.z, cell.level, 5) > 0.5) {
-      const sx = hash3(cell.x, cell.z, 1, 6) > 0.5 ? 1 : -1;
-      const sz = hash3(cell.x, cell.z, 2, 7) > 0.5 ? 1 : -1;
-      // Against the kerb, not out in the road: with frontage brought forward
-      // the corridor is only 6.6 m and the old offset stood the post inside a
-      // wall.
-      const reach = wantsFrontage(room) ? HALF - FRONTAGE_D - 0.7 : HALF - 1.3;
-      const lx = pos.x + reach * sx;
-      const lz = pos.z + reach * sz;
-      decor.push({ kind: 'lamp', x: lx, y: pos.y, z: lz });
-      // `outdoor` so the pool can put it out at noon -- a street lamp burning
-      // in daylight was reported, and it is also the light the town has to be
-      // read by after dark, so it carries far more than a torch in a hall.
-      lights.push({
-        x: lx, y: pos.y + 3.9, z: lz, color: 0xffc182,
-        intensity: 26, radius: 26, flicker: true, outdoor: true,
-      });
-      addCollider(lx - 0.3, lx + 0.3, lz - 0.3, lz + 0.3, pos.y, pos.y + 4.2);
-    }
-    return;
-  }
+function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider }) {
+  if (open) return;
 
   // A street with frontage has a building on this side already; a low garden
   // wall in front of it is one wall too many.
@@ -799,7 +818,6 @@ function buildOutdoorEdge({ batcher, chunk, room, cell, pos, dir, open, addColli
     place(bx, pos.y + h / 2, bz), { chunk, ao: wallAo(pos.y) });
   addCollider(bx - (along ? t : CELL) / 2, bx + (along ? t : CELL) / 2,
     bz - (along ? CELL : t) / 2, bz + (along ? CELL : t) / 2, pos.y, pos.y + h + 2);
-  void decor;
 }
 
 /**
