@@ -318,6 +318,9 @@ export function buildScene(world, layout, materials, assets = null) {
   batcher.add(plane(gx1 - gx0, gz1 - gz0, 32), 'grass',
     place((gx0 + gx1) / 2, groundY, (gz0 + gz1) / 2), { chunk: 'ground' });
   addPlatform(gx0, gx1, gz0, gz1, groundY);
+  // ...and something for it to end against, out where the fog is thick enough
+  // to do the work.
+  buildHorizon(group, bounds, groundY);
 
   // --- rooms ---------------------------------------------------------------
 
@@ -1150,4 +1153,162 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, x, y, 
     }
   }
   void lights;
+}
+
+// -------------------------------------------------------------- horizon ----
+
+// Constant, so the same town gets the same skyline every load. A horizon that
+// reshuffles on reload is a screensaver, not a place.
+const HORIZON_SEED = 20931;
+
+/**
+ * The skyline: two rings of conifers with a ridge behind them.
+ *
+ * The ground runs 60 cells past the town and then meets the sky along a dead
+ * flat line -- green felt at noon, orange at dusk -- and that line is the one
+ * thing in frame that says this is a plane with a town drawn on it. What fixes
+ * it is not detail. The reference look (Stargate's British Columbia exteriors)
+ * is two tones at this range: a near-black comb of conifers against a bright
+ * sky, and a ridge dissolving into haze behind it. So this is flat triangles,
+ * one colour each, no texture and no light of its own. At 120 m through fog a
+ * texture is invisible; silhouette and tone are the entire job, and nothing
+ * here has to be lit, shadowed or updated.
+ *
+ * **The fog does the aerial perspective, and it squares.** `FogExp2` keeps
+ * `exp(-(density * depth)^2)` of a surface, not `exp(-density * depth)` -- a
+ * far shorter world than it sounds, half of any surface gone by 138 m at the
+ * noon density of 0.0060. Measured from the near edge of the town, which is
+ * where the horizon is visible at all (stand in the middle of it and you are
+ * looking at frontage), a ring keeps:
+ *
+ *     margin    noon .0060   dusk .0088   night .024
+ *     120 m       59.6%        32.8%        0.02%
+ *     165 m       37.5%        12.1%        0.00%
+ *     250 m       10.5%         0.8%        0.00%
+ *     380 m        0.6%         0.0%        0.00%
+ *
+ * That is the whole reason for +120, +165 and +250 m: three planes of depth
+ * out of three flat colours, and a horizon that puts itself away after dark
+ * without being told. The ridge is at +250 and not the +380 that would be
+ * right under unsquared fog, because 380 m keeps 0.6% -- not a tonal shape,
+ * nothing at all. Nor can the rings come closer: they have to clear everything
+ * built, and the town's own radius is already 213 m at Midgaard, so from the
+ * bounds centre the inner ring is 333 m off and keeps 1.8%. The treeline is
+ * for the streets that can see out; in the middle of town the buildings are
+ * the horizon.
+ */
+function buildHorizon(group, bounds, groundY) {
+  const cx = ((bounds.minX + bounds.maxX) / 2) * CELL;
+  const cz = ((bounds.minZ + bounds.maxZ) / 2) * CELL;
+  const town = Math.hypot((bounds.maxX - bounds.minX) * CELL, (bounds.maxZ - bounds.minZ) * CELL) / 2;
+
+  // `hash3` is the file's generator and there is no reason for a second one; a
+  // ring wants a stream, so run it over a counter. Measured over 20k draws:
+  // every tenth of the range within 3.6% of flat, lag-1 to lag-3 correlation
+  // under 0.01.
+  let draw = 0;
+  const rng = () => hash3(draw++, 0, 0, HORIZON_SEED);
+  const rnd = (lo, hi) => lo + rng() * (hi - lo);
+
+  // Unlit, and dark. A lit material was tried first -- up-normals handing the
+  // silhouettes the same sun and sky the field gets -- and at noon that made
+  // the treeline *lighter* than the sky behind it: a row of pale ghosts,
+  // exactly backwards from the reference. A conifer wall reflects almost
+  // nothing and reads near-black against any daylit sky, so flat unlit colour
+  // is the honest model: the fog supplies the aerial perspective and the
+  // per-hour tint, and exposure keeps it in step with the hour.
+  const conifer = new THREE.MeshBasicMaterial({
+    color: 0x141a14, side: THREE.DoubleSide,
+  });
+  // Colder and bluer than the trees, so the ridge reads as a further plane
+  // before the fog has said anything about it.
+  const rock = new THREE.MeshBasicMaterial({
+    color: 0x10151d, side: THREE.DoubleSide,
+  });
+
+  const silhouette = (points, material, name) => {
+    const position = new Float32Array(points);
+    // The unlit material never reads these, but the AO prepass renders the
+    // scene with a normal material, and a missing attribute there is a
+    // garbage buffer, not a default. Straight up is the cheapest true thing
+    // to say.
+    const normal = new Float32Array(position.length);
+    for (let i = 1; i < normal.length; i += 3) normal[i] = 1;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(position, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
+    geo.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.name = name;
+    // The sun's shadow camera is 260 m of span following the player. Nothing
+    // out here may enter that pass, casting or receiving.
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    // A 360-degree ring is always partly in view, so the test only ever
+    // answers yes.
+    mesh.frustumCulled = false;
+    group.add(mesh);
+  };
+
+  const rings = [
+    { r: town + 120, low: 14, high: 30 },
+    { r: town + 165, low: 18, high: 38 },
+  ];
+  rings.forEach((ring, index) => {
+    const points = [];
+    const span = 2 * Math.PI * ring.r;
+    for (let arc = 0; arc < span; arc += rnd(6, 10)) {
+      const a = arc / ring.r;
+      const radius = ring.r + rnd(-12, 12);
+      const px = cx + Math.cos(a) * radius;
+      const pz = cz + Math.sin(a) * radius;
+      // The ring's tangent, which seen from the town is also screen right --
+      // that is what puts the front face inwards below.
+      const tx = -Math.sin(a); const tz = Math.cos(a);
+      const h = rnd(ring.low, ring.high);
+      const w = h * rnd(0.32, 0.5);
+      // Apex off centre, or the whole ring is a metronome.
+      const lean = h * rnd(-0.06, 0.06);
+      const blade = (from, to, apex, top) => {
+        // Wound so the side facing the town is the front face: three flips a
+        // back face's normal, and these normals are all up, so the back of one
+        // of these would be lit from underneath.
+        points.push(px + tx * from, groundY, pz + tz * from);
+        points.push(px + tx * to, groundY, pz + tz * to);
+        points.push(px + tx * apex, groundY + top, pz + tz * apex);
+      };
+      blade(-w / 2, w / 2, lean, h);
+      if (rng() < 1 / 6) {
+        // A ragged lower tier on a minority of them. It has to *overhang*: a
+        // narrower triangle on the same centre line, half as tall, lies
+        // entirely inside the cone it is meant to break and draws nothing at
+        // all. So it is narrow and pushed out to one side, which is also what
+        // makes a spruce read as a spruce rather than a traffic cone.
+        const off = (rng() < 0.5 ? -1 : 1) * w * rnd(0.28, 0.42);
+        const half = w * rnd(0.26, 0.34);
+        blade(off - half, off + half, off, h * rnd(0.4, 0.58));
+      }
+    }
+    silhouette(points, conifer, `horizon-trees-${index}`);
+  });
+
+  // The ridge: one strip ring, ground to crest.
+  const SEG = 256;
+  // Whole cycles per turn, because the ring has to close. A frequency that is
+  // not an integer leaves crest(2pi) != crest(0), which is a vertical cliff in
+  // the skyline at one bearing -- the seam is worse than the repetition it was
+  // meant to avoid. 3, 7 and 11 are coprime, so nothing repeats inside a turn.
+  const waves = [[3, 11], [7, 6], [11, 3]].map(([f, amp]) => ({ f, amp, phase: rng() * Math.PI * 2 }));
+  const crest = (a) => waves.reduce((sum, w) => sum + w.amp * Math.sin(w.f * a + w.phase), 65);
+  const ridgeR = town + 250;
+  const ridge = [];
+  for (let i = 0; i < SEG; i++) {
+    const a0 = (i / SEG) * Math.PI * 2; const a1 = ((i + 1) / SEG) * Math.PI * 2;
+    const x0 = cx + Math.cos(a0) * ridgeR; const z0 = cz + Math.sin(a0) * ridgeR;
+    const x1 = cx + Math.cos(a1) * ridgeR; const z1 = cz + Math.sin(a1) * ridgeR;
+    const top0 = groundY + crest(a0); const top1 = groundY + crest(a1);
+    ridge.push(x0, groundY, z0, x1, groundY, z1, x1, top1, z1);
+    ridge.push(x0, groundY, z0, x1, top1, z1, x0, top0, z0);
+  }
+  silhouette(ridge, rock, 'horizon-ridge');
 }
