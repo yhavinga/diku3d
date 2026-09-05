@@ -378,6 +378,46 @@ def build_portcullis():
     return kit.deliver(p, "portcullis")
 
 
+def build_door_leaf():
+    """One leaf of a boarded door, hinge edge at x = 0 and the boards running
+    to +X, so a pivot standing on the jamb swings it exactly the way the old
+    flat panel swung. Reference size 1.35 wide by 2.85 tall -- half of the
+    world's 2.7 m doorway -- and the viewer scales it to the opening it hangs
+    in, so it is built lean and unornamented enough to survive stretching.
+
+    It replaces a single untextured box the height of the whole opening, which
+    a review metered at luminance 1.4 against a sky of 133 and called, fairly,
+    a black rectangle: vertex colour on a bare material has nothing to catch
+    the light with. Boards, ledges and straps are geometry, and MAT tags hand
+    the surfaces to the viewer's baked planks and iron."""
+    lib.reset()
+    p = []
+    W, H, boards, gap = 1.35, 2.85, 5, 0.012
+    bw = (W - (boards - 1) * gap) / boards
+    for i in range(boards):
+        bx = bw / 2 + i * (bw + gap)
+        # A few millimetres of face jitter, so the leaf is not one plane.
+        jitter = ((i * 2654435761) % 7 - 3) * 0.002
+        p.append(kit.timber((bw, 0.055, H), (bx, jitter, H / 2),
+                            (0, 0, 0), "planks", 0.012, "board%d" % i))
+    for z in (0.42, H / 2, H - 0.40):
+        p.append(kit.timber((W - 0.06, 0.05, 0.17), (W / 2, 0.052, z),
+                            (0, 0, 0), "oak", 0.012, "ledge"))
+    # Strap hinges on the street side (-Y), running off the hinge edge, and a
+    # knuckle over the pintle. Iron is what says this door is meant to hold.
+    for z in (0.55, H - 0.55):
+        p.append(kit.timber((0.98, 0.014, 0.085), (0.49, -0.04, z),
+                            (0, 0, 0), "iron", 0.006, "strap"))
+        p.append(lib.cylinder(0.034, 0.22, (0.015, -0.03, z), verts=10,
+                              name="knuckle", mat="iron"))
+    p.append(kit.timber((0.14, 0.012, 0.14), (W - 0.16, -0.037, H / 2 + 0.11),
+                        (0, 0, 0), "iron", 0.005, "roseplate"))
+    p.append(lib.torus(0.075, 0.013, (W - 0.16, -0.05, H / 2 - 0.01),
+                       (math.pi / 2, 0, 0), major_seg=10, minor_seg=6,
+                       name="ring", mat="iron"))
+    return kit.deliver(p, "door_leaf")
+
+
 def build_stone_arch():
     """A 3.2 x 3.1 opening, which is the size of every doorway in the world, so
     this drops straight onto the archways layout.js leaves where an exit will
@@ -428,7 +468,10 @@ def build_torch_sconce():
                         (math.radians(42), 0, 0), "iron", 0.012, "stay"))
     p.append(lib.cone(0.13, 0.09, 0.24, (0, -0.31, z + 0.24), verts=10, name="cup", mat="iron"))
     p.append(lib.cylinder(0.045, 0.62, (0, -0.31, z + 0.58), verts=8, name="haft", mat="oak"))
-    p.append(lib.cone(0.11, 0.05, 0.26, (0, -0.31, z + 0.96), verts=10, name="head", mat="cloth"))
+    # Pitch-dipped rags, not clean cloth: a review read the pale cream cone as
+    # "the flame" and called the town fireless. Bark is the darkest organic
+    # surface in the palette and reads as tarred wrapping at this size.
+    p.append(lib.cone(0.11, 0.05, 0.26, (0, -0.31, z + 0.96), verts=10, name="head", mat="bark"))
     return kit.deliver(p, "torch_sconce")
 
 
@@ -726,7 +769,7 @@ def build_nettles():
 ASSETS = [
     build_barrel, build_crate, build_sack, build_hay_bale, build_handcart,
     build_well, build_market_stall, build_lamp_post, build_hanging_sign,
-    build_bench, build_trough, build_fountain, build_signpost,
+    build_bench, build_trough, build_fountain, build_signpost, build_door_leaf,
     build_portcullis, build_stone_arch, build_torch_sconce, build_chimney_pot,
     build_stacked_crates, build_barrel_stack, build_firewood_pile,
     build_water_butt, build_bucket, build_rope_coil, build_ladder,

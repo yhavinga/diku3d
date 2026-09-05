@@ -23,9 +23,12 @@ const _scale = new THREE.Vector3();
 /**
  * Tags the models use that the texture baker has no recipe for. Two kinds here:
  * an alias, where an existing baked surface is genuinely the right one, and a
- * plain PBR value for the things that should not be textured at all -- cloth
- * and skin are small on screen, get tinted per person anyway, and read better
- * flat than wearing a stone pattern.
+ * plain PBR value for the small things that read better flat.
+ *
+ * `cloth` and `skin` are NOT in this table's reach any more: both grew real
+ * recipes in textures.js, and `materialFor` finds a baked surface first --
+ * their entries below are dead the moment the recipes exist. They stay as the
+ * fallback for a build without those recipes, nothing else.
  */
 // `oak` used to alias to `planks`. That is floorboards on a 2.4 m tile, and the
 // things tagged oak are a shoe, a sole, a belt and a head of hair -- 25 cm
@@ -195,6 +198,25 @@ export class AssetLibrary {
       primitives.push({ geometry, material, materialName, skinned: !!node.isSkinnedMesh });
     });
 
+    // The skinned path never saw any of that. `buildModelledFigure` clones
+    // `asset.scene` with SkeletonUtils, and a Mesh.clone *shares* geometry --
+    // so every townsperson wore Blender's raw metre UVs (cloth tiling at
+    // 1.00 m instead of 0.70, skin at 1.00 instead of 0.50) with V running
+    // the wrong way, which inverts the relief on people relative to every
+    // wall in town. Same treatment, in place, on the source scene; the
+    // primitive clones above were taken first, so nothing is scaled twice.
+    gltf.scene.traverse((node) => {
+      if (!node.isMesh || !node.geometry) return;
+      const material = this.materialFor(tagOf(node.material));
+      const uvScale = material.userData.uvScale ?? 1;
+      const uv = node.geometry.attributes.uv;
+      if (!uv) return;
+      for (let i = 0; i < uv.count; i++) {
+        uv.setXY(i, uv.getX(i) * uvScale, -uv.getY(i) * uvScale);
+      }
+      uv.needsUpdate = true;
+    });
+
     const size = new THREE.Vector3();
     bounds.getSize(size);
     return {
@@ -320,6 +342,7 @@ export const ASSET_NAMES = [
   'wall_solid', 'wall_door', 'wall_corner', 'wall_roof',
   'temple', 'market_stall', 'well', 'fountain', 'lamp_post', 'hanging_sign',
   'signpost', 'stone_arch', 'portcullis', 'torch_sconce', 'chimney_pot',
+  'door_leaf',
   'barrel', 'crate', 'sack', 'hay_bale', 'handcart', 'bench', 'trough',
   'stacked_crates', 'barrel_stack', 'firewood_pile', 'water_butt', 'bucket',
   'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',

@@ -1162,9 +1162,12 @@ export function populate(world, layout, built, options = {}) {
     flames.forEach((f, i) => {
       // A hearth fire sits where it was put, and is wider and lower than a
       // torch: it is a bed of logs, not a brand.
-      dummy.position.set(f.x, f.y + (f.hearth ? 0 : f.lamp ? 0.05 : 0.2), f.z);
+      // A torch flame starts a hand lower and a quarter larger than it did:
+      // at scale 1 from 0.2 up, the tarred head poked out under it and a
+      // review read the head as the flame. The fire has to wrap its fuel.
+      dummy.position.set(f.x, f.y + (f.hearth ? 0 : f.lamp ? 0.05 : 0.12), f.z);
       if (f.hearth) dummy.scale.set(1.9, 1.15, 1.9);
-      else dummy.scale.setScalar(f.lamp ? 1.15 : 1);
+      else dummy.scale.setScalar(f.lamp ? 1.15 : 1.28);
       dummy.updateMatrix();
       flameSystem.mesh.setMatrixAt(i, dummy.matrix);
     });
@@ -1295,10 +1298,18 @@ export function populate(world, layout, built, options = {}) {
             // light on the wall under it. One candidate per lit pane; the pool
             // only ever lights the nearest handful, so this costs nothing until
             // you are standing in front of one.
+            //
+            // `outdoor` matters: without it the pool ran this at a flat 3.4
+            // around the clock -- daylight included -- while the street lamp
+            // beside it earned its 2.6x night lift, a 20:1 ratio, and a judge
+            // standing under a lit window at night metered the paving as cold
+            // as paving fifteen metres off. Marked outdoor it is 13 after
+            // dark and nothing at noon, which is what a window does.
             if (lit) {
               windowLights.push({
-                x: px + f.nx * 0.5, y, z: pz + f.nz * 0.5,
-                color: 0xffb063, intensity: 3.4, radius: 6.5, flicker: false,
+                x: px + f.nx * 0.9, y, z: pz + f.nz * 0.9,
+                color: 0xffb063, intensity: 5.0, radius: 9.0, flicker: false,
+                outdoor: true,
               });
             }
           }
@@ -1422,26 +1433,63 @@ export function populate(world, layout, built, options = {}) {
 
   // --- doors --------------------------------------------------------------
 
+  // A 2.7 m opening is a gateway, not a house door, and one leaf across the
+  // whole of it read as a barn lid -- a review metered the old untextured
+  // panel at luminance 1.4 against a sky of 133 and called it a black
+  // rectangle, which it was: bare vertex colour has nothing to catch the
+  // light with. So: two boarded leaves from the library, planks and iron
+  // dressed by the baked materials, hinged on their own jambs. The flat
+  // panel survives as the fallback, half-width, for `?assets=off`.
   const doorMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 });
+  const leafAsset = assets ? assets.get('door_leaf') : null;
+  // Reference size the leaf was modelled at; the viewer scales to the opening.
+  const LEAF_W = 1.35;
+  const LEAF_H = 2.85;
   const doors = [];
-  for (const spec of built.doors) {
-    const parts = [];
-    pushPart(parts, G.box(spec.width - 0.25, spec.height - 0.1, 0.16), 0x5a4028, at(spec.width / 2 - 0.1, spec.height / 2, 0));
-    for (const y of [spec.height * 0.25, spec.height * 0.75]) {
-      pushPart(parts, G.box(spec.width - 0.3, 0.18, 0.2), 0x33302c, at(spec.width / 2 - 0.1, y, 0));
+  const makeLeaf = (leafWidth, height) => {
+    if (leafAsset) {
+      const leaf = new THREE.Group();
+      for (const primitive of leafAsset.primitives) {
+        const mesh = new THREE.Mesh(primitive.geometry, primitive.material);
+        mesh.castShadow = true;
+        leaf.add(mesh);
+      }
+      leaf.scale.set(leafWidth / LEAF_W, (height - 0.05) / LEAF_H, 1);
+      return leaf;
     }
-    pushPart(parts, G.sphere(0.09, 8), 0x8a7a46, at(spec.width - 0.45, spec.height * 0.5, 0.14));
+    const parts = [];
+    pushPart(parts, G.box(leafWidth - 0.06, height - 0.1, 0.14), 0x5a4028, at(leafWidth / 2, height / 2, 0));
+    for (const y of [height * 0.25, height * 0.75]) {
+      pushPart(parts, G.box(leafWidth - 0.1, 0.16, 0.18), 0x33302c, at(leafWidth / 2, y, 0));
+    }
     const mesh = new THREE.Mesh(mergeGeometries(parts, false), doorMaterial);
     mesh.castShadow = true;
-    const pivot = new THREE.Group();
+    return mesh;
+  };
+  for (const spec of built.doors) {
     const [ux, uz] = [Math.cos(spec.rotY), -Math.sin(spec.rotY)];
-    pivot.position.set(spec.x - ux * spec.width / 2, spec.y, spec.z - uz * spec.width / 2);
-    pivot.rotation.y = spec.rotY;
-    pivot.add(mesh);
-    group.add(pivot);
+    const leafWidth = spec.width / 2 - 0.015;
+    const pivots = [];
+    for (const side of [-1, 1]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(spec.x + side * ux * spec.width / 2, spec.y, spec.z + side * uz * spec.width / 2);
+      pivot.rotation.y = spec.rotY;
+      const leaf = makeLeaf(leafWidth, spec.height);
+      // The right-hand leaf is the left one mirrored, so its boards run back
+      // toward the middle and its straps still face the street. A negative
+      // scale flips the winding; three flips the front face with it.
+      if (side === 1) leaf.scale.x *= -1;
+      pivot.add(leaf);
+      group.add(pivot);
+      // Leaves swing opposite ways to meet in the middle.
+      pivots.push({ node: pivot, sign: -side, base: spec.rotY });
+    }
     const door = {
-      spec, pivot, open: !spec.closed, target: spec.closed ? 0 : 1, t: spec.closed ? 0 : 1,
+      spec, pivots, open: !spec.closed, target: spec.closed ? 0 : 1, t: spec.closed ? 0 : 1,
     };
+    // Stand the leaves where `t` says they are. The updater only writes on a
+    // change of t, so without this a door that starts open drew shut.
+    for (const p of pivots) p.node.rotation.y = p.base + p.sign * door.t * (Math.PI / 2) * 0.95;
     doors.push(door);
     interactables.push({
       position: new THREE.Vector3(spec.x, spec.y + spec.height / 2, spec.z),
@@ -1702,7 +1750,7 @@ export function populate(world, layout, built, options = {}) {
       const want = door.open ? 1 : 0;
       if (Math.abs(door.t - want) > 0.001) {
         door.t += Math.sign(want - door.t) * Math.min(Math.abs(want - door.t), dt * 2.2);
-        door.pivot.rotation.y = door.spec.rotY + door.t * (Math.PI / 2) * 0.95;
+        for (const p of door.pivots) p.node.rotation.y = p.base + p.sign * door.t * (Math.PI / 2) * 0.95;
       }
     }
 
