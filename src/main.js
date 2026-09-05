@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 
-import { createPipeline, SkyEnvironment, clampSkyHighlights } from './render.js';
+import { createPipeline, SkyEnvironment, clampSkyHighlights, OVERLAY_LAYER } from './render.js';
 import { parseArea, buildWorld, DIR_STEP, DIR_NAME, SECTOR_NAME } from './are.js';
 import { layoutWorld } from './layout.js';
 import { createMaterials } from './textures.js';
@@ -65,7 +65,12 @@ const TIMES = {
     cloud: [0.58, 0.9, 1.5, 11.3],
   },
   noon: {
-    elevation: 58, azimuth: 175, exposure: 0.165, fog: 0xbcd2e6, density: 0.0060,
+    // 355, not 175: theta is measured from +z, which is *south* (north is -z,
+    // the compass says so). 175 put the noon sun due north, so every
+    // south-facing frontage sat in permanent shade -- the inverse of any
+    // northern-hemisphere reference. Dawn 95 (east) and dusk 258 (west) were
+    // already right; the arc now runs east, south, west.
+    elevation: 58, azimuth: 355, exposure: 0.165, fog: 0xbcd2e6, density: 0.0060,
     sun: 0xfff4e2, sunIntensity: 22, sky: 0xa3c4e4, ground: 0x6f6455, ambient: 0.07,
     env: 0.34, bounce: 0x77694f, haze: 0xbcd2e6,
     bloom: 0.14, bloomThreshold: 28, stars: 0, turbidity: 3.0, rayleigh: 1.3,
@@ -106,6 +111,102 @@ const TIMES = {
 };
 
 /**
+ * The colours overcast takes over from the hour. Keyed the same way TIMES is,
+ * because they are the same four moments seen through a cloud deck: `haze`,
+ * the horizon inside the bake, is the fog you are standing in, so it is not
+ * listed twice.
+ */
+const OVERCAST = {
+  dawn: { fog: 0xaab0b6, sky: 0xa9b2bc, ground: 0x565149, bounce: 0x53504a },
+  noon: { fog: 0xb3bfc9, sky: 0xb6c2cc, ground: 0x635f55, bounce: 0x63625a },
+  dusk: { fog: 0x9aa2ab, sky: 0x8f99a6, ground: 0x4a463f, bounce: 0x49473f },
+  night: { fog: 0x141a24, sky: 0x232c3a, ground: 0x14161c, bounce: 0x171a20 },
+};
+
+/**
+ * Weather as a second axis on the hour, not a second set of presets.
+ *
+ * `clear` is the identity; anything else takes the hour's preset and hands
+ * back a modified copy, and `applyTime` reads that copy for everything it
+ * touches. So there is still exactly one preset object and one place that
+ * reads it, and the visible sky, the environment bake, the fog, the bloom, the
+ * shadow map and the figures' hand-placed contact shadows cannot go out of
+ * step with each other -- which is the failure mode a second set of presets
+ * would have, and it would show up as people casting sunlit shadows under a
+ * cloud deck.
+ *
+ * The reference is a British Columbia overcast: the light every Stargate
+ * exterior was shot in, and the reason those hills read as depth rather than
+ * as a backdrop. It is sky-dominated light. The direct sun falls to roughly a
+ * tenth, the sky itself becomes the source and goes high and pale, shadows
+ * lose their edge because the source is now the whole dome, and distance
+ * dissolves within a couple of streets. The one number that matters is the
+ * sun/sky ratio inverting; the colours here follow from it.
+ */
+const WEATHER = {
+  clear: (p) => p,
+  overcast: (p, name) => {
+    const hour = OVERCAST[name] ? name : 'dusk'; // the fallback TIMES just took
+    const c = OVERCAST[hour];
+    const night = hour === 'night';
+    return {
+      ...p,
+      // A fraction of the sun, and none of its colour: cloud is a grey
+      // diffuser, so even a dusk sun arrives white rather than gold. 0.12 was
+      // tried first and measured 29% of the ground's luminance at noon --
+      // enough to still read as a directional day. At 0.07 it measures 23%
+      // and no cast edge survives; the reference frames have none either.
+      sunIntensity: p.sunIntensity * 0.07,
+      sun: 0xe3e9ef,
+      sunFraction: 0.15,
+      turbidity: Math.max(p.turbidity, 8),
+      rayleigh: 0.9,
+      // No glare peak through a stratus deck: the Mie term is what puts a
+      // bright halo round the sun, and under the cloud gain it blew 3.2% of
+      // an overcast dusk frame past sRGB 250 -- more than the clear version
+      // of the same shot. There is no disc to see, so there is no halo.
+      mie: [0.0016, 0.35],
+      // Total cover, fully believed, and a gain of 2. The first cut used a
+      // gain just under 1 on the theory that a deck is grey; measured, that
+      // put the sky at 1.25x the ground where the reference frames (Stargate's
+      // Edora and Hanka exteriors) hold 2.5-2.8x, because the shader derives
+      // the cloud's colour from the sky *behind* it -- so a deck that is the
+      // light source has to sit well over that sky, not under it. Drift stays
+      // whatever the hour asked for.
+      cloud: [0.04, 1.0, 2.0, p.cloud[3]],
+      // three's Sky carries a second, stock cloud layer; under weather it is
+      // part of the same deck, so the weather owns its dials too.
+      stockCloud: [0.85, 0.6],
+      fog: c.fog, sky: c.sky, ground: c.ground, bounce: c.bounce, haze: c.fog,
+      // Aerial haze is most of the look, and it is the one dial that reads as
+      // weather rather than as a filter over the same picture. 1.8 was the
+      // first cut and it read as sea fog -- a frontage 40 m off dissolved
+      // while real BC overcast keeps tens of kilometres of visibility. 1.45
+      // keeps a building at 100 m legible and still melts the treeline.
+      density: p.density * (night ? 1.3 : 1.45),
+      // The sky is the source now. The first balance starved the walls: a
+      // white plaster panel metered at half the brightness of the grey paving
+      // under it, because vertical faces live entirely off the bake and the
+      // hemisphere once the sun is gone. So the ambient terms come up, and
+      // exposure gives a little back to keep the sky/ground ratio.
+      ambient: night ? p.ambient : p.ambient * 1.8,
+      env: night ? p.env : Math.min(1, p.env * 1.4),
+      exposure: p.exposure * ({ dawn: 1.45, noon: 1.5, dusk: 1.15, night: 1 })[hour],
+      // Damp collecting in the low patches of everything outdoors that keeps
+      // a `wet` recipe -- the single most identifiable feature of the look.
+      wet: 1.9,
+      // A cloud deck hides both. The tint stays, so nothing has to guess at a
+      // colour if the shafts are ever switched back on by hand.
+      stars: 0,
+      shafts: 0,
+      // Bloom is left at the hour's own. With the sun at a tenth nothing
+      // crosses a daytime threshold, which is right -- overcast has no glare --
+      // and night keeps the lamps it blooms.
+    };
+  },
+};
+
+/**
  * Diku's own direction order -- north, east, south, west, up, down -- on the
  * arrow keys, with the two vertical ones where a keyboard already puts "further
  * up" and "further down". WASD is taken by the body and every letter that would
@@ -138,6 +239,7 @@ const TONE_MAPPING = {
 
 const state = {
   time: params.get('time') || 'dusk',
+  weather: params.get('weather') === 'overcast' ? 'overcast' : 'clear',
   showStats: false,
   roomVnum: null,
   paused: true,
@@ -223,6 +325,9 @@ async function boot() {
   scene.add(actors.group);
 
   const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 900);
+  // The overlay quads take themselves off layer 0 to hide from the AO prepass,
+  // so the one camera that draws the world has to be told to look there too.
+  camera.layers.enable(OVERLAY_LAYER);
 
   const sky = new Sky();
   sky.scale.setScalar(6000);
@@ -272,7 +377,9 @@ async function boot() {
   const hud = new Hud(document.body, layout);
   const audio = new Audio();
 
-  const options = createOptions({ quality, applyTime: (n) => applyTime(n), audio, state });
+  const options = createOptions({
+    quality, applyTime: (n) => applyTime(n), applyWeather: (w) => applyWeather(w), audio, state,
+  });
   const game = createGame({ world, layout, built, actors });
   const gameUi = createGameUi(game);
   game.onTeleport = (x, y, z) => player.spawn(x, y, z, camera.rotation.y);
@@ -297,7 +404,12 @@ async function boot() {
   applyTime(state.time);
 
   function applyTime(name) {
-    const preset = TIMES[name] || TIMES.dusk;
+    const base = TIMES[name] || TIMES.dusk;
+    // The single choke point, and the reason weather is a modifier rather than
+    // a preset of its own: everything below reads `preset` and nothing below
+    // reads `state.weather`, so there is no way for the sky, the bake and the
+    // shadows to end up in different weather.
+    const preset = (WEATHER[state.weather] || WEATHER.clear)(base, name);
     state.time = name;
     game.setTimeOfDay(name);
     const phi = THREE.MathUtils.degToRad(90 - preset.elevation);
@@ -308,8 +420,12 @@ async function boot() {
     sky.material.uniforms.sunPosition.value.copy(sunPosition);
     sky.material.uniforms.turbidity.value = preset.turbidity;
     sky.material.uniforms.rayleigh.value = preset.rayleigh;
-    sky.material.uniforms.mieCoefficient.value = 0.006;
-    sky.material.uniforms.mieDirectionalG.value = 0.86;
+    sky.material.uniforms.mieCoefficient.value = preset.mie?.[0] ?? 0.006;
+    sky.material.uniforms.mieDirectionalG.value = preset.mie?.[1] ?? 0.86;
+    // The stock cloud layer inside three's Sky, normally left at its shipped
+    // defaults; weather may take it over. Set on the bake too, below.
+    sky.material.uniforms.cloudCoverage.value = preset.stockCloud?.[0] ?? 0.4;
+    sky.material.uniforms.cloudDensity.value = preset.stockCloud?.[1] ?? 0.4;
     skyRange.setFloor(preset.skyFloor ?? 0x000000, preset.skyFloorGain ?? 0);
     skyRange.setCloud(...preset.cloud);
     sun.position.copy(sunPosition).multiplyScalar(120);
@@ -319,6 +435,9 @@ async function boot() {
     hemi.groundColor.setHex(preset.ground);
     hemi.intensity = preset.ambient;
     scene.fog = new THREE.FogExp2(preset.fog, preset.density);
+    // Rain-damp on everything outdoors that keeps a wet recipe; identity for
+    // clear weather, and indoor floors have wet 0 so a scale changes nothing.
+    materials.setWetness(preset.wet ?? 1);
     renderer.toneMappingExposure = preset.exposure;
     bloom.strength = preset.bloom;
     bloom.threshold = preset.bloomThreshold;
@@ -328,7 +447,7 @@ async function boot() {
     state.shaftGain = preset.shafts;
     // Figures are kept out of the shadow map, so their contact shadows are
     // placed by hand and have to be told where the light is coming from.
-    actors.setSun(sunPosition, preset.elevation);
+    actors.setSun(sunPosition, preset.elevation, preset.sunFraction ?? 1);
     // And the windows have to be told there is daylight outside them, or from
     // inside a room they are black rectangles at head height.
     const daylight = THREE.MathUtils.clamp(preset.elevation / 22, 0, 1) * 0.75;
@@ -353,8 +472,8 @@ async function boot() {
       sunPosition,
       turbidity: preset.turbidity,
       rayleigh: preset.rayleigh,
-      mieCoefficient: 0.006,
-      mieDirectionalG: 0.86,
+      mieCoefficient: preset.mie?.[0] ?? 0.006,
+      mieDirectionalG: preset.mie?.[1] ?? 0.86,
       ground: preset.bounce,
       horizon: preset.haze,
       intensity: preset.env,
@@ -363,10 +482,17 @@ async function boot() {
       skyFloor: preset.skyFloor ?? 0x000000,
       skyFloorGain: preset.skyFloorGain ?? 0,
       cloud: preset.cloud,
+      stockCloud: preset.stockCloud,
     });
 
     shadowAnchor.set(Infinity, Infinity, Infinity); // the sun moved: redraw shadows
-    hud.toast(`${name}`);
+    hud.toast(state.weather === 'clear' ? `${name}` : `${name} · ${state.weather}`);
+  }
+
+  /** The other axis. Same hour, different sky; `applyTime` does all the work. */
+  function applyWeather(name) {
+    state.weather = WEATHER[name] ? name : 'clear';
+    applyTime(state.time);
   }
 
   // ---------------------------------------------------------- interaction --
@@ -670,7 +796,7 @@ async function boot() {
   window.diku = {
     scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi, options,
     pipeline, environment, materials,
-    player, hud, layout, built, actors, world, applyTime, state, times: TIMES,
+    player, hud, layout, built, actors, world, applyTime, applyWeather, state, times: TIMES,
     /** Console A/B for the tone curve: 'agx', 'aces' or 'neutral'. */
     setTone(name) {
       renderer.toneMapping = TONE_MAPPING[name] ?? THREE.AgXToneMapping;

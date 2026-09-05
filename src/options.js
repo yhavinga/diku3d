@@ -33,6 +33,7 @@ export const DEFAULTS = {
   bloom: null,
   lights: null,
   time: 'dusk',
+  weather: 'clear',
   sound: true,
 };
 
@@ -90,6 +91,12 @@ const FIELDS = [
     label: 'Time of day',
     note: null,
     options: [['dawn', 'dawn'], ['noon', 'noon'], ['dusk', 'dusk'], ['night', 'night']],
+  },
+  {
+    key: 'weather',
+    label: 'Weather',
+    note: null,
+    options: [['clear', 'clear'], ['overcast', 'overcast']],
   },
   {
     key: 'sound',
@@ -159,7 +166,7 @@ const CSS = `
 }
 `;
 
-export function createOptions({ quality, applyTime, audio, state }) {
+export function createOptions({ quality, applyTime, applyWeather, audio, state }) {
   const stored = load();
   const values = { ...DEFAULTS, ...stored };
 
@@ -238,6 +245,7 @@ export function createOptions({ quality, applyTime, audio, state }) {
     quality.setScale(values.renderScale === 'auto' ? null : values.renderScale);
 
     if (values.time !== state.time) applyTime(values.time);
+    if (values.weather !== state.weather) applyWeather(values.weather);
     if (audio.muted === values.sound) audio.toggleMute();
   }
 

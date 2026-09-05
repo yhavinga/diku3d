@@ -567,7 +567,14 @@ function decorate(material, recipe, macro, grain) {
     // whatever the surface, and at 1/0.22 it is about a centimetre a bump.
     shader.uniforms.detailScale = { value: 1 / 0.22 };
     shader.uniforms.detailStrength = { value: material.userData.detailStrength };
-    shader.uniforms.wetness = { value: recipe.wet ?? 0 };
+    // The base dampness is the recipe's; weather scales it at runtime through
+    // setWetness below. The uniform reference is kept on userData because the
+    // shader object only exists once the material has compiled.
+    shader.uniforms.wetness = {
+      value: (recipe.wet ?? 0) * (material.userData.wetScale ?? 1),
+    };
+    material.userData.wetnessUniform = shader.uniforms.wetness;
+    material.userData.wetBase = recipe.wet ?? 0;
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSurfacePos;')
@@ -683,6 +690,20 @@ export function createMaterials(size = 512, onProgress = () => {}) {
     surfaced.push(material);
     onProgress((index + 1) / names.length, name);
   });
+
+  /**
+   * Scale the dampness of every wet recipe -- overcast weather turns it up.
+   * A plain uniform write, no recompile: DIKU_WET is compiled in wherever the
+   * recipe has any wetness at all, and everything else has a base of zero, so
+   * indoor floors stay dry at any scale.
+   */
+  materials.setWetness = (scale) => {
+    for (const material of surfaced) {
+      material.userData.wetScale = scale;
+      const uniform = material.userData.wetnessUniform;
+      if (uniform) uniform.value = (material.userData.wetBase ?? 0) * scale;
+    }
+  };
 
   /** Close-range detail normals, on or off. Recompiles; only the P key does it. */
   materials.setDetail = (on) => {

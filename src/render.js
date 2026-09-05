@@ -102,6 +102,10 @@ export class SkyEnvironment {
     uniforms.rayleigh.value = options.rayleigh;
     uniforms.mieCoefficient.value = options.mieCoefficient;
     uniforms.mieDirectionalG.value = options.mieDirectionalG;
+    // The stock cloud layer, same dials and same defaults as the visible sky
+    // -- this is a second Sky, and anything set on one has to be set on both.
+    uniforms.cloudCoverage.value = options.stockCloud?.[0] ?? 0.4;
+    uniforms.cloudDensity.value = options.stockCloud?.[1] ?? 0.4;
     this.range.setFloor(options.skyFloor ?? 0x000000, options.skyFloorGain ?? 0);
     // The same cloud the sky outside has, so what the town is lit by matches
     // what is over it.
@@ -206,6 +210,14 @@ export function clampSkyHighlights(sky, ceiling = 60) {
         + '\t\t\t\tcover *= smoothstep( 0.015, 0.20, up );\n'
         + '\t\t\t\tfloat lum = dot( texColor, vec3( 0.2126, 0.7152, 0.0722 ) );\n'
         + '\t\t\t\tvec3 cloudCol = mix( vec3( lum ), texColor, 0.35 ) * skyCloud.z * ( 0.62 + 0.7 * n );\n'
+        // A full deck is brightest at the zenith -- CIE overcast puts it at
+        // three times the horizon -- but this cloud borrows its colour from
+        // the clear sky underneath, which runs the other way; measured, an
+        // overcast noon came out at 0.64x. The height term restores the
+        // shape, and only once the deck is fully believed (amount 1.0), so
+        // fair-weather cloud is untouched.
+        + '\t\t\t\tfloat deck = smoothstep( 0.97, 1.0, skyCloud.y );\n'
+        + '\t\t\t\tcloudCol *= 1.0 + deck * ( 1.5 * up - 0.3 );\n'
         + '\t\t\t\ttexColor = mix( texColor, cloudCol, cover * skyCloud.y );\n'
         + '\t\t\t}\n'
         + '\t\t\tfloat skyPeak = max( max( texColor.r, texColor.g ), texColor.b );\n'
@@ -421,6 +433,25 @@ export class LightShaftPass extends Pass {
 // -------------------------------------------------------------------- AO ----
 
 /**
+ * The layer transparent overlay quads live on: name labels, the figures'
+ * hand-placed contact shadows, chimney smoke.
+ *
+ * They must not exist for the AO prepass. That pass renders the whole scene
+ * through `scene.overrideMaterial`, which ignores alpha entirely -- so a name
+ * label is, to the depth and normal buffers, a solid wall floating a couple of
+ * metres in front of the figure, and the AO shades whatever is genuinely
+ * behind it. Measured on the composited frame at the Market Square at noon:
+ * the sky around a close label came out 34 luma darker at blend 0.55 than at
+ * blend 0, against 0.6 for a control patch of the same sky.
+ *
+ * Nothing else has to be told about the layer. None of these cast shadows, and
+ * the environment bake renders a scene of its own; only the one camera that
+ * draws the world needs it enabled, which `main.js` does, because `layers.set`
+ * takes an object off layer 0.
+ */
+export const OVERLAY_LAYER = 2;
+
+/**
  * GTAO with a resolution of its own. The pass re-renders the scene into a
  * normal/depth buffer, so its cost tracks the size it is asked for and not the
  * size of the frame; half resolution is indistinguishable after the denoise.
@@ -436,6 +467,18 @@ class ScaledGTAOPass extends GTAOPass {
       Math.max(2, Math.round(width * this.scale)),
       Math.max(2, Math.round(height * this.scale)),
     );
+  }
+
+  render(renderer, writeBuffer, readBuffer, deltaTime, maskActive) {
+    // The prepass re-renders the scene from this same camera, so switching the
+    // overlay layer off around it is the whole of the fix -- no per-frame
+    // traversal, and nothing to keep in step with what is in the scene.
+    this.camera.layers.disable(OVERLAY_LAYER);
+    try {
+      super.render(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
+    } finally {
+      this.camera.layers.enable(OVERLAY_LAYER);
+    }
   }
 }
 

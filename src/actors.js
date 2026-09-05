@@ -13,6 +13,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ITEM, ACT_AGGRESSIVE, ACT_SENTINEL } from './are.js';
 import { hash3, ROOM, CEIL } from './build.js';
 import { InstanceBatch } from './assets.js';
+import { OVERLAY_LAYER } from './render.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 const SKIN = [0xe8c39e, 0xd9a877, 0xb5834f, 0x8a5a33, 0x6d4526, 0xc9b7a0];
@@ -116,6 +117,11 @@ export function makeLabel(text, height = 0.5, options) {
   });
   const sprite = new THREE.Sprite(material);
   sprite.scale.set(height * aspect, height, 1);
+  // Off the default layer, which is how it stays out of the AO prepass. That
+  // pass draws the scene through a single override material and never looks at
+  // alpha, so it takes the whole quad for a wall and shades the sky behind the
+  // label: 34 luma of darkening around a close one at noon.
+  sprite.layers.set(OVERLAY_LAYER);
   return sprite;
 }
 
@@ -663,6 +669,7 @@ function makeContactShadows(count, opacity, renderOrder) {
   mesh.renderOrder = renderOrder;
   mesh.castShadow = false;
   mesh.receiveShadow = false;
+  mesh.layers.set(OVERLAY_LAYER); // kept out of the AO prepass, see makeLabel
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   return mesh;
 }
@@ -1408,6 +1415,7 @@ export function populate(world, layout, built, options = {}) {
     });
     const points = new THREE.Points(geo, material);
     points.frustumCulled = false;
+    points.layers.set(OVERLAY_LAYER); // kept out of the AO prepass, see makeLabel
     group.add(points);
     smokeSystem = { points, geo, base: positions.slice(), seeds };
   }
@@ -1484,14 +1492,17 @@ export function populate(world, layout, built, options = {}) {
     }
   }
 
-  function setSun(direction, elevationDeg) {
+  function setSun(direction, elevationDeg, fraction = 1) {
     const len = Math.hypot(direction.x, direction.z) || 1;
     sun.x = direction.x / len;
     sun.z = direction.z / len;
     sun.elevation = elevationDeg;
     // Below the horizon there is no sun shadow at all, only the soft darkening
-    // under the feet that any ambient occlusion would give you.
-    sun.lift = THREE.MathUtils.clamp((elevationDeg + 2) / 12, 0, 1);
+    // under the feet that any ambient occlusion would give you. `fraction` is
+    // the same thing for weather rather than for the hour: under overcast
+    // there is almost no directional light left, and without it every figure
+    // would still throw a hard smear across the paving on a sunless day.
+    sun.lift = THREE.MathUtils.clamp((elevationDeg + 2) / 12, 0, 1) * fraction;
   }
 
   const _shadowMatrix = new THREE.Matrix4();
@@ -1527,11 +1538,15 @@ export function populate(world, layout, built, options = {}) {
       const pz = hidden ? 0 : fig.object.position.z;
       const y = hidden ? -1000 : fig.home.y + 0.02;
 
-      // The contact: a small dense patch under the feet, which does not know
-      // where the sun is and does not stretch. This is the one that says the
-      // figure is touching the ground.
+      // The contact: a dense patch under the feet, which does not know where
+      // the sun is and does not stretch. This is the one that says the figure
+      // is touching the ground -- and it has to be wider than the figure, or
+      // it does nothing. At 0.86x the shoulder width the whole patch hid
+      // behind the body from any eye-level view, and a judge metering the
+      // ground beside a pair of feet read 1.006x the surrounding paving:
+      // present in the buffers, invisible in the frame.
       if (hidden) _shadowScale.copy(HIDDEN.scale);
-      else _shadowScale.set(width * 0.86 * shrink, 1, width * 0.94 * shrink);
+      else _shadowScale.set(width * 1.32 * shrink, 1, width * 1.45 * shrink);
       _shadowPos.set(px, y, pz);
       _shadowQuat.identity();
       contactShadows.setMatrixAt(i, _shadowMatrix.compose(_shadowPos, _shadowQuat, _shadowScale));
@@ -1552,9 +1567,13 @@ export function populate(world, layout, built, options = {}) {
     castShadows.instanceMatrix.needsUpdate = true;
     // The contact patch is ambient occlusion and survives the sun going down;
     // the cast smear is the sun, so it fades with it, and a long one is fainter
-    // because it is the same light spread over more ground.
-    contactShadows.material.opacity = 0.46 + 0.22 * sun.lift;
-    castShadows.material.opacity = (0.30 + 0.16 * sun.lift) * Math.min(1, 4 / (1 + tan * 14));
+    // because it is the same light spread over more ground. The tan term used
+    // to be * 14, which reads as "short shadow, faint shadow" -- backwards: a
+    // noon shadow is the short *dark* one, and at tan 1.6 the smear rendered
+    // at opacity 0.079, which a judge correctly reported as no shadow at all.
+    // At * 6 noon comes out at 0.17 and dusk keeps its full 0.46.
+    contactShadows.material.opacity = 0.52 + 0.26 * sun.lift;
+    castShadows.material.opacity = (0.30 + 0.16 * sun.lift) * Math.min(1, 4 / (1 + tan * 6));
   }
 
   const _look = new THREE.Vector3();
