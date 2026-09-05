@@ -331,6 +331,11 @@ export function buildScene(world, layout, materials, assets = null) {
     const outdoor = isOutdoor(room);
     const airborne = room.sector === SECTOR.AIR;
     const mats = pickMaterials(room, room.area);
+    // A park takes grass rather than the cobbles its CITY sector would hand it.
+    // Here and not inside `pickMaterials`, because an alley routed out of a
+    // park room asks that same function for its surface -- and the paving
+    // between two park cells is the path the mud says runs through them.
+    if (isPark(room)) mats.floor = 'grass';
     const sides = layout.sides.get(cell.vnum);
     const roomHoles = holes.get(cell.vnum) || [];
 
@@ -474,7 +479,9 @@ export function buildScene(world, layout, materials, assets = null) {
         w: SHELL * 2, d: SHELL * 2, h: CEIL + 1.1, seed: hash3(room.vnum, 2, 0, 11), doorSides: sides,
       });
       buildInteriorProps({ room, pos, sides, decor, mats });
+      if (isShop(room)) buildShopSign({ room, pos, sides, instances, model, chunk });
     } else {
+      if (isPark(room)) buildPark({ room, cell, pos, sides, instances, model, chunk, decor, addCollider });
       // Out of doors the same thing, against the sides with no way out of
       // them, so a square reads as somewhere people keep their things rather
       // than as swept paving.
@@ -797,6 +804,138 @@ function buildStreetLamp({ room, cell, pos, decor, lights, addCollider }) {
     intensity: 26, radius: 26, flicker: true, outdoor: true,
   });
   addCollider(lx - 0.3, lx + 0.3, lz - 0.3, lz + 0.3, pos.y, pos.y + 4.2);
+}
+
+/**
+ * Which rooms are shops is in the world data, not in the prose: `#SHOPS` names
+ * a keeper mob and the reset table drops that mob in a room, so a room whose
+ * mobs include a keeper is the mud's own answer to the question.
+ */
+const isShop = (room) => !!room.mobs && room.mobs.some((mob) => mob.shop);
+
+/** Head height and then some. Nobody walks into a shop sign. */
+const SIGN_CLEAR = 2.6;
+
+/**
+ * The shop's sign, hung out over the street beside its door.
+ *
+ * `hanging_sign` is modelled for exactly this and nothing had ever placed it:
+ * fixing plate flat on the wall at z = 0, ironwork reaching out along +z,
+ * origin on the ground under the fixing. All it needs is the outside face of a
+ * wall and the way out of it.
+ *
+ * That wall is the one the door is in, because that is the wall the street
+ * sees, and the sign slides along it to clear the opening -- the same move
+ * `buildInteriorProps` makes with a fitting whose wall has the door in it. A
+ * shop with no way out to open air is buried inside something else and has no
+ * street to hang anything over, so it gets none: that is the bars and back
+ * rooms in Midgaard's temple block, which are reached through other rooms.
+ */
+function buildShopSign({ room, pos, sides, instances, model, chunk }) {
+  if (!instances) return;
+  // A missing model means no sign. Procedural ironwork and a painted board is
+  // not worth inventing for something this small.
+  const sign = model(['hanging_sign'], 0);
+  if (!sign) return;
+
+  const dir = [0, 1, 2, 3].find((d) => {
+    const side = sides[d];
+    return side && side.kind === 'alley' && !alleyEnclosed(side.link);
+  });
+  if (dir === undefined) return;
+
+  const [dx, , dz] = DIR_STEP[dir];
+  // Beside the doorway, not over it, and well short of the corner.
+  const along = (hash3(room.vnum, 0, 0, 91) > 0.5 ? 1 : -1) * (DOOR_W / 2 + 1.4);
+  // It already hangs clear of a head from an origin on the ground, but read
+  // that off the model's own bounds rather than trusting it: a regenerated
+  // sign that sits lower has to be lifted, not left hanging in the doorway.
+  const bottom = instances.library.get(sign)?.bounds?.min.y ?? 0;
+  instances.add(sign, {
+    x: pos.x + dx * SHELL + (dx ? 0 : along),
+    y: pos.y + Math.max(0, SIGN_CLEAR - bottom),
+    z: pos.z + dz * SHELL + (dz ? 0 : along),
+    // `FACE_ROT` turns a model's -z towards a direction; the arm reaches the
+    // other way, so half a turn past that swings it out over the street.
+    rotY: FACE_ROT[dir] + Math.PI,
+  }, chunk);
+}
+
+/**
+ * A park, planted.
+ *
+ * Midgaard's park is CITY sector like every other street, so it paved wall to
+ * wall -- a review stood in the middle of one and reported a park with no tree,
+ * grass or path in it. The mud names them itself, "Small path through the
+ * park", "Park Entrance", and that name is the signal `pickMaterials` already
+ * reads. A room that calls itself a *road* past the park is a road, which is
+ * the distinction `readFittings` draws between a taproom and a room that merely
+ * points at one. The path wants no geometry of its own: the alley routed
+ * between two park cells keeps its cobbles, so the grass is joined up by paving.
+ */
+const PARK = /\bpark\b/i;
+const PARK_IS_A_ROAD = /\b(road|street|avenue|lane)\b/i;
+const isPark = (room) => isOutdoor(room) && PARK.test(room.name) && !PARK_IS_A_ROAD.test(room.name);
+
+/** How much of a side you can walk out of stays empty. */
+const PARK_CLEAR = 1.5;
+const PARK_CORNER = 4.3;
+
+function buildPark({ room, cell, pos, sides, instances, model, chunk, decor, addCollider }) {
+  // A side with a way out of it keeps its last metre and a half clear; a side
+  // without one is a park wall, and things grow against a wall.
+  const clears = (lx, lz) => {
+    for (let d = 0; d < 4; d++) {
+      if (!sides[d]) continue;
+      const [dx, , dz] = DIR_STEP[d];
+      if (HALF - (dx ? lx * dx : lz * dz) < PARK_CLEAR) return false;
+    }
+    return true;
+  };
+
+  // Trees go in the corners, because the ways out are on the axes and so is the
+  // walk across -- and never at the centre, which is where the player arrives.
+  // The corner the street lamp stands in is left alone (`buildStreetLamp` picks
+  // it the same way) or a canopy swallows the only light in the room.
+  const lampX = hash3(cell.x, cell.z, 1, 6) > 0.5 ? 1 : -1;
+  const lampZ = hash3(cell.x, cell.z, 2, 7) > 0.5 ? 1 : -1;
+  const corners = [[1, 1], [1, -1], [-1, -1], [-1, 1]]
+    .filter(([sx, sz]) => !(sx === lampX && sz === lampZ));
+  const first = Math.floor(hash3(room.vnum, 0, 0, 81) * corners.length);
+  const trees = hash3(room.vnum, 1, 0, 82) > 0.45 ? 3 : 2;
+  for (let i = 0; i < trees; i++) {
+    const [sx, sz] = corners[(first + i) % corners.length];
+    const lx = sx * (PARK_CORNER + (hash3(room.vnum, i, 0, 83) - 0.5) * 1.3);
+    const lz = sz * (PARK_CORNER + (hash3(room.vnum, i, 1, 84) - 0.5) * 1.3);
+    if (!clears(lx, lz)) continue;
+    const tx = pos.x + lx;
+    const tz = pos.z + lz;
+    decor.push({ kind: 'tree', x: tx, y: pos.y, z: tz, scale: 0.72 + hash3(room.vnum, i, 2, 85) * 0.34 });
+    // The same box a forest tree gets: a trunk is something you walk around.
+    addCollider(tx - 0.7, tx + 0.7, tz - 0.7, tz + 0.7, pos.y, pos.y + 8);
+  }
+
+  // Undergrowth around the edges, and no collider on it: these are knee- and
+  // ankle-high, and walking through a clump of grass is not the wall a trunk is.
+  if (!instances) return;
+  for (const kind of [
+    { name: model(['bush'], 0), count: 5, ring: 4.4, spread: 1.0, size: 0.85, salt: 86 },
+    { name: model(['grass_tuft'], 0), count: 14, ring: 4.2, spread: 1.8, size: 1.0, salt: 90 },
+  ]) {
+    if (!kind.name) continue;
+    for (let i = 0; i < kind.count; i++) {
+      const angle = ((i + hash3(room.vnum, i, 0, kind.salt)) / kind.count) * Math.PI * 2;
+      const radius = kind.ring + (hash3(room.vnum, i, 1, kind.salt) - 0.5) * kind.spread;
+      const lx = Math.cos(angle) * radius;
+      const lz = Math.sin(angle) * radius;
+      if (!clears(lx, lz)) continue;
+      instances.add(kind.name, {
+        x: pos.x + lx, y: pos.y, z: pos.z + lz,
+        rotY: hash3(room.vnum, i, 2, kind.salt) * Math.PI * 2,
+        scale: kind.size * (0.8 + hash3(room.vnum, i, 3, kind.salt) * 0.5),
+      }, chunk);
+    }
+  }
 }
 
 /** The boundary of an open-air room: an opening, or something to stop you. */
