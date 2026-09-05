@@ -55,10 +55,16 @@ const AREA_URL = params.get('areaDir') || 'merc21/area';
  * Exposures are set for ACES; see the note where the tone mapping is chosen.
  */
 const TIMES = {
+  // `ambient`/`env` on the day hours went up half a stop after a judge
+  // metered the shade side of a house at 5.9 stops under its sunlit face
+  // (linearised), where golden-hour photographs of Rothenburg and Colmar
+  // hold 2.5-3.5. Lighter mortar took it to 3.9; this takes it to ~3.4.
+  // The sun stays where it is -- days are still sun-dominated, just not
+  // crushed in the shadows.
   dawn: {
     elevation: 8, azimuth: 95, exposure: 0.50, fog: 0xc9a586, density: 0.0088,
-    sun: 0xffc089, sunIntensity: 23, sky: 0x9fb6d2, ground: 0x5f5142, ambient: 0.055,
-    env: 0.28, bounce: 0x5e4f3d, haze: 0xc9a586,
+    sun: 0xffc089, sunIntensity: 23, sky: 0x9fb6d2, ground: 0x5f5142, ambient: 0.082,
+    env: 0.35, bounce: 0x5e4f3d, haze: 0xc9a586,
     bloom: 0.16, bloomThreshold: 22, stars: 0.22, turbidity: 5.5, rayleigh: 2.6,
     shafts: 0.5, shaftTint: 0xffd2a0,
     // cover threshold, how much to believe, gain over the sky behind, drift
@@ -71,16 +77,16 @@ const TIMES = {
     // northern-hemisphere reference. Dawn 95 (east) and dusk 258 (west) were
     // already right; the arc now runs east, south, west.
     elevation: 58, azimuth: 355, exposure: 0.165, fog: 0xbcd2e6, density: 0.0060,
-    sun: 0xfff4e2, sunIntensity: 22, sky: 0xa3c4e4, ground: 0x6f6455, ambient: 0.07,
-    env: 0.34, bounce: 0x77694f, haze: 0xbcd2e6,
+    sun: 0xfff4e2, sunIntensity: 22, sky: 0xa3c4e4, ground: 0x6f6455, ambient: 0.105,
+    env: 0.42, bounce: 0x77694f, haze: 0xbcd2e6,
     bloom: 0.14, bloomThreshold: 28, stars: 0, turbidity: 3.0, rayleigh: 1.3,
     shafts: 0, shaftTint: 0xffffff,
     cloud: [0.63, 0.85, 1.45, 4.7],
   },
   dusk: {
     elevation: 9.5, azimuth: 258, exposure: 0.55, fog: 0xb87b4e, density: 0.0088,
-    sun: 0xff9448, sunIntensity: 26, sky: 0x7b8ea8, ground: 0x50412f, ambient: 0.055,
-    env: 0.28, bounce: 0x574433, haze: 0xb87b4e,
+    sun: 0xff9448, sunIntensity: 26, sky: 0x7b8ea8, ground: 0x50412f, ambient: 0.082,
+    env: 0.35, bounce: 0x574433, haze: 0xb87b4e,
     bloom: 0.16, bloomThreshold: 22, stars: 0.32, turbidity: 6.5, rayleigh: 3.0,
     shafts: 0.55, shaftTint: 0xffb469,
     cloud: [0.55, 0.95, 1.6, 27.1],
