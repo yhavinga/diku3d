@@ -57,8 +57,17 @@ const CSS = `
 #g-log { position: absolute; right: 24px; bottom: 96px; width: 330px;
   max-height: min(38vh, 300px); overflow: hidden; display: flex;
   flex-direction: column; justify-content: flex-end; gap: 2px; }
+/* A soft glow was the only thing separating these lines from the world, and
+   over sunlit paving or a night street they simply drowned. Same cure as the
+   in-world name labels: a thin dark edge does the work of a wide halo at a
+   fraction of the ink -- plus a low plate per line, the description panel's
+   own trick, so a message reads on any background at all. */
 #g-log p { margin: 0; font-size: 13.5px; line-height: 1.42; color: #d9cdb4;
-  text-shadow: 0 1px 8px rgba(0,0,0,0.9); animation: g-in 200ms ease both; }
+  background: rgba(16, 13, 9, 0.62); padding: 3px 9px; border-radius: 2px;
+  align-self: flex-end; max-width: 100%;
+  text-shadow: 0 0 1px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.85),
+    0 -1px 2px rgba(0,0,0,0.85), 1px 0 2px rgba(0,0,0,0.85), -1px 0 2px rgba(0,0,0,0.85);
+  animation: g-in 200ms ease both; }
 #g-log p.you { color: #f0e3c8; }
 #g-log p.them { color: #cf9d92; }
 #g-log p.gain { color: var(--gold); }
@@ -70,7 +79,10 @@ const CSS = `
 /* ------------------------------------------------------------- floats -- */
 #g-floats { position: absolute; inset: 0; }
 #g-floats span { position: absolute; left: 50%; top: 50%; font-family: var(--serif);
-  font-size: 26px; font-weight: 400; text-shadow: 0 2px 12px rgba(0,0,0,0.9); white-space: nowrap; }
+  font-size: 26px; font-weight: 400; white-space: nowrap;
+  text-shadow: 0 0 1px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.85),
+    0 -1px 2px rgba(0,0,0,0.85), 1px 0 2px rgba(0,0,0,0.85), -1px 0 2px rgba(0,0,0,0.85),
+    0 2px 12px rgba(0,0,0,0.8); }
 #g-hurt { position: absolute; inset: 0; opacity: 0; pointer-events: none;
   background: radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 42%, rgba(150,26,18,0.55) 100%); }
 
@@ -118,8 +130,9 @@ const CSS = `
 #g-hint { position: absolute; left: 50%; bottom: 62px; transform: translateX(-50%);
   font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--gold); opacity: 0; transition: opacity 150ms ease;
-  text-shadow: 0 1px 8px rgba(0,0,0,0.9); }
-#g-hint.on { opacity: 0.85; }
+  text-shadow: 0 0 1px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.85),
+    0 -1px 2px rgba(0,0,0,0.85), 1px 0 2px rgba(0,0,0,0.85), -1px 0 2px rgba(0,0,0,0.85); }
+#g-hint.on { opacity: 1; }
 
 /* -------------------------------------------------------------- level -- */
 #g-level { position: absolute; inset: 0; display: flex; flex-direction: column;
