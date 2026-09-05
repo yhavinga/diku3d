@@ -2,7 +2,9 @@
 
 A browser viewer that builds Midgaard at load time out of the stock Merc 2.1
 `.are` files. `README.md` explains what it is and how it works; this file is
-the part that isn't visible from the code.
+the part that isn't visible from the code. `LEARNINGS.md` is the
+round-by-round log the traps below are promoted from — fuller, dated, with
+the measurement that settled each finding; add to it at the end of a round.
 
 ## Running and checking
 
