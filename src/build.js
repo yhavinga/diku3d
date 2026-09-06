@@ -107,6 +107,57 @@ const isBog = (room) => isOpenAir(room) && room.sector !== SECTOR.CITY
   && BOG.test(`${room.name} ${room.description}`)
   && (BOG.test(room.name) || !BOG_NOT.test(room.name));
 
+// ------------------------------------------------------------- the Shire ----
+
+/**
+ * The Shire is the one area in the stock world that is not built at Midgaard's
+ * scale, and it has to be keyed by area rather than by prose because that is
+ * what it is: a village of a different people. Measured before any of this,
+ * standing on Bywater Road at #1120: eaves 6.2-10.8 m (median 6.8) over a
+ * 1.72 m figure, three storeys of half-timbering, indistinguishable from
+ * Midgaard's Main Street.
+ *
+ * Everything *inside* the area is still chosen from the mud's own words, the
+ * way `pickMaterials` and `readFittings` already choose. The prose is a
+ * construction drawing: "a smial, a hole in the ground which serves as the
+ * proper dwelling place for halflings"; a halfling hole is "rather crudely
+ * built... musty and damp"; a dark tunnel's "ceiling is so low that you must
+ * crouch"; and in the pig pen "you feel your boots sinking into the mud".
+ */
+const isShire = (room) => room.areaFile === 'shire.are';
+/** Dug into a hillside: the hobbits' own word for one, plus the famous one. */
+const SMIAL = /\b(smial|bag ?end|halfling hole)\b/i;
+/** Earth rather than masonry -- the burrow network and the holes off it. */
+const BURROW = /\b(smial|bag ?end|halfling hole|tunnel|intersection)\b/i;
+/** A yard with animals in it is not a terrace of shops. */
+const FARMYARD = /\b(pig ?pen|barn|chicken coop|stable|byre|sty)\b/i;
+
+/** How high a Shire bank stands: a garden wall, not a storey. */
+const BANK_LO = 2.9;
+const BANK_HI = 3.7;
+/** The cutting in a bank that a front door sits at the back of. */
+const BANK_GAP = 3.4;
+/**
+ * The tile a turf bank wears, against the 5.5 m the `grass` recipe uses on the
+ * ground.
+ *
+ * The ground is nearly always seen at a grazing angle, which compresses the
+ * pattern into a fine dense turf; a bank is seen face on, and at the ground
+ * tile the same recipe came out as metre-wide blobs -- topiary, not grass.
+ * Going the other way was worse and worth recording: at a 14 m tile the blobs
+ * are 2.5 m across and the banks read as camouflage netting. So finer, until
+ * the grain on a bank face matches the grain the field has at a distance.
+ */
+const TURF_UV = 1 / 2.6;
+
+/**
+ * A hobbit's own front door. The world's standard opening is 3.2 x 3.1 m and
+ * everything here is built at about that 1.8x, so 2.2 m is the same fraction
+ * of a halfling's door that 3.1 m is of a man's -- clearly smaller from the
+ * street, and still a door and not a hatch.
+ */
+const ROUND_DOOR = 2.2;
+
 export function hash3(a, b, c, salt = 0) {
   let h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263) ^ Math.imul(c | 0, 2147483647) ^ Math.imul(salt, 1274126177);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -211,6 +262,21 @@ function plane(w, d, seg = 4) {
   return geo;
 }
 
+/**
+ * Half an ellipsoid sitting on its own base plane: a turf bank, a barrow, the
+ * hill a smial is dug into. No bottom cap, because it never leaves the ground
+ * it is standing on -- and an open shell seen from underneath is a hole, so
+ * nothing may hang one of these in the air.
+ */
+// Not cached the way `box` and `plane` are: every one of these is a different
+// size, so a cache would only ever grow. `Batcher.add` clones what it is given,
+// so the caller disposes -- same as `buildBogPool` does with its discs.
+function mound(w, h, d, seg = 20) {
+  const geo = new THREE.SphereGeometry(0.5, seg, Math.max(3, Math.round(seg / 2)), 0, Math.PI * 2, 0, Math.PI / 2);
+  geo.scale(w, h * 2, d);
+  return geo;
+}
+
 /** Triangular prism: gable roofs, dune wedges. */
 function triPrism(width, height, depth) {
   const w = width / 2; const d = depth / 2;
@@ -273,7 +339,9 @@ function dirBetween(a, b) {
 
 function pickMaterials(room, area) {
   const name = `${room.name} ${area}`.toLowerCase();
-  const cave = /moria|sewer|catacomb|cavern|mine|tunnel|crypt|grotto|den|dungeon/.test(name);
+  // `tomb` alongside `crypt`: the graveyard's thirteen tombs were reading as
+  // ordinary rooms and coming out in plaster and floorboards.
+  let cave = /moria|sewer|catacomb|cavern|mine|tunnel|crypt|tomb|grotto|den|dungeon/.test(name);
   const holy = /temple|altar|sanctum|shrine|chapel|cathedral/.test(name);
   const wood = /inn|bar|tavern|pub|shop|store|smith|baker|grocer|hall|guild|house|cabin|room/.test(name);
 
@@ -305,9 +373,48 @@ function pickMaterials(room, area) {
   // because a passage routed between two bog rooms asks here for its surface
   // and the ground between two bogs is bog.
   if (isBog(room)) floor = 'peat';
+
+  // The Shire is dug, not built. Same move as the bog and the park: the room's
+  // own words overrule the sector, and they do it here rather than at the call
+  // site because the lane routed out of a pig pen asks this function what the
+  // ground between them is made of, and it is mud.
+  let smial = false;
+  let burrow = false;
+  let wallUv;                   // undefined -> the material's own tile
+  if (isShire(room)) {
+    burrow = BURROW.test(room.name);
+    if (burrow) {
+      // Trodden earth, all of it, because a burrow is dug out of one substance.
+      // Not the bare rock the `tunnel` branch above hands out: these are cut
+      // through a hillside, not mined. `dirt` and not `peat` on the walls --
+      // peat is the darkest surface in the world and a torch-lit room made of
+      // it measured 14% of the frame under luminance 4; and `dirt` carries the
+      // damp in its low patches that the prose asks for ("the air is musty and
+      // damp"). Peat stays overhead, where nothing lights it anyway.
+      smial = SMIAL.test(room.name);
+      cave = true;              // whatever else, no dressed-masonry kit in a hole
+      floor = 'dirt'; wallIn = 'dirt'; wallOut = 'dirt'; ceil = 'peat'; roof = 'grass';
+      // A smial's outside is the hill, so its outer skin is turf and not the
+      // earth face it is cut from: `dirt` carries a `wet` term, and shaded by
+      // `wallAo` a six-metre wall of it read as wet black cobble under a green
+      // cap -- a building with a dome, which is the opposite of the point. In
+      // grass, wall and dome are one green mass with a doorway in it. The tile
+      // has to come with it or the wall wears the ground's 5.5 m grass.
+      if (smial) { wallOut = 'grass'; wallUv = TURF_UV; }
+    } else if (cave) {
+      // "Gamgee Resi*den*ce" is not a den. The cave test above is a substring
+      // match, so a farmer's cottage came out in bare rock with a rock ceiling;
+      // nothing in the Shire is a cavern.
+      cave = false;
+      floor = 'planks'; wallIn = 'plaster'; wallOut = 'timber'; ceil = 'planks';
+    }
+    // "You feel your boots sinking into the mud." A coop's floor is the same.
+    if (/\b(pig ?pen|chicken coop|sty)\b/i.test(room.name)) floor = 'dirt';
+  }
+
   if (!holy && !cave && !wood && hash3(room.vnum, 0, 0, 9) > 0.6) wallOut = 'timber';
-  if (!holy && hash3(room.vnum, 1, 0, 3) > 0.84) roof = 'thatch';
-  return { floor, wallIn, wallOut, roof, ceil, holy, cave };
+  if (!holy && !burrow && hash3(room.vnum, 1, 0, 3) > 0.84) roof = 'thatch';
+  return { floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv };
 }
 
 // ------------------------------------------------------------------ main ----
@@ -425,7 +532,24 @@ export function buildScene(world, layout, materials, assets = null) {
       chunk, materials: mats, sides,
     });
 
-    const half = airborne ? ROOM / 2 : (openAir ? HALF : ROOM / 2);
+    // A doorway has nothing under it, and underground you can see that.
+    //
+    // An indoor room's floor stops at its own wall line (ROOM/2 = 5 m) and the
+    // passage routed away from it starts at the next cell boundary (HALF =
+    // 6.5 m), so every doorway spans 1.5 m of no floor -- and outside the
+    // doorway a 0.8 m strip runs the length of every wall. Above ground the
+    // world's own ground plane lies 0.47 m below and fills it, which is why
+    // nobody has ever seen it. Underground there is nothing below at all:
+    // standing in a Shire tunnel you were looking at daylight sky through the
+    // floor, and it read as a bar of blown white across the opening -- 0.164%
+    // of the frame, and the hide-things sweep named the culprit as the sky
+    // itself, not any mesh. Paving these rooms to their cell edge closes both.
+    //
+    // The gap is world-wide -- it lives in the `half` below, and Moria and the
+    // sewers have it too -- so this is keyed to the Shire's own burrows rather
+    // than changed for every area, and the general case is written up instead.
+    const buried = !openAir && mats.cave && isShire(room) && cell.level < 0;
+    const half = airborne ? ROOM / 2 : (openAir || buried ? HALF : ROOM / 2);
     buildFloor({
       batcher, chunk, material: mats.floor, x: pos.x, y: pos.y, z: pos.z,
       half, holes: roomHoles.filter((h) => !h.ceiling), addPlatform, slab: !airborne,
@@ -466,7 +590,11 @@ export function buildScene(world, layout, materials, assets = null) {
         if (!canopy) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog });
         // Once, for the whole cell -- the corners need to know about all four
         // sides, not one at a time.
-        if (dir === 3) buildCityFrontage({ batcher, chunk, room, cell, pos, sides, addCollider, decor });
+        if (dir === 3) {
+          buildCityFrontage({
+            batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors,
+          });
+        }
       }
 
       // "In the air..." rooms sit three levels above the roofs. An archway
@@ -495,6 +623,11 @@ export function buildScene(world, layout, materials, assets = null) {
           x: wx + dx * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), y: pos.y,
           z: wz + dz * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), rotY, dir,
           width: DOOR_W, height: DOOR_H,
+          // One round leaf covering the whole opening instead of two boarded
+          // halves. The opening stays 3.2 x 3.1 -- square to within 3%, which
+          // is close enough for a circle and leaves the lintel, the collider
+          // and the player's clearance exactly as they were.
+          round: isShire(room),
           closed: !!(side.exit.locks & EX_CLOSED),
           locked: !!(side.exit.locks & EX_LOCKED),
           keyword: side.exit.keyword || 'door',
@@ -548,10 +681,18 @@ export function buildScene(world, layout, materials, assets = null) {
         half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
       });
       if (kit === null) buildRoof({ batcher, chunk, mats, room, x: pos.x, y: pos.y + CEIL + SLAB, z: pos.z, decor });
-      decor.push({
-        kind: 'windows', x: pos.x, y: pos.y, z: pos.z,
-        w: SHELL * 2, d: SHELL * 2, h: CEIL + 1.1, seed: hash3(room.vnum, 2, 0, 11), doorSides: sides,
-      });
+      // A burrow under the ground has no outside to put a window in. The Shire's
+      // tunnels and its lower halfling holes were getting casements with lit
+      // panes and sills, and the sills -- pale timber right beside a wall torch
+      // -- came out as two glowing white bars across a room the mud calls
+      // "darkness". The smials on Bywater Road are at street level and keep
+      // theirs, which is the whole difference.
+      if (!(mats.cave && isShire(room) && cell.level < 0)) {
+        decor.push({
+          kind: 'windows', x: pos.x, y: pos.y, z: pos.z,
+          w: SHELL * 2, d: SHELL * 2, h: CEIL + 1.1, seed: hash3(room.vnum, 2, 0, 11), doorSides: sides,
+        });
+      }
       buildInteriorProps({ room, pos, sides, decor, mats });
       if (isShop(room)) buildShopSign({ room, pos, sides, instances, model, chunk });
     } else {
@@ -570,12 +711,16 @@ export function buildScene(world, layout, materials, assets = null) {
       // Nobody stacks barrels in a bog. This clutter is street furniture and it
       // reaches every open-air room, which is how a trough came to stand in the
       // marsh; the reeds below are what a bog keeps against its edges instead.
-      if (!bog && blank.length && hash3(room.vnum, 13, 0, 6) > 0.28) {
+      const farm = farmProps(room);
+      // The farmyard always dresses: an empty pig pen is a cobbled square with
+      // pigs on it, and the trough is half of what makes it a pen.
+      if (!bog && blank.length && (farm || hash3(room.vnum, 13, 0, 6) > 0.28)) {
         decor.push({
           // Against the new facade, not inside it.
           kind: 'clutter', x: pos.x, y: pos.y, z: pos.z,
           half: wantsFrontage(room) ? HALF - FRONTAGE_D : HALF,
           walls: blank, seed: hash3(room.vnum, 12, 0, 5), indoor: false,
+          props: farm,
         });
       }
     }
@@ -616,16 +761,16 @@ export function buildScene(world, layout, materials, assets = null) {
   // --- build on every empty cell that fronts a street ----------------------
 
   const frontage = new Map(); // cell key -> sector to build from
-  const consider = (level, x, z, sector, bog) => {
+  const consider = (level, x, z, sector, bog, shire) => {
     if (layout.at(level, x, z) !== undefined || layout.isPath(level, x, z)) return;
     const k = `${level}:${x},${z}`;
-    if (!frontage.has(k)) frontage.set(k, { level, x, z, sector, bog });
+    if (!frontage.has(k)) frontage.set(k, { level, x, z, sector, bog, shire });
   };
   for (const cell of layout.order) {
     if (!isOpenAir(cell.room) || cell.room.sector === SECTOR.AIR) continue;
     for (let dir = 0; dir < 4; dir++) {
       const [dx, , dz] = DIR_STEP[dir];
-      consider(cell.level, cell.x + dx, cell.z + dz, cell.room.sector, isBog(cell.room));
+      consider(cell.level, cell.x + dx, cell.z + dz, cell.room.sector, isBog(cell.room), isShire(cell.room));
     }
   }
   for (const link of layout.links) {
@@ -636,7 +781,7 @@ export function buildScene(world, layout, materials, assets = null) {
     for (const c of link.path) {
       for (let dir = 0; dir < 4; dir++) {
         const [dx, , dz] = DIR_STEP[dir];
-        consider(link.from.level, c.x + dx, c.z + dz, source.sector, isBog(source));
+        consider(link.from.level, c.x + dx, c.z + dz, source.sector, isBog(source), isShire(source));
       }
     }
   }
@@ -656,7 +801,7 @@ export function buildScene(world, layout, materials, assets = null) {
     buildFiller({
       batcher, instances, model, faceRot: faces < 0 ? null : FACE_ROT[faces],
       chunk: `${spot.level}:${Math.floor(spot.x / 4)},${Math.floor(spot.z / 4)}`,
-      sector: spot.sector, bog: spot.bog, x: pos.x, y: pos.y, z: pos.z,
+      sector: spot.sector, bog: spot.bog, shire: spot.shire, x: pos.x, y: pos.y, z: pos.z,
       seed: hash3(spot.x, spot.z, spot.level, 17), addCollider, lights, decor,
     });
   }
@@ -747,13 +892,15 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
 
   for (const skin of (kit !== null && kit !== undefined && instances ? [] : [
     { name: mats.wallIn, t: WALL_IN, offset: WALL_IN / 2, height: CEIL },
-    { name: mats.wallOut, t: WALL_OUT, offset: WALL_IN + WALL_OUT / 2, height: eave },
+    // `uv` is undefined for every room but a smial, and undefined falls through
+    // to the material's own tile inside `Batcher.add`.
+    { name: mats.wallOut, t: WALL_OUT, offset: WALL_IN + WALL_OUT / 2, height: eave, uv: mats.wallUv },
   ])) {
     const sx = x + dx * skin.offset;
     const sz = z + dz * skin.offset;
     if (!gap) {
       batcher.add(box(width, skin.height, skin.t, 3, 4, 1), skin.name,
-        place(sx, y + skin.height / 2, sz, rotY), { chunk, ao: wallAo(y) });
+        place(sx, y + skin.height / 2, sz, rotY), { chunk, ao: wallAo(y), uvScale: skin.uv });
       continue;
     }
     const sideW = (width - gap) / 2;
@@ -761,12 +908,12 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
       const offset = s * (gap + sideW) / 2;
       batcher.add(box(sideW, skin.height, skin.t, 2, 4, 1), skin.name,
         place(sx + (along ? 0 : offset), y + skin.height / 2, sz + (along ? offset : 0), rotY),
-        { chunk, ao: wallAo(y) });
+        { chunk, ao: wallAo(y), uvScale: skin.uv });
     }
     const lintel = skin.height - DOOR_H;
     if (lintel > 0.05) {
       batcher.add(box(gap, lintel, skin.t, 2, 1, 1), skin.name,
-        place(sx, y + DOOR_H + lintel / 2, sz, rotY), { chunk, ao: () => 0.72 });
+        place(sx, y + DOOR_H + lintel / 2, sz, rotY), { chunk, ao: () => 0.72, uvScale: skin.uv });
     }
   }
 
@@ -813,7 +960,12 @@ const FRONTAGE_D = 3.2;
 /** Rooms the mud itself calls open ground. Six metres is not a market square. */
 const SQUARE = /\b(square|plaza|piazza|courtyard|market|green|common|park|field|yard)\b/i;
 
-const wantsFrontage = (room) => room.sector === SECTOR.CITY && !SQUARE.test(room.name);
+// A pig pen is sectored CITY like every other Shire lane, and a terrace of
+// shop fronts brought forward around a sty is not what the mud describes. It
+// gets a rail fence off `buildOutdoorEdge` instead, the way any other
+// unfronted open-air room gets its boundary.
+const wantsFrontage = (room) => room.sector === SECTOR.CITY && !SQUARE.test(room.name)
+  && !(isShire(room) && FARMYARD.test(room.name));
 
 /**
  * Bring the frontage forward on every side of a city cell that is not a way
@@ -823,13 +975,14 @@ const wantsFrontage = (room) => room.sector === SECTOR.CITY && !SQUARE.test(room
  * inside the 5-9 m a real town street runs to, and the buildings now touch
  * their neighbours in the cells behind instead of standing free on paving.
  */
-function buildCityFrontage({ batcher, chunk, room, cell, pos, sides, addCollider, decor }) {
+function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors }) {
   if (!wantsFrontage(room)) return;
   const isOpen = (d) => {
     const side = sides[d];
     return !!(side && (side.kind === 'alley' || side.kind === 'portal' || side.kind === 'gate'));
   };
   const inset = HALF - FRONTAGE_D / 2;
+  const shire = isShire(room);
 
   const block = (bx, bz, sx, sz, salt) => {
     const seed = hash3(cell.x * 7 + Math.round(bx), cell.z * 7 + Math.round(bz), cell.level, salt);
@@ -845,18 +998,171 @@ function buildCityFrontage({ batcher, chunk, room, cell, pos, sides, addCollider
     decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed });
   };
 
+  /**
+   * A Shire cottage: the same block, at the height a cottage is.
+   *
+   * The ridge is worked out here rather than borrowed from `block` because
+   * `triPrism` puts its cross-section on local X and its ridge on local Z, and
+   * a quarter turn maps local Z to world X -- so under rotation the *width*
+   * argument has to become the short side, not stay the long one.
+   */
+  const cottage = (bx, bz, sx, sz, salt) => {
+    const seed = hash3(cell.x * 7 + Math.round(bx), cell.z * 7 + Math.round(bz), cell.level, salt);
+    const h = 2.9 + seed * 0.8;
+    batcher.add(box(sx, h, sz, 3, 2, 3), seed > 0.5 ? 'plaster' : 'timber',
+      place(bx, pos.y + h / 2, bz), { chunk, ao: wallAo(pos.y) });
+    const roofH = 2.2 + seed * 1.3;
+    const wide = sx > sz;
+    batcher.add(triPrism((wide ? sz : sx) + 0.8, roofH, (wide ? sx : sz) + 0.8),
+      seed > 0.38 ? 'thatch' : 'rooftile',
+      place(bx, pos.y + h, bz, wide ? Math.PI / 2 : 0), { chunk });
+    addCollider(bx - sx / 2, bx + sx / 2, bz - sz / 2, bz + sz / 2, pos.y, pos.y + h);
+    decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed });
+    if (hash3(Math.round(bx), Math.round(bz), cell.level, 71) > 0.5) {
+      decor.push({ kind: 'smoke', x: bx, y: pos.y + h + roofH, z: bz });
+    }
+  };
+
+  /**
+   * A turf bank with a hobbit hole cut into it: the Shire's answer to a shop
+   * front.
+   *
+   * Nothing is subtracted anywhere, because there is no CSG here. The bank is
+   * built as two lengths with a gap between them, and the gap *is* the cutting
+   * -- a 3.4 m recess with a stone face at the back of it, a round door in the
+   * face, and a turf gable carried over the opening so the door reads as being
+   * in a bank rather than between two of them. The recess keeps the room's own
+   * paving and no collider, so you can walk in and stand at the door.
+   *
+   * The gable is a prism and not another half-ellipsoid on purpose: a
+   * hemisphere has no bottom cap, and one hung in the air is an open shell that
+   * reads as a hole in the turf from below.
+   */
+  const bank = (dir) => {
+    const [dx, , dz] = DIR_STEP[dir];
+    const along = dir === 1 || dir === 3;    // the bank runs along z
+    const seed = hash3(cell.x, cell.z, dir, 64);
+    const h = BANK_LO + seed * (BANK_HI - BANK_LO);
+    // Local frame: `a` runs along the street, `o` outwards from the room centre.
+    const at = (a, o) => (along
+      ? { x: pos.x + dx * o, z: pos.z + a }
+      : { x: pos.x + a, z: pos.z + dz * o });
+    // ...and the same swap for extents: [world x, world z].
+    const span = (a, o) => (along ? [o, a] : [a, o]);
+    // A metre deeper than the block it stands on. An ellipsoid's tangent is
+    // vertical at its rim, so at the 1.6 m half-depth of a bare frontage block
+    // a 3 m bank meets the paving at very nearly a right angle and reads as a
+    // green wall; 2.1 m takes the aspect from 2:1 to 1.5:1 and the toe lies
+    // down. The overhang is unreachable either way -- measured over the Shire,
+    // no closed side of a frontage cell has a routed passage behind it, so the
+    // cell it leans into is always one that has been built on.
+    const depth = FRONTAGE_D + 1.0;
+    const turf = (a, len) => {
+      const c = at(a, inset);
+      const [sx, sz] = span(len, depth);
+      const geo = mound(sx, h, sz);
+      batcher.add(geo, 'grass', place(c.x, pos.y, c.z), { chunk, uvScale: TURF_UV });
+      geo.dispose();
+      addCollider(c.x - sx / 2, c.x + sx / 2, c.z - sz / 2, c.z + sz / 2, pos.y, pos.y + h);
+    };
+    const chimney = (a) => {
+      if (hash3(cell.x, cell.z, dir, 68) < 0.45) return;
+      const c = at(a, inset);
+      batcher.add(box(0.85, 1.9, 0.85), 'stonewall', place(c.x, pos.y + h + 0.25, c.z), { chunk });
+      decor.push({ kind: 'smoke', x: c.x, y: pos.y + h + 1.2, z: c.z });
+    };
+
+    if (hash3(cell.x, cell.z, dir, 65) >= 0.8) {
+      // A plain bank: a green shoulder to the lane, and the neighbour's
+      // chimney standing out of it.
+      turf(0, CELL + 0.6);
+      chimney((hash3(cell.x, cell.z, dir, 69) - 0.5) * 6);
+      return;
+    }
+
+    // Two lengths of bank, overlapping the neighbouring cells a little so the
+    // banks along a street join up instead of ending at every cell boundary.
+    const wingLen = HALF + 0.3 - BANK_GAP / 2;
+    const wingAt = BANK_GAP / 2 + wingLen / 2;
+    for (const s of [-1, 1]) turf(s * wingAt, wingLen);
+    chimney(wingAt * (hash3(cell.x, cell.z, dir, 69) > 0.5 ? 1 : -1));
+
+    // The face at the back of the cutting, flush with the cell boundary.
+    const faceT = 0.6;
+    const faceH = ROUND_DOOR + 0.55;
+    const fc = at(0, HALF - faceT / 2);
+    const [fx, fz] = span(BANK_GAP, faceT);
+    batcher.add(box(fx, faceH, fz, 2, 2, 1), 'stonewall',
+      place(fc.x, pos.y + faceH / 2, fc.z), { chunk, ao: wallAo(pos.y) });
+    addCollider(fc.x - fx / 2, fc.x + fx / 2, fc.z - fz / 2, fc.z + fz / 2, pos.y, pos.y + faceH);
+
+    // A brow of turf over the door, carried on the face and not on the air.
+    // Spanning the whole cutting it was a 3.7 m green awning hanging over an
+    // open recess, which from underneath is exactly what it looked like -- and
+    // a cutting is meant to be open to the sky anyway. 1.6 m deep, sitting on
+    // the face and oversailing the door by 0.7 m, is a hood.
+    const capH = Math.max(0.6, h - faceH + 0.55);
+    const cap = at(0, HALF - faceT / 2 - 0.2);
+    batcher.add(triPrism(faceT + 1.0, capH, BANK_GAP + 0.6), 'grass',
+      place(cap.x, pos.y + faceH, cap.z, along ? 0 : Math.PI / 2), { chunk, uvScale: TURF_UV });
+
+    // The door itself. Nothing leads through it -- the bank behind is solid --
+    // so it is scenery with a hinge, and shut is the only way you ever see the
+    // whole circle. `room: -1` keeps it out of main.js's "is a door in the way"
+    // lookup, which matches on room and direction.
+    const dc = at(0, HALF - faceT - 0.08);
+    doors.push({
+      x: dc.x, y: pos.y, z: dc.z,
+      // FACE_ROT turns a model's -z towards a direction, so it turns the
+      // leaf's +z -- its ironwork, its knob -- back towards the street.
+      rotY: FACE_ROT[dir], dir: -1, room: -1,
+      width: ROUND_DOOR, height: ROUND_DOOR,
+      round: true, scenery: true, closed: true, locked: false, keyword: 'round door',
+    });
+
+    if (!instances) return;
+    const pot = model(['herb_pots', 'nettles', 'bush'], hash3(cell.x, cell.z, dir, 66));
+    if (!pot) return;
+    for (const s of [-1, 1]) {
+      const p = at(s * (BANK_GAP / 2 - 0.6), HALF - faceT - 0.7);
+      instances.add(pot, {
+        x: p.x, y: pos.y, z: p.z, rotY: hash3(cell.x, cell.z, dir * 2 + s, 67) * Math.PI * 2,
+      }, chunk);
+    }
+  };
+
+  /** The corner between two ways out: a knoll, not a block. */
+  const knoll = (bx, bz, salt) => {
+    const seed = hash3(cell.x * 7 + Math.round(bx), cell.z * 7 + Math.round(bz), cell.level, salt);
+    const h = BANK_LO + seed * (BANK_HI - BANK_LO);
+    const geo = mound(FRONTAGE_D + 0.7, h, FRONTAGE_D + 0.7);
+    batcher.add(geo, 'grass', place(bx, pos.y, bz), { chunk, uvScale: TURF_UV });
+    geo.dispose();
+    addCollider(bx - FRONTAGE_D / 2, bx + FRONTAGE_D / 2, bz - FRONTAGE_D / 2, bz + FRONTAGE_D / 2, pos.y, pos.y + h);
+  };
+
   for (let dir = 0; dir < 4; dir++) {
     if (isOpen(dir)) continue;
     const [dx, , dz] = DIR_STEP[dir];
     const along = dir === 1 || dir === 3;
-    block(pos.x + dx * inset, pos.z + dz * inset,
-      along ? FRONTAGE_D : CELL, along ? CELL : FRONTAGE_D, 62 + dir);
+    const bx = pos.x + dx * inset;
+    const bz = pos.z + dz * inset;
+    const sx = along ? FRONTAGE_D : CELL;
+    const sz = along ? CELL : FRONTAGE_D;
+    if (!shire) { block(bx, bz, sx, sz, 62 + dir); continue; }
+    // Mostly bank, a cottage now and then -- a village of holes with a few
+    // houses in it, which is what the Shire is.
+    if (hash3(cell.x, cell.z, dir, 60) < 0.76) bank(dir);
+    else cottage(bx, bz, sx, sz, 62 + dir);
   }
   // Corners, only where both of their sides are a way out -- otherwise the
   // full-width block on the closed side already covers them.
   for (const [dirA, dirB, sx, sz] of [[0, 1, 1, -1], [1, 2, 1, 1], [2, 3, -1, 1], [3, 0, -1, -1]]) {
     if (!isOpen(dirA) || !isOpen(dirB)) continue;
-    block(pos.x + sx * inset, pos.z + sz * inset, FRONTAGE_D, FRONTAGE_D, 70 + dirA);
+    const bx = pos.x + sx * inset;
+    const bz = pos.z + sz * inset;
+    if (shire) knoll(bx, bz, 70 + dirA);
+    else block(bx, bz, FRONTAGE_D, FRONTAGE_D, 70 + dirA);
   }
 }
 
@@ -1482,6 +1788,13 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
   // wall in front of it is one wall too many.
   if (wantsFrontage(room)) return;
 
+  // A pen is fenced, not walled. Without this the pig pen took the CITY branch
+  // below and came out ringed in 2.6 m of dressed ashlar.
+  if (isShire(room) && FARMYARD.test(room.name)) {
+    buildRailFence({ batcher, chunk, pos, dir, addCollider });
+    return;
+  }
+
   const [dx, , dz] = DIR_STEP[dir];
   const bx = pos.x + dx * (HALF - 0.3);
   const bz = pos.z + dz * (HALF - 0.3);
@@ -1505,6 +1818,33 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
     place(bx, pos.y + h / 2, bz), { chunk, ao: shade });
   addCollider(bx - (along ? t : CELL) / 2, bx + (along ? t : CELL) / 2,
     bz - (along ? CELL : t) / 2, bz + (along ? CELL : t) / 2, pos.y, pos.y + h + 2);
+}
+
+/**
+ * Post and rail along one side of a cell: six posts and two rails, waist high,
+ * so you can see the pigs over it. The collider is the whole line and stands
+ * taller than the timber -- you cannot step over a fence here any more than
+ * you can step over a wall.
+ */
+function buildRailFence({ batcher, chunk, pos, dir, addCollider }) {
+  const [dx, , dz] = DIR_STEP[dir];
+  const along = dir === 1 || dir === 3;
+  const out = HALF - 0.35;
+  const at = (a) => (along
+    ? { x: pos.x + dx * out, z: pos.z + a }
+    : { x: pos.x + a, z: pos.z + dz * out });
+  const H = 1.3;
+  for (let i = 0; i < 6; i++) {
+    const p = at((i / 5 - 0.5) * (CELL - 0.7));
+    batcher.add(box(0.2, H, 0.2), 'timber', place(p.x, pos.y + H / 2, p.z), { chunk });
+  }
+  const c = at(0);
+  for (const ry of [0.46, 1.02]) {
+    const [rw, rd] = along ? [0.11, CELL] : [CELL, 0.11];
+    batcher.add(box(rw, 0.16, rd), 'timber', place(c.x, pos.y + ry, c.z), { chunk });
+  }
+  const [cw, cd] = along ? [0.6, CELL] : [CELL, 0.6];
+  addCollider(c.x - cw / 2, c.x + cw / 2, c.z - cd / 2, c.z + cd / 2, pos.y, pos.y + H + 1.2);
 }
 
 /**
@@ -1664,6 +2004,39 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
 
 /** Pitched roof over an indoor room, with a chimney now and then. */
 function buildRoof({ batcher, chunk, mats, room, x, y, z, decor }) {
+  // "A smial, a hole in the ground which serves as the proper dwelling place
+  // for halflings." What is over one is the hill, not a roof -- so a turf dome
+  // sits on the wall head instead of a pitched span, and with `wallOut` already
+  // earth the frontage reads as a bank with a doorway in it.
+  //
+  // The dome is barely wider than the walls it stands on. A hemisphere has no
+  // bottom cap, so any of it that oversails is an open shell seen from below;
+  // 15 cm of overhang is hidden by the wall itself.
+  if (mats.smial) {
+    const wallTop = y - SLAB + 1.1;
+    const width = SHELL * 2 + 0.3;
+    const domeH = 3.2 + hash3(room.vnum, 3, 0, 2) * 1.4;
+    // A collar first. The room is a square and the dome is a circle, so the
+    // four corners of the wall head reach 2.4 m past the rim -- and a dome set
+    // straight on them leaves an open triangle at each corner that you can see
+    // the sky through, which is what it did. A closed slab of turf across the
+    // whole head caps them and reads as the thick edge of a turf roof.
+    const collar = SHELL * 2 + 0.7;
+    batcher.add(box(collar, 0.55, collar, 3, 1, 3), 'grass',
+      place(x, wallTop + 0.275, z), { chunk, uvScale: TURF_UV });
+    const dome = mound(width, domeH, width);
+    batcher.add(dome, 'grass', place(x, wallTop + 0.45, z), { chunk, uvScale: TURF_UV });
+    dome.dispose();
+    // A chimney out of the turf, rooted where the dome is still thick.
+    const angle = hash3(room.vnum, 7, 0, 5) * Math.PI * 2;
+    const r = 2.6 + hash3(room.vnum, 8, 0, 6) * 1.4;
+    const cx = x + Math.cos(angle) * r;
+    const cz = z + Math.sin(angle) * r;
+    const turf = wallTop + 0.45 + domeH * Math.sqrt(Math.max(0, 1 - ((2 * r) / width) ** 2));
+    batcher.add(box(0.9, 2.4, 0.9), 'stonewall', place(cx, turf + 0.4, cz), { chunk });
+    decor.push({ kind: 'smoke', x: cx, y: turf + 1.7, z: cz });
+    return;
+  }
   const span = SHELL * 2 + 1.0;
   const height = mats.holy ? 1.6 : 2.4 + hash3(room.vnum, 3, 0, 2) * 1.2;
   const alongX = hash3(room.vnum, 4, 0, 8) > 0.5;
@@ -1765,6 +2138,19 @@ function buildInteriorProps({ room, pos, sides, decor, mats }) {
   buildLooseProps({ room, pos, sides, decor, mats });
 }
 
+/**
+ * What is stacked against the wall of a barn is not what is stacked against
+ * the wall of a guild hall, and the general list is mostly a guild hall's.
+ * Null leaves the general list alone; `hay_bale` twice weights the pick, the
+ * same trick `buildForest` uses to get a fir-first mix out of `choose`.
+ */
+const FARM = /\b(pig ?pen|barn|chicken coop|stable|byre|sty|gamgee|farm(?:er|house|yard)?s?)\b/i;
+const FARM_PROPS = [
+  'hay_bale', 'hay_bale', 'trough', 'sack', 'barrel', 'firewood_pile',
+  'planks_pile', 'bucket', 'cartwheel', 'ladder', 'water_butt', 'crate',
+];
+const farmProps = (room) => (isShire(room) && FARM.test(room.name) ? FARM_PROPS : null);
+
 function buildLooseProps({ room, pos, sides, decor, mats }) {
   const blank = [];
   for (let d = 0; d < 4; d++) if (!sides[d]) blank.push(d);
@@ -1778,6 +2164,7 @@ function buildLooseProps({ room, pos, sides, decor, mats }) {
     decor.push({
       kind: 'clutter', x: pos.x, y: pos.y, z: pos.z, half: SHELL,
       walls: blank, seed: hash3(room.vnum, 12, 0, 5), indoor: true,
+      props: farmProps(room),
     });
   }
   if (mats.floor === 'planks' && hash3(room.vnum, 9, 0, 7) > 0.45) {
@@ -1790,7 +2177,7 @@ function buildLooseProps({ room, pos, sides, decor, mats }) {
 }
 
 /** Scenery for an empty cell: houses along a street, trees along a path. */
-function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, x, y, z, seed, addCollider, lights, decor }) {
+function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, shire, x, y, z, seed, addCollider, lights, decor }) {
   // Pave the cell to match its street before building on it. Without this the
   // world's ground plane shows through around the footings -- which read as a
   // lawn once that plane became grass.
@@ -1834,6 +2221,31 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, x
     case SECTOR.CITY: {
       const w = CELL * 0.92;
       const d = CELL * 0.92;
+      // Behind a Shire frontage the ground goes on: a knoll a cell wide, or a
+      // cottage in its own garden. Never the modelled house -- fit-scaled it
+      // stands 9-11 m and the banks in front of it are three, so it would
+      // simply look over them. (w and d are equal here, so the ridge rotation
+      // is symmetric and cannot come out across the building.)
+      if (shire) {
+        if (seed < 0.62) {
+          const kh = 3.6 + hash3(x, z, 0, 28) * 1.8;
+          const knoll = mound(CELL + 1.4, kh, CELL + 1.4);
+          batcher.add(knoll, 'grass', place(x, y, z), { chunk, uvScale: TURF_UV });
+          knoll.dispose();
+          addCollider(x - HALF, x + HALF, z - HALF, z + HALF, y, y + kh);
+          break;
+        }
+        const ch = 3.0 + hash3(x, z, 0, 29) * 0.9;
+        batcher.add(box(w, ch, d, 3, 2, 3), hash3(x, z, 0, 22) > 0.5 ? 'plaster' : 'timber',
+          place(x, y + ch / 2, z), { chunk, ao: wallAo(y) });
+        const cRoof = 2.6 + hash3(x, z, 0, 23) * 1.4;
+        batcher.add(triPrism(w + 1.0, cRoof, d + 1.0), hash3(x, z, 0, 24) > 0.35 ? 'thatch' : 'rooftile',
+          place(x, y + ch, z, hash3(x, z, 0, 25) > 0.5 ? Math.PI / 2 : 0), { chunk });
+        addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2, y, y + ch);
+        decor.push({ kind: 'windows', x, y, z, w, d, h: ch, seed: hash3(x, z, 0, 26) });
+        if (hash3(x, z, 0, 27) > 0.45) decor.push({ kind: 'smoke', x, y: y + ch + cRoof, z });
+        break;
+      }
       const h = 5.5 + seed * 6.5;
       const stone = hash3(x, z, 0, 22) > 0.5;
       const house = model(stone
@@ -1923,6 +2335,29 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, x
     }
     case SECTOR.AIR: break;
     default: {
+      // FIELD lands here, and a 2.2 m block of rock is not what borders the
+      // Shire's grassy fields. Left flat -- `GROUND` has already laid grass --
+      // with hedge and a tree on it. Nothing gets a mound: undergrowth is
+      // scattered on a ring at one height, and on a dome that is one height the
+      // surface never has, so every bush would float or be buried.
+      if (shire) {
+        if (hash3(x, z, 0, 30) > 0.55) {
+          const tx = x + (hash3(x, z, 0, 31) - 0.5) * CELL * 0.5;
+          const tz = z + (hash3(x, z, 1, 31) - 0.5) * CELL * 0.5;
+          decor.push({ kind: 'tree', x: tx, y, z: tz, scale: 0.9 + hash3(x, z, 2, 31) * 0.5 });
+          addCollider(tx - 0.7, tx + 0.7, tz - 0.7, tz + 0.7, y, y + 8);
+        }
+        if (!instances) break;
+        scatterUndergrowth({
+          instances, chunk, x, y, z,
+          rand: (i, k, salt) => hash3(x, z, i, salt + k),
+          kinds: [
+            { name: model(['bush'], 0), count: 2 + Math.floor(hash3(x, z, 0, 32) * 3), ring: 4.6, spread: 3.4, size: 0.95, salt: 33 },
+            { name: model(['grass_tuft'], 0), count: 6 + Math.floor(hash3(x, z, 0, 34) * 5), ring: 4.4, spread: 4.2, size: 1.0, salt: 35 },
+          ],
+        });
+        break;
+      }
       const h = 2.2;
       batcher.add(box(CELL, h, CELL, 2, 2, 2), 'rock', place(x, y + h / 2 - 0.6, z), { chunk, ao: wallAo(y) });
       addCollider(x - HALF, x + HALF, z - HALF, z + HALF, y, y + h - 0.6);

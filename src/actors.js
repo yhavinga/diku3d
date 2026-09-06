@@ -168,6 +168,30 @@ const metalMaterial = new THREE.MeshStandardMaterial({
 });
 
 /**
+ * A halfling is a halfling because the mud says so -- and it usually says so in
+ * the *description* rather than in the keywords: only two of the Shire's twelve
+ * have "halfling" in a name you can see. "The shiriff is over waist high, quite
+ * tall for a halfling"; "a personable yet serious halfling, the Thain"; "the
+ * Miller is an impatient young halfling".
+ *
+ * This is the one test that reads the description, and it deliberately reads
+ * nothing else out of it: `figureTraits` matches on words like "guard" and
+ * "smith", and running those over a paragraph of prose would dress half the
+ * world's mobiles by whatever their own description happens to mention.
+ * Measured over all 45 stock areas, \b(halfling|hobbit)\b matches 12 mobiles
+ * and all 12 are in the Shire -- so this is keyed to that area by the mud's own
+ * vocabulary, and it would still be right if another area put a hobbit in it.
+ */
+const HALFLING = /\b(halflings?|hobbits?)\b/i;
+/**
+ * Tolkien's hobbits run two to four feet and 1.05 m is the usual figure. The
+ * townsperson model is 1.762 m tall and the per-mobile jitter at the end of
+ * `figureTraits` multiplies by 0.92-1.10, so this lands a crowd between 0.97
+ * and 1.16 m -- measured after the change at 1.002 to 1.149 over 29 figures.
+ */
+const HALFLING_SCALE = 0.6;
+
+/**
  * Build a body from the mobile's own words: a guard gets a helmet and a spear,
  * a wizard a robe and a staff, a baker an apron. It's a guess, but it's the
  * area author's vocabulary doing the guessing.
@@ -198,6 +222,12 @@ function figureTraits(proto) {
   if (has(/giant|ogre|troll|golem|titan/)) { traits.scale = 1.55; traits.skin = 0x6b7a5c; traits.hair = false; }
   if (has(/executioner|headsman/)) { traits.hood = true; traits.cloth = 0x2b2320; traits.weapon = 'axe'; }
   if (has(/skeleton|zombie|ghoul|wraith|ghost|spectre|spirit/)) { traits.skin = 0xd6d2c4; traits.cloth = 0x3b3a36; traits.hair = false; }
+  // Last, so nothing above it can put a halfling back at a man's height. The
+  // trades still land -- the grocer keeps his apron, the shiriff his helmet --
+  // because those set clothing, and this sets only how big he is.
+  if (HALFLING.test(`${proto.keywords} ${proto.short} ${proto.long || ''} ${proto.description || ''}`)) {
+    traits.scale = HALFLING_SCALE;
+  }
 
   for (const item of proto.equipment || []) {
     if (item.proto.itemType === ITEM.WEAPON) traits.weapon = traits.weapon || 'sword';
@@ -301,6 +331,12 @@ const BEASTS = {
   wolf: [/wolf|hound|mastiff/, 0.72, 1.15, 'quad', 0x5b5750],
   rottweiler: [/rottweiler|doberman/, 0.62, 1.0, 'quad', 0x2e2622],
   fido: [/fido|beagle|dog|cur|mutt/, 0.5, 0.85, 'quad', 0x7a6247],
+  // After the dogs on purpose: hood.are's pitbull is "dog pit bull pitbull",
+  // and `\bbull\b` matches it. Over all 45 stock areas this otherwise picks up
+  // exactly four mobiles -- the Shire's cow and bull, and ofcol2's two cows --
+  // every one of which was being built as a human townsperson standing in a
+  // barn, which is not what a barn full of cows looks like.
+  cattle: [/\b(cow|cows|bull|bulls|ox|oxen|cattle|calf|heifer|steer)\b/, 1.4, 2.15, 'quad', 0x6d5a4a],
   puppy: [/puppy|pup\b/, 0.26, 0.42, 'quad', 0x8a7355],
   kitten: [/kitten/, 0.2, 0.34, 'quad', 0x6f6558],
   cat: [/\bcat\b|feline/, 0.3, 0.5, 'quad', 0x4a4038],
@@ -935,7 +971,10 @@ export function populate(world, layout, built, options = {}) {
         const px = item.x + wx * out + wz * along;
         const pz = item.z + wz * out + wx * along;
         const spin = strHash(`${item.x}`, i + 9) * Math.PI * 2;
-        const prop = model([
+        // A room may name its own list -- a barn stacks hay and a pig pen wants
+        // its trough, and neither is well served by the general one, which is
+        // mostly a guild hall's.
+        const prop = model(item.props || [
           'barrel', 'crate', 'sack', 'hay_bale', 'bench', 'trough',
           'stacked_crates', 'barrel_stack', 'firewood_pile', 'water_butt', 'bucket',
           'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',
@@ -1485,14 +1524,18 @@ export function populate(world, layout, built, options = {}) {
   const LEAF_W = 1.35;
   const LEAF_H = 2.85;
   const doors = [];
+  const primitivesOf = (asset) => {
+    const leaf = new THREE.Group();
+    for (const primitive of asset.primitives) {
+      const mesh = new THREE.Mesh(primitive.geometry, primitive.material);
+      mesh.castShadow = true;
+      leaf.add(mesh);
+    }
+    return leaf;
+  };
   const makeLeaf = (leafWidth, height) => {
     if (leafAsset) {
-      const leaf = new THREE.Group();
-      for (const primitive of leafAsset.primitives) {
-        const mesh = new THREE.Mesh(primitive.geometry, primitive.material);
-        mesh.castShadow = true;
-        leaf.add(mesh);
-      }
+      const leaf = primitivesOf(leafAsset);
       leaf.scale.set(leafWidth / LEAF_W, (height - 0.05) / LEAF_H, 1);
       return leaf;
     }
@@ -1505,15 +1548,56 @@ export function populate(world, layout, built, options = {}) {
     mesh.castShadow = true;
     return mesh;
   };
+
+  /**
+   * The Shire's door: one round leaf covering the whole opening.
+   *
+   * Same conventions as `door_leaf` -- hinge edge at x = 0, leaf running out
+   * along +x, boards in the z = 0 plane, ironwork out along +z -- measured off
+   * the file rather than assumed: planks span x 0..1.5, y 0.004..1.496,
+   * z +/-0.034, and the iron rim overshoots the nominal circle by 8 mm at
+   * -0.016 / 1.508. So the circle's centre is (0.75, 0.75) and its diameter
+   * is 1.5.
+   *
+   * The one thing it cannot share with `door_leaf` is the scale: that one is
+   * stretched width/1.35 by height/2.85 independently, and doing that to a
+   * circle gives an ellipse. This scales uniformly on the shorter side of the
+   * opening, so a 3.2 x 3.1 m doorway carries a 3.1 m circle with 5 cm of
+   * jamb showing either side.
+   */
+  const ROUND_LEAF = 1.5;
+  const roundAsset = assets ? assets.get('door_round') : null;
+  const makeRoundLeaf = (size) => {
+    if (roundAsset) {
+      const leaf = primitivesOf(roundAsset);
+      leaf.scale.setScalar(size / ROUND_LEAF);
+      return leaf;
+    }
+    // The `?assets=off` fallback: a flat panel, as wide as it is tall, with
+    // its boards running the way the model's do.
+    const parts = [];
+    pushPart(parts, G.cylinder(size / 2 - 0.02, size / 2 - 0.02, 0.14, 24), 0x4f6a3a,
+      at(size / 2, size / 2, 0, Math.PI / 2, 0, 0));
+    pushPart(parts, G.cylinder(0.1, 0.1, 0.2, 10), 0x33302c,
+      at(size / 2, size / 2, 0, Math.PI / 2, 0, 0));
+    const mesh = new THREE.Mesh(mergeGeometries(parts, false), doorMaterial);
+    mesh.castShadow = true;
+    return mesh;
+  };
+
   for (const spec of built.doors) {
     const [ux, uz] = [Math.cos(spec.rotY), -Math.sin(spec.rotY)];
     const leafWidth = spec.width / 2 - 0.015;
     const pivots = [];
-    for (const side of [-1, 1]) {
+    // A circle cannot be split down the middle and still be a circle, so a
+    // round door is a single leaf hung on one jamb.
+    for (const side of (spec.round ? [-1] : [-1, 1])) {
       const pivot = new THREE.Group();
       pivot.position.set(spec.x + side * ux * spec.width / 2, spec.y, spec.z + side * uz * spec.width / 2);
       pivot.rotation.y = spec.rotY;
-      const leaf = makeLeaf(leafWidth, spec.height);
+      const leaf = spec.round
+        ? makeRoundLeaf(Math.min(spec.width, spec.height))
+        : makeLeaf(leafWidth, spec.height);
       // The right-hand leaf is the left one mirrored, so its boards run back
       // toward the middle and its straps still face the street. A negative
       // scale flips the winding; three flips the front face with it.
@@ -1530,6 +1614,10 @@ export function populate(world, layout, built, options = {}) {
     // change of t, so without this a door that starts open drew shut.
     for (const p of pivots) p.node.rotation.y = p.base + p.sign * door.t * (Math.PI / 2) * 0.95;
     doors.push(door);
+    // Scenery: the round door in a turf bank has solid ground behind it, so it
+    // is not something to be opened. Left interactive, E would swing it to
+    // reveal a wall, which is worse than a door that stays shut.
+    if (spec.scenery) continue;
     interactables.push({
       position: new THREE.Vector3(spec.x, spec.y + spec.height / 2, spec.z),
       radius: 2.6,
