@@ -80,7 +80,25 @@ to five areas with Haon Dor's forest walkable through the West Gate.
   reading the map fast still works. Portals, stairs and bent layouts
   keep the fade: a glide through a wall would say something false.
 
-## 2026-09-05 — the British Columbia rounds
+### What the second judge round taught
+
+- **An alias is a place a whole biome can hide in.** `leaves → grass`
+  looked like a harmless fallback and put the lawn on every tree crown in
+  the world; the judge's raycast pair (crown at 50 m, ground at 3.7 m,
+  same material uuid) is the two-line probe that catches any such alias.
+- **Check a tween's endpoint against the world, not just its curve.** The
+  glide landed on the raw room centre and physics popped the player 2.13 m
+  sideways in one frame — off the fountain the never-at-the-centre rule
+  exists for. Resolve the destination before travelling to it.
+- **A shear that moves both ends of a segment equally tilts nothing.**
+  Twelve rain streaks sampled, twelve at 0.0° — the wind offset used the
+  same per-streak value for both vertices. Flag one end in the seed
+  (+1 on the lower vertex) and the lean is one shader line.
+- **Scale errors read as material errors.** The forest's trunks measured
+  right (0.81 m median — an old-growth stand at 199 stems/ha) while the
+  trees were 12:1 height:diameter against a conifer's 50:1; the stand
+  read as topiary. The judge's ruler pair — trunk width by horizon
+  raycast sweep, canopy top by downcast — settles tree scale in numbers.
 
 Three rounds in one day: a weather axis toward the Stargate SG-1 / Pacific
 Northwest look, an independent judge round, and the repairs it demanded.
