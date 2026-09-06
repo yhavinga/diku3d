@@ -150,6 +150,31 @@ for (const area of areas) {
   }
 }
 
+// The shipping configuration is a multi-area world, and the per-area passes
+// above never exercised it: layout.js runs ONE breadth-first placement over
+// the combined graph, a genuinely different path from 43 separate ones (the
+// cross-area exits only resolve when both ends are loaded). So the default
+// set gets its own pass, with the viewer's own start room and cap.
+const DEFAULT_WORLD = ['midgaard.are', 'haon.are', 'shire.are', 'marsh.are', 'trollden.are'];
+const defaultSet = areas.filter((a) => DEFAULT_WORLD.includes(a.file));
+if (defaultSet.length === DEFAULT_WORLD.length) {
+  const world = buildWorld(defaultSet);
+  const layout = layoutWorld(world, { startVnum: 3001, maxRooms: 400 });
+  dangling += passagesToUnbuilt(layout);
+  const found = [];
+  for (const check of CHECKS) {
+    const faults = check.run(world, layout);
+    if (faults.length) found.push({ check, faults });
+  }
+  console.log(`\none world (${DEFAULT_WORLD.map((f) => f.replace('.are', '')).join('+')}): `
+    + `${layout.cells.size} rooms placed`);
+  for (const { check, faults } of found) {
+    total += faults.length;
+    console.log(`  ${check.name} -- ${faults.length}`);
+    for (const f of faults.slice(0, 6)) console.log(`      ${f}`);
+  }
+}
+
 console.log(total === 0
   ? `no structural faults across ${areas.length} areas`
   : `\n${total} structural fault(s)`);

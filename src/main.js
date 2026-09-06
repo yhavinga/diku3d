@@ -23,9 +23,22 @@ import { createGameUi } from './game-ui.js';
 import { createRain } from './rain.js';
 
 const params = new URLSearchParams(location.search);
-const AREA_FILES = (params.get('areas') || 'midgaard')
+// The default world is no longer one town. Midgaard plus the four areas
+// west of it -- Haon Dor's forest through the West Gate, the Shire, the
+// marsh and the troll den -- lay out as ONE graph: layout.js runs a single
+// breadth-first placement and every cross-area exit resolves to an ordinary
+// routed street you walk (measured: 252 rooms, 96.3% walkable, better than
+// Midgaard's own 92.5%, ~3x fps headroom, +1 s boot). Chosen over the other
+// neighbours by measurement, not taste: an area hanging off ONE horizontal
+// exit pair grows as a clean branch; two anchors fold it back over the town
+// (midennir interleaves forest through the streets, 88.1%), and vertical
+// anchors shove open ground three levels up (dream 76.3%).
+const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden')
   .split(',').filter(Boolean).map((f) => (f.endsWith('.are') ? f : `${f}.are`));
 const START_VNUM = Number(params.get('room') || 3001);
+// A live trap: the breadth-first placement stops mid-walk at the cap, and
+// whole areas silently get zero rooms while their exits degrade to gates.
+// The default set is 252 rooms; anything bigger must raise ?max= with it.
 const MAX_ROOMS = Number(params.get('max') || 400);
 const AREA_URL = params.get('areaDir') || 'merc21/area';
 
@@ -468,6 +481,11 @@ async function boot() {
     // Figures are kept out of the shadow map, so their contact shadows are
     // placed by hand and have to be told where the light is coming from.
     actors.setSun(sunPosition, preset.elevation, preset.sunFraction ?? 1);
+    // The water mirrors the hour's sky -- preset.sky, not haze: noon's sky is
+    // within 4/255 of what the shader always assumed, so clear noon holds
+    // still, while overcast pales it and night stops it glowing (the sheet
+    // used to keep a daytime blue at night exposure and metered lum 185).
+    actors.setSky(preset.sky, preset.sunFraction ?? 1);
     // And the windows have to be told there is daylight outside them, or from
     // inside a room they are black rectangles at head height.
     const daylight = THREE.MathUtils.clamp(preset.elevation / 22, 0, 1) * 0.75;
