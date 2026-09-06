@@ -30,6 +30,7 @@ MODULES = [
     "roomkit",
     "props",
     "trees",
+    "marsh",
     "townsperson",
 ]
 
@@ -50,6 +51,10 @@ BUDGET = {
     "temple_wall_solid": 2500, "temple_wall_door": 2500, "temple_corner": 600,
     "temple_roof": 4000, "temple_steps": 400, "temple_column": 600,
     "wall_solid": 2000, "wall_door": 2000, "wall_corner": 600, "wall_roof": 3000,
+    # A whole building rather than a prop: four log walls, two log gables and a
+    # shake roof. It lives in props.py because that is where it is built, not
+    # because it costs what a barrel does.
+    "log_cabin": 3500,
 }
 PROP_BUDGET = 800
 TREE_BUDGET = 1500

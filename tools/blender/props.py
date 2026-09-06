@@ -766,6 +766,269 @@ def build_nettles():
     return kit.deliver(p, "nettles")
 
 
+# --- the wet coast: a round door and a log cabin --------------------------
+
+def chord_board(x0, x1, cx, cz, R, y0, y1, mat="planks", name="board"):
+    """One vertical board of a round leaf, its top and bottom cut to the circle.
+
+    Twelve triangles: a box whose four top corners and four bottom corners sit
+    at the chord height of the circle at that board's own two edges. Nine of
+    these inscribe an eighteen-sided polygon in the circle, which is 11 mm off
+    a true 0.75 m radius at the worst edge midpoint and hides under the rim.
+
+    The alternative -- rectangular boards trimmed at their centre x -- was tried
+    on paper and is wrong both ways round: measured at the outer edge the two
+    end boards come out zero high and vanish, and measured at the centre they
+    stand 0.39 m proud of the circle and the leaf grows square shoulders. And a
+    boolean is not available: openings here are the gaps between boxes."""
+    h0 = max(0.02, math.sqrt(max(0.0, R * R - (x0 - cx) ** 2)))
+    h1 = max(0.02, math.sqrt(max(0.0, R * R - (x1 - cx) ** 2)))
+    verts = [(x0, y0, cz - h0), (x1, y0, cz - h1), (x1, y0, cz + h1), (x0, y0, cz + h0),
+             (x0, y1, cz - h0), (x1, y1, cz - h1), (x1, y1, cz + h1), (x0, y1, cz + h0)]
+    faces = [(0, 1, 2, 3), (7, 6, 5, 4), (0, 4, 5, 1), (3, 2, 6, 7),
+             (0, 3, 7, 4), (1, 5, 6, 2)]
+    mesh = lib.bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.validate()
+    mesh.update()
+    obj = lib.bpy.data.objects.new(name, mesh)
+    lib.bpy.context.collection.objects.link(obj)
+    return lib.assign(obj, mat)
+
+
+def build_door_round():
+    """A round door for the Shire, 1.5 m across, hung exactly the way
+    `build_door_leaf` is hung.
+
+    Everything the viewer relies on is shared with it deliberately: the hinge
+    edge is x = 0, the leaf runs to +X, it stands from z = 0 with the boards in
+    the y = 0 plane and every piece of iron on the street side at -Y. So the
+    circle's centre is at (0.75, 0.75) and the hinge line is the tangent at its
+    leftmost point -- which is also where a real round door's pintles go. The
+    pivot that swings a boarded leaf swings this one.
+
+    The one thing it does not share is proportion. `door_leaf` is 1.35 x 2.85
+    and the viewer stretches it to whatever opening it finds; a circle stretched
+    on two different scales is an ellipse, so this wants an opening as wide as
+    it is tall."""
+    lib.reset()
+    p = []
+    D = 1.5
+    R, cx, cz = D / 2, D / 2, D / 2
+    boards, gap = 9, 0.010
+    bw = (D - (boards - 1) * gap) / boards
+    for i in range(boards):
+        x0 = i * (bw + gap)
+        # The same few millimetres of face jitter the boarded leaf has, so the
+        # planking is not one plane under a raking sun.
+        jitter = ((i * 2654435761) % 7 - 3) * 0.002
+        p.append(chord_board(x0, x0 + bw, cx, cz, R,
+                             -0.028 + jitter, 0.028 + jitter,
+                             mat="planks", name="board%d" % i))
+    # Ledges on the inside face, cut short of the rim.
+    for z in (cz - 0.33, cz + 0.33):
+        p.append(kit.timber((1.24, 0.05, 0.16), (cx, 0.052, z), (0, 0, 0),
+                            "oak", 0.012, "ledge"))
+    # The rim. A torus with four minor segments is a bead standing 30 mm proud
+    # of each face, and at twenty major segments it is the part of the leaf that
+    # actually reads as round -- the boards behind it are an eighteen-gon.
+    p.append(lib.torus(0.70, 0.058, (cx, 0.0, cz), (math.pi / 2, 0, 0),
+                       major_seg=20, minor_seg=4, name="rim", mat="iron"))
+    # Knob at the middle of the leaf, which is where Bag End's is. Lofted rather
+    # than a UV sphere: 76 triangles against a sphere's hundred, and a sphere
+    # spends its budget at the poles where nothing is looking.
+    p.append(lib.loft([(-0.150, 0.022, 0.022, cx, cz), (-0.130, 0.052, 0.052, cx, cz),
+                       (-0.100, 0.062, 0.062, cx, cz), (-0.070, 0.040, 0.040, cx, cz),
+                       (-0.030, 0.030, 0.030, cx, cz)],
+                      sides=8, axis="y", name="knob", mat="iron"))
+    p.append(lib.cone(0.095, 0.08, 0.022, (cx, -0.038, cz), (math.pi / 2, 0, 0),
+                      verts=10, name="rose", mat="iron"))
+    # Straps and knuckles, on the street side and off the hinge edge. Set at
+    # +-0.30 of centre rather than the boarded leaf's +-0.45: the leaf is only
+    # 0.126 m short of the hinge line there, so barely a finger of strap hangs
+    # in the air the way it does on every real round door.
+    for z in (cz - 0.30, cz + 0.30):
+        p.append(kit.timber((0.84, 0.014, 0.085), (0.44, -0.040, z),
+                            (0, 0, 0), "iron", 0.006, "strap"))
+        p.append(lib.cylinder(0.034, 0.20, (0.016, -0.030, z), verts=10,
+                              name="knuckle", mat="iron"))
+    return kit.deliver(p, "door_round")
+
+
+def log_run(axis, a, b, across, z, r0, r1, verts=8, mat="bark", name="log"):
+    """A round log lying along `axis` from `a` to `b`, at `across` on the other
+    horizontal axis and `z` up.
+
+    Logs are described by where they stop -- at the corner, at a jamb -- rather
+    than by a length and a direction, because that is how a wall with an opening
+    in it is written. `lib.cone` puts radius1 at its own -Z, and Rx(90) sends +Z
+    to *-Y*, so the two radii swap over on the y runs."""
+    length, mid = b - a, (a + b) / 2
+    if axis == "x":
+        return lib.cone(r0, r1, length, (mid, across, z), (0, math.pi / 2, 0),
+                        verts=verts, name=name, mat=mat)
+    return lib.cone(r1, r0, length, (across, mid, z), (math.pi / 2, 0, 0),
+                    verts=verts, name=name, mat=mat)
+
+
+def build_log_cabin():
+    """A trapper's cabin for Haon Dor: 5.5 x 4.5 on the wall lines, stacked
+    round logs crossing at the corners, a shake roof and two empty openings.
+
+    Two decisions carry it.
+
+    **The courses interleave, they do not alternate.** A wall where course 0 is
+    the front pair and course 1 the side pair leaves a gap of a whole log
+    between one front log and the next -- that is a chinked cabin, and the
+    chinking is 150 mm of daylight we would then have to model. Scandinavian
+    full-scribe instead: every wall gets a log every course, the two pairs offset
+    half a course from each other, and the 25% they overlap at the corners is
+    the saddle notch. Nothing has to be cut and nothing shows through.
+
+    **The bottom course is hewn.** Offsetting the side walls half a course up
+    leaves a 100 mm slot under them, which is a light leak the length of the
+    building. Real cabins square their sills onto the foundation for exactly
+    this reason, so four squared sills close it and give the whole thing a flat
+    foot to stand on.
+
+    The two openings are empty on purpose -- the viewer hangs its own leaf in
+    the door -- and both are trimmed with jambs and a head, which is not
+    decoration: a log cut off at an opening shows the viewer a cylinder's flat
+    end cap on the reveal, and a wall of those reads as cardboard."""
+    lib.reset()
+    p = []
+    W, D = 5.5, 4.5             # wall centrelines
+    r, over = 0.15, 0.30        # log radius, and how far one runs past a corner
+    sill_h, wall_top, rise = 0.20, 2.40, 1.70
+    NX = NY = 9
+    # The side walls have to finish level with the wall head (the roof lands on
+    # them) and start half a course above the front and back, so the spacing
+    # falls out of NY - 0.5 rather than NY - 1.
+    course = (wall_top - 2 * r - sill_h) / (NY - 0.5)
+    x_z = [sill_h + r + k * course for k in range(NX)]
+    y_z = [sill_h + r + course / 2 + k * course for k in range(NY)]
+
+    door_half, door_cut = 0.50, 0.60
+    # The door and window heads are the *underside of the first whole log*, not
+    # a round number: a course whose centre clears the opening still hangs its
+    # bottom 150 mm into it, and trimming to 2.00 m exactly would have left a
+    # log across the top of the doorway.
+    door_top = x_z[8] - r                       # 1.988
+    win_y, win_half, win_cut = 0.55, 0.30, 0.39
+    win_z0, win_z1 = y_z[2] + r, y_z[6] - r     # 1.059 .. 1.653
+
+    def wall(axis, across, half, zs, gap=None, band=None):
+        """One face's worth of logs. `gap` is (lo, hi) along the wall's own
+        axis and `band` the (z0, z1) it applies over: a course whose centre
+        falls in that band comes out as two pieces with the opening between."""
+        A, B = -half - over, half + over
+        for i, z in enumerate(zs):
+            # Butt to tip, course by course. A wall of logs all tapering the
+            # same way leans; alternating them is why real ones do not.
+            ra, rb = (r * 1.06, r * 0.94) if i % 2 else (r * 0.94, r * 1.06)
+            spans = [(A, B)]
+            if gap and band[0] <= z <= band[1]:
+                spans = [(A, gap[0]), (gap[1], B)]
+            for (a, b) in spans:
+                fa, fb = (a - A) / (B - A), (b - A) / (B - A)
+                p.append(log_run(axis, a, b, across, z,
+                                 ra + (rb - ra) * fa, ra + (rb - ra) * fb))
+
+    # Hewn sills. The front one is cut for the doorway like everything above it.
+    for (sy, spans) in ((-1, [(-W / 2 - over, -door_cut), (door_cut, W / 2 + over)]),
+                        (1, [(-W / 2 - over, W / 2 + over)])):
+        for (a, b) in spans:
+            p.append(kit.timber((b - a, 2 * r, sill_h), ((a + b) / 2, sy * D / 2, sill_h / 2),
+                                (0, 0, 0), "bark", 0.03, "sill"))
+    for sx in (-1, 1):
+        p.append(kit.timber((2 * r, D - 2 * r, sill_h), (sx * W / 2, 0, sill_h / 2),
+                            (0, 0, 0), "bark", 0.03, "sill"))
+
+    # Walls. The door is in the front gable (-Y); the window in the +X flank.
+    wall("x", -D / 2, W / 2, x_z, gap=(-door_cut, door_cut), band=(0.0, door_top))
+    wall("x", D / 2, W / 2, x_z)
+    wall("y", W / 2, D / 2, y_z, gap=(win_y - win_cut, win_y + win_cut),
+         band=(win_z0, win_z1))
+    wall("y", -W / 2, D / 2, y_z)
+
+    # Gable logs: the front and back walls carried on up, each cut to the roof
+    # line. Stop when one gets shorter than a notch is wide.
+    k = NX
+    while True:
+        z = sill_h + r + k * course
+        half_len = (W / 2 + r) * (1.0 - (z + r - wall_top) / rise)
+        if half_len < 0.45:
+            break
+        for sy in (-1, 1):
+            p.append(log_run("x", -half_len, half_len, sy * D / 2, z, r * 0.97, r * 0.97))
+        k += 1
+
+    # Roof. Ridge along Y over the gables, spanning X.
+    apex = wall_top + rise
+    run = W / 2 + r + 0.45                       # half span plus the eave
+    eave_z = wall_top - rise * 0.45 / (W / 2 + r)
+    slope = math.sqrt(run ** 2 + (apex - eave_z) ** 2)
+    pitch = math.atan2(apex - eave_z, run)
+    roof_len = D + 2 * 0.35
+    cosp, sinp = math.cos(pitch), math.sin(pitch)
+    for sx in (-1, 1):
+        # Sheathing first. Shakes with gaps between them are a roof you can see
+        # the sky through; laid over a continuous plane they are only relief.
+        p.append(kit.timber((slope, roof_len, 0.06),
+                            (sx * (slope / 2) * cosp, 0, apex - (slope / 2) * sinp),
+                            (0, sx * pitch, 0), "planks", 0.02, "sheathing"))
+        # Cedar shakes are long up the slope and narrow across -- 600 mm by 250
+        # is the real article. The first cut was 5 courses of 4, which came out
+        # 1.15 m by 1.30 and read as boards. Five by seven is 0.78 by 0.68, and
+        # it is affordable only because a shake is a `lib.box` and not a
+        # `kit.timber`: 12 triangles against 28, and the chamfer that buys the
+        # difference would be 17 mm on something 50 mm thick. What reads on a
+        # shake roof is the shadow under each lap, and that is the lap's doing.
+        for i in range(5):
+            s = slope * (i + 0.5) / 5
+            # The upper course laps the one below it, so it stands further off
+            # the sheathing -- which is the direction a shake roof is laid in.
+            off = 0.045 + 0.012 * (4 - i)
+            bx = sx * (s * cosp + off * sinp)
+            bz = apex - s * sinp + off * cosp
+            for j in range(7):
+                by = -roof_len / 2 + roof_len * (j + 0.5) / 7 + (0.10 if i % 2 else -0.10)
+                p.append(lib.box((slope / 5 + 0.16, roof_len / 7 - 0.06, 0.05),
+                                 (bx, by, bz), (0, sx * pitch, 0),
+                                 name="shake", mat="planks"))
+        # Ridge cap.
+        p.append(kit.timber((0.52, roof_len, 0.07),
+                            (sx * (0.22 * cosp + 0.12 * sinp), 0,
+                             apex - 0.22 * sinp + 0.12 * cosp),
+                            (0, sx * pitch, 0), "planks", 0.02, "cap"))
+    # Purlins, their ends out past the gables. A shake roof with nothing under
+    # it at the verge is a lid; three pole ends say how it is held up.
+    for px in (0.0, -1.45, 1.45):
+        s = abs(px) / cosp
+        p.append(log_run("y", -roof_len / 2 + 0.07, roof_len / 2 - 0.07, px,
+                         apex - s * sinp - 0.14, 0.105, 0.105, name="purlin"))
+
+    # Door and window linings. `planks` against the walls' `bark`, which is what
+    # a sawn board next to a peeled log looks like.
+    for sx in (-1, 1):
+        # Off `door_half`, not off a number typed twice: the jamb's inner face
+        # *is* the edge of the clear opening the viewer will hang a leaf in.
+        p.append(kit.timber((0.10, 2 * r + 0.06, door_top),
+                            (sx * (door_half + 0.05), -D / 2, door_top / 2),
+                            (0, 0, 0), "planks", 0.02, "jamb"))
+    p.append(kit.timber((1.40, 2 * r + 0.06, 0.14), (0, -D / 2, door_top + 0.07),
+                        (0, 0, 0), "planks", 0.02, "lintel"))
+    for sy in (-1, 1):
+        p.append(kit.timber((2 * r + 0.06, 0.09, win_z1 - win_z0),
+                            (W / 2, win_y + sy * (win_half + 0.045),
+                             (win_z0 + win_z1) / 2),
+                            (0, 0, 0), "planks", 0.02, "jamb"))
+    for (z, h) in ((win_z0 - 0.05, 0.10), (win_z1 + 0.06, 0.12)):
+        p.append(kit.timber((2 * r + 0.08, 0.78, h), (W / 2, win_y, z),
+                            (0, 0, 0), "planks", 0.02, "winboard"))
+    return kit.deliver(p, "log_cabin")
+
+
 ASSETS = [
     build_barrel, build_crate, build_sack, build_hay_bale, build_handcart,
     build_well, build_market_stall, build_lamp_post, build_hanging_sign,
@@ -774,7 +1037,7 @@ ASSETS = [
     build_stacked_crates, build_barrel_stack, build_firewood_pile,
     build_water_butt, build_bucket, build_rope_coil, build_ladder,
     build_planks_pile, build_herb_pots, build_broom, build_cartwheel,
-    build_nettles,
+    build_nettles, build_door_round, build_log_cabin,
 ]
 
 
