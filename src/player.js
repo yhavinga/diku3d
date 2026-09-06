@@ -49,6 +49,10 @@ class SpatialGrid {
 
 const UP = new THREE.Vector3(0, 1, 0);
 
+// The camera looks down -Z at yaw 0, so facing along a segment is the atan2
+// of the NEGATED offset -- the sign that has shipped wrong twice before.
+const yawAlong = (a, b) => Math.atan2(-(b.x - a.x), -(b.z - a.z));
+
 export class Player {
   constructor(camera, domElement, world) {
     this.camera = camera;
@@ -119,24 +123,46 @@ export class Player {
   }
 
   glide(x, y, z, yaw, onArrive = null) {
-    const from = this.position.clone();
+    this.glidePath([new THREE.Vector3(x, y, z)], yaw, onArrive);
+  }
+
+  /**
+   * Walk a polyline: face the first leg, then follow the legs at one pace,
+   * turning smoothly at each corner. This is what a compass step uses when
+   * the layout routed the exit round a bend -- the street exists, so the
+   * step walks it, instead of cutting to black because the destination is
+   * not on the axis the mud named. `finalYaw`, when given, is the facing to
+   * settle on over the last leg (a straight step ends exactly on the mud's
+   * compass direction); otherwise you end up looking the way you walked.
+   */
+  glidePath(groundPoints, finalYaw = null, onArrive = null) {
+    const pts = [this.position.clone()];
+    for (const p of groundPoints) pts.push(new THREE.Vector3(p.x, p.y + EYE, p.z));
     // Resolve the destination BEFORE walking to it. Gliding to the raw room
     // centre and letting physics take over afterwards produced a measured
     // 2.13 m sideways pop in a single frame wherever the centre is occupied
     // -- the fountain on the Temple Square, precisely the thing the "never
     // put anything at a room's exact centre" rule exists for.
-    const [tx, tz] = this.resolvePoint(x, z, y);
-    const to = new THREE.Vector3(tx, y + EYE, tz);
+    const last = pts[pts.length - 1];
+    const [tx, tz] = this.resolvePoint(last.x, last.z, last.y - EYE);
+    last.x = tx; last.z = tz;
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i].distanceTo(pts[i - 1]));
+    const total = cum[cum.length - 1];
     const fromYaw = this.camera.rotation.y;
+    const firstYaw = yawAlong(pts[0], pts[1]);
     // Shortest arc, so a step behind you turns 180 and not 540.
-    let d = yaw - fromYaw;
+    let d = firstYaw - fromYaw;
     d = (((d + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
     // Up to half a second for a half turn; the walk itself just over a
-    // second for a full 26 m cell-to-cell step, less for anything shorter.
+    // second for a full 26 m cell-to-cell step, a touch more round a bend.
     const turn = (Math.abs(d) / Math.PI) * 0.5;
-    const move = THREE.MathUtils.clamp(from.distanceTo(to) / 22, 0.5, 1.2);
+    // A single cell in just over a second; the long way round Poor Alley --
+    // seven legs, four corners, ~90 m -- caps out near three, which is what
+    // one press costing a detour should feel like.
+    const move = THREE.MathUtils.clamp(total / 24, 0.55, 2.9);
     this.velocity.set(0, 0, 0);
-    this._glide = { from, to, fromYaw, toYaw: fromYaw + d, turn, move, t: 0, onArrive };
+    this._glide = { pts, cum, total, fromYaw, toYaw: fromYaw + d, finalYaw, turn, move, t: 0, onArrive };
   }
 
   updateGlide(dt) {
@@ -152,7 +178,20 @@ export class Player {
     }
     if (g.turn > 0 && !g.turned) { g.turned = true; this.camera.rotation.y = g.toYaw; }
     const u = Math.min(1, (g.t - g.turn) / g.move);
-    this.position.lerpVectors(g.from, g.to, ease(u));
+    // Walk the polyline by arc length, and steer: each leg pulls the yaw
+    // toward its own direction (the last leg toward the mud's, if given), at
+    // a rate that takes a right angle in about a quarter second.
+    const s = ease(u) * g.total;
+    let seg = 1;
+    while (seg < g.cum.length - 1 && s > g.cum[seg]) seg++;
+    const span = Math.max(1e-6, g.cum[seg] - g.cum[seg - 1]);
+    this.position.lerpVectors(g.pts[seg - 1], g.pts[seg], (s - g.cum[seg - 1]) / span);
+    const wantYaw = (seg === g.cum.length - 1 && g.finalYaw !== null)
+      ? g.finalYaw : yawAlong(g.pts[seg - 1], g.pts[seg]);
+    let dy = wantYaw - this.camera.rotation.y;
+    dy = (((dy + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+    const rate = 7 * dt;
+    this.camera.rotation.y += THREE.MathUtils.clamp(dy, -rate, rate);
     // The bob and footsteps at a brisk jog cadence -- the sound is half of
     // what makes the step read as moving rather than as a camera move, and a
     // judge measured a walking cadence under a much faster translation as

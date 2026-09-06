@@ -690,12 +690,31 @@ async function boot() {
       const flat = Math.hypot(ox, oz);
       const [sx, , sz] = DIR_STEP[dir];
       const along = ox * sx + oz * sz;
+      const onArrive = () => {
+        const queued = queuedStep;
+        queuedStep = null;
+        if (queued !== null) step(queued);
+      };
       if (Math.abs(oy) < 3.2 && flat > 6 && flat < 46 && along > 0.82 * flat) {
-        player.glide(target.center.x, target.center.y, target.center.z, DIR_YAW[dir], () => {
-          const queued = queuedStep;
-          queuedStep = null;
-          if (queued !== null) step(queued);
-        });
+        player.glide(target.center.x, target.center.y, target.center.z, DIR_YAW[dir], onArrive);
+        return;
+      }
+      // Off-axis, but routed: a quarter of Midgaard's exits land somewhere
+      // other than the direction the mud names, and those used to cut to
+      // black -- "Poor Alley to the eastern end, instant, even with a 180".
+      // The layout walked every such exit through the streets, and the link
+      // remembers its path, so the step walks the same streets round the
+      // bend -- Poor Alley's own detour is five cells and four corners, and
+      // walking it is the honest answer to where "east" actually goes here.
+      // Stairs and portals still cut.
+      const link = Math.abs(oy) < 3.2 && layout.links.find((l) => l.kind === 'alley' && l.path && l.to
+        && ((l.from.vnum === room.vnum && l.to.vnum === exit.to)
+          || (l.to.vnum === room.vnum && l.from.vnum === exit.to)));
+      if (link && link.path.length <= 6) {
+        const cells = link.from.vnum === room.vnum ? link.path : [...link.path].reverse();
+        const points = cells.map((c) => ({ x: c.x * CELL, y: target.center.y, z: c.z * CELL }));
+        points.push(target.center);
+        player.glidePath(points, null, onArrive);
         return;
       }
     }
