@@ -6,6 +6,80 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-09-06 — the world opens
+
+One long session: the compass step became a walk, the mud's own barometer
+took over the sky, rain arrived, and the default world grew from one town
+to five areas with Haon Dor's forest walkable through the West Gate.
+
+### The world graph
+
+- **Multi-area layout needed no new code, only measurement.** layout.js
+  runs ONE breadth-first placement over whatever areas load; cross-area
+  exits resolve to ordinary routed streets the moment both ends exist.
+  The predictor for a good neighbour: an area hanging off **one horizontal
+  exit pair grows as a clean branch** and raises the walkable percentage
+  (five-area set: 96.3% against Midgaard's own 92.5%); two anchors fold
+  the area back over the town (midennir: forest rooms one step from the
+  Mage's Bar, 88.1%), and a vertical anchor shoves open ground three
+  levels up (dream 76.3%). Curation IS the travel feature.
+- **`MAX_ROOMS` truncates silently mid-walk.** At the cap, whole areas get
+  zero rooms while their exits quietly degrade to gates. Any curated set
+  must be counted against it (252 < 400 today) — and the shipping
+  configuration was never exercised by any check until world-check grew a
+  one-world pass.
+- **A sector-driven feature must cover the routed cells too.** Water
+  planes were emitted per water *room*; the routed cell between two water
+  rooms showed the raw floor recipe as a boiling band mid-river. Same
+  shape of bug as the clutter that then stacked barrels on the new water.
+- **The mud's INDOORS flag means "no sky", not "a building".** 44 of Haon
+  Dor's forest rooms carry ROOM_INDOORS — the deep dark forest — and were
+  built as ashlar corridors with torches. They are hollows under knitted
+  fir crowns now; rain and outdoor ambience stay correctly off. And six
+  of the 44 are genuinely interiors — the NAME (cave, temple, inside,
+  underground) wins over the sector code, the same move the park makes.
+
+### Weather and water
+
+- **Port the mud's systems dice-for-dice, on a separate RNG stream.**
+  weather_update came over with its exact pressure bounds and messages,
+  but rolling it on the game's own stream would have shifted every number
+  game-check pins. Its own seeded stream keeps game-check byte-identical.
+  And the options guard had to compare the *mode*, not the value — under
+  'auto' the two legitimately differ, and the old comparison rebaked the
+  environment every options apply.
+- **Any material with hardcoded radiance breaks when exposure swings.**
+  The water's colours were constants while toneMappingExposure runs 0.165
+  to 0.62 — so the river read swimming-pool teal under overcast and, at
+  night, a glowing white sheet (lum 185, 86% of pixels over 180; 34.5
+  after feeding it the hour's sky). If a shader owns its colour, applyTime
+  must own a setter for it.
+- **Rain is a line, not a sprite.** ~900 one-pixel falling streaks in a
+  camera-riding cylinder cost less than the chimney smoke; lit by the
+  hour's haze they are silver by day and gone at night, which is right.
+  The sound carries the other half, and *halving* it indoors reads as
+  rain on the roof.
+
+### Assets
+
+- **glTF export is not byte-reproducible where UV-spheres meet join()** —
+  rebuilding an identical tree shuffles only the index buffer (POSITION,
+  NORMAL, UV byte-identical). Two committed .glbs will show as modified
+  after any rebuild without anything having changed.
+- **Measure before adding a flag: `shade_smooth` changes not one normal
+  on an 8-sided hull** (45° facets against the 30° threshold) while it
+  genuinely rounds a UV-sphere. A first render also beats counting: the
+  fir shipped as a see-through bottlebrush and the moss cap clipped its
+  own boulder, both invisible in the tri-count and obvious in one frame.
+
+### The walked step
+
+- **Turn first, then walk — and keep the cut where a walk would lie.**
+  The compass glide eases up to a second cell-to-cell with bob and
+  footsteps, half a second extra for a half turn, one buffered press so
+  reading the map fast still works. Portals, stairs and bent layouts
+  keep the fade: a glide through a wall would say something false.
+
 ## 2026-09-05 — the British Columbia rounds
 
 Three rounds in one day: a weather axis toward the Stargate SG-1 / Pacific
