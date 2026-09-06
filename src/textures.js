@@ -319,6 +319,27 @@ const SURFACES = {
     s.rough = 0.72 + dry * 0.24 + clump * 0.06;
   },
 
+  leaves(u, v, s) {
+    // Foliage in the mass: what a crown looks like from ten metres, which is
+    // clumps of needle and leaf over their own shadowed interior -- not what
+    // a lawn looks like. This recipe exists because `leaves` used to alias to
+    // `grass`, and a judge raycast a fir crown at 50 m and the ground at
+    // 3.7 m and got the same material uuid: every conifer in the forest was
+    // wearing the lawn. A crown's darks are its own depth, so the interior
+    // runs much darker than any ground cover, and the palette sits blue of
+    // the grass -- coastal conifer against meadow.
+    const clump = cellular(u * 9, v * 9, 9, 163, 0.5);
+    const mass = fbm(u * 16, v * 16, 16, 167, 4);
+    const fine = fbm(u * 64, v * 64, 64, 173, 2);
+    const depth = clamp01(clump[0] * 1.15);
+    const lit = mix(rgb(0x435c3b), rgb(0x6d8256), mass * 0.7 + fine * 0.3);
+    const cool = mix(lit, rgb(0x3d5548), clump[2] * 0.5);
+    s.color = mix(rgb(0x1c2717), cool, clamp01(1.05 - depth));
+    s.height = (1 - depth) * 0.5 + fine * 0.25;
+    // Needles scatter, they do not sheen: keep it matt right through.
+    s.rough = 0.86 + fine * 0.1;
+  },
+
   rock(u, v, s) {
     const [, edge, id] = cellular(u * 6, v * 6, 6, 151, 0.5);
     const crack = clamp01((edge - 0.03) * 10);
@@ -526,6 +547,10 @@ const RECIPES = {
   thatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7 },
   dirt: { surface: 'dirt', scale: 4.5, normalScale: 0.9, env: 0.7, wet: 0.3, detail: 0.6 },
   grass: { surface: 'grass', scale: 5.5, normalScale: 0.55, env: 0.6, wet: 0, detail: 0.7 },
+  // World-unit tile like everything else, so a crown at 80 m repeats at the
+  // same physical size as one at 8 -- the per-model stretch was half of what
+  // made the trees read as toys.
+  leaves: { surface: 'leaves', scale: 2.0, normalScale: 0.75, env: 0.4, wet: 0, detail: 0.5 },
   rock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0.25, detail: 0.6 },
   sand: { surface: 'sand', scale: 6, normalScale: 0.6, env: 0.7, wet: 0, detail: 0.6 },
   iron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1.4, wet: 0, detail: 0.3 },

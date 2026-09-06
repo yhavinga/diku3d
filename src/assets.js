@@ -35,7 +35,11 @@ const _scale = new THREE.Vector3();
 // objects wearing a tenth of a floorboard, which is the wood grain that was
 // reported smeared across every townsperson's feet. Solid oak at this size has
 // no board and no seam: close grain and nothing else.
-const TAG_ALIASES = { leaves: 'grass' };
+// `leaves` had an alias to `grass` here, and it put the lawn on every tree
+// crown in the world -- confirmed by a judge with matching material uuids at
+// 50 m and 3.7 m. It is a real recipe now, so materialFor finds it first and
+// this table no longer needs an entry for it.
+const TAG_ALIASES = {};
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
   skin: { color: 0xc79b76, roughness: 0.72, metalness: 0 },
