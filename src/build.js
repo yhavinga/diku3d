@@ -1374,16 +1374,21 @@ function buildHorizon(group, bounds, groundY) {
   // nothing and reads near-black against any daylit sky, so flat unlit colour
   // is the honest model: the fog supplies the aerial perspective and the
   // per-hour tint, and exposure keeps it in step with the hour.
+  // Vertex colours carry the variation: seen with a clear sky from the town's
+  // edge -- the park, the levee -- a single flat tone read as one continuous
+  // grey dam, and repetition the eye forgives in a texture it does not
+  // forgive in a skyline. One factor per tree and a slow wave along the
+  // ridge break it for free; the material stays unlit.
   const conifer = new THREE.MeshBasicMaterial({
-    color: 0x141a14, side: THREE.DoubleSide,
+    color: 0x141a14, side: THREE.DoubleSide, vertexColors: true,
   });
   // Colder and bluer than the trees, so the ridge reads as a further plane
   // before the fog has said anything about it.
   const rock = new THREE.MeshBasicMaterial({
-    color: 0x10151d, side: THREE.DoubleSide,
+    color: 0x10151d, side: THREE.DoubleSide, vertexColors: true,
   });
 
-  const silhouette = (points, material, name) => {
+  const silhouette = (points, colors, material, name) => {
     const position = new Float32Array(points);
     // The unlit material never reads these, but the AO prepass renders the
     // scene with a normal material, and a missing attribute there is a
@@ -1394,6 +1399,7 @@ function buildHorizon(group, bounds, groundY) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(position, 3));
     geo.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
     geo.computeBoundingSphere();
     const mesh = new THREE.Mesh(geo, material);
     mesh.name = name;
@@ -1413,6 +1419,7 @@ function buildHorizon(group, bounds, groundY) {
   ];
   rings.forEach((ring, index) => {
     const points = [];
+    const colors = [];
     const span = 2 * Math.PI * ring.r;
     for (let arc = 0; arc < span; arc += rnd(6, 10)) {
       const a = arc / ring.r;
@@ -1426,6 +1433,10 @@ function buildHorizon(group, bounds, groundY) {
       const w = h * rnd(0.32, 0.5);
       // Apex off centre, or the whole ring is a metronome.
       const lean = h * rnd(-0.06, 0.06);
+      // One tone per tree: brightness spread wide, hue nudged so a few read
+      // browner (dead tops) and a few bluer, the way a real stand mixes.
+      const tone = rnd(0.68, 1.3);
+      const hue = rnd(0.9, 1.1);
       const blade = (from, to, apex, top) => {
         // Wound so the side facing the town is the front face: three flips a
         // back face's normal, and these normals are all up, so the back of one
@@ -1433,6 +1444,7 @@ function buildHorizon(group, bounds, groundY) {
         points.push(px + tx * from, groundY, pz + tz * from);
         points.push(px + tx * to, groundY, pz + tz * to);
         points.push(px + tx * apex, groundY + top, pz + tz * apex);
+        for (let k = 0; k < 3; k++) colors.push(tone * hue, tone, tone * (2 - hue));
       };
       blade(-w / 2, w / 2, lean, h);
       if (rng() < 1 / 6) {
@@ -1446,7 +1458,7 @@ function buildHorizon(group, bounds, groundY) {
         blade(off - half, off + half, off, h * rnd(0.4, 0.58));
       }
     }
-    silhouette(points, conifer, `horizon-trees-${index}`);
+    silhouette(points, colors, conifer, `horizon-trees-${index}`);
   });
 
   // The ridge: one strip ring, ground to crest.
@@ -1458,14 +1470,26 @@ function buildHorizon(group, bounds, groundY) {
   const waves = [[3, 11], [7, 6], [11, 3]].map(([f, amp]) => ({ f, amp, phase: rng() * Math.PI * 2 }));
   const crest = (a) => waves.reduce((sum, w) => sum + w.amp * Math.sin(w.f * a + w.phase), 65);
   const ridgeR = town + 250;
+  // Tone drifts along the ridge the same way the crest does -- coprime whole
+  // cycles, so it closes -- and the crest sits a shade lighter than the foot,
+  // which is what haze does to a far slope. Without this the ridge was one
+  // continuous grey band and read as a dam, not a range.
+  const toneWaves = [[2, 0.06], [5, 0.05], [13, 0.03]].map(([f, amp]) => ({ f, amp, phase: rng() * Math.PI * 2 }));
+  const ridgeTone = (a) => toneWaves.reduce((sum, w) => sum + w.amp * Math.sin(w.f * a + w.phase), 1);
   const ridge = [];
+  const ridgeColors = [];
+  const push = (x, y, z, a, top) => {
+    ridge.push(x, y, z);
+    const t = ridgeTone(a) * (top ? 1.14 : 0.92);
+    ridgeColors.push(t, t, t * 1.04);
+  };
   for (let i = 0; i < SEG; i++) {
     const a0 = (i / SEG) * Math.PI * 2; const a1 = ((i + 1) / SEG) * Math.PI * 2;
     const x0 = cx + Math.cos(a0) * ridgeR; const z0 = cz + Math.sin(a0) * ridgeR;
     const x1 = cx + Math.cos(a1) * ridgeR; const z1 = cz + Math.sin(a1) * ridgeR;
     const top0 = groundY + crest(a0); const top1 = groundY + crest(a1);
-    ridge.push(x0, groundY, z0, x1, groundY, z1, x1, top1, z1);
-    ridge.push(x0, groundY, z0, x1, top1, z1, x0, top0, z0);
+    push(x0, groundY, z0, a0, false); push(x1, groundY, z1, a1, false); push(x1, top1, z1, a1, true);
+    push(x0, groundY, z0, a0, false); push(x1, top1, z1, a1, true); push(x0, top0, z0, a0, true);
   }
-  silhouette(ridge, rock, 'horizon-ridge');
+  silhouette(ridge, ridgeColors, rock, 'horizon-ridge');
 }
