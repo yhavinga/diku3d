@@ -55,6 +55,28 @@ const OUTDOOR = new Set([
 
 export const isOutdoor = (room) => OUTDOOR.has(room.sector) && !(room.flags & ROOM_INDOORS);
 
+/**
+ * FOREST plus ROOM_INDOORS is the mud saying "no sky", not "inside a building".
+ * Haon Dor's deep, dark forest is under the canopy -- "the crowns of the trees
+ * must be very dense, as they leave the forest floor in utter darkness" -- and
+ * 44 of the default world's 68 forest rooms carry the flag. Built as interiors
+ * they came out as stone boxes with a ceiling and a roof standing in a wood.
+ *
+ * `isOutdoor` still answers no for them, and that is the right answer: it is
+ * what keeps the rain and the open-air ambience off under a canopy. What
+ * changes is only the geometry, so the two questions are now separate.
+ */
+// The sector says forest, but six of Haon Dor's INDOORS rooms are named
+// caves, an underground hallway, a temple, the inside of a tree -- real
+// interiors that happen to sit in a forest area. The name wins over the
+// sector code, the same move readFittings and the park already make.
+const CANOPY_NOT = /\b(cave|underground|temple|hall|inside|web|tunnel)\b/i;
+const isCanopy = (room) => room.sector === SECTOR.FOREST && !isOutdoor(room)
+  && !CANOPY_NOT.test(room.name);
+
+/** No walls, no ceiling, no roof -- whatever the mud says about the sky. */
+const isOpenAir = (room) => isOutdoor(room) || isCanopy(room);
+
 /** One definition, because the alley between two of them needs the same answer. */
 const isWater = (room) => room.sector === SECTOR.WATER_SWIM || room.sector === SECTOR.WATER_NOSWIM;
 
@@ -332,6 +354,10 @@ export function buildScene(world, layout, materials, assets = null) {
     const pos = worldOf(cell);
     const chunk = chunkOf(cell);
     const outdoor = isOutdoor(room);
+    // What the room record carries is the mud's answer, because rain and
+    // ambience read it. What the geometry below asks is whether there are walls.
+    const canopy = isCanopy(room);
+    const openAir = outdoor || canopy;
     const airborne = room.sector === SECTOR.AIR;
     const mats = pickMaterials(room, room.area);
     // A park takes grass rather than the cobbles its CITY sector would hand it.
@@ -344,7 +370,7 @@ export function buildScene(world, layout, materials, assets = null) {
 
     // A modelled room kit, where one fits. Caves keep their procedural rock --
     // the kits are dressed masonry and would look absurd in Moria.
-    const kit = (!outdoor && !mats.cave && instances)
+    const kit = (!openAir && !mats.cave && instances)
       ? (mats.holy && model(['temple_wall_solid']) ? 'temple_'
         : (model(['wall_solid']) ? '' : null))
       : null;
@@ -365,11 +391,11 @@ export function buildScene(world, layout, materials, assets = null) {
       chunk, materials: mats, sides,
     });
 
-    const half = airborne ? ROOM / 2 : (outdoor ? HALF : ROOM / 2);
+    const half = airborne ? ROOM / 2 : (openAir ? HALF : ROOM / 2);
     buildFloor({
       batcher, chunk, material: mats.floor, x: pos.x, y: pos.y, z: pos.z,
       half, holes: roomHoles.filter((h) => !h.ceiling), addPlatform, slab: !airborne,
-      shade: !outdoor,
+      shade: !openAir,
     });
 
     if (isWater(room)) {
@@ -381,18 +407,21 @@ export function buildScene(world, layout, materials, assets = null) {
       const [dx, , dz] = DIR_STEP[dir];
       const rotY = (dir === 1 || dir === 3) ? Math.PI / 2 : 0;
       const open = side && (side.kind === 'alley' || side.kind === 'portal');
-      const distance = outdoor ? HALF : ROOM / 2;
+      const distance = openAir ? HALF : ROOM / 2;
       const wx = pos.x + dx * distance;
       const wz = pos.z + dz * distance;
 
-      if (!outdoor) {
+      if (!openAir) {
         buildIndoorWall({
           batcher, chunk, mats, x: wx, y: pos.y, z: wz, rotY, open, kit, instances,
           width: ROOM + (WALL_IN + WALL_OUT) * 2, addCollider, dir, room, lights, decor,
           cellX: pos.x, cellZ: pos.z,
         });
       } else if (!airborne) {
-        buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider });
+        // Nothing walls a room under the canopy: `buildForest` stands a picket
+        // of trees along every side there is no way out of, and a rock kerb
+        // behind that is the level editor showing through.
+        if (!canopy) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider });
         // Once, for the whole cell -- the corners need to know about all four
         // sides, not one at a time.
         if (dir === 3) buildCityFrontage({ batcher, chunk, room, cell, pos, sides, addCollider, decor });
@@ -421,8 +450,8 @@ export function buildScene(world, layout, materials, assets = null) {
 
       if (side && side.exit && (side.exit.locks & EX_ISDOOR)) {
         doors.push({
-          x: wx + dx * (outdoor ? -0.3 : (WALL_IN + WALL_OUT) / 2), y: pos.y,
-          z: wz + dz * (outdoor ? -0.3 : (WALL_IN + WALL_OUT) / 2), rotY, dir,
+          x: wx + dx * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), y: pos.y,
+          z: wz + dz * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), rotY, dir,
           width: DOOR_W, height: DOOR_H,
           closed: !!(side.exit.locks & EX_CLOSED),
           locked: !!(side.exit.locks & EX_LOCKED),
@@ -434,7 +463,7 @@ export function buildScene(world, layout, materials, assets = null) {
 
     // One per cell, after the sides, not one per side: which way out a street
     // happens to have says nothing about where its lamp stands.
-    if (outdoor) buildStreetLamp({ room, cell, pos, decor, lights, addCollider });
+    if (openAir) buildStreetLamp({ room, cell, pos, decor, lights, addCollider });
 
     // links that had no free wall left: an arch standing in the room itself
     for (const link of layout.links) {
@@ -471,7 +500,7 @@ export function buildScene(world, layout, materials, assets = null) {
       }
     }
 
-    if (!outdoor) {
+    if (!openAir) {
       buildCeiling({
         batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + CEIL, z: pos.z,
         half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
@@ -485,7 +514,9 @@ export function buildScene(world, layout, materials, assets = null) {
       if (isShop(room)) buildShopSign({ room, pos, sides, instances, model, chunk });
     } else {
       if (isPark(room)) buildPark({ room, cell, pos, sides, instances, model, chunk, decor, addCollider });
-      else if (room.sector === SECTOR.FOREST) buildForest({ room, pos, sides, instances, model, chunk, decor, addCollider });
+      else if (room.sector === SECTOR.FOREST) {
+        buildForest({ room, pos, sides, instances, model, chunk, decor, addCollider, dense: canopy });
+      }
       // Out of doors the same thing, against the sides with no way out of
       // them, so a square reads as somewhere people keep their things rather
       // than as swept paving.
@@ -504,7 +535,7 @@ export function buildScene(world, layout, materials, assets = null) {
     // upper floors need something underneath them
     if (cell.level > 0 && layout.at(cell.level - 1, cell.x, cell.z) === undefined && !airborne) {
       const h = LEVEL_H;
-      const s = outdoor ? HALF : SHELL;
+      const s = openAir ? HALF : SHELL;
       batcher.add(box(s * 2, h, s * 2), 'stonewall', place(pos.x, pos.y - SLAB - h / 2, pos.z), {
         chunk, ao: wallAo(pos.y - SLAB - h),
       });
@@ -543,7 +574,7 @@ export function buildScene(world, layout, materials, assets = null) {
     if (!frontage.has(k)) frontage.set(k, { level, x, z, sector });
   };
   for (const cell of layout.order) {
-    if (!isOutdoor(cell.room) || cell.room.sector === SECTOR.AIR) continue;
+    if (!isOpenAir(cell.room) || cell.room.sector === SECTOR.AIR) continue;
     for (let dir = 0; dir < 4; dir++) {
       const [dx, , dz] = DIR_STEP[dir];
       consider(cell.level, cell.x + dx, cell.z + dz, cell.room.sector);
@@ -553,7 +584,7 @@ export function buildScene(world, layout, materials, assets = null) {
     if (link.kind !== 'alley' || alleyEnclosed(link)) continue;
     // Same reason as above: no frontage along a passage that does not exist.
     if (rooms.get(link.from.vnum)?.unbuilt || rooms.get(link.to.vnum)?.unbuilt) continue;
-    const sector = isOutdoor(link.from.room) ? link.from.room.sector : link.to.room.sector;
+    const sector = isOpenAir(link.from.room) ? link.from.room.sector : link.to.room.sector;
     for (const c of link.path) {
       for (let dir = 0; dir < 4; dir++) {
         const [dx, , dz] = DIR_STEP[dir];
@@ -590,7 +621,10 @@ export function buildScene(world, layout, materials, assets = null) {
   return { group, colliders, platforms, lights, portals, doors, rooms, decor, stats };
 }
 
-const alleyEnclosed = (link) => !isOutdoor(link.from.room) && !isOutdoor(link.to.room);
+// A passage is a corridor only when there is a building at both ends of it. The
+// trail between two rooms under the canopy is a trail: walls and a ceiling slab
+// on it is the masonry tunnel Haon Dor was reported as.
+const alleyEnclosed = (link) => !isOpenAir(link.from.room) && !isOpenAir(link.to.room);
 
 // ---------------------------------------------------------------- pieces ----
 
@@ -976,15 +1010,35 @@ function buildPark({ room, cell, pos, sides, instances, model, chunk, decor, add
  * The trees go through the `decor` path rather than being instanced here, so
  * the no-assets fallback still grows something; the species is actors.js's
  * choice, which is where a fir-first pick belongs.
+ *
+ * `dense` is a room the mud flags ROOM_INDOORS: under the canopy, not in a
+ * clearing. It has no walls to be enclosed by, so its own trees are the
+ * enclosure -- a picket just inside every side there is no way out of, close
+ * enough that the crowns knit over the room, with the undergrowth thickened to
+ * match. Everything else about the cell is what an open forest room gets.
  */
 const FOREST_CLEAR = 1.5;
 /** Nothing inside this of the centre: the player materialises there. */
 const FOREST_MIDDLE = 2.5;
 const FOREST_CORNER = 4.6;
+/** The picket line, far enough in that a trunk is inside its own cell. */
+const FOREST_PICKET = 5.2;
+/** How much of a side the picket spreads over: the cell, less a corner each end. */
+const FOREST_SPAN = CELL - 2.2;
 
-function buildForest({ room, pos, sides, instances, model, chunk, decor, addCollider }) {
+function buildForest({ room, pos, sides, instances, model, chunk, decor, addCollider, dense = false }) {
   const clears = edgeClear(sides, FOREST_CLEAR);
   const open = (lx, lz) => Math.hypot(lx, lz) >= FOREST_MIDDLE && clears(lx, lz);
+  const trunks = [];
+  // `conifer` weights the species pick in actors.js toward fir: this is the
+  // deep coastal forest, not a town park.
+  const plant = (lx, lz, scale) => {
+    const tx = pos.x + lx;
+    const tz = pos.z + lz;
+    decor.push({ kind: 'tree', conifer: true, x: tx, y: pos.y, z: tz, scale });
+    addCollider(tx - 0.7, tx + 0.7, tz - 0.7, tz + 0.7, pos.y, pos.y + 8);
+    trunks.push([lx, lz]);
+  };
   // Which corners are plantable at all, starting from a different one per room.
   // Taking the first that clear, rather than dropping a corner that fails, is
   // what stops a room coming out with nothing standing in it after all: with a
@@ -1000,28 +1054,58 @@ function buildForest({ room, pos, sides, instances, model, chunk, decor, addColl
     if (open(lx, lz)) spots.push([lx, lz, k]);
   }
 
-  // One or two of them, because the ways out are on the axes and the walk
-  // across is too. A forest room with nothing standing in it is a clearing, and
-  // Haon Dor is not a hundred clearings in a row.
-  const trees = Math.min(spots.length, hash3(room.vnum, 0, 0, 100) > 0.45 ? 2 : 1);
+  // The picket: two or three firs along every side there is no way out of,
+  // standing where a wall would have been. The sides you can walk out of keep
+  // their metre and a half, so a trail still runs through -- and salal fills the
+  // gap between one trunk and the next, or the picket is a colonnade you can see
+  // straight out of at eye level.
+  const salal = instances ? model(['salal_bush'], 0) : null;
+  if (dense) {
+    for (let d = 0; d < 4; d++) {
+      if (sides[d]) continue;
+      const [dx, , dz] = DIR_STEP[d];
+      const n = hash3(room.vnum, d, 0, 104) > 0.5 ? 3 : 2;
+      const at = (along, out) => (dx ? [dx * out, along] : [along, dz * out]);
+      for (let i = 0; i < n; i++) {
+        const base = ((i + 0.5) / n - 0.5) * FOREST_SPAN;
+        const [lx, lz] = at(base + (hash3(room.vnum, d, i, 105) - 0.5) * 1.1,
+          FOREST_PICKET - hash3(room.vnum, d, i, 106) * 0.6);
+        if (open(lx, lz)) plant(lx, lz, 0.9 + hash3(room.vnum, d, i, 107) * 0.5);
+        if (!salal || i === n - 1) continue;
+        const [sx, sz] = at(base + FOREST_SPAN / (n * 2), FOREST_PICKET - 0.5);
+        if (!open(sx, sz)) continue;
+        instances.add(salal, {
+          x: pos.x + sx, y: pos.y, z: pos.z + sz,
+          rotY: hash3(room.vnum, d, i, 108) * Math.PI * 2,
+          scale: 0.9 + hash3(room.vnum, d, i, 109) * 0.5,
+        }, chunk);
+      }
+    }
+  }
+
+  // One or two in the corners, because the ways out are on the axes and the
+  // walk across is too. A forest room with nothing standing in it is a
+  // clearing, and Haon Dor is not a hundred clearings in a row. A dense room
+  // whose picket found a side is already walled by it; one with a way out of
+  // every side -- a crossing in the woods -- falls back to these.
+  const trees = trunks.length ? 0 : Math.min(spots.length, hash3(room.vnum, 0, 0, 100) > 0.45 ? 2 : 1);
   for (let i = 0; i < trees; i++) {
     const [lx, lz, k] = spots[i];
-    const tx = pos.x + lx;
-    const tz = pos.z + lz;
-    // `conifer` weights the species pick in actors.js toward fir: this is the
-    // deep coastal forest, not a town park.
-    decor.push({ kind: 'tree', conifer: true, x: tx, y: pos.y, z: tz, scale: 0.8 + hash3(room.vnum, k, 2, 101) * 0.5 });
-    addCollider(tx - 0.7, tx + 0.7, tz - 0.7, tz + 0.7, pos.y, pos.y + 8);
+    plant(lx, lz, 0.8 + hash3(room.vnum, k, 2, 101) * 0.5);
   }
 
   if (!instances) return;
 
-  // A boulder in one room in four, in a corner the trees did not take -- and
-  // this one does get a collider, because a metre of granite is not a fern.
-  const rock = spots.length > trees && hash3(room.vnum, 0, 0, 102) < 0.25
+  // A boulder in one room in four -- one in three under the canopy -- in a
+  // corner nothing is standing in already, and this one does get a collider,
+  // because a metre of granite is not a fern.
+  const bare = spots.slice(trees).find(([lx, lz]) => trunks.every(
+    ([tx, tz]) => Math.hypot(lx - tx, lz - tz) > 1.7,
+  ));
+  const rock = bare && hash3(room.vnum, 0, 0, 102) < (dense ? 1 / 3 : 0.25)
     ? model(['moss_rock'], 0) : null;
   if (rock) {
-    const [lx, lz] = spots[trees];
+    const [lx, lz] = bare;
     const scale = 0.9 + hash3(room.vnum, 3, 0, 102) * 0.5;
     instances.add(rock, {
       x: pos.x + lx, y: pos.y, z: pos.z + lz,
@@ -1035,9 +1119,9 @@ function buildForest({ room, pos, sides, instances, model, chunk, decor, addColl
     rand: (i, k, salt) => hash3(room.vnum, i, k, salt),
     clears: open,
     kinds: [
-      { name: model(['fern'], 0), count: 4 + Math.floor(hash3(room.vnum, 0, 0, 103) * 4), ring: 4.6, spread: 1.6, size: 1.0, salt: 110 },
-      { name: model(['salal_bush'], 0), count: 2 + Math.floor(hash3(room.vnum, 1, 0, 103) * 2), ring: 4.9, spread: 1.2, size: 1.0, salt: 111 },
-      { name: model(['grass_tuft'], 0), count: 6 + Math.floor(hash3(room.vnum, 2, 0, 103) * 4), ring: 4.4, spread: 2.0, size: 1.0, salt: 112 },
+      { name: model(['fern'], 0), count: (dense ? 6 : 4) + Math.floor(hash3(room.vnum, 0, 0, 103) * 4), ring: 4.6, spread: dense ? 2.4 : 1.6, size: 1.0, salt: 110 },
+      { name: salal, count: (dense ? 3 : 2) + Math.floor(hash3(room.vnum, 1, 0, 103) * 2), ring: 4.9, spread: 1.2, size: 1.0, salt: 111 },
+      { name: model(['grass_tuft'], 0), count: (dense ? 8 : 6) + Math.floor(hash3(room.vnum, 2, 0, 103) * 4), ring: 4.4, spread: 2.0, size: 1.0, salt: 112 },
     ],
   });
 }
@@ -1080,7 +1164,7 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider })
  */
 function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor }) {
   const enclosed = alleyEnclosed(link);
-  const source = isOutdoor(link.from.room) ? link.from.room : link.to.room;
+  const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
   const mats = pickMaterials(source, source.area);
   // A river is a chain of water rooms with a routed cell between each pair, and
   // only the rooms ever got a water surface -- so midstream showed the raw
