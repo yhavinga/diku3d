@@ -55,6 +55,10 @@ BUDGET = {
     # shake roof. It lives in props.py because that is where it is built, not
     # because it costs what a barrel does.
     "log_cabin": 3500,
+    # The graveyard three, capped at what they were briefed at rather than left
+    # to PROP_BUDGET's 800. A headstone gets scattered by the dozen and a fence
+    # by the segment, so the loose cap would not have caught a regression here.
+    "headstone": 250, "grave_slab": 120, "iron_fence": 450,
 }
 PROP_BUDGET = 800
 TREE_BUDGET = 1500

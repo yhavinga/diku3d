@@ -335,5 +335,6 @@ export const ASSET_NAMES = [
   'tree_oak', 'tree_pine', 'bush', 'grass_tuft',
   'tree_fir', 'tree_snag', 'fern', 'salal_bush', 'moss_rock',
   'reed_clump', 'tussock', 'dead_log',
+  'headstone', 'grave_slab', 'iron_fence',
   'townsperson',
 ];

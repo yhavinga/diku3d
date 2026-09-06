@@ -1029,6 +1029,149 @@ def build_log_cabin():
     return kit.deliver(p, "log_cabin")
 
 
+# --- the graveyard --------------------------------------------------------
+
+# Stone here is `rock` and not `stonewall`, which is not a matter of taste:
+# `stonewall` is a *coursed masonry* recipe -- dressed faces against mortar,
+# with bed joints and perpends -- on a 3.6 m tile, so a 0.45 m headstone samples
+# a fifth of one course and comes out with a mortar joint ruled across a stone
+# that is supposed to have been carved out of one block. `rock` is
+# structureless (cellular cracking over fbm), weathers grey-brown from 0x3f3d3a
+# to 0x726d64 on a 5 m tile, and carries wet 0.25 -- damp collecting in the low
+# patches, which is what stone standing out in the rain does.
+
+
+def sunk_panel(outline, thick, recess, shrink=0.80, lift=0.075, mat="rock",
+               name="stone"):
+    """An outline in the XZ plane extruded along Y, with a shallow panel sunk
+    into its front face.
+
+    A recess cannot be booleaned -- openings here are the gaps between boxes --
+    and building the panel's border out of four boxes costs 170 triangles and
+    comes out crude wherever the border follows a curve. Stepping the extrusion
+    instead is one closed solid and 8n-4: the front face is a ring between the
+    outline and a copy of it scaled toward the middle, the ring's inner edge
+    steps back by `recess`, and the panel floor caps it off.
+
+    `shrink` and `lift` are one scale and one offset rather than a true polygon
+    offset, chosen together so the margin comes out even: at 0.80 and 0.075 on
+    a 0.45 x 0.75 stone it is 45 mm at the sides and 75 mm top and bottom.
+
+    Winding is handed to bmesh. The solid is closed and manifold, so
+    recalc_face_normals gets all five families of face right at once -- five
+    chances not to have to reason about which way round a quad reads from -Y,
+    and the arch's voussoirs are on record as what that costs when it is got
+    wrong."""
+    n = len(outline)
+    fy, by = -thick / 2, thick / 2
+    ry = fy + recess
+    inner = [(x * shrink, lift + z * shrink) for (x, z) in outline]
+    verts = ([(x, fy, z) for (x, z) in outline] +      # a: outline, front
+             [(x, by, z) for (x, z) in outline] +      # b: outline, back
+             [(x, fy, z) for (x, z) in inner] +        # c: panel edge, front
+             [(x, ry, z) for (x, z) in inner])         # d: panel edge, sunk
+    a, b, c, d = 0, n, 2 * n, 3 * n
+    faces = []
+    for i in range(n):
+        j = (i + 1) % n
+        faces.append((a + i, a + j, b + j, b + i))     # the sides of the stone
+        faces.append((a + i, c + i, c + j, a + j))     # the margin round it
+        faces.append((c + i, d + i, d + j, c + j))     # the wall of the recess
+    faces.append(tuple(range(b, b + n)))               # back
+    faces.append(tuple(range(d, d + n)))               # panel floor
+    mesh = lib.bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.validate()
+    bm = lib.bmesh.new()
+    bm.from_mesh(mesh)
+    lib.bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+    obj = lib.bpy.data.objects.new(name, mesh)
+    lib.bpy.context.collection.objects.link(obj)
+    return lib.assign(obj, mat)
+
+
+def build_headstone():
+    """One upright gravestone, 0.45 x 0.75 x 0.12, standing true.
+
+    Modelled dead straight on purpose -- a leaning headstone is what makes a
+    graveyard read, but a lean baked into the asset repeats identically across
+    thirty of them, so the placement code owns it and this owns the stone."""
+    lib.reset()
+    W, H, T = 0.45, 0.75, 0.12
+    # Shoulder low and the crown shallow: a segmental head, 150 mm of rise over
+    # a 207 mm half-width. Carry the arc up from a half-height shoulder instead
+    # and it is a round-topped Victorian marker rather than a gentle one.
+    shoulder, base_half, head_half = 0.60, W / 2, 0.207
+    outline = [(-base_half, 0.0), (base_half, 0.0), (head_half, shoulder)]
+    arcs = 10
+    for i in range(1, arcs):
+        t = math.pi * i / arcs
+        outline.append((head_half * math.cos(t),
+                        shoulder + (H - shoulder) * math.sin(t)))
+    outline.append((-head_half, shoulder))
+    stone = sunk_panel(outline, T, 0.015, mat="rock", name="headstone")
+    return kit.deliver([stone], "headstone")
+
+
+def build_grave_slab():
+    """A ledger stone, 1.8 x 0.7, lying 0.18 m off the ground on its own plinth.
+
+    The plinth is inside the 0.18, not under it: a ledger stone is something you
+    could trip over, and stacking a slab on top of a separate base takes it to
+    knee height, which is a table tomb and a different thing entirely."""
+    lib.reset()
+    plinth = 0.06
+    L, W, H = 1.80, 0.70, 0.18
+    p = [kit.timber((L + 0.14, W + 0.14, plinth), (0, 0, plinth / 2), (0, 0, 0),
+                    "rock", 0.02, "plinth"),
+         # All twelve arrises taken off rather than the four `timber` would do:
+         # this one is seen from above, where the short ends are in view.
+         kit.slab((L, W, H - plinth), (0, 0, plinth + (H - plinth) / 2), (0, 0, 0),
+                  mat="rock", name="ledger", width=0.035)]
+    return kit.deliver(p, "grave_slab")
+
+
+def build_iron_fence():
+    """One railing panel, running +X from x = 0 to exactly x = 2.6.
+
+    The chaining rule is the whole point of the numbers: both posts are set in
+    by half their own width, so their *outer faces* land on x = 0 and x = 2.6
+    and the rails finish flush with them. Repeat at a 2.600 m pitch and two
+    panels meet post-face to post-face -- no gap, and no pair of coincident
+    posts z-fighting the way they would if the posts were centred on the ends."""
+    lib.reset()
+    p = []
+    RUN, H = 2.60, 1.10
+    post, cap = 0.10, 0.10
+    for px in (post / 2, RUN - post / 2):
+        p.append(kit.timber((post, post, H - cap), (px, 0, (H - cap) / 2),
+                            (0, 0, 0), "iron", 0.015, "post"))
+        # A four-sided cone is a pyramid, but its base sits corner-on to the
+        # axes, so it needs the eighth turn to square up with the post under it
+        # -- and then its radius is a half-*diagonal*, so it has to be the
+        # post's half-width times root two to come out flush. At a flat 0.75 of
+        # the post it stood 3 mm proud at each end, which measured as a run of
+        # 2.606 and chained with the finials lapping 6 mm into each other.
+        p.append(lib.cone(post * math.sqrt(2) / 2, 0.0, cap, (px, 0, H - cap / 2),
+                          (0, 0, math.pi / 4), verts=4, name="finial", mat="iron"))
+    for z in (0.16, 0.86):
+        p.append(kit.timber((RUN, 0.05, 0.07), (RUN / 2, 0, z), (0, 0, 0),
+                            "iron", 0.012, "rail"))
+    # Bars are plain boxes: 12 triangles against a chamfered timber's 28, and
+    # the chamfer that buys the difference would be 9 mm on a 26 mm bar.
+    bars = 11
+    span = RUN - 2 * post
+    for i in range(bars):
+        bx = post + span * (i + 1) / (bars + 1)
+        p.append(lib.box((0.026, 0.026, 0.95), (bx, 0, 0.525), name="bar", mat="iron"))
+        p.append(lib.cone(0.024, 0.0, 0.10, (bx, 0, 1.05), (0, 0, math.pi / 4),
+                          verts=4, name="spear", mat="iron"))
+    return kit.deliver(p, "iron_fence")
+
+
 ASSETS = [
     build_barrel, build_crate, build_sack, build_hay_bale, build_handcart,
     build_well, build_market_stall, build_lamp_post, build_hanging_sign,
@@ -1038,6 +1181,7 @@ ASSETS = [
     build_water_butt, build_bucket, build_rope_coil, build_ladder,
     build_planks_pile, build_herb_pots, build_broom, build_cartwheel,
     build_nettles, build_door_round, build_log_cabin,
+    build_headstone, build_grave_slab, build_iron_fence,
 ]
 
 
