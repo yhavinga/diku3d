@@ -436,6 +436,85 @@ async function boot() {
   const shaftTint = new THREE.Color(1, 1, 1);
   let sunElevation = 0;
 
+  // The wettest the ground may get, in a downpour. Two things fix it, and
+  // neither is taste. Above, the damp term in textures.js takes
+  // `1 - wetness * 0.42` off the albedo of the patches water collects in, so
+  // anything past 2.38 multiplies a colour by a negative number; 2.25 leaves
+  // the core of a puddle at 5% of its dry albedo, which is about what a puddle
+  // is, with margin under the wall. Below, overcast already ships `wet: 1.9` --
+  // the damp air of the look -- so rain has only the band between the two to
+  // work in, and it is measured *from the hour's preset* rather than from dry.
+  // Measured from dry it would be worse than useless: SKY_RAINING is 0.65, and
+  // 1 + 1.25 * 0.65 comes to 1.78, which is drier than the overcast it rains
+  // out of, so ordinary rain would have dried the streets.
+  const WET_RAIN = 2.25;
+  // Seconds to close 63% of the gap, so three times that is as good as arrived.
+  // A mud hour is 40 seconds and a shower is a few of them: wet through inside
+  // one, or the rain would stop before the street looked rained on. Drying is
+  // nine times slower, which is the asymmetry anyone who has watched a pavement
+  // after a shower already knows.
+  const WET_RISE = 11;
+  const WET_FALL = 95;
+  // setWetness walks all 21 baked materials writing a uniform on each. Cheap --
+  // no recompile, no upload -- but not free, and a step this small is not a
+  // step anyone can see.
+  const WET_EPSILON = 0.004;
+
+  /**
+   * How wet the ground is: one number, one owner.
+   *
+   * Two things want to set it, and left to themselves they write over each
+   * other: the hour's weather preset (`wet: 1.9` under overcast, damp air) and
+   * rain actually falling. So the preset is the baseline and rain is a fraction
+   * of the way from it to a downpour, and this is the only caller of
+   * `materials.setWetness` in the program.
+   *
+   * The easing lives here and not in a preset because rain never passes through
+   * `applyTime`: the mud walks CLOUDY -> RAINING under one overcast sky, so
+   * `mudSky()` reads the same on both sides and nothing rebakes. `state.rainLevel`
+   * is the truthful source -- it is already zero unless the weather is on auto,
+   * so a hand-pinned clear sky cannot wet the streets.
+   */
+  const wetness = {
+    base: 1,      // what the hour's weather preset asks for
+    value: 1,     // where the easing has got to
+    applied: 1,   // what the materials were last told
+    target() {
+      // The max is the guard, not the model: a preset already wetter than a
+      // downpour would otherwise be dried by its own rain.
+      return Math.max(this.base, this.base + (WET_RAIN - this.base) * state.rainLevel);
+    },
+    /**
+     * The preset's baseline, from `applyTime`. Under the mud's own weather it
+     * may cut the ground wetter -- the sky, the fog, the bake and the exposure
+     * all cut with it -- but never drier: a sky clearing after rain leaves
+     * streets that are still wet, and they dry on the clock below. A sky pinned
+     * by hand is not weather but an authoring control, and there `clear` has to
+     * mean clear in this frame, not in five minutes.
+     */
+    setBase(value) {
+      this.base = value;
+      this.value = state.weatherMode === 'auto'
+        ? Math.max(this.value, this.target())
+        : this.target();
+      this.push();
+    },
+    update(dt) {
+      const target = this.target();
+      const gap = target - this.value;
+      if (gap !== 0) {
+        this.value = Math.abs(gap) < WET_EPSILON ? target
+          : this.value + gap * (1 - Math.exp(-dt / (gap > 0 ? WET_RISE : WET_FALL)));
+      }
+      this.push();
+    },
+    push() {
+      if (Math.abs(this.value - this.applied) < WET_EPSILON) return;
+      this.applied = this.value;
+      materials.setWetness(this.value);
+    },
+  };
+
   applyTime(state.time);
 
   function applyTime(name) {
@@ -471,8 +550,15 @@ async function boot() {
     hemi.intensity = preset.ambient;
     scene.fog = new THREE.FogExp2(preset.fog, preset.density);
     // Rain-damp on everything outdoors that keeps a wet recipe; identity for
-    // clear weather, and indoor floors have wet 0 so a scale changes nothing.
-    materials.setWetness(preset.wet ?? 1);
+    // clear weather. It is a material global and there is no per-room copy, so
+    // it reaches interiors too -- but `planks` and `marble` are `wet: 0` and do
+    // not even compile the damp branch, and the one wet recipe that gets indoors
+    // is `flagstone` at 0.16, where the whole span from dry to a downpour moves
+    // the darkest patch of an up-facing floor by 8% of its albedo.
+    //
+    // The preset is only the baseline -- rain falling adds to it, and `wetness`
+    // owns the sum, so this path and the frame loop cannot disagree.
+    wetness.setBase(preset.wet ?? 1);
     // Rain is lit by the hour's own haze, so it reads silver by day and all
     // but disappears at night, which is how night rain behaves.
     rain.setColour(preset.haze);
@@ -857,6 +943,10 @@ async function boot() {
       const outdoorNow = state.roomVnum !== null && (built.rooms.get(state.roomVnum)?.outdoor ?? true);
       rain.setIntensity(outdoorNow ? level : 0);
       rain.update(dt, camera.position);
+      // The ground remembers the rain after the streaks stop. Unlike the
+      // streaks this is not gated on standing outdoors: it is raining on the
+      // town, not on you, so a street seen from a doorway is still wet.
+      wetness.update(dt);
     }
 
     const vnum = currentRoom();
@@ -923,7 +1013,10 @@ async function boot() {
   // Handy from the console, and how the screenshots for this were framed.
   window.diku = {
     scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi, options,
-    pipeline, environment, materials,
+    // `wetness` is exposed because it is a slow-moving number nothing on screen
+    // reports: reading .value against .target() is how you tell a street that is
+    // drying from one that has dried.
+    pipeline, environment, materials, wetness,
     player, hud, layout, built, actors, world, applyTime, applyWeather, state, times: TIMES,
     /** Console A/B for the tone curve: 'agx', 'aces' or 'neutral'. */
     setTone(name) {
@@ -942,36 +1035,86 @@ async function boot() {
     places() {
       const out = [];
       const seen = new Set();
+      const taken = new Set();
       const add = (key, vnum, why, target = null, time = null) => {
         if (vnum === undefined || seen.has(key) || !built.rooms.has(vnum)) return;
         seen.add(key);
+        taken.add(vnum);
         out.push({ key, vnum, room: built.rooms.get(vnum).room.name, why, target, time });
       };
       const rooms = [...built.rooms.entries()].filter(([, i]) => !i.unbuilt);
-      const find = (test) => (rooms.find(([vnum]) => test(world.rooms.get(vnum))) || [])[0];
+      /**
+       * The best room a test admits, or nothing at all. A category that finds
+       * no room is skipped rather than forced onto a bad one, which is what
+       * keeps this total: `?areas=midgaard` has no forest, no bog and no
+       * graveyard in it and still returns a usable list.
+       *
+       * With no score it is the first match, as it always was. A room already
+       * spoken for is only taken again if nothing else fits, because every key
+       * should be its own place -- `water` and `square` both used to land on
+       * the fountain in the Temple Square, so a reviewer shot it twice.
+       */
+      const pick = (test, score = null) => {
+        let chosen;
+        let best = -Infinity;
+        for (const [vnum] of rooms) {
+          const room = world.rooms.get(vnum);
+          if (!test(room)) continue;
+          const value = (score ? score(room) : 0) - (taken.has(vnum) ? 1e6 : 0);
+          if (value > best) { best = value; chosen = vnum; }
+        }
+        return chosen;
+      };
+      const ways = (r) => r.exits.filter(Boolean).length;
+      // Something to point the camera at: `shoot` aims at the nearest prop or
+      // mobile within the room, and finds a wall in an empty one.
+      const stuff = (r) => r.items.length + r.mobs.length;
 
-      for (const [vnum] of rooms) {
-        const room = world.rooms.get(vnum);
-        const fountain = room.items.find((o) => o.proto.itemType === 25
-          || /fountain|well|water/.test(o.proto.keywords));
-        if (fountain) { add('water', vnum, 'a fountain: animated water, refraction, wet stone'); break; }
-      }
-      add('watersector', find((r) => r.sector === 6 || r.sector === 7), 'open water');
-      add('square', find((r) => r.exits.filter(Boolean).length >= 4 && r.sector === 1),
+      add('water', pick((r) => r.items.some((o) => o.proto.itemType === 25
+          || /fountain|well|water/.test(o.proto.keywords))),
+        'a fountain: animated water, refraction, wet stone');
+      add('watersector', pick((r) => r.sector === 6 || r.sector === 7), 'open water');
+      add('square', pick((r) => ways(r) >= 4 && r.sector === 1),
         'the widest open space: pavement, frontage, silhouettes');
-      add('street', find((r) => r.sector === 1 && r.exits.filter(Boolean).length === 2),
+      add('street', pick((r) => r.sector === 1 && ways(r) === 2),
         'a street between two frontages, for receding perspective');
-      add('interior', find((r) => r.sector === 0 && /temple|hall|sanctum/i.test(r.name)),
+      add('interior', pick((r) => r.sector === 0 && /temple|hall|sanctum/i.test(r.name)),
         'a lit stone interior: light falloff, torches, shadowed material');
-      add('shop', find((r) => r.mobs.some((m) => m.shop)), 'a shopkeeper and their stock');
-      add('forest', find((r) => r.sector === 3), 'trees and undergrowth');
-      add('field', find((r) => r.sector === 2), 'open ground and horizon');
-      add('gate', find((r) => r.exits.some((e) => e && e.offMap)), 'a sealed gate out of the world');
-      const beast = actors.interactables.find((i) => i.kind === 'mob' && i.subtitle);
-      for (const [vnum] of rooms) {
-        if (world.rooms.get(vnum).mobs.length >= 2) { add('crowd', vnum, 'several mobiles together'); break; }
-      }
-      void beast;
+      add('shop', pick((r) => r.mobs.some((m) => m.shop)), 'a shopkeeper and their stock');
+      // Haon Dor's heart, not the Shire's hedgerow -- which is where the first
+      // forest room in walking order happens to be. The mud's own words for the
+      // stand are "deep, dark" and "dense", and those are the rooms that got a
+      // closed fir canopy: 44 of them carry ROOM_INDOORS, which there means no
+      // sky rather than indoors.
+      add('forest', pick((r) => r.sector === 3,
+        (r) => (/deep, dark/i.test(r.name) ? 3 : 0) + (/dense/i.test(r.name) ? 2 : 0)
+            + ways(r) + stuff(r)),
+        'dense fir forest under a closed canopy: trunk scale, undergrowth');
+      add('field', pick((r) => r.sector === 2), 'open ground and horizon');
+      // Peat is build.js's own answer to "is this a bog": `isBog` picks the
+      // floor, so asking the floor asks that question once instead of keeping a
+      // second copy of its vocabulary here. Standing water in the name puts a
+      // pool where the camera is already looking.
+      add('bog', pick((r) => built.rooms.get(r.vnum).materials.floor === 'peat',
+        (r) => ways(r) + stuff(r) * 0.5 + (/pool|water/i.test(r.name) ? 2 : 0)),
+        'the marsh: peat, standing water, reeds and ground mist');
+      // Match the name and not the area file, and stay above ground: the
+      // thirteen tombs are cellars off these paths, and a room the mud itself
+      // calls a Graveyard is the one carrying headstones however they were
+      // placed. Prose alone is not enough -- Midgaard's Concourse describes the
+      // graveyard it leads to, and it is a street.
+      add('graveyard', pick((r) => built.rooms.get(r.vnum).outdoor
+          && /\b(graveyard|graves?|tombs?|crypt)\b/i.test(r.name),
+        (r) => (/graveyard/i.test(r.name) ? 3 : 0) + ways(r) + stuff(r)),
+        'headstones on open ground, gravel underfoot, sky over a burial place');
+      // A gate the world is walled off at, not a trapdoor: the Temple's `up` to
+      // #3700 is off-map too, and used to win this outright -- an interior with
+      // a bricked-up ceiling is not what the key means.
+      add('gate', pick((r) => built.rooms.get(r.vnum).outdoor
+          && r.exits.some((e, i) => e && e.offMap && i < 4),
+        (r) => (/gate/i.test(r.name) ? 3 : 0) + ways(r) + stuff(r)),
+        'a sealed gate out of the world');
+      add('crowd', pick((r) => r.mobs.length >= 2), 'several mobiles together');
       return out;
     },
 
