@@ -70,6 +70,7 @@ export class Player {
     this._forward = new THREE.Vector3();
     this._right = new THREE.Vector3();
     this._fade = 0;
+    this._glide = null;
 
     const down = (event) => {
       if (event.repeat) return;
@@ -82,11 +83,81 @@ export class Player {
   }
 
   spawn(x, y, z, yaw = 0) {
+    this._glide = null;
     this.position.set(x, y + EYE, z);
     this.velocity.set(0, 0, 0);
     this.camera.position.copy(this.position);
     this.camera.rotation.set(0, yaw, 0);
     this.camera.updateMatrixWorld(true);
+  }
+
+  get gliding() { return !!this._glide; }
+
+  /**
+   * Carry the player to a point the way a step would: face the exit first if
+   * it is behind you, then walk, bob and footsteps running, and hand control
+   * back on arrival. This is what the compass arrows use for an ordinary
+   * next-room exit -- the old cut-to-black said you *had moved*; this says
+   * you are *moving*, which is the difference between reading a map and
+   * being somewhere. Portals, stairs and anything not a straight walk keep
+   * the fade: a glide through a wall would say something false.
+   */
+  glide(x, y, z, yaw, onArrive = null) {
+    const from = this.position.clone();
+    const to = new THREE.Vector3(x, y + EYE, z);
+    const fromYaw = this.camera.rotation.y;
+    // Shortest arc, so a step behind you turns 180 and not 540.
+    let d = yaw - fromYaw;
+    d = (((d + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+    // Up to half a second for a half turn; the walk itself close to a second
+    // for a full 26 m cell-to-cell step, less for anything shorter.
+    const turn = (Math.abs(d) / Math.PI) * 0.5;
+    const move = THREE.MathUtils.clamp(from.distanceTo(to) / 30, 0.45, 1.0);
+    this.velocity.set(0, 0, 0);
+    this._glide = { from, to, fromYaw, toYaw: fromYaw + d, turn, move, t: 0, onArrive };
+  }
+
+  updateGlide(dt) {
+    const g = this._glide;
+    const ease = (u) => u * u * (3 - 2 * u);
+    g.t += dt;
+    if (g.t < g.turn) {
+      // Turning first, walking second: the mud's compass step is "face north,
+      // go north", and overlapping the two reads as drifting sideways.
+      this.camera.rotation.y = g.fromYaw + (g.toYaw - g.fromYaw) * ease(g.t / g.turn);
+      this.camera.position.copy(this.position);
+      return;
+    }
+    if (g.turn > 0 && !g.turned) { g.turned = true; this.camera.rotation.y = g.toYaw; }
+    const u = Math.min(1, (g.t - g.turn) / g.move);
+    this.position.lerpVectors(g.from, g.to, ease(u));
+    // The walk bob at walking tempo, footsteps included -- the sound is half
+    // of what makes the step read as walking rather than as a camera move.
+    const previous = this.bobPhase;
+    this.bobPhase += dt * 9;
+    if (Math.floor(previous / Math.PI) !== Math.floor(this.bobPhase / Math.PI) && this.onFootstep) {
+      this.onFootstep(false);
+    }
+    this.bob += (1 - this.bob) * Math.min(1, dt * 8);
+    this.camera.getWorldDirection(this._forward);
+    this._forward.y = 0;
+    if (this._forward.lengthSq() < 1e-6) this._forward.set(0, 0, -1);
+    this._forward.normalize();
+    this._right.crossVectors(this._forward, UP).normalize();
+    const bobY = Math.sin(this.bobPhase) * 0.055 * this.bob;
+    const bobX = Math.cos(this.bobPhase * 0.5) * 0.035 * this.bob;
+    this.camera.position.set(
+      this.position.x + bobX * this._right.x,
+      this.position.y + bobY,
+      this.position.z + bobX * this._right.z,
+    );
+    if (u >= 1) {
+      const done = g.onArrive;
+      this._glide = null;
+      this.velocity.set(0, 0, 0);
+      this.camera.position.copy(this.position);
+      if (done) done();
+    }
   }
 
   /** Highest walkable surface under (x, z) that we could actually stand on. */
@@ -102,6 +173,7 @@ export class Player {
   }
 
   update(dt) {
+    if (this._glide) { this.updateGlide(dt); return; }
     const object = this.camera;
     const sprint = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
     const speed = sprint ? SPRINT : WALK;

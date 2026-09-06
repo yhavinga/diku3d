@@ -601,7 +601,12 @@ async function boot() {
    * and a wall here, and that is worth saying out loud rather than pretending
    * there is nothing there.
    */
+  // One buffered press, so reading the map fast still works: a second arrow
+  // during a glide queues and fires on arrival instead of being swallowed.
+  let queuedStep = null;
+
   function step(dir) {
+    if (player.gliding) { queuedStep = dir; return; }
     if (fadeTimer > 0) return;
     const here = currentRoom();
     const room = here && world.rooms.get(here);
@@ -624,6 +629,27 @@ async function boot() {
       const word = door.spec.keyword.split(/\s+/)[0] || 'door';
       hud.toast(door.spec.locked && !door.forced ? `the ${word} is locked` : `the ${word} is closed`);
       return;
+    }
+    // An ordinary next-room exit is walked, not cut to: the target sits where
+    // the compass says it should, near ground level, within a couple of cells.
+    // Anything else -- a portal, a stair, a layout that had to bend -- keeps
+    // the fade, because gliding through a wall would say something false.
+    const hereInfo = built.rooms.get(room.vnum);
+    if (dir < 4 && hereInfo) {
+      const ox = target.center.x - hereInfo.center.x;
+      const oy = target.center.y - hereInfo.center.y;
+      const oz = target.center.z - hereInfo.center.z;
+      const flat = Math.hypot(ox, oz);
+      const [sx, , sz] = DIR_STEP[dir];
+      const along = ox * sx + oz * sz;
+      if (Math.abs(oy) < 3.2 && flat > 6 && flat < 46 && along > 0.82 * flat) {
+        player.glide(target.center.x, target.center.y, target.center.z, DIR_YAW[dir], () => {
+          const queued = queuedStep;
+          queuedStep = null;
+          if (queued !== null) step(queued);
+        });
+        return;
+      }
     }
     fadeTimer = 0.34;
     dom.fade.style.opacity = '1';
