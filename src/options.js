@@ -95,8 +95,8 @@ const FIELDS = [
   {
     key: 'weather',
     label: 'Weather',
-    note: null,
-    options: [['clear', 'clear'], ['overcast', 'overcast']],
+    note: "Auto is the mud's own weather: a barometer wandering between four sky states, a mud hour every forty seconds, announced in the log the way a player would read it.",
+    options: [['auto', 'auto'], ['clear', 'clear'], ['overcast', 'overcast']],
   },
   {
     key: 'sound',
@@ -245,7 +245,9 @@ export function createOptions({ quality, applyTime, applyWeather, audio, state }
     quality.setScale(values.renderScale === 'auto' ? null : values.renderScale);
 
     if (values.time !== state.time) applyTime(values.time);
-    if (values.weather !== state.weather) applyWeather(values.weather);
+    // Against the *mode*, not the rendered sky: under 'auto' the two differ by
+    // design, and comparing them would rebake the environment on every apply.
+    if (values.weather !== state.weatherMode) applyWeather(values.weather);
     if (audio.muted === values.sound) audio.toggleMute();
   }
 

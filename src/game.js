@@ -47,6 +47,9 @@ export const WEAR = {
   ABOUT: 12, WAIST: 13, WRIST_L: 14, WRIST_R: 15, WIELD: 16, HOLD: 17,
 };
 
+/** merc.h: SKY_*, the four states weather_update walks between. */
+export const SKY = { CLOUDLESS: 0, CLOUDY: 1, RAINING: 2, LIGHTNING: 3 };
+
 /** How each slot reads in `equipment`, in the mud's own wording. */
 export const WEAR_NAME = [
   'light', 'finger', 'finger', 'neck', 'neck', 'body', 'head', 'legs', 'feet',
@@ -816,7 +819,7 @@ const DEATH_CRIES = [
 /** Everything above, bundled so tools/game-check.mjs can drive the rules alone. */
 export const MERC = {
   PULSE_PER_SECOND, PULSE_VIOLENCE, PULSE_TICK,
-  MAX_LEVEL, LEVEL_HERO, MAX_WEAR, TYPE_HIT, POS, WEAR, WEAR_NAME,
+  MAX_LEVEL, LEVEL_HERO, MAX_WEAR, TYPE_HIT, POS, WEAR, WEAR_NAME, SKY,
   CLASS_TABLE, SKILLS, STR_APP, INT_APP, WIS_APP, DEX_APP, CON_APP,
   Rng, idiv, interpolate, clamp,
   isNpc, isAwake, isGood, isEvil, currStr, currInt, currWis, currDex, currCon,
@@ -1309,6 +1312,142 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     });
   }
 
+  // -- weather --------------------------------------------------------------
+  /**
+   * update.c: weather_update, over db.c's boot seeding. The mud has always had
+   * real weather -- a barometer that wanders, and four sky states it walks
+   * between -- so the viewer's sky comes from here rather than from a dial.
+   *
+   * Three things about this are not the mud's:
+   *
+   * A generator of its own. Merc rolls the weather out of the one global
+   * stream; here that stream is pinned by `seed` and driven by a test harness,
+   * and a sky that quietly shifted every combat roll after it would be a poor
+   * trade for a cloud.
+   *
+   * A calendar of its own. `state.hour` is the *player's* hour -- whatever the
+   * time-of-day preset was last set to, which is what shop hours read -- and it
+   * does not advance. This one does, at `WEATHER_SECONDS` a mud hour, and only
+   * so the day and month can roll over, because the month is the season term in
+   * the pressure walk. The two are deliberately not the same clock: tying them
+   * would make an hour of weather also move the sun.
+   *
+   * No sunlight. weather_update also sets SUN_* and announces sunrise and
+   * sunset; the viewer's daylight is `applyTime` in main.js and belongs to the
+   * player, so porting a second one would put two suns in the state.
+   */
+  const weatherRng = new Rng(seed === undefined ? undefined : (seed ^ 0x9e3779b9) >>> 0);
+  const wdice = (number, size) => {
+    let sum = 0;
+    for (let i = 0; i < number; i++) sum += weatherRng.range(1, size);
+    return sum;
+  };
+
+  /**
+   * db.c: the calendar is read off the wall clock at boot -- one mud hour per
+   * PULSE_TICK, counted from Merc's own epoch -- so a session started in the
+   * mud's month 11 gets month 11's weather, exactly as the 1993 server would.
+   */
+  const MERC_EPOCH = 650336715;
+  const lhour = idiv(Date.now() / 1000 - MERC_EPOCH, PULSE_TICK / PULSE_PER_SECOND);
+  const lday = idiv(lhour, 24);
+  const lmonth = idiv(lday, 35);
+  const weather = {
+    hour: lhour % 24,
+    day: lday % 35,
+    month: lmonth % 17,
+    year: idiv(lmonth, 17),
+    change: 0,
+    mmhg: 960,
+    sky: SKY.CLOUDLESS,
+  };
+  weather.mmhg += weather.month >= 7 && weather.month <= 12
+    ? weatherRng.range(1, 50)
+    : weatherRng.range(1, 80);
+  if (weather.mmhg <= 980) weather.sky = SKY.LIGHTNING;
+  else if (weather.mmhg <= 1000) weather.sky = SKY.RAINING;
+  else if (weather.mmhg <= 1020) weather.sky = SKY.CLOUDY;
+  else weather.sky = SKY.CLOUDLESS;
+  state.weather = weather;
+
+  /**
+   * How long a mud hour of weather takes. Merc runs weather_update off the
+   * point-pulse, which reschedules itself with number_range(PULSE_TICK / 2,
+   * 3 * PULSE_TICK / 2) -- 15 to 45 real seconds, averaging 30. This sits
+   * inside that band, at the slow end: the sky here is a thing you notice
+   * while walking, not while standing still reading a shop list.
+   */
+  const WEATHER_SECONDS = 40;
+  let weatherAccum = 0;
+
+  /** update.c: weather_update, minus the sunlight. `room` is where you stand. */
+  function weatherUpdate(room) {
+    const lines = [];
+
+    if (++weather.hour >= 24) { weather.hour = 0; weather.day++; }
+    if (weather.day >= 35) { weather.day = 0; weather.month++; }
+    if (weather.month >= 17) { weather.month = 0; weather.year++; }
+
+    // The season: months 9-16 are the low-pressure half of the year, and the
+    // barometer is pushed back towards a lower resting point in them.
+    const diff = weather.month >= 9 && weather.month <= 16
+      ? (weather.mmhg > 985 ? -2 : 2)
+      : (weather.mmhg > 1015 ? -2 : 2);
+
+    weather.change = clamp(weather.change + diff * wdice(1, 4) + wdice(2, 6) - wdice(2, 6), -12, 12);
+    weather.mmhg = clamp(weather.mmhg + weather.change, 960, 1040);
+
+    switch (weather.sky) {
+      case SKY.CLOUDLESS:
+        if (weather.mmhg < 990 || (weather.mmhg < 1010 && weatherRng.bits(2) === 0)) {
+          lines.push('The sky is getting cloudy.');
+          weather.sky = SKY.CLOUDY;
+        }
+        break;
+
+      case SKY.CLOUDY:
+        if (weather.mmhg < 970 || (weather.mmhg < 990 && weatherRng.bits(2) === 0)) {
+          lines.push('It starts to rain.');
+          weather.sky = SKY.RAINING;
+        }
+        if (weather.mmhg > 1030 && weatherRng.bits(2) === 0) {
+          lines.push('The clouds disappear.');
+          weather.sky = SKY.CLOUDLESS;
+        }
+        break;
+
+      case SKY.RAINING:
+        if (weather.mmhg < 970 && weatherRng.bits(2) === 0) {
+          lines.push('Lightning flashes in the sky.');
+          weather.sky = SKY.LIGHTNING;
+        }
+        if (weather.mmhg > 1030 || (weather.mmhg > 1010 && weatherRng.bits(2) === 0)) {
+          lines.push('The rain stopped.');
+          weather.sky = SKY.CLOUDY;
+        }
+        break;
+
+      case SKY.LIGHTNING:
+        if (weather.mmhg > 1010 || (weather.mmhg > 990 && weatherRng.bits(2) === 0)) {
+          lines.push('The lightning has stopped.');
+          weather.sky = SKY.RAINING;
+        }
+        break;
+
+      // Merc's own default arm: it bug()s a bad sky and resets. Unreachable
+      // here, since nothing but this function ever writes `sky`.
+      default:
+        weather.sky = SKY.CLOUDLESS;
+        break;
+    }
+
+    // The weather changes whether or not anyone is under it, but only someone
+    // outside and awake is told: the mud walks the descriptor list with
+    // IS_OUTSIDE and IS_AWAKE before sending a line.
+    if (!lines.length || !room || !room.outdoor || !isAwake(state)) return;
+    for (const text of lines) emit({ kind: 'weather', text });
+  }
+
   // -- the clock ------------------------------------------------------------
   let pulseAccum = 0;
   let pulseViolence = PULSE_VIOLENCE;
@@ -1659,6 +1798,15 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     pulseAccum += dt * PULSE_PER_SECOND;
     let guard = 0;
     while (pulseAccum >= 1 && guard++ < 32) { pulseAccum -= 1; pulse(); }
+
+    // The weather runs on its own clock, not the point-pulse, because resting
+    // runs the point-pulse four times as fast and a nap should not summon rain.
+    weatherAccum += dt;
+    let weatherGuard = 0;
+    while (weatherAccum >= WEATHER_SECONDS && weatherGuard++ < 8) {
+      weatherAccum -= WEATHER_SECONDS;
+      weatherUpdate(room);
+    }
   }
 
   const game = {
@@ -1745,6 +1893,13 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     setTimeOfDay(name) {
       state.hour = { dawn: 6, noon: 12, dusk: 19, night: 1 }[name] ?? 12;
     },
+
+    /**
+     * The mud's own sky, live -- `sky` is one of SKY.*, with the barometer that
+     * moved it. main.js renders CLOUDLESS as its clear preset and the other
+     * three as overcast; a rain pass would want RAINING and LIGHTNING apart.
+     */
+    weather() { return weather; },
 
     /** main.js hands this in so death and recall can actually move the camera. */
     set onTeleport(fn) { onTeleport = fn; },

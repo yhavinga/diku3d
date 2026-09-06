@@ -18,8 +18,9 @@ import { Audio } from './audio.js';
 import { Quality, LightPool, PRESETS } from './quality.js';
 import { createOptions } from './options.js';
 import { AssetLibrary, ASSET_NAMES } from './assets.js';
-import { createGame } from './game.js';
+import { createGame, SKY } from './game.js';
 import { createGameUi } from './game-ui.js';
+import { createRain } from './rain.js';
 
 const params = new URLSearchParams(location.search);
 const AREA_FILES = (params.get('areas') || 'midgaard')
@@ -243,9 +244,18 @@ const TONE_MAPPING = {
   neutral: THREE.NeutralToneMapping,
 };
 
+const weatherParam = params.get('weather');
+
 const state = {
   time: params.get('time') || 'dusk',
-  weather: params.get('weather') === 'overcast' ? 'overcast' : 'clear',
+  // Two fields, because weather has an owner as well as a value. `weatherMode`
+  // is who decides -- 'auto' is the mud's own weather_update in game.js, the
+  // other two pin it by hand -- and `weather` is what is actually rendered,
+  // always one of the keys in WEATHER. Everything downstream reads only the
+  // second, so nothing but `applyWeather` has to know a mode exists.
+  weatherMode: weatherParam === 'overcast' || weatherParam === 'auto' ? weatherParam : 'clear',
+  weather: weatherParam === 'overcast' ? 'overcast' : 'clear',
+  rainLevel: 0,
   showStats: false,
   roomVnum: null,
   paused: true,
@@ -368,6 +378,7 @@ async function boot() {
   });
   const { composer, bloom, shafts } = pipeline;
   const environment = new SkyEnvironment(renderer);
+  const rain = createRain(scene);
 
   // Torches and lamps from the builder, plus one behind every lit window.
   const lightPool = new LightPool(scene, 14, built.lights.concat(actors.lights));
@@ -444,6 +455,9 @@ async function boot() {
     // Rain-damp on everything outdoors that keeps a wet recipe; identity for
     // clear weather, and indoor floors have wet 0 so a scale changes nothing.
     materials.setWetness(preset.wet ?? 1);
+    // Rain is lit by the hour's own haze, so it reads silver by day and all
+    // but disappears at night, which is how night rain behaves.
+    rain.setColour(preset.haze);
     renderer.toneMappingExposure = preset.exposure;
     bloom.strength = preset.bloom;
     bloom.threshold = preset.bloomThreshold;
@@ -495,10 +509,26 @@ async function boot() {
     hud.toast(state.weather === 'clear' ? `${name}` : `${name} · ${state.weather}`);
   }
 
-  /** The other axis. Same hour, different sky; `applyTime` does all the work. */
+  /**
+   * The other axis. Same hour, different sky; `applyTime` does all the work.
+   *
+   * 'auto' is not a sky but an owner: it hands the choice to the mud's
+   * barometer and takes whatever that reads now. The two named values pin it.
+   */
   function applyWeather(name) {
-    state.weather = WEATHER[name] ? name : 'clear';
+    state.weatherMode = name === 'auto' || WEATHER[name] ? name : 'clear';
+    const sky = state.weatherMode === 'auto' ? mudSky() : state.weatherMode;
+    state.weather = WEATHER[sky] ? sky : 'clear';
     applyTime(state.time);
+  }
+
+  /**
+   * The mud's four sky states over the viewer's two. SKY_CLOUDLESS is the clear
+   * preset; cloudy, raining and lightning are all the same deck overhead until
+   * something draws rain, which is why `game.weather()` keeps the raw value.
+   */
+  function mudSky() {
+    return game.weather().sky === SKY.CLOUDLESS ? 'clear' : 'overcast';
   }
 
   // ---------------------------------------------------------- interaction --
@@ -762,6 +792,27 @@ async function boot() {
     camera.updateMatrixWorld();
     if (!state.paused) game.update(dt, player.position, camera.getWorldDirection(forward));
     gameUi.update();
+
+    // The mud's barometer may have crossed a sky boundary in that update.
+    // `applyWeather` rebakes the whole environment, so it is called only when
+    // the value it would render actually changes -- never once a frame.
+    if (state.weatherMode === 'auto' && mudSky() !== state.weather) applyWeather('auto');
+
+    // Rain falls out of the mud's sky, not the options screen: it only ever
+    // runs under auto, when the barometer says RAINING or worse. The streaks
+    // need open sky overhead; the sound stays on indoors -- audio halves it
+    // itself, and rain on the roof is half of what rain is for.
+    {
+      const sky = state.weatherMode === 'auto' ? game.weather().sky : SKY.CLOUDLESS;
+      const level = sky === SKY.LIGHTNING ? 1 : sky === SKY.RAINING ? 0.65 : 0;
+      if (level !== state.rainLevel) {
+        state.rainLevel = level;
+        audio.setRain(level);
+      }
+      const outdoorNow = state.roomVnum !== null && (built.rooms.get(state.roomVnum)?.outdoor ?? true);
+      rain.setIntensity(outdoorNow ? level : 0);
+      rain.update(dt, camera.position);
+    }
 
     const vnum = currentRoom();
     if (vnum !== undefined && vnum !== state.roomVnum) {

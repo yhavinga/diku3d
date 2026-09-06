@@ -40,7 +40,38 @@ export class Audio {
     lfo.connect(lfoGain).connect(this.windGain.gain);
     lfo.start();
 
+    // rain bed: the same noise through a higher shelf -- rain is hiss where
+    // wind is rumble -- silent until setRain opens it. Under a roof the gain
+    // halves rather than closes, which is what rain on someone else's roof
+    // sounds like.
+    const rain = this.ctx.createBufferSource();
+    rain.buffer = this.noise;
+    rain.loop = true;
+    rain.playbackRate.value = 1.7;
+    const rainFilter = this.ctx.createBiquadFilter();
+    rainFilter.type = 'highpass';
+    rainFilter.frequency.value = 1400;
+    this.rainGain = this.ctx.createGain();
+    this.rainGain.gain.value = 0;
+    rain.connect(rainFilter).connect(this.rainGain).connect(this.master);
+    rain.start();
+    this._rainLevel = 0;
+    this._rainOutdoor = 1;
+
     this.nextBell = this.ctx.currentTime + 25;
+  }
+
+  /** 0 dry to 1 soaking; ramped, because rain does not start on a frame. */
+  setRain(level) {
+    this._rainLevel = Math.max(0, Math.min(1, level));
+    this.applyRain();
+  }
+
+  applyRain() {
+    if (!this.rainGain) return;
+    const shelter = this._rainOutdoor ? 1 : 0.4;
+    const target = this._rainLevel * 0.34 * shelter;
+    this.rainGain.gain.linearRampToValueAtTime(target, this.ctx.currentTime + 1.8);
   }
 
   makeNoiseBuffer(seconds) {
@@ -150,6 +181,8 @@ export class Audio {
     if (!this.ctx) return;
     const target = outdoor ? 0.2 : 0.05;
     this.windGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.8);
+    this._rainOutdoor = outdoor ? 1 : 0;
+    this.applyRain();
   }
 
   update(outdoorCity) {
