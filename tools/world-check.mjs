@@ -155,19 +155,41 @@ for (const area of areas) {
 // the combined graph, a genuinely different path from 43 separate ones (the
 // cross-area exits only resolve when both ends are loaded). So the default
 // set gets its own pass, with the viewer's own start room and cap.
-const DEFAULT_WORLD = ['midgaard.are', 'haon.are', 'shire.are', 'marsh.are', 'trollden.are'];
+const DEFAULT_WORLD = ['midgaard.are', 'haon.are', 'shire.are', 'marsh.are',
+  'trollden.are', 'grave.are'];
+// Mirrors MAX_ROOMS in src/main.js. Not imported: main.js is a browser module
+// that reads `location` at import time, and the point of this tool is that it
+// runs in node. If that number moves, move this one.
+const MAX_ROOMS = 400;
 const defaultSet = areas.filter((a) => DEFAULT_WORLD.includes(a.file));
 if (defaultSet.length === DEFAULT_WORLD.length) {
   const world = buildWorld(defaultSet);
-  const layout = layoutWorld(world, { startVnum: 3001, maxRooms: 400 });
+  const layout = layoutWorld(world, { startVnum: 3001, maxRooms: MAX_ROOMS });
+  // What the set actually demands, with the cap lifted. The cap does not fail
+  // when it bites, it truncates: the breadth-first walk stops mid-graph, whole
+  // areas end up with zero rooms and their exits quietly degrade to gates, and
+  // nothing downstream says a word. So the two counts are compared here.
+  const uncapped = layoutWorld(world, { startVnum: 3001, maxRooms: Infinity });
   dangling += passagesToUnbuilt(layout);
   const found = [];
   for (const check of CHECKS) {
     const faults = check.run(world, layout);
     if (faults.length) found.push({ check, faults });
   }
+  const spare = MAX_ROOMS - uncapped.cells.size;
   console.log(`\none world (${DEFAULT_WORLD.map((f) => f.replace('.are', '')).join('+')}): `
-    + `${layout.cells.size} rooms placed`);
+    + `${layout.cells.size} rooms placed, ${uncapped.cells.size} reachable, `
+    + `cap ${MAX_ROOMS} (${spare >= 0 ? `${spare} spare` : `${-spare} over`})`);
+  if (uncapped.cells.size > MAX_ROOMS) {
+    total++;
+    console.log(`  room cap exceeded -- ${uncapped.cells.size} reachable against ${MAX_ROOMS}`);
+    console.log('    the shipping set is truncated mid-walk: these areas lose rooms');
+    for (const area of defaultSet) {
+      const placed = area.rooms.filter((r) => layout.cells.has(r.vnum)).length;
+      const want = area.rooms.filter((r) => uncapped.cells.has(r.vnum)).length;
+      if (placed < want) console.log(`      ${area.file}: ${placed}/${want} rooms placed`);
+    }
+  }
   for (const { check, faults } of found) {
     total += faults.length;
     console.log(`  ${check.name} -- ${faults.length}`);

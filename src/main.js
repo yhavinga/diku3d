@@ -23,22 +23,27 @@ import { createGameUi } from './game-ui.js';
 import { createRain } from './rain.js';
 
 const params = new URLSearchParams(location.search);
-// The default world is no longer one town. Midgaard plus the four areas
-// west of it -- Haon Dor's forest through the West Gate, the Shire, the
-// marsh and the troll den -- lay out as ONE graph: layout.js runs a single
-// breadth-first placement and every cross-area exit resolves to an ordinary
-// routed street you walk (measured: 252 rooms, 96.3% walkable, better than
-// Midgaard's own 92.5%, ~3x fps headroom, +1 s boot). Chosen over the other
+// The default world is no longer one town. Midgaard plus the five areas
+// around it -- Haon Dor's forest through the West Gate, the Shire, the
+// marsh, the troll den and the graveyard off the Concourse -- lay out as ONE
+// graph: layout.js runs a single breadth-first placement and every cross-area
+// exit resolves to an ordinary routed street you walk (measured: 285 rooms,
+// 96.7% walkable, better than Midgaard's own 92.5%). Chosen over the other
 // neighbours by measurement, not taste: an area hanging off ONE horizontal
 // exit pair grows as a clean branch; two anchors fold it back over the town
 // (midennir interleaves forest through the streets, 88.1%), and vertical
-// anchors shove open ground three levels up (dream 76.3%).
-const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden')
+// anchors shove open ground three levels up (dream 76.3%). grave is the same
+// clean-branch shape -- one two-way anchor #3129 <-> #3600, no vertical one,
+// and its 13 tombs hang below on DOWN exits, so nothing gets shoved skyward.
+// It also *raises* Midgaard's own number to 93.5%: the dead gate at #3129
+// south becomes a walk.
+const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden,grave')
   .split(',').filter(Boolean).map((f) => (f.endsWith('.are') ? f : `${f}.are`));
 const START_VNUM = Number(params.get('room') || 3001);
 // A live trap: the breadth-first placement stops mid-walk at the cap, and
 // whole areas silently get zero rooms while their exits degrade to gates.
-// The default set is 252 rooms; anything bigger must raise ?max= with it.
+// The default set is 285 rooms; anything bigger must raise ?max= with it.
+// tools/world-check.mjs guards this number for the shipping set.
 const MAX_ROOMS = Number(params.get('max') || 400);
 const AREA_URL = params.get('areaDir') || 'merc21/area';
 
@@ -324,7 +329,7 @@ async function boot() {
   }
 
   const built = buildScene(world, layout, materials, assets);
-  await progress(0.72, `${built.stats.triangles.toLocaleString()} triangles`);
+  await progress(0.72, `${Math.round(built.stats.triangles).toLocaleString()} triangles`);
 
   const actors = populate(world, layout, built, { materials, assets });
   await progress(0.86, 'populating rooms');
@@ -1092,8 +1097,11 @@ async function boot() {
 
   await progress(1, 'ready');
   dom.loading.classList.add('hidden');
+  // The triangle count is rounded because an indexed geometry's triangles are
+  // index.count/3 and the sum is taken over position.count/3, so it comes out
+  // fractional: the title used to read "1,454,852.667 triangles".
   dom.titleStats.textContent = `${layout.stats.placed} rooms · ${layout.stats.alleys + layout.stats.stairs} passages · `
-    + `${layout.stats.portals} archways · ${built.stats.triangles.toLocaleString()} triangles`;
+    + `${layout.stats.portals} archways · ${Math.round(built.stats.triangles).toLocaleString()} triangles`;
   dom.title.classList.remove('hidden');
   frame();
 }
