@@ -695,11 +695,21 @@ const WATER_VERT = `
     gl_Position = projectionMatrix * viewMatrix * world;
   }`;
 
+// Water has no light of its own here: it is the sky, bent through a surface.
+// So every dial below is a way of saying how much of the sky is showing and
+// how bright that sky is, and `setSky()` is what feeds them. At their defaults
+// they are the constants this shader shipped with, so a viewer that never
+// calls the setter renders exactly what it always did.
 const WATER_FRAG = `
   uniform float time;
   uniform vec3 shallow;
   uniform vec3 deep;
   uniform vec3 skyColour;
+  uniform float skyMix;
+  uniform float skyGain;
+  uniform float bodySky;
+  uniform float chop;
+  uniform float glint;
   varying vec3 vWorld;
   varying vec2 vUv;
   float wave(vec2 p, float t) {
@@ -711,13 +721,23 @@ const WATER_FRAG = `
     vec2 grad = vec2(
       wave(p + vec2(0.06, 0.0), time * 1.1) - h,
       wave(p + vec2(0.0, 0.06), time * 1.1) - h);
-    vec3 normal = normalize(vec3(-grad.x * 6.0, 1.0, -grad.y * 6.0));
+    vec3 normal = normalize(vec3(-grad.x * 6.0 * chop, 1.0, -grad.y * 6.0 * chop));
     vec3 viewDir = normalize(cameraPosition - vWorld);
     float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0);
-    vec3 base = mix(deep, shallow, h * 0.5 + 0.5);
-    vec3 colour = mix(base, skyColour, clamp(fresnel * 1.3, 0.0, 0.9));
+    // What the sheet is reflecting. skyColour is a *tone*; skyGain is how
+    // bright that tone stands in the frame, which is the whole difference
+    // between a deck that is lighting the town and a swatch of grey paint.
+    vec3 above = skyColour * skyGain;
+    float mirror = clamp(fresnel * skyMix, 0.0, 0.9);
+    // The body is not a colour of its own either -- it is the same light on
+    // its way back up, minus what the water took out of it. Under a flat deck
+    // that leaves hardly any tint, which is why a real overcast river reads
+    // grey and not teal; and with no sun to shade them the waves have nothing
+    // to say either, so chop flattens the tint and the surface together.
+    vec3 body = mix(mix(deep, shallow, 0.5 + 0.5 * h * chop), above, bodySky);
+    vec3 colour = mix(body, above, mirror);
     float spec = pow(max(dot(reflect(-viewDir, normal), normalize(vec3(0.4, 0.8, 0.2))), 0.0), 48.0);
-    gl_FragColor = vec4(colour + spec * 0.8, 0.88);
+    gl_FragColor = vec4(colour + spec * glint, 0.88);
   }`;
 
 // ------------------------------------------------------------------ smoke ----
@@ -1397,6 +1417,11 @@ export function populate(world, layout, built, options = {}) {
         shallow: { value: new THREE.Color(0x4d8f8c) },
         deep: { value: new THREE.Color(0x14343c) },
         skyColour: { value: new THREE.Color(0x9fc4e8) },
+        skyMix: { value: 1.3 },
+        skyGain: { value: 1 },
+        bodySky: { value: 0 },
+        chop: { value: 1 },
+        glint: { value: 0.8 },
       },
       transparent: true,
     });
@@ -1531,6 +1556,10 @@ export function populate(world, layout, built, options = {}) {
   // is how much of the light is the sun rather than sky, which is what decides
   // whether there is a sharp shadow at all.
   const sun = { x: 0.4, z: 0.4, elevation: 45, lift: 1 };
+  // The sky the water answers to: its tone, and how much of the light is still
+  // coming from a sun rather than from the whole dome. Both start at the values
+  // the water shader shipped with, so nothing moves until setSky() is called.
+  const overhead = { colour: new THREE.Color(0x9fc4e8), sun: 1 };
   /**
    * How much daylight a window is letting through. `level` is 0 at night and
    * 1 in the middle of the day; the colour is the hour's haze, so a dawn pane
@@ -1560,6 +1589,47 @@ export function populate(world, layout, built, options = {}) {
     // there is almost no directional light left, and without it every figure
     // would still throw a hard smear across the paving on a sunless day.
     sun.lift = THREE.MathUtils.clamp((elevationDeg + 2) / 12, 0, 1) * fraction;
+    refreshWater(); // the water's glitter is the sun's, so it moves with it
+  }
+
+  /**
+   * What is over the water. `colourHex` is the hour's own sky -- the same
+   * colour the hemisphere light is given -- and `sunFraction` is how much of
+   * the light is still the sun rather than the whole dome, which is the number
+   * the weather modifier already gives setSun().
+   *
+   * Under a stratus deck a river is a flat pale sheet: the deck is the only
+   * source there is, so the water reads as the deck's own tone, its tint is
+   * nearly gone, the chop has no sun to shade it, and there is no disc left to
+   * glint off it. Under a clear sky none of that applies, and at sunFraction 1
+   * every value below is exactly the constant the shader shipped with.
+   */
+  function setSky(colourHex, sunFraction = 1) {
+    overhead.colour.setHex(colourHex);
+    overhead.sun = THREE.MathUtils.clamp(sunFraction, 0, 1);
+    refreshWater();
+  }
+
+  function refreshWater() {
+    if (!waterMaterials.length) return;
+    const cloud = 1 - overhead.sun; // 0 in the clear, 0.85 under the deck
+    // A lobe this tight is a point source by construction, and cloud does not
+    // dim the disc so much as remove it -- hence the square rather than a
+    // straight fraction. sun.lift carries the hour as well as the weather, so
+    // the glitter also goes out when the sun goes down.
+    const disc = sun.lift * sun.lift;
+    for (const material of waterMaterials) {
+      const u = material.uniforms;
+      u.skyColour.value.copy(overhead.colour);
+      // Grazing angles have to be able to reach the sky's own tone, and the
+      // sheet has to sit at the sky's own level to read as a mirror of it
+      // rather than as a pane of coloured glass laid over the riverbed.
+      u.skyMix.value = 1.3 + 1.2 * cloud;
+      u.skyGain.value = 1 + 0.65 * cloud;
+      u.bodySky.value = 0.45 * cloud;
+      u.chop.value = 1 - 0.5 * cloud;
+      u.glint.value = 0.8 * disc;
+    }
   }
 
   const _shadowMatrix = new THREE.Matrix4();
@@ -1770,7 +1840,7 @@ export function populate(world, layout, built, options = {}) {
 
   return {
     group, interactables, update, doors, figures,
-    setSun, setDaylight, lights: windowLights,
+    setSun, setDaylight, setSky, lights: windowLights,
   };
 }
 
