@@ -328,5 +328,7 @@ export const ASSET_NAMES = [
   'barrel', 'crate', 'sack', 'hay_bale', 'handcart', 'bench', 'trough',
   'stacked_crates', 'barrel_stack', 'firewood_pile', 'water_butt', 'bucket',
   'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',
-  'tree_oak', 'tree_pine', 'bush', 'grass_tuft', 'townsperson',
+  'tree_oak', 'tree_pine', 'bush', 'grass_tuft',
+  'tree_fir', 'tree_snag', 'fern', 'salal_bush', 'moss_rock',
+  'townsperson',
 ];
