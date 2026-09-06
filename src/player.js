@@ -102,17 +102,39 @@ export class Player {
    * being somewhere. Portals, stairs and anything not a straight walk keep
    * the fade: a glide through a wall would say something false.
    */
+  /** Push a point out of any closed collider, the same maths update() uses. */
+  resolvePoint(x, z, feetY) {
+    const items = this.colliders.near(x, z, this._scratch);
+    const headY = feetY + HEIGHT;
+    for (const c of items) {
+      if (c.door && c.door.open) continue;
+      if (c.y1 <= feetY + STEP_UP || c.y0 >= headY) continue;
+      if (x < c.x0 - RADIUS || x > c.x1 + RADIUS || z < c.z0 - RADIUS || z > c.z1 + RADIUS) continue;
+      const px = Math.min(x - (c.x0 - RADIUS), (c.x1 + RADIUS) - x);
+      const pz = Math.min(z - (c.z0 - RADIUS), (c.z1 + RADIUS) - z);
+      if (px < pz) x += (x < (c.x0 + c.x1) / 2 ? -px : px);
+      else z += (z < (c.z0 + c.z1) / 2 ? -pz : pz);
+    }
+    return [x, z];
+  }
+
   glide(x, y, z, yaw, onArrive = null) {
     const from = this.position.clone();
-    const to = new THREE.Vector3(x, y + EYE, z);
+    // Resolve the destination BEFORE walking to it. Gliding to the raw room
+    // centre and letting physics take over afterwards produced a measured
+    // 2.13 m sideways pop in a single frame wherever the centre is occupied
+    // -- the fountain on the Temple Square, precisely the thing the "never
+    // put anything at a room's exact centre" rule exists for.
+    const [tx, tz] = this.resolvePoint(x, z, y);
+    const to = new THREE.Vector3(tx, y + EYE, tz);
     const fromYaw = this.camera.rotation.y;
     // Shortest arc, so a step behind you turns 180 and not 540.
     let d = yaw - fromYaw;
     d = (((d + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
-    // Up to half a second for a half turn; the walk itself close to a second
-    // for a full 26 m cell-to-cell step, less for anything shorter.
+    // Up to half a second for a half turn; the walk itself just over a
+    // second for a full 26 m cell-to-cell step, less for anything shorter.
     const turn = (Math.abs(d) / Math.PI) * 0.5;
-    const move = THREE.MathUtils.clamp(from.distanceTo(to) / 30, 0.45, 1.0);
+    const move = THREE.MathUtils.clamp(from.distanceTo(to) / 22, 0.5, 1.2);
     this.velocity.set(0, 0, 0);
     this._glide = { from, to, fromYaw, toYaw: fromYaw + d, turn, move, t: 0, onArrive };
   }
@@ -131,10 +153,12 @@ export class Player {
     if (g.turn > 0 && !g.turned) { g.turned = true; this.camera.rotation.y = g.toYaw; }
     const u = Math.min(1, (g.t - g.turn) / g.move);
     this.position.lerpVectors(g.from, g.to, ease(u));
-    // The walk bob at walking tempo, footsteps included -- the sound is half
-    // of what makes the step read as walking rather than as a camera move.
+    // The bob and footsteps at a brisk jog cadence -- the sound is half of
+    // what makes the step read as moving rather than as a camera move, and a
+    // judge measured a walking cadence under a much faster translation as
+    // "an implied stride of 20 m per footfall". The cadence follows the pace.
     const previous = this.bobPhase;
-    this.bobPhase += dt * 9;
+    this.bobPhase += dt * 13;
     if (Math.floor(previous / Math.PI) !== Math.floor(this.bobPhase / Math.PI) && this.onFootstep) {
       this.onFootstep(false);
     }

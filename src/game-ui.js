@@ -54,8 +54,8 @@ const CSS = `
 #g-target .g-bar { margin-top: 8px; margin-bottom: 0; }
 
 /* ---------------------------------------------------------------- log -- */
-#g-log { position: absolute; right: 24px; bottom: 96px; width: 330px;
-  max-height: min(38vh, 300px); overflow: hidden; display: flex;
+#g-log { position: absolute; right: 24px; bottom: 140px; width: 330px;
+  max-height: min(30vh, 220px); overflow: hidden; display: flex;
   flex-direction: column; justify-content: flex-end; gap: 2px; }
 /* A soft glow was the only thing separating these lines from the world, and
    over sunlit paving or a night street they simply drowned. Same cure as the
@@ -263,11 +263,22 @@ export function createGameUi(game) {
   document.body.appendChild(root);
 
   // -- log ------------------------------------------------------------------
-  const LINES = 14;
+  // Seven, not fourteen: at fourteen the log grew over the compass and all
+  // three vitals bars and sat there for the rest of the session ("You have
+  // been KILLED!!" rendered on top of the HP bar). And lines expire -- a
+  // quiet minute should hand the corner of the screen back to the HUD.
+  const LINES = 7;
+  const LINE_TTL = 11000;
   function say(text, cls = '') {
     if (!text) return;
     const line = el('p', cls, text);
     log.appendChild(line);
+    setTimeout(() => {
+      if (!line.parentNode) return;
+      line.style.transition = 'opacity 900ms ease';
+      line.style.opacity = '0';
+      setTimeout(() => line.remove(), 950);
+    }, LINE_TTL);
     while (log.children.length > LINES) log.removeChild(log.firstChild);
     // Old lines fade rather than vanish, so the eye stays on the newest.
     const kids = log.children;

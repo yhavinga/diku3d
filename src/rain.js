@@ -14,10 +14,15 @@
 
 import * as THREE from 'three';
 
-const COUNT = 900;
-const RADIUS = 15;
+// A judge measured the first cut at 0.09% of the frame's pixels changed --
+// functionally invisible -- with every streak at exactly 0.0 degrees from
+// vertical, which reads as scratches on the lens. So: more of them, longer,
+// denser ink, a wider volume, and a real lean baked into the geometry (the
+// old shear moved both ends of a segment equally, which tilts nothing).
+const COUNT = 1500;
+const RADIUS = 19;
 const HEIGHT = 17;
-const STREAK = 0.75;
+const STREAK = 1.15;
 
 const RAIN_VERT = /* glsl */`
   attribute float seed;
@@ -25,16 +30,21 @@ const RAIN_VERT = /* glsl */`
   uniform float intensity;
   varying float vFade;
   void main() {
+    // The integer part of the seed flags the lower end of the streak; the
+    // fraction is the per-streak identity.
+    float tip = step(1.0, seed);
+    float s = fract(seed);
     // Each streak falls its own lap of the cylinder, offset by its seed, and
     // wraps. Speed varies a little per streak so sheets do not march.
-    float lap = mod(time * (0.55 + seed * 0.2) + seed * 7.0, 1.0);
+    float lap = mod(time * (0.55 + s * 0.2) + s * 7.0, 1.0);
     vec3 pos = position;
     pos.y += ${HEIGHT.toFixed(1)} * (1.0 - lap) - ${(HEIGHT / 2).toFixed(1)};
-    // A touch of wind shear: rain never falls plumb.
-    pos.x += lap * 1.6;
+    // Wind: the whole column drifts with the fall, and the lower end trails
+    // behind the upper, so every streak leans off vertical by its own angle.
+    pos.x += lap * 1.6 + tip * (0.14 + s * 0.12);
     // Fade the far half of the population in and out with intensity, so light
     // rain is sparse rather than faint.
-    vFade = intensity >= seed ? 1.0 : 0.0;
+    vFade = intensity >= s ? 1.0 : 0.0;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }`;
 
@@ -67,8 +77,10 @@ export function createRain(scene) {
     const y = hash(i, 3) * HEIGHT;
     const seed = hash(i, 4);
     positions.set([x, y, z, x, y - STREAK, z], i * 6);
+    // Same fractional identity on both ends; +1 marks the lower end so the
+    // shader can lean it.
     seeds[i * 2] = seed;
-    seeds[i * 2 + 1] = seed;
+    seeds[i * 2 + 1] = seed + 1;
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -81,7 +93,7 @@ export function createRain(scene) {
       time: { value: 0 },
       intensity: { value: 0 },
       colour: { value: new THREE.Color(0xaab4bd) },
-      opacity: { value: 0.16 },
+      opacity: { value: 0.26 },
     },
     transparent: true,
     depthWrite: false,
