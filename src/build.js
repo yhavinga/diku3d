@@ -55,6 +55,9 @@ const OUTDOOR = new Set([
 
 export const isOutdoor = (room) => OUTDOOR.has(room.sector) && !(room.flags & ROOM_INDOORS);
 
+/** One definition, because the alley between two of them needs the same answer. */
+const isWater = (room) => room.sector === SECTOR.WATER_SWIM || room.sector === SECTOR.WATER_NOSWIM;
+
 export function hash3(a, b, c, salt = 0) {
   let h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263) ^ Math.imul(c | 0, 2147483647) ^ Math.imul(salt, 1274126177);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -369,7 +372,7 @@ export function buildScene(world, layout, materials, assets = null) {
       shade: !outdoor,
     });
 
-    if (room.sector === SECTOR.WATER_SWIM || room.sector === SECTOR.WATER_NOSWIM) {
+    if (isWater(room)) {
       decor.push({ kind: 'water', x: pos.x, y: pos.y + 0.7, z: pos.z, size: half * 2 });
     }
 
@@ -482,6 +485,7 @@ export function buildScene(world, layout, materials, assets = null) {
       if (isShop(room)) buildShopSign({ room, pos, sides, instances, model, chunk });
     } else {
       if (isPark(room)) buildPark({ room, cell, pos, sides, instances, model, chunk, decor, addCollider });
+      else if (room.sector === SECTOR.FOREST) buildForest({ room, pos, sides, instances, model, chunk, decor, addCollider });
       // Out of doors the same thing, against the sides with no way out of
       // them, so a square reads as somewhere people keep their things rather
       // than as swept paving.
@@ -881,17 +885,46 @@ const isPark = (room) => isOutdoor(room) && PARK.test(room.name) && !PARK_IS_A_R
 const PARK_CLEAR = 1.5;
 const PARK_CORNER = 4.3;
 
-function buildPark({ room, cell, pos, sides, instances, model, chunk, decor, addCollider }) {
-  // A side with a way out of it keeps its last metre and a half clear; a side
-  // without one is a park wall, and things grow against a wall.
-  const clears = (lx, lz) => {
-    for (let d = 0; d < 4; d++) {
-      if (!sides[d]) continue;
-      const [dx, , dz] = DIR_STEP[d];
-      if (HALF - (dx ? lx * dx : lz * dz) < PARK_CLEAR) return false;
+/**
+ * Nothing may stand in a doorway. A side with a way out of it keeps its last
+ * `margin` metres clear; a side without one is a wall, and things grow against
+ * a wall. Cell-local coordinates in, planted-or-not out.
+ */
+const edgeClear = (sides, margin) => (lx, lz) => {
+  for (let d = 0; d < 4; d++) {
+    if (!sides[d]) continue;
+    const [dx, , dz] = DIR_STEP[d];
+    if (HALF - (dx ? lx * dx : lz * dz) < margin) return false;
+  }
+  return true;
+};
+
+/**
+ * A ring of small planting near the edges of a cell: instanced, and no collider
+ * on any of it. These are knee- and ankle-high, and walking through a clump of
+ * grass is not the wall a trunk is. `rand(i, k, salt)` is the caller's own
+ * stream, because a room is keyed by vnum and a filler cell by its coordinates.
+ */
+function scatterUndergrowth({ instances, chunk, x, y, z, kinds, rand, clears = null }) {
+  for (const kind of kinds) {
+    if (!kind.name) continue;
+    for (let i = 0; i < kind.count; i++) {
+      const angle = ((i + rand(i, 0, kind.salt)) / kind.count) * Math.PI * 2;
+      const radius = kind.ring + (rand(i, 1, kind.salt) - 0.5) * kind.spread;
+      const lx = Math.cos(angle) * radius;
+      const lz = Math.sin(angle) * radius;
+      if (clears && !clears(lx, lz)) continue;
+      instances.add(kind.name, {
+        x: x + lx, y, z: z + lz,
+        rotY: rand(i, 2, kind.salt) * Math.PI * 2,
+        scale: kind.size * (0.8 + rand(i, 3, kind.salt) * 0.5),
+      }, chunk);
     }
-    return true;
-  };
+  }
+}
+
+function buildPark({ room, cell, pos, sides, instances, model, chunk, decor, addCollider }) {
+  const clears = edgeClear(sides, PARK_CLEAR);
 
   // Trees go in the corners, because the ways out are on the axes and so is the
   // walk across -- and never at the centre, which is where the player arrives.
@@ -915,27 +948,108 @@ function buildPark({ room, cell, pos, sides, instances, model, chunk, decor, add
     addCollider(tx - 0.7, tx + 0.7, tz - 0.7, tz + 0.7, pos.y, pos.y + 8);
   }
 
-  // Undergrowth around the edges, and no collider on it: these are knee- and
-  // ankle-high, and walking through a clump of grass is not the wall a trunk is.
+  // Undergrowth around the edges.
   if (!instances) return;
-  for (const kind of [
-    { name: model(['bush'], 0), count: 5, ring: 4.4, spread: 1.0, size: 0.85, salt: 86 },
-    { name: model(['grass_tuft'], 0), count: 14, ring: 4.2, spread: 1.8, size: 1.0, salt: 90 },
-  ]) {
-    if (!kind.name) continue;
-    for (let i = 0; i < kind.count; i++) {
-      const angle = ((i + hash3(room.vnum, i, 0, kind.salt)) / kind.count) * Math.PI * 2;
-      const radius = kind.ring + (hash3(room.vnum, i, 1, kind.salt) - 0.5) * kind.spread;
-      const lx = Math.cos(angle) * radius;
-      const lz = Math.sin(angle) * radius;
-      if (!clears(lx, lz)) continue;
-      instances.add(kind.name, {
-        x: pos.x + lx, y: pos.y, z: pos.z + lz,
-        rotY: hash3(room.vnum, i, 2, kind.salt) * Math.PI * 2,
-        scale: kind.size * (0.8 + hash3(room.vnum, i, 3, kind.salt) * 0.5),
-      }, chunk);
-    }
+  scatterUndergrowth({
+    instances, chunk, x: pos.x, y: pos.y, z: pos.z,
+    rand: (i, k, salt) => hash3(room.vnum, i, k, salt),
+    clears,
+    kinds: [
+      { name: model(['bush'], 0), count: 5, ring: 4.4, spread: 1.0, size: 0.85, salt: 86 },
+      { name: model(['grass_tuft'], 0), count: 14, ring: 4.2, spread: 1.8, size: 1.0, salt: 90 },
+    ],
+  });
+}
+
+/**
+ * A walkable forest room: the floor of a coastal rainforest, not a lawn.
+ *
+ * Haon Dor is the largest outdoor surface in the default world and its *rooms*
+ * carried nothing at all -- grass to the cell edge, with every tree in the
+ * filler cells between them. Standing in one you were on a mown clearing
+ * looking at a treeline, a hundred times over. So the rooms are planted too,
+ * on the park's rules, because a room is somewhere you walk: the ring near the
+ * edges gets the undergrowth, the middle stays clear -- that is where the
+ * player arrives -- and any side with a way out of it keeps its last metre and
+ * a half, or the trail is blocked by a fern.
+ *
+ * The trees go through the `decor` path rather than being instanced here, so
+ * the no-assets fallback still grows something; the species is actors.js's
+ * choice, which is where a fir-first pick belongs.
+ */
+const FOREST_CLEAR = 1.5;
+/** Nothing inside this of the centre: the player materialises there. */
+const FOREST_MIDDLE = 2.5;
+const FOREST_CORNER = 4.6;
+
+function buildForest({ room, pos, sides, instances, model, chunk, decor, addCollider }) {
+  const clears = edgeClear(sides, FOREST_CLEAR);
+  const open = (lx, lz) => Math.hypot(lx, lz) >= FOREST_MIDDLE && clears(lx, lz);
+  // Which corners are plantable at all, starting from a different one per room.
+  // Taking the first that clear, rather than dropping a corner that fails, is
+  // what stops a room coming out with nothing standing in it after all: with a
+  // jittered corner simply skipped when it reached into a doorway, 13 of the
+  // default world's 68 forest rooms were still bare lawn. Now none are.
+  const corners = [[1, 1], [1, -1], [-1, -1], [-1, 1]];
+  const first = Math.floor(hash3(room.vnum, 1, 0, 100) * corners.length);
+  const spots = [];
+  for (let k = 0; k < corners.length; k++) {
+    const [sx, sz] = corners[(first + k) % corners.length];
+    const lx = sx * (FOREST_CORNER + (hash3(room.vnum, k, 0, 101) - 0.5) * 1.6);
+    const lz = sz * (FOREST_CORNER + (hash3(room.vnum, k, 1, 101) - 0.5) * 1.6);
+    if (open(lx, lz)) spots.push([lx, lz, k]);
   }
+
+  // One or two of them, because the ways out are on the axes and the walk
+  // across is too. A forest room with nothing standing in it is a clearing, and
+  // Haon Dor is not a hundred clearings in a row.
+  const trees = Math.min(spots.length, hash3(room.vnum, 0, 0, 100) > 0.45 ? 2 : 1);
+  for (let i = 0; i < trees; i++) {
+    const [lx, lz, k] = spots[i];
+    const tx = pos.x + lx;
+    const tz = pos.z + lz;
+    // `conifer` weights the species pick in actors.js toward fir: this is the
+    // deep coastal forest, not a town park.
+    decor.push({ kind: 'tree', conifer: true, x: tx, y: pos.y, z: tz, scale: 0.8 + hash3(room.vnum, k, 2, 101) * 0.5 });
+    addCollider(tx - 0.7, tx + 0.7, tz - 0.7, tz + 0.7, pos.y, pos.y + 8);
+  }
+
+  if (!instances) return;
+
+  // A boulder in one room in four, in a corner the trees did not take -- and
+  // this one does get a collider, because a metre of granite is not a fern.
+  const rock = spots.length > trees && hash3(room.vnum, 0, 0, 102) < 0.25
+    ? model(['moss_rock'], 0) : null;
+  if (rock) {
+    const [lx, lz] = spots[trees];
+    const scale = 0.9 + hash3(room.vnum, 3, 0, 102) * 0.5;
+    instances.add(rock, {
+      x: pos.x + lx, y: pos.y, z: pos.z + lz,
+      rotY: hash3(room.vnum, 4, 0, 102) * Math.PI * 2, scale,
+    }, chunk);
+    addStoneCollider({ instances, name: rock, x: pos.x + lx, y: pos.y, z: pos.z + lz, scale, addCollider });
+  }
+
+  scatterUndergrowth({
+    instances, chunk, x: pos.x, y: pos.y, z: pos.z,
+    rand: (i, k, salt) => hash3(room.vnum, i, k, salt),
+    clears: open,
+    kinds: [
+      { name: model(['fern'], 0), count: 4 + Math.floor(hash3(room.vnum, 0, 0, 103) * 4), ring: 4.6, spread: 1.6, size: 1.0, salt: 110 },
+      { name: model(['salal_bush'], 0), count: 2 + Math.floor(hash3(room.vnum, 1, 0, 103) * 2), ring: 4.9, spread: 1.2, size: 1.0, salt: 111 },
+      { name: model(['grass_tuft'], 0), count: 6 + Math.floor(hash3(room.vnum, 2, 0, 103) * 4), ring: 4.4, spread: 2.0, size: 1.0, salt: 112 },
+    ],
+  });
+}
+
+/**
+ * A box round a boulder, read off the model rather than guessed: Blender puts
+ * the origin on the floor, so the height is the whole of `size.y`.
+ */
+function addStoneCollider({ instances, name, x, y, z, scale, addCollider }) {
+  const size = instances.library.get(name)?.size;
+  const half = ((size ? Math.max(size.x, size.z) : 0.9) * scale) / 2;
+  addCollider(x - half, x + half, z - half, z + half, y, y + (size ? size.y : 0.9) * scale);
 }
 
 /** The boundary of an open-air room: an opening, or something to stop you. */
@@ -968,6 +1082,12 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
   const enclosed = alleyEnclosed(link);
   const source = isOutdoor(link.from.room) ? link.from.room : link.to.room;
   const mats = pickMaterials(source, source.area);
+  // A river is a chain of water rooms with a routed cell between each pair, and
+  // only the rooms ever got a water surface -- so midstream showed the raw
+  // `water` floor material between two shader planes, a boiling band 13 m wide
+  // across every reach. The plane is a pure function of world position, so one
+  // laid over the routed cell joins the two either side of it seamlessly.
+  const midstream = isWater(link.from.room) && isWater(link.to.room);
   const level = link.from.level;
   const y = level * LEVEL_H;
   const chain = [link.from, ...link.path, link.to];
@@ -985,11 +1105,17 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
     batcher.add(box(CELL, SLAB, CELL), mats.floor, place(pos.x, y - SLAB / 2 - 0.01, pos.z), { chunk });
     addPlatform(pos.x - HALF, pos.x + HALF, pos.z - HALF, pos.z + HALF, y);
 
+    // The floor underneath stays as it is; the plane covers it, at the same
+    // height and size the rooms either side use.
+    if (midstream) decor.push({ kind: 'water', x: pos.x, y: y + 0.7, z: pos.z, size: CELL });
+
     if (!enclosed) {
       // Was 0.86 -- one street cell in seven carried anything at all, which is
       // most of why the town read as a blockout. The two open ends of the
       // passage are excluded so nothing lands in the middle of the way through.
-      if (hash3(c.x, c.z, level, 12) > 0.45) {
+      // Not on the river, though: a routed cell between two water rooms is
+      // water now, and barrels do not stack on it.
+      if (!midstream && hash3(c.x, c.z, level, 12) > 0.45) {
         const walls = [0, 1, 2, 3].filter((d) => !openDirs.has(d));
         decor.push({
           kind: 'clutter', x: pos.x, y, z: pos.z, half: HALF,
@@ -1272,11 +1398,45 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, x, y, 
       break;
     }
     case SECTOR.FOREST: {
+      // One cell in six stands a dead spar instead of one of its trees: a stand
+      // of identical live conifers is wallpaper, and the snag is the thing that
+      // says this wood is old. It keeps the trunk's collider either way.
+      const snag = instances && hash3(x, z, 0, 161) < 1 / 6 ? model(['tree_snag'], 0) : null;
+      const spar = snag ? Math.floor(hash3(x, z, 1, 161) * 5) : -1;
       for (let i = 0; i < 5; i++) {
         const tx = x + (hash3(x, z, i, 31) - 0.5) * CELL * 0.9;
         const tz = z + (hash3(x, z, i, 32) - 0.5) * CELL * 0.9;
-        decor.push({ kind: 'tree', x: tx, y, z: tz, scale: 0.7 + hash3(x, z, i, 33) * 0.8 });
+        if (i === spar) {
+          instances.add(snag, {
+            x: tx, y, z: tz, rotY: hash3(x, z, i, 162) * Math.PI * 2,
+            scale: 0.85 + hash3(x, z, i, 163) * 0.4,
+          }, chunk);
+        } else {
+          decor.push({ kind: 'tree', conifer: true, x: tx, y, z: tz, scale: 0.7 + hash3(x, z, i, 33) * 0.8 });
+        }
         addCollider(tx - 0.7, tx + 0.7, tz - 0.7, tz + 0.7, y, y + 8);
+      }
+      if (!instances) break;
+      // The cell's own coordinates already use all three of hash3's slots, so
+      // here the fourth varies per draw; the families are spaced to keep clear
+      // of each other.
+      scatterUndergrowth({
+        instances, chunk, x, y, z,
+        rand: (i, k, salt) => hash3(x, z, i, salt + k),
+        kinds: [
+          { name: model(['fern'], 0), count: 3 + Math.floor(hash3(x, z, 0, 144) * 3), ring: 4.2, spread: 4.0, size: 1.0, salt: 140 },
+          { name: model(['salal_bush'], 0), count: 1 + Math.floor(hash3(x, z, 0, 154) * 3), ring: 4.6, spread: 3.6, size: 1.0, salt: 150 },
+        ],
+      });
+      // A boulder in a third of the cells. Nothing walls this cell off -- only
+      // its trunks have colliders -- so the rock gets one too.
+      const rock = hash3(x, z, 0, 160) < 1 / 3 ? model(['moss_rock'], 0) : null;
+      if (rock) {
+        const rx = x + (hash3(x, z, 1, 160) - 0.5) * CELL * 0.7;
+        const rz = z + (hash3(x, z, 2, 160) - 0.5) * CELL * 0.7;
+        const scale = 0.9 + hash3(x, z, 3, 160) * 0.6;
+        instances.add(rock, { x: rx, y, z: rz, rotY: hash3(x, z, 4, 160) * Math.PI * 2, scale }, chunk);
+        addStoneCollider({ instances, name: rock, x: rx, y, z: rz, scale, addCollider });
       }
       break;
     }

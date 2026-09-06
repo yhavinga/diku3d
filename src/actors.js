@@ -1206,10 +1206,15 @@ export function populate(world, layout, built, options = {}) {
 
   // --- trees --------------------------------------------------------------
 
-  const treeModel = model(['tree_oak']);
+  const treeModel = model(['tree_oak', 'tree_fir']);
   if (trees.length && treeModel && instances) {
     for (const t of trees) {
-      const kind = model(['tree_oak', 'tree_pine'], strHash(`${t.x},${t.z}`, 2)) || treeModel;
+      // A forest cell asks for conifers (`choose` picks uniformly, so
+      // repeating a name is how a species gets weighted); everywhere else --
+      // parks, field edges -- keeps the broadleaf mix it always had.
+      const kind = (t.conifer
+        ? model(['tree_fir', 'tree_fir', 'tree_fir', 'tree_pine', 'tree_oak'], strHash(`${t.x},${t.z}`, 2))
+        : model(['tree_oak', 'tree_pine'], strHash(`${t.x},${t.z}`, 2))) || treeModel;
       instances.add(kind, {
         x: t.x, y: t.y, z: t.z,
         rotY: strHash(`${t.x},${t.z}`, 4) * Math.PI * 2,
