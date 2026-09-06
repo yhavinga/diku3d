@@ -308,6 +308,45 @@ const SURFACES = {
     s.rough = 0.82 + (1 - lumps) * 0.14 - stone * 0.12;
   },
 
+  /**
+   * Waterlogged peat. No bond, no cells and no repeat you could name: a bog is
+   * the least structured ground there is, and anything with a period in it
+   * reads as a tiled floor the moment you stand on it. What varies instead is
+   * how wet the ground is -- black saturated peat in the hollows, dried fibrous
+   * brown on the hummock tops, sphagnum taking the shallow ground between.
+   */
+  peat(u, v, s) {
+    const hummock = fbm(u * 7, v * 7, 7, 313, 4);
+    const fibre = fbm(u * 44, v * 44, 44, 317, 2);
+    const moss = clamp01(fbm(u * 11, v * 11 + 0.3, 11, 331, 3) * 1.8 - 0.75);
+    // The hollows are where the water stands, so the darkest ground is the
+    // lowest ground -- the same correlation `wet` in the recipe leans on.
+    const soak = clamp01((0.52 - hummock) * 3.4);
+    // Halved from the first cut, which baked to a mean of (109,99,78) -- paler
+    // than `dirt` is warm and only a shade under `grass`, so a wet bog read as
+    // a dry track. Peat is the darkest ground there is: (83,73,56) baked, a
+    // third under the meadow beside it, and browner rather than merely greyer.
+    // Only the top of the range came down here, not the bottom: the bottom is
+    // the RGB-0 floor. Sunlit peat metered (120,108,80) at 0x483315 -- a dry
+    // sandy track, and the mud calls this an oozing quagmire. The brightest
+    // texel is (86,70,46) now, which renders in the low 90s under a noon sun.
+    const fibrous = mix(rgb(0x231a0e), rgb(0x2f2210), hummock * 0.8 + fibre * 0.2);
+    // The soaked tone is a floor as well as a colour. At 0x14100b, peat was the
+    // only material outdoors putting pixels at literal RGB 0 -- 653 of them at
+    // noon and every zero in the frame -- because it is the darkest surface in
+    // the world and the wet term takes another 30% off it in exactly the
+    // hollows the shadows already own. Nothing under a sky is ever zero.
+    s.color = mix(mix(fibrous, rgb(0x1c1710), soak * 0.75), rgb(0x3f4d24), moss * 0.45);
+    // The fine octave stays out of the relief. At 44 repeats over a 4.2 m tile
+    // it is a 9.5 cm bump, and a field of those under a noon sun is gravel --
+    // waterlogged peat is a smooth skin over soft ground, so the hummocks carry
+    // the whole of the shape and the fibre only breaks up the sheen.
+    s.height = hummock * 0.55 + fibre * 0.05 + moss * 0.1;
+    // Saturated ground holds a sheen; the moss and the dried fibre on top of it
+    // are dead matt. One value for both is what makes mud read as chocolate.
+    s.rough = 0.92 - soak * 0.22 + moss * 0.06;
+  },
+
   grass(u, v, s) {
     const blades = fbm(u * 120, v * 120, 120, 131, 2);
     const clump = fbm(u * 14, v * 14, 14, 137, 4);
@@ -439,6 +478,27 @@ const SURFACES = {
     s.rough = 0.08;
     s.metal = 0.1;
   },
+
+  /**
+   * Standing bog water. Nothing moves it, so there is no chop to shade and no
+   * glitter to catch: what breaks the sheet up is what floats on it, duckweed
+   * and peat stain, which is patches rather than waves. Near-black brown-green
+   * -- but never near zero, because nothing outdoors under a sky is.
+   *
+   * The roughness is where the read lives. Open water is a mirror and the weed
+   * on it is not, and a single value across both is a sheet of dark plastic.
+   */
+  bogwater(u, v, s) {
+    const stain = fbm(u * 5, v * 5, 5, 337, 4);
+    const weed = clamp01(fbm(u * 13, v * 13, 13, 347, 3) * 2.0 - 1.0);
+    const scum = clamp01(cellular(u * 9, v * 9, 9, 349, 0.5)[1] * -6 + 1);
+    const dark = mix(rgb(0x15190f), rgb(0x232b1c), stain);
+    s.color = mix(mix(dark, rgb(0x2f3a1e), weed * 0.7), rgb(0x3d4526), scum * 0.35);
+    s.height = 0.5 + weed * 0.12 + stain * 0.05;
+    // The floor is 0.22 and not the river's 0.08: a mirror that sharp returns
+    // the sun as a disc, which is the glitter a stagnant pool has none of.
+    s.rough = 0.22 + weed * 0.46 + scum * 0.16;
+  },
 };
 
 // -------------------------------------------------------------- baking ----
@@ -547,6 +607,16 @@ const RECIPES = {
   thatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7 },
   dirt: { surface: 'dirt', scale: 4.5, normalScale: 0.9, env: 0.7, wet: 0.3, detail: 0.6 },
   grass: { surface: 'grass', scale: 5.5, normalScale: 0.55, env: 0.6, wet: 0, detail: 0.7 },
+  // The wettest recipe there is, and out of doors, which is where `wet`
+  // belongs: damp standing in the low patches is the whole of what tells a bog
+  // apart from a ploughed field.
+  // Low `env`, and that is what keeps it brown: the blue channel was being
+  // lifted 54 -> 80 by the sky alone, which is how a dark mud desaturates into
+  // a pale tan. Rough wet organic ground reflects very little of the dome.
+  peat: { surface: 'peat', scale: 4.2, normalScale: 0.45, env: 0.48, wet: 0.65, detail: 0.35 },
+  // Below the river's 1.6: a pool under a hedge of reeds sees a fraction of the
+  // sky an open reach does, and a full mirror of it read as a puddle of sky.
+  bogwater: { surface: 'bogwater', scale: 3.4, normalScale: 0.35, env: 0.8, wet: 0, detail: 0.15 },
   // World-unit tile like everything else, so a crown at 80 m repeats at the
   // same physical size as one at 8 -- the per-model stretch was half of what
   // made the trees read as toys.

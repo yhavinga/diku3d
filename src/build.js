@@ -17,6 +17,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SECTOR, ROOM_INDOORS, EX_ISDOOR, EX_CLOSED, EX_LOCKED, DIR_STEP, DIR_NAME } from './are.js';
 import { InstanceBatch } from './assets.js';
+import { OVERLAY_LAYER } from './render.js';
 
 export const CELL = 13;         // grid pitch; rooms sit two cells apart
 export const ROOM = 10;         // interior span of an indoor room
@@ -79,6 +80,32 @@ const isOpenAir = (room) => isOutdoor(room) || isCanopy(room);
 
 /** One definition, because the alley between two of them needs the same answer. */
 const isWater = (room) => room.sector === SECTOR.WATER_SWIM || room.sector === SECTOR.WATER_NOSWIM;
+
+/**
+ * A bog, by what the room says it is rather than by its sector code.
+ *
+ * The Old Marsh's sectors are a lie and the mud is quite open about it: "An
+ * Oozing Bog" and "Murky Bog" are MOUNTAIN, so they came out as bare rock with
+ * eleven-metre cliffs in every cell beside them, while "Gloomy Path Through the
+ * Marsh" is WATER_SWIM and came out as open river. The prose is truthful where
+ * the sector is not, which is the same asymmetry `SQUARE` and `CANOPY_NOT`
+ * already trade on -- so the name and the description decide.
+ *
+ * Two guards, both measured over the 45 stock areas. `BOG_NOT` on the *name* is
+ * what separates a room that is a bog from one that can see one: "On a hill",
+ * "Beach" and Haon Dor's "path on the river bank" all mention the marsh next
+ * door and none of them is one. And a name that says bog outright wins anyway,
+ * so "Swamp's Edge" is still a swamp. Over the default five areas that is 10
+ * rooms, all in the marsh, and none at all in Midgaard, the Shire, Haon Dor or
+ * the Troll Den; over all 45 it adds only Mahn-Tor's swampy paths, which are
+ * swampy paths. `pond` and `murky` were tried in the vocabulary and dropped --
+ * they take Midgaard's park pond and the two park paths beside it.
+ */
+const BOG = /\b(bogs?|marsh(?:es|y)?|swamps?|swampy|mire|fen|quagmire|quick ?sand|morass|oozing|peat)\b/i;
+const BOG_NOT = /\b(hills?|beach|shore|lake|river|cliff|bridge|gates?|keep|tower|road|street|inn|house)\b/i;
+const isBog = (room) => isOpenAir(room) && room.sector !== SECTOR.CITY
+  && BOG.test(`${room.name} ${room.description}`)
+  && (BOG.test(room.name) || !BOG_NOT.test(room.name));
 
 export function hash3(a, b, c, salt = 0) {
   let h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263) ^ Math.imul(c | 0, 2147483647) ^ Math.imul(salt, 1274126177);
@@ -273,6 +300,11 @@ function pickMaterials(room, area) {
     case SECTOR.AIR: floor = 'cloud'; break;
     default: break;
   }
+  // After the switch, because the sector is the thing being overruled -- and
+  // inside this function rather than at the call site the way the park does it,
+  // because a passage routed between two bog rooms asks here for its surface
+  // and the ground between two bogs is bog.
+  if (isBog(room)) floor = 'peat';
   if (!holy && !cave && !wood && hash3(room.vnum, 0, 0, 9) > 0.6) wallOut = 'timber';
   if (!holy && hash3(room.vnum, 1, 0, 3) > 0.84) roof = 'thatch';
   return { floor, wallIn, wallOut, roof, ceil, holy, cave };
@@ -296,6 +328,7 @@ export function buildScene(world, layout, materials, assets = null) {
   const doors = [];       // interactive door panels
   const rooms = new Map();// vnum -> {room, cell, center, outdoor, materials, sides}
   const decor = [];       // handed to actors.js
+  const mistCells = [];   // cell centres the ground mist lies over
 
   const addCollider = (x0, x1, z0, z1, y0, y1) => colliders.push({ x0, x1, z0, z1, y0, y1 });
   const addPlatform = (x0, x1, z0, z1, top) => platforms.push({ x0, x1, z0, z1, top });
@@ -357,6 +390,7 @@ export function buildScene(world, layout, materials, assets = null) {
     // What the room record carries is the mud's answer, because rain and
     // ambience read it. What the geometry below asks is whether there are walls.
     const canopy = isCanopy(room);
+    const bog = isBog(room);
     const openAir = outdoor || canopy;
     const airborne = room.sector === SECTOR.AIR;
     const mats = pickMaterials(room, room.area);
@@ -398,8 +432,16 @@ export function buildScene(world, layout, materials, assets = null) {
       shade: !openAir,
     });
 
-    if (isWater(room)) {
+    // Six of the marsh's rooms are sectored as open water and only two of them
+    // are: "Gloomy Path Through the Marsh" is WATER_SWIM, and a path is not
+    // thirteen metres of river. A bog takes pools instead.
+    if (isWater(room) && !bog) {
       decor.push({ kind: 'water', x: pos.x, y: pos.y + 0.7, z: pos.z, size: half * 2 });
+    }
+    let pools = null;
+    if (bog) {
+      mistCells.push(pos);
+      pools = buildBogPool({ batcher, chunk, room, pos, sides });
     }
 
     for (let dir = 0; dir < 4; dir++) {
@@ -421,7 +463,7 @@ export function buildScene(world, layout, materials, assets = null) {
         // Nothing walls a room under the canopy: `buildForest` stands a picket
         // of trees along every side there is no way out of, and a rock kerb
         // behind that is the level editor showing through.
-        if (!canopy) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider });
+        if (!canopy) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog });
         // Once, for the whole cell -- the corners need to know about all four
         // sides, not one at a time.
         if (dir === 3) buildCityFrontage({ batcher, chunk, room, cell, pos, sides, addCollider, decor });
@@ -513,7 +555,10 @@ export function buildScene(world, layout, materials, assets = null) {
       buildInteriorProps({ room, pos, sides, decor, mats });
       if (isShop(room)) buildShopSign({ room, pos, sides, instances, model, chunk });
     } else {
-      if (isPark(room)) buildPark({ room, cell, pos, sides, instances, model, chunk, decor, addCollider });
+      // Bog first: half the marsh's bog rooms are sectored FOREST or MOUNTAIN,
+      // and a stand of firs is not what grows in standing water.
+      if (bog) buildBogFlora({ room, pos, sides, pools, instances, model, chunk });
+      else if (isPark(room)) buildPark({ room, cell, pos, sides, instances, model, chunk, decor, addCollider });
       else if (room.sector === SECTOR.FOREST) {
         buildForest({ room, pos, sides, instances, model, chunk, decor, addCollider, dense: canopy });
       }
@@ -522,7 +567,10 @@ export function buildScene(world, layout, materials, assets = null) {
       // than as swept paving.
       const blank = [];
       for (let d = 0; d < 4; d++) if (!sides[d]) blank.push(d);
-      if (blank.length && hash3(room.vnum, 13, 0, 6) > 0.28) {
+      // Nobody stacks barrels in a bog. This clutter is street furniture and it
+      // reaches every open-air room, which is how a trough came to stand in the
+      // marsh; the reeds below are what a bog keeps against its edges instead.
+      if (!bog && blank.length && hash3(room.vnum, 13, 0, 6) > 0.28) {
         decor.push({
           // Against the new facade, not inside it.
           kind: 'clutter', x: pos.x, y: pos.y, z: pos.z,
@@ -555,7 +603,7 @@ export function buildScene(world, layout, materials, assets = null) {
     const fromInfo = rooms.get(link.from.vnum);
     const toInfo = rooms.get(link.to.vnum);
     if ((fromInfo && fromInfo.unbuilt) || (toInfo && toInfo.unbuilt)) continue;
-    buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor });
+    buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells });
   }
 
   for (const plan of stairPlans) {
@@ -568,27 +616,27 @@ export function buildScene(world, layout, materials, assets = null) {
   // --- build on every empty cell that fronts a street ----------------------
 
   const frontage = new Map(); // cell key -> sector to build from
-  const consider = (level, x, z, sector) => {
+  const consider = (level, x, z, sector, bog) => {
     if (layout.at(level, x, z) !== undefined || layout.isPath(level, x, z)) return;
     const k = `${level}:${x},${z}`;
-    if (!frontage.has(k)) frontage.set(k, { level, x, z, sector });
+    if (!frontage.has(k)) frontage.set(k, { level, x, z, sector, bog });
   };
   for (const cell of layout.order) {
     if (!isOpenAir(cell.room) || cell.room.sector === SECTOR.AIR) continue;
     for (let dir = 0; dir < 4; dir++) {
       const [dx, , dz] = DIR_STEP[dir];
-      consider(cell.level, cell.x + dx, cell.z + dz, cell.room.sector);
+      consider(cell.level, cell.x + dx, cell.z + dz, cell.room.sector, isBog(cell.room));
     }
   }
   for (const link of layout.links) {
     if (link.kind !== 'alley' || alleyEnclosed(link)) continue;
     // Same reason as above: no frontage along a passage that does not exist.
     if (rooms.get(link.from.vnum)?.unbuilt || rooms.get(link.to.vnum)?.unbuilt) continue;
-    const sector = isOpenAir(link.from.room) ? link.from.room.sector : link.to.room.sector;
+    const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
     for (const c of link.path) {
       for (let dir = 0; dir < 4; dir++) {
         const [dx, , dz] = DIR_STEP[dir];
-        consider(link.from.level, c.x + dx, c.z + dz, sector);
+        consider(link.from.level, c.x + dx, c.z + dz, source.sector, isBog(source));
       }
     }
   }
@@ -603,13 +651,17 @@ export function buildScene(world, layout, materials, assets = null) {
       const nx = spot.x + dx; const nz = spot.z + dz;
       if (layout.at(spot.level, nx, nz) !== undefined || layout.isPath(spot.level, nx, nz)) faces = dir;
     }
+    const pos = { x: spot.x * CELL, y: spot.level * LEVEL_H, z: spot.z * CELL };
+    if (spot.bog) mistCells.push(pos);
     buildFiller({
       batcher, instances, model, faceRot: faces < 0 ? null : FACE_ROT[faces],
       chunk: `${spot.level}:${Math.floor(spot.x / 4)},${Math.floor(spot.z / 4)}`,
-      sector: spot.sector, x: spot.x * CELL, y: spot.level * LEVEL_H, z: spot.z * CELL,
+      sector: spot.sector, bog: spot.bog, x: pos.x, y: pos.y, z: pos.z,
       seed: hash3(spot.x, spot.z, spot.level, 17), addCollider, lights, decor,
     });
   }
+
+  const mist = buildMist(group, mistCells);
 
   const stats = batcher.finish(group);
   if (instances) {
@@ -618,7 +670,7 @@ export function buildScene(world, layout, materials, assets = null) {
     stats.triangles += placed.triangles;
     stats.instanced = placed.triangles;
   }
-  return { group, colliders, platforms, lights, portals, doors, rooms, decor, stats };
+  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, stats };
 }
 
 // A passage is a corridor only when there is a building at both ends of it. The
@@ -1144,8 +1196,286 @@ function addStoneCollider({ instances, name, x, y, z, scale, addCollider }) {
   addCollider(x - half, x + half, z - half, z + half, y, y + (size ? size.y : 0.9) * scale);
 }
 
+// ------------------------------------------------------------------ bog ----
+
+/** Nothing inside this of the centre gets wet: the player materialises there. */
+const BOG_MIDDLE = 2.3;
+/** How much of a side you can walk out of stays clear of water and reeds. */
+const BOG_CLEAR = 2.0;
+/** A disc small enough that one fits between the arrival point and the kerb. */
+const POOL_R = [1.2, 1.8];
+/** Standing water lies on the peat rather than being cut into the floor slab. */
+const POOL_LIFT = 0.03;
+
+/**
+ * A pool of standing water, off to one side of a bog room.
+ *
+ * Two rules shape it. It may not sit at the centre, which is where the player
+ * arrives; and it may not fill the cell, because a full cell of water is a lake
+ * and a bog is water lying in a hollow with peat all round it. That leaves a
+ * band: a disc of radius r has to clear 2.3 m at the middle and stay 0.5 m
+ * inside a 6.5 m half-cell, so 2r <= 3.7 and nothing bigger than 1.8 m fits.
+ * Three overlapping lobes of that size, clustered on one anchor angle, come to
+ * about 7% of the cell and read as one irregular pool rather than three
+ * puddles on a ring.
+ *
+ * The anchor points away from the ways out, so the water is never in a doorway
+ * and the walk through the room is dry. And the lobes are *clamped* into that
+ * band rather than rejected when they miss it -- the forest picket learned this
+ * the expensive way, with 13 of 68 rooms coming out bare because a jittered
+ * spot that reached into a doorway was simply dropped.
+ */
+function buildBogPool({ batcher, chunk, room, pos, sides }) {
+  // Away from the exits: sum the ways out and face the other way.
+  let ax = 0; let az = 0;
+  for (let d = 0; d < 4; d++) {
+    if (!sides[d]) continue;
+    const [dx, , dz] = DIR_STEP[d];
+    ax += dx; az += dz;
+  }
+  const anchor = (ax || az) ? Math.atan2(-az, -ax) : hash3(room.vnum, 1, 0, 172) * Math.PI * 2;
+
+  const discs = [];
+  for (let i = 0; i < 3; i++) {
+    const angle = anchor + (hash3(room.vnum, i, 0, 173) - 0.5) * 1.6;
+    const r = POOL_R[0] + hash3(room.vnum, i, 1, 174) * (POOL_R[1] - POOL_R[0]);
+    const cos = Math.cos(angle); const sin = Math.sin(angle);
+    // The far limit is where the disc would cross the cell wall on whichever
+    // axis it runs closest to; the near limit is the dry landing at the centre.
+    const far = Math.min(
+      (HALF - 0.5 - r) / Math.max(0.1, Math.abs(cos)),
+      (HALF - 0.5 - r) / Math.max(0.1, Math.abs(sin)),
+    );
+    const near = BOG_MIDDLE + r;
+    if (far < near) continue;
+    const rho = Math.min(far, Math.max(near, 3.4 + hash3(room.vnum, i, 2, 175) * 1.4));
+    const lx = cos * rho; const lz = sin * rho;
+    const geo = new THREE.CircleGeometry(r, 14);
+    geo.rotateX(-Math.PI / 2);
+    batcher.add(geo, 'bogwater', place(pos.x + lx, pos.y + POOL_LIFT, pos.z + lz), { chunk });
+    geo.dispose();
+    discs.push({ x: lx, z: lz, r });
+  }
+  return discs;
+}
+
+/**
+ * What grows in a bog: reeds standing in the shallows at the water's edge,
+ * tussocks and dead timber on the peat between.
+ *
+ * The three models this wants are being made; until they land every one falls
+ * back to something already in the library, so a bog is never bare ground. The
+ * pool footprint comes in from `buildBogPool` and nothing is planted inside it
+ * -- a reed bed rings a pool, it does not float on one.
+ */
+function buildBogFlora({ room, pos, sides, pools, instances, model, chunk }) {
+  if (!instances) return;
+  const clears = edgeClear(sides, BOG_CLEAR);
+  const inWater = (lx, lz) => (pools || []).some((p) => Math.hypot(lx - p.x, lz - p.z) < p.r);
+  const dry = (lx, lz) => Math.hypot(lx, lz) >= BOG_MIDDLE && clears(lx, lz) && !inWater(lx, lz);
+
+  // A reed clump wants a name of its own; a fern is the nearest thing standing
+  // in the library, and salal and a mossed boulder stand in for the rest.
+  const reed = model(['reed_clump', 'fern'], 0);
+  const tussock = model(['tussock', 'salal_bush', 'grass_tuft'], 0);
+  const log = model(['dead_log', 'moss_rock'], 0);
+
+  // The margin: a ring just outside each lobe, which is where reeds actually
+  // grow -- roots in the water, heads out of it.
+  if (reed) {
+    for (const [i, p] of (pools || []).entries()) {
+      const n = 5 + Math.floor(hash3(room.vnum, i, 0, 181) * 4);
+      for (let k = 0; k < n; k++) {
+        const a = ((k + hash3(room.vnum, i, k, 182)) / n) * Math.PI * 2;
+        const rr = p.r + 0.15 + hash3(room.vnum, i, k, 183) * 0.7;
+        const lx = p.x + Math.cos(a) * rr;
+        const lz = p.z + Math.sin(a) * rr;
+        if (!clears(lx, lz) || inWater(lx, lz)) continue;
+        instances.add(reed, {
+          x: pos.x + lx, y: pos.y, z: pos.z + lz,
+          rotY: hash3(room.vnum, i, k, 184) * Math.PI * 2,
+          scale: 0.85 + hash3(room.vnum, i, k, 185) * 0.5,
+        }, chunk);
+      }
+    }
+  }
+
+  // A dead log lies where a tree fell, so one per room at most, out on the peat.
+  if (log && hash3(room.vnum, 0, 0, 186) > 0.42) {
+    const a = hash3(room.vnum, 1, 0, 187) * Math.PI * 2;
+    const rho = 3.6 + hash3(room.vnum, 2, 0, 188) * 1.6;
+    const lx = Math.cos(a) * rho; const lz = Math.sin(a) * rho;
+    if (dry(lx, lz)) {
+      instances.add(log, {
+        x: pos.x + lx, y: pos.y, z: pos.z + lz,
+        rotY: hash3(room.vnum, 3, 0, 189) * Math.PI * 2,
+        scale: 0.9 + hash3(room.vnum, 4, 0, 190) * 0.4,
+      }, chunk);
+    }
+  }
+
+  scatterUndergrowth({
+    instances, chunk, x: pos.x, y: pos.y, z: pos.z,
+    rand: (i, k, salt) => hash3(room.vnum, i, k, salt),
+    clears: dry,
+    kinds: [
+      { name: tussock, count: 6 + Math.floor(hash3(room.vnum, 0, 0, 191) * 4), ring: 4.5, spread: 2.6, size: 1.0, salt: 192 },
+      { name: reed, count: 4 + Math.floor(hash3(room.vnum, 1, 0, 191) * 3), ring: 5.1, spread: 1.6, size: 0.9, salt: 193 },
+    ],
+  });
+}
+
+// ----------------------------------------------------------------- mist ----
+
+/**
+ * Under the bloom threshold at every hour, and thin enough to see through.
+ * Measured against the ground band with the bank hidden and shown: at 0.05/0.12
+ * dawn lifted it 14.8 of luminance, which is a veil over the marsh rather than
+ * mist lying in it. These read 9.2 at dawn, 5.8 at dusk, 1.4 at night and 0.2
+ * at noon -- dawn stays the thickest, which is the hour a bog actually steams.
+ */
+const MIST_MIN = 0.04;
+const MIST_MAX = 0.085;
+/**
+ * Mist is lit by the sky directly above it, and the haze colour `applyTime`
+ * hands out is the horizon's -- the brightest part of the dome at both ends of
+ * the day. A knee-high bank sees less than that.
+ */
+const MIST_SKY = 0.85;
+/** Knee height and below: this is ground mist, not weather. */
+const MIST_HEIGHTS = [0.35, 0.8, 1.3];
+
+/**
+ * The alpha of a mist bank: two and a bit octaves of value noise on a periodic
+ * lattice, so it tiles. `hash3` is the file's own generator -- the horizon uses
+ * it as a stream the same way -- and there is no reason for a second one.
+ */
+function mistTexture(size = 128) {
+  const at = (ix, iy, period, salt) => hash3(
+    ((ix % period) + period) % period, ((iy % period) + period) % period, 0, salt,
+  );
+  const noise = (x, y, period, salt) => {
+    const ix = Math.floor(x); const iy = Math.floor(y);
+    const fx = x - ix; const fy = y - iy;
+    const sx = fx * fx * (3 - 2 * fx); const sy = fy * fy * (3 - 2 * fy);
+    const a = at(ix, iy, period, salt); const b = at(ix + 1, iy, period, salt);
+    const c = at(ix, iy + 1, period, salt); const d = at(ix + 1, iy + 1, period, salt);
+    return (a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy;
+  };
+  const data = new Uint8ClampedArray(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x + 0.5) / size; const v = (y + 0.5) / size;
+      const n = noise(u * 4, v * 4, 4, 401) * 0.62
+        + noise(u * 9, v * 9, 9, 409) * 0.26
+        + noise(u * 18, v * 18, 18, 419) * 0.12;
+      const a = Math.max(0, Math.min(1, n * 1.55 - 0.28)) * 255;
+      const i = (y * size + x) * 4;
+      data[i] = a; data[i + 1] = a; data[i + 2] = a; data[i + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * Ground mist over the bog: flat horizontal quads, three to a cell.
+ *
+ * Not sprites. The chimney smoke measured 4.5 ms a frame on its own -- 910 soft
+ * billboards 3.2 m across, and large soft sprites are the most expensive thing
+ * per pixel there is. A horizontal sheet seen from standing height is nearly
+ * edge-on, so a 14 m bank covers a band of the frame rather than a disc of it,
+ * and three of them stacked at ankle, shin and knee height cost a fraction of
+ * one billboard cloud.
+ *
+ * Three things they must be. On `OVERLAY_LAYER`, because GTAO's prepass renders
+ * the scene with an override material and cannot see alpha -- a transparent
+ * quad in that buffer is an opaque wall and the AO shades what is behind it,
+ * which is exactly the bug the name labels shipped. `depthWrite` off, so the
+ * banks read through each other. And no colour of its own: `setHour` feeds it
+ * the hour's haze, because a material with hardcoded radiance is the fault that
+ * made the river glow white at night.
+ */
+function buildMist(group, cells) {
+  if (!cells.length) return null;
+  const texture = mistTexture();
+  const parts = [];
+  cells.forEach((cell, index) => {
+    MIST_HEIGHTS.forEach((height, layer) => {
+      const seed = (k, salt) => hash3(index, layer, k, salt);
+      // Wider than a 13 m cell on purpose: a bank whose edge lines up with a
+      // cell boundary is a decal, and the overlap is what joins the marsh up.
+      const size = 12 + seed(0, 421) * 5;
+      const cx = cell.x + (seed(2, 423) - 0.5) * 5;
+      const cz = cell.z + (seed(4, 425) - 0.5) * 5;
+      const geo = new THREE.PlaneGeometry(size, size, 6, 6);
+      geo.rotateX(-Math.PI / 2);
+      geo.rotateY(seed(1, 422) * Math.PI * 2);
+      geo.translate(cx, cell.y + height + (seed(3, 424) - 0.5) * 0.3, cz);
+      // Alpha in the vertex colour is what feathers the edges; the noise map
+      // is a tiling pattern and has no edge of its own to fade.
+      const pos = geo.attributes.position;
+      const colour = new Float32Array(pos.count * 4);
+      const uv = geo.attributes.uv;
+      // Each bank samples its own patch of the one noise map, so a single
+      // scrolling offset drifts all of them without any two matching.
+      const ou = seed(5, 426) * 8; const ov = seed(6, 427) * 8;
+      const us = 0.7 + seed(7, 428) * 0.6;
+      for (let i = 0; i < pos.count; i++) {
+        const dx = (pos.getX(i) - cx) / (size / 2);
+        const dz = (pos.getZ(i) - cz) / (size / 2);
+        const t = Math.max(0, 1 - Math.hypot(dx, dz));
+        colour[i * 4] = 1; colour[i * 4 + 1] = 1; colour[i * 4 + 2] = 1;
+        colour[i * 4 + 3] = t * t * (3 - 2 * t);
+        uv.setXY(i, uv.getX(i) * us + ou, uv.getY(i) * us + ov);
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(colour, 4));
+      parts.push(geo);
+    });
+  });
+
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xbcd2e6, transparent: true, opacity: MIST_MIN, depthWrite: false,
+    side: THREE.DoubleSide, vertexColors: true, alphaMap: texture,
+  });
+  const merged = mergeGeometries(parts, false);
+  for (const geo of parts) geo.dispose();
+  const mesh = new THREE.Mesh(merged, material);
+  mesh.name = 'bog-mist';
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.layers.set(OVERLAY_LAYER);
+  // Three's own per-mesh hook, so the drift needs no place in anyone's loop.
+  mesh.onBeforeRender = () => {
+    const t = performance.now() / 1000;
+    texture.offset.set(t * 0.0055, t * 0.0022);
+  };
+  group.add(mesh);
+
+  return {
+    mesh,
+    /**
+     * Radiation fog burns off as the ground warms and stands again once the sun
+     * is off it, so the bank is thickest at night and thinnest at noon. The
+     * colour is the hour's haze: a mist is lit by the sky and nothing else.
+     */
+    setHour(colourHex, elevationDeg) {
+      material.color.setHex(colourHex).multiplyScalar(MIST_SKY);
+      const day = Math.max(0, Math.min(1, (elevationDeg + 4) / 26));
+      material.opacity = MIST_MAX - (MIST_MAX - MIST_MIN) * day;
+    },
+  };
+}
+
 /** The boundary of an open-air room: an opening, or something to stop you. */
-function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider }) {
+function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog = false }) {
   if (open) return;
 
   // A street with frontage has a building on this side already; a low garden
@@ -1157,10 +1487,22 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider })
   const bz = pos.z + dz * (HALF - 0.3);
   const along = dir === 1 || dir === 3;
   const t = 0.6;
-  const h = room.sector === SECTOR.CITY ? 2.6 : 1.4;
-  const material = room.sector === SECTOR.CITY ? 'stonewall' : 'rock';
+  // Half the marsh is sectored MOUNTAIN, so every closed side of a bog was a
+  // waist-high grey rock kerb: a wet hollow fenced in dry stone. A cut peat
+  // bank is the same barrier out of the ground the room is actually made of,
+  // and low enough to see the next hollow over.
+  const h = room.sector === SECTOR.CITY ? 2.6 : (bog ? 0.9 : 1.4);
+  const material = bog ? 'peat' : (room.sector === SECTOR.CITY ? 'stonewall' : 'rock');
+  // `wallAo` runs 0.58 -> 1.0 over 1.8 m, which on a 0.9 m bank never gets past
+  // 0.79 -- the whole face shaded, hard. On rock that survives; on peat, the
+  // darkest surface in the world, it was the *only* thing outdoors putting
+  // pixels at literal RGB 0. Measured: 1448 zeros in a noon frame, 195 with
+  // vertex colours off, and the wet term accounted for none of it.
+  const shade = bog
+    ? (x, y) => 0.84 + 0.16 * Math.min(1, (y - pos.y) / h)
+    : wallAo(pos.y);
   batcher.add(box(along ? t : CELL, h, along ? CELL : t, 2, 2, 2), material,
-    place(bx, pos.y + h / 2, bz), { chunk, ao: wallAo(pos.y) });
+    place(bx, pos.y + h / 2, bz), { chunk, ao: shade });
   addCollider(bx - (along ? t : CELL) / 2, bx + (along ? t : CELL) / 2,
     bz - (along ? CELL : t) / 2, bz + (along ? CELL : t) / 2, pos.y, pos.y + h + 2);
 }
@@ -1170,16 +1512,20 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider })
  * buildings that fill the cells beside it become the street frontage; between
  * two indoor rooms it gets walls and a ceiling and becomes a corridor.
  */
-function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor }) {
+function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells }) {
   const enclosed = alleyEnclosed(link);
   const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
   const mats = pickMaterials(source, source.area);
+  const bog = isBog(source);
   // A river is a chain of water rooms with a routed cell between each pair, and
   // only the rooms ever got a water surface -- so midstream showed the raw
   // `water` floor material between two shader planes, a boiling band 13 m wide
   // across every reach. The plane is a pure function of world position, so one
   // laid over the routed cell joins the two either side of it seamlessly.
-  const midstream = isWater(link.from.room) && isWater(link.to.room);
+  // ...unless both of them are bog, where the same sector code means standing
+  // water in peat rather than a reach of river.
+  const midstream = isWater(link.from.room) && isWater(link.to.room)
+    && !isBog(link.from.room) && !isBog(link.to.room);
   const level = link.from.level;
   const y = level * LEVEL_H;
   const chain = [link.from, ...link.path, link.to];
@@ -1200,6 +1546,7 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
     // The floor underneath stays as it is; the plane covers it, at the same
     // height and size the rooms either side use.
     if (midstream) decor.push({ kind: 'water', x: pos.x, y: y + 0.7, z: pos.z, size: CELL });
+    if (bog && mistCells) mistCells.push({ x: pos.x, y, z: pos.z });
 
     if (!enclosed) {
       // Was 0.86 -- one street cell in seven carried anything at all, which is
@@ -1207,7 +1554,7 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
       // passage are excluded so nothing lands in the middle of the way through.
       // Not on the river, though: a routed cell between two water rooms is
       // water now, and barrels do not stack on it.
-      if (!midstream && hash3(c.x, c.z, level, 12) > 0.45) {
+      if (!midstream && !bog && hash3(c.x, c.z, level, 12) > 0.45) {
         const walls = [0, 1, 2, 3].filter((d) => !openDirs.has(d));
         decor.push({
           kind: 'clutter', x: pos.x, y, z: pos.z, half: HALF,
@@ -1443,7 +1790,7 @@ function buildLooseProps({ room, pos, sides, decor, mats }) {
 }
 
 /** Scenery for an empty cell: houses along a street, trees along a path. */
-function buildFiller({ batcher, instances, model, faceRot, chunk, sector, x, y, z, seed, addCollider, lights, decor }) {
+function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, x, y, z, seed, addCollider, lights, decor }) {
   // Pave the cell to match its street before building on it. Without this the
   // world's ground plane shows through around the footings -- which read as a
   // lawn once that plane became grass.
@@ -1451,6 +1798,33 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, x, y, 
     [SECTOR.CITY]: 'cobble', [SECTOR.FIELD]: 'grass', [SECTOR.FOREST]: 'grass',
     [SECTOR.HILLS]: 'grass', [SECTOR.MOUNTAIN]: 'rock', [SECTOR.DESERT]: 'sand',
   };
+  // A bog is what its rooms say, and so is everything between them. Half the
+  // Old Marsh is sectored MOUNTAIN, and taken at its word that put an
+  // eleven-metre rock face in every cell beside a bog -- a wet hollow at the
+  // bottom of a quarry. Reed beds and dead timber on peat instead, and nothing
+  // to wall it in: the kerbs on the rooms themselves are the barrier.
+  if (bog) {
+    batcher.add(plane(CELL, CELL, 3), 'peat', place(x, y, z), { chunk });
+    if (!instances) return;
+    scatterUndergrowth({
+      instances, chunk, x, y, z,
+      rand: (i, k, salt) => hash3(x, z, i, salt + k),
+      kinds: [
+        { name: model(['reed_clump', 'fern'], 0), count: 4 + Math.floor(hash3(x, z, 0, 194) * 4), ring: 4.0, spread: 5.0, size: 1.0, salt: 195 },
+        { name: model(['tussock', 'salal_bush', 'grass_tuft'], 0), count: 3 + Math.floor(hash3(x, z, 0, 196) * 3), ring: 4.4, spread: 4.4, size: 1.0, salt: 197 },
+      ],
+    });
+    const log = hash3(x, z, 0, 198) < 0.3 ? model(['dead_log', 'moss_rock'], 0) : null;
+    if (log) {
+      instances.add(log, {
+        x: x + (hash3(x, z, 1, 198) - 0.5) * CELL * 0.6, y,
+        z: z + (hash3(x, z, 2, 198) - 0.5) * CELL * 0.6,
+        rotY: hash3(x, z, 3, 198) * Math.PI * 2,
+        scale: 0.9 + hash3(x, z, 4, 198) * 0.4,
+      }, chunk);
+    }
+    return;
+  }
   const ground = GROUND[sector];
   if (ground) {
     batcher.add(plane(CELL, CELL, 3), ground, place(x, y, z), { chunk });

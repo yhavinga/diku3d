@@ -471,6 +471,9 @@ async function boot() {
     // Rain is lit by the hour's own haze, so it reads silver by day and all
     // but disappears at night, which is how night rain behaves.
     rain.setColour(preset.haze);
+    // The bog's ground mist, lit by the same haze the rain is and thickest when
+    // the ground is coldest. Only the marsh has any, so this is null elsewhere.
+    built.mist?.setHour(preset.haze, preset.elevation);
     renderer.toneMappingExposure = preset.exposure;
     bloom.strength = preset.bloom;
     bloom.threshold = preset.bloomThreshold;
