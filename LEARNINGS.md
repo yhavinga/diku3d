@@ -6,7 +6,155 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
-## 2026-09-06 — the world opens
+## 2026-09-07 — six areas, and the judge's third round
+
+The graveyard joined, the marsh became a bog, the Shire became halfling,
+Haon Dor got its cabin and its forest floor — and an independent judge
+round found the two systemic faults nobody had measured: noon shade and
+a wetness system that had never worked.
+
+### Choosing and joining areas
+
+- **Measure the seam's sector pairs, not just the anchor count.** grave.are
+  joins on one horizontal anchor like the book says, but the decisive
+  number was different: 18 boundary contact pairs, every one park/field/
+  water, zero interiors — the only clean seam in the world (midgaard↔shire
+  has 7 indoor contacts, marsh↔trollden 8). And a new area can *improve*
+  the town it joins: the layout reshuffle in the park corner turned one
+  portal into an alley and lifted Midgaard's own walkable 92.5% → 93.5%.
+- **world-check now guards MAX_ROOMS out loud.** The guard was proven by
+  lowering the cap in a scratch copy: at 260 it names haon 66/71, marsh
+  1/18; at 200, marsh 0/18 and trollden 0/5 — exactly the silent-truncation
+  failure it exists to catch, now an exit code instead of a mystery.
+
+### Prose-driven predicates
+
+- **Test the vocabulary over all 45 areas before shipping it.** `pond` and
+  `murky` took Midgaard's park pond into the bog set; `chapel` matched a
+  street in hood.are; `den` as a substring matches "Gamgee Resi**den**ce".
+  The reject-list (`BOG_NOT`, name-only matching) is as load-bearing as
+  the match-list, and each word earns its place by a 45-area count.
+- **The sector code lies and the prose does not.** Bog rooms sectored
+  MOUNTAIN, tombs that miss the `crypt` vocabulary, "A Gravel Road" with
+  no gravel — the mud's authors wrote the truth in the name and
+  description and mis-set the enum. Every treatment this round keyed on
+  words, with the sector as a hint at most.
+
+### Measurement
+
+- **A vertex census lies about surfaces — twice in one day.** A log-cabin
+  gable read "open" counted by vertices (a log wall's vertices sit only at
+  the ends), and the roof-overhang probe said "0 cells affected" because a
+  prism has six vertices and none in the middle. Sample triangle surfaces,
+  or raycast; never count corners.
+- **The sun's shadow map follows the last rendered camera.** `goto()`
+  *after* `applyTime` leaves the new position outside the shadow frustum
+  and every shaded face reads lit — one whole set of numbers was wrong
+  this way. Camera first, then the hour, then let a frame render, then
+  freeze and measure.
+- **"Placed" is not "reads".** Wave 3 planted 146 headstones and the judge
+  photographed an empty lawn: mown grass under them, street barrels on top,
+  and an over-cautious edge clearance that left 7.7 stones per 169 m² cell.
+  Density, ground and de-cluttering are one feature; the count alone proves
+  nothing a viewer can see.
+
+### Light
+
+- **The missing term at noon was ground bounce, not more sky.** Raising
+  `env` to 1.35 does fix the 24:1 shade crush — and flattens cast shadows
+  from 8.4:1 to 2.2:1, a sunny day with no shadows in it. A
+  `HemisphereLight` with a black sky half and a bright ground half is the
+  bounce term by construction: walls get half, undersides all, shadowed
+  paving nothing. Measured: shade ratio 24:1 → 5.2:1 with the cast ratio
+  held at 6.1:1.
+- **A HemisphereLight has no occlusion, and three.js filters lights by the
+  *camera's* layers, not the object's.** So the bounce lit the temple's
+  inside like the street (81 → 140 mean) and a layers split cannot fix it
+  without a second render pass. The zero-cost fix: an `aIndoor` vertex
+  flag written by the batcher, `mix(1.0, indoorBounce, vIndoor)` in the
+  light loop — temple 139 → 99 with the market untouched.
+- **Judge a sky gradient at several altitudes before "fixing" it.** The
+  reported too-bright zenith reproduced only at 25–45° — that dip is the
+  Rayleigh minimum 90° from the sun, correct physics. Horizon(2°)/zenith
+  measured 3.64:1, already right; rayleigh tuning would have washed the
+  whole sky to fix a non-fault.
+
+### Fog and wet
+
+- **FogExp2's half-contrast distance is 0.8326/density, and ours was 95 m.**
+  What was meant as a BC haze was dense fog 44× past clear air; distant
+  firs read as sand dunes through 130 m of tan. And fog colour belongs to
+  the hour's *horizon sky* (dusk fog was (184,123,78) under a sky whose
+  own horizon read (181,176,177)) — half-distance now 520–694 m by hour.
+- **The entire wetness system had never changed a pixel.** Both shader
+  gates were calibrated against the macro map's raw histogram; what the
+  shader samples is mip/bilinear-filtered and converges to the local mean
+  (0.76–0.91, entirely above the 0.58 gate edge). So overcast's `wet: 1.9`,
+  the rain coupling, `setWetness` — all dead since the day they shipped,
+  and nobody had ever A/B-measured wet against dry. Calibrate a gate on
+  what the shader *samples*, and A/B every feature once at birth.
+- **Rain must be measured from the preset it falls out of.** The first
+  coupling lerped from dry and produced 1.78 under an overcast base of
+  1.9 — rain would have dried the street. `target = base + (peak−base)·r`.
+  And state the frame loop re-derives cannot be pinned from the console —
+  a force hook has to override the derivation itself (`diku.forceRain`).
+
+### The judge's third round
+
+- **The judge found two faults nobody's checklist held** (noon shade
+  crush, dead wetness) and mis-diagnosed one: Main Street's "gaps between
+  houses" are routed passage mouths — walling them would seal the town.
+  The observation was right, the cause was not; the A/B with party walls
+  on/off (low-sky 0.81% both ways) is what stopped a wrong fix. 87 real
+  gaps elsewhere did get their party walls.
+- **The fountain had no visible water at all.** Its coping was modelled as
+  a solid lid; the square water plane sat *under* it and only the corners
+  overhanging the drum ever rendered. "No glint" was the thread; pulling
+  it found geometry nobody had looked at side-on since it shipped.
+
+### The verify round, and the causes it overturned
+
+A fresh judge re-measured all twelve assessable faults at the same
+cameras: nine RESOLVED, two IMPROVED (marsh water still slab-edged,
+mid-distance street still islands), interior scale still open — and seven
+new finds. Fixing those five overturned two of the judge's own root
+causes, which is the round's real lesson: **reproduce the mechanism, not
+just the symptom, before editing.**
+
+- **A fix that clears the air exposes what the murk was hiding.** Thinning
+  noon fog 0.0060 → 0.0012 revealed the horizon ridge as a black cut-out
+  at 95:1 against the sky — it had been fogged out of existence since the
+  day it shipped. The judged cause ("fog disabled") was wrong: fog was on
+  and blending. The real one: **`scene.fog.color` is an LDR display colour
+  and the sky is HDR** — at noon the sky's linear radiance is 3.10 against
+  the fog colour's 0.644, so a *full* fog blend still reads 4.8× darker
+  than the sky behind it. The ridge now writes the fog transmittance into
+  its alpha and lets the real sky supply the haze: sky:ridge 31:1 → 1.6:1.
+  Every other distant fogged surface still blends toward the too-dim
+  colour (invisible at street range) — open item, lives in TIMES.
+- **`timber()` builds inside-out when the longest side runs along Y.** The
+  chamfer ring is wound in (u,v) and placed by axis permutation; axes 0
+  and 2 are cyclic, axis 1 is an odd permutation and reverses handedness.
+  The fountain's kerb blocks (0.71 m tangential, 0.62 tall) had all 20
+  outer faces pointing inward — backface-culled into a see-through drum —
+  and it had shipped that way three rounds earlier; the water rebuild it
+  was blamed on was innocent. 28 of 64 assets regenerate with the fix.
+- **The "party wall through the swamp hill" was the HILLS filler**: a
+  13×13×4 m rock box sheared flat at y+3.2 in every hills cell, so the
+  mud's "you stand atop a hill" sat 3.2 m below its own surroundings. A
+  grass prism ridge (2.8–4.4 m by hash, quarter turns only — a free angle
+  overhangs the cell by 2.7 m) reads as terrain. MOUNTAIN's 11 m box has
+  the same shape of fault, one cell taller, still open.
+- **The "crates among the graves" were park benches.** Midgaard's park
+  cells interleave the graveyard's (the gate opens into the park), and a
+  routed park passage laid its bench on cell (−4,21). No object reset, no
+  clutter-gate leak — content behaving correctly, left alone. Census the
+  instances before blaming the gate.
+- **A one-word veto beats a wider guard.** #6142 "…cave…" is a canopy
+  room the cave-word wrongly kept enclosed; `\boutside\b` frees exactly
+  one room across all 45 areas. `entrance to` and `before` were tried and
+  dropped — they take "Entrance to the Crypt" and "Standing before the
+  throne" with them.
 
 One long session: the compass step became a walk, the mud's own barometer
 took over the sky, rain arrived, and the default world grew from one town

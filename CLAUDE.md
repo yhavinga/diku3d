@@ -282,8 +282,48 @@ choose.
   a separate isotropic grain map now, in world units, not a multiple of the tile.
 - `wet` in a recipe is damp collecting in the low patches. That is right for a
   street and wrong for a floor, and `planks`, `marble` and `flagstone` are mostly
-  indoors — it was putting rain puddles on the floorboards of the tavern. They
-  are dry; `cobble` is not.
+  indoors — it was putting rain puddles on the floorboards of the tavern.
+  `planks` and `marble` are dry; `flagstone` keeps a trace at 0.16; `cobble` is
+  not dry at all.
+- **Calibrate a shader gate on what the shader samples, not on the source
+  histogram.** Both wetness gates were set against the macro map's raw pixels;
+  the mip/bilinear-filtered sample converges to the local mean (0.76–0.91,
+  above the 0.58 gate edge), so the entire wet system — overcast's 1.9, rain,
+  `setWetness` — had never changed a pixel and nobody had A/B-measured it.
+  A/B every feature once at birth.
+- **The sun's shadow map is drawn around the camera of the last rendered
+  frame.** `goto()` *after* `applyTime` leaves the destination outside the
+  shadow frustum and every shaded face measures lit. Camera first, then the
+  hour, let a frame render, then freeze and measure.
+- **A vertex census lies about surfaces.** A log-cabin gable read "open" by
+  vertex count (a log wall's vertices sit only at the ends) and a roof prism
+  reported "0 cells affected" (six vertices, none mid-span). Sample triangle
+  surfaces or raycast; never count corners.
+- **A HemisphereLight has no occlusion, and three.js filters lights by the
+  *camera's* layers, not the object's.** The noon ground-bounce hemisphere lit
+  the temple's inside like the street; a layers split needs a second render
+  pass. `Batcher` writes an `aIndoor` vertex flag and the light loop mixes the
+  hemisphere down indoors — new batched geometry must keep that flag right.
+- **Underground rooms inherit nothing from the surface recipe.** Buried rooms
+  were getting lit window panes, a floor gap open to the sky (room floors stop
+  at ROOM/2 = 5 m, routed passages start at HALF = 6.5 m) and pitched roofs
+  breaking up through the graveyard turf. Anything built per-room must be
+  checked against buried rooms explicitly.
+- **Test a prose vocabulary over all 45 areas before shipping it.** `pond`
+  took Midgaard's park pond into the bog set, `chapel` matched a street in
+  hood.are, `den` as a substring matches "Gamgee Resi**den**ce". The
+  reject-list is as load-bearing as the match-list.
+- **`scene.fog.color` is an LDR display colour and the sky is HDR.** At noon
+  the sky's linear radiance is ~3.1 against the fog colour's 0.64, so even a
+  100% fog blend reads ~5× darker than the sky behind it — a distant object
+  can never dissolve into the sky through fog colour alone. The horizon ring
+  writes the fog *transmittance* into its alpha instead and lets the real sky
+  supply the haze.
+- **`kit.py` `timber()` used to build inside-out when the longest side ran
+  along Y** — axis 1 placement is an odd permutation and reversed the chamfer
+  ring's winding. Fixed, but the shape of the bug generalises: after any
+  permutation-based placement, verify face orientation by sampling normals,
+  not by eye; backface culling hides the error from every front-on look.
 - Figures are kept out of the sun's shadow map, so their contact shadows are
   placed by hand in `actors.js` and have to be told where the sun is:
   `applyTime()` calls `actors.setSun()`. Miss that and every person in the town
