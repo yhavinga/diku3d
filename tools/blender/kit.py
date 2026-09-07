@@ -102,6 +102,19 @@ def timber(size, loc=(0, 0, 0), rot=(0, 0, 0), mat="oak", cham=0.035, name="timb
         faces.append((i, j, j + 8, i + 8))
     faces.append(tuple(range(7, -1, -1)))
     faces.append(tuple(range(8, 16)))
+    # The ring is wound counter-clockwise in (u, v), so the outward normal is
+    # u x v -- and only two of the three placements above keep that pointing
+    # out. (end, u, v) and (u, v, end) are cyclic in (u, v, end) and preserve
+    # the handedness; (u, end, v) is the odd one out and reverses it, so every
+    # timber whose *longest* side runs along Y came out inside-out: normals
+    # into the solid, outer faces back-face culled. Nobody noticed for a long
+    # time because a beam is usually longest along X or Z -- upright posts are
+    # Z, joists are X -- and the case that bites is a block sized by an arc,
+    # where the tangential dimension wins. The fountain's ten kerb blocks are
+    # 0.71 m around against 0.62 tall, so the whole drum wall was missing and
+    # you looked straight through the basin.
+    if axis == 1:
+        faces = [tuple(reversed(f)) for f in faces]
 
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(verts, [], faces)

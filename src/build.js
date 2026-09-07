@@ -72,8 +72,24 @@ export const isOutdoor = (room) => OUTDOOR.has(room.sector) && !(room.flags & RO
 // interiors that happen to sit in a forest area. The name wins over the
 // sector code, the same move readFittings and the park already make.
 const CANOPY_NOT = /\b(cave|underground|temple|hall|inside|web|tunnel)\b/i;
+/**
+ * A room that says it is *outside* one is not inside one. "Outside a cave in
+ * the deep, dark forest" is the mouth of the Green Dragon's cave -- a path end
+ * under the same crowns as the forty-four rooms around it, with the cave
+ * itself the room to the north -- and `cave` in its own name was building it a
+ * brick box with a plank ceiling 5.2 m over the middle of a wood.
+ *
+ * Checked over all 45 stock areas, which is the only way to ship a word here:
+ * of the 45 FOREST+INDOORS rooms `CANOPY_NOT` currently calls interiors --
+ * Moria's thirty-odd tunnels, the spider web, the Green Dragon's cave itself,
+ * the great tree, the cultist temple -- exactly one says `outside`, and it is
+ * #6142. `entrance to` and `before` were tried alongside it and dropped:
+ * across the world they take "Entrance to the Crypt", "Entrance to the High
+ * Tower" and "Standing before the throne", all of them genuinely indoors.
+ */
+const CANOPY_OUTSIDE = /\boutside\b/i;
 const isCanopy = (room) => room.sector === SECTOR.FOREST && !isOutdoor(room)
-  && !CANOPY_NOT.test(room.name);
+  && (CANOPY_OUTSIDE.test(room.name) || !CANOPY_NOT.test(room.name));
 
 /** No walls, no ceiling, no roof -- whatever the mud says about the sky. */
 const isOpenAir = (room) => isOutdoor(room) || isCanopy(room);
@@ -3449,10 +3465,40 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
       }
       break;
     }
-    case SECTOR.MOUNTAIN: case SECTOR.HILLS: {
-      const h = sector === SECTOR.MOUNTAIN ? 11 : 4;
+    case SECTOR.MOUNTAIN: {
+      const h = 11;
       batcher.add(box(CELL, h, CELL, 3, 3, 3), 'rock', place(x, y + h / 2 - 0.8, z), { chunk, ao: wallAo(y) });
       addCollider(x - HALF, x + HALF, z - HALF, z + HALF, y, y + h - 0.8);
+      break;
+    }
+    /**
+     * Higher ground, as a ridge and not as a block.
+     *
+     * This shared the mountain's branch: a 13 m cube of rock 4 m tall, its top
+     * sheared off at exactly y + 3.2 in every cell that took it. Where two or
+     * three of those line up -- and they do, because a room hands its sector to
+     * every filler around it -- what you get is a dead flat coping over a dead
+     * vertical face running tens of metres, which a judge photographed beside
+     * #8304 and read as a coursed party wall crossing the room. Worse, #8304 is
+     * the mud's own "You stand atop a hill": the one room that ought to be the
+     * high point was standing 3.2 m *below* the ground on two sides of it.
+     *
+     * A prism instead, the same move the desert dune already makes, and grass
+     * rather than rock because `FILLER_GROUND` has already called this cell
+     * grass and a green hillside is what the sector means outside a canyon.
+     * The rotation is a quarter turn and not the dune's free angle: a
+     * CELL-square prism turned to an arbitrary heading overhangs its own cell
+     * by up to 2.7 m, which here would push a rock into a neighbouring room's
+     * floor. Ridge lines that run two ways and heights that vary by a metre
+     * and a half are enough -- two cells no longer share a face or a top edge,
+     * and the whole thing slopes to nothing at the cell boundary, so a room
+     * beside it looks up a bank rather than at a wall.
+     */
+    case SECTOR.HILLS: {
+      const h = 2.8 + hash3(x, z, 0, 45) * 1.6;
+      batcher.add(triPrism(CELL, h, CELL), GROUND[SECTOR.HILLS] || 'grass',
+        place(x, y, z, hash3(x, z, 1, 45) > 0.5 ? Math.PI / 2 : 0), { chunk, ao: wallAo(y) });
+      addCollider(x - HALF, x + HALF, z - HALF, z + HALF, y, y + h);
       break;
     }
     case SECTOR.DESERT: {
@@ -3511,6 +3557,37 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
 const HORIZON_SEED = 20931;
 
 /**
+ * Keep `scene.fog`'s transmittance and throw away its colour: the surface
+ * dissolves into whatever is already in the buffer behind it -- which out here
+ * is the sky, at the sky's own radiance -- instead of into an LDR haze colour
+ * that at noon is a fifth as bright as the sky it stands for. See the note on
+ * `buildHorizon` for the measurement.
+ *
+ * The maths is the stock `fog_fragment` chunk with the mix taken out, so it
+ * reads the same `fogDensity` and `vFogDepth` three already keeps in step with
+ * the hour, per fragment. `fogColor` simply falls out of the program; three
+ * uploads only the uniforms a program actually declares, so nothing breaks.
+ * `depthWrite` stays on: within one ring a nearer blade drawn after a further
+ * one must hide it rather than blend twice over it.
+ */
+function haze(material) {
+  material.transparent = true;
+  material.depthWrite = true;
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <fog_fragment>', [
+      '#ifdef USE_FOG',
+      '  #ifdef FOG_EXP2',
+      '    gl_FragColor.a *= exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );',
+      '  #else',
+      '    gl_FragColor.a *= 1.0 - smoothstep( fogNear, fogFar, vFogDepth );',
+      '  #endif',
+      '#endif',
+    ].join('\n'));
+  };
+  return material;
+}
+
+/**
  * The skyline: two rings of conifers with a ridge behind them.
  *
  * The ground runs 60 cells past the town and then meets the sky along a dead
@@ -3523,28 +3600,46 @@ const HORIZON_SEED = 20931;
  * texture is invisible; silhouette and tone are the entire job, and nothing
  * here has to be lit, shadowed or updated.
  *
- * **The fog does the aerial perspective, and it squares.** `FogExp2` keeps
- * `exp(-(density * depth)^2)` of a surface, not `exp(-density * depth)` -- a
- * far shorter world than it sounds, half of any surface gone by 138 m at the
- * noon density of 0.0060. Measured from the near edge of the town, which is
- * where the horizon is visible at all (stand in the middle of it and you are
- * looking at frontage), a ring keeps:
+ * **The aerial perspective is a dissolve, not a fog blend.** `FogExp2` keeps
+ * `exp(-(density * depth)^2)` of a surface, not `exp(-density * depth)`, and
+ * that is the right transmittance -- but `scene.fog.color` is an LDR display
+ * colour and the sky it stands for is HDR. Measured at noon, looking out over
+ * the town: the rendered sky is 3.10 in linear radiance where the fog colour
+ * `#bcd2e6` is 0.644, so the haze is **4.8x too dim to be the sky**. Blending
+ * a black ridge 49% of the way into something five times darker than what is
+ * behind it does not dissolve it; it leaves a cut-out. A/B at 686 m, noon:
+ * fog off the ridge is RGB 0,0,0, fog on it is 29,37,44, and the sky over it
+ * is 174,207,220. Nobody saw this while the noon density was 0.0060, because
+ * at that density 686 m keeps nothing at all and the whole horizon was
+ * invisible; thinning the fog to 0.0012 for a clear day is what uncovered it.
  *
- *     margin    noon .0060   dusk .0088   night .024
- *     120 m       59.6%        32.8%        0.02%
- *     165 m       37.5%        12.1%        0.00%
- *     250 m       10.5%         0.8%        0.00%
- *     380 m        0.6%         0.0%        0.00%
+ * So the fog's *transmittance* is kept and its *colour* is thrown away: the
+ * fragment writes `exp(-(density*depth)^2)` into alpha and lets the sky
+ * already in the buffer supply the haze, at whatever radiance the sky
+ * actually has. That is also what extinction plus in-scattering comes to when
+ * the in-scattered light is the background -- which at horizon level under a
+ * uniform sky it is. It needs no per-hour hook: `fogDensity` is a uniform
+ * three keeps in step with `scene.fog`, so night's 0.024 dissolves the ridge
+ * to nothing on its own, and it is per fragment, so standing at the town's
+ * edge the near arc is correctly denser than the far one.
  *
- * That is the whole reason for +120, +165 and +250 m: three planes of depth
- * out of three flat colours, and a horizon that puts itself away after dark
- * without being told. The ridge is at +250 and not the +380 that would be
- * right under unsquared fog, because 380 m keeps 0.6% -- not a tonal shape,
- * nothing at all. Nor can the rings come closer: they have to clear everything
- * built, and the town's own radius is already 213 m at Midgaard, so from the
- * bounds centre the inner ring is 333 m off and keeps 1.8%. The treeline is
- * for the streets that can see out; in the middle of town the buildings are
- * the horizon.
+ * **Only the ridge gets it, and that is not a compromise.** Alpha compositing
+ * attenuates once per *surface* where air attenuates once per *metre*, so it
+ * is only honest where a ray crosses the thing once. The ridge is a closed
+ * strip: one layer, always. A tree ring is 440 loose triangles about 1.5 deg
+ * wide spaced 0.6 deg apart, so two or three of them stack on any bearing --
+ * dissolved at 64% each they come to 92% together, and what that looks like
+ * is not a hazier treeline but a heap of glass cones, each one visible
+ * through the next, with their pale tips speckled across the ridge behind.
+ * Photographed and rejected. The combs keep the stock fog blend, and the
+ * near-black comb they come out as is what the reference has anyway; it is
+ * the ridge behind them that has to dissolve.
+ *
+ * The three radii are three planes of depth. From the loaded world's centre
+ * that is 556, 601 and 686 m. They cannot come closer: they have to clear
+ * everything built, and the town's own radius is 213 m at Midgaard alone.
+ * The treeline is for the streets that can see out; in the middle of town
+ * the buildings are the horizon.
  */
 function buildHorizon(group, bounds, groundY) {
   const cx = ((bounds.minX + bounds.maxX) / 2) * CELL;
@@ -3564,8 +3659,8 @@ function buildHorizon(group, bounds, groundY) {
   // the treeline *lighter* than the sky behind it: a row of pale ghosts,
   // exactly backwards from the reference. A conifer wall reflects almost
   // nothing and reads near-black against any daylit sky, so flat unlit colour
-  // is the honest model: the fog supplies the aerial perspective and the
-  // per-hour tint, and exposure keeps it in step with the hour.
+  // is the honest model: how much of it survives to the eye is the haze's job,
+  // and exposure keeps it in step with the hour.
   // Vertex colours carry the variation: seen with a clear sky from the town's
   // edge -- the park, the levee -- a single flat tone read as one continuous
   // grey dam, and repetition the eye forgives in a texture it does not
@@ -3575,12 +3670,12 @@ function buildHorizon(group, bounds, groundY) {
     color: 0x141a14, side: THREE.DoubleSide, vertexColors: true,
   });
   // Colder and bluer than the trees, so the ridge reads as a further plane
-  // before the fog has said anything about it.
-  const rock = new THREE.MeshBasicMaterial({
+  // before the haze has said anything about it.
+  const rock = haze(new THREE.MeshBasicMaterial({
     color: 0x10151d, side: THREE.DoubleSide, vertexColors: true,
-  });
+  }));
 
-  const silhouette = (points, colors, material, name) => {
+  const silhouette = (points, colors, material, name, order) => {
     const position = new Float32Array(points);
     // The unlit material never reads these, but the AO prepass renders the
     // scene with a normal material, and a missing attribute there is a
@@ -3602,6 +3697,10 @@ function buildHorizon(group, bounds, groundY) {
     // A 360-degree ring is always partly in view, so the test only ever
     // answers yes.
     mesh.frustumCulled = false;
+    // The ridge blends, so it goes before everything else that does -- nothing
+    // in the world is further away than it is. The combs are opaque and the
+    // depth buffer already has them right.
+    mesh.renderOrder = order;
     group.add(mesh);
   };
 
@@ -3650,7 +3749,7 @@ function buildHorizon(group, bounds, groundY) {
         blade(off - half, off + half, off, h * rnd(0.4, 0.58));
       }
     }
-    silhouette(points, colors, conifer, `horizon-trees-${index}`);
+    silhouette(points, colors, conifer, `horizon-trees-${index}`, 0);
   });
 
   // The ridge: one strip ring, ground to crest.
@@ -3683,5 +3782,5 @@ function buildHorizon(group, bounds, groundY) {
     push(x0, groundY, z0, a0, false); push(x1, groundY, z1, a1, false); push(x1, top1, z1, a1, true);
     push(x0, groundY, z0, a0, false); push(x1, top1, z1, a1, true); push(x0, top0, z0, a0, true);
   }
-  silhouette(ridge, ridgeColors, rock, 'horizon-ridge');
+  silhouette(ridge, ridgeColors, rock, 'horizon-ridge', -3);
 }
