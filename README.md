@@ -200,3 +200,6 @@ Michael Seifert and Sebastian Hammer, of DIKU, the department of computer
 science at the University of Copenhagen. Merc 2.1 is by Furey, Hatchet and Kahn,
 released 1 August 1993. Their licences are in `merc21/README` and
 `merc21/doc/`, and both forbid commercial use — that applies to this too.
+The code in this repository is otherwise MIT (`LICENSE`); the vendored
+three.js in `vendor/three/` carries its own MIT notice, and the `merc21/`
+submodule keeps the DikuMUD and Merc terms.
