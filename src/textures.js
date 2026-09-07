@@ -781,8 +781,25 @@ function decorate(material, recipe, macro, grain) {
           float dikuUp = clamp( dot( viewMatrix[ 1 ].xyz, vNormal ), 0.0, 1.0 );
           // Water sits in the low patches, and the low patches are where the
           // height field -- and so the macro tone -- is darkest.
+          //
+          // **One gate, and its edges are measured.** This used to be two
+          // multiplied together -- smoothstep(0.58, 0.18, macro.r) for the
+          // low patches and smoothstep(0.30, 0.62, macro.b) for the rough
+          // ones -- and their product was *identically zero* on every surface
+          // in the town, so the whole wetness chain moved not one pixel:
+          // setWetness, the rain tracker, and overcast's wet: 1.9 all wrote
+          // a uniform nothing read. Measured by writing the two terms straight
+          // to the back buffer over the Market Square paving: the tone gate
+          // read 0.000 and the roughness gate 0.009. The edges were chosen
+          // against the macro map's *unfiltered* histogram (mean 0.645), but
+          // what the shader samples is mip- and bilinear-filtered, which
+          // collapses towards the local mean -- the paving reads 0.76 to 0.91,
+          // clear of the old 0.58 upper edge at every distance. Re-centred on
+          // what is actually sampled, one gate does the job the pair was meant
+          // to: dry-to-downpour now moves that paving by 8.9 of luminance,
+          // where the shipped pair moved it by 0.00.
           float dikuDamp = wetness * dikuUp * dikuUp
-            * smoothstep( 0.58, 0.18, dikuMacro.r ) * smoothstep( 0.30, 0.62, dikuMacro.b );
+            * smoothstep( 0.92, 0.62, dikuMacro.r );
           roughnessFactor = mix( roughnessFactor, 0.11, dikuDamp );
           diffuseColor.rgb *= 1.0 - dikuDamp * 0.42;
         #endif

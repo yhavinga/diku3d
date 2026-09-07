@@ -80,8 +80,18 @@ const TIMES = {
   // hold 2.5-3.5. Lighter mortar took it to 3.9; this takes it to ~3.4.
   // The sun stays where it is -- days are still sun-dominated, just not
   // crushed in the shadows.
+  //
+  // **`density` is a visibility, and it can be read straight off.** `FogExp2`
+  // squares it, so transmittance is `exp(-(d*density)^2)` and contrast is
+  // halved at `0.8326 / density` metres. At 0.0088 that is 95 m: a judge
+  // measured the far hills dissolving to bare sand and the skyline going
+  // brown, because in clear air the same figure is 1-2 km. The clear day
+  // hours now sit at 520 m (dawn, dusk) and 694 m (noon) -- still hazy
+  // enough to give the town depth, and Pacific-Northwest rather than dust.
+  // Night keeps its 35 m on purpose: it is what lifts a far wall off zero
+  // and hides the edge of the world. Overcast keeps its own, below.
   dawn: {
-    elevation: 8, azimuth: 95, exposure: 0.50, fog: 0xc9a586, density: 0.0088,
+    elevation: 8, azimuth: 95, exposure: 0.50, fog: 0xbaa089, density: 0.0016,
     sun: 0xffc089, sunIntensity: 23, sky: 0x9fb6d2, ground: 0x5f5142, ambient: 0.082,
     env: 0.35, bounce: 0x5e4f3d, haze: 0xc9a586,
     bloom: 0.16, bloomThreshold: 22, stars: 0.22, turbidity: 5.5, rayleigh: 2.6,
@@ -95,15 +105,51 @@ const TIMES = {
     // south-facing frontage sat in permanent shade -- the inverse of any
     // northern-hemisphere reference. Dawn 95 (east) and dusk 258 (west) were
     // already right; the arc now runs east, south, west.
-    elevation: 58, azimuth: 355, exposure: 0.165, fog: 0xbcd2e6, density: 0.0060,
-    sun: 0xfff4e2, sunIntensity: 22, sky: 0xa3c4e4, ground: 0x6f6455, ambient: 0.105,
+    elevation: 58, azimuth: 355, exposure: 0.165, fog: 0xbcd2e6, density: 0.0012,
+    // **The hemisphere light is the ground bounce, and only at noon.**
+    //
+    // With the sun high, no vertical face gets any direct light at all, so
+    // every wall in the town falls to whatever the ambient is -- and a judge
+    // metered the shaded side of a house against the sunlit paving at 24:1
+    // where photographs of a sunny town square hold 4-6:1. The missing light
+    // is not the sky, which the bake already delivers: it is the *sunlit
+    // ground*, which under a high sun throws back about 70% of everything a
+    // shaded wall receives. `env` cannot supply it -- raising the bake lifts
+    // the shaded wall and the shadow lying on the paving by the same factor,
+    // and measured, `env` 0.42 -> 1.35 fixed the wall (24:1 -> 5:1) while
+    // flattening cast shadows on the ground from 8.4:1 to 2.2:1, which is a
+    // sunny day with no shadows in it. The bake's own ground dome cannot
+    // supply it either: it fades to alpha 0 at the rim, and the rim is
+    // precisely the direction a vertical surface integrates most strongly
+    // (bounce x3 moved the wall by one sRGB step).
+    //
+    // A hemisphere light with a *black* sky half and a bright ground half is
+    // exactly that term, and nothing else: it gives a vertical face half the
+    // bounce colour, an underside all of it, and an up-facing face -- the
+    // paving in shadow -- nothing whatever. Measured at the Market Square at
+    // noon: shaded wall 24.0:1 -> 5.6:1, cast shadow on the paving 8.6:1 ->
+    // 8.4:1, sunlit cobble 183 -> 188 sRGB, frame under sRGB 8 2.05% -> 0.00%,
+    // nothing over 250 either side. The intensity looks absurd next to dawn's
+    // 0.082 because it is a different quantity: the sky's own bake is clamped
+    // at 60, so anything measured against it lives on that scale.
+    //
+    // Black, not a dim blue: any sky colour here is counted twice -- once in
+    // the bake and once on the hemisphere -- and it lands on the up-facing
+    // surfaces, which is what flattens the shadows.
+    sun: 0xfff4e2, sunIntensity: 22, sky: 0xa3c4e4, ground: 0xb0a894, ambient: 32,
+    hemiSky: 0x000000,
     env: 0.42, bounce: 0x77694f, haze: 0xbcd2e6,
     bloom: 0.14, bloomThreshold: 28, stars: 0, turbidity: 3.0, rayleigh: 1.3,
     shafts: 0, shaftTint: 0xffffff,
     cloud: [0.63, 0.85, 1.45, 4.7],
   },
   dusk: {
-    elevation: 9.5, azimuth: 258, exposure: 0.55, fog: 0xb87b4e, density: 0.0088,
+    // The fog colour is pulled a third of the way to the hour's own horizon
+    // sky, measured away from the sun: dusk's sky reads (181,176,177) there
+    // while the fog was (184,123,78), so every distant fir was tinted with a
+    // sunset that only exists in one direction. It is still warm, because at
+    // this elevation the haze genuinely is.
+    elevation: 9.5, azimuth: 258, exposure: 0.55, fog: 0xb68c6b, density: 0.0016,
     sun: 0xff9448, sunIntensity: 26, sky: 0x7b8ea8, ground: 0x50412f, ambient: 0.082,
     env: 0.35, bounce: 0x574433, haze: 0xb87b4e,
     bloom: 0.16, bloomThreshold: 22, stars: 0.32, turbidity: 6.5, rayleigh: 3.0,
@@ -140,12 +186,21 @@ const TIMES = {
  * because they are the same four moments seen through a cloud deck: `haze`,
  * the horizon inside the bake, is the fog you are standing in, so it is not
  * listed twice.
+ *
+ * `ambient` and `density` are here as absolute numbers rather than multipliers
+ * on the hour, because the two axes have stopped agreeing about what those
+ * numbers mean. Under a deck there is no sun, so there is no ground bounce and
+ * no thin clear air: the hemisphere goes back to being a floor and the haze
+ * goes back to melting the treeline within a couple of streets. Left as
+ * `p.ambient * 1.8` and `p.density * 1.45` the clear day's repairs would have
+ * arrived here too -- overcast noon would have inherited a bounce intensity of
+ * 58 and a visibility of a kilometre, neither of which is weather.
  */
 const OVERCAST = {
-  dawn: { fog: 0xaab0b6, sky: 0xa9b2bc, ground: 0x565149, bounce: 0x53504a },
-  noon: { fog: 0xb3bfc9, sky: 0xb6c2cc, ground: 0x635f55, bounce: 0x63625a },
-  dusk: { fog: 0x9aa2ab, sky: 0x8f99a6, ground: 0x4a463f, bounce: 0x49473f },
-  night: { fog: 0x141a24, sky: 0x232c3a, ground: 0x14161c, bounce: 0x171a20 },
+  dawn: { fog: 0xaab0b6, sky: 0xa9b2bc, ground: 0x565149, bounce: 0x53504a, ambient: 0.1476, density: 0.01276 },
+  noon: { fog: 0xb3bfc9, sky: 0xb6c2cc, ground: 0x635f55, bounce: 0x63625a, ambient: 0.189, density: 0.0087 },
+  dusk: { fog: 0x9aa2ab, sky: 0x8f99a6, ground: 0x4a463f, bounce: 0x49473f, ambient: 0.1476, density: 0.01276 },
+  night: { fog: 0x141a24, sky: 0x232c3a, ground: 0x14161c, bounce: 0x171a20, ambient: 1.2, density: 0.0312 },
 };
 
 /**
@@ -203,18 +258,22 @@ const WEATHER = {
       // part of the same deck, so the weather owns its dials too.
       stockCloud: [0.85, 0.6],
       fog: c.fog, sky: c.sky, ground: c.ground, bounce: c.bounce, haze: c.fog,
+      // No sun means no sunlit ground to bounce off it, so the hemisphere is a
+      // floor again and its upper half is the deck rather than noon's black.
+      hemiSky: c.sky,
       // Aerial haze is most of the look, and it is the one dial that reads as
       // weather rather than as a filter over the same picture. 1.8 was the
       // first cut and it read as sea fog -- a frontage 40 m off dissolved
       // while real BC overcast keeps tens of kilometres of visibility. 1.45
-      // keeps a building at 100 m legible and still melts the treeline.
-      density: p.density * (night ? 1.3 : 1.45),
+      // keeps a building at 100 m legible and still melts the treeline. Both
+      // it and the ambient below are absolute now; see the note on OVERCAST.
+      density: c.density,
       // The sky is the source now. The first balance starved the walls: a
       // white plaster panel metered at half the brightness of the grey paving
       // under it, because vertical faces live entirely off the bake and the
       // hemisphere once the sun is gone. So the ambient terms come up, and
       // exposure gives a little back to keep the sky/ground ratio.
-      ambient: night ? p.ambient : p.ambient * 1.8,
+      ambient: c.ambient,
       env: night ? p.env : Math.min(1, p.env * 1.4),
       exposure: p.exposure * ({ dawn: 1.45, noon: 1.5, dusk: 1.15, night: 1 })[hour],
       // Damp collecting in the low patches of everything outdoors that keeps
@@ -274,6 +333,10 @@ const state = {
   weatherMode: weatherParam === 'overcast' || weatherParam === 'auto' ? weatherParam : 'clear',
   weather: weatherParam === 'overcast' ? 'overcast' : 'clear',
   rainLevel: 0,
+  // `null` means the mud's barometer decides, which is nearly always. Anything
+  // else is `diku.forceRain` holding it there so rain can be looked at without
+  // waiting for the weather to turn -- see the note on the hook itself.
+  forcedRain: null,
   showStats: false,
   roomVnum: null,
   paused: true,
@@ -545,7 +608,9 @@ async function boot() {
     sun.position.copy(sunPosition).multiplyScalar(120);
     sun.color.setHex(preset.sun);
     sun.intensity = preset.sunIntensity;
-    hemi.color.setHex(preset.sky);
+    // Not `preset.sky`: that colour is also the water's mirror, and at noon the
+    // hemisphere has a job the water has not -- see the note on TIMES.noon.
+    hemi.color.setHex(preset.hemiSky ?? preset.sky);
     hemi.groundColor.setHex(preset.ground);
     hemi.intensity = preset.ambient;
     scene.fog = new THREE.FogExp2(preset.fog, preset.density);
@@ -935,7 +1000,9 @@ async function boot() {
     // itself, and rain on the roof is half of what rain is for.
     {
       const sky = state.weatherMode === 'auto' ? game.weather().sky : SKY.CLOUDLESS;
-      const level = sky === SKY.LIGHTNING ? 1 : sky === SKY.RAINING ? 0.65 : 0;
+      // The override comes first, or the barometer would write over it every
+      // frame -- which is exactly how a reviewer concluded rain did nothing.
+      const level = state.forcedRain ?? (sky === SKY.LIGHTNING ? 1 : sky === SKY.RAINING ? 0.65 : 0);
       if (level !== state.rainLevel) {
         state.rainLevel = level;
         audio.setRain(level);
@@ -1017,7 +1084,41 @@ async function boot() {
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
     pipeline, environment, materials, wetness,
-    player, hud, layout, built, actors, world, applyTime, applyWeather, state, times: TIMES,
+    player, hud, layout, built, actors, world, applyTime, applyWeather, state,
+    times: TIMES, overcast: OVERCAST, rain,
+    /**
+     * Make it rain now, whatever the mud's barometer says.
+     *
+     * Rain is not a switch anywhere else in the program, and deliberately so:
+     * it falls out of `game.weather()` under `auto`, which means it arrives
+     * when it arrives. That is right for playing and useless for looking, and
+     * the two ways of forcing it by hand both fail silently. Setting
+     * `state.rainLevel` is overwritten by the barometer on the very next frame.
+     * Driving `wetness` directly is overwritten by `wetness.update`. A reviewer
+     * did both, measured no change, and reported rain as broken.
+     *
+     * So this owns all four things rain actually is: the level the frame loop
+     * reads, the sound, the deck overhead, and the wet ground. The easing is
+     * skipped -- 11 seconds to 63% is honest weather and no use to anyone
+     * taking a screenshot, so the streets arrive already wet.
+     *
+     * `forceRain(0)` hands the sky back to the barometer; it does not put the
+     * weather back, because it does not know what you set it to. Follow it with
+     * `applyWeather('clear')` if that is what you want.
+     */
+    forceRain(level = 0.65) {
+      state.forcedRain = level > 0 ? Math.min(1, level) : null;
+      if (state.forcedRain !== null && state.weather !== 'overcast') applyWeather('overcast');
+      state.rainLevel = state.forcedRain ?? 0;
+      audio.setRain(state.rainLevel);
+      wetness.value = wetness.target();
+      wetness.push();
+      return {
+        rainLevel: state.rainLevel, weather: state.weather,
+        wetness: wetness.value, forced: state.forcedRain !== null,
+      };
+    },
+
     /** Console A/B for the tone curve: 'agx', 'aces' or 'neutral'. */
     setTone(name) {
       renderer.toneMapping = TONE_MAPPING[name] ?? THREE.AgXToneMapping;
