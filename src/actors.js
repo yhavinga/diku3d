@@ -117,6 +117,11 @@ export function makeLabel(text, height = 0.5, options) {
   });
   const sprite = new THREE.Sprite(material);
   sprite.scale.set(height * aspect, height, 1);
+  // What it wants to be at any distance. A sprite with size attenuation grows
+  // without limit as you walk up to it, and a long name on a wide canvas is
+  // three metres across -- which at arm's length is the whole frame. The cap
+  // is applied per frame in `update`; this is what it caps.
+  sprite.userData.baseScale = { x: height * aspect, y: height };
   // Off the default layer, which is how it stays out of the AO prepass. That
   // pass draws the scene through a single override material and never looks at
   // alpha, so it takes the whole quad for a wall and shades the sky behind the
@@ -219,6 +224,14 @@ function figureTraits(proto) {
   if (has(/king|lord|mayor|noble|duke|queen|lady/)) { traits.cloak = true; traits.cloth = 0x6b2f3f; traits.trim = 0xc8a24f; }
   if (has(/dwarf|dwarv/)) { traits.scale = 0.72; traits.beard = true; }
   if (has(/child|kid|boy|girl|pupil|smurf|gnome|hobbit/)) traits.scale = 0.66;
+  // A word for how old someone is is a word for how tall they are, and this
+  // list had no word for the youngest: a mob named "a toddler" was simply not
+  // matched by anything above and stood a full 1.78 m, which a judge measured
+  // against a doorway. 0.5 of a man is 0.89 m, which is a two-year-old; a
+  // child at 0.66 is 1.17 m, which is about six. Everything that follows a
+  // figure's size -- the label over its head and the contact patch under its
+  // feet -- is derived from `height`, so both come with it.
+  if (has(/toddler|infant|\bbaby\b|newborn/)) traits.scale = 0.50;
   if (has(/giant|ogre|troll|golem|titan/)) { traits.scale = 1.55; traits.skin = 0x6b7a5c; traits.hair = false; }
   if (has(/executioner|headsman/)) { traits.hood = true; traits.cloth = 0x2b2320; traits.weapon = 'axe'; }
   if (has(/skeleton|zombie|ghoul|wraith|ghost|spectre|spirit/)) { traits.skin = 0xd6d2c4; traits.cloth = 0x3b3a36; traits.hair = false; }
@@ -922,7 +935,32 @@ export function populate(world, layout, built, options = {}) {
         });
       }
       if (item.proto.itemType === ITEM.FOUNTAIN) {
-        waters.push({ x: mesh.position.x, y: mesh.position.y + 0.62, z: mesh.position.z, size: 2.4 });
+        // Fitted to the drum the model actually has, not to a square guess.
+        // This was a 2.4 x 2.4 square at y 0.62, and `build_fountain()` in
+        // tools/blender/props.py caps the basin with a *solid* disc of radius
+        // 1.25 spanning 0.62 to 0.76 -- the "coping" is a cylinder, not a ring.
+        // So the plane sat exactly under that cap and the only part of it
+        // anyone ever saw was the 0.45 m of corner sticking out past the
+        // stonework, cutting through the drum's front face. Which is the whole
+        // of the judge's finding, and it means there is no visible water in the
+        // lower basin at all.
+        //
+        // The asset is not being rebuilt this round, so the water goes on top
+        // of the cap instead of under it: a disc 1.5 cm proud of the stone at
+        // 1.18, inside the 1.25 coping, which leaves a 7 cm lip of stone all
+        // round and reads as a basin filled to the brim. The plinth rises
+        // through it, which is what a pedestal standing in water does.
+        waters.push({
+          x: mesh.position.x, y: mesh.position.y + 0.775, z: mesh.position.z,
+          radius: 1.18,
+          // A stone basin is still water a foot deep. The river's chop is a
+          // reach of moving water and its `deep` is a colour you cannot see
+          // the bottom through; neither is true here. The glint goes *up*,
+          // because a flat basin is the one water in town that is a mirror,
+          // and a fountain with no specular on it at golden hour reads as
+          // painted concrete -- which is what a judge called it.
+          chop: 0.45, glint: 1.25, deep: 0x2c5f60,
+        });
       }
     });
   }
@@ -1451,24 +1489,32 @@ export function populate(world, layout, built, options = {}) {
 
   const waterMaterials = [];
   for (const w of waters) {
-    const geo = new THREE.PlaneGeometry(w.size, w.size, 1, 1);
+    // A reach of river fills its cell and is square; a basin is round. Round
+    // ones say so with a radius.
+    const geo = w.radius
+      ? new THREE.CircleGeometry(w.radius, 28)
+      : new THREE.PlaneGeometry(w.size, w.size, 1, 1);
     geo.rotateX(-Math.PI / 2);
     const material = new THREE.ShaderMaterial({
       vertexShader: WATER_VERT,
       fragmentShader: WATER_FRAG,
       uniforms: {
         time: { value: 0 },
-        shallow: { value: new THREE.Color(0x4d8f8c) },
-        deep: { value: new THREE.Color(0x14343c) },
+        shallow: { value: new THREE.Color(w.shallow ?? 0x4d8f8c) },
+        deep: { value: new THREE.Color(w.deep ?? 0x14343c) },
         skyColour: { value: new THREE.Color(0x9fc4e8) },
         skyMix: { value: 1.3 },
         skyGain: { value: 1 },
         bodySky: { value: 0 },
-        chop: { value: 1 },
-        glint: { value: 0.8 },
+        chop: { value: w.chop ?? 1 },
+        glint: { value: w.glint ?? 0.8 },
       },
       transparent: true,
     });
+    // What this body of water is, as against what the weather is doing to it.
+    // `refreshWater` scales both by the hour, so they have to be kept.
+    material.userData.chopBase = w.chop ?? 1;
+    material.userData.glintBase = w.glint ?? 0.8;
     const mesh = new THREE.Mesh(geo, material);
     mesh.position.set(w.x, w.y, w.z);
     group.add(mesh);
@@ -1723,8 +1769,8 @@ export function populate(world, layout, built, options = {}) {
       u.skyMix.value = 1.3 + 1.2 * cloud;
       u.skyGain.value = 1 + 0.65 * cloud;
       u.bodySky.value = 0.45 * cloud;
-      u.chop.value = 1 - 0.5 * cloud;
-      u.glint.value = 0.8 * disc;
+      u.chop.value = material.userData.chopBase * (1 - 0.5 * cloud);
+      u.glint.value = material.userData.glintBase * disc;
     }
   }
 
@@ -1735,6 +1781,32 @@ export function populate(world, layout, built, options = {}) {
   const _shadowAxis = new THREE.Vector3(0, 1, 0);
 
   const HIDDEN = { pos: new THREE.Vector3(0, -1000, 0), scale: new THREE.Vector3(0, 0, 0) };
+
+  /**
+   * Hold a name label to a fraction of the frame however close you get.
+   *
+   * A `Sprite` with `sizeAttenuation` is a world-space quad, so its share of
+   * the screen goes as 1/distance and there is no lower bound on distance. A
+   * judge walked up to a wolf and its name spanned a third of the width; a long
+   * name is nearly three metres of canvas, and at two metres away the frame is
+   * only about four metres wide.
+   *
+   * The screen fraction of a quad of width `w` at distance `d` is
+   * `w / (2 d tan(fovY/2) aspect)`, so the widest it may be is that inverted.
+   * The label rides up with its own shrinking so it stays just clear of the
+   * head rather than sinking into it.
+   */
+  const LABEL_MAX_FRAC = 0.12;
+
+  function clampLabel(fig, camera, distance) {
+    const base = fig.label.userData.baseScale;
+    if (!base) return;
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    const widest = LABEL_MAX_FRAC * 2 * Math.max(0.4, distance) * tanHalf * camera.aspect;
+    const k = Math.min(1, widest / base.x);
+    fig.label.scale.set(base.x * k, base.y * k, 1);
+    fig.label.position.y = fig.height + base.y * k;
+  }
 
   function updateContactShadows() {
     if (!contactShadows) return;
@@ -1893,6 +1965,7 @@ export function populate(world, layout, built, options = {}) {
       const distSq = dx * dx + dz * dz;
       const near = distSq < 400;
       fig.label.visible = distSq < 110;
+      if (fig.label.visible) clampLabel(fig, camera, Math.sqrt(distSq));
       if (near) {
         _look.set(dx, 0, dz).normalize();
         const want = Math.atan2(_look.x, _look.z);

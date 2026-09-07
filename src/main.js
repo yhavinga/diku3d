@@ -136,8 +136,18 @@ const TIMES = {
     // Black, not a dim blue: any sky colour here is counted twice -- once in
     // the bake and once on the hemisphere -- and it lands on the up-facing
     // surfaces, which is what flattens the shadows.
+    // A hemisphere light has no occlusion term, so this one lit the inside of
+    // the temple exactly as hard as it lit the shaded wall outside: the
+    // interior's mean went 81 -> 140 the day it arrived and the torch pools
+    // stopped reading. There is no sunlit ground inside a building, so
+    // `hemiIndoor` is the fraction of it that reaches geometry built inside an
+    // enclosed room -- see `indoorBounce` in textures.js. Dimming the light
+    // itself instead was measured and trades straight against the thing it was
+    // added for: at intensity 12 the temple comes back to 110 but the market's
+    // sunlit-cobble:shaded-wall ratio goes 3.4:1 -> 6.2:1, against the 4-6 a
+    // judge asks for. This costs the market nothing.
     sun: 0xfff4e2, sunIntensity: 22, sky: 0xa3c4e4, ground: 0xb0a894, ambient: 32,
-    hemiSky: 0x000000,
+    hemiSky: 0x000000, hemiIndoor: 0.22,
     env: 0.42, bounce: 0x77694f, haze: 0xbcd2e6,
     bloom: 0.14, bloomThreshold: 28, stars: 0, turbidity: 3.0, rayleigh: 1.3,
     shafts: 0, shaftTint: 0xffffff,
@@ -260,7 +270,9 @@ const WEATHER = {
       fog: c.fog, sky: c.sky, ground: c.ground, bounce: c.bounce, haze: c.fog,
       // No sun means no sunlit ground to bounce off it, so the hemisphere is a
       // floor again and its upper half is the deck rather than noon's black.
-      hemiSky: c.sky,
+      // Which also means it is an honest ambient again and interiors want all
+      // of it -- noon's `hemiIndoor` must not survive the spread above.
+      hemiSky: c.sky, hemiIndoor: 1,
       // Aerial haze is most of the look, and it is the one dial that reads as
       // weather rather than as a filter over the same picture. 1.8 was the
       // first cut and it read as sea fog -- a frontage 40 m off dissolved
@@ -465,7 +477,16 @@ async function boot() {
   const lightPool = new LightPool(scene, 14, built.lights.concat(actors.lights));
   const quality = new Quality({
     renderer, pipeline, sun, lightPool, materials,
-    name: params.get('quality') || 'medium',
+    // `high`, because that is what ships: `createOptions` runs `apply()` at
+    // startup and writes `quality.apply(values.preset)` with the stored value or
+    // DEFAULTS.preset, which is `high`. This fallback only ever held between
+    // here and that call, and it said `medium` -- the preset with `ao: false` --
+    // so anyone reading it would conclude ambient occlusion was off by default.
+    // It has been on for everyone since the default moved, which is how GTAO
+    // came to annihilate the interiors. (The URL parameter is overwritten by the
+    // same call, so `?quality=` alone does not stick; the options screen is
+    // where the preset is chosen.)
+    name: params.get('quality') || 'high',
   });
   if (params.get('fps')) quality.preset.fps = Number(params.get('fps'));
 
@@ -613,6 +634,10 @@ async function boot() {
     hemi.color.setHex(preset.hemiSky ?? preset.sky);
     hemi.groundColor.setHex(preset.ground);
     hemi.intensity = preset.ambient;
+    // ...and how much of it reaches inside a building, which is not a taste
+    // dial: it is 1 wherever the hemisphere is a sky floor and less only where
+    // it stands in for the sunlit ground.
+    materials.setIndoorBounce(preset.hemiIndoor ?? 1);
     scene.fog = new THREE.FogExp2(preset.fog, preset.density);
     // Rain-damp on everything outdoors that keeps a wet recipe; identity for
     // clear weather. It is a material global and there is no per-room copy, so

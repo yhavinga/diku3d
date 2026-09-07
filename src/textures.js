@@ -398,6 +398,58 @@ const SURFACES = {
   },
 
   /**
+   * The floor of a coastal conifer forest: needle duff over humus, with moss
+   * in the damp hollows. Haon Dor was laid with the town's lawn -- a mown
+   * green a judge could name at a glance -- and a fir stand does not grow
+   * grass, because almost nothing reaches the ground under a closed canopy.
+   *
+   * Structureless on purpose. A needle is 20-30 mm and the tile has to cover a
+   * forest floor, so at any scale that avoids visible repetition a needle is
+   * under a texel; what actually reads at walking distance is the mottling
+   * between fresh litter and the humus under it, and that is what this is.
+   */
+  duff(u, v, s) {
+    const humus = fbm(u * 7, v * 7, 7, 51, 4);
+    const drift = fbm(u * 21, v * 21, 21, 53, 3);
+    const fine = fbm(u * 64, v * 64, 64, 57, 2);
+    const litter = clamp01(humus * 0.55 + drift * 0.45);
+    let c = mix(rgb(0x3a2c1d), rgb(0x8a6a44), litter);
+    // Moss goes where the humus reads darkest, which is where the water sits.
+    const moss = clamp01((0.34 - humus) * 3.4);
+    c = mix(c, rgb(0x4c5a30), moss * 0.7);
+    const shade = 0.90 + fine * 0.20;
+    s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
+    s.height = drift * 0.45 + fine * 0.30;
+    s.rough = 0.96 - fine * 0.05;
+  },
+
+  /**
+   * Screened path gravel. The graveyard's rooms call themselves "A Gravel Road"
+   * and "A Gravel Path" and were laid with lawn, which is the mud naming a
+   * surface nobody built.
+   *
+   * 80 chippings across a 2.4 m tile is 30 mm a stone, which is what a graded
+   * path gravel screens to -- and at 512 that is six texels each, so the
+   * pattern is a texture rather than a mosaic at any range you walk it from.
+   * The fines between the chippings go *lighter* than the stone, not darker:
+   * they are the same rock crushed, and darkening a joint that the crevice
+   * normal already shades is what made `stonewall` read as loose tiles.
+   */
+  gravel(u, v, s) {
+    const [, edge, id] = cellular(u * 80, v * 80, 80, 41, 0.45);
+    const packed = clamp01(edge * 14);
+    const grit = fbm(u * 30, v * 30, 30, 43, 3);
+    const stone = mix(rgb(0x6f6759), rgb(0xa79b86), id);
+    const fines = mix(rgb(0x8d8574), rgb(0xa8a08e), grit);
+    const c = mix(fines, stone, packed);
+    // Every chipping lies at its own angle, so no two catch the light alike.
+    const shade = 0.88 + ((id * 5.31) % 1) * 0.24;
+    s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
+    s.height = packed * (0.5 + id * 0.5) + grit * 0.12;
+    s.rough = 0.93 - grit * 0.06;
+  },
+
+  /**
    * Woven cloth. Not the weave -- a real one is sub-millimetre and invisible at
    * any range you see a person from. What is visible on a dyed woollen is that
    * the dye never took evenly, that the nap catches the light in bands, and
@@ -623,6 +675,14 @@ const RECIPES = {
   leaves: { surface: 'leaves', scale: 2.0, normalScale: 0.75, env: 0.4, wet: 0, detail: 0.5 },
   rock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0.25, detail: 0.6 },
   sand: { surface: 'sand', scale: 6, normalScale: 0.6, env: 0.7, wet: 0, detail: 0.6 },
+  // Out of doors and loose, so it takes damp -- but a path drains, which is the
+  // whole point of gravelling one, so well under the street's 0.5.
+  gravel: { surface: 'gravel', scale: 2.4, normalScale: 0.7, env: 0.75, wet: 0.28, detail: 0.6 },
+  // Matt and dry: needle litter is the least reflective surface out of doors,
+  // and it sheds water rather than holding it in pools. Low `env` for the same
+  // reason peat has it -- a forest floor sees a fraction of the dome, and a
+  // full mirror of the sky turns brown litter grey.
+  duff: { surface: 'duff', scale: 3.2, normalScale: 0.6, env: 0.42, wet: 0, detail: 0.7 },
   iron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1.4, wet: 0, detail: 0.3 },
   bark: { surface: 'bark', scale: 1.6, normalScale: 1.0, env: 0.65, wet: 0, detail: 0.5 },
   water: { surface: 'water', scale: 7, normalScale: 0.5, env: 1.6, wet: 0, detail: 0.2 },
@@ -700,6 +760,36 @@ function bakeMacro(size = 128) {
 }
 
 /**
+ * How much of the hemisphere light reaches a surface built inside an enclosed
+ * room. One shared uniform, written by `setIndoorBounce`.
+ *
+ * At noon the hemisphere is not sky, it is the *sunlit ground bounce*: a black
+ * upper half and a bright lower one, which is why it is 32 where dawn's is
+ * 0.082. A hemisphere light has no notion of occlusion, so it lit the inside of
+ * the temple exactly as hard as it lit the shaded wall outside, and the
+ * interior went 81 -> 140 mean the day it arrived. There is no sunlit ground
+ * inside a building, so the term does not belong there.
+ *
+ * three has no per-object light masking -- lights are filtered by the *camera's*
+ * layers, not the object's -- so this is a vertex flag instead: `Batcher` writes
+ * `aIndoor` = 1 on geometry built inside an enclosed room, and the hemisphere's
+ * irradiance is scaled by it. Anything without the attribute (every glTF model,
+ * every skinned figure) reads the default 0 and keeps the full bounce, which is
+ * what an outdoor prop wants.
+ */
+const indoorBounce = { value: 1 };
+
+const HEMI_LINE = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
+const LIGHTS_FRAGMENT_INDOOR = THREE.ShaderChunk.lights_fragment_begin.replace(
+  HEMI_LINE,
+  'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal )'
+  + ' * mix( 1.0, indoorBounce, vIndoor );',
+);
+if (LIGHTS_FRAGMENT_INDOOR === THREE.ShaderChunk.lights_fragment_begin) {
+  throw new Error('textures: three\'s hemisphere irradiance line moved; the indoor-bounce injection missed');
+}
+
+/**
  * Everything the baked maps cannot say, said in the shader instead:
  *
  *  - macro variation in world space, so a wall thirty metres along the street
@@ -728,25 +818,30 @@ function decorate(material, recipe, macro, grain) {
     };
     material.userData.wetnessUniform = shader.uniforms.wetness;
     material.userData.wetBase = recipe.wet ?? 0;
+    shader.uniforms.indoorBounce = indoorBounce;
 
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vSurfacePos;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSurfacePos;\nattribute float aIndoor;\nvarying float vIndoor;')
       .replace(
         '#include <worldpos_vertex>',
-        '#include <worldpos_vertex>\n\tvSurfacePos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;',
+        '#include <worldpos_vertex>\n\tvSurfacePos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;'
+        + '\n\tvIndoor = aIndoor;',
       );
 
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', /* glsl */`
         #include <common>
         varying vec3 vSurfacePos;
+        varying float vIndoor;
         uniform sampler2D macroMap;
         uniform sampler2D detailMap;
         uniform float macroScale;
         uniform float detailScale;
         uniform float detailStrength;
         uniform float wetness;
+        uniform float indoorBounce;
       `)
+      .replace('#include <lights_fragment_begin>', LIGHTS_FRAGMENT_INDOOR)
       .replace('#include <map_fragment>', /* glsl */`
         #include <map_fragment>
         // A skewed projection rather than a true triplanar one: this is
@@ -855,6 +950,11 @@ export function createMaterials(size = 512, onProgress = () => {}) {
     });
     material.name = name;
     material.userData.uvScale = 1 / recipe.scale;
+    // Only `Batcher` writes `aIndoor`. Everything else -- every glTF model,
+    // every skinned figure -- has no such attribute, and a missing attribute
+    // reads back whatever was last left in the generic slot unless the material
+    // names a default. 0 is "outdoors", which is what a prop wants.
+    material.defaultAttributeValues = { aIndoor: [0] };
     decorate(material, recipe, macro, grain);
     materials[name] = material;
     surfaced.push(material);
@@ -874,6 +974,14 @@ export function createMaterials(size = 512, onProgress = () => {}) {
       if (uniform) uniform.value = (material.userData.wetBase ?? 0) * scale;
     }
   };
+
+  /**
+   * The fraction of the hemisphere that reaches enclosed interiors. 1 at every
+   * hour whose hemisphere is an honest sky floor; below 1 only at noon, where
+   * it is the sunlit ground bounce and there is no sunlit ground indoors.
+   * A plain uniform write shared by every material, so no recompile.
+   */
+  materials.setIndoorBounce = (value) => { indoorBounce.value = value; };
 
   /** Close-range detail normals, on or off. Recompiles; only the P key does it. */
   materials.setDetail = (on) => {

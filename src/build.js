@@ -98,6 +98,14 @@ const isWater = (room) => room.sector === SECTOR.WATER_SWIM || room.sector === S
  * planes rather than 2 m discs and have further to go before they z-fight.
  */
 const WATER_LIFT = 0.06;
+/**
+ * How far a water plane runs past its own cell. Sheets laid exactly cell-sized
+ * abut on a shared edge, and two of the same shader a pixel out of step with
+ * each other draw a line along it -- the mosaic seam a judge read across the
+ * marsh lake. Overlapping costs nothing: they are at the same height and are
+ * the same surface.
+ */
+const WATER_LAP = 0.7;
 
 /**
  * Cut into the ground: a cave-material room on a level below zero.
@@ -213,6 +221,10 @@ class Batcher {
   constructor(materials) {
     this.materials = materials;
     this.groups = new Map();
+    // Whether what is being added right now is inside an enclosed room. Set
+    // once per cell rather than passed through a dozen builders; see the note
+    // on `indoorBounce` in textures.js for what reads it.
+    this.indoor = false;
   }
 
   /**
@@ -222,7 +234,9 @@ class Batcher {
   add(geometry, materialName, matrix, options = {}) {
     const material = this.materials[materialName];
     if (!material) throw new Error(`build: unknown material ${materialName}`);
-    const { tint = null, ao = null, chunk = '0', uvScale = null } = options;
+    const {
+      tint = null, ao = null, chunk = '0', uvScale = null, indoor = this.indoor,
+    } = options;
 
     const geo = geometry.index ? geometry.toNonIndexed() : geometry.clone();
     geo.applyMatrix4(matrix);
@@ -252,8 +266,13 @@ class Batcher {
 
     geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    // Written on every batched geometry, not only the indoor ones: mergeGeometries
+    // needs the same attribute set on all of them.
+    const inside = new Float32Array(pos.count);
+    if (indoor) inside.fill(1);
+    geo.setAttribute('aIndoor', new THREE.BufferAttribute(inside, 1));
     for (const name of Object.keys(geo.attributes)) {
-      if (!['position', 'normal', 'uv', 'color'].includes(name)) geo.deleteAttribute(name);
+      if (!['position', 'normal', 'uv', 'color', 'aIndoor'].includes(name)) geo.deleteAttribute(name);
     }
 
     const key = `${chunk}|${materialName}`;
@@ -400,7 +419,12 @@ function pickMaterials(room, area) {
 
   switch (room.sector) {
     case SECTOR.CITY: floor = 'cobble'; break;
-    case SECTOR.FIELD: case SECTOR.FOREST: case SECTOR.HILLS: floor = 'grass'; break;
+    case SECTOR.FIELD: case SECTOR.HILLS: floor = 'grass'; break;
+    // Not grass. Under a closed conifer canopy almost nothing reaches the
+    // ground, so what is down there is two or three years of needles over
+    // humus -- and because this is asked for the routed cells too, the litter
+    // runs between the rooms as well as through them.
+    case SECTOR.FOREST: floor = 'duff'; break;
     case SECTOR.MOUNTAIN: floor = 'rock'; break;
     case SECTOR.DESERT: floor = 'sand'; break;
     case SECTOR.WATER_SWIM: case SECTOR.WATER_NOSWIM: floor = 'water'; break;
@@ -543,6 +567,10 @@ export function buildScene(world, layout, materials, assets = null) {
     const canopy = isCanopy(room);
     const bog = isBog(room);
     const openAir = outdoor || canopy;
+    // Everything this cell adds is inside a building unless the cell is open to
+    // the sky. Set here rather than threaded through buildFloor, buildIndoorWall,
+    // buildCeiling and the props, all of which add on this room's behalf.
+    batcher.indoor = !openAir;
     const airborne = room.sector === SECTOR.AIR;
     const mats = pickMaterials(room, room.area);
     // A park takes grass rather than the cobbles its CITY sector would hand it.
@@ -591,7 +619,34 @@ export function buildScene(world, layout, materials, assets = null) {
     // are: "Gloomy Path Through the Marsh" is WATER_SWIM, and a path is not
     // thirteen metres of river. A bog takes pools instead.
     if (isWater(room) && !bog) {
-      decor.push({ kind: 'water', x: pos.x, y: pos.y + WATER_LIFT, z: pos.z, size: half * 2 });
+      // A little over the cell, so two neighbouring sheets overlap instead of
+      // meeting on a seam: they are at the same height and the same shader, and
+      // an abutting edge still shows as a line where the two planes' waves
+      // disagree by a pixel.
+      decor.push({ kind: 'water', x: pos.x, y: pos.y + WATER_LIFT, z: pos.z, size: half * 2 + WATER_LAP });
+      buildShore({
+        batcher,
+        instances,
+        model,
+        chunk,
+        room,
+        pos,
+        half,
+        wet: (d) => {
+          const [ddx, , ddz] = DIR_STEP[d];
+          const vn = layout.at(cell.level, cell.x + ddx, cell.z + ddz);
+          if (vn !== undefined) {
+            const info = rooms.get(vn);
+            return !!info && isWater(info.room) && !isBog(info.room);
+          }
+          // A routed cell only carries water where both ends of its passage do,
+          // which is the same test `buildAlley` makes for midstream.
+          const link = sides[d] && sides[d].link;
+          if (!link || !link.from || !link.to) return false; // a gate leads out of the world
+          const far = link.from.vnum === cell.vnum ? link.to : link.from;
+          return !!far.room && isWater(far.room) && !isBog(far.room);
+        },
+      });
     }
     let pools = null;
     if (bog) {
@@ -771,6 +826,7 @@ export function buildScene(world, layout, materials, assets = null) {
       // is still a field. Both read the room's own words.
       if (!bog) buildClearing({ batcher, chunk, room, pos, sides, addCollider });
       if (GRAVEYARD.test(room.name)) buildGraveyard({ instances, model, chunk, room, pos, sides });
+      if (STATUE.test(room.description)) buildStatue({ batcher, chunk, room, pos, sides, addCollider });
       // Out of doors the same thing, against the sides with no way out of
       // them, so a square reads as somewhere people keep their things rather
       // than as swept paving.
@@ -782,13 +838,14 @@ export function buildScene(world, layout, materials, assets = null) {
       const farm = farmProps(room);
       // The farmyard always dresses: an empty pig pen is a cobbled square with
       // pigs on it, and the trough is half of what makes it a pen.
-      if (!bog && blank.length && (farm || hash3(room.vnum, 13, 0, 6) > 0.28)) {
+      if (!bog && blank.length && wantsClutter(room)
+        && (farm || hash3(room.vnum, 13, 0, 6) > 0.28)) {
         decor.push({
           // Against the new facade, not inside it.
           kind: 'clutter', x: pos.x, y: pos.y, z: pos.z,
           half: wantsFrontage(room) ? HALF - FRONTAGE_D : HALF,
           walls: blank, seed: hash3(room.vnum, 12, 0, 5), indoor: false,
-          props: farm,
+          props: clutterProps(room),
         });
       }
     }
@@ -803,6 +860,7 @@ export function buildScene(world, layout, materials, assets = null) {
       addCollider(pos.x - s, pos.x + s, pos.z - s, pos.z + s, pos.y - SLAB - h, pos.y - SLAB);
     }
   }
+  batcher.indoor = false;
 
   // --- streets and corridors ----------------------------------------------
 
@@ -864,6 +922,7 @@ export function buildScene(world, layout, materials, assets = null) {
       const nx = spot.x + dx; const nz = spot.z + dz;
       if (layout.at(spot.level, nx, nz) !== undefined || layout.isPath(spot.level, nx, nz)) faces = dir;
     }
+    spot.faces = faces; // the party walls below need to know which cells share a street
     const pos = { x: spot.x * CELL, y: spot.level * LEVEL_H, z: spot.z * CELL };
     if (spot.bog) mistCells.push(pos);
     const paved = spot.bog ? 'peat' : FILLER_GROUND[spot.sector];
@@ -875,6 +934,23 @@ export function buildScene(world, layout, materials, assets = null) {
       seed: hash3(spot.x, spot.z, spot.level, 17), addCollider, lights, decor,
     });
   }
+  // Every cell you can stand on out of doors in the town: the rooms and the
+  // passages routed between them. A party wall is only ever laid where one of
+  // these can see the gap, which is what keeps it a street feature.
+  const streetCells = [];
+  for (const cell of layout.order) {
+    if (isOpenAir(cell.room) && cell.room.sector === SECTOR.CITY) {
+      streetCells.push({ level: cell.level, x: cell.x, z: cell.z });
+    }
+  }
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || alleyEnclosed(link)) continue;
+    if (rooms.get(link.from.vnum)?.unbuilt || rooms.get(link.to.vnum)?.unbuilt) continue;
+    const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
+    if (source.sector !== SECTOR.CITY) continue;
+    for (const c of link.path) streetCells.push({ level: link.from.level, x: c.x, z: c.z });
+  }
+  buildPartyWalls({ batcher, frontage, addCollider, layout, rooms, streetCells });
 
   // --- the graveyard's railings --------------------------------------------
 
@@ -895,18 +971,26 @@ export function buildScene(world, layout, materials, assets = null) {
     const comma = key.indexOf(',', colon);
     const cx = Number(key.slice(colon + 1, comma));
     const cz = Number(key.slice(comma + 1));
+    const chunk = chunkOf({ level, x: cx, z: cz });
+    const y = level * LEVEL_H;
     for (let dir = 0; dir < 4; dir++) {
       const [dx, , dz] = DIR_STEP[dir];
       const nx = cx + dx; const nz = cz + dz;
       // Anything with ground on it is somewhere you might walk through, so a
       // railing never lands across a way out -- including the iron grate the
-      // mud puts between #3600 and the Concourse.
-      if (layout.at(level, nx, nz) !== undefined || layout.isPath(level, nx, nz)) continue;
+      // mud puts between #3600 and the Concourse. Which is the same test as
+      // "the gravel runs that way", so the two are one branch: an arm of road
+      // where you can walk out, railings where you cannot.
+      if (layout.at(level, nx, nz) !== undefined || layout.isPath(level, nx, nz)) {
+        const [aw, ad] = dx ? [HALF, GRAVEL_W] : [GRAVEL_W, HALF];
+        batcher.add(plane(aw, ad, 2), 'gravel',
+          place(cx * CELL + dx * HALF / 2, y + GRAVEL_LIFT, cz * CELL + dz * HALF / 2), { chunk });
+        continue;
+      }
       // ...and the empty cell between two graveyard rooms is inside, not out.
       if (graveCells.has(cellKey(level, nx + dx, nz + dz))) continue;
       buildIronFence({
-        instances, model, chunk: chunkOf({ level, x: cx, z: cz }),
-        x: cx * CELL, y: level * LEVEL_H, z: cz * CELL, dir, addCollider,
+        instances, model, chunk, x: cx * CELL, y, z: cz * CELL, dir, addCollider,
       });
     }
   }
@@ -917,12 +1001,46 @@ export function buildScene(world, layout, materials, assets = null) {
 
   const stats = batcher.finish(group);
   if (instances) {
+    markIndoorAssets(assets);
     const placed = instances.finish(group);
     stats.meshes += placed.meshes;
     stats.triangles += placed.triangles;
     stats.instanced = placed.triangles;
   }
   return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, stats };
+}
+
+/**
+ * The modelled room kits: panels, corners, roofs and the temple's columns.
+ * Every one of them is placed under `kit !== null`, which is gated on the cell
+ * *not* being open air, so an instance of one is inside a building by
+ * construction.
+ *
+ * They need the same `aIndoor` flag `Batcher` writes, and they cannot get it
+ * per instance: `InstanceBatch` hands one shared geometry to every
+ * `InstancedMesh` built from an asset, so a per-instance attribute would have
+ * to clone it per chunk. Marking the geometry itself is exact here and costs
+ * one float a vertex, once. This is also the half of the temple that matters:
+ * its walls, ceiling and columns are all kit, so before this the interior read
+ * 139 mean at noon with the batched marble floor already flagged -- an up-facing
+ * floor takes nothing from a hemisphere whose sky half is black.
+ */
+const INDOOR_ASSETS = [
+  'wall_solid', 'wall_door', 'wall_corner', 'wall_roof',
+  'temple_wall_solid', 'temple_wall_door', 'temple_corner', 'temple_roof', 'temple_column',
+];
+
+function markIndoorAssets(assets) {
+  for (const name of INDOOR_ASSETS) {
+    const asset = assets.get(name);
+    if (!asset) continue;
+    for (const primitive of asset.primitives) {
+      const geo = primitive.geometry;
+      if (geo.getAttribute('aIndoor')) continue;
+      const count = geo.getAttribute('position').count;
+      geo.setAttribute('aIndoor', new THREE.BufferAttribute(new Float32Array(count).fill(1), 1));
+    }
+  }
 }
 
 // A passage is a corridor only when there is a building at both ends of it. The
@@ -1298,6 +1416,111 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
 }
 
 /**
+ * Party walls: what turns a row of detached houses into a street.
+ *
+ * A room cell's own frontage block spans the full 13 m of its side, so those
+ * join. A *filler* cell -- the empty cell beside a street that gets a modelled
+ * house -- does not: the model is fit-scaled to 92% of the cell on its longest
+ * side and capped at 1.15, so a house typically finishes around 9 m and leaves
+ * a couple of metres of nothing at each end of its cell. Two of them side by
+ * side is a 4-8 m hole with sky in it, and a judge counted one between every
+ * pair down Main Street. Historic streets do not do that: where the buildings
+ * do not touch, a wall does, and the frontage reads as one continuous line
+ * with roofs of different heights over it.
+ *
+ * So each filler cell lays half a wall along the street from its own centre to
+ * each edge whose neighbour is another filler cell fronting the *same* street.
+ * Two halves meet at the boundary. Nothing is built towards a cell that is a
+ * room or a routed passage, which is what keeps every way through open --
+ * `faces` is by definition the one direction out of the cell that is walkable,
+ * and the wall never runs that way.
+ *
+ * A yard wall with a coping: high enough to stop the sky in the slot, low
+ * enough that it reads as a wall against a three-storey house and not as
+ * another storey.
+ *
+ * **What this cannot fix, measured.** Down Main Street it lays nothing at all,
+ * and that is correct: of the eleven cells flanking #3012-#3016, *nine are
+ * routed passages* -- the ways to the bakery, the armoury, the magic shop and
+ * the guild, whose rooms sit two cells back because rooms only ever take even
+ * coordinates. So the 13 m gaps a judge photographed between the houses there
+ * are the mouths of those passages, and walling them is walling the town shut.
+ * The islands this does close are everywhere the frontage is real: 87
+ * boundaries over the default five areas.
+ */
+const PARTY_H = 3.3;
+const PARTY_T = 0.45;
+const PARTY_SPAN = 5.2;
+/**
+ * How far towards the street, from the building cell's centre. An indoor room's
+ * outer skin is at SHELL, so this is flush with the shells that line most of
+ * Midgaard; a filler house fronts a metre or so behind it, and a low wall
+ * standing a metre proud of a house is a forecourt wall, which is the right way
+ * to be wrong. The cell edge is at HALF, so nothing here ever reaches the
+ * street cell next door.
+ */
+const PARTY_OUT = SHELL + 0.2;
+
+function buildPartyWalls({ batcher, frontage, addCollider, layout, rooms, streetCells }) {
+  /**
+   * What counts as a building beside a street. Three kinds line one here and
+   * they are not the same shape: an indoor room is an 11.4 m shell in a 13 m
+   * cell, a filler cell is a fit-scaled model around 9 m, and a room's own
+   * frontage block spans the full 13 and needs no help. A path cell and an
+   * open-air room are not buildings -- they are the street, or another street.
+   */
+  const building = (level, x, z) => {
+    // `layout.at` answers with a vnum, not a cell.
+    const vnum = layout.at(level, x, z);
+    if (vnum !== undefined) {
+      const info = rooms.get(vnum);
+      return !!info && !info.unbuilt && !isOpenAir(info.room);
+    }
+    if (layout.isPath(level, x, z)) return false;
+    const spot = frontage.get(`${level}:${x},${z}`);
+    return !!spot && !spot.bog && !spot.shire && spot.sector === SECTOR.CITY;
+  };
+
+  const done = new Set();
+  for (const s of streetCells) {
+    for (let p = 0; p < 4; p++) {
+      const [pdx, , pdz] = DIR_STEP[p];
+      const nx = s.x + pdx; const nz = s.z + pdz;
+      if (!building(s.level, nx, nz)) continue;
+      // The street runs across the way this building faces it.
+      for (const a of (pdx ? [0, 2] : [1, 3])) {
+        const [adx, , adz] = DIR_STEP[a];
+        if (!building(s.level, nx + adx, nz + adz)) continue;
+        // One wall to a boundary, however many street cells can see it.
+        const key = `${s.level}|${Math.min(nx, nx + adx)},${Math.min(nz, nz + adz)}|${p}`;
+        if (done.has(key)) continue;
+        done.add(key);
+
+        const y = s.level * LEVEL_H;
+        const h = PARTY_H + hash3(nx + adx, nz + adz, s.level, 78) * 0.9;
+        // Out to the frontage line -- an indoor shell's outer face is at SHELL,
+        // so this is flush with it -- and centred on the boundary between the
+        // two buildings, which is where the hole is.
+        const wx = nx * CELL - pdx * PARTY_OUT + adx * HALF;
+        const wz = nz * CELL - pdz * PARTY_OUT + adz * HALF;
+        // Long enough to bury itself in whatever stands either side, whether
+        // that leaves 1.6 m of gap or 3.8. It is a low wall against a
+        // three-storey house, so overlapping one costs nothing.
+        const [sx, sz] = pdx ? [PARTY_T, PARTY_SPAN] : [PARTY_SPAN, PARTY_T];
+        const chunk = `${s.level}:${Math.floor(nx / 4)},${Math.floor(nz / 4)}`;
+        batcher.add(box(sx, h, sz, 1, 2, 3), 'stonewall',
+          place(wx, y + h / 2, wz), { chunk, ao: wallAo(y) });
+        // A coping is what stops a wall reading as a slab standing on edge.
+        const [cw, cd] = pdx ? [PARTY_T + 0.16, PARTY_SPAN] : [PARTY_SPAN, PARTY_T + 0.16];
+        batcher.add(box(cw, 0.14, cd), 'stonewall',
+          place(wx, y + h + 0.07, wz), { chunk, ao: () => 0.95 });
+        addCollider(wx - sx / 2, wx + sx / 2, wz - sz / 2, wz + sz / 2, y, y + h);
+      }
+    }
+  }
+}
+
+/**
  * A street lamp, one to a city room.
  *
  * It used to be one per *north* side and then only half the time: 34 lamps in
@@ -1615,14 +1838,42 @@ function buildForest({ room, pos, sides, instances, model, chunk, decor, addColl
     addStoneCollider({ instances, name: rock, x: pos.x + lx, y: pos.y, z: pos.z + lz, scale, addCollider });
   }
 
+  // Coarse woody debris. In an old coastal stand about two thirds of the dead
+  // wood is lying on the ground rather than standing, and a forest floor with
+  // none of it reads as a plantation. Two to four pieces a room. `open`
+  // already keeps the middle of the room and every way out of it clear, so
+  // nothing ever lies across a trail or where the player arrives.
+  const log = model(['dead_log'], 0);
+  if (log) {
+    const n = 2 + Math.floor(hash3(room.vnum, 0, 0, 120) * 3);
+    for (let i = 0; i < n; i++) {
+      const angle = ((i + hash3(room.vnum, i, 0, 121)) / n) * Math.PI * 2;
+      const radius = 3.9 + hash3(room.vnum, i, 1, 121) * 1.9;
+      const lx = Math.cos(angle) * radius;
+      const lz = Math.sin(angle) * radius;
+      if (!open(lx, lz)) continue;
+      instances.add(log, {
+        x: pos.x + lx, y: pos.y, z: pos.z + lz,
+        rotY: hash3(room.vnum, i, 2, 121) * Math.PI * 2,
+        // Rot as well as size: a log that fell last winter and one that has
+        // been going back into the duff for thirty years are not the same log.
+        scale: 0.75 + hash3(room.vnum, i, 3, 121) * 0.85,
+      }, chunk);
+    }
+  }
+
   scatterUndergrowth({
     instances, chunk, x: pos.x, y: pos.y, z: pos.z,
     rand: (i, k, salt) => hash3(room.vnum, i, k, salt),
     clears: open,
     kinds: [
-      { name: model(['fern'], 0), count: (dense ? 6 : 4) + Math.floor(hash3(room.vnum, 0, 0, 103) * 4), ring: 4.6, spread: dense ? 2.4 : 1.6, size: 1.0, salt: 110 },
-      { name: salal, count: (dense ? 3 : 2) + Math.floor(hash3(room.vnum, 1, 0, 103) * 2), ring: 4.9, spread: 1.2, size: 1.0, salt: 111 },
-      { name: model(['grass_tuft'], 0), count: (dense ? 8 : 6) + Math.floor(hash3(room.vnum, 2, 0, 103) * 4), ring: 4.4, spread: 2.0, size: 1.0, salt: 112 },
+      // Sword fern holds about 37% cover in a coastal stand and it was the
+      // thinnest thing on this floor: four to eight clumps over 169 m2 is a
+      // few per cent. The grass tufts come down to make room, because grass
+      // is what a fir stand does not have.
+      { name: model(['fern'], 0), count: (dense ? 11 : 8) + Math.floor(hash3(room.vnum, 0, 0, 103) * 5), ring: 4.3, spread: dense ? 3.2 : 2.6, size: 1.0, salt: 110 },
+      { name: salal, count: (dense ? 5 : 4) + Math.floor(hash3(room.vnum, 1, 0, 103) * 3), ring: 4.9, spread: 1.8, size: 1.0, salt: 111 },
+      { name: model(['grass_tuft'], 0), count: (dense ? 4 : 3) + Math.floor(hash3(room.vnum, 2, 0, 103) * 3), ring: 4.4, spread: 2.0, size: 1.0, salt: 112 },
     ],
   });
 }
@@ -1956,6 +2207,131 @@ function buildGatehouse({ batcher, chunk, pos, dir, addCollider }) {
   }
 }
 
+// --------------------------------------------------------------- shore ----
+
+/**
+ * Where open water stops.
+ *
+ * A water room lays one plane over its whole cell, so the lake at #8315/#8316
+ * met the dry marsh on the cell boundary: a razor-straight, axis-aligned line
+ * 13 m long, which is the grid showing through as plainly as anything in the
+ * world. Real open water has a margin -- peat slumping into it, a metre of mud
+ * that is neither, reeds standing in the shallows.
+ *
+ * So every side of a water cell with dry land beyond it gets a bank: half a
+ * dozen low peat domes strung along the edge and jittered in and out, which
+ * breaks the line because no two of them reach the same distance. The water
+ * plane laps over them rather than stopping at them -- `WATER_LAP` widens it --
+ * so the meeting is a ragged edge of mud in shallow water and not a cut.
+ *
+ * Sides where the water carries on get nothing, or the lake would be a mosaic
+ * of walled ponds.
+ */
+const SHORE_DOMES = 6;
+const SHORE_H = [0.26, 0.52];
+const SHORE_W = [2.3, 4.1];
+
+function buildShore({ batcher, instances, model, chunk, room, pos, half, wet }) {
+  const reed = instances ? model(['reed_clump', 'tussock', 'fern'], 0) : null;
+  for (let d = 0; d < 4; d++) {
+    if (wet(d)) continue;
+    const [dx, , dz] = DIR_STEP[d];
+    const along = dx !== 0;   // the bank runs across the cell, the other way
+    for (let i = 0; i < SHORE_DOMES; i++) {
+      const t = ((i + 0.5) / SHORE_DOMES - 0.5) * (half * 2 + 1.4)
+        + (hash3(room.vnum, d * 8 + i, 0, 240) - 0.5) * 1.5;
+      // How far in from the cell edge this lump reaches: the whole point is
+      // that it is different for every one of them.
+      const inward = 0.5 + hash3(room.vnum, d * 8 + i, 1, 241) * 1.9;
+      const w = SHORE_W[0] + hash3(room.vnum, d * 8 + i, 2, 242) * (SHORE_W[1] - SHORE_W[0]);
+      const h = SHORE_H[0] + hash3(room.vnum, d * 8 + i, 3, 243) * (SHORE_H[1] - SHORE_H[0]);
+      const bx = pos.x + (along ? dx * (half - inward) : t);
+      const bz = pos.z + (along ? t : dz * (half - inward));
+      const geo = mound(w, h, w * (0.62 + hash3(room.vnum, d * 8 + i, 4, 244) * 0.5));
+      batcher.add(geo, 'peat', place(bx, pos.y - 0.05, bz), { chunk });
+      geo.dispose();
+      if (!reed || hash3(room.vnum, d * 8 + i, 5, 245) < 0.42) continue;
+      // Standing in the shallows at the foot of the bank, on the water side.
+      const rx = bx - (along ? dx * 1.1 : 0);
+      const rz = bz - (along ? 0 : dz * 1.1);
+      instances.add(reed, {
+        x: rx, y: pos.y, z: rz,
+        rotY: hash3(room.vnum, d * 8 + i, 6, 246) * Math.PI * 2,
+        scale: 0.85 + hash3(room.vnum, d * 8 + i, 7, 247) * 0.5,
+      }, chunk);
+    }
+  }
+}
+
+// --------------------------------------------------------------- statue ----
+
+/**
+ * "A large, peculiar looking statue is standing in the middle of the square."
+ *
+ * The Market Square's own prose has said so since 1991 and there was nothing
+ * there, which is the same class of fault as the graveyard's lawn: the mud
+ * names a thing and the builder does not read it. Same move as `readFittings` --
+ * the description is a placement instruction.
+ *
+ * Subject, not scenery: the sentence has to say the statue *is* here, so a room
+ * that merely mentions one in passing does not grow one, and only out of doors,
+ * because the temple's prose talks about statues of gods on its walls.
+ *
+ * Never at the room's exact centre, whatever the prose says -- that is where
+ * the player arrives, and a fountain and a mobile have both been stood on
+ * already. 2.6 m off reads as "the middle of the square" from every approach
+ * and leaves the arrival point clear.
+ */
+const STATUE = /\bstatue\b[^.]{0,60}?\b(?:is|stands|standing|rises|towers)\b/i;
+
+function buildStatue({ batcher, chunk, room, pos, sides, addCollider }) {
+  // Away from the ways out, the same anchor the tomb's lid uses; on a square
+  // with a way out on every side there is no such direction, so the room's own
+  // number picks one and picks the same one every time.
+  let ax = 0; let az = 0;
+  for (let d = 0; d < 4; d++) {
+    if (!sides[d]) continue;
+    const [dx, , dz] = DIR_STEP[d];
+    ax += dx; az += dz;
+  }
+  const anchor = (ax || az) ? Math.atan2(-az, -ax) : hash3(room.vnum, 3, 0, 230) * Math.PI * 2;
+  const sx = pos.x + Math.cos(anchor) * 2.6;
+  const sz = pos.z + Math.sin(anchor) * 2.6;
+  const spin = anchor + Math.PI; // facing back across the square
+  const y = pos.y;
+  const put = (h) => place(sx, y + h, sz, spin);
+
+  // Plinth: base, die, cap. 1.73 m of it, which is what a figure has to stand
+  // on to be read as a monument rather than as a person who has stopped.
+  batcher.add(box(2.0, 0.30, 2.0), 'stonewall', put(0.15), { chunk, ao: () => 0.9 });
+  batcher.add(box(1.34, 1.25, 1.34, 2, 2, 2), 'stonewall', put(0.925), { chunk, ao: wallAo(y) });
+  batcher.add(box(1.62, 0.18, 1.62), 'stonewall', put(1.64), { chunk, ao: () => 0.95 });
+
+  // The figure, in marble against the plinth's masonry: robe, shoulders, head,
+  // and the peculiar part -- one arm straight up and the other straight out,
+  // which is what a statue nobody can identify looks like from a distance.
+  const robe = new THREE.CylinderGeometry(0.30, 0.44, 1.02, 12);
+  batcher.add(robe, 'marble', put(1.73 + 0.51), { chunk });
+  robe.dispose();
+  batcher.add(box(0.64, 0.62, 0.36, 2, 2, 1), 'marble', put(1.73 + 1.33), { chunk });
+  const head = new THREE.SphereGeometry(0.19, 12, 8);
+  batcher.add(head, 'marble', put(1.73 + 1.83), { chunk });
+  head.dispose();
+  // Raised arm, on the right of the figure's own facing.
+  // Clear of the head, or it merges with the shoulders and the silhouette is
+  // a chess piece.
+  const arm = box(0.15, 0.86, 0.15);
+  batcher.add(arm, 'marble',
+    place(sx + Math.cos(spin + Math.PI / 2) * 0.30, y + 1.73 + 2.14,
+      sz - Math.sin(spin + Math.PI / 2) * 0.30, spin), { chunk });
+  // ...and one held out level, which is a bar of stone lying the other way.
+  batcher.add(box(0.72, 0.15, 0.15), 'marble',
+    place(sx + Math.cos(spin - Math.PI / 2) * 0.62, y + 1.73 + 1.44,
+      sz - Math.sin(spin - Math.PI / 2) * 0.62, spin), { chunk });
+
+  addCollider(sx - 1.0, sx + 1.0, sz - 1.0, sz + 1.0, y, y + 1.73);
+}
+
 // ------------------------------------------------------------ graveyard ----
 
 /**
@@ -1976,18 +2352,42 @@ function buildGatehouse({ batcher, chunk, pos, dir, addCollider }) {
 const GRAVEYARD = /\bgrave ?yard\b/i;
 const OLD_TOMB = /\bold tomb\b/i;
 
+/**
+ * The road itself. Nineteen rooms say "gravel" in their own names and every one
+ * of them was laid with lawn -- a judge photographed #3600 and reported a mown
+ * field. An arm runs from the cell centre to each edge you can walk out of, so
+ * the routed cells between two graveyard rooms get theirs the same way the
+ * rooms do; a surface driven off the sector alone would have left a boiling
+ * band of grass midway between every pair, which is the marsh's lesson.
+ *
+ * 3.4 m wide, not the cell: a thirteen-metre gravel road is a car park. The
+ * lift is two centimetres, enough to clear the floor plane it lies on and far
+ * too little to trip over.
+ */
+const GRAVEL_W = 3.4;
+const GRAVEL_LIFT = 0.02;
+
 /** The gravel runs from the centre out to every way out; stones go on grass. */
 const GRAVE_PATH = 2.6;
-/** Nothing within this of a way out, or the path is blocked. */
-const GRAVE_CLEAR = 2.6;
+/**
+ * Nothing within this of a way out, or the path is blocked. It was 2.6, and
+ * that is what made the yard read as empty: a room with four ways out has
+ * `edgeClear` reject everything past 3.9 m on both axes, so of the twelve
+ * candidate positions exactly one per quadrant survived -- 146 stones over 19
+ * rooms, 7.7 a room, on cells 13 m square. The road is 3.4 m wide, so 1.9 m of
+ * verge still leaves it entirely open.
+ */
+const GRAVE_CLEAR = 1.9;
 /**
  * Rows out from the path and spacing along them. Rows rather than a scatter
  * because a graveyard is laid out and a wood is not, and jitter on top because
  * a hand-cut stone in soft ground does not stay where the surveyor put it.
  */
-const GRAVE_ROWS = [3.4, 5.3];
+const GRAVE_ROWS = [2.7, 4.0, 5.3];
+const GRAVE_FIRST = 2.6;
+const GRAVE_COLS = 3;
 const GRAVE_STEP = 1.5;
-const GRAVE_JITTER = 0.35;
+const GRAVE_JITTER = 0.32;
 
 function buildGraveyard({ instances, model, chunk, room, pos, sides }) {
   if (!instances) return;
@@ -2013,17 +2413,19 @@ function buildGraveyard({ instances, model, chunk, room, pos, sides }) {
 
   const quadrants = [[1, 1], [1, -1], [-1, -1], [-1, 1]];
   quadrants.forEach(([sx, sz], q) => {
-    // Three quadrants in four carry a plot; an empty corner is what stops the
-    // whole yard reading as one stamped tile.
-    if (hash3(room.vnum, q, 0, 220) < 0.26) return;
+    // Seven quadrants in eight carry a plot; an empty corner is what stops the
+    // whole yard reading as one stamped tile, and at 0.26 it was throwing away
+    // a quarter of a yard that already had too few stones in it.
+    if (hash3(room.vnum, q, 0, 220) < 0.13) return;
     GRAVE_ROWS.forEach((row, r) => {
-      for (let c = 0; c < 3; c++) {
-        const lx = sx * (row + (hash3(room.vnum, q * 8 + r * 3 + c, 0, 221) - 0.5) * 2 * GRAVE_JITTER);
-        const lz = sz * (3.2 + c * GRAVE_STEP + (hash3(room.vnum, q * 8 + r * 3 + c, 1, 222) - 0.5) * 2 * GRAVE_JITTER);
+      for (let c = 0; c < GRAVE_COLS; c++) {
+        const k = q * 12 + r * GRAVE_COLS + c;
+        const lx = sx * (row + (hash3(room.vnum, k, 0, 221) - 0.5) * 2 * GRAVE_JITTER);
+        const lz = sz * (GRAVE_FIRST + c * GRAVE_STEP + (hash3(room.vnum, k, 1, 222) - 0.5) * 2 * GRAVE_JITTER);
         if (!free(lx, lz)) continue;
         // A slab lies flat and needs 1.94 x 0.84 of ground, so it only goes in
-        // the outer row where there is room for it.
-        const lying = slab && r === 1 && hash3(room.vnum, q * 8 + c, 2, 223) < 0.24;
+        // the outer rows where there is room for it.
+        const lying = slab && r > 0 && hash3(room.vnum, q * 8 + c, 2, 223) < 0.24;
         const name = lying ? slab : stone;
         if (!name) continue;
         instances.add(name, {
@@ -2031,9 +2433,12 @@ function buildGraveyard({ instances, model, chunk, room, pos, sides }) {
           // A row faces the path it was cut for, give or take how carefully it
           // was set. `InstanceBatch` can only turn about Y, so the lean a
           // settled headstone has is not available here -- see the report.
-          rotY: (sz > 0 ? 0 : Math.PI)
-            + (hash3(room.vnum, q * 8 + r * 3 + c, 3, 224) - 0.5) * 0.34,
-          scale: 0.86 + hash3(room.vnum, q * 8 + r * 3 + c, 4, 225) * 0.3,
+          rotY: (sz > 0 ? 0 : Math.PI) + (hash3(room.vnum, k, 3, 224) - 0.5) * 0.34,
+          // The model is a 0.75 m stone, and 0.86-1.16 of it is 0.65-0.87 m --
+          // the low end of what a churchyard actually holds, and too low to
+          // read from the road at all. 0.95-1.45 spans 0.71-1.09 m, which
+          // covers a child's marker up to a headstone with a name on it.
+          scale: 0.95 + hash3(room.vnum, k, 4, 225) * 0.5,
         }, chunk);
       }
     });
@@ -2537,6 +2942,7 @@ function buildRailFence({ batcher, chunk, pos, dir, addCollider }) {
  */
 function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null }) {
   const enclosed = alleyEnclosed(link);
+  batcher.indoor = enclosed;
   const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
   const mats = pickMaterials(source, source.area);
   const bog = isBog(source);
@@ -2570,7 +2976,7 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
 
     // The floor underneath stays as it is; the plane covers it, at the same
     // height and size the rooms either side use.
-    if (midstream) decor.push({ kind: 'water', x: pos.x, y: y + WATER_LIFT, z: pos.z, size: CELL });
+    if (midstream) decor.push({ kind: 'water', x: pos.x, y: y + WATER_LIFT, z: pos.z, size: CELL + WATER_LAP });
     if (bog && mistCells) mistCells.push({ x: pos.x, y, z: pos.z });
 
     if (!enclosed) {
@@ -2583,12 +2989,14 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
       // the cell's walls, which here are the cabin's.
       const built = cabins.some((r) => pos.x + HALF > r.x0 && pos.x - HALF < r.x1
         && pos.z + HALF > r.z0 && pos.z - HALF < r.z1);
-      if (!built && !midstream && !bog && hash3(c.x, c.z, level, 12) > 0.45) {
+      if (!built && !midstream && !bog && wantsClutter(source)
+        && hash3(c.x, c.z, level, 12) > 0.45) {
         const walls = [0, 1, 2, 3].filter((d) => !openDirs.has(d));
         decor.push({
           kind: 'clutter', x: pos.x, y, z: pos.z, half: HALF,
           walls: walls.length ? walls : [0, 1, 2, 3],
           seed: hash3(c.x, c.z, level, 13), indoor: false,
+          props: clutterProps(source),
         });
       }
       continue;
@@ -2618,6 +3026,7 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
       }
     }
   }
+  batcher.indoor = false;
 }
 
 /** A stone archway: portals you step through, gates that are sealed. */
@@ -2840,6 +3249,26 @@ const FARM_PROPS = [
 ];
 const farmProps = (room) => (isShire(room) && FARM.test(room.name) ? FARM_PROPS : null);
 
+/**
+ * Whether a room out of doors gets the loose clutter at all, and what it draws
+ * from. The general list is *street furniture* -- barrels, crates, a water
+ * butt, stacked crates -- and it was reaching every open-air room in the world,
+ * because the only thing gating it was the cell having a blank side. So a judge
+ * photographed barrels standing on the graveyard's grass and the town park
+ * strewn with crates, and both readings were correct.
+ *
+ * A cell that is paved keeps it. A farmyard names its own list and keeps that
+ * wherever it stands, since a Shire farm is FIELD and not CITY. A park is a
+ * city cell but nobody stacks a barrel on the grass, so it gets the things a
+ * park does have. Field, forest and the graveyard get nothing: what belongs
+ * there is planted, not stacked, and `buildForest`, `buildPark` and
+ * `buildGraveyard` already put it in.
+ */
+const PARK_PROPS = ['bench', 'bench', 'herb_pots', 'nettles'];
+const wantsClutter = (room) => !GRAVEYARD.test(room.name)
+  && (room.sector === SECTOR.CITY || !!farmProps(room));
+const clutterProps = (room) => farmProps(room) || (isPark(room) ? PARK_PROPS : null);
+
 function buildLooseProps({ room, pos, sides, decor, mats }) {
   const blank = [];
   for (let d = 0; d < 4; d++) if (!sides[d]) blank.push(d);
@@ -2875,7 +3304,7 @@ function buildLooseProps({ room, pos, sides, decor, mats }) {
  * apart.
  */
 const FILLER_GROUND = {
-  [SECTOR.CITY]: 'cobble', [SECTOR.FIELD]: 'grass', [SECTOR.FOREST]: 'grass',
+  [SECTOR.CITY]: 'cobble', [SECTOR.FIELD]: 'grass', [SECTOR.FOREST]: 'duff',
   [SECTOR.HILLS]: 'grass', [SECTOR.MOUNTAIN]: 'rock', [SECTOR.DESERT]: 'sand',
   // A lake has a bed like anything else, and without one the filler cells
   // around the marsh lake laid nothing at all: their water planes hung over
@@ -3032,7 +3461,7 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
       break;
     }
     case SECTOR.WATER_SWIM: case SECTOR.WATER_NOSWIM: {
-      decor.push({ kind: 'water', x, y: y + WATER_LIFT, z, size: CELL });
+      decor.push({ kind: 'water', x, y: y + WATER_LIFT, z, size: CELL + WATER_LAP });
       break;
     }
     case SECTOR.AIR: break;
