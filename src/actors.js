@@ -1587,11 +1587,14 @@ export function populate(world, layout, built, options = {}) {
 
   for (const spec of built.doors) {
     const [ux, uz] = [Math.cos(spec.rotY), -Math.sin(spec.rotY)];
-    const leafWidth = spec.width / 2 - 0.015;
+    // `single` is a one-leaf opening: the log cabin's doorway is 1.00 m of
+    // clear width and a one-room cabin does not have double doors, so the leaf
+    // spans the whole of it instead of being half of a pair.
+    const leafWidth = spec.single ? spec.width - 0.03 : spec.width / 2 - 0.015;
     const pivots = [];
     // A circle cannot be split down the middle and still be a circle, so a
-    // round door is a single leaf hung on one jamb.
-    for (const side of (spec.round ? [-1] : [-1, 1])) {
+    // round door is a single leaf hung on one jamb -- and so is `single`.
+    for (const side of (spec.round || spec.single ? [-1] : [-1, 1])) {
       const pivot = new THREE.Group();
       pivot.position.set(spec.x + side * ux * spec.width / 2, spec.y, spec.z + side * uz * spec.width / 2);
       pivot.rotation.y = spec.rotY;
