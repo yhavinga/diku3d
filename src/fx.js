@@ -822,6 +822,8 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
    * waits in the queue for its beat.
    */
   function onEvent(event) {
+    // A spell's blow is spellfx.js's to draw: no swing, no spark, no clang.
+    if (event.spell) return;
     const delay = event.delay || 0;
     if (['hit', 'miss', 'parry', 'dodge'].includes(event.kind)) {
       if (event.from) {

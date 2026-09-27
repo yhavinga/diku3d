@@ -167,6 +167,32 @@ const CSS = `
 #g-level .title { font-size: 19px; color: var(--ink); opacity: 0.86; }
 #g-level .gains { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em;
   color: var(--gold); opacity: 0.8; }
+/* ------------------------------------------------------------- spells -- */
+/* The spells you know, along the bottom: the one you would cast lifted and
+   edged in gold. A slot darkens from the top while you are still gathering
+   yourself (the spell's beats), and dims when you have not the mana. */
+#g-spells { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  padding: 7px 9px 8px; display: none; }
+#game-ui.caster #g-spells { display: block; }
+#game-ui.caster #g-hint { bottom: 104px; }
+#g-spells .keys { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--gold); opacity: 0.6; margin: 0 2px 6px; display: flex; justify-content: space-between; gap: 18px; }
+#g-spells .slots { display: flex; gap: 5px; }
+#g-spells .s { position: relative; width: 89px; height: 50px; padding: 6px 7px 5px; box-sizing: border-box;
+  background: rgba(224,189,119,0.05); border: 1px solid rgba(224,189,119,0.14); border-radius: 2px;
+  display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;
+  transition: transform 140ms ease, border-color 140ms ease, opacity 200ms ease; }
+#g-spells .s::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--fam); opacity: 0.85; }
+#g-spells .s.sel { border-color: rgba(224,189,119,0.75); transform: translateY(-3px);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35), inset 0 0 18px rgba(224,189,119,0.08); }
+#g-spells .s.poor { opacity: 0.42; }
+#g-spells .s .n { font-size: 12.5px; line-height: 1.12; color: var(--ink); }
+#g-spells .s .m { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em; color: var(--dim);
+  display: flex; justify-content: space-between; }
+#g-spells .s .cd { position: absolute; left: 0; right: 0; top: 0; height: 0; background: rgba(8,6,4,0.62); }
+#g-spells .s.fire-flash { animation: g-cast 420ms ease-out; }
+@keyframes g-cast { 0% { box-shadow: 0 0 0 0 var(--fam); } 30% { box-shadow: 0 0 22px 2px var(--fam); } 100% { box-shadow: 0 0 0 0 rgba(0,0,0,0); } }
+
 @keyframes g-level {
   0% { opacity: 0; visibility: visible; }
   9% { opacity: 1; }
@@ -290,6 +316,14 @@ export function createGameUi(game) {
   ending.id = 'g-ending';
   root.append(hint, levelUp, ending);
 
+  // -- spells ---------------------------------------------------------------
+  const spellBar = el('div', 'panel');
+  spellBar.id = 'g-spells';
+  spellBar.append(el('div', 'keys', '<span>z · x — choose</span><span>c · right-click — cast</span>'));
+  const spellSlots = el('div', 'slots');
+  spellBar.appendChild(spellSlots);
+  root.appendChild(spellBar);
+
   document.body.appendChild(root);
 
   // -- log ------------------------------------------------------------------
@@ -351,7 +385,10 @@ export function createGameUi(game) {
   // click the sheet, and releasing the mouse is what puts the catcher up.
   const lift = (up) => { root.style.zIndex = up ? '21' : '12'; };
 
-  function closeSheet() { sheetMode = null; sheet.classList.remove('on'); lift(false); }
+  /** A scroll of identify waiting for something to be read at. */
+  let reading = null;
+
+  function closeSheet() { reading = null; sheetMode = null; sheet.classList.remove('on'); lift(false); }
 
   function openSheet(mode) {
     if (sheetMode === mode) return closeSheet();
@@ -396,18 +433,41 @@ export function createGameUi(game) {
       s.equipment.forEach((obj, i) => {
         if (!obj) return;
         worn += 1;
+        const verb = game.magic && game.magic.itemVerb(obj);
+        if (verb === 'zap' || verb === 'brandish') {
+          // A wand or a staff in hand is for using; putting it away is the second line.
+          wornList.append(row(obj.name, `${WEAR_NAME[i]} · ${verb}`, { onClick: () => game.useItem(obj) }));
+          wornList.append(row('put it away', 'remove', { cls: 'dim', onClick: () => game.remove(i) }));
+          return;
+        }
         wornList.append(row(obj.name, `${WEAR_NAME[i]} · remove`, { onClick: () => game.remove(i) }));
       });
       if (!worn) wornList.append(row('nothing but your own skin', '', { cls: 'dim' }));
       left.append(wornList);
 
       const right = el('div');
-      right.append(el('h4', null, `carried — ${s.carryWeight}/${s.carryMax} lb`));
+      right.append(el('h4', null, reading ? `recite ${reading.name} at what?` : `carried — ${s.carryWeight}/${s.carryMax} lb`));
       const bagList = el('ul');
       if (!s.inventory.length) bagList.append(row('your hands are empty', '', { cls: 'dim' }));
       for (const obj of s.inventory.slice()) {
-        bagList.append(row(obj.name, `${obj.weight} lb · wear`, { onClick: () => game.wear(obj) }));
+        if (reading) {
+          if (obj === reading) continue;
+          bagList.append(row(obj.name, 'this', { onClick: () => { const scroll = reading; reading = null; game.useItem(scroll, { targetObj: obj }); } }));
+          continue;
+        }
+        // Potions, pills and scrolls are used from the pack; a wand or a staff
+        // has to be held first (do_zap and do_brandish read WEAR_HOLD).
+        const verb = game.magic && game.magic.itemVerb(obj);
+        if (verb === 'quaff' || verb === 'eat' || verb === 'recite') {
+          const aimed = verb === 'recite' && game.magic.wantsObject(obj);
+          bagList.append(row(obj.name, `${obj.weight} lb · ${verb}${aimed ? '…' : ''}`, {
+            onClick: () => { if (aimed) reading = obj; else game.useItem(obj); },
+          }));
+          continue;
+        }
+        bagList.append(row(obj.name, `${obj.weight} lb · ${verb ? 'hold' : 'wear'}`, { onClick: () => game.wear(obj) }));
       }
+      if (reading) bagList.append(row('never mind', '', { cls: 'dim', onClick: () => { reading = null; } }));
       right.append(bagList);
 
       const pile = game.here();
@@ -599,6 +659,9 @@ export function createGameUi(game) {
         case 'say':
           say(event.text, 'faint');
           break;
+        case 'magic':
+          say(event.text, event.tone || 'faint');
+          break;
         case 'recall':
           say(event.text, 'gate');
           break;
@@ -624,10 +687,131 @@ export function createGameUi(game) {
     }
   }
 
+  // -- the spell bar ---------------------------------------------------------
+  // What `game.spells()` says you can cast, a window of seven at a time round
+  // the one chosen. Z and X (or the wheel) choose, C (or the right button)
+  // casts -- whoever you are fighting or looking at for an attack, yourself
+  // for the rest.
+  const FAMILY_COLOUR = {
+    missile: '#a58cff', prism: '#e8a0ff', fireball: '#e87a3a', flame: '#e87a3a', flamestrike: '#e87a3a',
+    lightning: '#9fc4ff', shock: '#9fc4ff', storm: '#9fc4ff', frost: '#9fd8ff', acid: '#9ad84a',
+    heal: '#f0cf8a', refresh: '#9fe8c8', ward: '#9fb8ff', bless: '#f0d27a', sanctuary: '#f4f4f4',
+    curse: '#9a6ad0', hex: '#9a6ad0', weaken: '#8a7aa8', blind: '#8a7aa8', harm: '#d0503a', drain: '#d0503a',
+    poison: '#8ac850', faerie: '#f08ac8', holy: '#f4e2a8', dispel: '#8fe8f0', quake: '#c8a878',
+  };
+  let spellList = [];
+  let spellSel = 0;
+  let spellSig = '';
+  const slotNodes = [];
+
+  /**
+   * The bar lives in the gap between the room's description (left, up to
+   * 40vw) and the vitals (right, 354 px), centred in it, with as many slots
+   * as fit -- three on a small window, seven on a wide one.
+   */
+  function place() {
+    const w = window.innerWidth;
+    const from = 26 + 0.4 * w + 14;
+    const to = w - 354 - 14;
+    spellBar.style.left = `${(from + to) / 2}px`;
+    return Math.max(3, Math.min(7, Math.floor((to - from - 18 + 5) / 94)));
+  }
+
+  function drawSpells() {
+    spellSlots.textContent = '';
+    slotNodes.length = 0;
+    const WINDOW = place();
+    const first = Math.max(0, Math.min(spellSel - Math.floor(WINDOW / 2), spellList.length - WINDOW));
+    for (let i = first; i < Math.min(spellList.length, first + WINDOW); i++) {
+      const sp = spellList[i];
+      const node = el('div', `s${i === spellSel ? ' sel' : ''}`);
+      node.style.setProperty('--fam', FAMILY_COLOUR[sp.family] || '#e0bd77');
+      const cd = el('i', 'cd');
+      node.append(el('div', 'n', sp.name), el('div', 'm', `<span>${sp.mana} m</span><span>${sp.learned}%</span>`), cd);
+      spellSlots.appendChild(node);
+      slotNodes.push({ node, cd, sp });
+    }
+  }
+
+  function chooseSpell(step) {
+    if (!spellList.length) return;
+    spellSel = (spellSel + step + spellList.length) % spellList.length;
+    drawSpells();
+  }
+
+  function castSelected() {
+    const sp = spellList[spellSel];
+    if (!sp || sheetMode) return;
+    const result = game.cast(sp.name);
+    const slot = slotNodes.find((x) => x.sp.name === sp.name);
+    if (slot && result.ok) {
+      slot.node.classList.remove('fire-flash');
+      void slot.node.offsetWidth;
+      slot.node.classList.add('fire-flash');
+    }
+  }
+
+  function updateSpells() {
+    const list = game.spells ? game.spells() : [];
+    const sig = list.map((x) => `${x.name}:${x.mana}:${x.learned}`).join('|');
+    if (sig !== spellSig) {
+      const keep = spellList[spellSel] && spellList[spellSel].name;
+      spellList = list;
+      spellSig = sig;
+      const at = list.findIndex((x) => x.name === keep);
+      spellSel = at >= 0 ? at : Math.min(spellSel, Math.max(0, list.length - 1));
+      root.classList.toggle('caster', list.length > 0);
+      drawSpells();
+    }
+    if (!spellList.length) return;
+    const wait = game.magic ? game.magic.wait : 0;
+    for (const { node, cd, sp } of slotNodes) {
+      node.classList.toggle('poor', game.state.mana < sp.mana);
+      cd.style.height = `${Math.min(100, (wait / 3) * 100)}%`;
+    }
+  }
+
+  // The wheel and the right button, only while you are playing (the mouse is
+  // captured): with it released they belong to the page and the sheets.
+  const playing = () => !!document.pointerLockElement && !sheetMode;
+  function onWheel(event) {
+    if (!playing() || !spellList.length) return;
+    chooseSpell(event.deltaY > 0 ? 1 : -1);
+  }
+  function onMouse(event) {
+    if (event.button === 2 && playing()) castSelected();
+  }
+  const noMenu = (event) => { if (document.pointerLockElement) event.preventDefault(); };
+  document.addEventListener('wheel', onWheel, { passive: true });
+  document.addEventListener('mousedown', onMouse);
+  document.addEventListener('contextmenu', noMenu);
+  window.addEventListener('resize', () => { if (spellList.length) drawSpells(); });
+
+  // The title screen's class choice, and `?class=` for a link straight in.
+  {
+    const CLASSES = ['mage', 'cleric', 'thief', 'warrior'];
+    const pick = document.getElementById('class-pick');
+    const choose = (index) => {
+      if (!game.chooseClass || !game.chooseClass(index)) return;
+      if (pick) for (const b of pick.querySelectorAll('button')) b.classList.toggle('on', Number(b.dataset.class) === index);
+    };
+    if (pick) {
+      pick.addEventListener('click', (event) => {
+        const b = event.target.closest('button[data-class]');
+        if (b) choose(Number(b.dataset.class));
+      });
+    }
+    const wanted = CLASSES.indexOf(new URLSearchParams(location.search).get('class'));
+    if (wanted >= 0) choose(wanted);
+  }
+
   // -- keys -----------------------------------------------------------------
   // The viewer already owns E, escape, 1-4, F, P, V, M and G; these are the
   // ones it left alone.
   const KEYS = {
+    KeyZ: () => chooseSpell(-1),
+    KeyX: () => chooseSpell(1),
+    KeyC: () => castSelected(),
     KeyI: () => openSheet('gear'),
     KeyB: () => openSheet('shop'),
     KeyK: () => openSheet('skills'),
@@ -650,6 +834,7 @@ export function createGameUi(game) {
 
   function update() {
     consume();
+    updateSpells();
     const s = game.state;
 
     const width = (value, max) => `${Math.max(0, Math.min(100, (value / Math.max(1, max)) * 100))}%`;
@@ -717,6 +902,9 @@ export function createGameUi(game) {
     log: say,
     destroy() {
       document.removeEventListener('keydown', onKey);
+      document.removeEventListener('wheel', onWheel);
+      document.removeEventListener('mousedown', onMouse);
+      document.removeEventListener('contextmenu', noMenu);
       root.remove();
       style.remove();
     },

@@ -26,6 +26,7 @@ import {
   ROOM_NO_MOB, ROOM_PRIVATE, ROOM_SOLITARY,
 } from './are.js';
 import { createNav } from './nav.js';
+import { createMagic, SPELL_SKILLS, SPELL, TAR, AFF, ROOM_REACH, ensureMagic } from './magic.js';
 
 // --------------------------------------------------------------- merc.h ----
 
@@ -132,6 +133,9 @@ export const SKILLS = [
   { key: 'kick', name: 'kick', level: [37, 37, 37, 1] },
   { key: 'disarm', name: 'disarm', level: [37, 37, 10, 37] },
 ];
+
+/** Everything do_practice lists: the combat skills above and magic.js's spells. */
+const ALL_SKILLS = SKILLS.concat(SPELL_SKILLS);
 
 /** dam_message's attack_table, indexed by a weapon's value[3]. */
 const ATTACK_TABLE = [
@@ -306,7 +310,8 @@ export function createCharacter(classIndex, { level = 1, sex = 1, rng = new Rng(
     learned: {},
     fighting: null,
   };
-  for (const skill of SKILLS) ch.learned[skill.key] = 0;
+  for (const skill of ALL_SKILLS) ch.learned[skill.key] = 0;
+  ensureMagic(ch);
 
   switch (CLASS_TABLE[classIndex].attrPrime) {
     case APPLY.STR: ch.permStr = 16; break;
@@ -316,6 +321,11 @@ export function createCharacter(classIndex, { level = 1, sex = 1, rng = new Rng(
     case APPLY.CON: ch.permCon = 16; break;
     default: break;
   }
+  // DIVERGES: the mud starts every spell at 0% and will not let you practise
+  // before third level, so a new mage's one spell fails every time for two
+  // levels. A caster starts with its first-level spells at what one session
+  // at the guild buys (int_app.learn); everything later is practised as usual.
+  for (const skill of SPELL_SKILLS) if (skill.level[classIndex] === 1) ch.learned[skill.key] = INT_APP[currInt(ch)];
 
   while (ch.level < level && ch.level < LEVEL_HERO) {
     ch.level += 1;
@@ -595,7 +605,8 @@ function damMessage(ch, victim, dam, dt) {
       toVict: `${capitalise(ch.name)} ${vp} you${punct}`,
     };
   }
-  const attack = ATTACK_TABLE[dt - TYPE_HIT] || ATTACK_TABLE[0];
+  // A spell passes skill_table's noun_damage ("fireball") in place of a number.
+  const attack = typeof dt === 'string' ? dt : (ATTACK_TABLE[dt - TYPE_HIT] || ATTACK_TABLE[0]);
   return {
     toChar: `Your ${attack} ${vp} ${victim.name}${punct}`,
     toVict: `${capitalise(ch.name)}'s ${attack} ${vp} you${punct}`,
@@ -641,7 +652,8 @@ function oneHit(ch, victim, dt, ctx) {
   const thac0 = interpolate(ch.level, thac000, thac032) - getHitroll(ch);
   // The C also gives an unseen victim four points of AC; nothing here can be
   // invisible, so that branch has nothing to fire on.
-  const victimAc = Math.max(-15, idiv(getAc(victim), 10));
+  let victimAc = Math.max(-15, idiv(getAc(victim), 10));
+  if (ch.affectedBy & AFF.BLIND) victimAc -= 4;   // !can_see(ch, victim)
 
   let diceroll;
   do { diceroll = ctx.rng.bits(5); } while (diceroll >= 20);
@@ -703,7 +715,7 @@ function checkDodge(ch, victim, ctx) {
 /**
  * fight.c: damage. The parts that only exist for a multiplayer mud -- KILLER
  * flags, charm threads, group assists, link-dead recall -- are the parts left
- * out, along with sanctuary and protection (no spells here) and `trip`, which
+ * out, along with `trip`, which
  * puts the victim on the floor for two rounds: bearable in a text window,
  * unbearable when the floor is where your camera is.
  */
@@ -717,6 +729,8 @@ function damage(ch, victim, dam, dt, ctx) {
       victim.position = POS.FIGHTING;
       if (!ch.fighting) ctx.setFighting(ch, victim);
     }
+    if (victim.affectedBy & AFF.SANCTUARY) dam = idiv(dam, 2);
+    if ((victim.affectedBy & AFF.PROTECT) && isEvil(ch)) dam -= idiv(dam, 4);
     if (dam < 0) dam = 0;
 
     if (dt >= TYPE_HIT) {
@@ -735,6 +749,8 @@ function damage(ch, victim, dam, dt, ctx) {
       ...blow(ch, victim),
       hp: Math.max(0, victim.hit - dam),
       maxHp: victim.maxHit,
+      // A spell's blow: spellfx.js draws it, and fx.js leaves the swing out.
+      ...(typeof dt === 'string' ? { spell: dt } : null),
     });
   }
 
@@ -1219,6 +1235,66 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     kill(ch, victim) { deathHandler(ch, victim); },
   };
 
+  // -- magic ----------------------------------------------------------------
+  // magic.js holds the spells; these are the places magic.c reaches back
+  // into the rest of the mud, answered in metres.
+  const posOf = (ch) => (ch === state ? position : ch.slot.pos);
+  const magic = createMagic({
+    rng, emit, ctx, player: state, damage, updatePos,
+    gainExp: (ch, gain) => gainExp(ch, gain, rng),
+    distance: (a, b) => dist2(posOf(a), posOf(b)),
+    people(ch, radius) {
+      const at = posOf(ch);
+      const out = [];
+      if (state.position !== POS.DEAD && dist2(position, at) <= radius * radius) out.push(state);
+      for (const slot of mobsNear(at, radius)) if (slot.instance && !slot.dead) out.push(slot.instance);
+      return out;
+    },
+    /**
+     * do_cast's last act: the victim of an offensive spell fights back. As
+     * with an aggressive mobile (aggrUpdate), out of reach it only picks the
+     * fight and comes for you; the violence pulse swings once it is there.
+     */
+    strikeBack(victim, ch) {
+      if (victim.fighting || !isAwake(victim)) return;
+      if (dist2(posOf(victim), posOf(ch)) > MELEE * MELEE) {
+        ctx.setFighting(victim, ch);
+        if (!ch.fighting) ctx.setFighting(ch, victim);
+        return;
+      }
+      ctx.round = { player: 0, npc: MOB_BEAT };
+      try { multiHit(victim, ch, undefined, ctx); } finally { ctx.round = null; ctx.now = undefined; }
+    },
+    recall(ch) { if (ch === state) recall(false); },
+    /**
+     * spell_teleport: a random room, any room the mud has that is not private.
+     * DIVERGES: only the player is ever moved -- a mobile's body walks, and
+     * cannot be put down across the map -- and only to a room that was built.
+     */
+    teleport(ch) {
+      if (ch !== state) return false;
+      const rooms = [...built.rooms.values()]
+        .filter((info) => !info.unbuilt && info.room && !(info.room.flags & (ROOM_PRIVATE | ROOM_SOLITARY)));
+      if (!rooms.length) return false;
+      const info = rooms[rng.range(0, rooms.length - 1)];
+      if (state.fighting) ctx.stopFighting(state);
+      emit({ kind: 'teleport', x: info.center.x, y: info.center.y, z: info.center.z, vnum: info.room.vnum });
+      if (onTeleport) onTeleport(info.center.x, info.center.y, info.center.z);
+      return true;
+    },
+    sky: () => weather.sky,
+    outdoors(ch) {
+      const info = built.rooms.get(ch === state ? state.roomVnum : ch.slot.roomVnum);
+      return !!(info && info.outdoor);
+    },
+    extract(ch, obj) {
+      const i = ch.inventory.indexOf(obj);
+      if (i >= 0) { ch.inventory.splice(i, 1); return; }
+      if (obj.wearLoc >= 0 && ch.equipment[obj.wearLoc] === obj) { unequipChar(ch, obj); return; }
+      throw new Error(`game.js: extract of ${obj.name}, which ${ch.name} does not have`);
+    },
+  });
+
   function makePile(obj, at) {
     return {
       kind: 'item', name: obj.name, contents: [obj],
@@ -1319,6 +1395,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     // fight.c: raw_kill for a PC -- affects stripped, armour back to 100,
     // resting, and one point of everything.
     state.fighting = null;
+    magic.stripAll(state);
     state.armor = 100;
     for (const obj of state.equipment) if (obj) state.armor -= applyAc(obj, obj.wearLoc);
     state.position = POS.RESTING;
@@ -1597,6 +1674,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     } else if (state.position === POS.RESTING) {
       hit += idiv(currCon(state), 2); mana += currInt(state); move += idiv(currDex(state), 2);
     }
+    if (state.affectedBy & AFF.POISON) { hit = idiv(hit, 4); mana = idiv(mana, 4); move = idiv(move, 4); }
     state.hit = Math.min(state.maxHit, state.hit + hit);
     state.mana = Math.min(state.maxMana, state.mana + mana);
     state.move = Math.min(state.maxMove, state.move + move);
@@ -1604,8 +1682,12 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     for (const slot of mobs) {
       const mob = slot.instance;
       if (!mob || slot.dead) continue;
-      if (!mob.fighting) mob.hit = Math.min(mob.maxHit, mob.hit + idiv(mob.level * 3, 2));
+      if (!mob.fighting) mob.hit = Math.min(mob.maxHit, mob.hit + idiv(idiv(mob.level * 3, 2), (mob.affectedBy & AFF.POISON) ? 4 : 1));
     }
+
+    // char_update's affect loop, then poison: the player and everyone woken.
+    magic.tick(state);
+    for (const slot of mobs) if (slot.instance && !slot.dead) magic.tick(slot.instance);
 
     for (let i = ground.length - 1; i >= 0; i--) {
       const pile = ground[i];
@@ -1670,6 +1752,13 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
    * finish: the mud's move is instant, so it never has to ask.
    */
   let mobileSpec = null;
+  /**
+   * special.c's spec_lookup, as a table: the #SPECIALS name (`record.special`)
+   * to fn(slot, mob), true if it acted. Filled from outside -- magic.js puts
+   * the casters and breathers in -- and exposed as `game.specFuns`.
+   */
+  const SPEC_FUNS = {};
+  magic.install(SPEC_FUNS);
   function mobileUpdate() {
     const counts = new Map();
     for (const slot of mobs) if (!slot.dead) counts.set(slot.roomVnum, (counts.get(slot.roomVnum) || 0) + 1);
@@ -1681,7 +1770,8 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       const act = slot.proto.act;
       // "Examine call for special procedure": a spec_fun that acted ends this
       // mobile's turn, as in update.c. `game.mobileSpec` is where one plugs in.
-      if (mobileSpec && mob && mobileSpec(slot, mob)) continue;
+      const spec = SPEC_FUNS[slot.record.special];
+      if (mob && ((spec && spec(slot, mob)) || (mobileSpec && mobileSpec(slot, mob)))) continue;
       // "That's all for sleeping / busy monster": fighting is busy.
       if (mob && mob.position !== POS.STANDING) continue;
       const room = world.rooms.get(slot.roomVnum);
@@ -1874,17 +1964,17 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   }
 
   // -- targeting ------------------------------------------------------------
-  function facingTarget() {
+  function facingTarget(reach = REACH, cone = 0.45) {
     let best = null;
     let bestScore = -Infinity;
-    for (const slot of mobsNear(position, REACH)) {
+    for (const slot of mobsNear(position, reach)) {
       if (!slot.instance) continue;
       const dx = slot.pos.x - position.x;
       const dz = slot.pos.z - position.z;
       const d = Math.hypot(dx, dz);
       if (d < 1e-4) continue;
       const dot = (dx / d) * facing.x + (dz / d) * facing.z;
-      if (dot < 0.45) continue;
+      if (dot < cone) continue;
       const score = dot * 2 - d * 0.12;
       if (score > bestScore) { bestScore = score; best = slot; }
     }
@@ -2034,7 +2124,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     const trainer = mobsNear(position, 6).find((slot) => (slot.proto.act & ACT_PRACTICE));
     if (!trainer) return { ok: false, text: "You can't do that here." };
     if (state.practice <= 0) return { ok: false, text: 'You have no practice sessions left.' };
-    const skill = SKILLS.find((s) => s.key === key);
+    const skill = ALL_SKILLS.find((s) => s.key === key);
     if (!skill || state.level < skill.level[state.class]) return { ok: false, text: "You can't practice that." };
 
     const adept = CLASS_TABLE[state.class].skillAdept;
@@ -2052,13 +2142,14 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
   /** Which skills this class may practise at all, and where they stand. */
   function skills() {
-    return SKILLS
+    return ALL_SKILLS
       .filter((s) => s.level[state.class] <= LEVEL_HERO)
       .map((s) => ({
         key: s.key, name: s.name, learned: state.learned[s.key],
         adept: CLASS_TABLE[state.class].skillAdept,
         available: state.level >= s.level[state.class],
         level: s.level[state.class],
+        spell: !!s.spell,
       }));
   }
 
@@ -2091,6 +2182,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     // costs nothing.
     for (const slot of mobsNear(position, 48)) if (!slot.instance) wake(slot);
     moveMobs(dt);
+    magic.update(dt);
 
     pulseAccum += dt * PULSE_PER_SECOND;
     let guard = 0;
@@ -2121,6 +2213,43 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     update,
     attack,
     nav: ways,
+
+    // -- magic --------------------------------------------------------------
+    magic,
+    /** spec_lookup's table (see mobileUpdate): name -> fn(slot, mob). */
+    specFuns: SPEC_FUNS,
+    /**
+     * do_cast. An offensive spell goes at whoever you are fighting, else at
+     * whoever you are looking at in the room; anything else at yourself unless
+     * `target` (a mobile instance) says otherwise.
+     */
+    cast(name, { target = null, obj = null } = {}) {
+      if (state.position === POS.DEAD) return { ok: false, text: 'You are dead.' };
+      const sp = SPELL[name];
+      if (!target && sp && sp.target === TAR.OFFENSIVE && !state.fighting) {
+        const slot = facingTarget(ROOM_REACH, 0.82);
+        if (slot) target = wake(slot);
+      }
+      const result = magic.cast(name, { target, obj });
+      if (!result.ok && !result.lost) emit({ kind: 'note', text: result.text });
+      return result;
+    },
+    /** The spells you could cast now, with their mana. */
+    spells: () => magic.known(),
+    /** quaff, recite, zap, brandish or eat, by what the object is. */
+    useItem: (obj, options) => {
+      const result = magic.useItem(obj, options);
+      if (!result.ok) emit({ kind: 'note', text: result.text });
+      return result;
+    },
+    /** Start over as another class -- the title screen's choice, before you play. */
+    chooseClass(index, { level = 1 } = {}) {
+      if (state.fighting) return false;
+      const fresh = createCharacter(index, { level, rng });
+      for (const key of Object.keys(fresh)) state[key] = fresh[key];
+      magic.wait = 0;
+      return true;
+    },
 
     /**
      * Hear every event as it is emitted, alongside the `drain()` queue. Combat
