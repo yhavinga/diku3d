@@ -2397,7 +2397,13 @@ def serpent_clips(arm, spec):
     i1 = np.searchsorted(ys, lam)
     arc_per = arc_w[i1] - arc_w[i0]
 
-    def lay(head_arc, xs, arc, lift=None):
+    # A naga carries the front of its body reared up off the ground, cobra
+    # fashion; `rear` is how high the neck is held and `rear_n` how many
+    # segments the rise takes. Zero for every snake that lies flat.
+    rear_h = g.get("rear", 0.0)
+    rear_n = g.get("rear_n", max(3, n // 3))
+
+    def lay(head_arc, xs, arc, lift=None, rear=1.0):
         """Joint positions (Blender space) with the neck at arc `head_arc`."""
         pts = []
         for i in range(n + 1):
@@ -2405,6 +2411,8 @@ def serpent_clips(arm, spec):
             y = np.interp(s, arc, ys)
             x = np.interp(s, arc, xs)
             z = heights[i] + (lift(i) if lift else 0.0)
+            if rear_h:
+                z += rear * rear_h * max(0.0, 1.0 - i / rear_n) ** 1.6
             pts.append(V((x, -y, z)))
         return pts
 
@@ -2424,6 +2432,10 @@ def serpent_clips(arm, spec):
             delta = pts[anchor] - built[anchor]
             delta.z = 0.0
             pts = [p + delta for p in built]
+        if rear_h:
+            # The head keeps looking ahead however steeply the neck rises.
+            d0 = pts[0] - pts[1]
+            head_pitch += math.degrees(math.atan2(d0.z, math.hypot(d0.x, d0.y)))
         basis = {}
         M = {}
         for i, nm in enumerate(names):
@@ -2549,7 +2561,7 @@ def serpent_clips(arm, spec):
     def death(t):
         writhe = math.sin(math.pi * min(1.0, t / 0.5)) * (1 - ease((t - 0.5) / 0.5))
         xs_m = xs_i * (1 - ease(t)) + xs_d * ease(t)
-        pts = lay(base_arc, xs_m, arc_i, lift=lambda i: 0.06 * writhe * math.sin(i * 1.3))
+        pts = lay(base_arc, xs_m, arc_i, lift=lambda i: 0.06 * writhe * math.sin(i * 1.3), rear=1 - ease(t / 0.6))
         offset = V((0, -joints[0], 0)) - pts[0]
         offset.x = offset.z = 0.0
         pts = [p + offset for p in pts]

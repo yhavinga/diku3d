@@ -37,6 +37,7 @@ MODULES = [
     "weapons",
     "people",
     "beasts",
+    "monsters",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a

@@ -644,9 +644,13 @@ function buildPerson(library, who, proto, instance) {
  * the dragon master, the Dragonknights and the attendant of the dragon are
  * people.
  */
-const NOT_A_BEAST = /\b(were\w*|ettin|herald|horseman|horsehead|nebula|vampire|lamia|centaur|minotaur|master|dragonlord|dragonknight|spider|hierophant|attendant)\b/;
+const NOT_A_BEAST = /\b(were\w*|ettin|herald|horseman|horsehead|nebula|vampire|lamia|centaur|minotaur|master|dragonlord|dragonknight|hierophant|attendant)\b/;
 
 const BEASTS = [
+  // --- the monsters (tools/blender/monsters.py). First, because their names
+  // borrow the animals' words: a wolf spider and a bird spider are spiders.
+  { test: /\b(huge|giant|queen|empress|arachnos)\b.*\bspiders?\b|\bspiders?\b.*\b(huge|giant|queen|empress|arachnos)\b/, asset: 'beast_spider', scale: 2.2, coat: 0x1c1816, pale: 0x7a2a1c, points: 0x0d0b0a, patch: 0x2c2420, cover: 0.3, box: [0.5, 1.6, 'quad', 0x1c1816] },
+  { test: /\bspiders?\b/, asset: 'beast_spider', scale: 0.6, coat: 0x2e2621, pale: 0x8f7d66, points: 0x16120f, patch: 0x44382e, cover: 0.35, box: [0.15, 0.5, 'quad', 0x2e2621] },
   // --- canines. Two ear sets are modelled; `hide` collapses the one a breed
   // does not have.
   { test: /\bwargs?\b/, asset: 'beast_canine', scale: 1.6, coat: 0x26221f, pale: 0x3a342e, points: 0x151311, hide: ['flop'], box: [1.0, 1.6, 'quad', 0x2b2724] },
@@ -803,6 +807,8 @@ const _patch = new THREE.Color();
  * beaks) keep the colour they were modelled with, times `horn` if the look
  * darkens them -- a crow's beak and legs are the duck's, in black.
  */
+const COATED = new Set(['fur', 'feather', 'scales', 'chitin', 'ooze', 'hide']);
+
 function paintedGeometry(asset, node, tag, look) {
   const key = `${node.name}|${look.key}`;
   const cache = asset.beastGeometry;
@@ -811,12 +817,14 @@ function paintedGeometry(asset, node, tag, look) {
   const source = geometry.attributes.color;
   const count = geometry.attributes.position.count;
   const out = new Float32Array(count * 3);
-  const coated = tag === 'fur' || tag === 'feather' || tag === 'scales';
+  const coated = COATED.has(tag);
   _paint.setHex(look.coat);
   _pale.setHex(look.pale);
   _points.setHex(look.points);
   _patch.setHex(look.patch);
-  const horn = new THREE.Color(look.horn ?? 0xffffff);
+  // What glows takes the look's own colour: one pair of eyes, burning green
+  // on a basilisk and red on a drow.
+  const horn = new THREE.Color(tag === 'glow' ? (look.glow ?? 0xffffff) : (look.horn ?? 0xffffff));
   const edge = 1 - (look.cover || 0);
   for (let i = 0; i < count; i++) {
     const a = source ? source.getX(i) : 0;
@@ -848,7 +856,7 @@ function beastLook(spec, proto, seed = 0) {
   const look = {
     coat: base.coat ?? 0x6b5641, pale: base.pale ?? base.coat ?? 0x6b5641,
     points: base.points ?? base.coat ?? 0x6b5641, patch: base.patch ?? 0x000000,
-    cover: base.cover || 0, horn: base.horn ?? spec.horn,
+    cover: base.cover || 0, horn: base.horn ?? spec.horn, glow: spec.glow,
   };
   for (const [re, hex] of COAT_WORDS) {
     if (!re.test(words)) continue;
@@ -858,7 +866,7 @@ function beastLook(spec, proto, seed = 0) {
     look.cover = 0;
     break;
   }
-  look.key = [look.coat, look.pale, look.points, look.patch, look.cover, look.horn].join(',');
+  look.key = [look.coat, look.pale, look.points, look.patch, look.cover, look.horn, look.glow].join(',');
   return look;
 }
 
