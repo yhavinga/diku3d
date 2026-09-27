@@ -275,8 +275,11 @@ export function installSpecials(k) {
   for (const slot of mobs) if (slot.record.special) k.wake(slot);
 
   Object.assign(game, {
-    /** The mayor's progress through his day, for the harness and the curious. */
-    mayorState: () => ({ ...mayor, next: mayor.path ? mayor.path[mayor.pos] : null }),
+    /**
+     * The mayor's progress through his day -- the live record, so a harness can
+     * set `pos` to put him a step from the gates rather than wait out his walk.
+     */
+    mayorState: () => mayor,
     setMudHour(hour) { k.weather().hour = hour; },
   });
   void isAffected; void AFF;

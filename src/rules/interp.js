@@ -223,7 +223,7 @@ export function installInterp(k) {
 
   function doScore() {
     const s = state;
-    send(`You are ${s.displayName || 'yourself'} the ${MERC.CLASS_TABLE[s.class].name}, level ${s.level}.`);
+    send(`You are ${s.displayName ? `${s.displayName} ` : ''}the ${MERC.CLASS_TABLE[s.class].name}, level ${s.level}.`);
     send(`You have ${s.hit}/${s.maxHit} hit, ${s.mana}/${s.maxMana} mana, ${s.move}/${s.maxMove} movement, ${s.practice} practices.`);
     send(`You are carrying ${s.inventory.length}/${MERC.canCarryN(s)} items with weight ${MERC.carriedWeight(s)}/${MERC.canCarryW(s)} kg.`);
     send(`Str: ${MERC.currStr(s)}  Int: ${MERC.currInt(s)}  Wis: ${MERC.currWis(s)}  Dex: ${MERC.currDex(s)}  Con: ${MERC.currCon(s)}.`);

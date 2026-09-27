@@ -95,7 +95,7 @@ export function installObjects(k) {
       k.objFromRoom(obj);
     }
     const coins = k.objToRoom(createMoney(amount), state.roomVnum, k.dropSpot());
-    emit({ kind: 'drop', text: 'OK.', item: coins.name, obj: coins, gold: true });
+    emit({ kind: 'drop', text: `You drop ${coins.name}.`, item: coins.name, obj: coins, gold: true });
     return out(true, 'OK.');
   }
 

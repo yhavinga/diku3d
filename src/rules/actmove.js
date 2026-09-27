@@ -27,7 +27,6 @@ export function installMove(k) {
   /** act_move.c: has_key -- anything carried, worn included, with the key's vnum. */
   const hasKey = (key) => key > 0 && (state.inventory.some((o) => o.vnum === key)
     || state.equipment.some((o) => o && o.vnum === key));
-  const keyName = (key) => [...state.inventory, ...state.equipment].find((o) => o && o.vnum === key)?.name;
 
   /**
    * act_move.c: find_door -- a direction, or the keyword of a door in the room
@@ -245,9 +244,7 @@ export function installMove(k) {
         emit({ kind: 'locked', text, vnum, dir, key: e.key });
         return out(false, text);
       }
-      const keyText = keyName(e.key);
       unlockDoor(vnum, dir);
-      emit({ kind: 'note', text: `You unlock the ${name} with ${keyText}.` });
     }
     return openDoor(vnum, dir);
   }

@@ -829,7 +829,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
         // The first blow of a pulse's round was started from the pulse clock.
         const primed = event.beat === 0 && event.from.primedAt !== undefined && Math.abs(event.from.primedAt - (clock + delay)) < 0.2;
         if (fig && !primed) motion.strike(fig, event.beat % 2 ? 'attack2' : 'attack', delay);
-      } else {
+      } else if (event.skill !== 'kick') {   // a kick is the leg's (kick.js), not the blade's
         const primed = event.beat === 0 && vm.primedFor !== null && Math.abs(vm.primedFor - (clock + delay)) < 0.2;
         if (!primed) vm.strike(delay);
       }

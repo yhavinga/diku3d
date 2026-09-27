@@ -63,7 +63,7 @@
   }
 
   #look {
-    position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%);
+    position: absolute; left: 50%; bottom: 102px; transform: translateX(-50%);
     text-align: center; opacity: 0; transition: opacity 140ms ease;
     /* An edge, not just a glow: over bright paving the wide soft shadow
        vanished and the name with it. */
@@ -135,8 +135,21 @@
     transition: transform 140ms ease, box-shadow 140ms ease;
   }
   #enter:hover { transform: translateY(-1px); box-shadow: 0 8px 26px rgba(224,189,119,0.22); }
+  /* The nanny's class question, and a way back to the character you saved. */
+  #classes { display: flex; gap: 4px; margin-top: 18px; pointer-events: auto; }
+  #classes button { cursor: pointer; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--dim); background: transparent; border: 1px solid rgba(224,189,119,0.18);
+    padding: 7px 13px 6px; border-radius: 2px; transition: color 140ms ease, border-color 140ms ease, background 140ms ease; }
+  #classes button:hover { color: var(--ink); border-color: rgba(224,189,119,0.4); }
+  #classes button.on { color: var(--gold); border-color: rgba(224,189,119,0.62); background: rgba(224,189,119,0.08); }
+  #class-note { font-size: 13.5px; font-style: italic; color: var(--dim); opacity: 0.8; margin-top: -4px; min-height: 1.3em; }
+  #continue { margin-top: -6px; pointer-events: auto; cursor: pointer; font-family: var(--mono); font-size: 10.5px;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); background: transparent;
+    border: 1px solid rgba(224,189,119,0.45); padding: 10px 22px; border-radius: 2px; }
+  #continue:hover { background: rgba(224,189,119,0.08); }
+  #continue[hidden] { display: none; }
   #keys {
-    margin-top: 26px; display: grid; grid-template-columns: auto auto; gap: 6px 20px;
+    margin-top: 14px; display: grid; grid-template-columns: auto auto; gap: 5px 20px;
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; opacity: 0.45;
   }
   #keys b { font-weight: 400; color: var(--gold); }
@@ -200,13 +213,23 @@
   <h1>MIDGAARD</h1>
   <h2>DikuMUD · Merc 2.1 · in three dimensions</h2>
   <div id="title-stats"></div>
+  <div id="classes">
+    <button data-class="3" class="on">warrior</button>
+    <button data-class="2">thief</button>
+    <button data-class="1">cleric</button>
+    <button data-class="0">mage</button>
+  </div>
+  <div id="class-note"></div>
   <button id="enter">enter the temple</button>
+  <button id="continue" hidden></button>
   <div id="keys">
     <b>W A S D</b><span>walk · shift to run</span>
     <b>arrows</b><span>take the exit n / e / s / w · pg up, pg dn for up, down</span>
-    <b>mouse</b><span>look · E to examine</span>
-    <b>1 – 4</b><span>dawn, noon, dusk, night</span>
-    <b>F / V / M / G</b><span>stats · noclip · sound · unlock</span>
+    <b>mouse</b><span>look · click to attack · E to use, open, loot, drink</span>
+    <b>enter</b><span>the command line — look, get all corpse, unlock gate …</span>
+    <b>Z X C H</b><span>your skills · T take everything · R rest</span>
+    <b>I / B / K</b><span>inventory · trade · skills and training</span>
+    <b>1 – 4 · F V M G</b><span>the hour · stats, noclip, sound, force every lock</span>
   </div>
   <div id="credit">
     world by Hans Henrik Stærfeldt, Katja Nyboe, Tom Madsen, Michael Seifert and Sebastian Hammer, 1990–91<br>

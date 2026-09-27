@@ -1347,13 +1347,16 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     }
     for (const obj of mob.equipment) if (obj) contains.push(obj);
     for (const obj of contains) obj.wearLoc = WEAR.NONE;
+    // What the body still has in its hands, for whoever draws it.
+    const wornWeapon = mob.equipment[WEAR.WIELD];
+    const wornShield = mob.equipment[WEAR.SHIELD];
     mob.inventory = [];
     mob.equipment = new Array(MAX_WEAR).fill(null);
     return makeObject({
       vnum: OBJ_VNUM.CORPSE_NPC, name: `corpse of ${mob.name}`, keywords: 'corpse',
       description: `The corpse of ${mob.name} is lying here.`,
       itemType: ITEM.CORPSE_NPC, wearFlags: ITEM_TAKE, values: [0, 0, 0, 1], weight: 100,
-      timer: rng.range(2, 4), contains, slot: mob.slot,
+      timer: rng.range(2, 4), contains, slot: mob.slot, wornWeapon, wornShield,
     });
   }
 
