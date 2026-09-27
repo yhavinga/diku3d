@@ -584,8 +584,11 @@ def build_lantern():
     the air."""
     lib.reset()
     p = []
-    for i in range(9):
-        z = -0.1 - i * 0.14
+    # A rod most of the way and three links at the top: a chain of twelve
+    # links cost more than the lantern it held.
+    p.append(lib.cylinder(0.012, 1.0, (0, 0, -0.85), verts=4, name="rod", mat="iron"))
+    for i in range(3):
+        z = -0.08 - i * 0.12
         p.append(lib.torus(0.035, 0.008, (0, 0, z), (math.pi / 2 if i % 2 else 0, 0, 0 if i % 2 else math.pi / 2),
                            major_seg=6, minor_seg=3, name="link", mat="iron"))
     body_top = -1.35
