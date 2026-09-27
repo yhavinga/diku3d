@@ -95,7 +95,7 @@ function makeMaterials(library) {
   // Steel wants the environment to be anything at all: a bright metal with no
   // reflection is a grey plastic. Flat PBR on purpose -- a tiled stone recipe
   // on a 90 cm blade reads as a pattern, not a surface.
-  const steel = new THREE.MeshStandardMaterial({ color: 0xc8ccd2, metalness: 0.92, roughness: 0.28 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0xc8ccd2, metalness: 0.92, roughness: 0.4 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x55565a, metalness: 0.85, roughness: 0.42 });
   const brass = new THREE.MeshStandardMaterial({ color: 0xb08a4e, metalness: 0.9, roughness: 0.35 });
   const flat = (tag, fallback) => {
@@ -211,7 +211,7 @@ export const WEAPON_ASSETS = [
  * `steel` and `paint` recipes are there, these stand in.
  */
 const STAND_IN = {
-  steel: { color: 0xb4b9be, metalness: 0.95, roughness: 0.3 },
+  steel: { color: 0xb4b9be, metalness: 0.95, roughness: 0.4 },
   paint: { color: 0x7d2a22, metalness: 0, roughness: 0.66 },
 };
 
@@ -233,6 +233,14 @@ function modelledWeapon(library, name) {
     const standIn = STAND_IN[p.materialName];
     if (standIn && !(library.materials && library.materials[p.materialName])) {
       material = new THREE.MeshStandardMaterial({ vertexColors: true, ...standIn });
+    } else if (material && material.metalness > 0.5) {
+      // Half a metre from the eye, the hammered steel's relief is a field of
+      // tiny mirrors: each one caught a lamp at night and the blade bloomed
+      // like cut crystal. Its own copy, smoother and flatter, for the hand.
+      material = material.clone();
+      material.roughness = Math.max(material.roughness, 0.38);
+      if (material.normalScale) material.normalScale.multiplyScalar(0.4);
+      material.envMapIntensity = (material.envMapIntensity ?? 1) * 0.7;
     }
     inner.add(new THREE.Mesh(p.geometry, material));
   }
@@ -429,10 +437,17 @@ class Streaks {
  * directions, which is far easier to reason about than three Euler angles.
  * For bare hands `blade` is the line through the curled fingers.
  */
+/*
+ * Rest and ready keep the hand in the lower right, left of the vitals panel
+ * (NDC x ~0.25, y ~-0.6 at 16:9) and the blade rising up and out from it, so
+ * the crosshair and whatever it is on are never behind steel. The old ones
+ * crossed the blade over the centre of the frame and put the fist under the
+ * panel.
+ */
 const POSES = {
   cut: {
-    rest: { p: [0.24, -0.33, -0.55], blade: [-0.12, 0.62, -0.78], elbow: [0.45, -0.55, 0.7] },
-    ready: { p: [0.2, -0.24, -0.55], blade: [-0.32, 0.82, -0.47], elbow: [0.5, -0.65, 0.55] },
+    rest: { p: [0.18, -0.27, -0.55], blade: [0.4, 0.7, -0.6], elbow: [0.45, -0.55, 0.7] },
+    ready: { p: [0.15, -0.22, -0.55], blade: [0.15, 0.8, -0.58], elbow: [0.5, -0.65, 0.55] },
     block: { p: [0.06, -0.15, -0.5], blade: [-1, 0.14, -0.12], elbow: [0.35, -0.75, 0.55] },
     swings: [
       // right to left, falling: wound up over the right shoulder
@@ -452,8 +467,8 @@ const POSES = {
     ],
   },
   thrust: {
-    rest: { p: [0.24, -0.36, -0.48], blade: [-0.1, 0.35, -0.93], elbow: [0.4, -0.6, 0.7] },
-    ready: { p: [0.2, -0.27, -0.48], blade: [-0.14, 0.24, -0.96], elbow: [0.4, -0.55, 0.73] },
+    rest: { p: [0.18, -0.3, -0.5], blade: [0.12, 0.4, -0.9], elbow: [0.4, -0.6, 0.7] },
+    ready: { p: [0.16, -0.24, -0.5], blade: [0.05, 0.3, -0.95], elbow: [0.4, -0.55, 0.73] },
     block: { p: [0.06, -0.16, -0.46], blade: [-1, 0.2, -0.1], elbow: [0.35, -0.75, 0.55] },
     swings: [
       { windup: { p: [0.23, -0.27, -0.28], blade: [-0.06, 0.18, -0.98], elbow: [0.35, -0.45, 0.82] },
@@ -465,8 +480,8 @@ const POSES = {
     ],
   },
   punch: {
-    rest: { p: [0.24, -0.4, -0.42], blade: [-0.9, 0.3, -0.3], elbow: [0.3, -0.8, 0.5] },
-    ready: { p: [0.19, -0.2, -0.45], blade: [-0.9, 0.3, -0.3], elbow: [0.3, -0.65, 0.7] },
+    rest: { p: [0.2, -0.36, -0.45], blade: [-0.9, 0.3, -0.3], elbow: [0.3, -0.8, 0.5] },
+    ready: { p: [0.16, -0.22, -0.45], blade: [-0.9, 0.3, -0.3], elbow: [0.3, -0.65, 0.7] },
     block: { p: [0.08, -0.12, -0.36], blade: [-0.25, 0.96, 0.05], elbow: [0.2, -0.85, 0.45] },
     swings: [
       { windup: { p: [0.22, -0.22, -0.34], blade: [-0.9, 0.25, -0.3], elbow: [0.3, -0.7, 0.65] },
@@ -713,7 +728,9 @@ class ViewModel {
       lamp.color.copy(src.color);
       lamp.distance = src.distance;
       lamp.decay = src.decay;
-      lamp.intensity = src.intensity;
+      // Less than the wall beside it gets: a point light on a curved mirror
+      // at arm's length is the brightest pixel in a night frame.
+      lamp.intensity = src.intensity * 0.4;
     });
     this.sun.color.copy(sun.color);
     this.sun.intensity = sun.intensity * (indoor ? 0.08 : 1);

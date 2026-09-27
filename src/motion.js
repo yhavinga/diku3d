@@ -451,8 +451,11 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     if (!canSettle(fig) || order.radius !== undefined) return false;
     const m = fig.m;
     const r = fig.rand();
-    // A sentinel keeps its post: a wall to lean on beside it, nothing further.
-    const seat = fig.sentinel ? null : freeSpot(fig, order.room);
+    // A sentinel never leaves its room, which is all Merc asks of it; one
+    // on watch -- a guard, a knight -- also keeps its post, and gets only a
+    // wall to lean on beside it.
+    const post = fig.sentinel && /guard|knight|soldier/.test(fig.archetype || '');
+    const seat = post ? null : freeSpot(fig, order.room);
     // A room with seats is a room people sit in: most of a tavern's patrons,
     // most of the time, not one in five.
     if (seat && r < 0.62) {
@@ -464,7 +467,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
         return true;
       }
     }
-    if (r < 0.8 && !fig.sentinel) {
+    if (r < 0.8 && !post) {
       const partner = partnerFor(fig);
       if (partner) {
         const dx = fig.at.x - partner.at.x; const dz = fig.at.z - partner.at.z;
@@ -486,7 +489,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     if (r < 0.95 && fig.rand() < 0.5) {
       const wall = wallSpot(fig);
       const home = fig.homeSpot;
-      if (wall && (!fig.sentinel || !home || Math.hypot(wall.x - home.x, wall.z - home.z) < 2.8)) {
+      if (wall && (!post || !home || Math.hypot(wall.x - home.x, wall.z - home.z) < 2.8)) {
         const path = nav.pathInRoom(order.room, fig.at, wall.approach, 0.6);
         if (path && path.length) {
           m.settle = { spot: wall, phase: 'go', t: 0 };
@@ -887,6 +890,13 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       consider(o.at.x, o.at.z, SPACE + (fig.body.r + o.body.r - 0.56) + o.body.h * 0.8 + fig.body.h * 0.5, false);
     }
     if (player) consider(player.x, player.z, YOU, true);
+    // Waiting on you to get out of the way, for a stroll, is worth a second
+    // and a half; then it is somewhere else to go. Five patrons of an inn
+    // stood round a player at the centre of the room for forty seconds.
+    if (brake === 0) {
+      m.yielded = (m.yielded || 0) + dt;
+      if (m.yielded > 1.5 && orderOf(fig).kind === 'stroll') { m.yielded = 0; arrive(fig); return; }
+    } else m.yielded = 0;
     // Don't swerve past the point itself when nearly there.
     if (remaining < 1.2) bend *= remaining / 1.2;
     wantYaw += clamp(bend, -1.1, 1.1);
@@ -1292,7 +1302,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     if (m.overlay || m.pending || m.lunge || m.step || m.sway || m.recoil || m.speed > 0.05) return;
     m.nextFidget -= dt;
     if (m.nextFidget > 0) return;
-    m.nextFidget = 0.45 + fig.rand() * 0.8;
+    m.nextFidget = 0.3 + fig.rand() * 0.5;
     const free = m.swingIn;
     const a = fig.actions || {};
     const r = fig.rand();
@@ -1303,12 +1313,12 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       playOnce(fig, name, { gain: 0.72, until: (hit * 0.5 + 0.22) / dur });
       return;
     }
-    if (free > 0.8 && r < 0.46 && a.block) {
+    if (free > 0.8 && r < 0.45 && a.block) {
       playOnce(fig, 'block', { gain: 0.5, timeScale: 0.85 });
       return;
     }
     if (free > 0.75 && (a.walk || fig.legs)) {
-      const sideways = r > 0.72;
+      const sideways = r > 0.8;
       const dir = fig.rand() < 0.5 ? -1 : 1;
       m.step = sideways
         ? { t: 0, dur: 0.6 + fig.rand() * 0.2, along: 0, side: dir * (0.25 + fig.rand() * 0.15) }
@@ -1568,7 +1578,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
           think(fig, dt, player);
           portalStep(fig, dt);
           const settling = m.settle && m.settle.phase !== 'go' && tickSettle(fig, dt);
-          if (m.stage !== 'out' && (!settling || m.settle.phase === 'turn')) steer(fig, dt, player);
+          if (m.stage !== 'out' && (!settling || (m.settle && m.settle.phase === 'turn'))) steer(fig, dt, player);
           separate(fig, player);
         }
         // A figure that stopped fading half-way -- turned on while walking
@@ -1652,5 +1662,5 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     return { moving, idle, travelling, figures: figures.length };
   }
 
-  return { update, strike, react, perform, die, setOpacity, stats, orderOf, CLOSE };
+  return { update, strike, react, perform, die, setOpacity, stats, orderOf, CLOSE, spotsByRoom };
 }

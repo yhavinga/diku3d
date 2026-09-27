@@ -4594,6 +4594,11 @@ function readFittings(room, sides) {
     found.set(kind, blank.length ? blank[found.size % blank.length] : 0);
   };
   if (TAPROOM.test(room.name) && !NOT_THE_ROOM_ITSELF.test(room.name)) loose(/./, 'counter');
+  // An inn that does not say so in its name -- "The Green Dragon" -- says so
+  // in its prose: patrons, and something to eat or drink. Both, because the
+  // street outside names the inn too, and a morgue has patrons of its own.
+  if (/\bpatrons\b/i.test(room.description) && /\b(food|drink|ale|beer|hostess|innkeep\w*)\b/i.test(room.description)
+    && !NOT_THE_ROOM_ITSELF.test(room.name)) loose(/./, 'counter');
   loose(/\bcounter\b/i, 'counter');
   loose(/\b(fireplace|hearth|forge)\b/i, 'hearth');
   loose(/\bshelves\b/i, 'shelves');

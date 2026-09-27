@@ -108,8 +108,12 @@ const CSS = `
    hitpoints as a bar with a pale trailing chunk that drains a beat after
    each blow, so how much a hit took is readable. Nobody else is named: a
    name over every head in ten metres was a coop of five "a chicken"s. */
-.g-plate { position: absolute; left: 0; top: 0; width: 176px; transform: translate(-50%, -100%);
-  text-align: center; opacity: 0; transition: opacity 180ms ease; will-change: transform; }
+.g-plate { position: absolute; left: 0; top: 0; min-width: 150px; max-width: 240px; transform: translate(-50%, -100%);
+  padding: 4px 10px 5px; border-radius: 3px; text-align: center; opacity: 0; transition: opacity 180ms ease;
+  will-change: transform;
+  /* A low smoked-glass backing, not ink: the DOM is not tone mapped, so this
+     stays the grey it is written as and the words hold over white plaster. */
+  background: linear-gradient(rgba(14,11,8,0.34), rgba(14,11,8,0.5)); }
 .g-plate.on { opacity: 1; }
 .g-plate .n { font-size: 15.5px; line-height: 1.25; color: #f3e7cc; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
@@ -120,8 +124,8 @@ const CSS = `
 .g-plate .b i { position: absolute; inset: 0 auto 0 0; display: block; }
 .g-plate .b i.lag { background: rgba(240,222,180,0.8); transition: width 520ms cubic-bezier(.4,0,.2,1) 260ms; }
 .g-plate .b i.now { background: linear-gradient(90deg, #8f3326, #c4553f); transition: width 90ms linear; }
-.g-plate .c { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
-  color: var(--gold); opacity: 0.85; margin-top: 4px; white-space: nowrap;
+.g-plate .c { font-family: var(--mono); font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase;
+  color: #ecc98a; margin-top: 4px; white-space: nowrap;
   text-shadow: 0 0 1px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,0.85), 0 0 6px rgba(0,0,0,0.6); }
 .g-plate .c.warden { color: #e0a24e; }
 #g-focus .n { font-size: 14.5px; }
@@ -944,7 +948,8 @@ export function createGameUi(game) {
   function headOf(slot, lift = 0.3) {
     const fig = slot && slot.figure;
     if (!project || !fig || !fig.at) return null;
-    return project(fig.at.x, fig.at.y + (fig.height || 1.7) + lift, fig.at.z);
+    // Someone sitting is that much lower (motion.js `drop`).
+    return project(fig.at.x, fig.at.y + (fig.height || 1.7) + lift - ((fig.m && fig.m.drop) || 0), fig.at.z);
   }
 
   function show(event) {
@@ -1344,7 +1349,7 @@ export function createGameUi(game) {
     // seen, and the panel on the right only while they cannot.
     const foeT = t && t.fighting ? t : null;
     lastFoeSlot = foeT ? foeT.slot : null;
-    const head = foeT ? plateAt(foeT.slot, 0.16) : null;
+    const head = foeT ? plateAt(foeT.slot, 0.06) : null;
     foe.classList.toggle('on', !!head);
     if (head) {
       foe.style.transform = `translate(${head.x.toFixed(1)}px, ${head.y.toFixed(1)}px) translate(-50%, -100%)`;
@@ -1368,7 +1373,7 @@ export function createGameUi(game) {
     // the one being fought, whose plate already says so.
     const f = game.focused();
     lastFocusSlot = f ? f.slot : null;
-    const fhead = f && (!foeT || f.slot !== foeT.slot) ? plateAt(f.slot, 0.12) : null;
+    const fhead = f && (!foeT || f.slot !== foeT.slot) ? plateAt(f.slot, 0.06) : null;
     focusPlate.classList.toggle('on', !!fhead);
     if (fhead) {
       focusPlate.style.transform = `translate(${fhead.x.toFixed(1)}px, ${fhead.y.toFixed(1)}px) translate(-50%, -100%)`;

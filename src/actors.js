@@ -158,9 +158,8 @@ function gateBoard(dirName) {
   ctx.strokeStyle = '#24170c'; ctx.lineWidth = 10; ctx.strokeRect(5, 5, 502, 118);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillStyle = '#ead9b2';
-  ctx.font = '600 44px "Iowan Old Style", "Palatino Linotype", Georgia, serif';
-  const word = dirName.charAt(0).toUpperCase() + dirName.slice(1);
-  ctx.fillText(`${word} — beyond the map`, 256, 66);
+  ctx.font = '600 36px "Iowan Old Style", "Palatino Linotype", Georgia, serif';
+  ctx.fillText(`The way ${dirName} lies beyond the map`, 256, 66, 470);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
