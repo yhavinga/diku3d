@@ -576,6 +576,28 @@ def build_fungus():
         p.append(cap)
     return deliver(p, "fungus_cluster")
 
+
+def build_lantern():
+    """A pierced iron lantern on a chain from the tent's ridge beam: origin
+    at the beam's underside (z = 0), hanging down 2.1 m. The lamp is what the
+    flame and the light in build.js belong to; without it the flame hung in
+    the air."""
+    lib.reset()
+    p = []
+    for i in range(9):
+        z = -0.1 - i * 0.14
+        p.append(lib.torus(0.035, 0.008, (0, 0, z), (math.pi / 2 if i % 2 else 0, 0, 0 if i % 2 else math.pi / 2),
+                           major_seg=6, minor_seg=3, name="link", mat="iron"))
+    body_top = -1.35
+    p.append(lib.cone(0.05, 0.16, 0.22, (0, 0, body_top - 0.11), verts=8, name="hood", mat="iron"))
+    for k in range(6):
+        a = 2 * math.pi * k / 6
+        p.append(kit.timber((0.02, 0.02, 0.42), (math.cos(a) * 0.15, math.sin(a) * 0.15, body_top - 0.43),
+                            (0, 0, 0), "iron", 0.004, "rib"))
+    p.append(lib.cylinder(0.17, 0.04, (0, 0, body_top - 0.66), verts=8, name="base", mat="iron"))
+    p.append(lib.cone(0.12, 0.02, 0.12, (0, 0, body_top - 0.74), verts=8, name="finial", mat="iron"))
+    return deliver(p, "lantern", smooth=False)
+
 def build():
     out = [
         build_massif("massif_a", 81001, 12.0),
@@ -592,5 +614,6 @@ def build():
         build_cushions(),
         build_hitch_line(),
         build_fungus(),
+        build_lantern(),
     ]
     return "\n".join(out)

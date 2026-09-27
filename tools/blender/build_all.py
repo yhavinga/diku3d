@@ -86,7 +86,7 @@ BUDGET = {
     "massif_a": 3800, "massif_b": 3000, "massif_mouth": 3300,
     "dune_a": 1000, "dune_b": 1000, "palm_a": 2500, "palm_b": 2500,
     "tent_roof": 2600, "tent_wall": 1000, "tent_wall_door": 900,
-    "rug": 200, "cushions": 600, "hitch_line": 450, "fungus_cluster": 1300,
+    "rug": 200, "cushions": 600, "hitch_line": 450, "fungus_cluster": 1300, "lantern": 400,
     # The animals. One skinned mesh each, two materials (fur or feathers, and
     # horn), and far fewer of them than of people: Midgaard has 13, the
     # Shire's farm 19. The big ones get the most because they are the ones

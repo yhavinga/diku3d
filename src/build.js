@@ -3856,7 +3856,13 @@ function sewerDressing({ room, style, pos, y, blind, sides, wall, ceil, instance
   const against = blind.length ? blind : [0, 1, 2, 3].filter((d) => !sides[d] || sides[d].kind !== 'alley');
   let slot = 0;
   const nextWall = () => against[(slot++) % Math.max(1, against.length)];
-  if (/\b(bones?|skulls?|skeletons?|decay)\b/i.test(text) && against.length) {
+  // "From the treasure haphazardly strewn about": gold catches what light
+  // there is. A faint warm glint, which is also all that keeps a dragon's
+  // lair and its door off RGB 0.
+  if (/\btreasur\w*/i.test(text)) {
+    lights.push({ x: pos.x + 1.5, y: y + 1.2, z: pos.z - 1.5, color: 0xffcf7a, intensity: 9, radius: 13 });
+  }
+  if (/\b(bones?|skulls?|skeletons?|decay|carcass\w*)\b/i.test(text) && against.length) {
     const n = /\b(lot of|all kinds|scattered|spread)\b/i.test(text) ? 2 : 1;
     for (let i = 0; i < n; i++) {
       put('bone_pile', wall - 1.1, (rand(i, 41) - 0.5) * (wall - 1.5) * 2, nextWall(), rand(i, 43) * 6.28);
@@ -4134,11 +4140,18 @@ function buildEastRoom({ room, pos, sides, instances, chunk, decor, lights, addC
     instances.add('rug', { x: rug.x, y, z: rug.z, rotY: FACE_ROT[back] }, chunk);
     const seat = sewerAt(pos, back, 4.3, 0);
     instances.add('cushions', { x: seat.x, y, z: seat.z, rotY: FACE_ROT[back] + Math.PI }, chunk);
-    if (/lavish|fancy|rich|tapestr/i.test(text)) {
-      // A brass lamp hung from the ridge beam, which is the only way a tent
-      // this rich is lit after dark. It hangs from something: the beam.
-      decor.push({ kind: 'torch', bare: true, x: pos.x, y: y + 3.6, z: pos.z + 0.01 });
-      lights.push({ x: pos.x, y: y + 3.4, z: pos.z, color: 0xffb566, intensity: 6, radius: 10, flicker: true });
+    // A lantern on a chain from the ridge beam, off the middle of it. After
+    // dark it is all the light there is in a tent, so every tent has one --
+    // the rich ones turned up. Without it the inside of a tent at night was
+    // 23% of the frame at RGB 0: black goat hair lit by nothing.
+    // Two, one each end of the beam: from one, the far walls of an eleven-
+    // metre tent still fell to black at their foot.
+    const rich = /lavish|fancy|rich|tapestr/i.test(text);
+    for (const off of [-0.9, 0.9]) {
+      const lx = pos.x + off;
+      instances.add('lantern', { x: lx, y: y + 4.9, z: pos.z, rotY: 0 }, chunk);
+      decor.push({ kind: 'torch', bare: true, x: lx, y: y + 4.9 - 1.72, z: pos.z });
+      lights.push({ x: lx, y: y + 2.9, z: pos.z, color: 0xffb566, intensity: rich ? 34 : 24, radius: 16, flicker: true });
     }
     return;
   }

@@ -760,15 +760,19 @@ const SURFACES = {
     const id = hash2(strip, 0, 5, 611);
     const weave = fbm(u * 160, v * 40, 160, 613, 2);
     const slub = fbm(u * 20, v * 6, 20, 617, 3);
-    let c = id < 0.4 ? rgb(0x2c2622) : id < 0.75 ? rgb(0x5a4632) : rgb(0xbfae8c);
-    c = mix(c, rgb(0x1e1a17), slub * 0.25);
+    // The black is weathered goat hair, a brown-black, not a black: at
+    // 0x2c2622 the walls of a lamp-lit tent went to RGB 0 at night.
+    let c = id < 0.4 ? rgb(0x46392f) : id < 0.75 ? rgb(0x6a523a) : rgb(0xbfae8c);
+    c = mix(c, rgb(0x2a241f), slub * 0.15);
     const seam = f < 0.035 || f > 0.965;
     const band = (f > 0.06 && f < 0.1) || (f > 0.9 && f < 0.94);
     if (band) c = mix(c, rgb(0x8a2a20), 0.8);
     if (seam) c = mix(c, rgb(0x191512), 0.5);
     const shade = 0.9 + weave * 0.2;
     s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
-    s.height = 0.5 + weave * 0.15 + slub * 0.1 - (seam ? 0.2 : 0);
+    // The weave is under a texel at any distance you see a tent from; in the
+    // relief it only speckled the roof with black.
+    s.height = 0.5 + weave * 0.04 + slub * 0.1 - (seam ? 0.2 : 0);
     s.rough = 0.95;
   },
 
@@ -1053,7 +1057,9 @@ const RECIPES = {
   sewerwood: { surface: 'bark', scale: 1.6, normalScale: 0.6, env: 1, wet: 0, detail: 0.4, buried: true },
   // The eastern mountains, outside and in.
   cliff: { surface: 'sandstone', scale: 9, normalScale: 0.35, env: 0.3, wet: 0, detail: 0.6 },
-  tentcloth: { surface: 'tentcloth', scale: 4, normalScale: 0.5, env: 0.4, wet: 0, detail: 0.4 },
+  // A full `env`: cloth this open lets the sky through, and at 0.4 a tent's
+  // corners went to RGB 0 after dark however hard the lantern burned.
+  tentcloth: { surface: 'tentcloth', scale: 4, normalScale: 0.5, env: 1.0, wet: 0, detail: 0.4 },
   rug: { surface: 'rug', scale: 3.4, normalScale: 0.3, env: 0.35, wet: 0, detail: 0.3 },
   frond: { surface: 'frond', scale: 1.2, normalScale: 0.5, env: 0.5, wet: 0, detail: 0.3 },
   rope: { surface: 'rope', scale: 0.3, normalScale: 0.6, env: 0.4, wet: 0, detail: 0.2 },
