@@ -134,6 +134,51 @@ export function makeLabel(text, height = 0.5, options) {
   return sprite;
 }
 
+/**
+ * The board over a sealed gate: the way it points, and that the map ends
+ * there, painted on planks. Lit like everything else (it is wood, not a
+ * label), and seen only from the side it faces.
+ */
+function gateBoard(dirName) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 128);
+  grad.addColorStop(0, '#6a4a2e'); grad.addColorStop(1, '#4e3520');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 512, 128);
+  // Three planks, and the grain along them.
+  ctx.strokeStyle = 'rgba(20,12,6,0.55)';
+  ctx.lineWidth = 3;
+  for (const y of [43, 86]) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(512, y); ctx.stroke(); }
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 40; i++) {
+    const y = (i * 37) % 128; ctx.strokeStyle = `rgba(30,18,8,${0.08 + (i % 5) * 0.03})`;
+    ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.bezierCurveTo(170, y + 3, 340, y - 3, 512, y + 1.5); ctx.stroke();
+  }
+  ctx.strokeStyle = '#24170c'; ctx.lineWidth = 10; ctx.strokeRect(5, 5, 502, 118);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ead9b2';
+  ctx.font = '600 36px "Iowan Old Style", "Palatino Linotype", Georgia, serif';
+  ctx.fillText(`The way ${dirName} lies beyond the map`, 256, 66, 470);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  // One material, so one draw: the edges and the back take their colour
+  // from the painted frame in the canvas's corner.
+  const geometry = new THREE.BoxGeometry(2.2, 0.55, 0.06);
+  const uv = geometry.attributes.uv;
+  const front = geometry.groups[4];
+  for (let i = 0; i < uv.count; i++) {
+    if (i >= front.start / 1.5 && i < (front.start + front.count) / 1.5) continue;
+    uv.setXY(i, 0.004, 0.98);
+  }
+  geometry.clearGroups();
+  const board = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: texture, roughness: 0.85 }));
+  board.castShadow = false;
+  return board;
+}
+
 // ---------------------------------------------------------------- figures ----
 
 function pushPart(parts, geometry, colour, matrix) {
@@ -1665,6 +1710,9 @@ export function populate(world, layout, built, options = {}) {
   const banners = [];
   const tables = [];
   const fittings = [];
+  // Where people settle: seats on the benches, places at a bar and a hearth
+  // (motion.js `spots`). Filled as the furniture is placed.
+  const spots = [];
   // Declared here rather than with the windows: the hearths built below push
   // their fires into it, and those run first.
   const windowLights = [];
@@ -1705,18 +1753,13 @@ export function populate(world, layout, built, options = {}) {
       fig.rotation.y = -angle + Math.PI / 2;
       group.add(fig);
 
-      const label = makeLabel(mob.proto.short, 0.42);
-      label.position.set(0, height + 0.42, 0);
-      label.visible = false;
-      fig.add(label);
-
       const aggressive = !!(mob.proto.act & ACT_AGGRESSIVE);
       // The figure contract: whatever the builder handed back, plus where this
       // one stands and who it is. motion.js reads the clips, stride and hit
       // frames off it and fills in what an older rig does not carry.
       const record = {
         ...made,
-        object: fig, head: headGroup, label, home: fig.position.clone(), height,
+        object: fig, head: headGroup, home: fig.position.clone(), height,
         mixer: made.mixer || null, actions: made.actions || null, legs: made.legs || null,
         aggressive, walking: false,
         sentinel: !!(mob.proto.act & ACT_SENTINEL),
@@ -1844,8 +1887,12 @@ export function populate(world, layout, built, options = {}) {
       case 'table': tables.push(item); break;
       case 'fitting': fittings.push(item); break;
       case 'gateSign': {
-        const sign = makeLabel(`${item.text} — beyond the map`, 0.55, { colour: '#cbb994' });
-        sign.position.set(item.x, item.y, item.z);
+        // A painted board over the sealed arch, not words hanging in the air:
+        // it was a two-metre floating "up · #3700 — outside the loaded world"
+        // across the temple's nave.
+        const sign = gateBoard(item.text);
+        sign.position.set(item.x + item.dx * 0.42, item.y + 0.78, item.z + item.dz * 0.42);
+        sign.rotation.y = Math.atan2(-item.dx, -item.dz);
         group.add(sign);
         break;
       }
@@ -1883,6 +1930,12 @@ export function populate(world, layout, built, options = {}) {
         ], strHash(`${item.z}`, i));
         if (prop && instances) {
           instances.add(prop, { x: px, y: item.y, z: pz, rotY: spin }, 'props');
+          // props.py's bench: 1.85 m long, seat at 0.45, its back to local -Z.
+          if (prop === 'bench') {
+            for (const lx of [-0.5, 0.5]) {
+              spots.push({ kind: 'sit', seat: 0.48, x: px + lx * Math.cos(spin) + 0.06 * Math.sin(spin), y: item.y, z: pz - lx * Math.sin(spin) + 0.06 * Math.cos(spin), yaw: spin });
+            }
+          }
           continue;
         }
         if ((kinds + i) % 3 === 0) {
@@ -1900,6 +1953,13 @@ export function populate(world, layout, built, options = {}) {
     for (const item of tables) {
       const spin = item.spin || 0;
       const s2 = Math.sin(spin); const c2 = Math.cos(spin);
+      // Two to a bench, facing the table, stepped over from behind.
+      for (const side of [-1, 1]) {
+        for (const lx of [-0.36, 0.36]) {
+          const lz = side * 0.74;
+          spots.push({ kind: 'sit', from: 'behind', seat: 0.5, x: item.x + lx * c2 + lz * s2, y: item.y, z: item.z - lx * s2 + lz * c2, yaw: spin + (side > 0 ? Math.PI : 0) });
+        }
+      }
       const set = (lx, y, lz) => at(item.x + lx * c2 + lz * s2, y, item.z - lx * s2 + lz * c2, 0, spin, 0);
       pushPart(props, G.box(1.5, 0.1, 0.75), 0x93714a, set(0, item.y + 0.78, 0));
       for (const [ox, oz] of [[-0.62, -0.28], [0.62, -0.28], [-0.62, 0.28], [0.62, 0.28]]) {
@@ -2002,10 +2062,20 @@ export function populate(world, layout, built, options = {}) {
           pushPart(props, G.cylinder(0.17, 0.17, 0.04, 8), 0x60472c, put(sx, item.y + 0.05, sz, spin));
         }
         solid(shift, front, L / 2, D / 2 + 0.12, 0, H);
+        // Somewhere to stand with your elbows on it.
+        for (const lx of [-1.3, 0, 1.3]) {
+          const [wx, wz] = worldOf(shift + lx, front + D / 2 + 0.42);
+          spots.push({ kind: 'bar', x: wx, y: item.y, z: wz, yaw: ry + Math.PI });
+        }
       } else if (item.fitting === 'hearth') {
         const OPEN_W = 1.5; const OPEN_H = 1.35; const BREAST = 2.5; const DEEP = 0.72;
         const face = WALL_Z + DEEP / 2 + 0.02;
         const jamb = (BREAST - OPEN_W) / 2;
+        // Warming your hands at it: off the hearthstone, facing the fire.
+        for (const lx of [-0.7, 0.7]) {
+          const [wx, wz] = worldOf(shift + lx, WALL_Z + 1.25 + 0.5);
+          spots.push({ kind: 'stand', x: wx, y: item.y, z: wz, yaw: ry + Math.PI });
+        }
         // Pale: this is dressed stone standing in a dark room with a fire at
         // the foot of it, and the whole point of a chimney breast is that it
         // is the brightest thing in the room after the fire itself.
@@ -2647,32 +2717,6 @@ export function populate(world, layout, built, options = {}) {
 
   const HIDDEN = { pos: new THREE.Vector3(0, -1000, 0), scale: new THREE.Vector3(0, 0, 0) };
 
-  /**
-   * Hold a name label to a fraction of the frame however close you get.
-   *
-   * A `Sprite` with `sizeAttenuation` is a world-space quad, so its share of
-   * the screen goes as 1/distance and there is no lower bound on distance. A
-   * judge walked up to a wolf and its name spanned a third of the width; a long
-   * name is nearly three metres of canvas, and at two metres away the frame is
-   * only about four metres wide.
-   *
-   * The screen fraction of a quad of width `w` at distance `d` is
-   * `w / (2 d tan(fovY/2) aspect)`, so the widest it may be is that inverted.
-   * The label rides up with its own shrinking so it stays just clear of the
-   * head rather than sinking into it.
-   */
-  const LABEL_MAX_FRAC = 0.12;
-
-  function clampLabel(fig, camera, distance) {
-    const base = fig.label.userData.baseScale;
-    if (!base) return;
-    const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
-    const widest = LABEL_MAX_FRAC * 2 * Math.max(0.4, distance) * tanHalf * camera.aspect;
-    const k = Math.min(1, widest / base.x);
-    fig.label.scale.set(base.x * k, base.y * k, 1);
-    fig.label.position.y = fig.height + base.y * k;
-  }
-
   function updateContactShadows() {
     if (!contactShadows) return;
     // Away from the sun, on the ground.
@@ -2771,14 +2815,14 @@ export function populate(world, layout, built, options = {}) {
       const dx = camera.position.x - fig.object.position.x;
       const dz = camera.position.z - fig.object.position.z;
       const distSq = dx * dx + dz * dz;
-      // In a fight the foe plate (game-ui.js) takes the label's place.
-      fig.label.visible = distSq < 110 && !fig.m.dead && !fig.m.fighting && fig.m.fade > 0.99;
-      if (fig.label.visible) clampLabel(fig, camera, Math.sqrt(distSq));
       if (fig.interactable) {
         fig.interactable.position.set(fig.at.x, fig.at.y + fig.height * 0.6, fig.at.z);
       }
       if (fig.head && distSq < 400) {
-        _look.set(dx, 0, dz).normalize();
+        // Whoever they are talking to, or else you.
+        const other = fig.m.lookAt;
+        if (other) _look.set(other.at.x - fig.at.x, 0, other.at.z - fig.at.z).normalize();
+        else _look.set(dx, 0, dz).normalize();
         const want = Math.atan2(_look.x, _look.z);
         let delta = ((want - fig.object.rotation.y + Math.PI) % (Math.PI * 2)) - Math.PI;
         if (delta < -Math.PI) delta += Math.PI * 2;
@@ -2814,7 +2858,7 @@ export function populate(world, layout, built, options = {}) {
   // collider for the player but a mobile still walks round it.
   const nav = createNav({ layout, built, world });
   if (assets) nav.addInstances([built.group, group], assets, THREE);
-  const motion = createMotion({ figures, nav });
+  const motion = createMotion({ figures, nav, zones: built.zones || null, spots });
 
   /**
    * Play a clip on a mobile's body -- `target` is a figure, a game slot

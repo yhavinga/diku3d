@@ -24,6 +24,9 @@ const ROOM = 10;
 const DOOR_W = 3.2;
 const STAIR_START = ROOM / 2 - 0.5;
 const STAIR_END = STAIR_START - 7.4;
+const STAIR_STEPS = 20;
+const STAIR_RISER = LEVEL_H / STAIR_STEPS;
+const STAIR_TREAD = 7.4 / STAIR_STEPS;
 
 export const NAV_RES = 0.5;
 const PER = CELL / NAV_RES;          // 26 samples across a cell
@@ -567,9 +570,89 @@ export function createNav({ layout, built, world }) {
       const arrive = { x: centreOf(open[0]), y: b.level * LEVEL_H, z: centreOf(open[1]) };
       const goal = randomSpot(to, rand);
       const after = goal ? (pathInRoom(to, arrive, goal) || []) : [];
-      return { points, level: a.level, portal: { arrive, level: b.level, after, stair: true }, to };
+      // The flight itself, tread by tread: a body walks it rather than
+      // dissolving at the foot and reappearing 8.7 m away and a storey up.
+      const flight = { x: lower.x * CELL, y: lower.level * LEVEL_H, z: lower.z * CELL, dx, dz };
+      const on = (along, y) => ({ x: flight.x + dx * along, y, z: flight.z + dz * along });
+      const bottom = on(STAIR_START - 0.3, flight.y + STAIR_RISER);
+      const top = on(STAIR_END + 0.18, flight.y + LEVEL_H);
+      const lip = on(STAIR_END - 0.7, flight.y + LEVEL_H);
+      const climb = up ? [bottom, top, lip, arrive] : [lip, top, bottom, arrive];
+      return { points, level: a.level, portal: { arrive, level: b.level, after, stair: true, flight, climb }, to };
     }
     return null;
+  }
+
+  /**
+   * The height of the ground under (x, z) on a flight `route` returned: the
+   * top of whichever tread is there, the upper floor past the head, the lower
+   * floor off its sides and foot. build.js's buildStair, in numbers.
+   */
+  function stairY(flight, x, z) {
+    const ox = x - flight.x; const oz = z - flight.z;
+    const along = ox * flight.dx + oz * flight.dz;
+    const across = Math.abs(ox * flight.dz - oz * flight.dx);
+    if (along <= STAIR_END) return flight.y + LEVEL_H;
+    if (along >= STAIR_START || across > DOOR_W / 2 + 0.15) return flight.y;
+    const i = Math.min(STAIR_STEPS - 1, Math.max(0, Math.floor((STAIR_START - along) / STAIR_TREAD)));
+    return flight.y + STAIR_RISER * (i + 1);
+  }
+
+  /**
+   * The nearest wall a person could put their back to: a solid box at least
+   * head high, within `reach` of (x, z). Props (they carry a footprint) do
+   * not count. Returns the point on its face and the way out of it, or null.
+   */
+  function wallNear(x, z, level, reach = 2) {
+    const y = level * LEVEL_H;
+    let best = null; let bestD = reach;
+    for (const c of solids.around(x, z, _near)) {
+      if (c.obb || c.y0 > y + 0.4 || c.y1 < y + 1.9) continue;
+      const px = Math.min(c.x1, Math.max(c.x0, x));
+      const pz = Math.min(c.z1, Math.max(c.z0, z));
+      const d = Math.hypot(x - px, z - pz);
+      if (d < 1e-3 || d >= bestD) continue;
+      // A face, not a corner: square to the box's side.
+      const nx = px === c.x0 ? -1 : px === c.x1 ? 1 : 0;
+      const nz = pz === c.z0 ? -1 : pz === c.z1 ? 1 : 0;
+      if (Math.abs(nx) + Math.abs(nz) !== 1) continue;
+      bestD = d; best = { x: px, z: pz, nx, nz };
+    }
+    return best;
+  }
+
+  /**
+   * Whether a wall stands between two points: the segment against every
+   * collider box near it (a slab test). What a name over someone's head has
+   * to ask before it is drawn on top of the wall they are behind. Doors are
+   * not in `solids`, so a closed door does not hide anyone; a crate does,
+   * but only where the line actually passes through it.
+   */
+  const _seen = new Set();
+  const _cands = [];
+  function sightBlocked(x0, y0, z0, x1, y1, z1) {
+    if (!geometric) return false;
+    const dx = x1 - x0; const dy = y1 - y0; const dz = z1 - z0;
+    const len = Math.hypot(dx, dz);
+    _seen.clear();
+    const n = Math.max(1, Math.ceil(len / 6));
+    for (let k = 0; k <= n; k++) {
+      const t = k / n;
+      for (const c of solids.around(x0 + dx * t, z0 + dz * t, _cands)) _seen.add(c);
+    }
+    for (const c of _seen) {
+      let t0 = 0.02; let t1 = 0.98; // not the eye's own wall, nor the body's
+      const slab = (o, d, lo, hi) => {
+        if (Math.abs(d) < 1e-9) return o >= lo && o <= hi;
+        let a = (lo - o) / d; let b = (hi - o) / d;
+        if (a > b) { const s = a; a = b; b = s; }
+        if (a > t0) t0 = a;
+        if (b < t1) t1 = b;
+        return t0 <= t1;
+      };
+      if (slab(x0, dx, c.x0, c.x1) && slab(z0, dz, c.z0, c.z1) && slab(y0, dy, c.y0, c.y1)) return true;
+    }
+    return false;
   }
 
   /** Is the door (if any) on this exit standing open? `doors` is actors.doors, or null headless. */
@@ -647,6 +730,7 @@ export function createNav({ layout, built, world }) {
   return {
     CELL, LEVEL_H, NAV_RES, levelOf,
     sample, roomAt, territory, randomSpot, findPath, pathInRoom, clearLine, nearestOpen, route, doorOpen,
+    stairY, wallNear, sightBlocked,
     addInstances,
     /** How many cells have been rasterised so far -- the grid is built on demand. */
     get built() { return grids.size; },

@@ -95,7 +95,7 @@ function makeMaterials(library) {
   // Steel wants the environment to be anything at all: a bright metal with no
   // reflection is a grey plastic. Flat PBR on purpose -- a tiled stone recipe
   // on a 90 cm blade reads as a pattern, not a surface.
-  const steel = new THREE.MeshStandardMaterial({ color: 0xc8ccd2, metalness: 0.92, roughness: 0.28 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0xc8ccd2, metalness: 0.92, roughness: 0.4 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x55565a, metalness: 0.85, roughness: 0.42 });
   const brass = new THREE.MeshStandardMaterial({ color: 0xb08a4e, metalness: 0.9, roughness: 0.35 });
   const flat = (tag, fallback) => {
@@ -211,7 +211,7 @@ export const WEAPON_ASSETS = [
  * `steel` and `paint` recipes are there, these stand in.
  */
 const STAND_IN = {
-  steel: { color: 0xb4b9be, metalness: 0.95, roughness: 0.3 },
+  steel: { color: 0xb4b9be, metalness: 0.95, roughness: 0.4 },
   paint: { color: 0x7d2a22, metalness: 0, roughness: 0.66 },
 };
 
@@ -233,6 +233,14 @@ function modelledWeapon(library, name) {
     const standIn = STAND_IN[p.materialName];
     if (standIn && !(library.materials && library.materials[p.materialName])) {
       material = new THREE.MeshStandardMaterial({ vertexColors: true, ...standIn });
+    } else if (material && material.metalness > 0.5) {
+      // Half a metre from the eye, the hammered steel's relief is a field of
+      // tiny mirrors: each one caught a lamp at night and the blade bloomed
+      // like cut crystal. Its own copy, smoother and flatter, for the hand.
+      material = material.clone();
+      material.roughness = Math.max(material.roughness, 0.38);
+      if (material.normalScale) material.normalScale.multiplyScalar(0.4);
+      material.envMapIntensity = (material.envMapIntensity ?? 1) * 0.7;
     }
     inner.add(new THREE.Mesh(p.geometry, material));
   }
@@ -429,10 +437,17 @@ class Streaks {
  * directions, which is far easier to reason about than three Euler angles.
  * For bare hands `blade` is the line through the curled fingers.
  */
+/*
+ * Rest and ready keep the hand in the lower right, left of the vitals panel
+ * (NDC x ~0.25, y ~-0.6 at 16:9) and the blade rising up and out from it, so
+ * the crosshair and whatever it is on are never behind steel. The old ones
+ * crossed the blade over the centre of the frame and put the fist under the
+ * panel.
+ */
 const POSES = {
   cut: {
-    rest: { p: [0.24, -0.33, -0.55], blade: [-0.12, 0.62, -0.78], elbow: [0.45, -0.55, 0.7] },
-    ready: { p: [0.2, -0.24, -0.55], blade: [-0.32, 0.82, -0.47], elbow: [0.5, -0.65, 0.55] },
+    rest: { p: [0.18, -0.27, -0.55], blade: [0.4, 0.7, -0.6], elbow: [0.45, -0.55, 0.7] },
+    ready: { p: [0.15, -0.22, -0.55], blade: [0.15, 0.8, -0.58], elbow: [0.5, -0.65, 0.55] },
     block: { p: [0.06, -0.15, -0.5], blade: [-1, 0.14, -0.12], elbow: [0.35, -0.75, 0.55] },
     swings: [
       // right to left, falling: wound up over the right shoulder
@@ -452,8 +467,8 @@ const POSES = {
     ],
   },
   thrust: {
-    rest: { p: [0.24, -0.36, -0.48], blade: [-0.1, 0.35, -0.93], elbow: [0.4, -0.6, 0.7] },
-    ready: { p: [0.2, -0.27, -0.48], blade: [-0.14, 0.24, -0.96], elbow: [0.4, -0.55, 0.73] },
+    rest: { p: [0.18, -0.3, -0.5], blade: [0.12, 0.4, -0.9], elbow: [0.4, -0.6, 0.7] },
+    ready: { p: [0.16, -0.24, -0.5], blade: [0.05, 0.3, -0.95], elbow: [0.4, -0.55, 0.73] },
     block: { p: [0.06, -0.16, -0.46], blade: [-1, 0.2, -0.1], elbow: [0.35, -0.75, 0.55] },
     swings: [
       { windup: { p: [0.23, -0.27, -0.28], blade: [-0.06, 0.18, -0.98], elbow: [0.35, -0.45, 0.82] },
@@ -465,8 +480,8 @@ const POSES = {
     ],
   },
   punch: {
-    rest: { p: [0.24, -0.4, -0.42], blade: [-0.9, 0.3, -0.3], elbow: [0.3, -0.8, 0.5] },
-    ready: { p: [0.19, -0.2, -0.45], blade: [-0.9, 0.3, -0.3], elbow: [0.3, -0.65, 0.7] },
+    rest: { p: [0.2, -0.36, -0.45], blade: [-0.9, 0.3, -0.3], elbow: [0.3, -0.8, 0.5] },
+    ready: { p: [0.16, -0.22, -0.45], blade: [-0.9, 0.3, -0.3], elbow: [0.3, -0.65, 0.7] },
     block: { p: [0.08, -0.12, -0.36], blade: [-0.25, 0.96, 0.05], elbow: [0.2, -0.85, 0.45] },
     swings: [
       { windup: { p: [0.22, -0.22, -0.34], blade: [-0.9, 0.25, -0.3], elbow: [0.3, -0.7, 0.65] },
@@ -533,6 +548,7 @@ class ViewModel {
     this.kind = undefined;
     this.shield = undefined;
     this.swing = null;
+    this.queue = [];
     this.block = 0;
     this.jolt = 0;
     this.fight = 0;
@@ -586,7 +602,7 @@ class ViewModel {
    * about a quarter second; with more time than that the swing simply starts
    * later, with less it is quicker.
    */
-  strike(contactIn) {
+  strike(contactIn, miss = false) {
     const windup = clamp(contactIn - 0.1, 0.08, 0.26);
     const start = Math.max(0, contactIn - windup - 0.1);
     const set = POSES[this.style].swings;
@@ -594,7 +610,10 @@ class ViewModel {
     // Bare hands alternate: a jab with the right, a cross with the left.
     const hand = this.style === 'punch' && this.beat % 2 ? 'off' : 'hand';
     this.beat++;
-    this.swing = { t: -start, windup, strike: 0.1, shape, hand };
+    // Queued, not replacing: a round's second blow is known the moment the
+    // first is, and writing it over the first swing cut that one off before
+    // it landed -- two hits, one swing.
+    this.queue.push({ t: -start, windup, strike: 0.1, shape, hand, miss });
   }
 
   update(dt, player, fighting) {
@@ -604,7 +623,7 @@ class ViewModel {
 
     const armed = !!this.kind;
     this.fight += ((fighting ? 1 : 0) - this.fight) * Math.min(1, dt * 5);
-    const wantShow = armed || fighting || !!this.swing ? 1 : 0;
+    const wantShow = armed || fighting || !!this.swing || this.queue.length ? 1 : 0;
     this.show += (wantShow - this.show) * Math.min(1, dt * (wantShow ? 7 : 3));
     this.scene.visible = this.show > 0.01;
     if (!this.scene.visible) return;
@@ -631,6 +650,17 @@ class ViewModel {
     }
     this.lastYaw = yaw; this.lastPitch = pitch;
 
+    // A blow that meets nothing carries on past where it should have stopped:
+    // the follow-through a third again as far, which is what a miss looks
+    // like from behind the blade.
+    const follow = (s) => {
+      if (!s.miss) return s.shape.follow;
+      if (!s.over) {
+        const c = s.shape.contact; const f = s.shape.follow;
+        s.over = { p: f.p.map((v, i) => v + (v - c.p[i]) * 0.4), blade: f.blade, elbow: f.elbow };
+      }
+      return s.over;
+    };
     const mix = (m) => {
       // Collapse a two-pose blend to a single pose object.
       const a = m.a; const b = m.b; const t = m.u;
@@ -646,6 +676,12 @@ class ViewModel {
       if (!this.kind) off = { a: mix(off), b: P.block, u: w };
     }
 
+    // The latest queued swing that has started is the one on screen.
+    for (let i = 0; i < this.queue.length; i++) this.queue[i].t += dt;
+    while (this.queue.length && this.queue[0].t >= 0) {
+      this.swing = this.queue.shift();
+      this.swing.t -= dt; // advanced once below
+    }
     if (this.swing) {
       const s = this.swing;
       s.t += dt;
@@ -656,8 +692,8 @@ class ViewModel {
       if (t < 0) seg = { a: base, b: base, u: 0 };
       else if (t < s.windup) seg = { a: base, b: s.shape.windup, u: easeOut(t / s.windup) };
       else if (t < s.windup + s.strike) seg = { a: s.shape.windup, b: s.shape.contact, u: easeIn((t - s.windup) / s.strike) };
-      else if (t < s.windup + s.strike + 0.12) seg = { a: s.shape.contact, b: s.shape.follow, u: easeOut((t - s.windup - s.strike) / 0.12) };
-      else if (t < s.windup + s.strike + 0.55) seg = { a: s.shape.follow, b: base, u: ease((t - s.windup - s.strike - 0.12) / 0.43) };
+      else if (t < s.windup + s.strike + 0.12) seg = { a: s.shape.contact, b: follow(s), u: easeOut((t - s.windup - s.strike) / 0.12) };
+      else if (t < s.windup + s.strike + 0.55) seg = { a: follow(s), b: base, u: ease((t - s.windup - s.strike - 0.12) / 0.43) };
       else { this.swing = null; seg = null; }
       if (seg) { if (s.hand === 'off') off = seg; else main = seg; }
     }
@@ -692,7 +728,9 @@ class ViewModel {
       lamp.color.copy(src.color);
       lamp.distance = src.distance;
       lamp.decay = src.decay;
-      lamp.intensity = src.intensity;
+      // Less than the wall beside it gets: a point light on a curved mirror
+      // at arm's length is the brightest pixel in a night frame.
+      lamp.intensity = src.intensity * 0.4;
     });
     this.sun.color.copy(sun.color);
     this.sun.intensity = sun.intensity * (indoor ? 0.08 : 1);
@@ -833,7 +871,12 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
         if (fig && !primed) motion.strike(fig, event.beat % 2 ? 'attack2' : 'attack', delay);
       } else if (event.skill !== 'kick') {   // a kick is the leg's (kick.js), not the blade's
         const primed = event.beat === 0 && vm.primedFor !== null && Math.abs(vm.primedFor - (clock + delay)) < 0.2;
-        if (!primed) vm.strike(delay);
+        if (!primed) vm.strike(delay, event.kind === 'miss');
+        else if (event.kind === 'miss') {
+          // The swing was started before the round said it would miss.
+          const s = vm.queue[vm.queue.length - 1] || vm.swing;
+          if (s) s.miss = true;
+        }
       }
       // The air moving, a moment before the contact.
       queue.push({ at: clock + Math.max(0, delay - 0.12), kind: 'whoosh', event });
@@ -873,6 +916,9 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
         break;
       }
       case 'miss':
+        // A miss is a blow too: the one it missed leans out of its way, and
+        // the blade passes through the air where they were.
+        if (toFig) motion.react(toFig, 'evade');
         break;
       case 'parry': {
         if (toFig) motion.react(toFig, 'block');
@@ -919,10 +965,16 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     for (const slot of game.mobs) {
       if (slot.dead || !slot.instance || !slot.instance.fighting) continue;
       const fig = figureOf(slot);
-      if (!fig || slot.primedAt !== undefined || !game.willSwing(slot)) continue;
+      if (!fig) continue;
       const contactIn = vIn + MOB_BEAT;
       const clip = fig.clips && fig.clips.attack ? fig.clips.attack : 0.9;
       const windup = (fig.hitFrame && fig.hitFrame.attack ? fig.hitFrame.attack : 0.4) * clip;
+      // How long the body has before it must start its next swing: the
+      // footwork and feints between blows (motion.js fidget) fit inside it.
+      const swinging = game.willSwing(slot);
+      const primedNow = slot.primedAt !== undefined && clock < slot.primedAt + 0.3;
+      fig.m.swingIn = !swinging ? 9 : (primedNow ? 0 : contactIn - windup);
+      if (slot.primedAt !== undefined || !swinging) continue;
       if (contactIn <= windup + 0.02) {
         motion.strike(fig, 'attack', contactIn);
         slot.primedAt = clock + contactIn;
@@ -958,6 +1010,12 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
 
     // The weapon in your hand, from what you are actually wielding.
     const s = game.state;
+    // A foe low in the frame draws the view down to it (player.js).
+    const foeFig = s.fighting && s.fighting.slot ? figureOf(s.fighting.slot) : null;
+    if (foeFig && !foeFig.m.dead) {
+      player.lookAssist = player.lookAssist || new THREE.Vector3();
+      player.lookAssist.set(foeFig.at.x, foeFig.at.y + foeFig.height * 0.6, foeFig.at.z);
+    } else player.lookAssist = null;
     const wield = s.equipment[WEAR.WIELD];
     const shield = s.equipment[WEAR.SHIELD];
     vm.equip(weaponKind(wield), shield ? (/kite|tower|heater/i.test(shield.name) ? 'kite' : 'round') : null);

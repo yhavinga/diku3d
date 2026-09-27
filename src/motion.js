@@ -193,15 +193,130 @@ function prepareRig(figure) {
 
 // -- the controller -------------------------------------------------------------
 
+// -- bodies ---------------------------------------------------------------------
+
+/**
+ * How much ground a figure covers: a capsule along its heading. A horse is a
+ * 2.7 m body on a 0.7 m width, and separating it as a 0.55 m circle is how
+ * four horses and three cows came to stand inside one another in a barn.
+ * People and anything without a measured footprint are a circle.
+ */
+function bodyOf(fig) {
+  const foot = fig.object.userData.footprint;
+  if (!foot) return { r: 0.28, h: 0 };
+  const r = Math.max(0.12, foot.width / 2);
+  return { r, h: Math.max(0, foot.length / 2 - r) };
+}
+
+/** Closest distance between two segments in the plane, and the closest points. */
+function segSeg(ax, az, bx, bz, cx, cz, dx, dz, out) {
+  const d1x = bx - ax; const d1z = bz - az;
+  const d2x = dx - cx; const d2z = dz - cz;
+  const rx = ax - cx; const rz = az - cz;
+  const a = d1x * d1x + d1z * d1z; const e = d2x * d2x + d2z * d2z; const f = d2x * rx + d2z * rz;
+  let s = 0; let t = 0;
+  if (a <= 1e-9 && e <= 1e-9) { s = 0; t = 0; } else if (a <= 1e-9) { t = clamp(f / e, 0, 1); } else {
+    const c = d1x * rx + d1z * rz;
+    if (e <= 1e-9) { s = clamp(-c / a, 0, 1); } else {
+      const b = d1x * d2x + d1z * d2z; const denom = a * e - b * b;
+      s = denom > 1e-9 ? clamp((b * f - c * e) / denom, 0, 1) : 0;
+      t = (b * s + f) / e;
+      if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); } else if (t > 1) { t = 1; s = clamp((b - c) / a, 0, 1); }
+    }
+  }
+  out.px = ax + d1x * s; out.pz = az + d1z * s;
+  out.qx = cx + d2x * t; out.qz = cz + d2z * t;
+  return Math.hypot(out.px - out.qx, out.pz - out.qz);
+}
+
+/**
+ * The bones a procedural pose needs, found by name. Only the people's rig has
+ * all of them; a beast or a boxed figure gets null and never sits.
+ */
+function findBones(fig) {
+  const want = { hips: /^hips$/i, spine: /^spine$/i, thighL: /^thighL$/i, thighR: /^thighR$/i, shinL: /^shinL$/i, shinR: /^shinR$/i, footL: /^footL$/i };
+  const out = {};
+  fig.object.traverse((n) => {
+    if (!n.isBone) return;
+    for (const [k, re] of Object.entries(want)) if (!out[k] && re.test(n.name)) out[k] = n;
+  });
+  return Object.keys(want).every((k) => out[k]) ? out : null;
+}
+
+const _qa = new THREE.Quaternion();
+const _xAxis = new THREE.Vector3(1, 0, 0);
+const _pa = new THREE.Vector3();
+const _pb = new THREE.Vector3();
+
+/**
+ * Which way a rotation about a bone's own X swings it, measured off the rig
+ * once: the rigs are rolled so local X is the hinge (CLAUDE.md, Blender's roll
+ * operators), but which sign is "forward" is the exporter's business, and a
+ * sit built on a guessed sign kneels backwards. Also the lengths that decide
+ * how far a body drops to meet a seat.
+ */
+function measureSit(fig, bones) {
+  const root = fig.object;
+  root.updateMatrixWorld(true);
+  const local = (bone, out) => root.worldToLocal(bone.getWorldPosition(out));
+  const hip = local(bones.thighL, new THREE.Vector3());
+  const knee = local(bones.shinL, new THREE.Vector3());
+  const ankle = local(bones.footL, new THREE.Vector3());
+  const save = bones.thighL.quaternion.clone();
+  bones.thighL.quaternion.multiply(_qa.setFromAxisAngle(_xAxis, 0.6));
+  root.updateMatrixWorld(true);
+  const thighSign = local(bones.shinL, _pa).z > knee.z ? 1 : -1;
+  bones.thighL.quaternion.copy(save);
+  const saveShin = bones.shinL.quaternion.clone();
+  bones.shinL.quaternion.multiply(_qa.setFromAxisAngle(_xAxis, 0.6));
+  root.updateMatrixWorld(true);
+  // Knee flexion carries the foot backwards.
+  const kneeSign = local(bones.footL, _pb).z < ankle.z ? 1 : -1;
+  bones.shinL.quaternion.copy(saveShin);
+  root.updateMatrixWorld(true);
+  return {
+    thighSign, kneeSign,
+    hipY: hip.y, thigh: Math.hypot(knee.y - hip.y, knee.z - hip.z), shin: Math.hypot(ankle.y - knee.y, ankle.z - knee.z),
+    ankleY: ankle.y,
+  };
+}
+
 /**
  * @param {object} deps
  *   figures  -- actors.js's figure records
  *   nav      -- nav.js
- *   onCull   -- called with a figure when it leaves or enters range
+ *   zones    -- build.js's above/below-ground split, or null: a figure in the
+ *               half that is not being drawn is not animated either
+ *   spots    -- places a person can settle: { x, y, z, yaw, kind: 'sit'|'stand',
+ *               seat (height, for 'sit'), approach (0..1: 0 from in front) }
  */
-export function createMotion({ figures, nav }) {
+export function createMotion({ figures, nav, zones = null, spots = [] }) {
+  // Each spot knows its room and where to stand before settling into it.
+  const spotsByRoom = new Map();
+  for (const spot of spots) {
+    const level = nav.levelOf(spot.y);
+    spot.level = level;
+    spot.room = nav.roomAt(spot.x, spot.y, spot.z);
+    if (spot.room === undefined) continue;
+    const fx = Math.sin(spot.yaw); const fz = Math.cos(spot.yaw);
+    // A table bench is stepped over from behind; a bench against a wall is
+    // sat down on from in front; a place at a bar is walked up to.
+    const back = spot.kind === 'sit' ? (spot.from === 'behind' ? -0.62 : 0.62) : 0;
+    const want = { x: spot.x + fx * back, z: spot.z + fz * back };
+    const open = nav.nearestOpen(level, want.x, want.z, 1.1);
+    if (!open) continue;
+    spot.approach = { x: (open[0] + 0.5) * nav.NAV_RES, y: level * nav.LEVEL_H, z: (open[1] + 0.5) * nav.NAV_RES };
+    // Nowhere to put your feet in front of a bench turned to face a wall.
+    if (spot.kind === 'sit' && spot.from !== 'behind' && !nav.sample(spot.x + fx * 0.75, spot.z + fz * 0.75, level)) continue;
+    spot.by = null;
+    if (!spotsByRoom.has(spot.room)) spotsByRoom.set(spot.room, []);
+    spotsByRoom.get(spot.room).push(spot);
+  }
+
   for (const fig of figures) {
     prepareRig(fig);
+    fig.body = bodyOf(fig);
+    fig.bones = fig.mixer && !fig.legs ? findBones(fig) : null;
     const seed = fig.seed || 1;
     fig.rand = mulberry(seed);
     // The pace the rig was made to walk at -- its stride over its cycle, so
@@ -237,6 +352,10 @@ export function createMotion({ figures, nav }) {
       idle: 'idle', stuck: 0, repath: 0, goal: null,
       fade: 1, fading: 0, offset: { x: 0, z: 0 }, lunge: null, recoil: null, sway: null,
       overlay: null, dead: null, gone: null, order: null, fighting: false,
+      // Settling somewhere (a seat, a wall, a bar), talking to someone, and
+      // the footwork of a fight between blows.
+      settle: null, talk: null, sitW: 0, leanW: 0, barW: 0, step: null, nextFidget: 0.8, stance: 0, swingIn: 9,
+      climb: null, drop: 0, lookAt: null,
     };
     fig.walking = false;
   }
@@ -283,8 +402,221 @@ export function createMotion({ figures, nav }) {
 
   const orderOf = (fig) => fig.order || { kind: 'stroll', room: fig.room };
 
+  // -- settling: a seat, a wall, a place at the bar, someone to talk to ---------
+
+  /**
+   * People in a town are mostly *somewhere*: at a table, against a wall, in a
+   * doorway talking. A stroll that only ever walked to a random spot and
+   * stood there made a tavern of patrons pacing the floor -- one walked 70 of
+   * 80 samples and ended 2.4 m from where it began. Merc still decides who
+   * moves between rooms; this is only what a body does inside one.
+   */
+  const canSettle = (fig) => !!fig.bones && !fig.aggressive && !fig.shop;
+
+  function freeSpot(fig, room) {
+    const list = spotsByRoom.get(room);
+    if (!list) return null;
+    const free = list.filter((s) => !s.by);
+    if (!free.length) return null;
+    return free[Math.floor(fig.rand() * free.length)];
+  }
+
+  /** The nearest tall wall within reach, to lean on. */
+  function wallSpot(fig) {
+    const w = nav.wallNear(fig.at.x, fig.at.z, fig.level, 2.2);
+    if (!w) return null;
+    // Stand clear of the wall by what a back and a pair of heels take up.
+    const x = w.x + w.nx * 0.3; const z = w.z + w.nz * 0.3;
+    const open = nav.nearestOpen(fig.level, w.x + w.nx * 0.75, w.z + w.nz * 0.75, 0.6);
+    if (!open) return null;
+    const approach = { x: (open[0] + 0.5) * nav.NAV_RES, y: fig.at.y, z: (open[1] + 0.5) * nav.NAV_RES };
+    return { kind: 'lean', x, y: fig.at.y, z, yaw: Math.atan2(w.nx, w.nz), approach, by: null };
+  }
+
+  /** Someone standing about in reach, to walk over to and talk to. */
+  function partnerFor(fig) {
+    neighbours(fig, near);
+    let best = null; let bestD = 7 * 7;
+    for (const o of near) {
+      if (!canSettle(o) || o.m.dead || o.m.gone || o.m.path || o.m.settle || o.m.talk || o.m.climb) continue;
+      if (o.level !== fig.level || orderOf(o).kind !== 'stroll' || o.m.wait < 2) continue;
+      const d = (o.at.x - fig.at.x) ** 2 + (o.at.z - fig.at.z) ** 2;
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    return best;
+  }
+
+  /** Pick something to do rather than somewhere to stand. True if it planned a walk. */
+  function planActivity(fig, order) {
+    if (!canSettle(fig) || order.radius !== undefined) return false;
+    const m = fig.m;
+    const r = fig.rand();
+    // A sentinel never leaves its room, which is all Merc asks of it; one
+    // on watch -- a guard, a knight -- also keeps its post, and gets only a
+    // wall to lean on beside it.
+    const post = fig.sentinel && /guard|knight|soldier/.test(fig.archetype || '');
+    const seat = post ? null : freeSpot(fig, order.room);
+    // A room with seats is a room people sit in: most of a tavern's patrons,
+    // most of the time, not one in five.
+    if (seat && r < 0.62) {
+      const path = nav.pathInRoom(order.room, fig.at, seat.approach, 0.8);
+      if (path && path.length) {
+        seat.by = fig;
+        m.settle = { spot: seat, phase: 'go', t: 0 };
+        m.path = path; m.pi = 0; m.goal = seat.approach; m.stuck = 0;
+        return true;
+      }
+    }
+    if (r < 0.8 && !post) {
+      const partner = partnerFor(fig);
+      if (partner) {
+        const dx = fig.at.x - partner.at.x; const dz = fig.at.z - partner.at.z;
+        const d = Math.hypot(dx, dz) || 1;
+        // Conversational distance: 1.2-1.5 m between centres.
+        const gap = 1.25 + fig.rand() * 0.25;
+        const goal = { x: partner.at.x + (dx / d) * gap, z: partner.at.z + (dz / d) * gap };
+        const path = d > gap + 0.4 ? nav.pathInRoom(order.room, fig.at, goal, 0.6) : [];
+        if (path) {
+          m.talk = { with: partner, phase: 'go', t: 0 };
+          partner.m.talk = { with: fig, phase: 'wait', t: 0 };
+          partner.m.wait = Math.max(partner.m.wait, 8);
+          partner.m.turnTo = Math.atan2(fig.at.x - partner.at.x, fig.at.z - partner.at.z);
+          if (path.length) { m.path = path; m.pi = 0; m.goal = goal; m.stuck = 0; } else startTalk(fig);
+          return true;
+        }
+      }
+    }
+    if (r < 0.95 && fig.rand() < 0.5) {
+      const wall = wallSpot(fig);
+      const home = fig.homeSpot;
+      if (wall && (!post || !home || Math.hypot(wall.x - home.x, wall.z - home.z) < 2.8)) {
+        const path = nav.pathInRoom(order.room, fig.at, wall.approach, 0.6);
+        if (path && path.length) {
+          m.settle = { spot: wall, phase: 'go', t: 0 };
+          m.path = path; m.pi = 0; m.goal = wall.approach; m.stuck = 0;
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function startTalk(fig) {
+    const t = fig.m.talk;
+    const o = t.with;
+    // The same length of conversation for both, and both turned to it.
+    const span = 12 + fig.rand() * 18;
+    for (const [a, b] of [[fig, o], [o, fig]]) {
+      a.m.talk = { with: b, phase: 'hold', t: 0, gesture: 1 + a.rand() * 3 };
+      a.m.wait = span;
+      a.m.turnTo = Math.atan2(b.at.x - a.at.x, b.at.z - a.at.z);
+      a.m.lookAt = b;
+    }
+  }
+
+  /**
+   * Standing and talking is not standing still: the weight shifts, a hand
+   * comes up to make a point, and the two take turns at it.
+   */
+  function talking(fig, dt) {
+    const t = fig.m.talk;
+    t.t += dt;
+    t.gesture -= dt;
+    const o = t.with;
+    fig.m.turnTo = Math.atan2(o.at.x - fig.at.x, o.at.z - fig.at.z);
+    if (t.gesture > 0) return;
+    t.gesture = 2.2 + fig.rand() * 3.5;
+    // Only the one speaking gestures; the other is listening.
+    if (o.m.overlay) return;
+    const r = fig.rand();
+    if (r < 0.45 && fig.actions.cast) playOnce(fig, 'cast', { gain: 0.32 + fig.rand() * 0.12, timeScale: 0.8, until: 0.55 });
+    else if (r < 0.7 && fig.actions.idle2) fig.m.idle = fig.m.idle === 'idle2' ? 'idle' : 'idle2';
+  }
+
+  function endTalk(fig) {
+    const t = fig.m.talk;
+    fig.m.talk = null; fig.m.lookAt = null;
+    if (t && t.with && t.with.m.talk && t.with.m.talk.with === fig) {
+      t.with.m.talk = null; t.with.m.lookAt = null;
+      t.with.m.wait = Math.min(t.with.m.wait, 0.6 + t.with.rand() * 1.5);
+    }
+  }
+
+  /**
+   * The settling itself, once the approach is reached: turn to the seat's
+   * facing, then sink onto it (or step back to the wall) over most of a
+   * second; hold; and get up the same way. Moves `at` directly -- the seat is
+   * inside the table's collider, where the walking grid says nobody stands.
+   */
+  function tickSettle(fig, dt) {
+    const m = fig.m;
+    const s = m.settle;
+    const spot = s.spot;
+    const sitting = spot.kind === 'sit';
+    s.t += dt;
+    if (s.phase === 'turn') {
+      m.turnTo = spot.yaw;
+      if (Math.abs(wrap(spot.yaw - fig.object.rotation.y)) < 0.12 || s.t > 2.5) {
+        s.phase = 'down'; s.t = 0; s.from = { x: fig.at.x, z: fig.at.z };
+      }
+      return true;
+    }
+    if (s.phase === 'down' || s.phase === 'up') {
+      const dur = sitting ? 0.85 : 0.5;
+      const u = clamp(s.t / dur, 0, 1);
+      const k = smooth(s.phase === 'down' ? u : 1 - u);
+      fig.at.x = s.from.x + (spot.x - s.from.x) * k;
+      fig.at.z = s.from.z + (spot.z - s.from.z) * k;
+      fig.object.rotation.y += wrap(spot.yaw - fig.object.rotation.y) * Math.min(1, dt * 8);
+      if (sitting) m.sitW = k; else if (spot.kind === 'lean') m.leanW = k; else m.barW = k;
+      m.speed = 0;
+      // Feet shuffle as the weight comes off them or back on.
+      m.shuffle = Math.sin(u * Math.PI) * 0.5;
+      if (u >= 1) {
+        m.shuffle = 0;
+        if (s.phase === 'down') { s.phase = 'hold'; s.t = 0; s.until = sitting ? 25 + fig.rand() * 50 : 12 + fig.rand() * 25; } else {
+          spot.by = null;
+          m.settle = null; m.sitW = 0; m.leanW = 0; m.barW = 0;
+          m.wait = 0.8 + fig.rand() * 2;
+        }
+      }
+      return true;
+    }
+    if (s.phase === 'hold') {
+      fig.object.rotation.y += wrap(spot.yaw - fig.object.rotation.y) * Math.min(1, dt * 4);
+      // Company at the table: now and then a look at whoever else is settled
+      // close by, then back to the room.
+      s.glance = (s.glance ?? 1 + fig.rand() * 3) - dt;
+      if (s.glance <= 0) {
+        s.glance = 3 + fig.rand() * 5;
+        neighbours(fig, near);
+        const company = near.filter((o) => o.m.settle && o.m.settle.phase === 'hold'
+          && (o.at.x - fig.at.x) ** 2 + (o.at.z - fig.at.z) ** 2 < 2.4 * 2.4);
+        m.lookAt = company.length && fig.rand() < 0.7 ? company[Math.floor(fig.rand() * company.length)] : null;
+      }
+      if (s.t > s.until) { m.lookAt = null; standUp(fig); }
+      return true;
+    }
+    return false;
+  }
+
+  function standUp(fig) {
+    const s = fig.m.settle;
+    if (!s) return;
+    if (s.phase === 'go' || s.phase === 'turn') {
+      s.spot.by = null; fig.m.settle = null; return;
+    }
+    if (s.phase === 'up') return;
+    const k = s.spot.kind === 'sit' ? fig.m.sitW : (s.spot.kind === 'lean' ? fig.m.leanW : fig.m.barW);
+    // Up to where the sitting-down started, from however far down it got.
+    s.phase = 'up';
+    s.t = (1 - k) * (s.spot.kind === 'sit' ? 0.85 : 0.5);
+    s.from = s.from || { x: s.spot.approach.x, z: s.spot.approach.z };
+  }
+
   function planStroll(fig, order) {
     const m = fig.m;
+    if (planActivity(fig, order)) return;
     const leash = order.radius ?? (fig.sentinel ? 2.8 : Infinity);
     const around = order.home || fig.homeSpot;
     const others = near;
@@ -295,8 +627,9 @@ export function createMotion({ figures, nav }) {
       radius: leash,
       // Not onto someone else's spot, and not onto anyone standing still.
       avoid: (x, z) => others.some((o) => {
-        const g = o.m.goal || o.at;
-        return (g.x - x) ** 2 + (g.z - z) ** 2 < 1.4 * 1.4;
+        const g = o.m.dead ? o.at : (o.m.goal || o.at);
+        const room = 1.4 + fig.body.h + o.body.h + Math.max(0, fig.body.r + o.body.r - 0.56);
+        return (g.x - x) ** 2 + (g.z - z) ** 2 < room * room;
       }),
     });
     if (!spot) { m.wait = 1.5 + fig.rand() * 2; return; }
@@ -308,6 +641,19 @@ export function createMotion({ figures, nav }) {
   function arrive(fig) {
     const m = fig.m;
     m.path = null;
+    if (m.settle && m.settle.phase === 'go') {
+      // Boxed in short of the seat: give it up rather than slide through a table.
+      const a = m.settle.spot.approach;
+      if (Math.hypot(a.x - fig.at.x, a.z - fig.at.z) > 0.8) { m.settle.spot.by = null; m.settle = null; return arrive(fig); }
+      m.settle.phase = 'turn'; m.settle.t = 0;
+      m.goal = { x: fig.at.x, z: fig.at.z };
+      return;
+    }
+    if (m.talk && m.talk.phase === 'go') {
+      const o = m.talk.with;
+      if (o.m.talk && o.m.talk.with === fig && Math.hypot(o.at.x - fig.at.x, o.at.z - fig.at.z) < 2.4) { startTalk(fig); m.goal = { x: fig.at.x, z: fig.at.z }; return; }
+      m.talk = null;
+    }
     m.goal = { x: fig.at.x, z: fig.at.z };
     // A while standing about, not a metronome: mostly a few seconds, now and
     // then a long stop -- someone looking in a window, waiting for a friend.
@@ -368,6 +714,16 @@ export function createMotion({ figures, nav }) {
   function think(fig, dt, player) {
     const m = fig.m;
     const order = orderOf(fig);
+    // Anything but a stroll -- Merc sending them on, a fight -- gets them up
+    // off the bench first, and out of the conversation.
+    if (order.kind !== 'stroll') {
+      if (m.talk) endTalk(fig);
+      if (m.settle) standUp(fig);
+    }
+    if (m.settle && (m.settle.phase === 'up' || (order.kind !== 'stroll' && m.settle.phase !== 'go'))) {
+      m.want = 0; m.fighting = false;
+      return;
+    }
     if (order !== m.order) {
       m.order = order;
       m.path = null;
@@ -376,6 +732,11 @@ export function createMotion({ figures, nav }) {
         // A flight waits for the blow that caused it to be seen landing.
         m.stage = order.wait > 0 ? 'wait' : 'walk';
         if (m.stage === 'walk') { m.path = order.route.points.slice(); m.pi = 0; }
+      } else {
+        // A journey interrupted half-way into an archway is over: 'out' is
+        // the stage that skips steering, and a skeleton caught in it fought
+        // a whole fight without once turning to face its opponent.
+        m.stage = null;
       }
     }
     m.fighting = false;
@@ -394,7 +755,11 @@ export function createMotion({ figures, nav }) {
           return;
         }
         if (m.stage === 'walk' && !m.path) {
-          if (order.route.portal) { m.stage = 'out'; m.fading = -1; } else { order.done = true; }
+          const portal = order.route.portal;
+          if (portal && portal.climb) {
+            m.stage = 'climb';
+            m.climb = { pts: portal.climb, i: 0, portal, order };
+          } else if (portal) { m.stage = 'out'; m.fading = -1; } else { order.done = true; }
         }
         return;
       }
@@ -447,8 +812,13 @@ export function createMotion({ figures, nav }) {
       }
       default: {
         // stroll
-        if (m.path) return;
+        if (m.path || m.settle) return;
         m.wait -= dt;
+        if (m.talk) {
+          if (m.talk.phase === 'hold') talking(fig, dt);
+          if (m.wait > 0) return;
+          endTalk(fig);
+        }
         // Someone aggressive keeps an eye on you while standing about.
         if (fig.aggressive && player) {
           const pd = Math.hypot(player.x - fig.at.x, player.z - fig.at.z);
@@ -529,10 +899,19 @@ export function createMotion({ figures, nav }) {
       if (dist < space + 0.35) brake = Math.min(brake, yielding ? 0 : 0.35);
     };
     for (const o of near) {
-      if (o.m.dead || o.m.fade < 0.5) continue;
-      consider(o.at.x, o.at.z, SPACE, false);
+      if (o.m.gone || o.m.fade < 0.5 || o.level !== fig.level) continue;
+      // A long body wants the room its length takes, and a body on the
+      // ground is as much in the way as a standing one.
+      consider(o.at.x, o.at.z, SPACE + (fig.body.r + o.body.r - 0.56) + o.body.h * 0.8 + fig.body.h * 0.5, false);
     }
     if (player) consider(player.x, player.z, YOU, true);
+    // Waiting on you to get out of the way, for a stroll, is worth a second
+    // and a half; then it is somewhere else to go. Five patrons of an inn
+    // stood round a player at the centre of the room for forty seconds.
+    if (brake === 0) {
+      m.yielded = (m.yielded || 0) + dt;
+      if (m.yielded > 1.5 && orderOf(fig).kind === 'stroll') { m.yielded = 0; arrive(fig); return; }
+    } else m.yielded = 0;
     // Don't swerve past the point itself when nearly there.
     if (remaining < 1.2) bend *= remaining / 1.2;
     wantYaw += clamp(bend, -1.1, 1.1);
@@ -587,23 +966,53 @@ export function createMotion({ figures, nav }) {
     void player;
   }
 
-  /** People who overlap anyway (the player walking into one) are eased apart. */
+  /** The two ends of a figure's body segment on the ground. */
+  function spine(fig, out) {
+    const h = fig.body.h;
+    const yaw = fig.object.rotation.y;
+    const sx = Math.sin(yaw) * h; const sz = Math.cos(yaw) * h;
+    out.ax = fig.at.x - sx; out.az = fig.at.z - sz; out.bx = fig.at.x + sx; out.bz = fig.at.z + sz;
+    return out;
+  }
+  const _sa = {}; const _sb = {}; const _cp = {};
+
+  /** How far apart two bodies are, surface to surface (negative: overlapping), and the way out. */
+  function gapBetween(a, b) {
+    spine(a, _sa); spine(b, _sb);
+    const d = segSeg(_sa.ax, _sa.az, _sa.bx, _sa.bz, _sb.ax, _sb.az, _sb.bx, _sb.bz, _cp);
+    let nx = _cp.px - _cp.qx; let nz = _cp.pz - _cp.qz;
+    if (d < 1e-4) { nx = a.at.x - b.at.x || 1e-3; nz = a.at.z - b.at.z; }
+    const n = Math.hypot(nx, nz) || 1;
+    _cp.nx = nx / n; _cp.nz = nz / n;
+    return d - a.body.r - b.body.r;
+  }
+
+  /**
+   * Bodies that overlap anyway -- the player walking into one, a crowd at a
+   * door, a barn with seven beasts reset into it -- are eased apart, each as
+   * the capsule it is. The dead are solid too: a live pig walked through a
+   * dead one, because a corpse used to be nothing to step round.
+   */
   function separate(fig, player) {
+    if (fig.m.settle && fig.m.settle.phase !== 'go' && fig.m.settle.phase !== 'turn') return;
     neighbours(fig, near);
     for (const o of near) {
-      if (o.m.dead || o.m.gone) continue;
-      const dx = fig.at.x - o.at.x; const dz = fig.at.z - o.at.z;
-      const d = Math.hypot(dx, dz);
-      if (d >= 0.55 || d < 1e-4) continue;
-      const push = (0.55 - d) * 0.25;
-      const px = fig.at.x + (dx / d) * push; const pz = fig.at.z + (dz / d) * push;
+      if (o.m.gone || o.level !== fig.level) continue;
+      const gap = gapBetween(fig, o);
+      if (gap >= 0.04) continue;
+      // Only the living give way, and someone settled on a bench does not.
+      const settled = o.m.settle && o.m.settle.phase !== 'go';
+      const share = o.m.dead || settled ? 1 : 0.5;
+      const push = Math.min(0.25, (0.04 - gap) * share * 0.5);
+      const px = fig.at.x + _cp.nx * push; const pz = fig.at.z + _cp.nz * push;
       if (nav.sample(px, pz, fig.level)) { fig.at.x = px; fig.at.z = pz; }
     }
     if (player) {
       const dx = fig.at.x - player.x; const dz = fig.at.z - player.z;
       const d = Math.hypot(dx, dz);
-      if (d < 0.7 && d > 1e-4) {
-        const push = (0.7 - d) * 0.4;
+      const room = 0.42 + fig.body.r + fig.body.h * 0.5;
+      if (d < room && d > 1e-4) {
+        const push = (room - d) * 0.4;
         const px = fig.at.x + (dx / d) * push; const pz = fig.at.z + (dz / d) * push;
         if (nav.sample(px, pz, fig.level)) { fig.at.x = px; fig.at.z = pz; }
       }
@@ -611,6 +1020,62 @@ export function createMotion({ figures, nav }) {
   }
 
   // -- travelling through archways and stairs ---------------------------------
+
+  /**
+   * Up or down a flight, tread by tread, at a climbing pace: the body turns
+   * to each leg first, the way it does on the flat, and its feet ride the
+   * tread under it (nav.stairY), eased so a riser is a step and not a jolt.
+   * Nothing can interrupt it: a fight that starts on the stairs is fought at
+   * the top or the bottom, where there is ground to stand on.
+   */
+  function tickClimb(fig, dt) {
+    const m = fig.m;
+    const c = m.climb;
+    const target = c.pts[c.i];
+    const dx = target.x - fig.at.x; const dz = target.z - fig.at.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.14) {
+      c.i++;
+      if (c.i >= c.pts.length) { finishClimb(fig); return; }
+      return;
+    }
+    let yaw = fig.object.rotation.y;
+    const err = wrap(Math.atan2(dx, dz) - yaw);
+    if (Math.abs(err) > TURN_FIRST && m.speed < 0.3) {
+      m.speed = Math.max(0, m.speed - DECEL * dt);
+      fig.object.rotation.y = yaw + clamp(err, -TURN_STANDING * dt, TURN_STANDING * dt);
+      m.turning = Math.sign(err);
+      return;
+    }
+    m.turning = 0;
+    yaw += clamp(err, -TURN_WALKING * dt, TURN_WALKING * dt);
+    fig.object.rotation.y = yaw;
+    // A 45-degree flight is climbed at about two-thirds of a walk.
+    const want = Math.min(fig.pace * 0.7, Math.sqrt(2 * DECEL * d) + 0.2);
+    m.speed += clamp(want - m.speed, -DECEL * dt, ACCEL * dt);
+    const step = Math.min(d, m.speed * dt * Math.max(0, Math.cos(err)));
+    fig.at.x += Math.sin(yaw) * step;
+    fig.at.z += Math.cos(yaw) * step;
+    const ground = nav.stairY(c.portal.flight, fig.at.x, fig.at.z);
+    fig.at.y += (ground - fig.at.y) * Math.min(1, dt * 12);
+    fig.home.y = fig.at.y;
+    fig.level = nav.levelOf(fig.at.y);
+  }
+
+  function finishClimb(fig) {
+    const m = fig.m;
+    const p = m.climb.portal;
+    m.climb = null;
+    fig.at.y = p.arrive.y;
+    fig.level = p.level;
+    fig.home.y = p.arrive.y;
+    m.path = p.after && p.after.length ? p.after.slice() : null;
+    m.pi = 0;
+    // Whatever order is standing now -- the journey's, or a fight that began
+    // on the stairs -- takes over from here.
+    m.stage = 'in';
+    if (orderOf(fig).kind !== 'travel') { m.path = null; m.stage = null; }
+  }
 
   function portalStep(fig, dt) {
     const m = fig.m;
@@ -692,6 +1157,9 @@ export function createMotion({ figures, nav }) {
     // A turn on the spot is taken in steps, not on a turntable: a little walk
     // at a slow cadence reads as shifting the feet round.
     if (!moving && m.turning && a.walk) wWalk = 0.35;
+    // Feet moving under a body that is not going anywhere: footwork in a
+    // fight, the shuffle of sitting down.
+    if (m.shuffle > 0 && a.walk) wWalk = Math.max(wWalk, m.shuffle);
     const still = 1 - (wWalk + wRun);
     if (m.fighting && a.fight) wFight = still; else wIdle = still;
 
@@ -736,7 +1204,12 @@ export function createMotion({ figures, nav }) {
     });
   }
 
-  function playOnce(fig, name, { timeScale = 1, hold = false, gain = 1, from = 0 } = {}) {
+  /**
+   * `until`, a fraction of the clip, cuts it short with its usual fade-out:
+   * the first half of a swing, pulled back, is a feint; a third of a cast is
+   * a hand raised to make a point.
+   */
+  function playOnce(fig, name, { timeScale = 1, hold = false, gain = 1, from = 0, until = 1 } = {}) {
     const action = fig.actions && fig.actions[name];
     if (!action || !fig.mixer) return false;
     const m = fig.m;
@@ -749,7 +1222,7 @@ export function createMotion({ figures, nav }) {
     action.time = from;
     action.setEffectiveWeight(0);
     action.play();
-    m.overlay = { action, name, t: from, duration: fig.clips[name], hold, gain };
+    m.overlay = { action, name, t: from, duration: fig.clips[name] * until, hold, gain };
     return true;
   }
 
@@ -791,10 +1264,114 @@ export function createMotion({ figures, nav }) {
         const s = Math.sin(u * Math.PI) * m.sway.side;
         ox += fz * s * 0.38; oz -= fx * s * 0.38;
         roll += s * 0.14;
+        if (m.sway.back) {
+          const b = Math.sin(u * Math.PI) * m.sway.back;
+          ox -= fx * b; oz -= fz * b; pitch -= b * 0.9;
+        }
       }
     }
+    if (m.step) {
+      // Footwork: a half step in or out and back again, on the feet.
+      m.step.t += dt;
+      const u = m.step.t / m.step.dur;
+      if (u >= 1) { m.step = null; m.shuffle = 0; } else {
+        const s = Math.sin(u * Math.PI);
+        ox += fx * s * m.step.along; oz += fz * s * m.step.along;
+        pitch += s * m.step.along * 0.35;
+        m.shuffle = s * 0.6;
+      }
+    }
+    if (m.fighting && !m.dead) {
+      // A fighter's weight is never still between blows: it rocks from foot
+      // to foot and the guard bobs with it.
+      m.stance += dt;
+      const ph = m.stance + (fig.seed || 0) % 7;
+      roll += Math.sin(ph * 2.3) * 0.035;
+      pitch += Math.sin(ph * 1.7 + 1.1) * 0.025;
+    }
+    if (m.leanW > 0) pitch -= 0.1 * m.leanW;
+    // Elbows on the bar; a little toward the fire.
+    if (m.barW > 0) pitch += (m.settle && m.settle.spot.kind === 'bar' ? 0.13 : 0.04) * m.barW;
     m.offset.x = ox; m.offset.z = oz;
     fig.pitch = pitch; fig.roll = roll;
+  }
+
+  /**
+   * Between blows. Merc swings once a round, every three seconds, and a body
+   * that holds its guard pose for the two and a half seconds in between
+   * reads as a statue waiting for its turn. So the time before the next
+   * swing (`m.swingIn`, from fx.js's pulse clock) is filled: a feint -- the
+   * wind-up of a swing, checked; the guard shifting; a half step in or out;
+   * a step round to one side, which is a real move -- the body circles.
+   * Nothing is started that would still be running when the real swing is due.
+   */
+  function fidget(fig, dt) {
+    const m = fig.m;
+    if (m.step && m.step.side) {
+      // The sidestep carries the body round, a little each frame.
+      const yaw = fig.object.rotation.y;
+      const v = (m.step.side / m.step.dur) * dt;
+      const nx = fig.at.x + Math.cos(yaw) * v; const nz = fig.at.z - Math.sin(yaw) * v;
+      if (nav.sample(nx, nz, fig.level)) { fig.at.x = nx; fig.at.z = nz; }
+    }
+    if (m.overlay || m.pending || m.lunge || m.step || m.sway || m.recoil || m.speed > 0.05) return;
+    m.nextFidget -= dt;
+    if (m.nextFidget > 0) return;
+    m.nextFidget = 0.3 + fig.rand() * 0.5;
+    const free = m.swingIn;
+    const a = fig.actions || {};
+    const r = fig.rand();
+    if (free > 1.0 && r < 0.26 && a.attack) {
+      const name = a.attack2 && fig.rand() < 0.5 ? 'attack2' : 'attack';
+      const dur = fig.clips[name];
+      const hit = ((fig.hitFrame && fig.hitFrame[name]) ?? 0.4) * dur;
+      playOnce(fig, name, { gain: 0.72, until: (hit * 0.5 + 0.22) / dur });
+      return;
+    }
+    if (free > 0.8 && r < 0.45 && a.block) {
+      playOnce(fig, 'block', { gain: 0.5, timeScale: 0.85 });
+      return;
+    }
+    if (free > 0.75 && (a.walk || fig.legs)) {
+      const sideways = r > 0.8;
+      const dir = fig.rand() < 0.5 ? -1 : 1;
+      m.step = sideways
+        ? { t: 0, dur: 0.6 + fig.rand() * 0.2, along: 0, side: dir * (0.25 + fig.rand() * 0.15) }
+        : { t: 0, dur: 0.5 + fig.rand() * 0.2, along: dir * (0.16 + fig.rand() * 0.1), side: 0 };
+    }
+  }
+
+  /**
+   * Sitting and leaning, laid over whatever the clips posed: the rigs carry
+   * no sit clip, so the legs are folded here, after the mixer, about each
+   * bone's own hinge (measured once per rig by `measureSit`), and the body
+   * is lowered until the hips meet the seat. The idle underneath keeps
+   * breathing; only the legs and the height are this.
+   */
+  function posture(fig) {
+    const m = fig.m;
+    const b = fig.bones;
+    if (!fig.sitGeo) fig.sitGeo = measureSit(fig, b);
+    const g = fig.sitGeo;
+    if (m.sitW > 0.001) {
+      const w = m.sitW;
+      const spot = m.settle && m.settle.spot;
+      const seat = spot && spot.seat ? spot.seat : 0.48;
+      const hip = 1.42 * w;
+      for (const [thigh, shin] of [[b.thighL, b.shinL], [b.thighR, b.shinR]]) {
+        thigh.quaternion.multiply(_qa.setFromAxisAngle(_xAxis, g.thighSign * hip));
+        shin.quaternion.multiply(_qa.setFromAxisAngle(_xAxis, g.kneeSign * hip * 1.02));
+      }
+      // Hips down onto the seat: from standing hip height to the seat and
+      // the width of the pelvis above it.
+      m.drop = Math.max(0, g.hipY - (seat + 0.09)) * w;
+    } else m.drop = 0;
+    if (m.leanW > 0.001) {
+      // One heel back against the wall behind.
+      const w = m.leanW;
+      b.thighR.quaternion.multiply(_qa.setFromAxisAngle(_xAxis, g.thighSign * 0.42 * w));
+      b.shinR.quaternion.multiply(_qa.setFromAxisAngle(_xAxis, g.kneeSign * 1.25 * w));
+    }
   }
 
   /** No death clip: go over backwards, as a weight does, and settle. */
@@ -876,6 +1453,10 @@ export function createMotion({ figures, nav }) {
       if (!playOnce(fig, 'block')) fig.m.recoil = { t: 0, amount: 0.45 };
     } else if (kind === 'dodge') {
       fig.m.sway = { t: 0, side: fig.rand() < 0.5 ? -1 : 1 };
+    } else if (kind === 'evade') {
+      // A blow that simply missed: not a dodge, just the body swaying back
+      // off the line and a half step, so the whiff has something to miss.
+      fig.m.sway = { t: 0, side: (fig.rand() < 0.5 ? -1 : 1) * 0.55, back: 0.12 };
     }
   }
 
@@ -919,12 +1500,24 @@ export function createMotion({ figures, nav }) {
   function die(fig) {
     const m = fig.m;
     if (m.dead) return;
-    m.overlay && m.overlay.action.stop();
+    // Everything else stops, weights and all: a swing still pending when the
+    // killing blow landed used to start on the corpse and cut the fall off,
+    // and a stopped action kept reading 1.0 to anything that asked.
+    if (m.overlay) { m.overlay.action.setEffectiveWeight(0); m.overlay.action.stop(); }
     m.overlay = null;
+    m.pending = null;
+    if (m.calls) { const calls = m.calls; m.calls = null; for (const c of calls) c.fn(); }
+    if (m.settle) { m.settle.spot.by = null; m.settle = null; }
+    if (m.talk) endTalk(fig);
+    m.climb = null; m.step = null; m.shuffle = 0; m.sitW = 0; m.leanW = 0; m.barW = 0; m.drop = 0;
     m.path = null; m.speed = 0; m.lunge = null; m.recoil = null; m.sway = null;
+    if (fig.actions) {
+      for (const [name, action] of Object.entries(fig.actions)) {
+        if (name !== 'death' && ONE_SHOT.has(name)) { action.setEffectiveWeight(0); action.stop(); }
+      }
+    }
     const clip = playOnce(fig, 'death', { hold: true });
     m.dead = { t: 0, clip, side: fig.rand() < 0.5 ? -1 : 1 };
-    if (fig.label) fig.label.visible = false;
   }
 
   // -- the frame --------------------------------------------------------------------
@@ -972,15 +1565,19 @@ export function createMotion({ figures, nav }) {
         }
       }
 
-      if (m.pending) {
+      if (m.pending && !m.dead) {
         m.pending.at -= dt;
         if (m.pending.at <= 0) {
-        playOnce(fig, m.pending.name, { timeScale: m.pending.speed || 1, from: m.pending.from || 0 });
-        m.pending = null;
-      }
+          playOnce(fig, m.pending.name, { timeScale: m.pending.speed || 1, from: m.pending.from || 0 });
+          m.pending = null;
+        }
       }
 
-      if (far) {
+      // The half of the world that is not being drawn (build.js's zones):
+      // a figure in the sewer is not animated from the Market Square, which
+      // is where 115 of its draw calls were going.
+      const unseen = zones && (fig.level < 0 ? !zones.deep.visible : !zones.surface.visible);
+      if (far || unseen) {
         // Out of sight a walk is only a position moving along a line: no
         // mixer, no steering, nobody to step round.
         fig.object.visible = false;
@@ -990,17 +1587,34 @@ export function createMotion({ figures, nav }) {
       }
       fig.object.visible = true;
 
+      // Turning is this frame's news or none: steer (or the climb) sets it
+      // when a body really is coming round. Left standing from the last
+      // frame it steered, it held a 0.35 walk under figures that were
+      // sitting, fading through an arch, or just standing -- feet treading
+      // the spot.
+      m.turning = 0;
       if (!m.dead) {
-        think(fig, dt, player);
-        portalStep(fig, dt);
-        if (m.stage !== 'out') steer(fig, dt, player);
-        separate(fig, player);
+        if (m.climb) tickClimb(fig, dt);
+        else {
+          think(fig, dt, player);
+          portalStep(fig, dt);
+          const settling = m.settle && m.settle.phase !== 'go' && tickSettle(fig, dt);
+          if (m.stage !== 'out' && (!settling || (m.settle && m.settle.phase === 'turn'))) steer(fig, dt, player);
+          separate(fig, player);
+        }
+        // A figure that stopped fading half-way -- turned on while walking
+        // into an archway, and a fight is not a journey -- comes back solid.
+        // It used to stay at 0.54 opacity and fight as a ghost.
+        const through = orderOf(fig).kind === 'travel' && (m.stage === 'out' || m.stage === 'in');
+        if (!through && !m.gone && m.fade < 1) setOpacity(fig, Math.min(1, m.fade + dt / 0.3));
+        if (m.fighting) fidget(fig, dt);
       }
       tickOffsets(fig, dt);
       tickDeath(fig, dt);
       if (fig.legs) animateLegs(fig, dt);
       else animate(fig, dt);
       if (fig.mixer) fig.mixer.update(dt);
+      if (fig.bones && (m.sitW > 0.001 || m.leanW > 0.001)) posture(fig); else m.drop = 0;
       fig.walking = m.speed > 0.16;
       placeObject(fig);
     }
@@ -1010,7 +1624,7 @@ export function createMotion({ figures, nav }) {
     const m = fig.m;
     fig.object.position.set(
       fig.at.x + m.offset.x,
-      fig.at.y + (fig.lift || 0) - (fig.sink || 0),
+      fig.at.y + (fig.lift || 0) - (fig.sink || 0) - m.drop,
       fig.at.z + m.offset.z,
     );
     // Pitch and roll are about the figure's own axes, after its heading.
@@ -1025,6 +1639,11 @@ export function createMotion({ figures, nav }) {
     const order = orderOf(fig);
     if (m.dead) return;
     if (order !== m.order) think(fig, 0, null);
+    if (m.climb) {
+      // Nobody is watching the stairs either.
+      fig.at.x = m.climb.portal.arrive.x; fig.at.z = m.climb.portal.arrive.z;
+      finishClimb(fig);
+    }
     if (order.kind === 'travel') {
       // No one is watching the archway: through it at once.
       if (m.stage === 'out') portalStep(fig, 1);
@@ -1064,5 +1683,5 @@ export function createMotion({ figures, nav }) {
     return { moving, idle, travelling, figures: figures.length };
   }
 
-  return { update, strike, react, perform, die, setOpacity, stats, orderOf, CLOSE };
+  return { update, strike, react, perform, die, setOpacity, stats, orderOf, CLOSE, spotsByRoom };
 }

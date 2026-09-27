@@ -52,6 +52,24 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Combat and crowds, second pass (motion.js, fx.js, game-ui.js)
+
+- **A stopped animation action still reports its old weight.** Zero the
+  weight before stopping it, or every probe sees ghost weights — which is
+  how a corpse kept swinging (attack 1.0 beside death 1.0).
+- **Space one attacker's blows at the source (`oneHit`)**, so the text,
+  the death and the fall move with the blow. A click followed by a pulse
+  put two blows 0.11 s apart and the second landed first.
+- **Misses at level 1 are Merc's real numbers**: a level-1 warrior hits
+  the cityguard 5.2% of the time. The rules stay; a miss now reads as one
+  (the foe leans out, the blade follows through, "miss" on screen).
+- **The sit pose's rotation signs are measured off each rig at runtime,**
+  not assumed.
+- **A board with six materials is six draw calls**; one material with the
+  edge UVs pointed at a dark corner of the texture is one.
+- Measured: barn overlap frames 61/120 → 5/120; standing still between
+  blows 68% → 44%; Green Dragon patrons 0% → 34% seated.
+
 ### No Man's Land (hood.are, tools/blender/hood.py)
 
 - **Two areas anchored off the same side of town fight over the same cells

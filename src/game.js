@@ -698,7 +698,19 @@ function oneHit(ch, victim, dt, ctx) {
   if (victim.position === POS.DEAD) return;
   // When this blow is *shown* -- the rules resolve a whole round on one pulse,
   // and a round of four blows all landing on the same frame reads as one.
-  if (ctx.round) ctx.now = (isNpc(ch) ? ctx.round.npc : ctx.round.player) + (ctx.beat || 0) * SWING_GAP;
+  if (ctx.round) {
+    ctx.now = (isNpc(ch) ? ctx.round.npc : ctx.round.player) + (ctx.beat || 0) * SWING_GAP;
+    // One body, one blow at a time. A click's round and the pulse after it
+    // can put two of the same attacker's blows 0.1 s apart, and then one
+    // swing landed two hits. Push the later one back until the first has
+    // been seen to land; everything this blow emits (the state line, the
+    // death, the body falling) rides on ctx.now and moves with it.
+    if (ctx.clock !== undefined) {
+      const at = ctx.clock + ctx.now;
+      if (ch.blowAt !== undefined && at < ch.blowAt + MIN_BLOW_GAP) ctx.now += ch.blowAt + MIN_BLOW_GAP - at;
+      ch.blowAt = ctx.clock + ctx.now;
+    }
+  }
 
   const wield = ch.equipment[WEAR.WIELD];
   if (dt === undefined || dt === null) {
@@ -963,6 +975,7 @@ export const SWING_GAP = 0.62;   // between one blow of a round and the next
 export const MOB_BEAT = 0.31;    // a mobile's blows fall between yours
 export const CLICK_WINDUP = 0.24;  // a click swings now; the blow lands this much later
 export const AMBUSH_WINDUP = 0.5;  // an aggressive mobile's first swing is seen coming
+export const MIN_BLOW_GAP = 0.45;  // one attacker's blows are never shown closer than this
 
 /** A gate is only *held* if something that could stop a novice stands at it. */
 const WARDEN_MIN_LEVEL = 5;
@@ -1092,6 +1105,9 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       bucket: null,
     });
   });
+
+  const figureSlot = new Map();
+  for (const slot of mobs) if (slot.figure) figureSlot.set(slot.figure, slot);
 
   // Mobiles walk now, so the buckets are kept up as they go.
   const mobBucket = new Map();
@@ -1288,6 +1304,8 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   const ctx = {
     rng,
     emit,
+    /** Seconds of game time, for spacing blows on screen (oneHit). */
+    clock: 0,
     setFighting(ch, victim) {
       ch.fighting = victim;
       ch.position = POS.FIGHTING;
@@ -2185,7 +2203,17 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   }
 
   // -- targeting ------------------------------------------------------------
+  /**
+   * Whatever the viewer has in its crosshair (`game.focus`), if it is a
+   * mobile in reach: what `attack` swings at and what `target` describes.
+   * The cone below used to decide on its own, 63 degrees wide, and a click
+   * under a swamp troll's name could start a fight with the marsh wolf
+   * beside it.
+   */
+  let focusSlot = null;
   function facingTarget(reach = REACH, cone = 0.45) {
+    if (focusSlot && focusSlot.instance && !focusSlot.dead
+      && dist2(focusSlot.pos, position) <= (reach + 1.8) * (reach + 1.8)) return focusSlot;
     let best = null;
     let bestScore = -Infinity;
     for (const slot of mobsNear(position, reach)) {
@@ -2230,7 +2258,10 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (!mob.fighting) ctx.setFighting(mob, state);
       return { ok: true, text: `You attack ${mob.name}.` };
     }
-    if (state.fighting === mob) return { ok: false, text: 'You do the best you can!' };
+    // fight.c do_kill refuses anyone at all while you are fighting, not just
+    // the one you are fighting: a click on the troll in the crosshair must not
+    // open a second fight beside the marsh wolf you are already in.
+    if (state.fighting && !state.fighting.slot.dead) return { ok: false, text: 'You do the best you can!' };
     state.position = POS.STANDING;
     ctx.round = { player: CLICK_WINDUP, npc: MOB_BEAT };
     try { multiHit(state, mob, undefined, ctx); } finally { ctx.round = null; ctx.now = undefined; }
@@ -2415,6 +2446,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       facing.z = cameraDirection.z / d;
     }
     if (invulnerable > 0) invulnerable -= dt;
+    ctx.clock += dt;
 
     const room = nearestRoom(position);
     if (room) state.roomVnum = room.vnum;
@@ -2438,6 +2470,11 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       const info = built.rooms.get(gate.vnum);
       if (info && dist2(info.center, position) < 18 * 18) {
         gate.seen = true;
+        // The level of the one actually standing there -- db.c fuzzes it at
+        // reset -- and not the prototype's, which is what the board used to
+        // show beside a plate that said something else.
+        const warden = mobs.find((slot) => slot.record === gate.warden && !slot.dead);
+        if (warden) gate.wardenLevel = wake(warden).level;
         emit({ kind: 'gate-seen', gate, text: `${gate.wardenName} holds the way out of ${gate.name}.` });
       }
     }
@@ -2535,6 +2572,11 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     set mobileSpec(fn) { mobileSpec = fn; },
     get mobileSpec() { return mobileSpec; },
 
+    /** Where your eye is, as the last update was told: for what can be seen from it. */
+    get eye() { return position; },
+    /** Which way you face on the ground, unit length. */
+    get facing() { return facing; },
+
     /** Seconds until the next violence pulse resolves a round. */
     violenceIn() {
       return ((pulseViolence - 1) + (1 - pulseAccum)) / PULSE_PER_SECOND;
@@ -2567,7 +2609,30 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
         fighting: state.fighting === mob,
         aggressive: !!(mob.act & ACT_AGGRESSIVE),
         warden: gates.find((g) => !g.open && g.warden === mob.slot.record) || null,
+        shop: !!mob.slot.record.shop,
+        focused: mob.slot === focusSlot,
         slot: mob.slot,
+      };
+    },
+
+    /**
+     * The mobile the viewer is looking at (its figure), or null. Set every
+     * frame from the same pick that shows the examine prompt, so the click,
+     * the prompt and the plate agree on who is meant.
+     */
+    focus(figure) {
+      focusSlot = figure ? (figureSlot.get(figure) || null) : null;
+    },
+
+    /** The one the viewer is looking at, as `target()` describes it -- even mid-fight with someone else. */
+    focused() {
+      const slot = focusSlot;
+      if (!slot || slot.dead || !slot.instance) return null;
+      const mob = slot.instance;
+      return {
+        name: mob.name, level: mob.level, aggressive: !!(mob.act & ACT_AGGRESSIVE),
+        shop: !!slot.record.shop, fighting: state.fighting === mob,
+        warden: gates.find((g) => !g.open && g.warden === slot.record) || null, slot,
       };
     },
 

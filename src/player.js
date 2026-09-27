@@ -80,6 +80,7 @@ export class Player {
     // mauling rocks it (the usual trauma model).
     this.trauma = 0;
     this._shakeTime = 0;
+    this.lookAssist = null;
     this._shakeRoll = 0;
 
     const down = (event) => {
@@ -249,7 +250,31 @@ export class Player {
 
   update(dt) {
     this.step(dt);
+    this.assistPitch(dt);
     this.applyShake(dt);
+  }
+
+  /**
+   * A foe close and low -- a dog at 1.8 m has its chest 36 degrees under
+   * your eye, at the very bottom of a 72-degree frame, under the prompts --
+   * draws the view down a little, until it sits a hand's width under the
+   * crosshair. It only ever pulls down, only that far, and gently enough
+   * that the mouse wins whenever it is moved. `lookAssist` is set by fx.js
+   * from the fight, a world point or null.
+   */
+  assistPitch(dt) {
+    const at = this.lookAssist;
+    if (!at || this._glide) return;
+    const cam = this.camera;
+    const d = Math.hypot(at.x - cam.position.x, at.z - cam.position.z);
+    if (d > 4.5 || d < 0.3) return;
+    const below = Math.atan2(cam.position.y - at.y, d);
+    // Anything grown is well inside the frame already.
+    if (below < 0.35) return;
+    // Where the view would have to point to put the target 11 degrees under
+    // the centre; never above level, never further down than 45 degrees.
+    const want = THREE.MathUtils.clamp(-(below - 0.19), -0.78, 0);
+    if (cam.rotation.x > want + 0.02) cam.rotation.x += (want - cam.rotation.x) * Math.min(1, dt * 2.2);
   }
 
   /**

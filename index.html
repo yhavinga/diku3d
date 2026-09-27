@@ -62,8 +62,11 @@
     color: var(--gold); line-height: 1; margin-top: 4px;
   }
 
+  /* Under the crosshair, low: the bottom stack is the spell bar (casters),
+     the key hint (game-ui.js #g-hint), then this. A creature is not named
+     here -- its plate over its head does that -- and in a fight nothing is. */
   #look {
-    position: absolute; left: 50%; bottom: 102px; transform: translateX(-50%);
+    position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%);
     text-align: center; opacity: 0; transition: opacity 140ms ease;
     /* An edge, not just a glow: over bright paving the wide soft shadow
        vanished and the name with it. */
@@ -71,6 +74,8 @@
       0 -1px 2px rgba(0,0,0,0.85), 1px 0 2px rgba(0,0,0,0.85), -1px 0 2px rgba(0,0,0,0.85),
       0 2px 12px rgba(0,0,0,0.7);
   }
+  body.g-caster #look { bottom: 136px; }
+  body.g-fighting #look { visibility: hidden; }
   .look-name { display: block; font-size: 19px; }
   .look-sub { display: block; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; color: var(--gold); opacity: 0.8; margin-top: 3px; text-transform: uppercase; }
   .look-key { display: block; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; opacity: 0.55; margin-top: 6px; }

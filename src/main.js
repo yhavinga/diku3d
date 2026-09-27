@@ -1254,6 +1254,7 @@ async function boot() {
 
     if (!state.paused) {
       lookTarget = findLookTarget();
+      game.focus(lookTarget && lookTarget.figure ? lookTarget.figure : null);
       hud.setLook(lookTarget);
       for (const portal of built.portals) {
         if (fadeTimer > 0) break;
