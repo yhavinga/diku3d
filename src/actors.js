@@ -17,6 +17,7 @@ import { OVERLAY_LAYER } from './render.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createNav } from './nav.js';
 import { createMotion } from './motion.js';
+import { personOf, carryOf, CLIP_FACTS, HIT_FRAME, LOOPS, CLIPS } from './people.js';
 
 const SKIN = [0xe8c39e, 0xd9a877, 0xb5834f, 0x8a5a33, 0x6d4526, 0xc9b7a0];
 const CLOTH = [
@@ -328,6 +329,294 @@ function buildModelledFigure(asset, proto, library) {
   // it to the body made the head-turn write the body's own rotation and then
   // read it back as the error term, which flips between two poses every frame.
   return { group, headGroup: null, height: asset.size.y * scale, scale, mixer, actions };
+}
+
+
+// ------------------------------------------------------------------ people ----
+//
+// The people of the town, from tools/blender/people.py: three rigged files
+// (person_male, person_female, troll), each holding every archetype that is
+// built on that body as its own skinned mesh, the hair, beards and hats as
+// separate small ones, and one set of clips. src/people.js decides who a
+// mobile is; this dresses it.
+
+/** Every file the people come from. assets.js loads them with the rest. */
+export const PEOPLE_FILES = ['person_male', 'person_female', 'troll'];
+
+const RIGHT_ARM = ['upperarmR', 'forearmR', 'handR'];
+const LEFT_ARM = ['upperarmL', 'forearmL', 'handL'];
+
+/** Per asset: the clips by name, scale tracks stripped. */
+const clipSets = new WeakMap();
+/**
+ * The clips as the file carries them, less every `.scale` track. The exporter
+ * bakes a scale key for every bone every frame, all of them 1 -- and a mixer
+ * writing 1 into a head bone every frame is what would undo the bigger head
+ * a child or a halfling is given. Nothing in the rig is ever scaled by a clip.
+ */
+function clipsOf(asset) {
+  let set = clipSets.get(asset);
+  if (set) return set;
+  set = { base: new Map(), carried: new Map() };
+  for (const clip of asset.animations) {
+    const c = clip.clone();
+    c.tracks = c.tracks.filter((t) => !t.name.endsWith('.scale'));
+    set.base.set(c.name, c);
+  }
+  clipSets.set(asset, set);
+  return set;
+}
+
+/**
+ * The standing and walking clips with an arm held still round what it
+ * carries: a spear upright, a blade low, a shield at the side. The carry
+ * poses are single-frame clips in the file; their arm tracks replace the
+ * swinging ones and everything else -- the breathing, the stride, the head --
+ * is left as it was. Cached per file and per pair of carry poses.
+ */
+function carriedClip(asset, name, carry) {
+  const set = clipsOf(asset);
+  const clip = set.base.get(name);
+  if (!clip || (!carry.right && !carry.left)) return clip;
+  if (!['idle', 'idle2', 'walk', 'run'].includes(name)) return clip;
+  const key = `${name}|${carry.right}|${carry.left}`;
+  if (set.carried.has(key)) return set.carried.get(key);
+  const swap = new Map();
+  for (const [pose, bones] of [[carry.right, RIGHT_ARM], [carry.left, LEFT_ARM]]) {
+    const src = pose && set.base.get(pose);
+    if (!src) continue;
+    for (const bone of bones) {
+      const track = src.tracks.find((t) => t.name === `${bone}.quaternion`);
+      if (track) swap.set(track.name, track.values.slice(0, 4));
+    }
+  }
+  const out = clip.clone();
+  out.name = `${name}+${carry.right || ''}+${carry.left || ''}`;
+  out.tracks = out.tracks.map((t) => (swap.has(t.name)
+    ? new THREE.QuaternionKeyframeTrack(t.name, [0], swap.get(t.name)) : t));
+  set.carried.set(key, out);
+  return out;
+}
+
+/**
+ * An archetype's own scene: the file's scene with every other archetype
+ * taken out, cloned once and kept. Each person is then a clone of this, with
+ * the head pieces it does not wear removed.
+ */
+const templates = new Map();
+function templateOf(asset, file, arch) {
+  const key = `${file}|${arch}`;
+  if (templates.has(key)) return templates.get(key);
+  const scene = cloneSkinned(asset.scene);
+  const drop = [];
+  let body = null;
+  // Only the rig's own children -- the meshes sit beside the root bone under
+  // the armature node. Deeper, a multi-material mesh is a group whose
+  // primitives are named arch_guard_1, arch_guard_2... and would be taken
+  // for other archetypes and thrown away.
+  const holder = scene.getObjectByName('hips').parent;
+  for (const node of holder.children) {
+    if (node.name.startsWith('arch_')) {
+      if (node.name === `arch_${arch}`) body = node;
+      else drop.push(node);
+    }
+  }
+  if (!body) throw new Error(`actors: ${file}.glb has no arch_${arch}`);
+  for (const node of drop) node.removeFromParent();
+  // Standing height from the body mesh alone, not the hats, read off the
+  // geometry: the rig is at the origin and the geometry is in its rest pose,
+  // while Box3.setFromObject on a skinned mesh asks a skeleton that has not
+  // been posed yet and answers NaN.
+  let top = 0;
+  body.traverse((node) => {
+    if (!node.isMesh) return;
+    if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+    top = Math.max(top, node.geometry.boundingBox.max.y);
+  });
+  const record = { scene, height: top };
+  templates.set(key, record);
+  return record;
+}
+
+/**
+ * One material per surface and colour, shared by everyone who wears it. The
+ * crowd's variety is in the colours, not in how many materials there are:
+ * the twenty cityguards of Midgaard share one tabard.
+ */
+const personMaterials = new Map();
+function personMaterial(library, tag, hex, ghost) {
+  const key = `${tag}|${hex ?? '-'}|${ghost ? 1 : 0}`;
+  if (personMaterials.has(key)) return personMaterials.get(key);
+  const base = library.materialFor(tag);
+  const m = base.clone();
+  // The baked materials expect a colour attribute; the people carry none,
+  // and a missing one reads as black rather than as white.
+  m.vertexColors = false;
+  if (hex !== undefined && hex !== null) m.color.setHex(hex);
+  if (ghost) {
+    // A shade: see-through, lit from inside, and never in the depth buffer,
+    // so what is behind it still draws.
+    m.transparent = true;
+    m.opacity = tag === 'eye' ? 0.8 : 0.34;
+    m.depthWrite = false;
+    m.emissive = new THREE.Color(0x7f98b2);
+    m.emissiveIntensity = 0.55;
+  }
+  personMaterials.set(key, m);
+  return m;
+}
+
+/** The tags a person's own colours go on. */
+const TINTED = new Set(['cloth', 'cloth2', 'linen', 'skin', 'hair', 'leather', 'bone', 'paint']);
+
+/** A carried model from the library, sharing its geometry with every copy. */
+function carried(library, name, tint, ghost) {
+  const asset = library.get(name);
+  if (!asset) return null;
+  const group = new THREE.Group();
+  group.name = name;
+  for (const p of asset.primitives) {
+    const tag = p.materialName;
+    const hex = tag === 'paint' ? tint.cloth : undefined;
+    const material = (TINTED.has(tag) && hex !== undefined) || ghost
+      ? personMaterial(library, tag, hex, ghost) : p.material;
+    const mesh = new THREE.Mesh(p.geometry, material);
+    mesh.castShadow = false;
+    group.add(mesh);
+  }
+  return group;
+}
+
+const tagOfMaterial = (m) => (m && m.name ? m.name.replace(/^MAT:/, '') : '');
+
+/**
+ * A person, dressed. Returns the figure record the rest of the viewer drives:
+ *
+ *   { group, headGroup, height, scale, mixer, actions, clips, stride,
+ *     hitFrame, weapon, shield, castPoint, archetype }
+ *
+ * `actions` holds all eleven clips (idle idle2 walk run fight attack attack2
+ * hit block death cast). The five loops are playing, idle at weight 1 and the
+ * rest at 0; the six one-shots are set to play once and clamp on their last
+ * frame, at weight 0 and not started -- `reset().play()` them. `clips` is name
+ * to seconds, `stride` metres of ground per cycle at this figure's size, and
+ * `hitFrame` the fraction of `attack` and `attack2` at which the blow lands
+ * and of `cast` at which the spell is released. `castPoint` is an Object3D at
+ * the tip of a staff, or in the right fist.
+ */
+function buildPerson(library, who, proto, instance) {
+  const asset = library.get(who.file);
+  const t = templateOf(asset, who.file, who.arch);
+  const body = cloneSkinned(t.scene);
+  const wear = new Set(who.pieces);
+  const drop = [];
+  // Head pieces are the rig's children that are neither the archetype nor a bone.
+  for (const node of body.getObjectByName('hips').parent.children) {
+    if ((node.isMesh || node.isGroup) && !node.isBone && !node.name.startsWith('arch_')
+        && !wear.has(node.name)) drop.push(node);
+  }
+  for (const node of drop) node.removeFromParent();
+  const ghost = who.arch === 'ghost';
+  // One skeleton for the whole person. The loader and the clone give every
+  // primitive of every mesh its own Skeleton over the same bones -- nine or
+  // ten per person -- and the renderer recomputes and re-uploads each one's
+  // bone texture every frame. They are all bound to the same joints with the
+  // same inverse binds (one skin in the file), so one will do, and the
+  // renderer updates a shared skeleton once a frame.
+  let skeleton = null;
+  body.traverse((node) => {
+    if (!node.isSkinnedMesh) return;
+    if (!skeleton) { skeleton = node.skeleton; return; }
+    const same = node.skeleton.bones.length === skeleton.bones.length
+      && node.skeleton.bones.every((b, i) => b === skeleton.bones[i]);
+    if (same) node.bind(skeleton, node.bindMatrix);
+  });
+  body.traverse((node) => {
+    if (!node.isMesh) return;
+    // Figures stay out of the sun's shadow map: a skinned mesh there is a
+    // second skinning pass for a shadow the hand-placed contact patch
+    // already draws.
+    node.castShadow = false;
+    node.receiveShadow = !ghost;
+    const tag = tagOfMaterial(node.material);
+    node.material = personMaterial(library, tag, TINTED.has(tag) ? who.tint[tag] : undefined, ghost);
+    if (ghost) node.renderOrder = 2;
+  });
+  // A little of each person's own height, so a crowd is not one stature.
+  const scale = who.scale * (0.95 + strHash(`${proto.short}#${instance}`, 3) * 0.10);
+  body.scale.setScalar(scale);
+  if (who.headScale !== 1) {
+    const head = body.getObjectByName('head');
+    if (head) head.scale.setScalar(who.headScale);
+  }
+  const group = new THREE.Group();
+  group.add(body);
+
+  // What it holds. The grip bones are in the weapons' own frame, so a
+  // weapon sits in the hand with no offset at all -- see weapons.py.
+  let weapon = null;
+  let shield = null;
+  if (who.weapon) {
+    weapon = carried(library, who.weapon, who.tint, ghost);
+    const grip = body.getObjectByName('gripR');
+    if (weapon && grip) grip.add(weapon);
+    else weapon = null;
+  }
+  if (who.shield) {
+    shield = carried(library, who.shield, who.tint, ghost);
+    const mount = body.getObjectByName('shieldL');
+    if (shield && mount) mount.add(shield);
+    else shield = null;
+  }
+
+  // Where a spell leaves from: the knot of a staff, or else the right fist.
+  // weapons.py puts the staff's top at 0.855 m up its own axis.
+  const castPoint = new THREE.Object3D();
+  castPoint.name = 'castPoint';
+  if (weapon && who.weapon === 'weapon_staff') {
+    castPoint.position.set(0, 0.86, 0);
+    weapon.add(castPoint);
+  } else {
+    const grip = body.getObjectByName('gripR');
+    if (!grip) throw new Error(`actors: ${who.file}.glb has no gripR bone`);
+    castPoint.position.set(0, 0.03, 0);
+    grip.add(castPoint);
+  }
+
+  const carry = carryOf({ weapon: weapon ? who.weapon : null, shield: shield ? who.shield : null });
+  const mixer = new THREE.AnimationMixer(body);
+  const actions = {};
+  const clips = {};
+  const start = strHash(`${proto.short}#${instance}`, 13);
+  for (const name of CLIPS) {
+    const clip = carriedClip(asset, name, carry);
+    if (!clip) throw new Error(`actors: ${who.file}.glb has no clip "${name}"`);
+    const action = mixer.clipAction(clip);
+    clips[name] = clip.duration;
+    if (LOOPS.has(name)) {
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.time = start * clip.duration; // everyone on their own beat
+      action.setEffectiveWeight(name === 'idle' ? 1 : 0);
+      action.play();
+    } else {
+      action.setLoop(THREE.LoopOnce, 1);
+      action.clampWhenFinished = true;
+      action.setEffectiveWeight(0);
+    }
+    actions[name] = action;
+  }
+  // Kept for update(), which times the walk against it.
+  actions.walkCycle = clips.walk;
+  // Stand them in the idle before anything draws: until a mixer update the
+  // skeleton is in its bind pose, and `state.benchmark` stops the loop before
+  // the actors are updated.
+  mixer.update(0);
+  const facts = CLIP_FACTS[who.file];
+  return {
+    group, headGroup: null, height: t.height * scale, scale, mixer, actions, clips,
+    stride: { walk: facts.walk * scale, run: facts.run * scale },
+    hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
+  };
 }
 
 
@@ -1131,14 +1420,18 @@ export function populate(world, layout, built, options = {}) {
     room.mobs.forEach((mob, index) => {
       const proto = { ...mob.proto, equipment: mob.equipment };
       const beast = beastKind(mob.proto);
-      const person = beast ? null : model(['townsperson']);
+      // Who this is, per instance: the same prototype reset twice is two
+      // people with the same trade and their own hair.
+      const who = beast ? null : personOf({ ...proto, shop: mob.shop }, ITEM, vnum * 31 + index);
+      const person = !beast && !who ? model(['townsperson']) : null;
       const made = beast ? buildBeastFigure(beast, proto, assets, {
         seed: strHash(`${vnum}|${mob.proto.vnum}`, index),
         afloat: room.sector === SECTOR.WATER_SWIM || room.sector === SECTOR.WATER_NOSWIM,
       })
-        : (person && assets.get(person).animations.length
-          ? buildModelledFigure(assets.get(person), proto, assets)
-          : buildFigure(proto));
+        : (who && assets && assets.has(who.file) ? buildPerson(assets, who, proto, vnum * 31 + index)
+          : (person && assets.get(person).animations.length
+            ? buildModelledFigure(assets.get(person), proto, assets)
+            : buildFigure(proto)));
       const { group: fig, headGroup, height } = made;
       // Never at the centre of the room: that is where you arrive.
       const angle = (index / count) * Math.PI * 2 + strHash(mob.proto.keywords, 1) * 2;

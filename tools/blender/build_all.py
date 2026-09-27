@@ -34,6 +34,8 @@ MODULES = [
     "sewer",
     "desert",
     "townsperson",
+    "weapons",
+    "people",
     "beasts",
 ]
 
@@ -87,6 +89,9 @@ BUDGET = {
     "dune_a": 1000, "dune_b": 1000, "palm_a": 2500, "palm_b": 2500,
     "tent_roof": 2600, "tent_wall": 1000, "tent_wall_door": 900,
     "rug": 200, "cushions": 600, "hitch_line": 450, "fungus_cluster": 1300, "lantern": 400,
+    # Carried, so paid for once per armed mobile and once more in first person.
+    "weapon_sword": 600, "weapon_dagger": 400, "weapon_axe": 500, "weapon_mace": 600,
+    "weapon_spear": 400, "weapon_staff": 500, "shield_round": 1100, "shield_kite": 1000,
     # The animals. One skinned mesh each, two materials (fur or feathers, and
     # horn), and far fewer of them than of people: Midgaard has 13, the
     # Shire's farm 19. The big ones get the most because they are the ones
@@ -99,6 +104,12 @@ BUDGET = {
     "beast_dragon": 8000,
 }
 PROP_BUDGET = 800
+# people.py: an archetype is a whole dressed person, one skinned draw per
+# material; a head piece is worn on top of one. Figures are culled at 46 m
+# and a busy square shows about a dozen, so these are paid perhaps twelve
+# times a frame, not per chunk.
+PERSON_BUDGET = 6500
+HEAD_PIECE_BUDGET = 1000
 TREE_BUDGET = 1500
 
 
@@ -151,7 +162,11 @@ def check(report):
         if len(bits) < 3 or bits[2] != "tris":
             continue
         name, tris = bits[0], int(bits[1])
-        cap = BUDGET.get(name, TREE_BUDGET if name.startswith("tree") else PROP_BUDGET)
+        cap = BUDGET.get(name, TREE_BUDGET if name.startswith("tree") else
+                         PERSON_BUDGET if name.startswith("arch_") else
+                         HEAD_PIECE_BUDGET if name.startswith(("hair_", "beard_", "helm_", "hat_",
+                                                               "hood", "coif", "scarf", "moustache"))
+                         else PROP_BUDGET)
         if tris > cap:
             bad.append("%s %d > %d" % (name, tris, cap))
     return "OVER BUDGET: " + ", ".join(bad) if bad else "all within budget"

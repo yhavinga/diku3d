@@ -39,15 +39,27 @@ const _scale = new THREE.Vector3();
 // crown in the world -- confirmed by a judge with matching material uuids at
 // 50 m and 3.7 m. It is a real recipe now, so materialFor finds it first and
 // this table no longer needs an entry for it.
-// Snake scales are the feather surface: rows of overlapping scallops is what
-// both of them are, and at the size either is seen the two read the same.
-const TAG_ALIASES = { scales: 'feather' };
+// cloth2 and linen are a second and a third garment on one person -- hose
+// under a tunic, an apron over it -- in the same woven surface, so they are
+// the cloth recipe under another name and take their own tint. Snake scales
+// are the feather surface: rows of overlapping scallops is what both of them
+// are, and at the size either is seen the two read the same.
+const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', scales: 'feather' };
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
   skin: { color: 0xc79b76, roughness: 0.72, metalness: 0 },
   oak: { color: 0x5a4330, roughness: 0.78, metalness: 0 },
   leather: { color: 0x4a3524, roughness: 0.62, metalness: 0 },
   hair: { color: 0x3a2a1c, roughness: 0.86, metalness: 0 },
+  // An iris is small, dark and wet: the glint off it is what reads as a
+  // person looking at you. Not black -- nothing lit is.
+  eye: { color: 0x1a1410, roughness: 0.22, metalness: 0 },
+  // Off-white and not bright: a full white sclera at four pixels is a doll's.
+  eyewhite: { color: 0xb9ae9c, roughness: 0.4, metalness: 0 },
+  bone: { color: 0xcfc4a6, roughness: 0.78, metalness: 0 },
+  // Gilt: a cleric's holy symbol. Bright on purpose -- it has to read at
+  // twenty metres against a robe.
+  gold: { color: 0xd4a64a, roughness: 0.32, metalness: 0.9 },
   // Keratin and wet tissue on the animals: eyes, noses, hooves, claws, beaks,
   // horns and the inside of a mouth. White, because every part carries its
   // own colour in the vertex colours; glossy, because that is the difference
@@ -59,7 +71,7 @@ const TAG_MATERIALS = {
   },
 };
 /** Tags whose flat material wants the shared grain, at this strength. */
-const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6 };
+const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6, bone: 0.5 };
 
 export class AssetLibrary {
   constructor(materials, baseUrl = 'assets') {
@@ -353,7 +365,9 @@ export const ASSET_NAMES = [
   // the Great Eastern Desert: tools/blender/desert.py
   'massif_a', 'massif_b', 'massif_mouth', 'dune_a', 'dune_b', 'palm_a', 'palm_b',
   'tent_roof', 'tent_wall', 'tent_wall_door', 'rug', 'cushions', 'hitch_line', 'fungus_cluster', 'lantern',
-  'townsperson',
+  'townsperson', 'person_male', 'person_female', 'troll',
+  'weapon_sword', 'weapon_dagger', 'weapon_axe', 'weapon_mace', 'weapon_spear',
+  'weapon_staff', 'shield_round', 'shield_kite',
   // Animals, rigged and animated. One base mesh per build of body; the
   // breeds and species are proportions and coats laid on in actors.js.
   'beast_canine', 'beast_feline', 'beast_rodent', 'beast_bear', 'beast_equine', 'beast_cervid',

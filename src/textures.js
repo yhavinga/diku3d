@@ -565,6 +565,62 @@ const SURFACES = {
     s.metal = 0.85 - rust * 0.6;
   },
 
+  /**
+   * Worked steel: a blade, a helm, a breastplate. Iron above is the dark
+   * hot-worked bar of a door strap and a hinge, and a sword in it read as a
+   * stick of charcoal. What makes steel read as steel at street distance is
+   * the environment in it, so this is smooth and fully metallic, with the
+   * scratches of use in the relief and a little pitting where it was left
+   * wet -- and bright enough in its base that a polished flat catches the sky.
+   */
+  steel(u, v, s) {
+    const scratch = fbm(u * 40, v * 6, 40, 311, 3);
+    const cloud = fbm(u * 5, v * 5, 5, 313, 4);
+    const pit = clamp01(fbm(u * 24, v * 24, 24, 317, 3) * 1.8 - 1.05);
+    const c = mix(rgb(0x8e9398), rgb(0xb9bec2), cloud * 0.7 + scratch * 0.3);
+    s.color = mix(c, rgb(0x5e5a54), pit * 0.6);
+    s.height = 0.5 + scratch * 0.06 - pit * 0.12;
+    s.rough = 0.26 + cloud * 0.12 + pit * 0.3;
+    s.metal = 0.95 - pit * 0.4;
+  },
+
+  /**
+   * Riveted mail: rows of rings, each row laid half a ring over from the one
+   * above. At street distance it is the glitter and the dark between the
+   * rings that says mail rather than a grey jumper, so the gaps go deep in
+   * the relief and nearly black in the albedo -- but not black, because it
+   * is the ring edges catching the sky that carry it.
+   */
+  mail(u, v, s) {
+    const n = 36;
+    const row = Math.floor(v * n);
+    const x = u * n + (row % 2) * 0.5;
+    const fx = x - Math.floor(x) - 0.5;
+    const fy = v * n - row - 0.5;
+    const d = Math.sqrt(fx * fx + fy * fy * 1.3);
+    const ring = Math.exp(-(((d - 0.36) / 0.12) ** 2));
+    const grime = fbm(u * 6, v * 6, 6, 347, 3);
+    const c = mix(rgb(0x2a2b2c), mix(rgb(0x7b8086), rgb(0xa2a7ab), grime), ring);
+    s.color = c;
+    s.height = ring;
+    s.rough = 0.75 - ring * 0.4;
+    s.metal = 0.25 + ring * 0.7;
+  },
+
+  /**
+   * Paint on boards: a shield's face. Near-neutral, because every shield is
+   * tinted to whoever carries it, with the brush marks in the relief and the
+   * paint chipped back to wood where the edges and the hits land.
+   */
+  paint(u, v, s) {
+    const brush = fbm(u * 6, v * 30, 6, 331, 3);
+    const chip = clamp01(fbm(u * 14, v * 14, 14, 337, 4) * 2.2 - 1.35);
+    const base = mix(rgb(0xb4b0aa), rgb(0xc6c2ba), brush);
+    s.color = mix(base, rgb(0x5a4632), chip);
+    s.height = 0.5 + brush * 0.04 - chip * 0.2;
+    s.rough = 0.62 + chip * 0.3 + brush * 0.06;
+  },
+
   bark(u, v, s) {
     const ridges = fbm(u * 26, v * 5, 26, 181, 4);
     const deep = Math.abs(Math.sin((u * 18 + ridges * 5) * Math.PI));
@@ -1035,6 +1091,11 @@ const RECIPES = {
   // full mirror of the sky turns brown litter grey.
   duff: { surface: 'duff', scale: 3.2, normalScale: 0.6, env: 0.42, wet: 0, detail: 0.7 },
   iron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1.4, wet: 0, detail: 0.3 },
+  // Arms and armour. Tile sizes are the size of the things: a blade is 5 cm
+  // across and a shield 70.
+  steel: { surface: 'steel', scale: 0.6, normalScale: 0.35, env: 1.5, wet: 0, detail: 0.25 },
+  mail: { surface: 'mail', scale: 0.3, normalScale: 0.6, env: 1.3, wet: 0, detail: 0.2 },
+  paint: { surface: 'paint', scale: 0.8, normalScale: 0.5, env: 0.6, wet: 0, detail: 0.4 },
   bark: { surface: 'bark', scale: 1.6, normalScale: 1.0, env: 0.65, wet: 0, detail: 0.5 },
   water: { surface: 'water', scale: 7, normalScale: 0.5, env: 1.6, wet: 0, detail: 0.2 },
   // The sewer. `buried` hands their ambient, reflections and fog to the fixed
