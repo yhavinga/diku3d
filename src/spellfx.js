@@ -380,10 +380,12 @@ const AURA_FRAG = `
   ${FOG_GLSL}
   void main() {
     float rim = 1.0 - abs(dot(normalize(vN), normalize(vV)));
-    float f = pow(rim, 2.4);
+    // Only the silhouette: facing surfaces add nothing, so the body stays
+    // readable inside its halo even at arm's length.
+    float f = pow(rim, 3.2);
     float n = vnoise(vW * 3.2 + vec3(0.0, -uTime * 1.3, 0.0));
     float flick = mix(1.0, 0.6 + 0.8 * vnoise(vec3(uTime * 9.0, vW.y * 2.0, 0.0)), uFlicker);
-    float a = (f * 1.25 + 0.05) * (0.45 + 0.75 * n) * uIntensity * flick * fogT(vDist);
+    float a = f * 1.5 * (0.25 + 1.0 * n) * uIntensity * flick * fogT(vDist);
     gl_FragColor = vec4(uColor * uGain * a, 0.0);
   }
 `;
@@ -978,9 +980,10 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   wash.style.cssText = 'position:absolute;inset:0;opacity:0;mix-blend-mode:screen;';
   overlay.append(edge, wash);
   document.body.appendChild(overlay);
+  /** A wash over the frame. Held well short of opaque: a spell on you is felt, not a white-out. */
   function flashScreen(css, strength = 0.5, ms = 420) {
     wash.style.background = css;
-    wash.animate([{ opacity: 0 }, { opacity: strength, offset: 0.12 }, { opacity: 0 }], { duration: ms, easing: 'ease-out' });
+    wash.animate([{ opacity: 0 }, { opacity: Math.min(0.55, strength * 0.65), offset: 0.12 }, { opacity: 0 }], { duration: ms, easing: 'ease-out' });
   }
 
   // -- places ---------------------------------------------------------------------
@@ -1050,7 +1053,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   function chestPoint(who, out) {
     if (who.player) {
       camera.getWorldDirection(_v);
-      return out.copy(camera.position).addScaledVector(_v, 1.25).add({ x: 0, y: -0.28, z: 0 });
+      return out.copy(camera.position).addScaledVector(_v, 1.7).add({ x: 0, y: -0.3, z: 0 });
     }
     const fig = figureOf(who.slot);
     if (!fig) return who.slot ? out.set(who.slot.pos.x, who.slot.pos.y + 1.1, who.slot.pos.z) : out.copy(camera.position);
@@ -1652,9 +1655,12 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       }
       case 'fireball': {
         freeSphere(fx.data.ball); fx.data.ball = null;
-        explode(aim, feet, onYou ? 0.55 : (fx.saved ? 0.8 : 1));
+        // On you it goes off at arm's length and a size that leaves the frame
+        // readable: the wash at the edges says the rest.
+        if (onYou) { camera.getWorldDirection(_v); aim.copy(camera.position).addScaledVector(_v, 2.6); aim.y -= 0.35; }
+        explode(aim, feet, onYou ? 0.35 : (fx.saved ? 0.8 : 1));
         if (hitAny) hurtFigure(target, 1);
-        if (onYou) flashScreen('radial-gradient(ellipse at 50% 50%, rgba(255,200,120,0.95) 0%, rgba(255,110,30,0.55) 60%, rgba(120,20,0,0.35) 100%)', 0.85, 700);
+        if (onYou) flashScreen('radial-gradient(ellipse at 50% 50%, rgba(255,170,80,0) 25%, rgba(255,120,30,0.6) 72%, rgba(140,30,0,0.8) 100%)', 0.85, 700);
         break;
       }
       case 'flame': case 'breath-fire': case 'flamestrike': {
@@ -1700,14 +1706,14 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         break;
       }
       case 'acid': case 'breath-acid': {
-        burst(light, aim, 44, { speed: [1.2, 4], life: [0.4, 0.9], size: [0.04, 0.08], color: PAL.acid.drop, color2: PAL.acid.glow, drag: 1, gravity: 7, shape: 6, floor: feet.y + 0.02, occ: 0.6 });
-        burst(matter, aim, 20, { speed: [0.2, 0.8], up: 0.8, life: [1.6, 2.6], size: [0.3, 0.55], grow: 2.4, color: PAL.acid.fume, alpha: 0.55, drag: 1.2, gravity: -0.5, shape: 3, fadeIn: 0.2 });
+        burst(light, aim, onYou ? 16 : 44, { speed: [1.2, 4], life: [0.4, 0.9], size: [0.04 * scale, 0.08 * scale], color: PAL.acid.drop, color2: PAL.acid.glow, drag: 1, gravity: 7, shape: 6, floor: feet.y + 0.02, occ: 0.6 });
+        burst(matter, aim, onYou ? 6 : 20, { speed: [0.2, 0.8], up: 0.8, life: [1.6, 2.6], size: [0.3 * scale, 0.55 * scale], grow: 2.4, color: PAL.acid.fume, alpha: 0.55, drag: 1.2, gravity: -0.5, shape: 3, fadeIn: 0.2 });
         auraPulse(target, PAL.acid.glow, 1.4, 1.2);
         decal(feet, 0.9, 2, PAL.acid.glow.clone().multiplyScalar(0.6), 2.4, (d, u, t) => { u.uAlpha.value = (1 - t / 2.4) * Math.min(1, t / 0.1); });
         glowAt(light, aim, PAL.acid.glow, 1.0 * scale, 0.3, 0.8);
         if (hitAny) hurtFigure(target, 0.7);
         S.hiss(aim, 1.4);
-        if (onYou) flashScreen('radial-gradient(ellipse at 50% 50%, rgba(160,255,80,0.25) 0%, rgba(90,160,20,0.65) 100%)', 0.75, 900);
+        if (onYou) flashScreen('radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 35%, rgba(90,170,20,0.7) 100%)', 0.75, 900);
         break;
       }
       case 'prism': {
@@ -1910,8 +1916,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   const auras = new Map();   // figure -> { meshes, material, pulse }
   const AURA_KIND = [
     // flag or affect type, colour, intensity, thickness, flicker
-    { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 1.05, thick: 0.05, flicker: 0.15 },
-    { test: (ch) => ch.affectedBy & AFF.FAERIE_FIRE, color: PAL.faerie.glow, intensity: 1.3, thick: 0.02, flicker: 0.6 },
+    { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.62, thick: 0.035, flicker: 0.15 },
+    { test: (ch) => ch.affectedBy & AFF.FAERIE_FIRE, color: PAL.faerie.glow, intensity: 0.9, thick: 0.025, flicker: 0.6 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'shield' || a.type === 'stone skin'), color: PAL.ward.glow, intensity: 0.55, thick: 0.03, flicker: 0 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'armor' || a.type === 'protection'), color: PAL.ward.glow, intensity: 0.35, thick: 0.025, flicker: 0 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'bless'), color: PAL.bless.glow, intensity: 0.35, thick: 0.025, flicker: 0 },
@@ -1941,8 +1947,14 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     const material = auraMaterial();
     const meshes = [];
     const sources = [];
+    // The body, not what it holds or its buttons: a shell on every eye and
+    // on the staff stacks rims on rims and the figure reads as glass.
+    const skinned = [];
+    fig.object.traverse((o) => { if (o.isSkinnedMesh) skinned.push(o); });
     fig.object.traverse((o) => {
-      if (o.isMesh && !o.isSprite && o.geometry && o.geometry.attributes.normal && o.visible !== false) sources.push(o);
+      if (!o.isMesh || o.isSprite || !o.geometry || !o.geometry.attributes.normal || o.visible === false) return;
+      if (skinned.length && (!o.isSkinnedMesh || o.geometry.attributes.position.count < 150)) return;
+      sources.push(o);
     });
     for (const o of sources) {
       let shell;
@@ -2017,6 +2029,10 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       if (!near) continue;
       const rate = dt * budget.density;
       const px = fig.at.x; const py = fig.at.y; const pz = fig.at.z; const h = fig.height;
+      if (ch.affectedBy & AFF.SANCTUARY) {
+        // The light it stands in: one soft sprite a frame, faint, body-sized.
+        light.spawn({ x: px, y: py + h * 0.55, z: pz, life: 0.04, size: h * 1.25, color: PAL.sanctuary.glow, alpha: 0.1, shape: 0, drag: 0, fadeIn: 0, occ: 0 });
+      }
       if ((ch.affectedBy & AFF.SANCTUARY) && Math.random() < 6 * rate) {
         const a2 = rand(0, TAU);
         light.spawn({ x: px + Math.cos(a2) * 0.45, y: py + rand(0, h * 0.5), z: pz + Math.sin(a2) * 0.45, vx: 0, vy: rand(0.4, 0.8), vz: 0, life: rand(1, 1.6), size: rand(0.025, 0.045), color: PAL.sanctuary.mote, shape: 1, drag: 0.5, fadeIn: 0.3 });
