@@ -911,7 +911,7 @@ export function buildScene(world, layout, materials, assets = null) {
         instances.add('town_well', { x: wx2, y: pos.y, z: wz2, rotY: FACE_ROT[dir] }, chunk);
         addCollider(wx2 - 1.0, wx2 + 1.0, wz2 - 1.0, wz2 + 1.0, pos.y, pos.y + 0.62);
         portals.push({
-          x: wx2, y: pos.y, z: wz2, radius: 1.55, target: side.target.vnum,
+          x: wx2 - dx * PIT_REACH, y: pos.y, z: wz2 - dz * PIT_REACH, radius: 1.0, target: side.target.vnum,
           from: room.vnum, label: side.target.room.name, dir,
         });
       } else if (side && (side.kind === 'portal' || side.kind === 'gate') && !airborne && !deadExit(side.exit)) {
@@ -1002,7 +1002,7 @@ export function buildScene(world, layout, materials, assets = null) {
         half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
       });
       if (instances && sewerStyle(room) === 'cave') {
-        buildCaveLining({ instances, chunk, room, pos, sides, roofed: !roomHoles.some((h) => h.ceiling) });
+        buildCaveLining({ instances, chunk, room, pos, sides, roofed: !roomHoles.some((h) => h.ceiling), addCollider });
       }
       // ...and a room with earth over it has no roof either. Same family as the
       // windows below, and it was visible: a tomb sits 5.65 m under the
@@ -3315,7 +3315,16 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
   const level = link.from.level;
   const y = level * LEVEL_H;
   const chain = [link.from, ...link.path, link.to];
-  const caveRun = enclosed && sewerStyle(link.from.room) === 'cave' && sewerStyle(link.to.room) === 'cave';
+  // Lined as a cave when it leaves one: the rock goes on until the brick of
+  // whatever it reaches, and the room at the other end has its own wall.
+  const caveRun = enclosed && sewerStyle(source) === 'cave';
+  if (enclosed) {
+    for (const [end, next] of [[link.from, chain[1]], [link.to, chain[chain.length - 2]]]) {
+      const endMats = pickMaterials(end.room, end.room.area);
+      if (!isBuried(endMats, end)) continue;
+      closeDoorway({ batcher, pos: worldOf(end), dir: dirBetween(end, next), chunk: chunkOf(end), material: endMats.wallIn, addCollider });
+    }
+  }
   if (instances && caveRun) {
     // Each end, where the corridor meets a cave room's outer wall: a face of
     // rock with the doorway in it, looking down the corridor.
@@ -3323,10 +3332,15 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
       const d = dirBetween(end, next);
       const [dx, , dz] = DIR_STEP[d];
       const at = worldOf(end);
-      const face = ROOM / 2 + WALL_IN + WALL_OUT;
+      // On the face `closeDoorway` puts across the cell edge.
+      const face = HALF;
       instances.add('cave_wall_long_door', {
         x: at.x + dx * face, y, z: at.z + dz * face, rotY: FACE_ROT[(d + 2) % 4],
       }, chunkOf(end));
+      for (const [c0, c1] of [[-HALF, -CAVE_HOLE], [CAVE_HOLE, HALF]]) {
+        const r = sewerRect(at, d, face, face + CAVE_PROUD, c0, c1);
+        addCollider(r.x0, r.x1, r.z0, r.z1, y, y + CEIL);
+      }
     }
   }
 
@@ -3400,6 +3414,8 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
         instances.add('cave_wall_long', {
           x: pos.x + dx * (HALF - 0.5), y, z: pos.z + dz * (HALF - 0.5), rotY: FACE_ROT[dir],
         }, chunk);
+        const r = sewerRect(pos, dir, HALF - 0.5 - CAVE_PROUD, HALF - 0.5, -HALF, HALF);
+        addCollider(r.x0, r.x1, r.z0, r.z1, y, y + CEIL);
       }
       instances.add('cave_roof', {
         x: pos.x, y: y + CEIL, z: pos.z, rotY: Math.floor(hash3(c.x, c.z, level, 15) * 4) * Math.PI / 2,
@@ -3487,6 +3503,14 @@ function sewerCap({ instances, chunk, pos, dir, y, addCollider }) {
   const r = sewerRect(pos, dir, HALF - 0.3, HALF, -SW_A, SW_A);
   addCollider(r.x0, r.x1, r.z0, r.z1, y, y + 4.2);
 }
+
+/**
+ * How far in front of a pit or a well its way down is triggered: at the
+ * kerb, on the room side. At the centre, which is where it was, the mobiles
+ * that walk to a way out before they take it walked into the stonework --
+ * the pit's collider is a metre each way -- and stood in the middle of it.
+ */
+const PIT_REACH = 1.45;
 
 /** The prose of a junction with a shaft to the open air over it. */
 const SEWER_AIR = /\bair ?shaft\b|\bshaft leading up\b|\bup into sunlight\b/i;
@@ -3633,9 +3657,9 @@ function buildSewerChamber({
       const at = sewerAt(pos, dir, down ? SW_CA - 1.55 : SW_CA, 0);
       instances.add(down ? 'sewer_pit' : 'sewer_ladder', { x: at.x, y, z: at.z, rotY }, chunk);
       if (down) addCollider(at.x - 1.0, at.x + 1.0, at.z - 1.0, at.z + 1.0, y, y + 0.62);
-      const trigger = down ? at : sewerAt(pos, dir, SW_CA - 0.7, 0);
+      const trigger = sewerAt(pos, dir, down ? SW_CA - 1.55 - PIT_REACH : SW_CA - 0.7, 0);
       portals.push({
-        x: trigger.x, y, z: trigger.z, radius: down ? 1.55 : 1.2, target: side.target.vnum,
+        x: trigger.x, y, z: trigger.z, radius: down ? 1.0 : 1.2, target: side.target.vnum,
         from: room.vnum, label: side.target.room.name, dir,
       });
     }
@@ -3655,9 +3679,9 @@ function buildSewerChamber({
     const at = sewerAt(pos, dir, down ? SW_CA - 1.55 : SW_CA, 0);
     instances.add(down ? 'sewer_pit' : 'sewer_ladder', { x: at.x, y, z: at.z, rotY: FACE_ROT[dir] }, chunk);
     if (down) addCollider(at.x - 1.0, at.x + 1.0, at.z - 1.0, at.z + 1.0, y, y + 0.62);
-    const trigger = down ? at : sewerAt(pos, dir, SW_CA - 0.7, 0);
+    const trigger = sewerAt(pos, dir, down ? SW_CA - 1.55 - PIT_REACH : SW_CA - 0.7, 0);
     portals.push({
-      x: trigger.x, y, z: trigger.z, radius: down ? 1.55 : 1.2, target: link.from.vnum,
+      x: trigger.x, y, z: trigger.z, radius: down ? 1.0 : 1.2, target: link.from.vnum,
       from: room.vnum, label: link.from.room.name, dir: link.dir === 4 ? 5 : 4,
     });
   }
@@ -3807,6 +3831,9 @@ function sewerDressing({ room, style, pos, y, blind, sides, wall, ceil, instance
 }
 
 /** The cave roof is authored for a room; a corridor cell is 13 m square. */
+/** How far into a room a cave panel's rock is kept out of, and its opening's half-width. */
+const CAVE_PROUD = 0.55;
+const CAVE_HOLE = 1.42;
 const CAVE_STRETCH = 13 / 10.6;
 
 /**
@@ -3815,7 +3842,7 @@ const CAVE_STRETCH = 13 / 10.6;
  * what read as a level editor's room with a rock texture on it. A wall with a
  * way through it gets the panel with the opening in it.
  */
-function buildCaveLining({ instances, chunk, room, pos, sides, roofed }) {
+function buildCaveLining({ instances, chunk, room, pos, sides, roofed, addCollider }) {
   for (let dir = 0; dir < 4; dir++) {
     const side = sides[dir];
     const open = !!side && ['alley', 'portal', 'gate'].includes(side.kind);
@@ -3823,6 +3850,13 @@ function buildCaveLining({ instances, chunk, room, pos, sides, roofed }) {
     instances.add(open ? 'cave_wall_door' : 'cave_wall', {
       x: pos.x + dx * ROOM / 2, y: pos.y, z: pos.z + dz * ROOM / 2, rotY: FACE_ROT[dir],
     }, chunk);
+    // The rock stands up to 0.9 m proud of the wall line the room's own
+    // colliders are on; without these you walked into it to the knees.
+    const runs = open ? [[-ROOM / 2, -CAVE_HOLE], [CAVE_HOLE, ROOM / 2]] : [[-ROOM / 2, ROOM / 2]];
+    for (const [c0, c1] of runs) {
+      const r = sewerRect(pos, dir, ROOM / 2 - CAVE_PROUD, ROOM / 2, c0, c1);
+      addCollider(r.x0, r.x1, r.z0, r.z1, pos.y, pos.y + CEIL);
+    }
   }
   if (roofed) {
     instances.add('cave_roof', {
@@ -3916,6 +3950,38 @@ function buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addColl
     }
   }
   batcher.indoor = false;
+}
+
+/**
+ * The doorway of a buried room, from its wall out to its cell edge.
+ *
+ * A room's walls stand at 5-5.7 m from its middle and the corridor out of it
+ * starts at the cell edge, 6.5 m: in between, either side of the doorway, is a
+ * slot 0.8 m deep that nothing builds. In the town it looks onto the next
+ * building. Underground it looks onto nothing at all -- which means the sky
+ * dome, seven metres below the street: a lit blue slit beside every doorway
+ * in the sewer's lairs and caves. A face across the cell edge with the
+ * doorway in it, and a lined reveal back to the room's wall, close it.
+ */
+function closeDoorway({ batcher, pos, dir, chunk, material, addCollider }) {
+  const y = pos.y;
+  const H = CEIL + SLAB;
+  const T = 0.3;
+  const add = (a0, a1, c0, c1, y0, y1) => {
+    const r = sewerRect(pos, dir, a0, a1, c0, c1);
+    batcher.add(box(r.x1 - r.x0, y1 - y0, r.z1 - r.z0), material,
+      place((r.x0 + r.x1) / 2, (y0 + y1) / 2, (r.z0 + r.z1) / 2), { chunk, ao: wallAo(y) });
+    return r;
+  };
+  for (const s of [-1, 1]) {
+    const r = add(HALF - T, HALF, s * (DOOR_W / 2 + T), s * HALF, y, y + H);
+    addCollider(r.x0, r.x1, r.z0, r.z1, y, y + H);
+    // The reveal: a jamb from the room's wall to the face.
+    const j = add(SHELL - 0.05, HALF - T, s * DOOR_W / 2, s * (DOOR_W / 2 + T), y, y + DOOR_H);
+    addCollider(j.x0, j.x1, j.z0, j.z1, y, y + DOOR_H);
+  }
+  add(HALF - T, HALF, -(DOOR_W / 2 + T), DOOR_W / 2 + T, y + DOOR_H, y + H);
+  add(SHELL - 0.05, HALF - T, -DOOR_W / 2, DOOR_W / 2, y + DOOR_H, y + DOOR_H + 0.3);
 }
 
 /** A stone archway: portals you step through, gates that are sealed. */
