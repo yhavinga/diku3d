@@ -340,7 +340,7 @@ def rigid_shell(body, arm, name, keep, bone, offset=0.02, mat="steel", planes=()
 
 def ring(name, center, r, tube, mat="leather", seg=24, rot=(0, 0, 0), scale=(1, 1, 1)):
     bpy.ops.mesh.primitive_torus_add(major_radius=r, minor_radius=tube, major_segments=seg,
-                                     minor_segments=6, location=center, rotation=rot)
+                                     minor_segments=4, location=center, rotation=rot)
     o = bpy.context.object
     o.name = name
     o.scale = scale
@@ -400,7 +400,7 @@ def belt(body, z, name="belt", mat="leather", width=0.045, ease=0.008, buckle="i
 
 # --- covering -----------------------------------------------------------------------
 
-def cover(body, garments, reach=0.045, keep=None):
+def cover(body, garments, reach=0.045, keep=None, deep=()):
     """Delete the skin nothing can see: every body face whose vertices all
     have a garment within `reach` along their outward normal. `keep(co)`
     protects regions that must stay whatever covers them."""
@@ -410,6 +410,17 @@ def cover(body, garments, reach=0.045, keep=None):
         bm = bmesh.new()
         bm.from_mesh(g.data)
         trees.append(BVHTree.FromBMesh(bm))
+        bm.free()
+    # A long skirt stands well off the legs it hides, further than `reach`,
+    # and a leg left under one comes through the front of it the moment it
+    # strides. So under a skirt the rays go further -- but not below 12 cm,
+    # where the feet show under the hem.
+    deep_trees = []
+    for g in deep:
+        bm = bmesh.new()
+        bm.from_mesh(g.data)
+        top = max(v.co.z for v in bm.verts)
+        deep_trees.append((BVHTree.FromBMesh(bm), top))
         bm.free()
     bm = bmesh.new()
     bm.from_mesh(body.data)
@@ -425,6 +436,13 @@ def cover(body, garments, reach=0.045, keep=None):
             if loc is not None:
                 hit = True
                 break
+        if not hit and 0.12 < v.co.z:
+            for tr, top in deep_trees:
+                if v.co.z < top - 0.02:
+                    loc, _, _, _ = tr.ray_cast(v.co + n * 0.001, n, 0.40)
+                    if loc is not None:
+                        hit = True
+                        break
         if hit:
             hidden.add(v.index)
     dead = [f for f in bm.faces if all(v.index in hidden for v in f.verts)]
@@ -1234,7 +1252,7 @@ def dress(name, body, arm, P):
         bm.to_mesh(skin.data)
         bm.free()
     else:
-        cover(skin, pieces)
+        cover(skin, pieces, deep=[p for p in pieces if p.name.split(".")[0].endswith("skirt")])
     import os
     if os.environ.get("HUMANS_DEBUG"):
         print("  PIECES", name, people.tri_count(skin), [(p.name, people.tri_count(p)) for p in pieces])
@@ -1302,9 +1320,20 @@ def cap(P, name, keep, push, mat="hair", thick=0.004, smooth=True, bone="head", 
                 l = _local(P, v.co)
                 target = edge(l)
                 if target is not None and abs(target - l.z) < 0.02:
-                    v.co.z = c.z + target * hh / 0.118
+                    # Not a ruled line: hair grows in locks, and a hairline
+                    # cut clean round the skull is what made every head of
+                    # hair read as a leather cap. A few millimetres of ragged
+                    # fringe, fixed by angle so both sides of a face agree.
+                    th = _theta(l)
+                    ragged = 0.004 * math.sin(th * 23.0) + 0.0025 * math.sin(th * 41.0 + 1.3)
+                    v.co.z = c.z + (target - abs(ragged)) * hh / 0.118
     bm.normal_update()
-    moves = [(v, v.normal.copy() * push(_local(P, v.co))) for v in bm.verts]
+    # Lumps: hair is never an even shell, and a little unevenness in its
+    # thickness is what catches the light as locks rather than as a dome.
+    def lump(co):
+        return 0.0018 * (math.sin(co.x * 150.0 + co.z * 90.0) + math.sin(co.y * 170.0 - co.z * 60.0)) \
+            if mat == "hair" else 0.0
+    moves = [(v, v.normal.copy() * (push(_local(P, v.co)) + lump(v.co))) for v in bm.verts]
     for v, d in moves:
         v.co += d
     bm.to_mesh(skull.data)
@@ -1505,7 +1534,7 @@ def _dome(P, name, extra, z_rim, mat="steel", peak=0.0, flat=False):
         rings.append((z * k, rx, ry, ry * 1.04, 0, 0, 2.0))
     if peak:
         rings.append((0.125 * k + peak, 0.004, 0.004, 0.004, 0, 0, 2.0))
-    o = people.ring_loft(c + V((0, 0.004, 0)), (0, 0, 1), rings, sides=24, side=(-1, 0, 0), name=name,
+    o = people.ring_loft(c + V((0, 0.004, 0)), (0, 0, 1), rings, sides=18, side=(-1, 0, 0), name=name,
                          mat=mat)
     for p in o.data.polygons:
         p.use_smooth = True
@@ -1519,7 +1548,7 @@ def helm_kettle(P):
     c = people.head_center(P)
     hw, hd, hh = P["head"]
     crown = _dome(P, "helm_kettle", 0.018, 0.028)
-    brim = ring("brim", tuple(c + V((0, 0.004, 0.030 * hh / 0.118))), 1.0, 0.07, mat="steel", seg=28,
+    brim = ring("brim", tuple(c + V((0, 0.004, 0.030 * hh / 0.118))), 1.0, 0.07, mat="steel", seg=20,
                 scale=(hw + 0.075, hd + 0.075, 0.06))
     rig.set_rigid(brim, "head")
     return people.join([crown, brim], "helm_kettle")

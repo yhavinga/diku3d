@@ -609,7 +609,7 @@ def head(P):
     # themselves are clean quads. So the head keeps its own topology, spent
     # where a face is looked at: columns crowd towards the front, rings
     # towards the band from chin to brow. The neck ends inside it.
-    sides = 30
+    sides = 28
     # Evenly up the face from the chin to the brow, then by latitude over the
     # crown -- even steps in z put two rings on the whole dome and made a cone.
     zs = [-0.118 + (0.030 + 0.118) * i / 17.0 for i in range(18)]
@@ -749,9 +749,9 @@ def face_parts(P, skull=None):
         front = (fy if fy is not None else c.y - 0.078 * sd) - 0.0025
         ec = V((ex, front + 0.0108 * sd, ez))
         out.append(ellipsoid(tuple(ec), (0.0126 * sw, 0.0108 * sd, 0.0078 * sh),
-                             name="eyeball", mat="eyewhite", seg=10, rings=6))
+                             name="eyeball", mat="eyewhite", seg=8, rings=5))
         out.append(ellipsoid((ex, front + 0.0012, ez - 0.0006), (0.0060 * sw, 0.0022, 0.0062 * sh),
-                             name="iris", mat="eye", seg=8, rings=4))
+                             name="iris", mat="eye", seg=6, rings=4))
         # The brow: a thin tapering bar along the ridge, in hair.
         inner = c + V((sx * 0.012 * sw, -0.0975 * sd, 0.026 * sh))
         outer = c + V((sx * 0.056 * sw, -0.083 * sd, 0.024 * sh))
@@ -774,7 +774,7 @@ def face_parts(P, skull=None):
         sides=10, side=(1, 0, 0), name="nose", mat="skin"))
     for sx in (-1, 1):
         out.append(ellipsoid(tuple(tip + V((sx * 0.0115 * sw, 0.0065, 0.001))), (0.0068, 0.0072, 0.0060),
-                             name="nostril", mat="skin", seg=8, rings=6))
+                             name="nostril", mat="skin", seg=6, rings=4))
     # A mouth: fuller lips in the skin and a dark line between them, which is
     # the one mark on a face that reads at street distance after the eyes.
     mz = c.z - 0.0665 * sh
@@ -783,9 +783,9 @@ def face_parts(P, skull=None):
     # One lip roll above the line and one below, sunk mostly into the face so
     # only their fronts show.
     out.append(ellipsoid((0.0, my + 0.0030, mz + 0.0048), (0.020 * sw, 0.0058, 0.0040),
-                         name="lip", mat="skin", seg=12, rings=6))
+                         name="lip", mat="skin", seg=8, rings=4))
     out.append(ellipsoid((0.0, my + 0.0036, mz - 0.0050), (0.017 * sw, 0.0058, 0.0042),
-                         name="lip", mat="skin", seg=12, rings=6))
+                         name="lip", mat="skin", seg=8, rings=4))
     out.append(ring_loft(V((-0.019 * sw, my - 0.0018, mz)), (1, 0, 0), [
         (0.0, 0.0010, 0.0007, 0.0007), (0.019 * sw, 0.0014, 0.0010, 0.0010),
         (0.038 * sw, 0.0010, 0.0007, 0.0007)], sides=4, side=(0, 0, 1), name="mouth", mat="eye"))
