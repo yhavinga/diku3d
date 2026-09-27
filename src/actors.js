@@ -683,9 +683,48 @@ function buildPerson(library, who, proto, instance) {
  * the dragon master, the Dragonknights and the attendant of the dragon are
  * people.
  */
-const NOT_A_BEAST = /\b(were\w*|ettin|herald|horseman|horsehead|nebula|vampire|lamia|centaur|minotaur|master|dragonlord|dragonknight|spider|hierophant|attendant)\b/;
+const NOT_A_BEAST = /\b(were(?!rats?\b)\w+|ettin|herald|horseman|horsehead|nebula|vampire|lamia|centaur|minotaur|master|dragonlord|dragonknight|hierophant|attendant)\b/;
 
 const BEASTS = [
+  // --- the monsters (tools/blender/monsters.py). First, because their names
+  // borrow the animals' words: a wolf spider and a bird spider are spiders.
+  // Half drow, half spider: the skin is the pale channel, the hair the points.
+  // The chreffn: 'head and torso copper-covered, with yellow, glowing eyes,
+  // the lower body in an orange shading', crawling -- the drider's build, in
+  // copper over orange.
+  { test: /\bchreffns?\b/, asset: 'beast_drider', scale: 0.72, coat: 0xa8521c, pale: 0xb07a44, points: 0x6a4020, glow: 0xffd02a, box: [1.0, 1.6, 'quad', 0xa8521c] },
+  { test: /\bdriders?\b/, asset: 'beast_drider', scale: 1.0, coat: 0x19161a, pale: 0x3d3947, points: 0xe2dfe8, glow: 0xff3a24, box: [1.2, 2.2, 'quad', 0x19161a] },
+  { test: /\b(huge|giant|queen|empress|arachnos)\b.*\bspiders?\b|\bspiders?\b.*\b(huge|giant|queen|empress|arachnos)\b/, asset: 'beast_spider', scale: 2.2, coat: 0x1c1816, pale: 0x7a2a1c, points: 0x0d0b0a, patch: 0x2c2420, cover: 0.3, box: [0.5, 1.6, 'quad', 0x1c1816] },
+  { test: /\bspiders?\b/, asset: 'beast_spider', scale: 0.6, coat: 0x2e2621, pale: 0x8f7d66, points: 0x16120f, patch: 0x44382e, cover: 0.35, box: [0.15, 0.5, 'quad', 0x2e2621] },
+  { test: /\bscorpions?\b/, asset: 'beast_scorpion', scale: 0.8, coat: 0x7a3218, pale: 0xb0643c, points: 0x2e1409, patch: 0x5a2410, cover: 0.3, box: [0.12, 0.45, 'quad', 0x7a3218] },
+  { test: /\bbeetles?\b/, asset: 'beast_beetle', scale: 2.2, coat: 0x1d1a19, pale: 0x3a302a, points: 0x0f0d0c, patch: 0x2a2420, cover: 0.2, box: [0.3, 1.1, 'quad', 0x1d1a19] },
+  // A bat lives in the air: its idle is a hover and its walk is flight.
+  { test: /\bbats?\b/, asset: 'beast_bat', scale: 1.8, coat: 0x4a3b30, pale: 0x7a6452, points: 0x241b16, air: true, box: [0.1, 0.2, 'bird', 0x3a2e27] },
+  // The mud thing and what else is made of something that is not flesh.
+  { test: /\bmud ?monsters?\b/, asset: 'beast_mud', scale: 1.0, coat: 0x5e4a34, pale: 0x6a563e, points: 0x241a12, patch: 0x3a2c1c, cover: 0.45, glow: 0xff7020, box: [1.6, 1.0, 'quad', 0x4a3a28] },
+  { test: /\blemures?\b/, asset: 'beast_mud', scale: 0.62, coat: 0x9a7466, pale: 0xb08a7a, points: 0x5a4038, patch: 0x7a5a50, cover: 0.4, glow: 0xffc830, box: [1.0, 0.8, 'quad', 0x9a7466] },
+  { test: /\bshambling\b|\bmound\b/, asset: 'beast_mud', scale: 0.82, coat: 0x3b3a20, pale: 0x4a4626, points: 0x1c1a0e, patch: 0x56662a, cover: 0.55, glow: 0x302c14, box: [1.4, 1.0, 'quad', 0x3b3a20] },
+  { test: /\bswamp thing\b/, asset: 'beast_mud', scale: 0.95, coat: 0x32401e, pale: 0x3e4a24, points: 0x1a2010, patch: 0x4e5a26, cover: 0.5, glow: 0xc0d040, box: [1.6, 1.0, 'quad', 0x32401e] },
+  // Walking fungus: the cap is the coat, the stalk the pale, the gills the points.
+  { test: /\bmyconoid\b.*\bshaman\b|\bshaman\b.*\bmyconoid\b/, asset: 'beast_myconoid', scale: 1.25, coat: 0x6a3c52, pale: 0xd6cab4, points: 0x3a2a26, patch: 0xe6dccb, cover: 0.4, box: [1.6, 1.0, 'quad', 0x6a3c52] },
+  { test: /\bmyconoids?\b/, asset: 'beast_myconoid', scale: 1.0, coat: 0x7a5a3a, pale: 0xd8ccb6, points: 0x3a2c24, patch: 0xe8dcc6, cover: 0.3, box: [1.3, 0.9, 'quad', 0x7a5a3a] },
+  // Rats that stand: the sewer's wererats, and the morkoth, 'somewhere
+  // between a human and a rat', a shadow with lit eyes.
+  { test: /\bmorkoth\b/, asset: 'beast_ratman', scale: 1.02, coat: 0x151315, pale: 0x221e21, points: 0x0b0a0b, horn: 0x3a3436, glow: 0xff4a1c, box: [1.5, 0.6, 'quad', 0x151315] },
+  { test: /\bwererats?\b/, asset: 'beast_ratman', scale: 0.84, coat: 0x5a4636, pale: 0x8c7864, points: 0x2c221a, glow: 0x3a1a0c, box: [1.2, 0.5, 'quad', 0x5a4636] },
+  // Winged imps: the homonculus is eighteen inches of green; a gargoyle is
+  // the same creature four times over, in stone grey.
+  { test: /\bgargoyles?\b/, asset: 'beast_imp', scale: 4.0, coat: 0x6a6964, pale: 0x7c7b76, points: 0x3c3b38, glow: 0xff5a24, box: [1.9, 0.8, 'quad', 0x6a6964] },
+  { test: /\b(homonc?ulus|imps?|quasits?)\b/, asset: 'beast_imp', scale: 1.0, coat: 0x4a5a28, pale: 0x7a8a48, points: 0x283018, glow: 0xffc020, box: [0.45, 0.3, 'quad', 0x4a5a28] },
+  { test: /\bnagas?\b/, asset: 'beast_naga', scale: 1.0, stands: 1.9, coat: 0x56662a, pale: 0xc8b25e, points: 0x56662a, patch: 0x8a8a3a, cover: 0.35, box: [0.3, 5, 'quad', 0x56662a] },
+  { test: /\bbasilisks?\b/, asset: 'beast_basilisk', scale: 1.0, coat: 0x5a4a32, pale: 0xbca264, points: 0x3a3020, patch: 0x4a3c28, cover: 0.3, glow: 0x9cff9c, box: [0.5, 2.5, 'quad', 0x5a4a32] },
+  { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, stands: 3.6, coat: 0x5c2c68, pale: 0x8e6096, points: 0x3a1a44, patch: 0x4a2254, cover: 0.3, box: [0.8, 9, 'quad', 0x5c2c68] },
+  { test: /\bdustdiggers?\b/, asset: 'beast_dustdigger', scale: 1.0, coat: 0xc2a070, pale: 0x9a7c58, points: 0x7a5a3a, patch: 0xb08c5c, cover: 0.35, box: [0.3, 4, 'quad', 0xc2a070] },
+  { test: /\bcamels?\b/, asset: 'beast_camel', scale: 1.0, coat: 0xb48c5c, pale: 0xd6be96, points: 0x8a6a44, box: [1.9, 3, 'quad', 0xb48c5c] },
+  // The dracolich lies as a heap of bones until it rises: its idle is the
+  // dragon's `lair`, curled on the floor.
+  { test: /\bdracolich\b/, asset: 'beast_dracolich', scale: 0.8, coat: 0xcfc2a2, pale: 0xd9cfb6, points: 0x8a7e66, glow: 0x70ff9a, lair: true, box: [1.7, 9, 'quad', 0xcfc2a2] },
+  { test: /\bwisps?\b|\bwill-o/, wisp: true, glow: 0xa8e0ff, box: [0.3, 0.3, 'bird', 0xa8e0ff] },
   // --- canines. Two ear sets are modelled; `hide` collapses the one a breed
   // does not have.
   { test: /\bwargs?\b/, asset: 'beast_canine', scale: 1.6, coat: 0x26221f, pale: 0x3a342e, points: 0x151311, hide: ['flop'], box: [1.0, 1.6, 'quad', 0x2b2724] },
@@ -707,7 +746,11 @@ const BEASTS = [
   { test: /\b(cat|cats|feline)\b/, asset: 'beast_feline', scale: 1.0, coat: 0x6b5a48, pale: 0xcfc3b0, points: 0x6b5a48, patch: 0x2f2720, cover: 0.5, box: [0.3, 0.5, 'quad', 0x4a4038] },
   // --- rodents.
   { test: /\b(mouse|mice)\b/, asset: 'beast_rodent', scale: 0.45, coat: 0x7b6e62, pale: 0xc8bdb0, points: 0x7b6e62, grow: { head: 1.2, ear: 1.4 }, box: [0.07, 0.13, 'quad', 0x7b6e62] },
-  { test: /\b(gigantic|giant) rat\b|\brat (gigantic|giant)\b/, asset: 'beast_rodent', scale: 4.0, coat: 0x4a3f35, pale: 0x8a7e70, points: 0x4a3f35, box: [0.5, 0.9, 'quad', 0x4d453c] },
+  // Ten foot from head to tail, in the mud's own words: the model is half a
+  // metre with its tail.
+  { test: /\b(gigantic|giant) rat\b|\brat (gigantic|giant)\b/, asset: 'beast_rodent', scale: 6.0, coat: 0x4a3f35, pale: 0x8a7e70, points: 0x4a3f35, box: [0.5, 0.9, 'quad', 0x4d453c] },
+  { test: /\b(great|sewer) rats?\b/, asset: 'beast_rodent', scale: 2.4, coat: 0x4e4238, pale: 0x8a7e6e, points: 0x4e4238, box: [0.25, 0.5, 'quad', 0x4d453c] },
+  { test: /\b(rabbits?|hares?|bunny|bunnies)\b/, asset: 'beast_rodent', scale: 1.5, coat: 0x8a735a, pale: 0xd8ccb8, points: 0x5a4a3a, grow: { ear: 3.2, tail1: 0.2, head: 1.1 }, box: [0.2, 0.4, 'quad', 0x8a735a] },
   { test: /\b(rat|rats|rodent|vermin)\b/, asset: 'beast_rodent', scale: 1.2, coat: 0x5e5043, pale: 0x9e9180, points: 0x5e5043, box: [0.14, 0.26, 'quad', 0x4d453c] },
   // --- horses, and the deer, which is a lighter build of the same frame.
   // Horses vary coat by the mobile, so a stable of four is not one horse.
@@ -728,6 +771,9 @@ const BEASTS = [
   { test: /\b(pig|pigs|hog|hogs|sow|swine|piglet)\b/, asset: 'beast_pig', scale: 1.0, coat: 0xd6a494, pale: 0xe8c4b6, points: 0xd6a494, hide: ['tusk'], box: [0.62, 1.0, 'quad', 0x9a7a6c] },
   // --- bears. The marsh's "huge hairy beast" is twenty feet of green-furred
   // claws, and a bear is the nearest thing the library has to one.
+  // Its small kin, which 'cringes in terror': the same green-furred thing
+  // at a bear cub's size.
+  { test: /\bsmall beast\b/, asset: 'beast_bear', scale: 0.34, coat: 0x4a5634, pale: 0x5a6640, points: 0x2c3420, grow: { head: 1.3 }, box: [0.35, 0.6, 'quad', 0x4a5634] },
   { test: /\bhairy beast\b/, asset: 'beast_bear', scale: 2.4, coat: 0x3d4a2e, pale: 0x4d5a3a, points: 0x252e1c, box: [2.0, 3.2, 'quad', 0x3d4a2e] },
   { test: /\bteddy\b/, asset: 'beast_bear', scale: 0.32, coat: 0x9a7248, pale: 0xc9a77c, points: 0x9a7248, grow: { head: 1.4, ear: 1.3 }, box: [0.3, 0.45, 'quad', 0x9a7248] },
   { test: /\bbears?\b/, asset: 'beast_bear', scale: 1.0, coat: 0x4a3322, pale: 0x5c4230, points: 0x2a1d14, box: [1.0, 1.6, 'quad', 0x4a3728] },
@@ -737,11 +783,18 @@ const BEASTS = [
   { test: /\b(fairy dragon|pet dragon)\b/, asset: 'beast_dragon', scale: 0.12, coat: 0x6a8a4a, pale: 0xc8c890, points: 0x3a4a2a, box: [0.2, 1, 'quad', 0x6a8a4a] },
   { test: /\b(hatchling|baby|young)\b.*\bdragon\b|\bdragon\b.*\b(hatchling|baby|young)\b/, asset: 'beast_dragon', scale: 0.3, coat: 0x5a7a3a, pale: 0xb8b880, points: 0x2e3e20, box: [0.5, 2.5, 'quad', 0x5a7a3a] },
   { test: /\bwyverns?\b/, asset: 'beast_dragon', scale: 0.75, coat: 0x5a5244, pale: 0xa89c80, points: 0x2e2a22, box: [1.3, 6, 'quad', 0x5a5244] },
+  // The sewer's red dragon is asleep on its hoard when you come in -- its
+  // idle is `lair`, which also keeps nine metres of it inside the room.
+  { test: /\bred dragon\b/, asset: 'beast_dragon', scale: 0.95, coat: 0x7a2616, pale: 0xc08a4a, points: 0x3a100a, patch: 0x5a180e, cover: 0.3, lair: true, box: [1.7, 9, 'quad', 0x7a2616] },
   { test: /\bdragons?\b/, asset: 'beast_dragon', scale: 0.8, coat: 0x3a5a2a, pale: 0xa8a870, points: 0x1e2e16, patch: 0x2a3a1c, cover: 0.3, box: [1.7, 9, 'quad', 0x3a5a2a] },
   // --- serpents. A python is three metres; the marsh's anaconda is ten in the
   // mud's own words, and gets six, which is still the largest thing in it.
   { test: /\banaconda\b/, asset: 'beast_snake', scale: 2.0, coat: 0x4a5230, pale: 0x9a9468, points: 0x4a5230, patch: 0x1a1c12, cover: 0.4, box: [0.3, 6, 'quad', 0x4a5230] },
   { test: /\bpython\b/, asset: 'beast_snake', scale: 1.1, coat: 0x8a7248, pale: 0xd8ccaa, points: 0x8a7248, patch: 0x3a2c1a, cover: 0.45, box: [0.2, 3, 'quad', 0x8a7248] },
+  // Red, yellow and black in rings: laid on in bands along the body rather
+  // than through the patch noise every other snake is mottled with.
+  { test: /\bcoral snake\b|\bsnake coral\b/, asset: 'beast_snake', scale: 0.4, coat: 0xb02a18, pale: 0xb02a18, points: 0xb02a18, bands: [0xb02a18, 0xe0b830, 0x141212, 0xe0b830], band: 0.07, box: [0.08, 1, 'quad', 0xb02a18] },
+  { test: /\bmaggots?\b/, asset: 'beast_worm', scale: 0.8, coat: 0xd8ccae, pale: 0xe6ddc6, points: 0xb8aa8a, patch: 0xc8b898, cover: 0.2, box: [0.14, 1.0, 'quad', 0xd8ccae] },
   { test: /\b(snake|snakes|serpent|viper|cobra|adder|asp)\b/, asset: 'beast_snake', scale: 0.55, coat: 0x5a5a3a, pale: 0xb8b490, points: 0x5a5a3a, patch: 0x26261a, cover: 0.35, box: [0.12, 1.5, 'quad', 0x5a5a3a] },
   { test: /\b(worm|worms|iceworm|slug)\b/, asset: 'beast_worm', scale: 1.0, coat: 0x8a6a62, pale: 0xb08a80, points: 0x8a6a62, patch: 0x6a4c46, cover: 0.3, box: [0.14, 1.3, 'quad', 0x8a6a62] },
   { test: /\bswans?\b/, asset: 'beast_swan', scale: 1.0, coat: 0xefeeea, pale: 0xf4f3ef, points: 0xe2e0da, box: [0.62, 0.9, 'bird', 0xf2f0ea] },
@@ -800,6 +853,7 @@ export function beastKind(proto) {
  * way the record has the shape `update()` expects of a figure.
  */
 function buildBeastFigure(spec, proto, library, options = {}) {
+  if (spec.wisp) return buildWisp(spec, proto);
   const asset = library && spec.asset ? library.get(spec.asset) : null;
   if (asset && asset.animations.length) return buildModelledBeast(asset, spec, proto, library, options);
   return buildBoxBeast(spec.box, proto);
@@ -842,6 +896,8 @@ const _patch = new THREE.Color();
  * beaks) keep the colour they were modelled with, times `horn` if the look
  * darkens them -- a crow's beak and legs are the duck's, in black.
  */
+const COATED = new Set(['fur', 'feather', 'scales', 'chitin', 'ooze', 'hide', 'bone']);
+
 function paintedGeometry(asset, node, tag, look) {
   const key = `${node.name}|${look.key}`;
   const cache = asset.beastGeometry;
@@ -850,13 +906,17 @@ function paintedGeometry(asset, node, tag, look) {
   const source = geometry.attributes.color;
   const count = geometry.attributes.position.count;
   const out = new Float32Array(count * 3);
-  const coated = tag === 'fur' || tag === 'feather' || tag === 'scales';
+  const coated = COATED.has(tag);
   _paint.setHex(look.coat);
   _pale.setHex(look.pale);
   _points.setHex(look.points);
   _patch.setHex(look.patch);
-  const horn = new THREE.Color(look.horn ?? 0xffffff);
+  // What glows takes the look's own colour: one pair of eyes, burning green
+  // on a basilisk and red on a drow.
+  const horn = new THREE.Color(tag === 'glow' ? (look.glow ?? 0xffffff) : (look.horn ?? 0xffffff));
   const edge = 1 - (look.cover || 0);
+  const bands = look.bands ? look.bands.map((hex) => new THREE.Color(hex)) : null;
+  const position = geometry.attributes.position;
   for (let i = 0; i < count; i++) {
     const a = source ? source.getX(i) : 0;
     const b = source ? source.getY(i) : 0;
@@ -872,6 +932,14 @@ function paintedGeometry(asset, node, tag, look) {
       const t = THREE.MathUtils.smoothstep(c, edge - 0.035, edge + 0.035);
       r += (_patch.r - r) * t; g += (_patch.g - g) * t; bl += (_patch.b - bl) * t;
     }
+    if (bands) {
+      // Rings round the body: the model lies along +z (forward), so a band
+      // is a slab of z, whatever the vertex's pale or points mask says.
+      const k = Math.floor((position.getZ(i) / look.band) % bands.length + bands.length * 64) % bands.length;
+      r = bands[k].r; g = bands[k].g; bl = bands[k].b;
+      out[i * 3] = r; out[i * 3 + 1] = g; out[i * 3 + 2] = bl;
+      continue;
+    }
     r += (_pale.r - r) * a; g += (_pale.g - g) * a; bl += (_pale.b - bl) * a;
     r += (_points.r - r) * b; g += (_points.g - g) * b; bl += (_points.b - bl) * b;
     out[i * 3] = r; out[i * 3 + 1] = g; out[i * 3 + 2] = bl;
@@ -881,13 +949,24 @@ function paintedGeometry(asset, node, tag, look) {
   return geometry;
 }
 
+const DARKEST = 0x30;
+function floorColour(hex) {
+  const r = (hex >> 16) & 255; const g = (hex >> 8) & 255; const b = hex & 255;
+  const top = Math.max(r, g, b);
+  if (top >= DARKEST) return hex;
+  if (top === 0) return (DARKEST << 16) | (DARKEST << 8) | DARKEST;
+  const k = DARKEST / top;
+  return (Math.round(r * k) << 16) | (Math.round(g * k) << 8) | Math.round(b * k);
+}
+
 function beastLook(spec, proto, seed = 0) {
   const words = `${proto.keywords} ${proto.short}`.toLowerCase();
   const base = spec.coats ? COATS[spec.coats][Math.floor(seed * COATS[spec.coats].length)] : spec;
   const look = {
     coat: base.coat ?? 0x6b5641, pale: base.pale ?? base.coat ?? 0x6b5641,
     points: base.points ?? base.coat ?? 0x6b5641, patch: base.patch ?? 0x000000,
-    cover: base.cover || 0, horn: base.horn ?? spec.horn,
+    cover: base.cover || 0, horn: base.horn ?? spec.horn, glow: spec.glow,
+    bands: spec.bands || null, band: spec.band || 0.1,
   };
   for (const [re, hex] of COAT_WORDS) {
     if (!re.test(words)) continue;
@@ -897,7 +976,15 @@ function beastLook(spec, proto, seed = 0) {
     look.cover = 0;
     break;
   }
-  look.key = [look.coat, look.pale, look.points, look.patch, look.cover, look.horn].join(',');
+  // Nothing lit is black. A coat at 0x15 is 0.007 in linear light; under
+  // the ambient occlusion in a dark room that rounds to RGB 0, and a black
+  // beast came out as a hole in the frame (measured: 1% of a morkoth shot).
+  // Every coat keeps its hue but is lifted to at least this much.
+  for (const k of ['coat', 'pale', 'points', 'patch']) {
+    if (k === 'patch' && !look.cover) continue;
+    look[k] = floorColour(look[k]);
+  }
+  look.key = [look.coat, look.pale, look.points, look.patch, look.cover, look.horn, look.glow, look.bands].join(',');
   return look;
 }
 
@@ -973,14 +1060,143 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     clips.walk = clips.swim;
     if (stride.swim) stride.walk = stride.swim;
   }
+  // A dragon at home lies curled on its hoard: `lair` is its idle, and the
+  // walk crossfades it up onto its feet when it has somewhere to go.
+  if (spec.lair && actions.lair) {
+    actions.idle.stop();
+    actions.lair.setLoop(THREE.LoopRepeat, Infinity);
+    actions.lair.time = start * clips.lair;
+    actions.lair.setEffectiveWeight(1);
+    actions.lair.play();
+    actions.idle = actions.lair;
+    clips.idle = clips.lair;
+    delete actions.lair;
+  }
   mixer.update(0);
 
   const size = asset.size;
   group.userData.footprint = { length: size.z * scale, width: size.x * scale * width };
+  // A flier is built on the ground and flown by its clips, `hover` metres up
+  // (in the model's units): its name and its examine point go up with it.
+  const hover = spec.air ? (info.hover || 0) * scale : 0;
+  // A body that stands up out of its rest pose -- the reared naga, the worm
+  // out of the sand -- says how tall it really is, for the label over it.
+  const height = spec.stands ? spec.stands * scale : size.y * scale + hover;
   return {
-    group, headGroup: null, height: size.y * scale, scale, mixer, actions, clips, stride,
+    group, headGroup: null, height, scale, mixer, actions, clips, stride,
     hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
     afloat,
+  };
+}
+
+let wispHalo = null;
+function wispHaloTexture() {
+  if (wispHalo) return wispHalo;
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.45)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  wispHalo = new THREE.CanvasTexture(canvas);
+  wispHalo.colorSpace = THREE.SRGBColorSpace;
+  return wispHalo;
+}
+
+/**
+ * The Will-O-Wisp: "a glowing ball of floating light" with "a small pair of
+ * glowing eyes" -- nothing to model, so it is made here: an unlit core bright
+ * enough to bloom, a soft halo, two eyes, and a real point light offered to
+ * the light pool (`light`, a candidate that reads the wisp's position live).
+ * Its clips are keyframed on the core: a bob and a drift, darting when it
+ * travels, a lunge, a flinch, and going out.
+ */
+function buildWisp(spec, proto) {
+  const group = new THREE.Group();
+  const core = new THREE.Group();
+  core.name = 'wispCore';
+  const colour = new THREE.Color(spec.glow ?? 0xa8e0ff);
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 12),
+    new THREE.MeshBasicMaterial({ color: colour.clone().multiplyScalar(4) }));
+  core.add(ball);
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: wispHaloTexture(), color: colour.clone().multiplyScalar(1.6), transparent: true,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+  }));
+  halo.scale.setScalar(0.9);
+  core.add(halo);
+  const eyeMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 6, 5) });
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.014, 8, 6), eyeMaterial);
+    eye.position.set(side * 0.035, 0.02, 0.1);
+    core.add(eye);
+  }
+  const HOVER = 1.35;
+  core.position.set(0, HOVER, 0);
+  group.add(core);
+
+  const track = (name, times, values) => new THREE.VectorKeyframeTrack(`wispCore.${name}`, times, values);
+  const loop = (duration, fn, n = 24) => {
+    const times = []; const values = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      times.push(t * duration);
+      values.push(...fn(t));
+    }
+    return { times, values };
+  };
+  const bob = loop(3.2, (t) => [0.18 * Math.sin(t * Math.PI * 2), HOVER + 0.12 * Math.sin(t * Math.PI * 4),
+    0.12 * Math.sin(t * Math.PI * 2 + 1.3)]);
+  const dart = loop(0.8, (t) => [0.25 * Math.sin(t * Math.PI * 2), HOVER + 0.08 * Math.sin(t * Math.PI * 4), 0]);
+  const lunge = loop(0.7, (t) => {
+    const k = Math.sin(Math.PI * Math.min(1, t / 0.6));
+    return [0, HOVER - 0.25 * k, 0.9 * k];
+  }, 14);
+  const flinch = loop(0.4, (t) => [0.2 * Math.sin(t * Math.PI * 6) * (1 - t), HOVER + 0.1 * (1 - t), -0.3 * Math.sin(Math.PI * t)], 12);
+  const out = loop(1.2, (t) => [0, HOVER - 1.2 * t * t, 0], 12);
+  const fade = loop(1.2, (t) => { const k = Math.max(0.001, 1 - t); return [k, k, k]; }, 12);
+  const clipsOf = {
+    idle: new THREE.AnimationClip('idle', 3.2, [track('position', bob.times, bob.values)]),
+    walk: new THREE.AnimationClip('walk', 0.8, [track('position', dart.times, dart.values)]),
+    attack: new THREE.AnimationClip('attack', 0.7, [track('position', lunge.times, lunge.values)]),
+    hit: new THREE.AnimationClip('hit', 0.4, [track('position', flinch.times, flinch.values)]),
+    death: new THREE.AnimationClip('death', 1.2, [track('position', out.times, out.values), track('scale', fade.times, fade.values)]),
+  };
+  const mixer = new THREE.AnimationMixer(group);
+  const actions = {};
+  const clips = {};
+  for (const [name, clip] of Object.entries(clipsOf)) {
+    const action = mixer.clipAction(clip);
+    clips[name] = clip.duration;
+    if (LOOPED_CLIPS.has(name)) {
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.time = strHash(proto.short, 13) * clip.duration;
+      action.setEffectiveWeight(name === 'idle' ? 1 : 0);
+      action.play();
+    } else {
+      action.setLoop(THREE.LoopOnce, 1);
+      action.clampWhenFinished = true;
+      action.setEffectiveWeight(0);
+    }
+    actions[name] = action;
+  }
+  mixer.update(0);
+  group.userData.footprint = { length: 0.3, width: 0.3 };
+  // Offered to the light pool: it reads where the wisp is now, not where it
+  // was reset, and it is out by day like every other outdoor light.
+  const light = {
+    get x() { return group.position.x + core.position.x; },
+    get y() { return group.position.y + core.position.y; },
+    get z() { return group.position.z + core.position.z; },
+    color: colour.getHex(), intensity: 5, radius: 8, flicker: true, outdoor: true,
+  };
+  return {
+    group, headGroup: null, height: HOVER + 0.25, scale: 1, mixer, actions, clips,
+    stride: { walk: 1.6 }, hitFrame: { attack: 0.55 }, weapon: null, archetype: 'wisp', legs: null, light,
   };
 }
 
@@ -1475,6 +1691,8 @@ export function populate(world, layout, built, options = {}) {
             ? buildModelledFigure(assets.get(person), proto, assets)
             : buildFigure(proto)));
       const { group: fig, headGroup, height } = made;
+      // A creature that is itself a light (the Will-O-Wisp) joins the pool.
+      if (made.light) windowLights.push(made.light);
       // Never at the centre of the room: that is where you arrive.
       const angle = (index / count) * Math.PI * 2 + strHash(mob.proto.keywords, 1) * 2;
       const radius = 2.1 + strHash(mob.proto.short, 2) * 1.5;

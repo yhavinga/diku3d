@@ -555,6 +555,56 @@ const SURFACES = {
     s.rough = 0.74 + barb * 0.12 - vane * 0.06;
   },
 
+  /**
+   * Chitin: the shell of a spider, a beetle, a scorpion. Hard and glossy --
+   * the highlight sliding over it as it walks is most of what says "shell"
+   * rather than "hide" -- with a faint pitting and the odd plate edge.
+   * Neutral, like the fur, because the creature's colour is in its vertices.
+   */
+  chitin(u, v, s) {
+    const [d1, edge] = cellular(u * 10, v * 10, 10, 443, 0.4);
+    const pit = fbm(u * 80, v * 80, 80, 449, 2);
+    const tone = fbm(u * 4, v * 4, 4, 457, 3);
+    const seam = clamp01(1 - edge * 9);
+    const base = mix(rgb(0xa2a2a2), rgb(0xb6b6b6), tone);
+    const shade = (0.96 + d1 * 0.05) * (1 - seam * 0.12) * (0.97 + pit * 0.05);
+    s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
+    s.height = 0.5 - seam * 0.05 - (pit > 0.72 ? (pit - 0.72) * 0.25 : 0) + d1 * 0.015;
+    s.rough = 0.34 + pit * 0.1 + seam * 0.18;
+  },
+
+  /**
+   * Ooze: living mud, a lemure's flesh, a shambling heap. Lumps that sag
+   * into each other and a wet sheen that breaks up over them; no cell edges,
+   * because nothing in it is solid enough to have one.
+   */
+  ooze(u, v, s) {
+    const lump = fbm(u * 6, v * 6, 6, 461, 4);
+    const fine = fbm(u * 40, v * 40, 40, 463, 2);
+    const [d1] = cellular(u * 18, v * 18, 18, 467, 0.5);
+    const blister = clamp01(0.3 - d1) * 2.2;
+    const base = mix(rgb(0x969696), rgb(0xb2b2b2), lump);
+    const shade = 0.93 + lump * 0.1 + blister * 0.05;
+    s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
+    s.height = 0.5 + lump * 0.09 + blister * 0.03 + fine * 0.012;
+    s.rough = 0.18 + fine * 0.22 + (1 - lump) * 0.18;
+  },
+
+  /**
+   * Hide: a reptile's skin, pebbled in small scales that each stand a little
+   * proud of the grooves between them -- the basilisk, the naga, the imp.
+   */
+  hide(u, v, s) {
+    const [d1, edge, id] = cellular(u * 34, v * 34, 34, 471, 0.35);
+    const tone = fbm(u * 5, v * 5, 5, 479, 3);
+    const groove = clamp01(1 - edge * 5);
+    const base = mix(rgb(0x9c9c9c), rgb(0xb4b4b4), tone);
+    const shade = (0.95 + id * 0.08) * (1 - groove * 0.16);
+    s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
+    s.height = 0.5 + (1 - groove) * 0.05 - d1 * 0.02;
+    s.rough = 0.55 + groove * 0.2 + id * 0.08;
+  },
+
   iron(u, v, s) {
     const brush = fbm(u * 8, v * 120, 8, 173, 3);
     const rust = clamp01(fbm(u * 9, v * 9, 9, 179, 4) * 1.7 - 0.8);
@@ -1131,6 +1181,11 @@ const RECIPES = {
   // both slide over anything that walks through them.
   fur: { surface: 'fur', scale: 0.4, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, moving: true },
   feather: { surface: 'feather', scale: 0.3, normalScale: 0.3, env: 0.5, wet: 0, detail: 0, moving: true },
+  // The monsters (tools/blender/monsters.py): shell, living mud and reptile
+  // skin, all coloured per creature in its vertices like the fur.
+  chitin: { surface: 'chitin', scale: 0.35, normalScale: 0.35, env: 0.9, wet: 0, detail: 0, moving: true },
+  ooze: { surface: 'ooze', scale: 0.6, normalScale: 0.5, env: 1.1, wet: 0, detail: 0, moving: true },
+  hide: { surface: 'hide', scale: 0.25, normalScale: 0.4, env: 0.5, wet: 0, detail: 0, moving: true },
 };
 
 // ------------------------------------------------------- surface detail ----
