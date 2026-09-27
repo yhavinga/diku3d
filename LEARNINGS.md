@@ -52,6 +52,44 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### The rest of Merc (src/rules/, save.js, console.js, items.js)
+
+- **Anything that creates a mob or object at boot or reset shifts the fight
+  rolls** unless it draws on its own generator; `wake(slot, rng)` takes
+  one, and resets and the mayor use the wandering generator. Otherwise
+  magic-check's sanctuary check broke on an unrelated change.
+- **In first person a kick only enters the frame once the foot is above
+  waist height.**
+- **The library's flat materials carry a colour of their own**, so vertex
+  tints multiply down to near black.
+- **The right-hand column overflows at 720p**; the log gives way while the
+  target panel is up.
+- Merc's command table is kept in its original order because the
+  abbreviations resolve by order; the 90 socials are generated from
+  `interp.c` by `tools/gen-socials.mjs`, not transcribed.
+- A dead mob returns in its own body once its corpse is gone — the body is
+  the corpse — and walks in from a street.
+- 16 dropped items in view: +142 calls, +0.78 ms.
+
+### Spells (src/magic.js, src/spellfx.js)
+
+- **Additive effects over sunlit ground only bleach towards white.** Give
+  emissive particles a share of cover — premultiplied colour, blend ONE /
+  ONE_MINUS_SRC_ALPHA, alpha = a × occlusion. That is what made fire read
+  orange at noon.
+- **three's ACES does `color *= exposure / 0.6`.** Author effect colours in
+  display units and multiply by `0.6 / exposure`; the bloom threshold in
+  those units is about 12 at noon, 23 at dusk and 4 at night.
+- **An effect light toggled by `visible` changes the light count and
+  recompiles every lit material mid-fight.** Two pooled lights stay in the
+  scene at intensity 0; ~0.12 ms each at 720p.
+- **Aura shells on every mesh stack rims and turn a figure to glass.** Only
+  skinned meshes over 150 vertices, lit on the silhouette.
+- Aim things that fly at the player 0.8 m ahead of the face, burst them at
+  2.6 m, or the frame blows out.
+- Fireball at night 6.4 → 7.7 ms median; sanctuary on the target costs
+  nothing measurable.
+
 ### Sewer and desert (tools/blender/sewer.py, desert.py)
 
 - **`visible = false` also hides a group from the shadow pass.** With the

@@ -63,7 +63,7 @@
   }
 
   #look {
-    position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%);
+    position: absolute; left: 50%; bottom: 102px; transform: translateX(-50%);
     text-align: center; opacity: 0; transition: opacity 140ms ease;
     /* An edge, not just a glow: over bright paving the wide soft shadow
        vanished and the name with it. */
@@ -135,8 +135,22 @@
     transition: transform 140ms ease, box-shadow 140ms ease;
   }
   #enter:hover { transform: translateY(-1px); box-shadow: 0 8px 26px rgba(224,189,119,0.22); }
+  #class-pick { margin-top: 14px; display: flex; gap: 4px; align-items: center; pointer-events: auto;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+  #class-pick span { opacity: 0.45; margin-right: 8px; }
+  #class-pick button { font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer;
+    color: var(--gold); background: none; border: 1px solid rgba(224,189,119,0.22); padding: 6px 11px; border-radius: 2px;
+    opacity: 0.65; transition: opacity 140ms ease, border-color 140ms ease, background 140ms ease; }
+  #class-pick button:hover { opacity: 1; }
+  #class-pick button.on { opacity: 1; border-color: rgba(224,189,119,0.8); background: rgba(224,189,119,0.1); }
+  /* A way back to the character you saved. */
+  #continue { margin-top: 4px; pointer-events: auto; cursor: pointer; font-family: var(--mono); font-size: 10.5px;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); background: transparent;
+    border: 1px solid rgba(224,189,119,0.45); padding: 10px 22px; border-radius: 2px; }
+  #continue:hover { background: rgba(224,189,119,0.08); }
+  #continue[hidden] { display: none; }
   #keys {
-    margin-top: 26px; display: grid; grid-template-columns: auto auto; gap: 6px 20px;
+    margin-top: 14px; display: grid; grid-template-columns: auto auto; gap: 5px 20px;
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; opacity: 0.45;
   }
   #keys b { font-weight: 400; color: var(--gold); }
@@ -201,12 +215,16 @@
   <h2>DikuMUD · Merc 2.1 · in three dimensions</h2>
   <div id="title-stats"></div>
   <button id="enter">enter the temple</button>
+  <div id="class-pick"><span>as a</span><button data-class="3" class="on">warrior</button><button data-class="0">mage</button><button data-class="1">cleric</button><button data-class="2">thief</button></div>
+  <button id="continue" hidden></button>
   <div id="keys">
     <b>W A S D</b><span>walk · shift to run</span>
     <b>arrows</b><span>take the exit n / e / s / w · pg up, pg dn for up, down</span>
-    <b>mouse</b><span>look · E to examine</span>
-    <b>1 – 4</b><span>dawn, noon, dusk, night</span>
-    <b>F / V / M / G</b><span>stats · noclip · sound · unlock</span>
+    <b>mouse</b><span>look · click to attack · E to use, open, loot, drink</span>
+    <b>enter</b><span>the command line — look, get all corpse, unlock gate …</span>
+    <b>Z X / C</b><span>a caster's spells: choose / cast · a fighter's or thief's skills on Z X C H J L</span>
+    <b>I B K · T R</b><span>inventory, trade, skills and training · take everything · rest</span>
+    <b>1 – 4 · F V M G</b><span>the hour · stats, noclip, sound, force every lock</span>
   </div>
   <div id="credit">
     world by Hans Henrik Stærfeldt, Katja Nyboe, Tom Madsen, Michael Seifert and Sebastian Hammer, 1990–91<br>

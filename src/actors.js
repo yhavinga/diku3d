@@ -1497,6 +1497,9 @@ export function populate(world, layout, built, options = {}) {
     const room = world.rooms.get(vnum);
     if (!room || !room.items.length) continue;
     room.items.forEach((item, index) => {
+      // What can be picked up is a game object now and items.js draws it
+      // wherever it lies; only what stays put is scenery built here.
+      if (item.proto.wearFlags & 1) return;
       const modelled = item.proto.itemType === ITEM.FOUNTAIN ? model(['fountain'])
         : (/\bwell\b/.test(item.proto.keywords) ? model(['well']) : null);
       const mesh = modelled && instances ? new THREE.Group() : buildObject(item.proto);
@@ -1520,6 +1523,9 @@ export function populate(world, layout, built, options = {}) {
         subtitle: item.contents.length ? `contains ${item.contents.length} item(s)` : '',
         body: item.proto.description || item.proto.long,
         kind: 'item',
+        // Which of the game's objects this is (rules/world.js lays the reset
+        // table out in the same order), so E can act on it.
+        reset: { room: vnum, index, vnum: item.proto.vnum },
       });
       // Anything you'd bump into gets a box, so the fountain in the middle of
       // the square is something you walk around rather than stand inside.
@@ -2268,14 +2274,15 @@ export function populate(world, layout, built, options = {}) {
       position: new THREE.Vector3(spec.x, spec.y + spec.height / 2, spec.z),
       radius: 2.6,
       title: spec.keyword.split(/\s+/)[0] || 'door',
-      subtitle: spec.locked ? 'locked' : (spec.closed ? 'closed' : 'open'),
-      body: spec.locked
-        ? 'It is locked. In the mud you would need the key; here, press G to force every lock in the world.'
-        : 'Press E to swing it.',
+      // The game owns the lock now (rules/actmove.js); this reads what it says.
+      get subtitle() { return spec.locked ? 'locked' : (door.open ? 'open' : 'closed'); },
+      body: 'Press E to open or close it; a locked one opens only to its key, or to a thief who can pick it.',
       kind: 'door',
       door,
     });
-    if (spec.closed) built.colliders.push({
+    // Every door gets its collider, shut or not: the mayor closes the city
+    // gates at night, and a gate that was open at boot has to stop you then.
+    built.colliders.push({
       x0: spec.x - 1.2, x1: spec.x + 1.2, z0: spec.z - 1.2, z1: spec.z + 1.2,
       y0: spec.y, y1: spec.y + spec.height, door,
     });
@@ -2558,8 +2565,38 @@ export function populate(world, layout, built, options = {}) {
     return motion.perform(fig || null, clip, options);
   }
 
+  /**
+   * A mobile's line in the reset table refilling (rules/world.js): the same
+   * body it had -- built by populate's own path, so it looks as it did --
+   * stood up out of its death pose, faded back in, and set down at `at`,
+   * from where the game walks it to its post.
+   */
+  function respawn(fig, at) {
+    if (!fig) return;
+    const m = fig.m;
+    if (m.overlay) { m.overlay.action.setEffectiveWeight(0); m.overlay.action.stop(); }
+    if (fig.actions && fig.actions.death) { fig.actions.death.setEffectiveWeight(0); fig.actions.death.stop(); }
+    Object.assign(m, {
+      overlay: null, dead: null, gone: null, path: null, speed: 0, lunge: null, recoil: null, sway: null,
+      pending: null, calls: [], order: null, fighting: false, stuck: 0, stage: null, fading: 0,
+    });
+    fig.order = null;
+    fig.sink = 0;
+    fig.lift = 0;
+    fig.pitch = 0;
+    fig.roll = 0;
+    fig.object.rotation.x = 0;
+    fig.object.rotation.z = 0;
+    fig.at.x = at.x; fig.at.y = at.y; fig.at.z = at.z;
+    fig.home.y = at.y;
+    fig.level = nav.levelOf(at.y);
+    motion.setOpacity(fig, 1);
+    fig.object.visible = true;
+    if (fig.mixer) fig.mixer.update(0);
+  }
+
   return {
-    group, interactables, update, doors, figures, nav, motion, perform,
+    group, interactables, update, doors, figures, nav, motion, perform, respawn,
     setSun, setDaylight, setSky, lights: windowLights,
   };
 }

@@ -21,7 +21,11 @@ import { AssetLibrary, ASSET_NAMES } from './assets.js';
 import { createGame, SKY } from './game.js';
 import { createGameUi } from './game-ui.js';
 import { createFx } from './fx.js';
+import { createSpellFx } from './spellfx.js';
 import { createRain } from './rain.js';
+import { createItems } from './items.js';
+import { installSave } from './save.js';
+import { createKick } from './kick.js';
 
 const params = new URLSearchParams(location.search);
 // The default world is no longer one town. Midgaard plus the five areas
@@ -515,6 +519,7 @@ async function boot() {
   const fx = createFx({
     scene, camera, composer, actors, game, audio, player, library: assets, sun, hemi, built, lightPool,
   });
+  const spellfx = createSpellFx({ scene, camera, renderer, composer, game, actors, audio, player, quality });
   {
     // Screen position of a world point, for the foe plate and damage numbers.
     const p = new THREE.Vector3();
@@ -528,6 +533,51 @@ async function boot() {
   }
   game.onTeleport = (x, y, z) => player.spawn(x, y, z, camera.rotation.y);
   game.setTimeOfDay(state.time);
+
+  // The rest of the mud (src/rules): what lies on the ground, the command
+  // line's walking, the save file, and the sounds and the boot of it all.
+  const items = createItems({ scene, game, library: assets, built });
+  installSave(game, {
+    world,
+    storage: window.localStorage,
+    onRestore: (vnum) => {
+      const info = built.rooms.get(vnum) || built.rooms.get(START_VNUM);
+      if (info) player.spawn(info.center.x, info.center.y, info.center.z, camera.rotation.y);
+    },
+  });
+  game.walk = (dir) => step(dir, true);
+  gameUi.onConsole = () => player.keys.clear();
+  gameUi.setCamera(() => camera.position);
+  const kick = createKick({ fx, camera, game, audio });
+  game.listen((event) => rulesSound(event));
+  // A light you hold lights the way: one more candidate for the light pool,
+  // moved with you, so it costs a pooled light rather than a new one.
+  const heldLight = { x: 0, y: 0, z: 0, color: 0xffa25a, intensity: 5.5, radius: 12, flicker: true, outdoor: false, key: null };
+  const heldRight = new THREE.Vector3();
+  function updateHeldLight() {
+    const light = game.state.equipment[0];
+    const lit = light && light.itemType === 1 && light.values[2] !== 0;
+    const key = lit ? `${Math.floor(camera.position.x / 16)},${Math.floor(camera.position.z / 16)}` : null;
+    if (key !== heldLight.key) {
+      if (heldLight.key) {
+        const old = lightPool.grid.get(heldLight.key);
+        if (old) old.splice(old.indexOf(heldLight), 1);
+      }
+      if (key) {
+        if (!lightPool.grid.has(key)) lightPool.grid.set(key, []);
+        lightPool.grid.get(key).push(heldLight);
+      }
+      heldLight.key = key;
+    }
+    if (!lit) return;
+    // Held low and a little ahead, on the side a torch is carried.
+    const right = heldRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    heldLight.x = camera.position.x + right.x * 0.35;
+    heldLight.y = camera.position.y - 0.25;
+    heldLight.z = camera.position.z + right.z * 0.35;
+    // The pool ranks by distance over intensity; ours is at the eye, so it wins a slot.
+    heldLight.intensity = /lantern|lamp/.test(light.name) ? 4.2 : 5.5;
+  }
 
   const startCell = layout.cells.get(START_VNUM) || layout.start;
   const startInfo = built.rooms.get(startCell.vnum);
@@ -700,6 +750,7 @@ async function boot() {
     const daylight = THREE.MathUtils.clamp(preset.elevation / 22, 0, 1) * 0.75;
     actors.setDaylight(preset.haze, daylight);
     fx.setAmbient(daylight / 0.75);
+    spellfx.setDaylight(daylight / 0.75);
     // Whether it is day, for things that are lit *because* it is dark. Fully
     // out above twelve degrees of sun, fully lit below two, so the lamps are a
     // faint glow at golden hour, gone at noon, and the whole light of the town
@@ -792,6 +843,15 @@ async function boot() {
       if (Math.abs(item.position.x - camera.position.x) > 7 || Math.abs(item.position.z - camera.position.z) > 7) continue;
       consider(item);
     }
+    // Something on the ground right under your eye wins over the wall behind it.
+    const lying = items.lookable(camera);
+    if (lying) return groundTarget(lying);
+    if (best && best.reset) {
+      // Scenery the reset table put there (a fountain, a desk): the game's object.
+      const obj = game.ground.find((o) => o.inRoom === best.reset.room && o.vnum === best.reset.vnum
+        && o.resetIndex === best.reset.index);
+      if (obj) return { ...best, obj, action: verbFor(obj) };
+    }
     return best;
 
     function consider(item) {
@@ -806,6 +866,62 @@ async function boot() {
     }
   }
 
+  /** The one thing E does to an object, named the mud's way. */
+  function verbFor(obj) {
+    if (obj.itemType === 25) return 'E — drink';
+    if (game.isContainer(obj)) return obj.itemType === 23 ? 'E — search the body' : 'E — look inside';
+    if (obj.wearFlags & 1) return 'E — get';
+    return 'E — examine';
+  }
+
+  function groundTarget(obj) {
+    const inside = obj.contains && obj.contains.length;
+    return {
+      kind: 'ground', obj, title: obj.name,
+      subtitle: obj.itemType === 23 ? (inside ? `${inside} thing${inside === 1 ? '' : 's'} on it` : 'nothing left on it')
+        : (obj.itemType === 20 ? '' : ''),
+      action: verbFor(obj),
+      position: new THREE.Vector3(obj.at.x, obj.at.y, obj.at.z),
+    };
+  }
+
+  /** E on an object: drink at a fountain, search a body or a chest, pick a thing up. */
+  function useObject(obj, fallback) {
+    const say = (r) => { if (r && !r.ok && r.text) gameUi.log(r.text, 'faint'); };
+    if (obj.itemType === 25) return say(game.drink(obj));
+    if (game.isContainer(obj)) return gameUi.openLoot(obj);
+    if (obj.wearFlags & 1) return say(game.take(obj, null));
+    if (fallback) hud.showExamine(fallback);
+  }
+
+  /** The mud's sounds for the mud's verbs, placed where they happened. */
+  function rulesSound(event) {
+    const place = (p) => {
+      if (!p) return { pan: 0, gain: 1 };
+      const dx = p.x - camera.position.x;
+      const dz = p.z - camera.position.z;
+      const d = Math.hypot(dx, dz);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+      return { pan: d > 0.8 ? Math.max(-1, Math.min(1, (dx * right.x + dz * right.z) / d)) * 0.7 : 0, gain: Math.max(0.1, 1 / (1 + Math.max(0, d - 1) / 6)) };
+    };
+    switch (event.kind) {
+      case 'door-sound':
+        if (event.sound === 'open' || event.sound === 'close') audio.door(event.sound === 'open', place(event));
+        else audio.lock(place(event));
+        break;
+      case 'eat': audio.eat(); break;
+      case 'drink': audio.drink(); break;
+      case 'fill': audio.drink({ fill: true }); break;
+      case 'gold': audio.coins(); break;
+      case 'pickup': audio.pickup(); break;
+      case 'drop': audio.drop(event.gold); break;
+      case 'put': case 'give': case 'container': audio.pickup(); break;
+      case 'pick': audio.lock({ pick: true, failed: !event.ok }); break;
+      case 'sacrifice': audio.coins({ one: true }); break;
+      default: break;
+    }
+  }
+
   let lookTarget = null;
   let fadeTimer = 0;
 
@@ -816,14 +932,16 @@ async function boot() {
       hud.hideExamine();
       return;
     }
+    if (event.code === 'KeyE' && gameUi.sheet === 'loot') {
+      gameUi.close();
+      return;
+    }
     if (event.code === 'KeyE' && lookTarget) {
       if (lookTarget.kind === 'door') {
-        if (lookTarget.door.spec.locked && !lookTarget.door.forced) {
-          hud.toast(`it is locked (${lookTarget.door.spec.keyword.split(/\s+/)[0]})`);
-        } else {
-          lookTarget.door.open = !lookTarget.door.open;
-          audio.door(lookTarget.door.open);
-        }
+        // The mud's doors: open, close, and a lock that wants its key.
+        game.useDoor(lookTarget.door.spec.room, lookTarget.door.spec.dir);
+      } else if (lookTarget.obj) {
+        useObject(lookTarget.obj, lookTarget.kind === 'ground' ? null : lookTarget);
       } else {
         hud.showExamine(lookTarget);
       }
@@ -849,7 +967,7 @@ async function boot() {
     if (event.code === 'KeyV') { player.noclip = !player.noclip; hud.toast(player.noclip ? 'noclip on' : 'noclip off'); }
     if (event.code === 'KeyM') hud.toast(audio.toggleMute() ? 'sound off' : 'sound on');
     if (event.code === 'KeyG') {
-      for (const door of actors.doors) { door.spec.locked = false; door.forced = true; }
+      game.forceLocks();
       hud.toast('every lock in the world just gave way');
     }
     const dir = ARROW_DIR[event.code];
@@ -874,30 +992,32 @@ async function boot() {
   // during a glide queues and fires on arrival instead of being swallowed.
   let queuedStep = null;
 
-  function step(dir) {
-    if (player.gliding) { queuedStep = dir; return; }
-    if (fadeTimer > 0) return;
+  function step(dir, typed = false) {
+    // Typed at the command line, a refusal is the mud's line in the console;
+    // from the arrow keys it is a toast over the world.
+    const refuse = (toast, mud) => { if (typed) return { ok: false, text: mud }; hud.toast(toast); return null; };
+    if (player.gliding) { queuedStep = dir; return null; }
+    if (fadeTimer > 0) return null;
     const here = currentRoom();
     const room = here && world.rooms.get(here);
-    if (!room) return;
+    if (!room) return null;
     const exit = room.exits[dir];
     const name = DIR_NAME[dir];
-    if (!exit) { hud.toast(`no exit ${name}`); return; }
+    if (!exit) return refuse(`no exit ${name}`, 'Alas, you cannot go that way.');
     // Worth naming the room number. "Outside the loaded world" sounds like a
     // dead end and is not one: the exit is real in the mud and leads into an
     // area file this session did not load, so the vnum is exactly what you need
     // to find it -- The Dump's south is #3504 in midennir.are. Load it with
     // ?areas=midgaard,midennir and the exit works.
-    if (exit.offMap) { hud.toast(`${name}: #${exit.to} is in an area not loaded`); return; }
+    if (exit.offMap) return refuse(`${name}: #${exit.to} is in an area not loaded`, `That way (#${exit.to}) lies in an area this world did not load.`);
     const target = built.rooms.get(exit.to);
-    if (!target || target.unbuilt) { hud.toast(`${name}: nothing built that way`); return; }
+    if (!target || target.unbuilt) return refuse(`${name}: nothing built that way`, 'Alas, you cannot go that way.');
     // A door in the way behaves as it looks: what you see shut, you cannot walk
     // through. `door.open` is the live hinge, not the .are file's opinion.
     const door = actors.doors.find((d) => d.spec.room === room.vnum && d.spec.dir === dir);
     if (door && !door.open) {
       const word = door.spec.keyword.split(/\s+/)[0] || 'door';
-      hud.toast(door.spec.locked && !door.forced ? `the ${word} is locked` : `the ${word} is closed`);
-      return;
+      return refuse(door.spec.locked ? `the ${word} is locked` : `the ${word} is closed`, `The ${word} is closed.`);
     }
     // An ordinary next-room exit is walked, not cut to: the target sits where
     // the compass says it should, near ground level, within a couple of cells.
@@ -918,7 +1038,7 @@ async function boot() {
       };
       if (Math.abs(oy) < 3.2 && flat > 6 && flat < 46 && along > 0.82 * flat) {
         player.glide(target.center.x, target.center.y, target.center.z, DIR_YAW[dir], onArrive);
-        return;
+        return { ok: true };
       }
       // Off-axis, but routed: a quarter of Midgaard's exits land somewhere
       // other than the direction the mud names, and those used to cut to
@@ -936,7 +1056,7 @@ async function boot() {
         const points = cells.map((c) => ({ x: c.x * CELL, y: target.center.y, z: c.z * CELL }));
         points.push(target.center);
         player.glidePath(points, null, onArrive);
-        return;
+        return { ok: true };
       }
     }
     fadeTimer = 0.34;
@@ -952,6 +1072,7 @@ async function boot() {
       player.velocity.copy(carried);
       dom.fade.style.opacity = '0';
     }, 120);
+    return { ok: true };
   }
 
   function teleport(portal) {
@@ -1019,7 +1140,23 @@ async function boot() {
     dom.hint.classList.add('visible');
   });
 
+  // The saved character back, from the title screen (the class question
+  // itself is game-ui.js's #class-pick). Continuing replaces whatever was picked.
+  const continueButton = document.getElementById('continue');
+  let saved = null;
+  try { saved = game.savedCharacter(); } catch (error) { console.error(error); }
+  if (saved) {
+    continueButton.hidden = false;
+    continueButton.textContent = `continue — ${saved.className}, level ${saved.level}`;
+  }
+  let begun = false;
+  continueButton.addEventListener('click', () => {
+    if (!begun) { begun = true; game.loadSave(); }
+    audio.start();
+    player.controls.lock();
+  });
   dom.enter.addEventListener('click', () => {
+    begun = true;
     audio.start();
     player.controls.lock();
   });
@@ -1050,6 +1187,9 @@ async function boot() {
     camera.updateMatrixWorld();
     if (!state.paused) game.update(dt, player.position, camera.getWorldDirection(forward));
     gameUi.update();
+    items.update();
+    updateHeldLight();
+    if (!state.paused) game.autosave(dt);
 
     // The mud's barometer may have crossed a sky boundary in that update.
     // `applyWeather` rebakes the whole environment, so it is called only when
@@ -1108,6 +1248,8 @@ async function boot() {
     lightPool.update(camera.position, elapsed);
     actors.update(dt, elapsed, camera);
     fx.update(dt);
+    spellfx.update(state.paused ? 0 : dt);
+    kick.update(dt);
     audio.update(built.rooms.get(state.roomVnum)?.room.sector === 1);
 
     if (!state.paused) {
@@ -1142,7 +1284,7 @@ async function boot() {
 
   // Handy from the console, and how the screenshots for this were framed.
   window.diku = {
-    scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi, options, fx,
+    scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi, options, fx, spellfx,
     // `wetness` is exposed because it is a slow-moving number nothing on screen
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
