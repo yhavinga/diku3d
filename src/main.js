@@ -1447,6 +1447,14 @@ async function boot() {
         (r) => ways(r) + stuff(r)), 'open desert: dunes, sandstone cliffs, a cave mouth');
       add('oasis', pick((r) => r.areaFile === 'eastern.are' && /\b(oasis|camp|tent)\b/i.test(`${r.name} ${r.description}`),
         (r) => (/oasis/i.test(r.description) ? 3 : 0) + ways(r)), 'the oasis: palms, a pool, the nomads\' tents');
+      // Raff's neighborhood: the burnt-out strip between the two gangs, and a
+      // room with no roof left on it. Both are build.js's own answer, read
+      // off the materials it chose, so the vocabulary lives in one place.
+      const hood = (r) => built.rooms.get(r.vnum).materials.hood;
+      add('nomansland', pick((r) => hood(r) === 'nml', (r) => ways(r) * 2 + stuff(r)),
+        "No Man's Land: rubble, barricades at both ends, crows, the gangs' fires across it");
+      add('ruin', pick((r) => hood(r) === 'ruin', (r) => (/blood/i.test(r.description) ? 3 : 0) + ways(r)),
+        'a burnt-out shop: roofless walls, charred timbers, ash underfoot, the sky over it');
       add('cavern', pick((r) => sewer(r) && /\b(cave|stalag\w*)\b/i.test(r.name),
         (r) => (/stalag/i.test(r.name) ? 3 : 0) + ways(r) + stuff(r)),
         'a cave the sewer breaks into: rock, flowstone, torchless dark');

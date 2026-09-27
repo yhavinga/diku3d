@@ -978,10 +978,14 @@ const SURFACES = {
     const fleck = fbm(u * 40, v * 40, 40, 709, 2);
     const soot = clamp01((blotch * 0.62 + streak * 0.38 - 0.37) * 3.2) * (0.82 + fleck * 0.3);
     const joint = s.height < 0.3 ? 0.18 : 0;
-    const greyed = mix(s.color, rgb(0x7b766f), 0.35);
+    // The whole face is grimed first -- a fire does not leave clean stone
+    // anywhere near it -- and the tongues go darker again over that. Clean
+    // stone with black blotches on it read as a dalmatian, not as a fire.
+    const grime = fbm(u * 8, v * 8, 8, 707, 3);
+    const greyed = mix(s.color, rgb(0x2e2b28), 0.8 + grime * 0.15);
     // Floor at 0x221e1b: nothing under a sky reads zero, and burnt stone is a
     // warm charcoal, not ink.
-    s.color = mix(greyed, rgb(0x221e1b), clamp01(soot * 0.95 + joint * soot));
+    s.color = mix(greyed, rgb(0x191715), clamp01(soot * 0.85 + joint * soot));
     s.rough = Math.min(1, s.rough + soot * 0.12);
   },
 
@@ -997,23 +1001,25 @@ const SURFACES = {
     // Rectangular checks, not cells: courses across the grain, each broken
     // into its own run of block lengths, the lines wobbling a little. Voronoi
     // here read as crazy paving.
-    const rows = 24;
+    const rows = 40;
     const wob = (fbm(u * 8, v * 8, 8, 719, 2) - 0.5) * 0.35;
     const gy = v * rows + wob;
     const row = Math.floor(gy);
     const fy = gy - row;
-    const k = 12 + Math.floor(hash2(row, 0, rows, 721) * 8);
+    const k = 16 + Math.floor(hash2(row, 0, rows, 721) * 10);
     const gx = u * k + hash2(row, 1, rows, 723) + wob * 0.5;
     const seg = Math.floor(gx);
     const fx = gx - seg;
     const id = hash2(seg, row, 64, 725);
     const gapU = Math.min(fx, 1 - fx) / k;
     const gapV = Math.min(fy, 1 - fy) / rows;
-    const crack = clamp01(Math.min(gapU, gapV) * rows * 9 - 0.25);
+    const crack = clamp01(Math.min(gapU, gapV) * rows * 14 - 0.3);
     const grain = fbm(u * 2, v * 40, 2, 727, 3);
     const ash = clamp01((((id * 5.3) % 1) - 0.9) * 8) * 0.45;
-    const block = mix(rgb(0x1f1b18), rgb(0x2f2924), grain * 0.6 + id * 0.4);
-    s.color = mix(mix(rgb(0x100e0c), block, crack), rgb(0x5d5850), ash * crack);
+    // Blocks all within a shade of each other: at any distance a charred
+    // beam is one black shape, and the checks are only for up close.
+    const block = mix(rgb(0x221e1a), rgb(0x2b2622), grain * 0.6 + id * 0.4);
+    s.color = mix(mix(rgb(0x1c1815), block, crack * 0.7 + 0.3), rgb(0x4d4843), ash * crack);
     s.height = crack * (0.55 + id * 0.25) + grain * 0.08;
     s.rough = 0.9 - crack * 0.12 + ash * 0.1;
   },
@@ -1033,7 +1039,7 @@ const SURFACES = {
     const grain = fbm(u * n * 22 + id * 9, v * 4, n * 22, 743, 3);
     const gap = clamp01(Math.min(fx, 1 - fx) * 30);
     const weather = fbm(u * 6, v * 6, 6, 751, 3);
-    let c = mix(rgb(0x6d665c), rgb(0x9a9284), id * 0.5 + grain * 0.35 + weather * 0.15);
+    let c = mix(rgb(0x4b453d), rgb(0x6e675c), id * 0.5 + grain * 0.35 + weather * 0.15);
     // Two nails a board, at each rail, and the rust that has run from them.
     const nail = Math.min(Math.abs(fx - 0.5), 0.5) < 0.09 ? 1 : 0;
     const rail = Math.min(Math.abs((v * 2) % 1 - 0.18), Math.abs((v * 2) % 1 - 0.68));
@@ -1058,9 +1064,9 @@ const SURFACES = {
     SURFACES.cobble(u, v, s);
     const [d1, edge, id] = cellular(u * 18, v * 18, 18, 11, 0.38);
     const lost = ((id * 13.7) % 1) > 0.74;
-    const dirt = fbm(u * 30, v * 30, 30, 761, 3);
-    const weedy = clamp01(fbm(u * 9, v * 9, 9, 769, 3) * 2.2 - 1.0);
-    const ash = clamp01(fbm(u * 3.5, v * 3.5, 3.5, 773, 4) * 2.4 - 1.25);
+    const dirt = fbm(u * 30, v * 30, 30, 761, 2);
+    const weedy = clamp01(fbm(u * 9, v * 9, 9, 769, 2) * 2.2 - 1.0);
+    const ash = clamp01(fbm(u * 4, v * 4, 4, 773, 3) * 2.4 - 1.25);
     if (lost) {
       const earth = mix(rgb(0x3e3327), rgb(0x5d4b37), dirt);
       s.color = mix(earth, rgb(0x495a2a), weedy * clamp01(1 - d1 * 2.4) * 0.8);
@@ -1073,6 +1079,28 @@ const SURFACES = {
       s.height += (((id * 3.1) % 1) - 0.5) * 0.14;
     }
     s.color = mix(s.color, rgb(0x6e6a64), ash * 0.55);
+  },
+
+  /**
+   * Waste ground: an over-grown lot, a plaza never finished. Packed dry earth
+   * with gravel in it, dead grass in drifts and weeds coming through in
+   * clumps -- darker and duller than the `dirt` of a farm track, which under
+   * a noon sun came out as beach sand.
+   */
+  wasteground(u, v, s) {
+    const lumps = fbm(u * 12, v * 12, 12, 811, 3);
+    const grass = clamp01(fbm(u * 6, v * 6, 6, 813, 3) * 2.2 - 0.85);
+    const weed = clamp01(fbm(u * 18, v * 18, 18, 817, 3) * 2.6 - 1.45);
+    const [, edge, id] = cellular(u * 30, v * 30, 30, 819, 0.5);
+    const stone = clamp01((edge - 0.02) * 10) * (((id * 7.1) % 1) > 0.86 ? 1 : 0);
+    const blade = fbm(u * 90, v * 90, 90, 823, 2);
+    let c = mix(rgb(0x3d3326), rgb(0x564838), lumps);
+    c = mix(c, mix(rgb(0x5b5236), rgb(0x7a6d48), blade), grass * 0.85);
+    c = mix(c, rgb(0x3c4a24), weed * 0.8);
+    c = mix(c, rgb(0x5e5850), stone * 0.5);
+    s.color = c;
+    s.height = lumps * 0.4 + grass * blade * 0.25 + stone * 0.3 + weed * 0.15;
+    s.rough = 0.93 - stone * 0.1;
   },
 
   /**
@@ -1099,11 +1127,14 @@ const SURFACES = {
   ash(u, v, s) {
     const drift = fbm(u * 6, v * 6, 6, 781, 4);
     const fine = fbm(u * 55, v * 55, 55, 787, 2);
-    const [, edge, id] = cellular(u * 14, v * 14, 14, 797, 0.5);
-    const lump = clamp01((edge - 0.05) * 8) * (((id * 7.7) % 1) > 0.72 ? 1 : 0);
-    const brick = ((id * 3.3) % 1) > 0.9 ? 1 : 0;
-    let c = mix(rgb(0x4f4b46), rgb(0x8a857c), drift * 0.8 + fine * 0.2);
-    c = mix(c, brick ? rgb(0x7a4a34) : rgb(0x221e1a), lump);
+    const [, edge, id] = cellular(u * 30, v * 30, 30, 797, 0.5);
+    const lump = clamp01((edge - 0.05) * 8) * (((id * 7.7) % 1) > 0.8 ? 1 : 0);
+    const brick = ((id * 3.3) % 1) > 0.93 ? 1 : 0;
+    // Ash is pale where it lies fresh, but a floor of it has been rained on,
+    // walked through and mixed with the char: at the old 0x8a857c it read as
+    // snow.
+    let c = mix(rgb(0x34312d), rgb(0x57534c), drift * 0.8 + fine * 0.2);
+    c = mix(c, brick ? rgb(0x5e3a2a) : rgb(0x1c1916), lump);
     s.color = c;
     s.height = drift * 0.3 + fine * 0.1 + lump * 0.4;
     s.rough = 0.96 - lump * 0.1;
@@ -1280,10 +1311,11 @@ const RECIPES = {
   // under no roof and dry as the fire left it. `oldbone` is the sewer's bone
   // out in the daylight, for the gang's idol.
   sootwall: { surface: 'sootwall', scale: 3.6, normalScale: 1.0, env: 0.6, wet: 0, detail: 0.55 },
-  charred: { surface: 'charred', scale: 1.4, normalScale: 1.1, env: 0.5, wet: 0, detail: 0.5 },
+  charred: { surface: 'charred', scale: 1.4, normalScale: 0.55, env: 0.5, wet: 0, detail: 0.5 },
   boards: { surface: 'boards', scale: 2.0, normalScale: 0.7, env: 0.7, wet: 0, detail: 0.45 },
   brokencobble: { surface: 'brokencobble', scale: 2.2, normalScale: 1.0, env: 1.05, wet: 0.55, detail: 0.5 },
   ash: { surface: 'ash', scale: 3.0, normalScale: 0.6, env: 0.6, wet: 0, detail: 0.6 },
+  wasteground: { surface: 'wasteground', scale: 4.0, normalScale: 0.7, env: 0.45, wet: 0, detail: 0.6 },
   oldbone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 0.7, wet: 0, detail: 0.3 },
   // Ice Dragon Way's smashed crystal statues: nearly all reflection.
   crystal: { surface: 'crystal', scale: 0.8, normalScale: 0.35, env: 1.7, wet: 0, detail: 0.1 },
@@ -1388,7 +1420,7 @@ const DECAL_PAINT = {
   troll: { base: 0xd8d2c0, dark: 0xb3ad9c, drips: true },
   ogre: { base: 0x8e2f1f, dark: 0x6a2016, drips: true },
   strike: { base: 0x8a2e1e, dark: 0x642015, drips: true, dragged: true },
-  blood: { base: 0x4a1611, dark: 0x2c0c09, drips: false },
+  blood: { base: 0x3a0f0b, dark: 0x220706, drips: false },
 };
 
 function bakeDecal(name, size = 256) {
@@ -1813,9 +1845,13 @@ export function createMaterials(size = 512, onProgress = () => {}) {
   const grain = bakeGrain();
   const names = Object.keys(RECIPES);
   const surfaced = [];
+  // Several recipes share a surface -- the sewer's flags, rust and bark, the
+  // neighborhood's bone -- and differ only in how they are lit. One bake each.
+  const bakes = new Map();
   names.forEach((name, index) => {
     const recipe = RECIPES[name];
-    const baked = bake(recipe.surface, size);
+    if (!bakes.has(recipe.surface)) bakes.set(recipe.surface, bake(recipe.surface, size));
+    const baked = bakes.get(recipe.surface);
     const material = new THREE.MeshStandardMaterial({
       map: toTexture(baked.albedo, size, THREE.SRGBColorSpace),
       normalMap: toTexture(baked.normal, size, THREE.NoColorSpace),

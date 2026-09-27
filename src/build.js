@@ -98,8 +98,10 @@ const isCanopy = (room) => room.sector === SECTOR.FOREST && !isOutdoor(room) && 
 /** No walls, no ceiling, no roof -- whatever the mud says about the sky. */
 // "Strange Glowing Sand" is INDOORS by its flags and "a vast desert" by its
 // words; the words win, as they do for the canopy.
+// The neighborhood's courtyards likewise: INDOORS, and "once it was the
+// courtyard of a beautiful building complex ... the plants all died".
 const isOpenAir = (room) => isOutdoor(room) || isCanopy(room)
-  || (!!eastStyle(room) && eastStyle(room) !== 'cave');
+  || (!!eastStyle(room) && eastStyle(room) !== 'cave') || hoodStyle(room) === 'court';
 
 /**
  * An exit to room -1 is the stock files' way of writing "nothing": four of
@@ -680,8 +682,689 @@ function pickMaterials(room, area) {
 
   if (!holy && !cave && !wood && hash3(room.vnum, 0, 0, 9) > 0.6) wallOut = 'timber';
   if (!holy && !burrow && hash3(room.vnum, 1, 0, 3) > 0.84) roof = 'thatch';
-  return { floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv, sewer: style, inRock };
+
+  // The neighborhood, after everything else, because it overrules the sector
+  // (No Man's Land is HILLS, which is grass) and the passage routed out of one
+  // of its streets asks here what it is paved with.
+  const hood = hoodStyle(room);
+  if (hood === 'ruin') { floor = 'ash'; wallIn = 'sootwall'; wallOut = 'sootwall'; ceil = 'charred'; }
+  else if (hood === 'lot' || hood === 'plaza') floor = 'wasteground';
+  else if (hood === 'park') floor = 'grass';
+  else if (hood === 'court') floor = 'flagstone';
+  else if (hood === 'street' || hood === 'nml' || hood === 'wall') floor = 'brokencobble';
+  if (hood && hood !== 'ruin' && !holy && !wood) wallOut = 'sootwall';
+  return { floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv, sewer: style, inRock, hood };
 }
+
+// ---------------------------------------------- the Dangerous Neighborhood ----
+
+/**
+ * Raff's neighborhood, keyed by area like the Shire and the sewer, because it
+ * is a different kind of place rather than a different kind of room: the same
+ * town, gone bad. Inside the area the prose decides, room by room -- "All the
+ * shops and homes have been boarded up and abandoned", "Everywhere you look
+ * you see signs of recent violence. Patches of blood lie everywhere", "The
+ * remains of the magic shop", "This is the section of town between the two
+ * gang's territories. This is usually where the violence starts."
+ *
+ *  - `nml`: No Man's Land. Its ten rooms are sectored HILLS, which built them
+ *    grass ridges and rock kerbs; they are a burnt-out strip of town, open
+ *    and wider than a street, rubble and barricades at both ends.
+ *  - `ruin`: "The remains of", "What is left of", "what USED to be the
+ *    armory". Walled, but the roof and the floors above are gone: the ruin_
+ *    kit from tools/blender/hood.py, ash underfoot, the sky over it.
+ *  - `court`: the courtyards, flagged INDOORS and described as open ground
+ *    with the plants dead in them. The words win, as they do for the desert.
+ *  - `lot`, `plaza`, `park`: the over-grown lot, Dracolich Plaza, Khan Park.
+ *  - `lair`: the warehouse the gang leader runs things from, and the chapel.
+ *  - `wall`: Wall Road, "along the inside of the wall surrounding the city".
+ *  - `street` and `room` for the rest.
+ *
+ * Which gang's ground a room is on is read off the map rather than the
+ * resets: the mud loads its ogre gang members in the north and its trolls in
+ * the south, while its prose says the opposite -- "Yellow Dragon Road is the
+ * southern boundary of Troll Territory. You enter no-man's land to the south",
+ * "now entering Ogre territory" in the southern alley, "deep within Ogre gang
+ * territory" on Achilles Avenue. The prose is what the gangs paint on their
+ * walls, so north of No Man's Land is the Trolls' -- the Dragon gang, whose
+ * idol is the Dracolich and whose streets are named for dragons -- and south
+ * of it the Ogres'.
+ */
+const isHood = (room) => room.areaFile === 'hood.are';
+const HOOD_NML = /\bno man'?s land\b/i;
+const HOOD_RUIN = /\b(remains of|what is left of|used to be the)\b/i;
+const HOOD_COURT = /\bcourtyard\b/i;
+const HOOD_PLAZA = /\bplaza\b/i;
+const HOOD_LOT = /\bover-?grown\b/i;
+const HOOD_LAIR = /\b(warehouse|chapel)\b/i;
+const hoodStyle = (room) => {
+  if (!isHood(room)) return null;
+  const { name } = room;
+  if (HOOD_NML.test(name)) return 'nml';
+  if ((room.flags & ROOM_INDOORS) && HOOD_RUIN.test(`${name} ${room.description}`)) return 'ruin';
+  if (HOOD_COURT.test(name)) return 'court';
+  if (HOOD_PLAZA.test(name)) return 'plaza';
+  if (isPark(room)) return 'park';
+  if (HOOD_LOT.test(name)) return 'lot';
+  if (HOOD_LAIR.test(name)) return 'lair';
+  if (/^wall road$/i.test(name)) return 'wall';
+  return (room.flags & ROOM_INDOORS) ? 'room' : 'street';
+};
+
+/** Rooms the prose says have been painted on, and what the gangs paint with. */
+const HOOD_GRAFFITI = /\b(graffiti|spray-?painted|vandali[sz]ed|slogans|desecrated)\b/i;
+const HOOD_BLOOD = /\bblood\b/i;
+/** What is left lying about in a street nobody sweeps. */
+// Not the sewer's `rubble`: it wears the underground's materials, which are
+// lit for a drain and read as blue glass in the sun.
+const HOOD_PROPS = ['debris', 'debris', 'planks_pile', 'cartwheel', 'crate', 'barrel', 'sack', 'broom'];
+const HOOD_NML_PROPS = ['debris', 'debris', 'planks_pile', 'cartwheel'];
+
+/**
+ * Which gang holds a row of the map: north of No Man's Land the Trolls', south
+ * of it the Ogres'. `at(z)` answers for any cell, room or not, so the houses
+ * between the streets are painted by the same rule as the streets.
+ */
+function hoodTurf(layout) {
+  let z0 = Infinity;
+  let z1 = -Infinity;
+  for (const cell of layout.order) {
+    if (hoodStyle(cell.room) !== 'nml') continue;
+    z0 = Math.min(z0, cell.z);
+    z1 = Math.max(z1, cell.z);
+  }
+  return (z) => (z < z0 ? 'troll' : z > z1 ? 'ogre' : 'nml');
+}
+
+/**
+ * Places to stand a thing in an open-air room: against a side with no way out
+ * of it, or in a corner, far enough in to clear the frontage and far enough
+ * out to clear the middle, where the player arrives. Each pick is refused if
+ * it lands on one already made.
+ */
+function hoodSpots(room, pos, sides, count, radius, salt, taken = []) {
+  const reach = (!isOpenAir(room) ? ROOM / 2 - 0.5 : wantsFrontage(room) ? HALF - FRONTAGE_D : HALF - 0.9) - radius;
+  const blank = [0, 1, 2, 3].filter((d) => !sides[d]);
+  const out = [];
+  for (let i = 0, tries = 0; out.length < count && tries < count * 6; tries++, i++) {
+    const r = (k) => hash3(room.vnum, i, k, salt);
+    let x; let z; let dir = -1;
+    if (blank.length && r(0) < 0.7) {
+      dir = blank[Math.floor(r(1) * blank.length)];
+      const [dx, , dz] = DIR_STEP[dir];
+      const along = (r(2) * 2 - 1) * reach;
+      x = pos.x + dx * reach + (dx ? 0 : along);
+      z = pos.z + dz * reach + (dz ? 0 : along);
+    } else {
+      x = pos.x + (r(3) < 0.5 ? -1 : 1) * reach * (0.8 + r(5) * 0.2);
+      z = pos.z + (r(4) < 0.5 ? -1 : 1) * reach * (0.8 + r(6) * 0.2);
+    }
+    if (Math.hypot(x - pos.x, z - pos.z) < radius + 1.6) continue;
+    if (taken.some((t) => Math.hypot(t.x - x, t.z - z) < t.r + radius + 0.3)) continue;
+    const spot = { x, z, dir, r: radius };
+    taken.push(spot);
+    out.push(spot);
+  }
+  return out;
+}
+
+/** A modelled prop with a box round it, turned a quarter at a time plus a little. */
+function hoodProp({ instances, chunk, addCollider, name, x, y, z, rotY = 0, scale = 1, half = null, height = 1.2 }) {
+  if (!instances.add(name, { x, y, z, rotY, scale }, chunk)) return false;
+  if (half) {
+    const [hx, hz] = Math.abs(Math.sin(rotY)) > 0.7 ? [half[1], half[0]] : half;
+    addCollider(x - hx * scale, x + hx * scale, z - hz * scale, z + hz * scale, y, y + height * scale);
+  }
+  return true;
+}
+
+/** A fire in an iron basket, burning day and night where a gang keeps watch. */
+function hoodBrazier({ instances, chunk, decor, lights, addCollider, x, y, z }) {
+  const top = instances.library.get('brazier')?.bounds?.max.y;
+  if (top === undefined || !hoodProp({ instances, chunk, addCollider, name: 'brazier', x, y, z, half: [0.42, 0.42], height: 1.1 })) return;
+  decor.push({ kind: 'torch', bare: true, x, y: y + top - 0.12, z });
+  lights.push({ x, y: y + top + 0.5, z, color: 0xff8a3a, intensity: 18, radius: 14, flicker: true, outdoor: true });
+}
+
+/**
+ * Paint on a wall: one of the two gangs' marks, or the other gang's struck
+ * through. `n` is the face's outward normal (a unit axis), and the mark is
+ * centred on (x, y, z) in that face.
+ */
+function hoodMark(decals, turf, x, y, z, nx, nz, size, seed) {
+  if (turf !== 'troll' && turf !== 'ogre') return;
+  decals.push({ material: turf === 'troll' ? 'decal_troll' : 'decal_ogre', x, y, z, nx, nz, w: size, h: size });
+  // At the edge of its ground a gang's mark gets defaced by the other.
+  if (seed > 0.72) {
+    decals.push({ material: 'decal_strike', x: x + nz * 0.08, y: y + 0.05, z: z - nx * 0.08, nx, nz, w: size * 1.05, h: size * 1.05, lift: 0.02 });
+  }
+}
+
+/**
+ * The frontage of a street in the neighborhood: the same blocks `buildCity
+ * Frontage` brings forward everywhere, in sooted stone or old half-timber,
+ * every window boarded and no light in any of them, and the gang's mark on
+ * the wall. Called for each block with its street face.
+ */
+function hoodFrontage({ instances, chunk, addCollider, decals, lights, turf, graffiti, room, bx, bz, sx, sz, y0, h, face, seed, feature = null }) {
+  if (!instances) return;
+  const [nx, , nz] = DIR_STEP[face];
+  // The face plane and the run along it.
+  const half = (nx ? sz : sx) / 2;
+  const fx = bx + nx * (nx ? sx / 2 : 0);
+  const fz = bz + nz * (nz ? sz / 2 : 0);
+  const tx = nz ? 1 : 0;
+  const tz = nx ? 1 : 0;
+  // `FACE_ROT` turns a model's -z to a direction; these are built fronting +z
+  // like the houses, so half a turn more puts their front on the street.
+  const rotY = FACE_ROT[face] + Math.PI;
+  const bays = Math.max(1, Math.floor((half * 2) / 3.4));
+  const middle = Math.floor(bays / 2);
+  let door = hash3(Math.round(bx), Math.round(bz), 3, 911) < 0.4 ? Math.floor(hash3(Math.round(bx), Math.round(bz), 4, 911) * bays) : -1;
+  // "The Bakery used to be to the south but the entrance is sealed off."
+  if (feature === 'sealed') door = middle;
+  // A mark on about half the fronts, on every front where the mud mentions
+  // the painting -- on a bay of its own, not across a boarded window.
+  let mark = (graffiti || hash3(Math.round(bx), Math.round(bz), 5, 913) < 0.5)
+    ? Math.floor(hash3(Math.round(bx), Math.round(bz), 6, 913) * bays) : -1;
+  if (mark === door || (feature && mark === middle)) mark = bays > 1 ? (mark + 1) % bays : -1;
+  for (let i = 0; i < bays; i++) {
+    const a = -half + (half * 2) * (i + 0.5) / bays;
+    const x = fx + tx * a;
+    const z = fz + tz * a;
+    if (i === mark) {
+      const size = 1.6 + hash3(Math.round(bx), Math.round(bz), 7, 913) * 0.6;
+      hoodMark(decals, turf, x + nx * 0.02, y0 + 1.1 + size / 2, z + nz * 0.02, nx, nz, size, seed);
+      if (h > 6.8) instances.add('boarded_window', { x, y: y0 + 3.3, z, rotY }, chunk);
+      continue;
+    }
+    if (feature === 'barred' && i === middle) {
+      // "There is a barred window to the north. There appears to be a light
+      // coming from the cracks around it." The one lit window on the street.
+      instances.add('barred_window', { x, y: y0, z, rotY }, chunk);
+      lights.push({ x: x + nx * 0.8, y: y0 + 2.1, z: z + nz * 0.8, color: 0xffb566, intensity: 7, radius: 7, flicker: true, outdoor: true });
+    } else {
+      instances.add(i === door ? 'boarded_door' : 'boarded_window', { x, y: y0, z, rotY }, chunk);
+    }
+    if (h > 6.8) instances.add('boarded_window', { x, y: y0 + 3.3, z, rotY }, chunk);
+  }
+  if (feature === 'shored') {
+    // "The building could collapse at any moment": shores against its front.
+    // At 0.6 the shores reach 2.3 m out, which is what a 6.6 m lane can give.
+    for (const a of [-half * 0.5, half * 0.5]) {
+      const x = fx + tx * a; const z = fz + tz * a;
+      instances.add('shoring', { x, y: y0, z, rotY, scale: 0.6 }, chunk);
+      const ex = x + nx * 2.3; const ez = z + nz * 2.3;
+      addCollider(Math.min(x, ex) - tx * 0.3, Math.max(x, ex) + tx * 0.3,
+        Math.min(z, ez) - tz * 0.3, Math.max(z, ez) + tz * 0.3, y0, y0 + 2.5);
+    }
+  }
+  void room;
+}
+
+/** The frontage a room's own prose points at, by the side it names. */
+const HOOD_FRONT = [
+  ['barred', /barred window to the (north|south|east|west)/i],
+  ['sealed', /the (north|south|east|west)[^.]*?entrance is sealed/i],
+  ['sealed', /to the (north|south|east|west) but the entrance is sealed/i],
+  ['shored', /could collapse at any moment/i],
+  ['marble', /marble facade lies to the (north|south|east|west)/i],
+];
+function hoodFeatures(room, sides) {
+  const out = new Map();
+  for (const [kind, re] of HOOD_FRONT) {
+    const m = re.exec(room.description.replace(/\s+/g, ' '));
+    if (!m) continue;
+    const dir = m[1] ? WALL_WORD[m[1].toLowerCase()] : [2, 0, 1, 3].find((d) => !sides[d]);
+    if (dir !== undefined && !out.has(dir)) out.set(dir, kind);
+  }
+  return out;
+}
+
+/** "A wrought-iron fence ... the cemetery here to the north": the side it is on. */
+const HOOD_FENCE = /(?:cemetery|fence)[^.]*?\bto the (north|south|east|west)\b/i;
+const hoodFenceDir = (room) => {
+  if (!isHood(room)) return -1;
+  const m = HOOD_FENCE.exec(room.description.replace(/\s+/g, ' '));
+  return m ? WALL_WORD[m[1].toLowerCase()] : -1;
+};
+
+/**
+ * Everything a room in the neighborhood has that the prose names, beyond its
+ * walls and floor. One function, because each of these is a sentence or two
+ * of one room's description and nothing else in the world asks for them.
+ */
+function buildHoodRoom({ room, pos, sides, instances, model, chunk, decor, lights, addCollider, decals, turf, style }) {
+  if (!instances) return;
+  const text = `${room.name} ${room.description}`;
+  const y = pos.y;
+  const taken = [];
+  const put = (name, count, radius, salt, opts = {}) => {
+    if (!model([name])) return [];
+    const spots = hoodSpots(room, pos, sides, count, radius, salt, taken);
+    for (const s of spots) {
+      const rotY = opts.face && s.dir >= 0 ? FACE_ROT[s.dir] : hash3(room.vnum, Math.round(s.x), Math.round(s.z), salt) * Math.PI * 2;
+      hoodProp({
+        instances, chunk, addCollider, name, x: s.x, y, z: s.z, rotY,
+        scale: opts.scale ?? (0.9 + hash3(room.vnum, Math.round(s.x), 7, salt) * 0.25),
+        half: opts.solid === false ? null : [radius, radius], height: opts.height ?? 1.2,
+      });
+    }
+    return spots;
+  };
+  const blood = (count, salt) => {
+    for (let i = 0; i < count; i++) {
+      const a = hash3(room.vnum, i, 0, salt) * Math.PI * 2;
+      const r = 1.2 + hash3(room.vnum, i, 1, salt) * 2.6;
+      decals.push({
+        material: 'decal_blood', ground: true, x: pos.x + Math.cos(a) * r, y, z: pos.z + Math.sin(a) * r,
+        w: 0.9 + hash3(room.vnum, i, 2, salt) * 1.1, spin: hash3(room.vnum, i, 3, salt) * Math.PI * 2,
+      });
+    }
+  };
+  const crow = (x, z, top = 0) => {
+    instances.add('crow', { x, y: y + top, z, rotY: hash3(Math.round(x * 3), Math.round(z * 3), 0, 931) * Math.PI * 2 }, chunk);
+  };
+
+  // Blood where the mud says there is some. The weaponshop's is "splattered
+  // and dried all over the walls", which is handled with the ruins below.
+  if (HOOD_BLOOD.test(room.description) && style !== 'ruin') blood(/everywhere/i.test(text) ? 6 : 3, 941);
+
+  switch (style) {
+    case 'nml': {
+      // Burnt-out ground between two gangs: rubble where the houses came
+      // down, the charred bones of their roofs, whatever was thrown, and the
+      // crows that come for what is left after a fight.
+      const heaps = put('rubble_heap', 1 + Math.floor(hash3(room.vnum, 0, 0, 951) * 2), 1.7, 952, { height: 1.1 });
+      put('charred_beams', 1, 2.4, 953, { height: 0.9 });
+      if (hash3(room.vnum, 1, 0, 951) < 0.4) put('burnt_cart', 1, 1.9, 954, { height: 1.4 });
+      put('tall_weeds', 2, 0.5, 955, { solid: false });
+      put('debris', 2, 1.0, 956, { solid: false });
+      blood(2 + Math.floor(hash3(room.vnum, 2, 0, 951) * 3), 957);
+      for (const h of heaps) if (hash3(room.vnum, Math.round(h.x), 0, 958) < 0.6) crow(h.x + 0.2, h.z - 0.1, 1.08);
+      for (let i = 0; i < 2; i++) {
+        if (hash3(room.vnum, i, 0, 959) < 0.5) continue;
+        const a = hash3(room.vnum, i, 1, 959) * Math.PI * 2;
+        crow(pos.x + Math.cos(a) * 3.2, pos.z + Math.sin(a) * 3.2);
+      }
+      break;
+    }
+    case 'ruin': {
+      // Roof and floors in a heap on the ground floor, the timbers that held
+      // them lying across it, and nothing worth taking left.
+      const reach = ROOM / 2 - 2.2;
+      const corner = Math.floor(hash3(room.vnum, 0, 0, 961) * 4);
+      const cx = pos.x + (corner & 1 ? 1 : -1) * reach;
+      const cz = pos.z + (corner & 2 ? 1 : -1) * reach;
+      hoodProp({ instances, chunk, addCollider, name: 'rubble_heap', x: cx, y, z: cz, rotY: corner * 1.3, half: [1.6, 1.6], height: 1.1 });
+      const bx = pos.x - (corner & 1 ? 1 : -1) * 1.2;
+      const bz = pos.z - (corner & 2 ? 1 : -1) * (reach - 0.4);
+      hoodProp({ instances, chunk, addCollider, name: 'charred_beams', x: bx, y, z: bz, rotY: (corner & 1) * 0.3, half: [2.6, 1.0], height: 0.9 });
+      instances.add('debris', { x: pos.x + 2.2, y, z: pos.z - 2.6, rotY: 2.1 }, chunk);
+      if (HOOD_BLOOD.test(room.description)) {
+        // "Blood is splattered and dried all over the walls here."
+        for (let d = 0; d < 4; d++) {
+          if (sides[d]) continue;
+          const [dx, , dz] = DIR_STEP[d];
+          const a = (hash3(room.vnum, d, 0, 963) - 0.5) * 5;
+          decals.push({
+            material: 'decal_blood', x: pos.x + dx * (ROOM / 2 - 0.25) + (dx ? 0 : a), y: y + 1.3 + hash3(room.vnum, d, 1, 963),
+            z: pos.z + dz * (ROOM / 2 - 0.25) + (dz ? 0 : a), nx: -dx, nz: -dz, w: 1.6, h: 1.6,
+          });
+        }
+        blood(4, 964);
+      }
+      break;
+    }
+    case 'lot': {
+      // "A huge building was going to be built here ... Now it is just a
+      // weed-strewn plot of land"; its east end "just a dusty square".
+      const dusty = /dusty/i.test(room.description);
+      put('tall_weeds', dusty ? 3 : 7, 0.6, 971, { solid: false });
+      put('bramble', dusty ? 1 : 3, 1.3, 972, { height: 0.9 });
+      put('nettles', dusty ? 2 : 5, 0.3, 973, { solid: false });
+      put('grass_tuft', dusty ? 3 : 6, 0.3, 974, { solid: false });
+      if (!dusty) put('collapsed_shed', 1, 2.0, 975, { height: 2.0, face: true });
+      put('debris', 2, 1.0, 976, { solid: false });
+      break;
+    }
+    case 'plaza': {
+      // "They began construction of a pleasant plaza here ... renamed in
+      // honor of the Dragon gang's idol, the Dracolich. It has become sort of
+      // a training ground." The idol against the plaza's closed side, facing
+      // across it; pells to beat on; a fire.
+      const spot = hoodSpots(room, pos, sides, 1, 1.6, 981, taken)[0];
+      if (spot) {
+        const rotY = spot.dir >= 0 ? FACE_ROT[(spot.dir + 2) % 4] + Math.PI : Math.atan2(pos.x - spot.x, pos.z - spot.z);
+        hoodProp({ instances, chunk, addCollider, name: 'dracolich_idol', x: spot.x, y, z: spot.z, rotY, half: [0.5, 0.5], height: 4.2 });
+      }
+      put('training_pell', 3, 0.8, 982, { height: 2.0 });
+      const fire = hoodSpots(room, pos, sides, 2, 0.6, 983, taken);
+      for (const f of fire) hoodBrazier({ instances, chunk, decor, lights, addCollider, x: f.x, y, z: f.z });
+      // The paving that was started: a few flags laid and a stack of them
+      // never used.
+      put('planks_pile', 1, 0.9, 984);
+      break;
+    }
+    case 'park': {
+      // "Not really a 'park' ... queerly peaceful ... some kind of memorial to
+      // the great Mongol warrior Khan being crudely constructed here."
+      const spot = hoodSpots(room, pos, sides, 1, 2.1, 991, taken)[0];
+      if (spot) {
+        hoodProp({ instances, chunk, addCollider, name: 'khan_memorial', x: spot.x, y, z: spot.z, rotY: spot.dir >= 0 ? FACE_ROT[spot.dir] : 0, half: [1.6, 1.6], height: 1.8 });
+      }
+      for (let i = 0; i < 3; i++) {
+        const s = hoodSpots(room, pos, sides, 1, 0.9, 992 + i, taken)[0];
+        if (!s) continue;
+        decor.push({ kind: 'tree', x: s.x, y, z: s.z, scale: 0.8 + hash3(room.vnum, i, 0, 995) * 0.4 });
+        addCollider(s.x - 0.7, s.x + 0.7, s.z - 0.7, s.z + 0.7, y, y + 8);
+      }
+      put('bramble', 3, 1.3, 996, { height: 0.9 });
+      put('tall_weeds', 4, 0.5, 997, { solid: false });
+      put('grass_tuft', 8, 0.3, 998, { solid: false });
+      break;
+    }
+    case 'court': {
+      // "Someone forgot to water the plants and they all died"; "a set of
+      // stairs used to extend up to a suite of rooms but the set is missing
+      // stairs 3-15".
+      put('dead_planter', 3, 1.0, 1001, { face: true, height: 0.7 });
+      if (/\bstairs\b/i.test(room.description)) {
+        const blank = [0, 1, 2, 3].filter((d) => !sides[d]);
+        if (blank.length) {
+          const d = blank[0];
+          const [dx, , dz] = DIR_STEP[d];
+          const reach = HALF - 0.95;
+          const x = pos.x + dx * reach; const z = pos.z + dz * reach;
+          // Its wall is its +y in Blender, which is -z here once exported:
+          // FACE_ROT turns -z to face the wall it stands against.
+          hoodProp({ instances, chunk, addCollider, name: 'broken_stair', x, y, z, rotY: FACE_ROT[d], half: [4.0, 0.9], height: 3.5 });
+        }
+      }
+      put('debris', 2, 1.0, 1002, { solid: false });
+      break;
+    }
+    case 'lair': {
+      // The gang leader's hideout and the Ogres' chapel: their fires, their
+      // marks on the walls. INDOORS, so against the inner face of the walls.
+      for (let i = 0; i < 2; i++) {
+        const a = (i ? 1 : -1) * 2.6;
+        const d = [0, 1, 2, 3].find((k) => !sides[k]) ?? 0;
+        const [dx, , dz] = DIR_STEP[d];
+        hoodBrazier({ instances, chunk, decor, lights, addCollider, x: pos.x + dx * 3.4 + (dx ? 0 : a), y, z: pos.z + dz * 3.4 + (dz ? 0 : a) });
+      }
+      for (let d = 0; d < 4; d++) {
+        if (sides[d]) continue;
+        const [dx, , dz] = DIR_STEP[d];
+        const a = (hash3(room.vnum, d, 0, 1011) - 0.5) * 4;
+        hoodMark(decals, turf, pos.x + dx * (ROOM / 2 - 0.06) + (dx ? 0 : a), y + 2.1, pos.z + dz * (ROOM / 2 - 0.06) + (dz ? 0 : a),
+          -dx, -dz, 1.9, hash3(room.vnum, d, 1, 1011));
+      }
+      // The chapel is "desecrated by graffiti and vandalism": its roof
+      // timbers have come down in it.
+      if (/desecrated|vandalism/i.test(room.description)) {
+        put('rubble_heap', 1, 1.6, 1012, { height: 1.1 });
+        put('charred_beams', 1, 2.4, 1013, { height: 0.9 });
+      }
+      put('debris', 2, 1.0, 1014, { solid: false });
+      break;
+    }
+    default: break;
+  }
+
+  // Each gang keeps a fire burning where its street opens on No Man's Land:
+  // the only light along the strip after dark, and it is on the far side.
+  if (style === 'street') {
+    for (let d = 0; d < 4; d++) {
+      const side = sides[d];
+      if (!side || side.kind !== 'alley' || !side.target || hoodStyle(side.target.room) !== 'nml') continue;
+      const [dx, , dz] = DIR_STEP[d];
+      const s = hash3(room.vnum, d, 0, 1081) < 0.5 ? -1 : 1;
+      const x = pos.x + dx * 3.4 + (dx ? 0 : s * 2.3);
+      const z = pos.z + dz * 3.4 + (dz ? 0 : s * 2.3);
+      hoodBrazier({ instances, chunk, decor, lights, addCollider, x, y, z });
+    }
+  }
+
+  // Prose-named things, one room each.
+  if (/smashed crystal statues/i.test(text)) put('crystal_stump', 3, 1.0, 1021, { height: 2.0 });
+  else if (/crystal sculptures/i.test(text)) put('crystal_stump', 1, 1.0, 1022, { height: 2.0 });
+  if (/full of garbage/i.test(text)) put('refuse_heap', 3, 1.3, 1023, { height: 0.7 });
+  if (/toppling of a building/i.test(text)) {
+    // "Black Dragon Avenue used to run south from here but the way has been
+    // blocked by the toppling of a building into the street."
+    const [dx, , dz] = DIR_STEP[2];
+    for (const a of [-3.2, 0, 3.2]) {
+      hoodProp({ instances, chunk, addCollider, name: 'rubble_heap', x: pos.x + a, y, z: pos.z + dz * (HALF - FRONTAGE_D - 0.9) + dx, rotY: a, half: [1.6, 1.4], height: 1.1 });
+    }
+  }
+  if (/footprints|struggle|broken sticks/i.test(text)) put('debris', 2, 1.0, 1024, { solid: false });
+  if (/grand fountain/i.test(text)) {
+    // "There is a grand fountain to the east but the water doesn't look
+    // good to drink": dry, choked with rubbish.
+    const d = sides[1] ? [0, 2, 3].find((k) => !sides[k]) : 1;
+    if (d !== undefined) {
+      const [dx, , dz] = DIR_STEP[d];
+      const r = HALF - FRONTAGE_D - 1.5;
+      hoodProp({ instances, chunk, addCollider, name: 'fountain', x: pos.x + dx * r, y, z: pos.z + dz * r, half: [1.3, 1.3], height: 1.2 });
+      instances.add('debris', { x: pos.x + dx * r - dz * 1.8, y, z: pos.z + dz * r + dx * 1.8, rotY: 0.7 }, chunk);
+    }
+  }
+  if (/crushed under its own weight/i.test(text)) {
+    // "Some kind of tunnel entrance is to the west but it has been crushed
+    // under its own weight."
+    const d = /to the west/i.test(text) && !sides[3] ? 3 : [0, 1, 2, 3].find((k) => !sides[k]);
+    if (d !== undefined) {
+      const [dx, , dz] = DIR_STEP[d];
+      const r = HALF - FRONTAGE_D - 0.4;
+      instances.add('stone_arch', { x: pos.x + dx * r, y, z: pos.z + dz * r, rotY: dx ? Math.PI / 2 : 0 }, chunk);
+      hoodProp({ instances, chunk, addCollider, name: 'rubble_heap', x: pos.x + dx * (r - 0.9), y, z: pos.z + dz * (r - 0.9), rotY: dx ? Math.PI / 2 : 0, half: [1.7, 1.4], height: 1.2 });
+    }
+  }
+  if (/statue here depicting/i.test(text)) {
+    // "...a battle between two great warriors. You think it's odd that it has
+    // not been defiled, but then you sense a aura protecting it."
+    lights.push({ x: pos.x, y: y + 3.2, z: pos.z, color: 0xbcd4ff, intensity: 7, radius: 9, outdoor: true });
+  }
+}
+
+/**
+ * A cell built on in the neighborhood. Mostly the town's own house shut up
+ * and left (`house_derelict`), a third of them burnt out (`house_gutted`),
+ * and now and then one somebody still lives in -- the only glass in the
+ * district that lights after dark. Where the prose puts a burnt building on a
+ * corner, that corner is the burnt one.
+ *
+ * The inside of No Man's Land is not built on at all: the cells between its
+ * rooms are open ground, walkable, with the stumps of the houses that stood
+ * there -- which is what makes it a strip and not four more street corners.
+ */
+function buildHoodFiller({ batcher, instances, chunk, addCollider, addPlatform, decor, x, y, z, faceDir, open, burnt, cemetery, turf, decals, seed }) {
+  batcher.add(plane(CELL, CELL, 3), open ? 'ash' : 'brokencobble', place(x, y, z), { chunk });
+  if (!instances) return;
+  if (open) {
+    // Stumps of walls on two sides, the rest of them in heaps.
+    addPlatform(x - HALF, x + HALF, z - HALF, z + HALF, y);
+    const d = Math.floor(seed * 4);
+    for (const k of [d, (d + 1) % 4]) {
+      const [dx, , dz] = DIR_STEP[k];
+      instances.add('ruin_wall_solid', {
+        x: x + dx * (HALF - 1.2), y, z: z + dz * (HALF - 1.2), rotY: FACE_ROT[k], scaleX: 0.9, scaleY: 0.45 + seed * 0.3,
+      }, chunk);
+      const along = k === 1 || k === 3;
+      const cx = x + dx * (HALF - 1.2); const cz = z + dz * (HALF - 1.2);
+      addCollider(cx - (along ? 0.3 : 5.2), cx + (along ? 0.3 : 5.2), cz - (along ? 5.2 : 0.3), cz + (along ? 5.2 : 0.3), y, y + 3);
+    }
+    const hx = x - DIR_STEP[d][0] * 2.2 - DIR_STEP[(d + 1) % 4][0] * 2.2;
+    const hz = z - DIR_STEP[d][2] * 2.2 - DIR_STEP[(d + 1) % 4][2] * 2.2;
+    hoodProp({ instances, chunk, addCollider, name: 'rubble_heap', x: hx, y, z: hz, rotY: seed * 6, half: [1.6, 1.6], height: 1.1 });
+    instances.add('tall_weeds', { x: x + 1.5, y, z: z - 1.2, rotY: seed * 9 }, chunk);
+    if (seed > 0.5) instances.add('crow', { x: hx + 0.2, y: y + 1.08, z: hz, rotY: seed * 13 }, chunk);
+    decals.push({ material: 'decal_blood', ground: true, x: x - 1.1, y, z: z + 1.6, w: 1.2, spin: seed * 7 });
+    return;
+  }
+  if (cemetery) {
+    // "A large open space, possibly a cemetery ... You wonder if it's keeping
+    // you out, or the ghouls in?" Nobody tends it.
+    batcher.add(plane(CELL - 0.2, CELL - 0.2, 3), 'grass', place(x, y + 0.01, z), { chunk });
+    for (let i = 0; i < 9; i++) {
+      const gx = x - 4 + (i % 3) * 4 + (hash3(x, z, i, 1031) - 0.5);
+      const gz = z - 4 + Math.floor(i / 3) * 4 + (hash3(x, z, i, 1032) - 0.5);
+      instances.add(i % 4 === 3 ? 'grave_slab' : 'headstone', {
+        x: gx, y, z: gz, rotY: (hash3(x, z, i, 1033) - 0.5) * 0.5 + (i % 4 === 3 ? 0 : Math.PI / 2 * Math.round(hash3(x, z, i, 1034))),
+      }, chunk);
+    }
+    instances.add('tree_snag', { x: x + 2, y, z: z + 1.5, rotY: seed * 6, scale: 0.8 }, chunk);
+    instances.add('tall_weeds', { x: x - 2.5, y, z: z + 2.4, rotY: seed * 4 }, chunk);
+    addCollider(x - HALF, x + HALF, z - HALF, z + HALF, y, y + 3);
+    return;
+  }
+  const house = burnt ? 'house_gutted' : (seed < 0.1 ? 'house_stone_a' : (seed < 0.36 ? 'house_gutted' : 'house_derelict'));
+  const modelled = instances.library.get(house);
+  if (!modelled) return;
+  const fit = Math.min(1.15, (CELL * 0.92) / Math.max(0.001, Math.max(modelled.size.x, modelled.size.z)));
+  const rotY = faceDir >= 0 ? FACE_ROT[faceDir] + Math.PI : Math.floor(seed * 4) * (Math.PI / 2);
+  instances.add(house, { x, y, z, rotY, scaleX: fit, scaleZ: fit, scaleY: fit * (0.9 + seed * 0.25) }, chunk);
+  const w = CELL * 0.92;
+  addCollider(x - w / 2, x + w / 2, z - w / 2, z + w / 2, y, y + modelled.size.y * fit);
+  // The gang's mark on the street face.
+  if (faceDir >= 0 && hash3(x, z, 0, 1041) < 0.55) {
+    const [nx, , nz] = DIR_STEP[faceDir];
+    // The front wall's face, not the bounds: the step before the door stands
+    // a metre further out.
+    const face = 5.97 * fit;
+    const a = (hash3(x, z, 1, 1041) < 0.5 ? -1 : 1) * 2.35 * fit;
+    const px = x + nx * face + (nx ? 0 : a) + nx * 0.18;
+    const pz = z + nz * face + (nz ? 0 : a) + nz * 0.18;
+    // Only on masonry that is there: the burnt house's front is broken down
+    // in the middle, so its mark goes low.
+    hoodMark(decals, turf, px, y + (house === 'house_gutted' ? 1.4 : 1.9), pz, nx, nz, 1.7, hash3(x, z, 2, 1041));
+  }
+  void decor;
+}
+
+/**
+ * Where No Man's Land meets a street: a barricade across the passage, built
+ * from both ends and meeting in the middle, with the gap the patrolmen walk
+ * through. The stakes are always on the street's side of it, the cart and
+ * crates on No Man's Land's -- a gang holds its end.
+ */
+function buildHoodBarricade({ instances, chunk, addCollider, cell, dir, y, seed }) {
+  if (!instances) return;
+  const [dx, , dz] = DIR_STEP[dir];
+  const across = dir === 0 || dir === 2 ? [1, 0] : [0, 1];
+  const x = cell.x * CELL; const z = cell.z * CELL;
+  // The line lies across the way, the pieces either side of a 2.8 m gap.
+  const rotY = across[0] ? 0 : Math.PI / 2;
+  for (const s of [-1, 1]) {
+    const off = s * 4.2;
+    const px = x + across[0] * off + dx * (seed - 0.5);
+    const pz = z + across[1] * off + dz * (seed - 0.5);
+    const name = (s > 0) === (seed > 0.5) ? 'barricade' : 'barricade_stakes';
+    hoodProp({
+      instances, chunk, addCollider, name, x: px, y, z: pz, rotY: rotY + (s > 0 ? 0 : Math.PI),
+      half: name === 'barricade' ? [2.8, 0.9] : [2.0, 1.0], height: 1.8,
+    });
+  }
+  instances.add('debris', { x: x + dx * 2.6, y, z: z + dz * 2.6, rotY: seed * 6 }, chunk);
+}
+
+/**
+ * Wall Road: the long street down the inside of the town's east wall, and
+ * the wall. A curtain wall on every side of the road that faces out of town,
+ * except where the river goes through it -- "a hole in the wall" -- and there
+ * the road crosses the water on a bridge.
+ */
+function buildHoodWallRoad({ batcher, instances, link, layout, chunkOf, addCollider, addPlatform, reserved, cellKey }) {
+  if (!instances) return;
+  const level = link.from.level;
+  const y = level * LEVEL_H;
+  const chain = [link.from, ...link.path, link.to];
+  for (let i = 1; i < chain.length - 1; i++) {
+    const c = chain[i];
+    const open = new Set([dirBetween(c, chain[i - 1]), dirBetween(c, chain[i + 1])]);
+    const chunk = chunkOf({ x: c.x, z: c.z, level });
+    const px = c.x * CELL; const pz = c.z * CELL;
+    const other = layout.passageAt(level, c.x, c.z);
+    const river = other && other !== link && isWater(other.from.room) && isWater(other.to.room);
+    if (river) {
+      // The bridge: a stone deck over the water, the length of the cell, with
+      // a parapet down each side.
+      const along = open.has(0) || open.has(2);
+      const [w, d] = along ? [4.8, CELL] : [CELL, 4.8];
+      batcher.add(box(w, 0.34, d, 3, 1, 3), 'stonewall', place(px, y + 0.08, pz), { chunk, ao: wallAo(y - 0.2) });
+      addPlatform(px - w / 2, px + w / 2, pz - d / 2, pz + d / 2, y + 0.25);
+      for (const s of [-1, 1]) {
+        const [bx, bz] = along ? [px + s * (w / 2 - 0.25), pz] : [px, pz + s * (d / 2 - 0.25)];
+        const [bw, bd] = along ? [0.5, CELL] : [CELL, 0.5];
+        batcher.add(box(bw, 0.75, bd, 1, 1, 3), 'stonewall', place(bx, y + 0.62, bz), { chunk, ao: wallAo(y) });
+        addCollider(bx - bw / 2, bx + bw / 2, bz - bd / 2, bz + bd / 2, y, y + 1.5);
+      }
+      continue;
+    }
+    // East is out of town all the way down.
+    if (open.has(1)) continue;
+    const nkey = cellKey(level, c.x + 1, c.z);
+    if (layout.at(level, c.x + 1, c.z) !== undefined || layout.isPath(level, c.x + 1, c.z)) continue;
+    reserved.add(nkey);
+    // Its buttressed face to the road, which is west of it.
+    instances.add('city_wall', { x: px + HALF + 0.2, y, z: pz, rotY: FACE_ROT[3] + Math.PI }, chunk);
+    addCollider(px + HALF - 1.95, px + HALF + 1.6, pz - HALF, pz + HALF, y, y + 9);
+  }
+}
+
+/**
+ * The paint and the blood: every decal quad in the world, merged by
+ * material, laid a centimetre off whatever it is on.
+ */
+function buildDecals(group, decals, materials) {
+  const byMaterial = new Map();
+  for (const d of decals) {
+    if (!materials[d.material]) continue;
+    if (!byMaterial.has(d.material)) byMaterial.set(d.material, []);
+    byMaterial.get(d.material).push(d);
+  }
+  for (const [name, list] of byMaterial) {
+    const pos = new Float32Array(list.length * 18);
+    const nor = new Float32Array(list.length * 18);
+    const uv = new Float32Array(list.length * 12);
+    list.forEach((d, k) => {
+      let n; let r; let u;
+      if (d.ground) {
+        n = [0, 1, 0];
+        r = [Math.cos(d.spin), 0, Math.sin(d.spin)];
+        u = [Math.sin(d.spin), 0, -Math.cos(d.spin)];
+      } else {
+        n = [d.nx, 0, d.nz];
+        // Screen right for someone looking at the face: up x n.
+        r = [d.nz, 0, -d.nx];
+        u = [0, 1, 0];
+      }
+      const hw = d.w / 2; const hh = (d.h ?? d.w) / 2;
+      const lift = 0.012 + (d.lift ?? 0);
+      const c = [d.x + n[0] * lift, d.y + n[1] * lift, d.z + n[2] * lift];
+      const corner = (sx, sy) => [c[0] + r[0] * hw * sx + u[0] * hh * sy, c[1] + r[1] * hw * sx + u[1] * hh * sy,
+        c[2] + r[2] * hw * sx + u[2] * hh * sy];
+      const quad = [[-1, -1, 0, 0], [1, -1, 1, 0], [1, 1, 1, 1], [-1, -1, 0, 0], [1, 1, 1, 1], [-1, 1, 0, 1]];
+      quad.forEach(([sx, sy, tu, tv], i) => {
+        const p = corner(sx, sy);
+        pos.set(p, (k * 6 + i) * 3);
+        nor.set(n, (k * 6 + i) * 3);
+        uv.set([tu, tv], (k * 6 + i) * 2);
+      });
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geo, materials[name]);
+    mesh.name = name;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+}
+
 
 // ------------------------------------------------------------------ main ----
 
@@ -705,17 +1388,29 @@ export function buildScene(world, layout, materials, assets = null) {
   const mistCells = [];   // cell centres the ground mist lies over
   const skyHoles = [];    // the tops of the sewer's air shafts
   const cabins = [];      // world rects a cabin shell stands on: keep them clear
+  const decals = [];      // paint and blood, laid on surfaces: see buildDecals
+  const reserved = new Set(); // cells something other than a house stands on
 
   const addCollider = (x0, x1, z0, z1, y0, y1) => colliders.push({ x0, x1, z0, z1, y0, y1 });
   const addPlatform = (x0, x1, z0, z1, top) => platforms.push({ x0, x1, z0, z1, top });
 
   classifySewer(world);
+  const turfAt = hoodTurf(layout);
   // The whole kit or none of it: a chamber with no tunnel to leave by is worse
   // than the plain walled room it falls back to.
   const sewerKit = !!instances && SEWER_KIT.every((name) => assets.has(name));
 
   const worldOf = (cell) => ({ x: cell.x * CELL, y: cell.level * LEVEL_H, z: cell.z * CELL });
-  const chunkOf = (cell) => `${cell.level}:${Math.floor(cell.x / 4)},${Math.floor(cell.z / 4)}`;
+  // The neighborhood is chunked eight cells a side instead of four. It is a
+  // district of boarded houses a few hundred metres from the Market Square,
+  // every one of its models has five or six materials, and at 4x4 it came to
+  // 1,070 meshes drawn from a square that cannot see one of them.
+  const hoodBox = hoodBounds(layout);
+  const inHood = (cell) => !!hoodBox && cell.level === 0 && cell.x >= hoodBox.x0 && cell.x <= hoodBox.x1
+    && cell.z >= hoodBox.z0 && cell.z <= hoodBox.z1;
+  const chunkOf = (cell) => (inHood(cell)
+    ? `${cell.level}:h${Math.floor(cell.x / 8)},${Math.floor(cell.z / 8)}`
+    : `${cell.level}:${Math.floor(cell.x / 4)},${Math.floor(cell.z / 4)}`);
   // What every cell's ground was painted in, so `buildVerges` can find the
   // boundaries between two biomes without guessing at them a second time.
   const groundAt = new Map();
@@ -809,10 +1504,19 @@ export function buildScene(world, layout, materials, assets = null) {
 
     // A modelled room kit, where one fits. Caves keep their procedural rock --
     // the kits are dressed masonry and would look absurd in Moria.
+    const hood = mats.hood;
+    const ruin = hood === 'ruin';
     const kit = (!openAir && !mats.cave && instances)
-      ? (mats.holy && model(['temple_wall_solid']) ? 'temple_'
-        : (model(['wall_solid']) ? '' : null))
+      ? (ruin && model(['ruin_wall_solid']) ? 'ruin_'
+        : mats.holy && model(['temple_wall_solid']) ? 'temple_'
+          : (model(['wall_solid']) ? '' : null))
       : null;
+    // "The back wall of the building has been bashed down, allowing you to go
+    // south": that side is a breach, not a doorway.
+    const bashed = ruin ? /bashed down[^.]*?\b(north|south|east|west)\b/i.exec(room.description) : null;
+    const breach = bashed ? WALL_WORD[bashed[1].toLowerCase()] : -1;
+    // A roofless ruin is lit like the street it stands in.
+    if (ruin) batcher.indoor = false;
 
     // Nothing can reach an "In the air..." room now that its archways are not
     // built, so its floor is pure scenery -- and a translucent slab hanging
@@ -941,18 +1645,19 @@ export function buildScene(world, layout, materials, assets = null) {
         buildIndoorWall({
           batcher, chunk, mats, x: wx, y: pos.y, z: wz, rotY, open, kit, instances,
           width: ROOM + (WALL_IN + WALL_OUT) * 2, addCollider, dir, room, lights, decor,
-          cellX: pos.x, cellZ: pos.z,
+          cellX: pos.x, cellZ: pos.z, breach: dir === breach, unlit: ruin,
         });
       } else if (!airborne) {
         // Nothing walls a room under the canopy: `buildForest` stands a picket
         // of trees along every side there is no way out of, and a rock kerb
         // behind that is the level editor showing through.
-        if (!canopy) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog });
+        if (!canopy) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog, instances });
         // Once, for the whole cell -- the corners need to know about all four
         // sides, not one at a time.
         if (dir === 3) {
           buildCityFrontage({
             batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors,
+            lights, decals, turf: hood ? turfAt(cell.z) : null,
           });
         }
       }
@@ -1013,7 +1718,9 @@ export function buildScene(world, layout, materials, assets = null) {
 
     // One per cell, after the sides, not one per side: which way out a street
     // happens to have says nothing about where its lamp stands.
-    if (openAir) buildStreetLamp({ room, cell, pos, decor, lights, addCollider });
+    // Nobody has lit a lamp in the neighborhood for years: its light is the
+    // gangs' fires.
+    if (openAir && !hood) buildStreetLamp({ room, cell, pos, decor, lights, addCollider });
 
     // links that had no free wall left: an arch standing in the room itself
     for (const link of layout.links) {
@@ -1041,7 +1748,7 @@ export function buildScene(world, layout, materials, assets = null) {
           instances.add(`${kit}corner`, { x: pos.x + sx * KIT_LINE, y: pos.y, z: pos.z + sz * KIT_LINE, rotY: 0 }, chunk);
         }
       }
-      instances.add(`${kit}roof`, { x: pos.x, y: pos.y + CEIL, z: pos.z, rotY: 0 }, chunk);
+      if (!ruin) instances.add(`${kit}roof`, { x: pos.x, y: pos.y + CEIL, z: pos.z, rotY: 0 }, chunk);
       if (kit === 'temple_') {
         for (const sx of [-1, 1]) {
           for (const sz of [-1, 1]) {
@@ -1052,10 +1759,12 @@ export function buildScene(world, layout, materials, assets = null) {
     }
 
     if (!openAir) {
-      buildCeiling({
-        batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + CEIL, z: pos.z,
-        half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
-      });
+      if (!ruin) {
+        buildCeiling({
+          batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + CEIL, z: pos.z,
+          half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
+        });
+      }
       if (instances && deepStyle(room) === 'cave') {
         buildCaveLining({ instances, chunk, room, pos, sides, roofed: !roomHoles.some((h) => h.ceiling), addCollider });
       }
@@ -1065,7 +1774,7 @@ export function buildScene(world, layout, materials, assets = null) {
       // its own floor, so a 12.4 m rooftile prism ran from y -1.95 up to +0.6
       // and came through the grass -- measured over #3640, where it read as a
       // tiled roof lying on the turf. The chimney and its smoke went with it.
-      if (kit === null && !buried) {
+      if (kit === null && !buried && !ruin) {
         buildRoof({ batcher, chunk, mats, room, x: pos.x, y: pos.y + CEIL + SLAB, z: pos.z, decor });
       }
       // A room under the ground has no outside to put a window in. The Shire's
@@ -1075,20 +1784,38 @@ export function buildScene(world, layout, materials, assets = null) {
       // "darkness"; the graveyard's tombs were getting the same. The smials on
       // Bywater Road are at street level and keep theirs, which is the whole
       // difference.
-      if (!isBuried(mats, cell)) {
+      // A ruin's windows are holes, and nobody is home in the gangs' lairs.
+      if (!isBuried(mats, cell) && !ruin && hood !== 'lair') {
         decor.push({
           kind: 'windows', x: pos.x, y: pos.y, z: pos.z,
           w: SHELL * 2, d: SHELL * 2, h: CEIL + 1.1, seed: hash3(room.vnum, 2, 0, 11), doorSides: sides,
         });
       }
       if (isDeep(room)) buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider });
-      else buildInteriorProps({ room, pos, sides, decor, mats });
-      if (isShop(room)) buildShopSign({ room, pos, sides, instances, model, chunk });
+      else if (!ruin) buildInteriorProps({ room, pos, sides, decor, mats });
+      // "The inn actually looks fairly functional despite its lack of repair
+      // ... It looks as if the beer is still on tap!!!" The one place in the
+      // neighborhood with a sign out and a light at the door.
+      const pub = hood === 'room' && TAPROOM.test(room.name);
+      if (isShop(room) || pub) buildShopSign({ room, pos, sides, instances, model, chunk });
+      if (pub) {
+        const d = [0, 1, 2, 3].find((k) => sides[k] && sides[k].kind === 'alley');
+        if (d !== undefined) {
+          const [dx, , dz] = DIR_STEP[d];
+          for (const s of [-1, 1]) {
+            const along = s * (DOOR_W / 2 + 0.8);
+            const tx = pos.x + dx * (SHELL + 0.05) + (dx ? 0 : along);
+            const tz = pos.z + dz * (SHELL + 0.05) + (dz ? 0 : along);
+            decor.push({ kind: 'torch', x: tx, y: pos.y + 2.9, z: tz, rotY: FACE_ROT[d] + Math.PI });
+            lights.push({ x: tx + dx * 0.5, y: pos.y + 3.3, z: tz + dz * 0.5, color: 0xffa347, intensity: 12, radius: 12, flicker: true, outdoor: true });
+          }
+        }
+      }
     } else {
       // Bog first: half the marsh's bog rooms are sectored FOREST or MOUNTAIN,
       // and a stand of firs is not what grows in standing water.
       if (bog) buildBogFlora({ room, pos, sides, pools, instances, model, chunk });
-      else if (isPark(room)) buildPark({ room, cell, pos, sides, instances, model, chunk, decor, addCollider });
+      else if (isPark(room) && !hood) buildPark({ room, cell, pos, sides, instances, model, chunk, decor, addCollider });
       else if (room.sector === SECTOR.FOREST) {
         buildForest({
           room, pos, sides, instances, model, chunk, decor, addCollider, dense: canopy,
@@ -1106,7 +1833,7 @@ export function buildScene(world, layout, materials, assets = null) {
       if (eastStyle(room) && instances) buildEastRoom({ room, pos, sides, instances, chunk, decor, lights, addCollider });
       // "Through the garbage you can see a large junction of pipes": the
       // garbage first, heaped in the corners where nobody has to walk.
-      if (REFUSE.test(room.name) && instances && model(['refuse_heap'])) {
+      if (REFUSE.test(room.name) && !hood && instances && model(['refuse_heap'])) {
         const heaps = [];
         for (let k = 0; k < 4; k++) heaps.push([k & 1 ? 1 : -1, k & 2 ? 1 : -1]);
         // ...and against the middle of any side with no way out of it.
@@ -1124,7 +1851,9 @@ export function buildScene(world, layout, materials, assets = null) {
           addCollider(x - 1.1, x + 1.1, z - 0.9, z + 0.9, pos.y, pos.y + 0.6);
         });
       }
-      if (STATUE.test(room.description)) buildStatue({ batcher, chunk, room, pos, sides, addCollider });
+      if (STATUE.test(room.description) || (hood && /statue here depicting/i.test(room.description))) {
+        buildStatue({ batcher, chunk, room, pos, sides, addCollider });
+      }
       // Out of doors the same thing, against the sides with no way out of
       // them, so a square reads as somewhere people keep their things rather
       // than as swept paving.
@@ -1143,9 +1872,15 @@ export function buildScene(world, layout, materials, assets = null) {
           kind: 'clutter', x: pos.x, y: pos.y, z: pos.z,
           half: wantsFrontage(room) ? HALF - FRONTAGE_D : HALF,
           walls: blank, seed: hash3(room.vnum, 12, 0, 5), indoor: false,
-          props: clutterProps(room),
+          props: hood ? (hood === 'nml' ? HOOD_NML_PROPS : HOOD_PROPS) : clutterProps(room),
         });
       }
+    }
+    if (hood) {
+      buildHoodRoom({
+        room, pos, sides, instances, model, chunk, decor, lights, addCollider, decals,
+        turf: turfAt(cell.z), style: hood,
+      });
     }
 
     // upper floors need something underneath them
@@ -1162,6 +1897,12 @@ export function buildScene(world, layout, materials, assets = null) {
 
   // --- streets and corridors ----------------------------------------------
 
+  // Every cell an open-air street runs through, for the corridors that share one.
+  const openStreet = new Set();
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || alleyEnclosed(link)) continue;
+    for (const c of link.path) openStreet.add(cellKey(link.from.level, c.x, c.z));
+  }
   for (const link of layout.links) {
     if (link.kind !== 'alley') continue;
     // A corridor to a room that was never built is a corridor to nowhere, and
@@ -1179,7 +1920,25 @@ export function buildScene(world, layout, materials, assets = null) {
       buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor });
       continue;
     }
-    buildAlley({ batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt, cellKey });
+    buildAlley({
+      batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt,
+      cellKey, streetCells: openStreet,
+    });
+    // The neighborhood's anchor is Wall Road, and its passages into No Man's
+    // Land are barricaded.
+    const fromHood = hoodStyle(link.from.room);
+    const toHood = hoodStyle(link.to.room);
+    if (!!fromHood !== !!toHood) {
+      buildHoodWallRoad({ batcher, instances, link, layout, chunkOf, addCollider, addPlatform, reserved, cellKey });
+    } else if (fromHood && toHood && (fromHood === 'nml') !== (toHood === 'nml') && link.path.length) {
+      const mid = link.path[Math.floor(link.path.length / 2)];
+      const next = link.path[Math.floor(link.path.length / 2) + 1] || link.to;
+      buildHoodBarricade({
+        instances, chunk: chunkOf({ ...mid, level: link.from.level }), addCollider,
+        cell: mid, dir: dirBetween(mid, next), y: link.from.level * LEVEL_H,
+        seed: hash3(mid.x, mid.z, 0, 1071),
+      });
+    }
   }
 
   for (const plan of stairPlans) {
@@ -1210,17 +1969,17 @@ export function buildScene(world, layout, materials, assets = null) {
   // --- build on every empty cell that fronts a street ----------------------
 
   const frontage = new Map(); // cell key -> sector to build from
-  const consider = (level, x, z, sector, bog, shire, east = false) => {
+  const consider = (level, x, z, sector, bog, shire, east = false, hood = false) => {
     if (layout.at(level, x, z) !== undefined || layout.isPath(level, x, z)) return;
     const k = `${level}:${x},${z}`;
-    if (!frontage.has(k)) frontage.set(k, { level, x, z, sector, bog, shire, east });
+    if (!frontage.has(k)) frontage.set(k, { level, x, z, sector, bog, shire, east, hood });
   };
   for (const cell of layout.order) {
     if (!isOpenAir(cell.room) || cell.room.sector === SECTOR.AIR) continue;
     for (let dir = 0; dir < 4; dir++) {
       const [dx, , dz] = DIR_STEP[dir];
       consider(cell.level, cell.x + dx, cell.z + dz, cell.room.sector, isBog(cell.room), isShire(cell.room),
-        !!eastStyle(cell.room));
+        !!eastStyle(cell.room), !!hoodStyle(cell.room));
     }
   }
   for (const link of layout.links) {
@@ -1231,12 +1990,54 @@ export function buildScene(world, layout, materials, assets = null) {
     for (const c of link.path) {
       for (let dir = 0; dir < 4; dir++) {
         const [dx, , dz] = DIR_STEP[dir];
-        consider(link.from.level, c.x + dx, c.z + dz, source.sector, isBog(source), isShire(source), !!eastStyle(source));
+        consider(link.from.level, c.x + dx, c.z + dz, source.sector, isBog(source), isShire(source), !!eastStyle(source),
+          !!hoodStyle(source));
       }
     }
   }
+  // The neighborhood's cells that the prose says burnt, and its cemetery.
+  const hoodBurnt = new Set();
+  const hoodGraves = new Set();
+  for (const cell of layout.order) {
+    const r = cell.room;
+    if (!isHood(r)) continue;
+    const text = r.description.replace(/\s+/g, ' ');
+    const at = (dx, dz) => cellKey(cell.level, cell.x + dx, cell.z + dz);
+    const corner = /\b(north|south)(east|west) corner\b/i.exec(text);
+    if (corner && /\b(burn|demolish)/i.test(text)) {
+      hoodBurnt.add(at(corner[2].toLowerCase() === 'east' ? 1 : -1, corner[1].toLowerCase() === 'south' ? 1 : -1));
+    }
+    const gone = /\b(stables|building)\b[^.]*?\b(?:to the|run) (north|south|east|west)\b/i.exec(text);
+    if (gone && /\b(used to|toppling|dead or gone)\b/i.test(text)) {
+      const [dx, , dz] = DIR_STEP[WALL_WORD[gone[2].toLowerCase()]];
+      hoodBurnt.add(at(dx, dz));
+    }
+    const fence = hoodFenceDir(r);
+    if (fence >= 0) hoodGraves.add(at(DIR_STEP[fence][0], DIR_STEP[fence][2]));
+  }
+  // The inside of No Man's Land: a cell every one of whose ways in is No
+  // Man's Land's own.
+  const nmlCell = (level, x, z) => {
+    const v = layout.at(level, x, z);
+    if (v !== undefined) return hoodStyle(world.rooms.get(v)) === 'nml';
+    const link = layout.passageAt(level, x, z);
+    return !!link && hoodStyle(link.from.room) === 'nml' && hoodStyle(link.to.room) === 'nml';
+  };
+  const insideNml = (spot) => {
+    let n = 0;
+    for (let d = 0; d < 4; d++) {
+      const [dx, , dz] = DIR_STEP[d];
+      const x = spot.x + dx; const z = spot.z + dz;
+      if (layout.at(spot.level, x, z) === undefined && !layout.isPath(spot.level, x, z)) continue;
+      if (!nmlCell(spot.level, x, z)) return false;
+      n++;
+    }
+    return n >= 2;
+  };
+
   for (const spot of frontage.values()) {
     if (mountain.has(cellKey(spot.level, spot.x, spot.z))) continue;
+    if (reserved.has(cellKey(spot.level, spot.x, spot.z))) continue;
     // Face the house at the street. Models are built fronting -Z, so the
     // rotation that turns that front towards direction d is FACE_ROT[d]. It
     // also keeps the jetties and hoist beams oversailing a road, not a
@@ -1249,12 +2050,24 @@ export function buildScene(world, layout, materials, assets = null) {
     }
     spot.faces = faces; // the party walls below need to know which cells share a street
     const pos = { x: spot.x * CELL, y: spot.level * LEVEL_H, z: spot.z * CELL };
+    if (spot.hood) {
+      const key = cellKey(spot.level, spot.x, spot.z);
+      const open = insideNml(spot);
+      groundAt.set(key, open ? 'ash' : 'brokencobble');
+      buildHoodFiller({
+        batcher, instances, chunk: chunkOf(spot),
+        addCollider, addPlatform, decor, x: pos.x, y: pos.y, z: pos.z, faceDir: faces, open,
+        burnt: hoodBurnt.has(key), cemetery: hoodGraves.has(key), turf: turfAt(spot.z), decals,
+        seed: hash3(spot.x, spot.z, spot.level, 17),
+      });
+      continue;
+    }
     if (spot.bog) mistCells.push(pos);
     const paved = spot.bog ? 'peat' : (spot.east ? 'sand' : FILLER_GROUND[spot.sector]);
     if (paved) groundAt.set(cellKey(spot.level, spot.x, spot.z), paved);
     buildFiller({
       batcher, instances, model, faceRot: faces < 0 ? null : FACE_ROT[faces],
-      chunk: `${spot.level}:${Math.floor(spot.x / 4)},${Math.floor(spot.z / 4)}`,
+      chunk: chunkOf(spot),
       sector: spot.east ? SECTOR.DESERT : spot.sector, bog: spot.bog, shire: spot.shire, x: pos.x, y: pos.y, z: pos.z,
       seed: hash3(spot.x, spot.z, spot.level, 17), addCollider, lights, decor,
     });
@@ -1328,7 +2141,10 @@ export function buildScene(world, layout, materials, assets = null) {
 
   const mist = buildMist(group, mistCells);
 
-  const zones = buildZones(group, groundY, groundHoles);
+  const zones = buildZones(group, groundY, groundHoles, hoodBox && {
+    x0: hoodBox.x0 * CELL - HALF, x1: hoodBox.x1 * CELL + HALF, z0: hoodBox.z0 * CELL - HALF, z1: hoodBox.z1 * CELL + HALF,
+  });
+  buildDecals(zones.surface, decals, materials);
   if (skyHoles.length) zones.deep.add(buildSkyHoles(skyHoles));
   const stats = batcher.finish(zones.surface, zones.route);
   if (instances) {
@@ -1338,6 +2154,7 @@ export function buildScene(world, layout, materials, assets = null) {
     stats.triangles += placed.triangles;
     stats.instanced = placed.triangles;
   }
+  zones.gather();
   return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, stats, zones };
 }
 
@@ -1389,12 +2206,16 @@ function zonedInstances(surface, deep) {
  */
 const ZONE_SHAFT_REACH = 10;
 
-function buildZones(group, groundY, openings) {
+function buildZones(group, groundY, openings, district = null) {
   const surface = new THREE.Group();
   surface.name = 'surface';
   const deep = new THREE.Group();
   deep.name = 'underground';
   group.add(surface, deep);
+  // The neighborhood, inside the surface: see DISTRICT_REACH.
+  const hood = new THREE.Group();
+  hood.name = 'district';
+  surface.add(hood);
   const centres = openings.map((r) => ({ x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2 }));
   const reach2 = ZONE_SHAFT_REACH * ZONE_SHAFT_REACH;
   const update = (eye) => {
@@ -1402,6 +2223,27 @@ function buildZones(group, groundY, openings) {
     const shaft = centres.some((c) => (c.x - eye.x) ** 2 + (c.z - eye.z) ** 2 < reach2);
     deep.visible = below || shaft;
     surface.visible = !below || shaft;
+    if (district) {
+      const dx = Math.max(district.x0 - eye.x, 0, eye.x - district.x1);
+      const dz = Math.max(district.z0 - eye.z, 0, eye.z - district.z1);
+      hood.visible = dx * dx + dz * dz < DISTRICT_REACH * DISTRICT_REACH || eye.y > DISTRICT_ABOVE;
+    }
+  };
+  /**
+   * Everything built on the neighborhood's ground, moved under its own group
+   * once the batches are finished: what matters is where a mesh is, not who
+   * built it.
+   */
+  const gather = () => {
+    if (!district) return;
+    for (const mesh of [...surface.children]) {
+      if (!mesh.isMesh) continue;
+      const sphere = mesh.isInstancedMesh ? mesh.boundingSphere : mesh.geometry.boundingSphere;
+      if (!sphere || sphere.radius > 160) continue;
+      const { x, z } = sphere.center;
+      if (x < district.x0 || x > district.x1 || z < district.z0 || z > district.z1) continue;
+      hood.add(mesh);
+    }
   };
   const sensor = new THREE.Mesh(
     new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)),
@@ -1420,13 +2262,37 @@ function buildZones(group, groundY, openings) {
   // child, so showing both here, before it reaches them, is enough; the main
   // pass puts the eye's own answer back.
   sensor.castShadow = true;
-  sensor.onBeforeShadow = () => { surface.visible = true; deep.visible = true; };
+  sensor.onBeforeShadow = () => { surface.visible = true; deep.visible = true; hood.visible = true; };
   group.children.unshift(sensor);
   sensor.parent = group;
   return {
-    surface, deep, update,
+    surface, deep, update, gather,
     route: (chunk) => (isDeepChunk(chunk) ? deep : surface),
   };
+}
+
+/**
+ * How near the neighborhood you have to be for it to be drawn. It sits off
+ * the town's south-east corner at the far end of Wall Road, behind the whole
+ * town from the Market Square -- and frustum culling drew all of it from
+ * there anyway: 2,116 draw calls for nothing on screen (measured by hiding
+ * it: 0 pixels changed facing it from #3014, 214 m off, and 0 from the top of
+ * Wall Road, 183 m off, where the road's jog at the river hides it). It comes
+ * into sight round that jog, 58 m off, so 180 m is well clear of any pop;
+ * from above the roofs the whole of it is drawn.
+ */
+const DISTRICT_REACH = 180;
+const DISTRICT_ABOVE = 40;
+
+/** The neighborhood's cells, with a ring of two for the houses round it. */
+function hoodBounds(layout) {
+  let x0 = Infinity; let x1 = -Infinity; let z0 = Infinity; let z1 = -Infinity;
+  for (const cell of layout.order) {
+    if (!isHood(cell.room) || cell.level !== 0) continue;
+    x0 = Math.min(x0, cell.x); x1 = Math.max(x1, cell.x);
+    z0 = Math.min(z0, cell.z); z1 = Math.max(z1, cell.z);
+  }
+  return x0 === Infinity ? null : { x0: x0 - 2, x1: x1 + 2, z0: z0 - 2, z1: z1 + 2 };
 }
 
 /**
@@ -1523,7 +2389,7 @@ function buildCeiling({ batcher, chunk, material, x, y, z, half, holes }) {
  * One wall of an indoor room: an inner skin you see from inside, an outer skin
  * that is the face of the building, and a doorway punched through both.
  */
-function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, instances, width, addCollider, dir, room, lights, decor, cellX, cellZ }) {
+function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, instances, width, addCollider, dir, room, lights, decor, cellX, cellZ, breach = false, unlit = false }) {
   const gap = open ? DOOR_W : 0;
   const eave = CEIL + 1.1;
   const [dx, , dz] = DIR_STEP[dir];
@@ -1533,7 +2399,7 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
   // two procedural skins are skipped -- but the colliders below are unchanged,
   // because they describe the wall line, not the geometry sitting on it.
   if (kit !== null && kit !== undefined && instances) {
-    instances.add(`${kit}${open ? 'wall_door' : 'wall_solid'}`, {
+    instances.add(`${kit}${open ? (breach ? 'wall_breach' : 'wall_door') : 'wall_solid'}`, {
       x: cellX + dx * KIT_LINE, y, z: cellZ + dz * KIT_LINE, rotY: FACE_ROT[dir],
     }, chunk);
   }
@@ -1580,7 +2446,7 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
   // The sewer lights itself from its prose (`sewerDressing`): a torch on
   // every wall of every INSIDE room put four of them in "Mid-air", a cave
   // with nothing in it but the fall.
-  if (room.sector !== SECTOR.INSIDE || isDeep(room)) return;
+  if (room.sector !== SECTOR.INSIDE || isDeep(room) || unlit) return;
   const px = x - dx * 0.7;
   const pz = z - dz * 0.7;
   const spots = gap ? [-(gap / 2 + 0.8), gap / 2 + 0.8] : [0];
@@ -1626,7 +2492,7 @@ const wantsFrontage = (room) => room.sector === SECTOR.CITY && !SQUARE.test(room
  * inside the 5-9 m a real town street runs to, and the buildings now touch
  * their neighbours in the cells behind instead of standing free on paving.
  */
-function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors }) {
+function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors, lights = [], decals = null, turf = null }) {
   if (!wantsFrontage(room)) return;
   const isOpen = (d) => {
     const side = sides[d];
@@ -1635,11 +2501,19 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
   const inset = HALF - FRONTAGE_D / 2;
   const shire = isShire(room);
 
-  const block = (bx, bz, sx, sz, salt) => {
+  const hood = !!hoodStyle(room);
+  // "All the shops and homes have been boarded up and abandoned."
+  const graffiti = hood && HOOD_GRAFFITI.test(room.description);
+  const features = hood ? hoodFeatures(room, sides) : new Map();
+  const fenced = hoodFenceDir(room);
+  const block = (bx, bz, sx, sz, salt, face = -1) => {
     const seed = hash3(cell.x * 7 + Math.round(bx), cell.z * 7 + Math.round(bz), cell.level, salt);
     const h = 6.2 + seed * 4.6;
-    const stone = hash3(Math.round(bx), Math.round(bz), cell.level, 61) > 0.45;
-    batcher.add(box(sx, h, sz, 3, 4, 3), stone ? 'stonewall' : 'timber',
+    // In the neighborhood every front is masonry: a boarded window nailed
+    // over half-timbering's painted braces read as a sticker.
+    const stone = hood || hash3(Math.round(bx), Math.round(bz), cell.level, 61) > 0.45;
+    const marble = face >= 0 && features.get((face + 2) % 4) === 'marble';
+    batcher.add(box(sx, h, sz, 3, 4, 3), marble ? 'marble' : stone ? (hood ? 'sootwall' : 'stonewall') : 'timber',
       place(bx, pos.y + h / 2, bz), { chunk, ao: wallAo(pos.y) });
     const roofH = 1.7 + seed * 1.4;
     // `triPrism` puts its cross-section on local X and its ridge on local Z,
@@ -1652,10 +2526,21 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
     // left bare at each end, and it photographs as a slab floating over the
     // lane. `cottage` below already got this right; `block` never did.
     const wide = sx > sz;
+    // A burnt roof in the neighborhood is a black one.
     batcher.add(triPrism((wide ? sz : sx) + 0.7, roofH, (wide ? sx : sz) + 0.7),
-      seed > 0.86 ? 'thatch' : 'rooftile',
+      hood && seed < 0.2 ? 'charred' : seed > 0.86 ? 'thatch' : 'rooftile',
       place(bx, pos.y + h, bz, wide ? Math.PI / 2 : 0), { chunk });
     addCollider(bx - sx / 2, bx + sx / 2, bz - sz / 2, bz + sz / 2, pos.y, pos.y + h);
+    if (hood) {
+      // Boarded, dark, and painted on, in place of the lit casements.
+      if (face >= 0) {
+        hoodFrontage({
+          instances, chunk, addCollider, decals, lights, turf, graffiti, room, bx, bz, sx, sz, y0: pos.y, h, face,
+          seed: hash3(cell.x, cell.z, face, 1061), feature: features.get((face + 2) % 4) || null,
+        });
+      }
+      return;
+    }
     // A blank three-storey wall along the street was reported; give it openings.
     decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed });
   };
@@ -1824,7 +2709,12 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
     const bz = pos.z + dz * inset;
     const sx = along ? FRONTAGE_D : CELL;
     const sz = along ? CELL : FRONTAGE_D;
-    if (!shire) { block(bx, bz, sx, sz, 62 + dir); continue; }
+    if (dir === fenced) {
+      // The cemetery's railings stand where a house front would.
+      buildIronFence({ instances, model, chunk, x: pos.x, y: pos.y, z: pos.z, dir, addCollider });
+      continue;
+    }
+    if (!shire) { block(bx, bz, sx, sz, 62 + dir, (dir + 2) % 4); continue; }
     // Mostly bank, a cottage now and then -- a village of holes with a few
     // houses in it, which is what the Shire is.
     if (hash3(cell.x, cell.z, dir, 60) < 0.76) bank(dir);
@@ -3281,8 +4171,20 @@ function buildMist(group, cells) {
 }
 
 /** The boundary of an open-air room: an opening, or something to stop you. */
-function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog = false }) {
+function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog = false, instances = null }) {
   if (open) return;
+  // No Man's Land's edges are what is left of the houses that stood there:
+  // a broken wall along the side, a heap of it at its foot.
+  const hood = hoodStyle(room);
+  if (hood === 'nml' && instances && instances.library.get('ruin_wall_solid')) {
+    const [dx, , dz] = DIR_STEP[dir];
+    const along = dir === 1 || dir === 3;
+    const bx = pos.x + dx * (HALF - 0.45);
+    const bz = pos.z + dz * (HALF - 0.45);
+    instances.add('ruin_wall_solid', { x: bx, y: pos.y, z: bz, rotY: FACE_ROT[dir], scaleX: CELL / 11.4, scaleY: 0.8 + hash3(room.vnum, dir, 0, 1051) * 0.3 }, chunk);
+    addCollider(bx - (along ? 0.4 : HALF), bx + (along ? 0.4 : HALF), bz - (along ? HALF : 0.4), bz + (along ? HALF : 0.4), pos.y, pos.y + 6);
+    return;
+  }
 
   // A street with frontage has a building on this side already; a low garden
   // wall in front of it is one wall too many.
@@ -3335,7 +4237,7 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
   // bank is the same barrier out of the ground the room is actually made of,
   // and low enough to see the next hollow over.
   const h = room.sector === SECTOR.CITY ? 2.6 : (bog ? 0.9 : 1.4);
-  const material = bog ? 'peat' : (room.sector === SECTOR.CITY ? 'stonewall' : 'rock');
+  const material = bog ? 'peat' : (hood ? 'sootwall' : room.sector === SECTOR.CITY ? 'stonewall' : 'rock');
   // `wallAo` runs 0.58 -> 1.0 over 1.8 m, which on a 0.9 m bank never gets past
   // 0.79 -- the whole face shaded, hard. On rock that survives; on peat, the
   // darkest surface in the world, it was the *only* thing outdoors putting
@@ -3382,7 +4284,7 @@ function buildRailFence({ batcher, chunk, pos, dir, addCollider }) {
  * buildings that fill the cells beside it become the street frontage; between
  * two indoor rooms it gets walls and a ceiling and becomes a corridor.
  */
-function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null }) {
+function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null, streetCells = null }) {
   const enclosed = alleyEnclosed(link);
   batcher.indoor = enclosed;
   const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
@@ -3476,6 +4378,11 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
       }
       continue;
     }
+    // An open-air street routed through the same cell makes it a street: a
+    // corridor's walls and ceiling there would stand across the street's
+    // way. Nine such cells in the town before the neighborhood came, and
+    // Wall Road runs down four more of one Midgaard corridor.
+    if (streetCells && cellKey && streetCells.has(cellKey(level, c.x, c.z))) continue;
 
     for (let dir = 0; dir < 4; dir++) {
       if (openDirs.has(dir)) continue;

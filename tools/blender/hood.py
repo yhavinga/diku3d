@@ -82,7 +82,9 @@ def broken_run(x0, x1, y, t, heights, mat="sootwall", holes=(), step=0.36, cours
         xa = x0 + i * w
         xc = xa + w / 2
         want = heights(xc)
-        cur += max(-1.4, min(1.4, want - cur)) * 0.75 + r.uniform(-jag, jag)
+        # Less noise near the ground: a wall down to its footings is a line of
+        # stones, and single courses alternating there read as battlements.
+        cur += max(-1.4, min(1.4, want - cur)) * 0.75 + r.uniform(-jag, jag) * min(1.0, max(0.2, cur / 2.4))
         h = max(course, math.floor(cur / course) * course)
         if least:
             h = max(h, least(xc))
@@ -588,16 +590,16 @@ def build_burnt_cart():
     for sx in (-1, 1):
         body.append(kit.timber((0.1, bw + 0.3, 0.1), (sx * (bl / 2 - 0.4), 0, bz - 0.25), (0, 0, 0), "rust", 0.02,
                                "axle"))
-    body += wheel(-bl / 2 + 0.4, -bw / 2 - 0.12, 0.52, r=0.52, mat="charred")
-    body += wheel(bl / 2 - 0.4, -bw / 2 - 0.12, 0.52, r=0.52, mat="charred")
-    body += wheel(-bl / 2 + 0.4, bw / 2 + 0.12, 0.52, r=0.52, mat="charred")
+    body += wheel(-bl / 2 + 0.4, -bw / 2 - 0.12, 0.52, r=0.52, mat="charred", rim="iron")
+    body += wheel(bl / 2 - 0.4, -bw / 2 - 0.12, 0.52, r=0.52, mat="charred", rim="iron")
+    body += wheel(-bl / 2 + 0.4, bw / 2 + 0.12, 0.52, r=0.52, mat="charred", rim="iron")
     # Settle the burnt corner: the body tips down to the +x, +y side where
     # the fourth wheel was.
     kit.place(body, (0, 0, -0.1), (math.radians(-7), math.radians(6), 0))
     p += body
     # The fourth wheel's iron tyre lying in the ash, and the ash.
     p.append(lib.torus(0.52, 0.04, (bl / 2 + 0.2, bw / 2 + 0.7, 0.05), major_seg=16, minor_seg=4, name="tyre",
-                       mat="rust"))
+                       mat="iron"))
     p.append(heap(rng, 3.4, 2.4, 0.16))
     for sy in (-1, 1):
         p.append(kit.timber((2.2, 0.09, 0.09), (-bl / 2 - 1.0, sy * 0.4, 0.07), (0, 0, sy * 0.1), "charred", 0.02,
@@ -740,7 +742,7 @@ def build_dracolich_idol():
     # The ring of stones, a litter of offerings, and the black of old fires.
     for i in range(11):
         a = 2 * math.pi * i / 11 + rng.uniform(-0.1, 0.1)
-        p.append(chunk_stone(rng, (math.cos(a) * 1.25, math.sin(a) * 1.25, 0.15), (0.42, 0.3, 0.28), mat="stonewall"))
+        p.append(chunk_stone(rng, (math.cos(a) * 1.25, math.sin(a) * 1.25, 0.15), (0.42, 0.3, 0.28), mat="rock"))
     for i in range(5):
         p.append(kit.timber((0.05, 0.05, rng.uniform(0.4, 0.7)), (rng.uniform(-0.8, 0.8), rng.uniform(-0.9, -0.3), 0.03),
                             (math.pi / 2, 0, rng.uniform(0, 3)), "oldbone", 0.015, "bone"))
@@ -781,8 +783,8 @@ def build_khan_memorial():
         for i in range(n):
             a = 2 * math.pi * (i + k * 0.37) / n
             s = rng.uniform(0.3, 0.42) * (1 - k * 0.1)
-            p.append(chunk_stone(rng, (math.cos(a) * r, math.sin(a) * r, z), (s * 1.3, s, s * 0.8), mat="stonewall"))
-    p.append(heap(rng, 2.3, 2.2, 1.3, mat="stonewall"))
+            p.append(chunk_stone(rng, (math.cos(a) * r, math.sin(a) * r, z), (s * 1.3, s, s * 0.8), mat="rock"))
+    p.append(heap(rng, 2.3, 2.2, 1.3, mat="rock"))
     # The banner: pole, trident, a disc, and the tails.
     top = 5.2
     p.append(lib.cylinder(0.06, top, (0, 0, top / 2), verts=8, name="pole", mat="oak"))
@@ -1015,10 +1017,10 @@ def build_boarded_window():
     # The dark of the opening behind the boards: a shallow recess face.
     p.append(lib.box((ow, 0.05, oh), (0, 0.06, sill + oh / 2), name="recess", mat="charred"))
     for sx in (-1, 1):
-        p.append(kit.timber((0.2, 0.16, oh + 0.2), (sx * (ow / 2 + 0.1), -0.06, sill + oh / 2), (0, 0, 0), "stonewall",
+        p.append(kit.timber((0.2, 0.16, oh + 0.2), (sx * (ow / 2 + 0.1), -0.06, sill + oh / 2), (0, 0, 0), "sootwall",
                             0.03, "jamb"))
-    p.append(kit.timber((ow + 0.6, 0.18, 0.22), (0, -0.07, sill + oh + 0.11), (0, 0, 0), "stonewall", 0.03, "lintel"))
-    p.append(kit.timber((ow + 0.55, 0.3, 0.12), (0, -0.13, sill - 0.06), (0, 0, 0), "stonewall", 0.03, "sill"))
+    p.append(kit.timber((ow + 0.6, 0.18, 0.22), (0, -0.07, sill + oh + 0.11), (0, 0, 0), "sootwall", 0.03, "lintel"))
+    p.append(kit.timber((ow + 0.55, 0.3, 0.12), (0, -0.13, sill - 0.06), (0, 0, 0), "sootwall", 0.03, "sill"))
     p += board_up(0, sill, ow, oh, -0.15, rng, n=5)
     return deliver(p, "boarded_window")
 
@@ -1033,9 +1035,9 @@ def build_boarded_door():
     p.append(lib.box((ow, 0.05, oh), (0, 0.06, oh / 2), name="recess", mat="charred"))
     for sx in (-1, 1):
         p.append(kit.timber((0.24, 0.18, oh + 0.24), (sx * (ow / 2 + 0.12), -0.07, (oh + 0.24) / 2), (0, 0, 0),
-                            "stonewall", 0.03, "jamb"))
-    p.append(kit.timber((ow + 0.7, 0.2, 0.3), (0, -0.08, oh + 0.15), (0, 0, 0), "stonewall", 0.03, "lintel"))
-    p.append(kit.slab((ow + 0.5, 0.5, 0.12), (0, -0.2, 0.06), mat="stonewall", name="step", width=0.02))
+                            "sootwall", 0.03, "jamb"))
+    p.append(kit.timber((ow + 0.7, 0.2, 0.3), (0, -0.08, oh + 0.15), (0, 0, 0), "sootwall", 0.03, "lintel"))
+    p.append(kit.slab((ow + 0.5, 0.5, 0.12), (0, -0.2, 0.06), mat="sootwall", name="step", width=0.02))
     p += board_up(0, 0.1, ow, oh - 0.1, -0.17, rng, n=7)
     return deliver(p, "boarded_door")
 
@@ -1053,10 +1055,10 @@ def build_barred_window():
         p.append(kit.timber((ow / 2 - 0.05, 0.05, oh - 0.06), (sx * (ow / 4 + 0.035), 0.06, sill + oh / 2),
                             (0, 0, 0), "planks", 0.01, "shutter"))
         p.append(kit.timber((0.22, 0.2, oh + 0.24), (sx * (ow / 2 + 0.11), -0.06, sill + oh / 2), (0, 0, 0),
-                            "stonewall", 0.03, "jamb"))
-    p.append(kit.timber((ow + 0.66, 0.22, 0.24), (0, -0.07, sill + oh + 0.12), (0, 0, 0), "stonewall", 0.03,
+                            "sootwall", 0.03, "jamb"))
+    p.append(kit.timber((ow + 0.66, 0.22, 0.24), (0, -0.07, sill + oh + 0.12), (0, 0, 0), "sootwall", 0.03,
                         "lintel"))
-    p.append(kit.timber((ow + 0.6, 0.34, 0.13), (0, -0.14, sill - 0.065), (0, 0, 0), "stonewall", 0.03, "sill"))
+    p.append(kit.timber((ow + 0.6, 0.34, 0.13), (0, -0.14, sill - 0.065), (0, 0, 0), "sootwall", 0.03, "sill"))
     for i in range(5):
         x = -ow / 2 + ow * (i + 0.5) / 5
         p.append(lib.cylinder(0.022, oh + 0.1, (x, -0.1, sill + oh / 2), verts=6, name="bar", mat="rust"))
