@@ -586,6 +586,30 @@ export function installInterp(k) {
     game.breakOff();
   }
 
+  // --------------------------------------------------------------- magic --
+
+  /**
+   * magic.c: do_cast's parsing -- `cast 'magic missile' guard`, the spell
+   * quoted when it is two words -- handed to magic.js through `game.cast`,
+   * which says its own refusals.
+   */
+  function doCast(arg) {
+    if (!game.cast) return send('You do not know any spells.');
+    const [spell, rest] = oneArgument(arg);
+    const [who] = oneArgument(rest);
+    if (!spell) return send('Cast which what where?');
+    let target = null;
+    let obj = null;
+    if (who) {
+      const slot = getCharRoom(who);
+      if (slot === 'self') target = state;
+      else if (slot) target = k.wake(slot);
+      else obj = getObjCarry(who);
+      if (!target && !obj) return send("They aren't here.");
+    }
+    game.cast(spell, { target, obj });
+  }
+
   // ---------------------------------------------------------------- talk --
 
   function doSay(arg) {
@@ -642,7 +666,7 @@ export function installInterp(k) {
   const commands = [
     ['north', walk(0), P.STANDING], ['east', walk(1), P.STANDING], ['south', walk(2), P.STANDING],
     ['west', walk(3), P.STANDING], ['up', walk(4), P.STANDING], ['down', walk(5), P.STANDING],
-    ['buy', doBuy, P.RESTING], ['cast', notHere('You do not know any spells.'), P.FIGHTING],
+    ['buy', doBuy, P.RESTING], ['cast', doCast, P.FIGHTING],
     ['exits', doExits, P.RESTING], ['get', doGet, P.RESTING], ['inventory', doInventory, P.DEAD],
     ['kill', doKill, P.FIGHTING], ['look', doLook, P.RESTING],
     ['order', notHere('You have no followers here.'), P.RESTING],

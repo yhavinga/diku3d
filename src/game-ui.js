@@ -128,6 +128,7 @@ const CSS = `
   opacity: 0; visibility: hidden; pointer-events: none;
   transition: opacity 170ms ease, transform 170ms ease; }
 #g-sheet.on { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%); }
+#g-sheet.narrow { width: min(470px, 82vw); }
 #g-sheet h2 { margin: 0 0 3px; font-size: 24px; color: var(--gold); font-weight: 400; }
 #g-sheet .lede { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.13em;
   text-transform: uppercase; color: var(--dim); margin-bottom: 18px; }
@@ -511,6 +512,7 @@ export function createGameUi(game) {
     if (!sheetMode) return;
     const s = game.state;
     sheet.textContent = '';
+    sheet.classList.remove('narrow');
 
     if (sheetMode === 'gear') {
       sheet.append(el('h2', null, `${s.className} of the ${s.level}th level`));
@@ -633,7 +635,7 @@ export function createGameUi(game) {
       }
       cols.append(left, right);
       // A corpse has no pack side to it: one column, not a half-empty pair.
-      if (!right.children.length) cols.style.gridTemplateColumns = '1fr';
+      if (!right.children.length) { cols.style.gridTemplateColumns = '1fr'; sheet.classList.add('narrow'); }
       sheet.append(cols, reply, el('div', 'foot', 'e — close'));
       return;
     }
