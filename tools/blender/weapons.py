@@ -322,22 +322,24 @@ def build_shield_round():
         _outward(board)
         p.append(board)
     rim = lib.torus(R, 0.010, (0, face_y + 0.004, 0), (math.radians(90), 0, 0),
-                    major_seg=28, minor_seg=5, name="rim", mat="leather")
+                    major_seg=24, minor_seg=4, name="rim", mat="leather")
     rim.scale = (1.0, 1.0, 1.6)
     smooth(rim)
     p.append(rim)
-    boss = lib.sphere(0.085, (0, face_y - 0.012, 0), 14, 7, name="boss", mat="iron")
+    boss = lib.sphere(0.085, (0, face_y - 0.012, 0), 12, 5, name="boss", mat="iron")
     boss.scale = (1.0, 0.55, 1.0)
     smooth(boss)
     p.append(boss)
     p.append(lib.torus(0.088, 0.008, (0, face_y - 0.018, 0), (math.radians(90), 0, 0),
-                       major_seg=16, minor_seg=4, name="boss_flange", mat="iron"))
+                       major_seg=12, minor_seg=3, name="boss_flange", mat="iron"))
     # The grip behind the boss, across the shield, and a pair of board
     # battens behind it that stiffen the boards and show from behind.
-    p.append(kit.timber((0.20, 0.028, 0.028), (0, -0.010, 0), (0, 0, 0), "oak", 0.006, "grip"))
+    # Grip and battens in leather-wrapped wood: one material fewer to draw,
+    # and they are only ever seen from behind the shield.
+    p.append(kit.timber((0.20, 0.028, 0.028), (0, -0.010, 0), (0, 0, 0), "leather", 0.006, "grip"))
     for sz in (-1, 1):
         p.append(kit.timber((0.64, 0.016, 0.05), (0, -0.026, sz * 0.15), (0, 0, 0),
-                            "oak", 0.004, "batten"))
+                            "leather", 0.004, "batten"))
     return kit.deliver(p, "shield_round")
 
 
@@ -415,7 +417,7 @@ def build_shield_kite():
     boss.scale = (1.0, 0.5, 1.0)
     smooth(boss)
     p.append(boss)
-    p.append(kit.timber((0.028, 0.026, 0.16), (0, -0.012, 0), (0, 0, 0), "oak", 0.006, "grip"))
+    p.append(kit.timber((0.028, 0.026, 0.16), (0, -0.012, 0), (0, 0, 0), "leather", 0.006, "grip"))
     p.append(kit.timber((0.03, 0.012, 0.20), (0, -0.030, 0.18), (0, 0, 0), "leather", 0.003,
                         "strap"))
     return kit.deliver(p, "shield_kite")

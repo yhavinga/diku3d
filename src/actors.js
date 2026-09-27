@@ -10,13 +10,14 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { ITEM, ACT_AGGRESSIVE, ACT_SENTINEL } from './are.js';
+import { ITEM, SECTOR, ACT_AGGRESSIVE, ACT_SENTINEL } from './are.js';
 import { hash3, ROOM, CEIL } from './build.js';
 import { InstanceBatch } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createNav } from './nav.js';
 import { createMotion } from './motion.js';
+import { personOf, carryOf, CLIP_FACTS, HIT_FRAME, LOOPS, CLIPS } from './people.js';
 
 const SKIN = [0xe8c39e, 0xd9a877, 0xb5834f, 0x8a5a33, 0x6d4526, 0xc9b7a0];
 const CLOTH = [
@@ -331,46 +332,621 @@ function buildModelledFigure(asset, proto, library) {
 }
 
 
+// ------------------------------------------------------------------ people ----
+//
+// The people of the town, from tools/blender/people.py: three rigged files
+// (person_male, person_female, troll), each holding every archetype that is
+// built on that body as its own skinned mesh, the hair, beards and hats as
+// separate small ones, and one set of clips. src/people.js decides who a
+// mobile is; this dresses it.
+
+/** Every file the people come from. assets.js loads them with the rest. */
+export const PEOPLE_FILES = ['person_male', 'person_female', 'troll'];
+
+const RIGHT_ARM = ['upperarmR', 'forearmR', 'handR'];
+const LEFT_ARM = ['upperarmL', 'forearmL', 'handL'];
+
+/** Per asset: the clips by name, scale tracks stripped. */
+const clipSets = new WeakMap();
+/**
+ * The clips as the file carries them, less every `.scale` track. The exporter
+ * bakes a scale key for every bone every frame, all of them 1 -- and a mixer
+ * writing 1 into a head bone every frame is what would undo the bigger head
+ * a child or a halfling is given. Nothing in the rig is ever scaled by a clip.
+ */
+function clipsOf(asset) {
+  let set = clipSets.get(asset);
+  if (set) return set;
+  set = { base: new Map(), carried: new Map() };
+  for (const clip of asset.animations) {
+    const c = clip.clone();
+    c.tracks = c.tracks.filter((t) => !t.name.endsWith('.scale'));
+    set.base.set(c.name, c);
+  }
+  clipSets.set(asset, set);
+  return set;
+}
+
+/**
+ * The standing and walking clips with an arm held still round what it
+ * carries: a spear upright, a blade low, a shield at the side. The carry
+ * poses are single-frame clips in the file; their arm tracks replace the
+ * swinging ones and everything else -- the breathing, the stride, the head --
+ * is left as it was. Cached per file and per pair of carry poses.
+ */
+function carriedClip(asset, name, carry) {
+  const set = clipsOf(asset);
+  const clip = set.base.get(name);
+  if (!clip || (!carry.right && !carry.left)) return clip;
+  if (!['idle', 'idle2', 'walk', 'run'].includes(name)) return clip;
+  const key = `${name}|${carry.right}|${carry.left}`;
+  if (set.carried.has(key)) return set.carried.get(key);
+  const swap = new Map();
+  for (const [pose, bones] of [[carry.right, RIGHT_ARM], [carry.left, LEFT_ARM]]) {
+    const src = pose && set.base.get(pose);
+    if (!src) continue;
+    for (const bone of bones) {
+      const track = src.tracks.find((t) => t.name === `${bone}.quaternion`);
+      if (track) swap.set(track.name, track.values.slice(0, 4));
+    }
+  }
+  const out = clip.clone();
+  out.name = `${name}+${carry.right || ''}+${carry.left || ''}`;
+  out.tracks = out.tracks.map((t) => (swap.has(t.name)
+    ? new THREE.QuaternionKeyframeTrack(t.name, [0], swap.get(t.name)) : t));
+  set.carried.set(key, out);
+  return out;
+}
+
+/**
+ * An archetype's own scene: the file's scene with every other archetype
+ * taken out, cloned once and kept. Each person is then a clone of this, with
+ * the head pieces it does not wear removed.
+ */
+const templates = new Map();
+function templateOf(asset, file, arch) {
+  const key = `${file}|${arch}`;
+  if (templates.has(key)) return templates.get(key);
+  const scene = cloneSkinned(asset.scene);
+  const drop = [];
+  let body = null;
+  // Only the rig's own children -- the meshes sit beside the root bone under
+  // the armature node. Deeper, a multi-material mesh is a group whose
+  // primitives are named arch_guard_1, arch_guard_2... and would be taken
+  // for other archetypes and thrown away.
+  const holder = scene.getObjectByName('hips').parent;
+  for (const node of holder.children) {
+    if (node.name.startsWith('arch_')) {
+      if (node.name === `arch_${arch}`) body = node;
+      else drop.push(node);
+    }
+  }
+  if (!body) throw new Error(`actors: ${file}.glb has no arch_${arch}`);
+  for (const node of drop) node.removeFromParent();
+  // Standing height from the body mesh alone, not the hats, read off the
+  // geometry: the rig is at the origin and the geometry is in its rest pose,
+  // while Box3.setFromObject on a skinned mesh asks a skeleton that has not
+  // been posed yet and answers NaN.
+  let top = 0;
+  body.traverse((node) => {
+    if (!node.isMesh) return;
+    if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+    top = Math.max(top, node.geometry.boundingBox.max.y);
+  });
+  const record = { scene, height: top };
+  templates.set(key, record);
+  return record;
+}
+
+/**
+ * One material per surface and colour, shared by everyone who wears it. The
+ * crowd's variety is in the colours, not in how many materials there are:
+ * the twenty cityguards of Midgaard share one tabard.
+ */
+const personMaterials = new Map();
+function personMaterial(library, tag, hex, ghost) {
+  const key = `${tag}|${hex ?? '-'}|${ghost ? 1 : 0}`;
+  if (personMaterials.has(key)) return personMaterials.get(key);
+  const base = library.materialFor(tag);
+  const m = base.clone();
+  // The baked materials expect a colour attribute; the people carry none,
+  // and a missing one reads as black rather than as white.
+  m.vertexColors = false;
+  if (hex !== undefined && hex !== null) m.color.setHex(hex);
+  if (ghost) {
+    // A shade: see-through, lit from inside, and never in the depth buffer,
+    // so what is behind it still draws.
+    m.transparent = true;
+    m.opacity = tag === 'eye' ? 0.8 : 0.34;
+    m.depthWrite = false;
+    m.emissive = new THREE.Color(0x7f98b2);
+    m.emissiveIntensity = 0.55;
+  }
+  personMaterials.set(key, m);
+  return m;
+}
+
+/** The tags a person's own colours go on. */
+const TINTED = new Set(['cloth', 'cloth2', 'linen', 'skin', 'hair', 'leather', 'bone', 'paint']);
+
+/** A carried model from the library, sharing its geometry with every copy. */
+function carried(library, name, tint, ghost) {
+  const asset = library.get(name);
+  if (!asset) return null;
+  const group = new THREE.Group();
+  group.name = name;
+  for (const p of asset.primitives) {
+    const tag = p.materialName;
+    const hex = tag === 'paint' ? tint.cloth : undefined;
+    const material = (TINTED.has(tag) && hex !== undefined) || ghost
+      ? personMaterial(library, tag, hex, ghost) : p.material;
+    const mesh = new THREE.Mesh(p.geometry, material);
+    mesh.castShadow = false;
+    group.add(mesh);
+  }
+  return group;
+}
+
+const tagOfMaterial = (m) => (m && m.name ? m.name.replace(/^MAT:/, '') : '');
+
+/**
+ * A person, dressed. Returns the figure record the rest of the viewer drives:
+ *
+ *   { group, headGroup, height, scale, mixer, actions, clips, stride,
+ *     hitFrame, weapon, shield, castPoint, archetype }
+ *
+ * `actions` holds all eleven clips (idle idle2 walk run fight attack attack2
+ * hit block death cast). The five loops are playing, idle at weight 1 and the
+ * rest at 0; the six one-shots are set to play once and clamp on their last
+ * frame, at weight 0 and not started -- `reset().play()` them. `clips` is name
+ * to seconds, `stride` metres of ground per cycle at this figure's size, and
+ * `hitFrame` the fraction of `attack` and `attack2` at which the blow lands
+ * and of `cast` at which the spell is released. `castPoint` is an Object3D at
+ * the tip of a staff, or in the right fist.
+ */
+function buildPerson(library, who, proto, instance) {
+  const asset = library.get(who.file);
+  const t = templateOf(asset, who.file, who.arch);
+  const body = cloneSkinned(t.scene);
+  const wear = new Set(who.pieces);
+  const drop = [];
+  // Head pieces are the rig's children that are neither the archetype nor a bone.
+  for (const node of body.getObjectByName('hips').parent.children) {
+    if ((node.isMesh || node.isGroup) && !node.isBone && !node.name.startsWith('arch_')
+        && !wear.has(node.name)) drop.push(node);
+  }
+  for (const node of drop) node.removeFromParent();
+  const ghost = who.arch === 'ghost';
+  // One skeleton for the whole person. The loader and the clone give every
+  // primitive of every mesh its own Skeleton over the same bones -- nine or
+  // ten per person -- and the renderer recomputes and re-uploads each one's
+  // bone texture every frame. They are all bound to the same joints with the
+  // same inverse binds (one skin in the file), so one will do, and the
+  // renderer updates a shared skeleton once a frame.
+  let skeleton = null;
+  body.traverse((node) => {
+    if (!node.isSkinnedMesh) return;
+    if (!skeleton) { skeleton = node.skeleton; return; }
+    const same = node.skeleton.bones.length === skeleton.bones.length
+      && node.skeleton.bones.every((b, i) => b === skeleton.bones[i]);
+    if (same) node.bind(skeleton, node.bindMatrix);
+  });
+  body.traverse((node) => {
+    if (!node.isMesh) return;
+    // Figures stay out of the sun's shadow map: a skinned mesh there is a
+    // second skinning pass for a shadow the hand-placed contact patch
+    // already draws.
+    node.castShadow = false;
+    node.receiveShadow = !ghost;
+    const tag = tagOfMaterial(node.material);
+    node.material = personMaterial(library, tag, TINTED.has(tag) ? who.tint[tag] : undefined, ghost);
+    if (ghost) node.renderOrder = 2;
+  });
+  // A little of each person's own height, so a crowd is not one stature.
+  const scale = who.scale * (0.95 + strHash(`${proto.short}#${instance}`, 3) * 0.10);
+  body.scale.setScalar(scale);
+  if (who.headScale !== 1) {
+    const head = body.getObjectByName('head');
+    if (head) head.scale.setScalar(who.headScale);
+  }
+  const group = new THREE.Group();
+  group.add(body);
+
+  // What it holds. The grip bones are in the weapons' own frame, so a
+  // weapon sits in the hand with no offset at all -- see weapons.py.
+  let weapon = null;
+  let shield = null;
+  if (who.weapon) {
+    weapon = carried(library, who.weapon, who.tint, ghost);
+    const grip = body.getObjectByName('gripR');
+    if (weapon && grip) grip.add(weapon);
+    else weapon = null;
+  }
+  if (who.shield) {
+    shield = carried(library, who.shield, who.tint, ghost);
+    const mount = body.getObjectByName('shieldL');
+    if (shield && mount) mount.add(shield);
+    else shield = null;
+  }
+
+  // Where a spell leaves from: the knot of a staff, or else the right fist.
+  // weapons.py puts the staff's top at 0.855 m up its own axis.
+  const castPoint = new THREE.Object3D();
+  castPoint.name = 'castPoint';
+  if (weapon && who.weapon === 'weapon_staff') {
+    castPoint.position.set(0, 0.86, 0);
+    weapon.add(castPoint);
+  } else {
+    const grip = body.getObjectByName('gripR');
+    if (!grip) throw new Error(`actors: ${who.file}.glb has no gripR bone`);
+    castPoint.position.set(0, 0.03, 0);
+    grip.add(castPoint);
+  }
+
+  const carry = carryOf({ weapon: weapon ? who.weapon : null, shield: shield ? who.shield : null });
+  const mixer = new THREE.AnimationMixer(body);
+  const actions = {};
+  const clips = {};
+  const start = strHash(`${proto.short}#${instance}`, 13);
+  for (const name of CLIPS) {
+    const clip = carriedClip(asset, name, carry);
+    if (!clip) throw new Error(`actors: ${who.file}.glb has no clip "${name}"`);
+    const action = mixer.clipAction(clip);
+    clips[name] = clip.duration;
+    if (LOOPS.has(name)) {
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.time = start * clip.duration; // everyone on their own beat
+      action.setEffectiveWeight(name === 'idle' ? 1 : 0);
+      action.play();
+    } else {
+      action.setLoop(THREE.LoopOnce, 1);
+      action.clampWhenFinished = true;
+      action.setEffectiveWeight(0);
+    }
+    actions[name] = action;
+  }
+  // Kept for update(), which times the walk against it.
+  actions.walkCycle = clips.walk;
+  // Stand them in the idle before anything draws: until a mixer update the
+  // skeleton is in its bind pose, and `state.benchmark` stops the loop before
+  // the actors are updated.
+  mixer.update(0);
+  const facts = CLIP_FACTS[who.file];
+  return {
+    group, headGroup: null, height: t.height * scale, scale, mixer, actions, clips,
+    stride: { walk: facts.walk * scale, run: facts.run * scale },
+    hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
+  };
+}
+
+
 /**
  * Not everything in a mud is a person. Midgaard alone has a swan, a sparrow, a
- * wolf, two puppies and a duckling, and dressing them all in the townsperson
- * model is exactly as funny as it sounds. These are built from primitives like
- * the old figures were, because a handful of beasts is not worth a rig.
+ * wolf, two puppies and a duckling; the Shire keeps cows, pigs, hens and
+ * horses; Haon Dor has a bear, a deer, a fox and a pack of wolves.
+ *
+ * Each of these is one of a handful of modelled, rigged animals out of
+ * tools/blender/beasts.py -- a canine, a feline, an equine and so on -- and
+ * the breed or species is laid on here: a scale, a coat, a pale belly, dark
+ * points, patches, and which of the model's optional parts it has. A beagle,
+ * a rottweiler, a grey wolf and a red fox are one mesh. The masks those
+ * colours go into are in the model's vertex colours (R pale, G points, B a
+ * noise thresholded into patches); the mix is done once per look and shared.
+ *
+ * Order matters: the first entry whose test matches wins, so the narrower
+ * words come before the broader ones. `box` is the old primitive figure --
+ * shoulder, length, kind, colour -- which is still what gets built if the
+ * model is missing or `?assets=off`.
+ *
+ * Tested over all 45 stock areas. The reject list is as load-bearing as the
+ * match list: a wererat is a man, Herald the ettin has "mouse" in his
+ * keywords, a wolf spider is a spider, the dark horseman rides nothing, and
+ * the dragon master, the Dragonknights and the attendant of the dragon are
+ * people.
  */
-const BEASTS = {
-  // keyword test           shoulder  length  kind      colour
-  swan: [/swan/, 0.62, 0.9, 'bird', 0xf2f0ea],
-  duck: [/duckling/, 0.16, 0.24, 'bird', 0xc8b06a],
-  duck2: [/duck|goose|hen|chicken/, 0.28, 0.42, 'bird', 0xb9a06d],
-  sparrow: [/sparrow|pigeon|bird|raven|crow|gull/, 0.11, 0.17, 'bird', 0x6b5a45],
-  wolf: [/wolf|hound|mastiff/, 0.72, 1.15, 'quad', 0x5b5750],
-  rottweiler: [/rottweiler|doberman/, 0.62, 1.0, 'quad', 0x2e2622],
-  fido: [/fido|beagle|dog|cur|mutt/, 0.5, 0.85, 'quad', 0x7a6247],
-  // After the dogs on purpose: hood.are's pitbull is "dog pit bull pitbull",
-  // and `\bbull\b` matches it. Over all 45 stock areas this otherwise picks up
-  // exactly four mobiles -- the Shire's cow and bull, and ofcol2's two cows --
-  // every one of which was being built as a human townsperson standing in a
-  // barn, which is not what a barn full of cows looks like.
-  cattle: [/\b(cow|cows|bull|bulls|ox|oxen|cattle|calf|heifer|steer)\b/, 1.4, 2.15, 'quad', 0x6d5a4a],
-  puppy: [/puppy|pup\b/, 0.26, 0.42, 'quad', 0x8a7355],
-  kitten: [/kitten/, 0.2, 0.34, 'quad', 0x6f6558],
-  cat: [/\bcat\b|feline/, 0.3, 0.5, 'quad', 0x4a4038],
-  rat: [/\brat\b|mouse|rodent|vermin/, 0.14, 0.26, 'quad', 0x4d453c],
-  horse: [/horse|mare|pony|mule|donkey/, 1.45, 2.1, 'quad', 0x6b4f36],
-  pig: [/\bpig\b|boar|hog|sow/, 0.62, 1.0, 'quad', 0x9a7a6c],
-  bear: [/bear/, 1.0, 1.6, 'quad', 0x4a3728],
+const NOT_A_BEAST = /\b(were\w*|ettin|herald|horseman|horsehead|nebula|vampire|lamia|centaur|minotaur|master|dragonlord|dragonknight|spider|hierophant|attendant)\b/;
+
+const BEASTS = [
+  // --- canines. Two ear sets are modelled; `hide` collapses the one a breed
+  // does not have.
+  { test: /\bwargs?\b/, asset: 'beast_canine', scale: 1.6, coat: 0x26221f, pale: 0x3a342e, points: 0x151311, hide: ['flop'], box: [1.0, 1.6, 'quad', 0x2b2724] },
+  { test: /\b(guardian|roving) beast\b/, asset: 'beast_canine', scale: 1.7, coat: 0x1b1918, pale: 0x2b2724, points: 0x100f0e, hide: ['flop'], grow: { head: 1.1 }, box: [1.0, 1.6, 'quad', 0x1b1918] },
+  { test: /\b(wolf|wolves)\b/, asset: 'beast_canine', scale: 1.32, coat: 0x807870, pale: 0xd9d2c4, points: 0x4d4841, hide: ['flop'], grow: { tail1: 1.1 }, box: [0.72, 1.15, 'quad', 0x5b5750] },
+  { test: /\bfox(es)?\b/, asset: 'beast_canine', scale: 0.72, coat: 0xa4501e, pale: 0xefe8dc, points: 0x1f1813, hide: ['flop'], grow: { ear: 1.35, tail1: 1.3 }, box: [0.4, 0.7, 'quad', 0xa4501e] },
+  { test: /\b(rottweiler|doberman)\b/, asset: 'beast_canine', scale: 1.08, width: 1.12, coat: 0x1c1917, pale: 0x8a5630, points: 0x8a5630, hide: ['ear'], grow: { flop: 0.7 }, box: [0.62, 1.0, 'quad', 0x2e2622] },
+  { test: /\b(hound|mastiff|cooshee|pitbull)s?\b/, asset: 'beast_canine', scale: 1.15, width: 1.1, coat: 0x5f4d3c, pale: 0xb8a58a, points: 0x3a2f25, hide: ['ear'], box: [0.72, 1.15, 'quad', 0x5b5750] },
+  { test: /\bbeagles?\b/, asset: 'beast_canine', scale: 0.7, coat: 0xa06c38, pale: 0xf1ede4, points: 0xf1ede4, patch: 0x1e1a16, cover: 0.42, hide: ['ear'], grow: { flop: 1.15 }, box: [0.5, 0.85, 'quad', 0x7a6247] },
+  { test: /\b(puppy|puppies|pup)\b/, asset: 'beast_canine', scale: 0.5, coat: 0x8e7152, pale: 0xe2d6c2, points: 0x5a4632, hide: ['ear'], grow: { head: 1.35, flop: 1.1 }, box: [0.26, 0.42, 'quad', 0x8a7355] },
+  { test: /\b(fido|dog|dogs|cur|mutt|mongrel)\b/, asset: 'beast_canine', scale: 0.82, coat: 0x6b5641, pale: 0xa6927a, points: 0x3a3028, patch: 0xcfc6b4, cover: 0.2, hide: ['ear'], box: [0.5, 0.85, 'quad', 0x7a6247] },
+  // --- cats, great and small. The patch channel on the feline is tabby
+  // stripes, so `cover` is how striped it is.
+  { test: /\btigers?\b/, asset: 'beast_feline', scale: 4.0, coat: 0xc0692a, pale: 0xefe6d6, points: 0xc0692a, patch: 0x1a1512, cover: 0.42, box: [1.0, 1.9, 'quad', 0xc0692a] },
+  { test: /\b(lion|lions|cougar|puma)\b/, asset: 'beast_feline', scale: 3.6, coat: 0xa98352, pale: 0xe3d6bc, points: 0xa98352, box: [1.0, 1.9, 'quad', 0xa98352] },
+  { test: /\b(panther|jaguar|displacer)\b/, asset: 'beast_feline', scale: 3.3, coat: 0x161515, pale: 0x221f1d, points: 0x161515, box: [0.8, 1.6, 'quad', 0x161515] },
+  { test: /\b(leopard|lynx)\b/, asset: 'beast_feline', scale: 2.6, coat: 0xc49a55, pale: 0xefe6d6, points: 0xc49a55, patch: 0x2a2018, cover: 0.3, box: [0.7, 1.3, 'quad', 0xc49a55] },
+  { test: /\bkittens?\b/, asset: 'beast_feline', scale: 0.6, coat: 0x7d7266, pale: 0xd8d0c4, points: 0x7d7266, patch: 0x3b342e, cover: 0.5, grow: { head: 1.25, ear: 1.15 }, box: [0.2, 0.34, 'quad', 0x6f6558] },
+  { test: /\b(cat|cats|feline)\b/, asset: 'beast_feline', scale: 1.0, coat: 0x6b5a48, pale: 0xcfc3b0, points: 0x6b5a48, patch: 0x2f2720, cover: 0.5, box: [0.3, 0.5, 'quad', 0x4a4038] },
+  // --- rodents.
+  { test: /\b(mouse|mice)\b/, asset: 'beast_rodent', scale: 0.45, coat: 0x7b6e62, pale: 0xc8bdb0, points: 0x7b6e62, grow: { head: 1.2, ear: 1.4 }, box: [0.07, 0.13, 'quad', 0x7b6e62] },
+  { test: /\b(gigantic|giant) rat\b|\brat (gigantic|giant)\b/, asset: 'beast_rodent', scale: 4.0, coat: 0x4a3f35, pale: 0x8a7e70, points: 0x4a3f35, box: [0.5, 0.9, 'quad', 0x4d453c] },
+  { test: /\b(rat|rats|rodent|vermin)\b/, asset: 'beast_rodent', scale: 1.2, coat: 0x5e5043, pale: 0x9e9180, points: 0x5e5043, box: [0.14, 0.26, 'quad', 0x4d453c] },
+  // --- horses, and the deer, which is a lighter build of the same frame.
+  // Horses vary coat by the mobile, so a stable of four is not one horse.
+  { test: /\b(donkey|donkeys)\b/, asset: 'beast_equine', scale: 0.72, coat: 0x756b60, pale: 0xdcd4c8, points: 0x2c2723, grow: { ear: 1.8 }, box: [1.1, 1.6, 'quad', 0x756b60] },
+  { test: /\b(mule|mules)\b/, asset: 'beast_equine', scale: 0.88, coat: 0x5a4636, pale: 0xb7a58e, points: 0x2a221c, grow: { ear: 1.5 }, box: [1.3, 1.9, 'quad', 0x5a4636] },
+  { test: /\b(pony|ponies)\b/, asset: 'beast_equine', scale: 0.72, coats: 'horse', box: [1.1, 1.6, 'quad', 0x6b4f36] },
+  { test: /\bpegasus\b/, asset: 'beast_equine', scale: 1.0, coat: 0xe9e5dd, pale: 0xe9e5dd, points: 0xcfcac2, box: [1.45, 2.1, 'quad', 0xe9e5dd] },
+  { test: /\b(horse|horses|mare|stallion|steed|colt|foal)\b/, asset: 'beast_equine', scale: 1.0, coats: 'horse', box: [1.45, 2.1, 'quad', 0x6b4f36] },
+  { test: /\b(stag|stags|elk)\b/, asset: 'beast_cervid', scale: 1.15, coat: 0x8c5c32, pale: 0xefe6d6, points: 0x3a2c20, patch: 0xefe6d6, cover: 0.14, box: [0.95, 1.4, 'quad', 0x8c5c32] },
+  { test: /\b(deer|doe|fawn)\b/, asset: 'beast_cervid', scale: 1.0, coat: 0x9c6a3a, pale: 0xefe6d6, points: 0x3a2c20, patch: 0xefe6d6, cover: 0.18, hide: ['antler'], box: [0.85, 1.3, 'quad', 0x9c6a3a] },
+  // --- cattle. `\bbull\b` would match hood.are's pitbull, which is why the
+  // dogs come first. Cows have small horns, a bull big ones and no udder.
+  { test: /\b(bull|bulls|ox|oxen|steer)\b/, asset: 'beast_bovine', scale: 1.1, width: 1.12, coat: 0x2a221d, pale: 0x3a302a, points: 0x1f1915, hide: ['udder'], grow: { horn: 1.25, neck: 1.1 }, box: [1.4, 2.15, 'quad', 0x2a221d] },
+  { test: /\b(calf|calves)\b/, asset: 'beast_bovine', scale: 0.55, coats: 'cow', hide: ['udder', 'horn'], grow: { head: 1.25, ear: 1.1 }, box: [0.8, 1.2, 'quad', 0x6d5a4a] },
+  { test: /\b(cow|cows|cattle|heifer)\b/, asset: 'beast_bovine', scale: 1.0, coats: 'cow', grow: { horn: 0.7 }, box: [1.4, 2.15, 'quad', 0x6d5a4a] },
+  // --- pigs.
+  { test: /\b(boar|boars|warthog)\b/, asset: 'beast_pig', scale: 1.0, coat: 0x3a3029, pale: 0x4a3e34, points: 0x1f1a16, grow: { tusk: 1.2 }, box: [0.62, 1.0, 'quad', 0x3a3029] },
+  { test: /\b(pig|pigs|hog|hogs|sow|swine|piglet)\b/, asset: 'beast_pig', scale: 1.0, coat: 0xd6a494, pale: 0xe8c4b6, points: 0xd6a494, hide: ['tusk'], box: [0.62, 1.0, 'quad', 0x9a7a6c] },
+  // --- bears. The marsh's "huge hairy beast" is twenty feet of green-furred
+  // claws, and a bear is the nearest thing the library has to one.
+  { test: /\bhairy beast\b/, asset: 'beast_bear', scale: 2.4, coat: 0x3d4a2e, pale: 0x4d5a3a, points: 0x252e1c, box: [2.0, 3.2, 'quad', 0x3d4a2e] },
+  { test: /\bteddy\b/, asset: 'beast_bear', scale: 0.32, coat: 0x9a7248, pale: 0xc9a77c, points: 0x9a7248, grow: { head: 1.4, ear: 1.3 }, box: [0.3, 0.45, 'quad', 0x9a7248] },
+  { test: /\bbears?\b/, asset: 'beast_bear', scale: 1.0, coat: 0x4a3322, pale: 0x5c4230, points: 0x2a1d14, box: [1.0, 1.6, 'quad', 0x4a3728] },
+  // --- birds. The duck's patch channel is its head, so a drake's goes green.
+  // --- dragons, before the worms: "dragon wormkin" is a dragon. Haon Dor's
+  // is "huge"; hatchlings and fairy dragons are the same beast, small.
+  { test: /\b(fairy dragon|pet dragon)\b/, asset: 'beast_dragon', scale: 0.12, coat: 0x6a8a4a, pale: 0xc8c890, points: 0x3a4a2a, box: [0.2, 1, 'quad', 0x6a8a4a] },
+  { test: /\b(hatchling|baby|young)\b.*\bdragon\b|\bdragon\b.*\b(hatchling|baby|young)\b/, asset: 'beast_dragon', scale: 0.3, coat: 0x5a7a3a, pale: 0xb8b880, points: 0x2e3e20, box: [0.5, 2.5, 'quad', 0x5a7a3a] },
+  { test: /\bwyverns?\b/, asset: 'beast_dragon', scale: 0.75, coat: 0x5a5244, pale: 0xa89c80, points: 0x2e2a22, box: [1.3, 6, 'quad', 0x5a5244] },
+  { test: /\bdragons?\b/, asset: 'beast_dragon', scale: 0.8, coat: 0x3a5a2a, pale: 0xa8a870, points: 0x1e2e16, patch: 0x2a3a1c, cover: 0.3, box: [1.7, 9, 'quad', 0x3a5a2a] },
+  // --- serpents. A python is three metres; the marsh's anaconda is ten in the
+  // mud's own words, and gets six, which is still the largest thing in it.
+  { test: /\banaconda\b/, asset: 'beast_snake', scale: 2.0, coat: 0x4a5230, pale: 0x9a9468, points: 0x4a5230, patch: 0x1a1c12, cover: 0.4, box: [0.3, 6, 'quad', 0x4a5230] },
+  { test: /\bpython\b/, asset: 'beast_snake', scale: 1.1, coat: 0x8a7248, pale: 0xd8ccaa, points: 0x8a7248, patch: 0x3a2c1a, cover: 0.45, box: [0.2, 3, 'quad', 0x8a7248] },
+  { test: /\b(snake|snakes|serpent|viper|cobra|adder|asp)\b/, asset: 'beast_snake', scale: 0.55, coat: 0x5a5a3a, pale: 0xb8b490, points: 0x5a5a3a, patch: 0x26261a, cover: 0.35, box: [0.12, 1.5, 'quad', 0x5a5a3a] },
+  { test: /\b(worm|worms|iceworm|slug)\b/, asset: 'beast_worm', scale: 1.0, coat: 0x8a6a62, pale: 0xb08a80, points: 0x8a6a62, patch: 0x6a4c46, cover: 0.3, box: [0.14, 1.3, 'quad', 0x8a6a62] },
+  { test: /\bswans?\b/, asset: 'beast_swan', scale: 1.0, coat: 0xefeeea, pale: 0xf4f3ef, points: 0xe2e0da, box: [0.62, 0.9, 'bird', 0xf2f0ea] },
+  { test: /\bducklings?\b/, asset: 'beast_duck', scale: 0.45, coat: 0xd6be5c, pale: 0xe8d88e, points: 0xb09a48, grow: { head: 1.45, wing1: 0.7 }, horn: 0x7a6a50, box: [0.16, 0.24, 'bird', 0xc8b06a] },
+  { test: /\b(goose|geese)\b/, asset: 'beast_duck', scale: 1.55, coat: 0x8c877e, pale: 0xdad6ce, points: 0x3c3732, horn: 0xffb070, box: [0.4, 0.6, 'bird', 0x8c877e] },
+  { test: /\b(duck|ducks|mallard)\b/, asset: 'beast_duck', scale: 1.0, coat: 0x8f8a80, pale: 0x6e4332, points: 0x2c2b2a, patch: 0x1d5a2c, cover: 0.5, box: [0.28, 0.42, 'bird', 0xb9a06d] },
+  { test: /\b(hen|hens|chicken|chickens|rooster|cockerel|pullet)\b/, asset: 'beast_hen', scale: 1.0, coats: 'hen', box: [0.28, 0.42, 'bird', 0xb9a06d] },
+  { test: /\b(raven|crow|rook|jackdaw)s?\b/, asset: 'beast_songbird', scale: 2.5, coat: 0x17171b, pale: 0x1f1f24, points: 0x101012, horn: 0x383838, box: [0.3, 0.45, 'bird', 0x17171b] },
+  { test: /\b(gull|seagull)s?\b/, asset: 'beast_songbird', scale: 2.7, coat: 0xe6e6e4, pale: 0xf0f0ee, points: 0x3a3a3c, horn: 0xffd070, box: [0.3, 0.45, 'bird', 0xe6e6e4] },
+  { test: /\b(pigeon|dove)s?\b/, asset: 'beast_songbird', scale: 2.0, coat: 0x86888f, pale: 0x9c8c98, points: 0x3a3c42, patch: 0x5d6b70, cover: 0.5, horn: 0x8a6060, box: [0.2, 0.3, 'bird', 0x86888f] },
+  { test: /\b(sparrow|bird|finch|robin|wren|songbird)s?\b/, asset: 'beast_songbird', scale: 1.0, coat: 0x7a5a3c, pale: 0xbcae9a, points: 0x3a2a1e, patch: 0x6c6a66, cover: 0.5, box: [0.11, 0.17, 'bird', 0x6b5a45] },
+];
+
+/**
+ * Coats that vary by the mobile rather than the breed: the Shire keeps four
+ * horses, three cows and six hens, and a herd of identical clones reads as
+ * exactly what it is. `seed` picks one per mobile in the room.
+ */
+const COATS = {
+  horse: [
+    { coat: 0x6a4226, pale: 0x6a4226, points: 0x1b1714 }, // bay
+    { coat: 0x8a4f26, pale: 0x9a5c30, points: 0x8a4f26 }, // chestnut
+    { coat: 0x9c9890, pale: 0xb8b4ac, points: 0x4a4744 }, // grey
+    { coat: 0x221e1c, pale: 0x2a2522, points: 0x151312 }, // black
+    { coat: 0xa88a5a, pale: 0xd8ccb4, points: 0x2a241e }, // dun
+  ],
+  cow: [
+    { coat: 0xe6e2da, pale: 0xece8e0, points: 0xd8d2c8, patch: 0x1d1a18, cover: 0.52 }, // black and white
+    { coat: 0x70482c, pale: 0xc7b49a, points: 0x5a3a24 }, // brown
+    { coat: 0x8a4a28, pale: 0xe2d8cc, points: 0x8a4a28, patch: 0xe8e2d8, cover: 0.35 }, // red and white
+    { coat: 0xb89a70, pale: 0xe0d2bc, points: 0x8a7050 }, // fawn
+  ],
+  hen: [
+    { coat: 0x8a4a26, pale: 0x9a5a30, points: 0x3a2418 }, // russet
+    { coat: 0xe8e4dc, pale: 0xf0ece6, points: 0xcfc8bc }, // white
+    { coat: 0x2a2624, pale: 0x3a3430, points: 0x1a1816, horn: 0x8a8070 }, // black
+    { coat: 0xb88a4a, pale: 0xd8b88a, points: 0x5a3a20 }, // buff
+  ],
 };
+
+/** Colour words in a mobile's name that should win over the breed's coat. */
+const COAT_WORDS = [
+  [/\bblack\b/, 0x221e1b], [/\bwhite\b/, 0xe4e0d8], [/\b(grey|gray)\b/, 0x807d78],
+  [/\bbrown\b/, 0x5e4531], [/\bred\b/, 0x8c3f1f], [/\bgold(en)?\b/, 0xb0873f],
+  [/\bgreen\b/, 0x3a5a2a], [/\bblue\b/, 0x34506e], [/\b(brass|bronze)\b/, 0x9a7a3a],
+];
 
 export function beastKind(proto) {
   const words = `${proto.keywords} ${proto.short}`.toLowerCase();
-  for (const key of Object.keys(BEASTS)) {
-    if (BEASTS[key][0].test(words)) return BEASTS[key];
-  }
-  return null;
+  if (NOT_A_BEAST.test(words)) return null;
+  return BEASTS.find((b) => b.test.test(words)) || null;
 }
 
-function buildBeastFigure(spec, proto) {
-  const [, shoulder, length, kind, colour] = spec;
+/**
+ * The modelled animal if its asset loaded, the primitive one if not. Either
+ * way the record has the shape `update()` expects of a figure.
+ */
+function buildBeastFigure(spec, proto, library, options = {}) {
+  const asset = library && spec.asset ? library.get(spec.asset) : null;
+  if (asset && asset.animations.length) return buildModelledBeast(asset, spec, proto, library, options);
+  return buildBoxBeast(spec.box, proto);
+}
+
+// Clips that play on a loop, blended by weight. The rest are one-shots the
+// caller starts: attack, hit, and death (which holds its last frame).
+const LOOPED_CLIPS = new Set(['idle', 'walk', 'run', 'swim', 'fly', 'float']);
+
+/**
+ * Once per asset: the clips lose their scale tracks, because breeds are
+ * proportioned by scaling bones -- a puppy's head, a fox's ears -- and a
+ * sampled scale track would put every bone back to 1 on the first frame.
+ * The numbers the viewer needs about the rig (stride per cycle, when a bite
+ * lands) were measured in Blender and ride along in the file as extras.
+ */
+function prepareBeast(asset) {
+  if (asset.beast) return asset.beast;
+  for (const clip of asset.animations) {
+    clip.tracks = clip.tracks.filter((track) => !track.name.endsWith('.scale'));
+  }
+  let info = null;
+  asset.scene.traverse((node) => {
+    if (!info && node.userData && node.userData.diku) info = node.userData.diku;
+  });
+  if (typeof info === 'string') info = JSON.parse(info);
+  asset.beast = info || {};
+  asset.beastGeometry = new Map();
+  return asset.beast;
+}
+
+const _paint = new THREE.Color();
+const _pale = new THREE.Color();
+const _points = new THREE.Color();
+const _patch = new THREE.Color();
+
+/**
+ * One coat, mixed into a copy of the geometry and shared by every mobile that
+ * wears it. Fur and feathers read their masks; the horn parts (eyes, hooves,
+ * beaks) keep the colour they were modelled with, times `horn` if the look
+ * darkens them -- a crow's beak and legs are the duck's, in black.
+ */
+function paintedGeometry(asset, node, tag, look) {
+  const key = `${node.name}|${look.key}`;
+  const cache = asset.beastGeometry;
+  if (cache.has(key)) return cache.get(key);
+  const geometry = node.geometry.clone();
+  const source = geometry.attributes.color;
+  const count = geometry.attributes.position.count;
+  const out = new Float32Array(count * 3);
+  const coated = tag === 'fur' || tag === 'feather' || tag === 'scales';
+  _paint.setHex(look.coat);
+  _pale.setHex(look.pale);
+  _points.setHex(look.points);
+  _patch.setHex(look.patch);
+  const horn = new THREE.Color(look.horn ?? 0xffffff);
+  const edge = 1 - (look.cover || 0);
+  for (let i = 0; i < count; i++) {
+    const a = source ? source.getX(i) : 0;
+    const b = source ? source.getY(i) : 0;
+    const c = source ? source.getZ(i) : 0;
+    if (!coated) {
+      out[i * 3] = (source ? a : 1) * horn.r;
+      out[i * 3 + 1] = (source ? b : 1) * horn.g;
+      out[i * 3 + 2] = (source ? c : 1) * horn.b;
+      continue;
+    }
+    let r = _paint.r; let g = _paint.g; let bl = _paint.b;
+    if (look.cover) {
+      const t = THREE.MathUtils.smoothstep(c, edge - 0.035, edge + 0.035);
+      r += (_patch.r - r) * t; g += (_patch.g - g) * t; bl += (_patch.b - bl) * t;
+    }
+    r += (_pale.r - r) * a; g += (_pale.g - g) * a; bl += (_pale.b - bl) * a;
+    r += (_points.r - r) * b; g += (_points.g - g) * b; bl += (_points.b - bl) * b;
+    out[i * 3] = r; out[i * 3 + 1] = g; out[i * 3 + 2] = bl;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(out, 3));
+  cache.set(key, geometry);
+  return geometry;
+}
+
+function beastLook(spec, proto, seed = 0) {
+  const words = `${proto.keywords} ${proto.short}`.toLowerCase();
+  const base = spec.coats ? COATS[spec.coats][Math.floor(seed * COATS[spec.coats].length)] : spec;
+  const look = {
+    coat: base.coat ?? 0x6b5641, pale: base.pale ?? base.coat ?? 0x6b5641,
+    points: base.points ?? base.coat ?? 0x6b5641, patch: base.patch ?? 0x000000,
+    cover: base.cover || 0, horn: base.horn ?? spec.horn,
+  };
+  for (const [re, hex] of COAT_WORDS) {
+    if (!re.test(words)) continue;
+    // A black wolf is black all over; a white cat keeps nothing of the tabby.
+    look.coat = hex;
+    look.pale = spec.pale && hex === 0x221e1b ? 0x3a3430 : hex;
+    look.cover = 0;
+    break;
+  }
+  look.key = [look.coat, look.pale, look.points, look.patch, look.cover, look.horn].join(',');
+  return look;
+}
+
+function buildModelledBeast(asset, spec, proto, library, options = {}) {
+  const info = prepareBeast(asset);
+  const look = beastLook(spec, proto, options.seed || 0);
+  const group = new THREE.Group();
+  const body = cloneSkinned(asset.scene);
+  body.traverse((node) => {
+    if (!node.isMesh) return;
+    // Out of the shadow map like the people, for the same reason: a skinned
+    // mesh there is a second skinning pass. The contact shadow is placed by
+    // hand in populate(), and knows how long the animal is.
+    node.castShadow = false;
+    const tag = node.material && node.material.name ? node.material.name.replace(/^MAT:/, '') : '';
+    node.material = library.materialFor(tag);
+    node.geometry = paintedGeometry(asset, node, tag, look);
+  });
+  const scale = (spec.scale || 1) * (0.94 + strHash(proto.short, 3) * 0.12);
+  const width = spec.width || 1;
+  body.scale.set(scale * width, scale, scale);
+  // Proportions: bones scaled in the bind pose. `hide` collapses a part the
+  // breed does not have (a beagle's pricked ears, a cow's horns) to nothing.
+  const grow = { ...(spec.grow || {}) };
+  for (const part of spec.hide || []) grow[part] = 0.001;
+  const prefixes = Object.keys(grow).map((k) => [THREE.PropertyBinding.sanitizeNodeName(k), grow[k]]);
+  body.traverse((node) => {
+    if (!node.isBone) return;
+    for (const [prefix, k] of prefixes) {
+      if (node.name === prefix || (node.name.startsWith(prefix) && /^[LR]$/.test(node.name.slice(prefix.length)))) {
+        node.scale.setScalar(k);
+      }
+    }
+  });
+  group.add(body);
+
+  const mixer = new THREE.AnimationMixer(body);
+  const actions = {};
+  const clips = {};
+  const start = strHash(proto.short, 13);
+  for (const clip of asset.animations) {
+    const action = mixer.clipAction(clip);
+    clips[clip.name] = clip.duration;
+    if (LOOPED_CLIPS.has(clip.name)) {
+      action.setLoop(THREE.LoopRepeat, Infinity);
+      action.time = start * clip.duration;
+      action.setEffectiveWeight(clip.name === 'idle' ? 1 : 0);
+      action.play();
+    } else {
+      action.setLoop(THREE.LoopOnce, 1);
+      action.clampWhenFinished = true;
+      action.setEffectiveWeight(0);
+    }
+    actions[clip.name] = action;
+  }
+  const stride = {};
+  for (const [k, v] of Object.entries(info.stride || {})) stride[k] = v * scale;
+  // On water a swan or a duck floats and paddles: its idle is `float` and its
+  // walk is `swim`, both of which carry the body down to the waterline. The
+  // land clips are stopped rather than kept at zero, so nothing else can
+  // blend a standing duck back in over the pond.
+  let afloat = false;
+  if (options.afloat && actions.float && actions.swim) {
+    afloat = true;
+    actions.idle.stop();
+    actions.walk.stop();
+    actions.float.setEffectiveWeight(1);
+    actions.idle = actions.float;
+    actions.walk = actions.swim;
+    delete actions.float;
+    delete actions.swim;
+    clips.idle = clips.float;
+    clips.walk = clips.swim;
+    if (stride.swim) stride.walk = stride.swim;
+  }
+  mixer.update(0);
+
+  const size = asset.size;
+  group.userData.footprint = { length: size.z * scale, width: size.x * scale * width };
+  return {
+    group, headGroup: null, height: size.y * scale, scale, mixer, actions, clips, stride,
+    hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
+    afloat,
+  };
+}
+
+function buildBoxBeast(spec, proto) {
+  const [shoulder, length, kind, colour] = spec;
   const tint = new THREE.Color(colour);
   const dark = tint.clone().multiplyScalar(0.7).getHex();
   const parts = [];
@@ -844,11 +1420,18 @@ export function populate(world, layout, built, options = {}) {
     room.mobs.forEach((mob, index) => {
       const proto = { ...mob.proto, equipment: mob.equipment };
       const beast = beastKind(mob.proto);
-      const person = beast ? null : model(['townsperson']);
-      const made = beast ? buildBeastFigure(beast, proto)
-        : (person && assets.get(person).animations.length
-          ? buildModelledFigure(assets.get(person), proto, assets)
-          : buildFigure(proto));
+      // Who this is, per instance: the same prototype reset twice is two
+      // people with the same trade and their own hair.
+      const who = beast ? null : personOf({ ...proto, shop: mob.shop }, ITEM, vnum * 31 + index);
+      const person = !beast && !who ? model(['townsperson']) : null;
+      const made = beast ? buildBeastFigure(beast, proto, assets, {
+        seed: strHash(`${vnum}|${mob.proto.vnum}`, index),
+        afloat: room.sector === SECTOR.WATER_SWIM || room.sector === SECTOR.WATER_NOSWIM,
+      })
+        : (who && assets && assets.has(who.file) ? buildPerson(assets, who, proto, vnum * 31 + index)
+          : (person && assets.get(person).animations.length
+            ? buildModelledFigure(assets.get(person), proto, assets)
+            : buildFigure(proto)));
       const { group: fig, headGroup, height } = made;
       // Never at the centre of the room: that is where you arrive.
       const angle = (index / count) * Math.PI * 2 + strHash(mob.proto.keywords, 1) * 2;
@@ -880,8 +1463,10 @@ export function populate(world, layout, built, options = {}) {
         room: vnum,
         homeSpot: { x: fig.position.x, z: fig.position.z },
         seed: Math.floor(strHash(`${mob.proto.short}#${vnum}#${index}`, 17) * 1e9) + 1,
-        // Birds may cross water; nobody else strolls into it.
-        swims: !!(beast && beast[3] === 'bird'),
+        // A bird reset afloat stays on the water it was reset on -- its idle
+        // and walk are `float` and `swim`, which ride at the waterline and
+        // would sink it into dry ground. The boxed birds keep the old licence.
+        swims: !!(beast && (made.afloat || (!made.mixer && beast.box && beast.box[2] === 'bird'))),
       };
       figures.push(record);
 
@@ -1856,32 +2441,37 @@ export function populate(world, layout, built, options = {}) {
       // behind the body from any eye-level view, and a judge metering the
       // ground beside a pair of feet read 1.006x the surrounding paving:
       // present in the buffers, invisible in the frame.
-      if (down > 0) {
-        const yaw = fig.object.rotation.y;
+      // An animal is longer than it is wide, so its patch is an ellipse laid
+      // along its body, and what the sun throws is its outline seen from the
+      // sun: the length across the light, the width along it, turned as the
+      // animal turns. A fallen animal is already lying along that ellipse.
+      const foot = fig.object.userData.footprint;
+      const turn = foot ? yaw - fig.object.rotation.y : 0;
+      const across = foot ? Math.abs(foot.length * Math.sin(turn)) + Math.abs(foot.width * Math.cos(turn)) : width;
+      const along = foot ? Math.abs(foot.length * Math.cos(turn)) + Math.abs(foot.width * Math.sin(turn)) : width;
+      if (down > 0 && !foot) {
         const back = fig.legs ? 0 : height * 0.45 * down;
-        px -= Math.sin(yaw) * back;
-        pz -= Math.cos(yaw) * back;
+        px -= Math.sin(fig.object.rotation.y) * back;
+        pz -= Math.cos(fig.object.rotation.y) * back;
       }
       if (hidden || fade < 0.02) _shadowScale.copy(HIDDEN.scale);
-      else {
-        const along = width * 1.45 * shrink + (fig.legs ? 0 : height * 0.75 * down);
-        _shadowScale.set(width * 1.32 * shrink * fade, 1, along * fade);
-      }
+      else if (foot) _shadowScale.set(foot.width * 1.25 * shrink * fade, 1, foot.length * 1.02 * shrink * fade);
+      else _shadowScale.set(width * 1.32 * shrink * fade, 1, (width * 1.45 * shrink + (fig.legs ? 0 : height * 0.75 * down)) * fade);
       _shadowPos.set(px, y, pz);
-      if (down > 0) _shadowQuat.setFromAxisAngle(_shadowAxis, fig.object.rotation.y);
+      if (foot || down > 0) _shadowQuat.setFromAxisAngle(_shadowAxis, fig.object.rotation.y);
       else _shadowQuat.identity();
       contactShadows.setMatrixAt(i, _shadowMatrix.compose(_shadowPos, _shadowQuat, _shadowScale));
 
       // The cast shadow: long, faint, pointing away from the light.
-      const length = width + (height / tan) * sun.lift;
+      const length = along + ((foot ? height * 0.8 : height) / tan) * sun.lift;
       // Nothing standing, nothing to cast a long shadow: the dead lie in their
       // own contact patch.
       if (hidden || sun.lift <= 0.001 || down > 0 || fade < 0.02) _shadowScale.copy(HIDDEN.scale);
-      else _shadowScale.set(width * shrink * fade, 1, length * shrink * fade);
+      else _shadowScale.set(across * shrink * fade, 1, length * shrink * fade);
       _shadowPos.set(
-        px + dirX * (length / 2 - width * 0.35),
+        px + dirX * (length / 2 - along * 0.35),
         y,
-        pz + dirZ * (length / 2 - width * 0.35),
+        pz + dirZ * (length / 2 - along * 0.35),
       );
       _shadowQuat.setFromAxisAngle(_shadowAxis, yaw);
       castShadows.setMatrixAt(i, _shadowMatrix.compose(_shadowPos, _shadowQuat, _shadowScale));

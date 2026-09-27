@@ -49,6 +49,18 @@ exits leaves a lane between two terraces, and either way the facades finish
 Anything still unreachable — an exit into an area you haven't loaded — becomes a
 barred gate with a sign saying which vnum is on the other side.
 
+The people in it are the mud's mobiles, dressed by what the area file says
+they are: `src/people.js` reads keywords, flags and shops and picks one of
+seventeen archetypes — cityguard, knight, priest, mage, merchant, beggar,
+troll, zombie and so on — with a weapon from the mobile's own resets. Animals
+are fifteen modelled bodies, bred into dogs, wolves, foxes, horses, cattle,
+swans and a green dragon by coat and proportion. They wander the way Merc's
+`mobile_update` has them wander, through a random open exit every so often,
+and walk the routed street to get there; fights are Merc's `fight.c`, played
+on the beat with the swing's contact frame landing on the blow.
+
+    node tools/people-check.mjs [--all]   # who every mobile is dressed as
+
 ## Controls
 
 | | |

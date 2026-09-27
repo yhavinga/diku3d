@@ -503,6 +503,52 @@ const SURFACES = {
     s.rough = 0.60 + blotch * 0.12 + pore * 0.05;
   },
 
+  /**
+   * Fur and hide, for the animals. Near-neutral, like cloth, because every
+   * beast carries its coat, its pale belly and its dark points in vertex colour
+   * and the map must not fight them. What the map does carry is the one thing
+   * that tells a pelt from a painted shell at a few metres: the coat lies in
+   * clumps that each catch the light a little differently, and the gaps
+   * between them are shadowed. Isotropic on purpose -- the UVs are cube
+   * projected, so a strand direction would change at every projection seam.
+   */
+  fur(u, v, s) {
+    const [d1, edge, id] = cellular(u * 16, v * 16, 16, 401, 0.5);
+    const fine = fbm(u * 64, v * 64, 64, 409, 2);
+    const tone = fbm(u * 4, v * 4, 4, 419, 3);
+    const clump = clamp01(edge * 3.2);
+    const base = mix(rgb(0x9e9e9e), rgb(0xb4b4b4), tone);
+    // Kept low: at 0.16 of tone and 0.07 of relief a horse's short coat read
+    // as a fleece at two metres.
+    const shade = (0.95 + id * 0.08) * (0.95 + clump * 0.05) * (0.95 + fine * 0.08);
+    s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
+    s.height = 0.5 + clump * 0.035 + fine * 0.025 - d1 * 0.01;
+    s.rough = 0.86 + fine * 0.1;
+  },
+
+  /**
+   * Feathers: rows of overlapping vanes, each a shallow scallop whose lower
+   * edge stands proud of the next. Kept faint -- at the size a swan is seen
+   * from, plumage is a soft sheen with a little structure in it, not scales.
+   */
+  feather(u, v, s) {
+    const rows = 14;
+    const cols = 9;
+    const r = v * rows;
+    const ri = Math.floor(r);
+    const x = u * cols + (ri % 2) * 0.5;
+    const cx = x - Math.floor(x) - 0.5;
+    const cy = r - ri;
+    const vane = clamp01(1 - Math.hypot(cx * 1.2, (cy - 0.15) * 0.8) * 1.5);
+    const barb = fbm(u * 70, v * 22, 70, 431, 2);
+    const tone = fbm(u * 3, v * 3, 3, 433, 3);
+    const base = mix(rgb(0xa6a6a6), rgb(0xbababa), tone);
+    const shade = (0.93 + vane * 0.09) * (0.95 + barb * 0.08);
+    s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
+    s.height = 0.5 + vane * 0.06 + barb * 0.02;
+    s.rough = 0.74 + barb * 0.12 - vane * 0.06;
+  },
+
   iron(u, v, s) {
     const brush = fbm(u * 8, v * 120, 8, 173, 3);
     const rust = clamp01(fbm(u * 9, v * 9, 9, 179, 4) * 1.7 - 0.8);
@@ -511,6 +557,62 @@ const SURFACES = {
     s.height = 0.5 + brush * 0.15;
     s.rough = 0.55 + rust * 0.35;
     s.metal = 0.85 - rust * 0.6;
+  },
+
+  /**
+   * Worked steel: a blade, a helm, a breastplate. Iron above is the dark
+   * hot-worked bar of a door strap and a hinge, and a sword in it read as a
+   * stick of charcoal. What makes steel read as steel at street distance is
+   * the environment in it, so this is smooth and fully metallic, with the
+   * scratches of use in the relief and a little pitting where it was left
+   * wet -- and bright enough in its base that a polished flat catches the sky.
+   */
+  steel(u, v, s) {
+    const scratch = fbm(u * 40, v * 6, 40, 311, 3);
+    const cloud = fbm(u * 5, v * 5, 5, 313, 4);
+    const pit = clamp01(fbm(u * 24, v * 24, 24, 317, 3) * 1.8 - 1.05);
+    const c = mix(rgb(0x8e9398), rgb(0xb9bec2), cloud * 0.7 + scratch * 0.3);
+    s.color = mix(c, rgb(0x5e5a54), pit * 0.6);
+    s.height = 0.5 + scratch * 0.06 - pit * 0.12;
+    s.rough = 0.26 + cloud * 0.12 + pit * 0.3;
+    s.metal = 0.95 - pit * 0.4;
+  },
+
+  /**
+   * Riveted mail: rows of rings, each row laid half a ring over from the one
+   * above. At street distance it is the glitter and the dark between the
+   * rings that says mail rather than a grey jumper, so the gaps go deep in
+   * the relief and nearly black in the albedo -- but not black, because it
+   * is the ring edges catching the sky that carry it.
+   */
+  mail(u, v, s) {
+    const n = 36;
+    const row = Math.floor(v * n);
+    const x = u * n + (row % 2) * 0.5;
+    const fx = x - Math.floor(x) - 0.5;
+    const fy = v * n - row - 0.5;
+    const d = Math.sqrt(fx * fx + fy * fy * 1.3);
+    const ring = Math.exp(-(((d - 0.36) / 0.12) ** 2));
+    const grime = fbm(u * 6, v * 6, 6, 347, 3);
+    const c = mix(rgb(0x2a2b2c), mix(rgb(0x7b8086), rgb(0xa2a7ab), grime), ring);
+    s.color = c;
+    s.height = ring;
+    s.rough = 0.75 - ring * 0.4;
+    s.metal = 0.25 + ring * 0.7;
+  },
+
+  /**
+   * Paint on boards: a shield's face. Near-neutral, because every shield is
+   * tinted to whoever carries it, with the brush marks in the relief and the
+   * paint chipped back to wood where the edges and the hits land.
+   */
+  paint(u, v, s) {
+    const brush = fbm(u * 6, v * 30, 6, 331, 3);
+    const chip = clamp01(fbm(u * 14, v * 14, 14, 337, 4) * 2.2 - 1.35);
+    const base = mix(rgb(0xb4b0aa), rgb(0xc6c2ba), brush);
+    s.color = mix(base, rgb(0x5a4632), chip);
+    s.height = 0.5 + brush * 0.04 - chip * 0.2;
+    s.rough = 0.62 + chip * 0.3 + brush * 0.06;
   },
 
   bark(u, v, s) {
@@ -684,8 +786,19 @@ const RECIPES = {
   // full mirror of the sky turns brown litter grey.
   duff: { surface: 'duff', scale: 3.2, normalScale: 0.6, env: 0.42, wet: 0, detail: 0.7 },
   iron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1.4, wet: 0, detail: 0.3 },
+  // Arms and armour. Tile sizes are the size of the things: a blade is 5 cm
+  // across and a shield 70.
+  steel: { surface: 'steel', scale: 0.6, normalScale: 0.35, env: 1.5, wet: 0, detail: 0.25 },
+  mail: { surface: 'mail', scale: 0.3, normalScale: 0.6, env: 1.3, wet: 0, detail: 0.2 },
+  paint: { surface: 'paint', scale: 0.8, normalScale: 0.5, env: 0.6, wet: 0, detail: 0.4 },
   bark: { surface: 'bark', scale: 1.6, normalScale: 1.0, env: 0.65, wet: 0, detail: 0.5 },
   water: { surface: 'water', scale: 7, normalScale: 0.5, env: 1.6, wet: 0, detail: 0.2 },
+  // The animals. A 0.4 m tile is a hand's-breadth clump pattern on a dog and
+  // still reads as a coat on a horse. `moving` keeps the world-space effects
+  // off them: a splash line fixed to the paving and a grain fixed to the world
+  // both slide over anything that walks through them.
+  fur: { surface: 'fur', scale: 0.4, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, moving: true },
+  feather: { surface: 'feather', scale: 0.3, normalScale: 0.3, env: 0.5, wet: 0, detail: 0, moving: true },
 };
 
 // ------------------------------------------------------- surface detail ----
@@ -865,8 +978,10 @@ function decorate(material, recipe, macro, grain) {
         float dikuStorey = mod( vSurfacePos.y, 7.6 );
         float dikuSplash = ( 1.0 - smoothstep( 0.0, 0.85, dikuStorey ) ) * dikuVertical;
         float dikuSheltered = smoothstep( 5.6, 6.6, dikuStorey ) * dikuVertical;
+        #ifndef DIKU_MOVING
         diffuseColor.rgb *= 1.0 - dikuSplash * 0.24 * ( 0.6 + dikuMacro.r * 0.7 );
         diffuseColor.rgb *= 1.0 + dikuSheltered * 0.06;
+        #endif
       `)
       .replace('#include <roughnessmap_fragment>', /* glsl */`
         #include <roughnessmap_fragment>
@@ -918,10 +1033,11 @@ function decorate(material, recipe, macro, grain) {
       `);
   };
   if (recipe.wet) material.defines = { ...material.defines, DIKU_WET: 1 };
+  if (recipe.moving) material.defines = { ...material.defines, DIKU_MOVING: 1 };
   // Our injected source differs from stock, so it needs a key of its own or
   // three will hand us a program compiled for an undecorated material.
   material.customProgramCacheKey = () => `diku|${material.defines?.DIKU_DETAIL ? 1 : 0}`
-    + `|${material.defines?.DIKU_WET ? 1 : 0}`;
+    + `|${material.defines?.DIKU_WET ? 1 : 0}|${material.defines?.DIKU_MOVING ? 1 : 0}`;
 }
 
 /**

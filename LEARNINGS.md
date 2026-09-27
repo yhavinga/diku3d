@@ -6,6 +6,69 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-09-27 — people, animals, and a town that walks
+
+Five agents in parallel, each in its own worktree with its own port and a
+headless GPU Chromium (`/tmp/pw/shot.mjs`, Playwright over Metal), because the
+shared chrome-devtools and Blender MCP instances serialise everything. Blender
+runs headless per agent: `Blender -b --factory-startup --python-expr …`.
+`lib.py` had the main checkout's path hard-coded, so a worktree's models
+landed in the wrong `assets/`; it derives it from `__file__` now.
+
+### Motion (src/nav.js, src/motion.js)
+
+- **Stride is the median backward speed of the foot that is low *and*
+  moving back.** On the old clip the swinging foot passes lower than the
+  planted one; a height-only test gave 0.16 m per cycle. The mean runs
+  25–35% fast because of heel-off; a multiplier sweep put the minimum slip
+  at the median.
+- **Pace comes from the rig, not from a constant.** A duck at human pace
+  needed its walk clip at 7× speed. Pace = stride / cycle length.
+- **Two passages can share a street cell.** `passageAt` names one owner and
+  build.js builds the cell twice. Before the room rule was fixed, 78 of 179
+  room changes went through a third room.
+- **Axis-aligned boxes round rotated props seal trails shut.** Use the
+  rotated footprint.
+- **`RenderPass.clearDepth` clears before `setRenderTarget`,** so it clears
+  whatever target was bound last, not its own.
+- **A swing in progress has to win.** A flinch laid over a swing cancelled
+  the blow about to land, and the next beat's wind-up cut the first swing
+  off before its hit frame.
+- **Merc resolves a whole round on one pulse.** Every event needs its own
+  presentation beat or four blows land on one frame.
+- Measured: 60 s over six areas, 249 figures, zero frames inside a wall
+  collider, sideways drift 0° at p99; 10 minutes of Midgaard headless: 161
+  room changes by 23 of 71 mobiles, sentinels and shopkeepers never moved.
+
+### Animals (tools/blender/beasts.py)
+
+- **Blender 5.2's glTF exporter writes white vertex colours for every
+  material after the first** in a multi-material mesh — the eyes came out
+  as white marbles. One object per material.
+- **Smooth-blending chain segments end to end makes a bead at every joint.**
+  Join a chain with a plain minimum, then blend it into the body.
+- **A distance field returning 1e3 outside a part's box breaks marching**
+  unless every step is capped — one eye came back 269 m up.
+- `export_force_sampling=False` and linear keys halved the files.
+- 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
+
+### People (tools/blender/people.py, src/people.js)
+
+- **The exporter writes a key at frame f to time f/fps.** Clips keyed from
+  frame 1 hold their first frame and hitch every loop; bake from 0.
+- **It bakes a `.scale` track on every bone.** Strip them at load, or a
+  child's bigger head is reset to 1 every frame.
+- **three drops the dots from bone names** (`grip.R` → `gripR`).
+- **`Box3.setFromObject` on an unposed skinned mesh is NaN**; use the
+  geometry's bounding box.
+- **Decimate's vertex-group weight is violently non-linear**: 0.97 against
+  1.0 already keeps 70% of that side. Search for it.
+- **Bone heat fails on tiny loose islands**: bind the trunk alone, weld the
+  head rigidly.
+- One skeleton shared by every mesh of a figure uploads its bone texture
+  once; materials cached by surface and colour. Market Square people cost
+  0.56 → 0.87 ms for 2.6× the triangles.
+
 ## 2026-09-07 — six areas, and the judge's third round
 
 The graveyard joined, the marsh became a bog, the Shire became halfling,
