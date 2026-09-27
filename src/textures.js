@@ -964,10 +964,9 @@ const SURFACES = {
   /**
    * The town's coursed rubble after a fire has been at it. Soot does not lie
    * evenly: it is laid down by smoke rising up a face, so it comes in tall
-   * tongues and not in round blotches -- the noise is stretched four to one
-   * up the wall. Where it is thickest the stone is nearly black and dead
-   * matt; between the tongues the wall is its own colour, a little greyed.
-   * The joints hold it longest, because soot settles in a recess.
+   * tongues and not in round blotches -- the noise is stretched six to one
+   * up the wall. Where it is thickest the stone is a charcoal grey and dead
+   * matt; between the tongues the wall is grimed, never clean.
    */
   sootwall(u, v, s) {
     SURFACES.stonewall(u, v, s);
@@ -977,15 +976,18 @@ const SURFACES = {
     const streak = fbm(u * 24, v * 4, 4, 703, 3);
     const fleck = fbm(u * 40, v * 40, 40, 709, 2);
     const soot = clamp01((blotch * 0.62 + streak * 0.38 - 0.37) * 3.2) * (0.82 + fleck * 0.3);
-    const joint = s.height < 0.3 ? 0.18 : 0;
     // The whole face is grimed first -- a fire does not leave clean stone
     // anywhere near it -- and the tongues go darker again over that. Clean
     // stone with black blotches on it read as a dalmatian, not as a fire.
     const grime = fbm(u * 8, v * 8, 8, 707, 3);
-    const greyed = mix(s.color, rgb(0x2e2b28), 0.8 + grime * 0.15);
+    // Measured, not guessed: at 0.10 mean albedo the district's walls went to
+    // RGB 0 in their own shade after dusk (0.76% of a night street, 3.3% of a
+    // ruin at dusk, against 0.01% anywhere in Midgaard). 0.16 keeps the soot
+    // and loses the holes.
+    const greyed = mix(s.color, rgb(0x3a3632), 0.72 + grime * 0.15);
     // Floor at 0x221e1b: nothing under a sky reads zero, and burnt stone is a
     // warm charcoal, not ink.
-    s.color = mix(greyed, rgb(0x191715), clamp01(soot * 0.85 + joint * soot));
+    s.color = mix(greyed, rgb(0x2c2825), clamp01(soot * 0.7));
     s.rough = Math.min(1, s.rough + soot * 0.12);
   },
 
@@ -998,30 +1000,21 @@ const SURFACES = {
    * black shape, and up close the checks are what say it was wood.
    */
   charred(u, v, s) {
-    // Rectangular checks, not cells: courses across the grain, each broken
-    // into its own run of block lengths, the lines wobbling a little. Voronoi
-    // here read as crazy paving.
-    const rows = 40;
-    const wob = (fbm(u * 8, v * 8, 8, 719, 2) - 0.5) * 0.35;
-    const gy = v * rows + wob;
-    const row = Math.floor(gy);
-    const fy = gy - row;
-    const k = 16 + Math.floor(hash2(row, 0, rows, 721) * 10);
-    const gx = u * k + hash2(row, 1, rows, 723) + wob * 0.5;
-    const seg = Math.floor(gx);
-    const fx = gx - seg;
-    const id = hash2(seg, row, 64, 725);
-    const gapU = Math.min(fx, 1 - fx) / k;
-    const gapV = Math.min(fy, 1 - fy) / rows;
-    const crack = clamp01(Math.min(gapU, gapV) * rows * 14 - 0.3);
+    // Small checks, irregular, and all within a shade of each other: at any
+    // distance a charred beam is one black shape, and up close the checks
+    // are relief, not pattern. Rows of rectangles read as brickwork and big
+    // cells as crazy paving; both were tried.
+    const [, edge, id] = cellular(u * 26, v * 26, 26, 721, 0.48);
+    const crack = clamp01((edge - 0.015) * 16);
     const grain = fbm(u * 2, v * 40, 2, 727, 3);
-    const ash = clamp01((((id * 5.3) % 1) - 0.9) * 8) * 0.45;
-    // Blocks all within a shade of each other: at any distance a charred
-    // beam is one black shape, and the checks are only for up close.
-    const block = mix(rgb(0x221e1a), rgb(0x2b2622), grain * 0.6 + id * 0.4);
-    s.color = mix(mix(rgb(0x1c1815), block, crack * 0.7 + 0.3), rgb(0x4d4843), ash * crack);
-    s.height = crack * (0.55 + id * 0.25) + grain * 0.08;
-    s.rough = 0.9 - crack * 0.12 + ash * 0.1;
+    const ash = clamp01((((id * 5.3) % 1) - 0.9) * 8) * 0.4;
+    // As dark as it can be and still hold a value under the moon: at 0.07
+    // mean albedo the burnt cart and the stakes' points went to RGB 0 in No
+    // Man's Land at night.
+    const block = mix(rgb(0x2e2925), rgb(0x39332d), grain * 0.6 + id * 0.4);
+    s.color = mix(mix(rgb(0x241f1b), block, crack * 0.7 + 0.3), rgb(0x4d4843), ash * crack);
+    s.height = crack * (0.5 + id * 0.3) + grain * 0.1;
+    s.rough = 0.88 - crack * 0.1 + ash * 0.1;
   },
 
   /**
@@ -1092,7 +1085,7 @@ const SURFACES = {
     const grass = clamp01(fbm(u * 6, v * 6, 6, 813, 3) * 2.2 - 0.85);
     const weed = clamp01(fbm(u * 18, v * 18, 18, 817, 3) * 2.6 - 1.45);
     const [, edge, id] = cellular(u * 30, v * 30, 30, 819, 0.5);
-    const stone = clamp01((edge - 0.02) * 10) * (((id * 7.1) % 1) > 0.86 ? 1 : 0);
+    const stone = clamp01((edge - 0.02) * 10) * (((id * 7.1) % 1) > 0.93 ? 1 : 0);
     const blade = fbm(u * 90, v * 90, 90, 823, 2);
     let c = mix(rgb(0x3d3326), rgb(0x564838), lumps);
     c = mix(c, mix(rgb(0x5b5236), rgb(0x7a6d48), blade), grass * 0.85);

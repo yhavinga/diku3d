@@ -590,16 +590,16 @@ def build_burnt_cart():
     for sx in (-1, 1):
         body.append(kit.timber((0.1, bw + 0.3, 0.1), (sx * (bl / 2 - 0.4), 0, bz - 0.25), (0, 0, 0), "rust", 0.02,
                                "axle"))
-    body += wheel(-bl / 2 + 0.4, -bw / 2 - 0.12, 0.52, r=0.52, mat="charred", rim="iron")
-    body += wheel(bl / 2 - 0.4, -bw / 2 - 0.12, 0.52, r=0.52, mat="charred", rim="iron")
-    body += wheel(-bl / 2 + 0.4, bw / 2 + 0.12, 0.52, r=0.52, mat="charred", rim="iron")
+    body += wheel(-bl / 2 + 0.4, -bw / 2 - 0.12, 0.52, r=0.52, mat="charred", rim="charred")
+    body += wheel(bl / 2 - 0.4, -bw / 2 - 0.12, 0.52, r=0.52, mat="charred", rim="charred")
+    body += wheel(-bl / 2 + 0.4, bw / 2 + 0.12, 0.52, r=0.52, mat="charred", rim="charred")
     # Settle the burnt corner: the body tips down to the +x, +y side where
     # the fourth wheel was.
     kit.place(body, (0, 0, -0.1), (math.radians(-7), math.radians(6), 0))
     p += body
     # The fourth wheel's iron tyre lying in the ash, and the ash.
     p.append(lib.torus(0.52, 0.04, (bl / 2 + 0.2, bw / 2 + 0.7, 0.05), major_seg=16, minor_seg=4, name="tyre",
-                       mat="iron"))
+                       mat="charred"))
     p.append(heap(rng, 3.4, 2.4, 0.16))
     for sy in (-1, 1):
         p.append(kit.timber((2.2, 0.09, 0.09), (-bl / 2 - 1.0, sy * 0.4, 0.07), (0, 0, sy * 0.1), "charred", 0.02,

@@ -773,7 +773,9 @@ function hoodTurf(layout) {
     z0 = Math.min(z0, cell.z);
     z1 = Math.max(z1, cell.z);
   }
-  return (z) => (z < z0 ? 'troll' : z > z1 ? 'ogre' : 'nml');
+  const of = (z) => (z < z0 ? 'troll' : z > z1 ? 'ogre' : 'nml');
+  // Four cells is two rooms: the street on No Man's Land and the one behind.
+  return (z) => (of(z) !== 'nml' && (of(z - 4) !== of(z) || of(z + 4) !== of(z)) ? `${of(z)}!` : of(z));
 }
 
 /**
@@ -829,13 +831,14 @@ function hoodBrazier({ instances, chunk, decor, lights, addCollider, x, y, z }) 
 /**
  * Paint on a wall: one of the two gangs' marks, or the other gang's struck
  * through. `n` is the face's outward normal (a unit axis), and the mark is
- * centred on (x, y, z) in that face.
+ * centred on (x, y, z) in that face. `turf` ends in `!` within a few rows of
+ * No Man's Land, where the other gang comes across to deface it.
  */
 function hoodMark(decals, turf, x, y, z, nx, nz, size, seed) {
-  if (turf !== 'troll' && turf !== 'ogre') return;
-  decals.push({ material: turf === 'troll' ? 'decal_troll' : 'decal_ogre', x, y, z, nx, nz, w: size, h: size });
-  // At the edge of its ground a gang's mark gets defaced by the other.
-  if (seed > 0.72) {
+  const gang = turf && turf.replace('!', '');
+  if (gang !== 'troll' && gang !== 'ogre') return;
+  decals.push({ material: gang === 'troll' ? 'decal_troll' : 'decal_ogre', x, y, z, nx, nz, w: size, h: size });
+  if (turf.endsWith('!') && seed > 0.4) {
     decals.push({ material: 'decal_strike', x: x + nz * 0.08, y: y + 0.05, z: z - nx * 0.08, nx, nz, w: size * 1.05, h: size * 1.05, lift: 0.02 });
   }
 }
@@ -1021,7 +1024,7 @@ function buildHoodRoom({ room, pos, sides, instances, model, chunk, decor, light
       // weed-strewn plot of land"; its east end "just a dusty square".
       const dusty = /dusty/i.test(room.description);
       put('tall_weeds', dusty ? 3 : 7, 0.6, 971, { solid: false });
-      put('bramble', dusty ? 1 : 3, 1.3, 972, { height: 0.9 });
+      put('bramble', dusty ? 1 : 3, 1.0, 972, { height: 0.8, scale: 0.75 });
       put('nettles', dusty ? 2 : 5, 0.3, 973, { solid: false });
       put('grass_tuft', dusty ? 3 : 6, 0.3, 974, { solid: false });
       if (!dusty) put('collapsed_shed', 1, 2.0, 975, { height: 2.0, face: true });
@@ -1059,7 +1062,7 @@ function buildHoodRoom({ room, pos, sides, instances, model, chunk, decor, light
         decor.push({ kind: 'tree', x: s.x, y, z: s.z, scale: 0.8 + hash3(room.vnum, i, 0, 995) * 0.4 });
         addCollider(s.x - 0.7, s.x + 0.7, s.z - 0.7, s.z + 0.7, y, y + 8);
       }
-      put('bramble', 3, 1.3, 996, { height: 0.9 });
+      put('bramble', 3, 1.0, 996, { height: 0.8, scale: 0.75 });
       put('tall_weeds', 4, 0.5, 997, { solid: false });
       put('grass_tuft', 8, 0.3, 998, { solid: false });
       break;
@@ -1114,6 +1117,12 @@ function buildHoodRoom({ room, pos, sides, instances, model, chunk, decor, light
 
   // Each gang keeps a fire burning where its street opens on No Man's Land:
   // the only light along the strip after dark, and it is on the far side.
+  // And one on each corner it holds -- the crossings, where it can see three
+  // ways at once -- which is all the light its streets get.
+  if (style === 'street' && [0, 1, 2, 3].filter((d) => sides[d]).length >= 3) {
+    const corner = hoodSpots(room, pos, sides, 1, 0.5, 1082, taken)[0];
+    if (corner) hoodBrazier({ instances, chunk, decor, lights, addCollider, x: corner.x, y, z: corner.z });
+  }
   if (style === 'street') {
     for (let d = 0; d < 4; d++) {
       const side = sides[d];
@@ -1897,10 +1906,10 @@ export function buildScene(world, layout, materials, assets = null) {
 
   // --- streets and corridors ----------------------------------------------
 
-  // Every cell an open-air street runs through, for the corridors that share one.
+  // Every cell Wall Road runs through, for the corridors that share one.
   const openStreet = new Set();
   for (const link of layout.links) {
-    if (link.kind !== 'alley' || alleyEnclosed(link)) continue;
+    if (link.kind !== 'alley' || !!hoodStyle(link.from.room) === !!hoodStyle(link.to.room)) continue;
     for (const c of link.path) openStreet.add(cellKey(link.from.level, c.x, c.z));
   }
   for (const link of layout.links) {
@@ -4378,10 +4387,11 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
       }
       continue;
     }
-    // An open-air street routed through the same cell makes it a street: a
-    // corridor's walls and ceiling there would stand across the street's
-    // way. Nine such cells in the town before the neighborhood came, and
-    // Wall Road runs down four more of one Midgaard corridor.
+    // Wall Road routed through the same cell makes it a street: a corridor's
+    // walls and ceiling there would stand across the road. It runs down four
+    // cells of the corridor between #3022 and #3023. (Nine cells in Midgaard
+    // already have an open street and a corridor sharing them, and are left
+    // as they were.)
     if (streetCells && cellKey && streetCells.has(cellKey(level, c.x, c.z))) continue;
 
     for (let dir = 0; dir < 4; dir++) {
