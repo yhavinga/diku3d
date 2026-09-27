@@ -46,6 +46,11 @@ const TAG_MATERIALS = {
   oak: { color: 0x5a4330, roughness: 0.78, metalness: 0 },
   leather: { color: 0x4a3524, roughness: 0.62, metalness: 0 },
   hair: { color: 0x3a2a1c, roughness: 0.86, metalness: 0 },
+  // Keratin and wet tissue on the animals: eyes, noses, hooves, claws, beaks,
+  // horns and the inside of a mouth. White, because every part carries its
+  // own colour in the vertex colours; glossy, because that is the difference
+  // between an eye and a painted dot.
+  horn: { color: 0xffffff, roughness: 0.34, metalness: 0 },
   glass: {
     color: 0xd8c48a, roughness: 0.12, metalness: 0,
     transparent: true, opacity: 0.55, emissive: 0x000000,
@@ -337,4 +342,8 @@ export const ASSET_NAMES = [
   'reed_clump', 'tussock', 'dead_log',
   'headstone', 'grave_slab', 'iron_fence',
   'townsperson',
+  // Animals, rigged and animated. One base mesh per build of body; the
+  // breeds and species are proportions and coats laid on in actors.js.
+  'beast_canine', 'beast_feline', 'beast_rodent', 'beast_bear', 'beast_equine', 'beast_cervid',
+  'beast_bovine', 'beast_pig', 'beast_duck', 'beast_swan', 'beast_hen', 'beast_songbird',
 ];

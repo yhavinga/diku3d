@@ -32,6 +32,7 @@ MODULES = [
     "trees",
     "marsh",
     "townsperson",
+    "beasts",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a
@@ -59,6 +60,13 @@ BUDGET = {
     # to PROP_BUDGET's 800. A headstone gets scattered by the dozen and a fence
     # by the segment, so the loose cap would not have caught a regression here.
     "headstone": 250, "grave_slab": 120, "iron_fence": 450,
+    # The animals. One skinned mesh each, two materials (fur or feathers, and
+    # horn), and far fewer of them than of people: Midgaard has 13, the
+    # Shire's farm 19. The big ones get the most because they are the ones
+    # seen close and whole -- a horse fills the frame a sparrow never does.
+    "beast_canine": 4600, "beast_feline": 3800, "beast_rodent": 2600, "beast_bear": 5600,
+    "beast_equine": 6000, "beast_cervid": 5200, "beast_bovine": 6000, "beast_pig": 4800,
+    "beast_duck": 3800, "beast_swan": 4500, "beast_hen": 4000, "beast_songbird": 2600,
 }
 PROP_BUDGET = 800
 TREE_BUDGET = 1500
