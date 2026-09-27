@@ -39,7 +39,9 @@ const _scale = new THREE.Vector3();
 // crown in the world -- confirmed by a judge with matching material uuids at
 // 50 m and 3.7 m. It is a real recipe now, so materialFor finds it first and
 // this table no longer needs an entry for it.
-const TAG_ALIASES = {};
+// Snake scales are the feather surface: rows of overlapping scallops is what
+// both of them are, and at the size either is seen the two read the same.
+const TAG_ALIASES = { scales: 'feather' };
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
   skin: { color: 0xc79b76, roughness: 0.72, metalness: 0 },
@@ -346,4 +348,5 @@ export const ASSET_NAMES = [
   // breeds and species are proportions and coats laid on in actors.js.
   'beast_canine', 'beast_feline', 'beast_rodent', 'beast_bear', 'beast_equine', 'beast_cervid',
   'beast_bovine', 'beast_pig', 'beast_duck', 'beast_swan', 'beast_hen', 'beast_songbird',
+  'beast_snake', 'beast_worm', 'beast_dragon',
 ];

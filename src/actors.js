@@ -401,6 +401,18 @@ const BEASTS = [
   { test: /\bteddy\b/, asset: 'beast_bear', scale: 0.32, coat: 0x9a7248, pale: 0xc9a77c, points: 0x9a7248, grow: { head: 1.4, ear: 1.3 }, box: [0.3, 0.45, 'quad', 0x9a7248] },
   { test: /\bbears?\b/, asset: 'beast_bear', scale: 1.0, coat: 0x4a3322, pale: 0x5c4230, points: 0x2a1d14, box: [1.0, 1.6, 'quad', 0x4a3728] },
   // --- birds. The duck's patch channel is its head, so a drake's goes green.
+  // --- dragons, before the worms: "dragon wormkin" is a dragon. Haon Dor's
+  // is "huge"; hatchlings and fairy dragons are the same beast, small.
+  { test: /\b(fairy dragon|pet dragon)\b/, asset: 'beast_dragon', scale: 0.12, coat: 0x6a8a4a, pale: 0xc8c890, points: 0x3a4a2a, box: [0.2, 1, 'quad', 0x6a8a4a] },
+  { test: /\b(hatchling|baby|young)\b.*\bdragon\b|\bdragon\b.*\b(hatchling|baby|young)\b/, asset: 'beast_dragon', scale: 0.3, coat: 0x5a7a3a, pale: 0xb8b880, points: 0x2e3e20, box: [0.5, 2.5, 'quad', 0x5a7a3a] },
+  { test: /\bwyverns?\b/, asset: 'beast_dragon', scale: 0.75, coat: 0x5a5244, pale: 0xa89c80, points: 0x2e2a22, box: [1.3, 6, 'quad', 0x5a5244] },
+  { test: /\bdragons?\b/, asset: 'beast_dragon', scale: 1.0, coat: 0x3a5a2a, pale: 0xa8a870, points: 0x1e2e16, patch: 0x2a3a1c, cover: 0.3, box: [1.7, 9, 'quad', 0x3a5a2a] },
+  // --- serpents. A python is three metres; the marsh's anaconda is ten in the
+  // mud's own words, and gets six, which is still the largest thing in it.
+  { test: /\banaconda\b/, asset: 'beast_snake', scale: 2.0, coat: 0x4a5230, pale: 0x9a9468, points: 0x4a5230, patch: 0x1a1c12, cover: 0.4, box: [0.3, 6, 'quad', 0x4a5230] },
+  { test: /\bpython\b/, asset: 'beast_snake', scale: 1.1, coat: 0x8a7248, pale: 0xd8ccaa, points: 0x8a7248, patch: 0x3a2c1a, cover: 0.45, box: [0.2, 3, 'quad', 0x8a7248] },
+  { test: /\b(snake|snakes|serpent|viper|cobra|adder|asp)\b/, asset: 'beast_snake', scale: 0.55, coat: 0x5a5a3a, pale: 0xb8b490, points: 0x5a5a3a, patch: 0x26261a, cover: 0.35, box: [0.12, 1.5, 'quad', 0x5a5a3a] },
+  { test: /\b(worm|worms|iceworm|slug)\b/, asset: 'beast_worm', scale: 1.0, coat: 0x8a6a62, pale: 0xb08a80, points: 0x8a6a62, patch: 0x6a4c46, cover: 0.3, box: [0.14, 1.3, 'quad', 0x8a6a62] },
   { test: /\bswans?\b/, asset: 'beast_swan', scale: 1.0, coat: 0xefeeea, pale: 0xf4f3ef, points: 0xe2e0da, box: [0.62, 0.9, 'bird', 0xf2f0ea] },
   { test: /\bducklings?\b/, asset: 'beast_duck', scale: 0.45, coat: 0xd6be5c, pale: 0xe8d88e, points: 0xb09a48, grow: { head: 1.45, wing1: 0.7 }, horn: 0x7a6a50, box: [0.16, 0.24, 'bird', 0xc8b06a] },
   { test: /\b(goose|geese)\b/, asset: 'beast_duck', scale: 1.55, coat: 0x8c877e, pale: 0xdad6ce, points: 0x3c3732, horn: 0xffb070, box: [0.4, 0.6, 'bird', 0x8c877e] },
@@ -443,6 +455,7 @@ const COATS = {
 const COAT_WORDS = [
   [/\bblack\b/, 0x221e1b], [/\bwhite\b/, 0xe4e0d8], [/\b(grey|gray)\b/, 0x807d78],
   [/\bbrown\b/, 0x5e4531], [/\bred\b/, 0x8c3f1f], [/\bgold(en)?\b/, 0xb0873f],
+  [/\bgreen\b/, 0x3a5a2a], [/\bblue\b/, 0x34506e], [/\b(brass|bronze)\b/, 0x9a7a3a],
 ];
 
 export function beastKind(proto) {
@@ -506,7 +519,7 @@ function paintedGeometry(asset, node, tag, look) {
   const source = geometry.attributes.color;
   const count = geometry.attributes.position.count;
   const out = new Float32Array(count * 3);
-  const coated = tag === 'fur' || tag === 'feather';
+  const coated = tag === 'fur' || tag === 'feather' || tag === 'scales';
   _paint.setHex(look.coat);
   _pale.setHex(look.pale);
   _points.setHex(look.points);

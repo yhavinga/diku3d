@@ -67,6 +67,9 @@ BUDGET = {
     "beast_canine": 4600, "beast_feline": 3800, "beast_rodent": 2600, "beast_bear": 5600,
     "beast_equine": 6000, "beast_cervid": 5200, "beast_bovine": 6000, "beast_pig": 4800,
     "beast_duck": 3800, "beast_swan": 4500, "beast_hen": 4000, "beast_songbird": 2600,
+    "beast_snake": 3600, "beast_worm": 2600,
+    # One of it in the default world, and it is nine metres long.
+    "beast_dragon": 8000,
 }
 PROP_BUDGET = 800
 TREE_BUDGET = 1500
