@@ -3,20 +3,24 @@
   "attack": {
    "duration": 0.7916666666666666,
    "frames": 19,
+   "head_gap": 0.1033,
    "hit": 0.5263157894736842
   },
   "attack2": {
    "duration": 0.875,
    "frames": 21,
+   "head_gap": 0.143,
    "hit": 0.5238095238095238
   },
   "block": {
    "duration": 0.5,
-   "frames": 12
+   "frames": 12,
+   "head_gap": 0.0841
   },
   "cast": {
    "duration": 1.0,
    "frames": 24,
+   "head_gap": 0.1773,
    "hit": 0.5833333333333334
   },
   "death": {
@@ -25,11 +29,13 @@
   },
   "fight": {
    "duration": 1.3333333333333333,
-   "frames": 32
+   "frames": 32,
+   "head_gap": 0.143
   },
   "hit": {
    "duration": 0.4166666666666667,
-   "frames": 10
+   "frames": 10,
+   "head_gap": 0.143
   },
   "idle": {
    "duration": 2.0,
@@ -37,7 +43,8 @@
   },
   "idle2": {
    "duration": 3.75,
-   "frames": 90
+   "frames": 90,
+   "head_gap": 0.0136
   },
   "run": {
    "duration": 0.6666666666666666,
@@ -62,20 +69,24 @@
   "attack": {
    "duration": 0.7916666666666666,
    "frames": 19,
+   "head_gap": 0.1246,
    "hit": 0.5263157894736842
   },
   "attack2": {
    "duration": 0.875,
    "frames": 21,
+   "head_gap": 0.1526,
    "hit": 0.5238095238095238
   },
   "block": {
    "duration": 0.5,
-   "frames": 12
+   "frames": 12,
+   "head_gap": 0.0918
   },
   "cast": {
    "duration": 1.0,
    "frames": 24,
+   "head_gap": 0.1991,
    "hit": 0.5833333333333334
   },
   "death": {
@@ -84,11 +95,13 @@
   },
   "fight": {
    "duration": 1.3333333333333333,
-   "frames": 32
+   "frames": 32,
+   "head_gap": 0.1526
   },
   "hit": {
    "duration": 0.4166666666666667,
-   "frames": 10
+   "frames": 10,
+   "head_gap": 0.1526
   },
   "idle": {
    "duration": 2.0,
@@ -96,7 +109,8 @@
   },
   "idle2": {
    "duration": 3.75,
-   "frames": 90
+   "frames": 90,
+   "head_gap": 0.0161
   },
   "run": {
    "duration": 0.6666666666666666,
@@ -121,20 +135,24 @@
   "attack": {
    "duration": 0.7916666666666666,
    "frames": 19,
+   "head_gap": 0.07,
    "hit": 0.5263157894736842
   },
   "attack2": {
    "duration": 0.875,
    "frames": 21,
+   "head_gap": 0.2432,
    "hit": 0.5238095238095238
   },
   "block": {
    "duration": 0.5,
-   "frames": 12
+   "frames": 12,
+   "head_gap": 0.1655
   },
   "cast": {
    "duration": 1.0,
    "frames": 24,
+   "head_gap": 0.304,
    "hit": 0.5833333333333334
   },
   "death": {
@@ -143,11 +161,13 @@
   },
   "fight": {
    "duration": 1.3333333333333333,
-   "frames": 32
+   "frames": 32,
+   "head_gap": 0.2432
   },
   "hit": {
    "duration": 0.4166666666666667,
-   "frames": 10
+   "frames": 10,
+   "head_gap": 0.243
   },
   "idle": {
    "duration": 2.0,
@@ -155,7 +175,8 @@
   },
   "idle2": {
    "duration": 3.75,
-   "frames": 90
+   "frames": 90,
+   "head_gap": 0.0284
   },
   "run": {
    "duration": 0.6666666666666666,

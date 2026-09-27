@@ -18,6 +18,7 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createNav } from './nav.js';
 import { createMotion } from './motion.js';
 import { personOf, carryOf, CLIP_FACTS, HIT_FRAME, LOOPS, CLIPS } from './people.js';
+import { dressedGeometry, personMaterial as dressMaterial } from './dress.js';
 
 const SKIN = [0xe8c39e, 0xd9a877, 0xb5834f, 0x8a5a33, 0x6d4526, 0xc9b7a0];
 const CLOTH = [
@@ -399,101 +400,55 @@ function carriedClip(asset, name, carry) {
 }
 
 /**
- * An archetype's own scene: the file's scene with every other archetype
- * taken out, cloned once and kept. Each person is then a clone of this, with
- * the head pieces it does not wear removed.
+ * A file's rig, once: its bones, and one skinned mesh kept only to carry a
+ * skeleton through the clone -- every person then gets the clone and swaps
+ * that mesh's geometry for their own merged one (dress.js). The height of
+ * each archetype is read off its body and a bare face in their rest pose:
+ * Box3.setFromObject on a skinned mesh asks a skeleton that has not been
+ * posed yet and answers NaN.
  */
-const templates = new Map();
-function templateOf(asset, file, arch) {
-  const key = `${file}|${arch}`;
-  if (templates.has(key)) return templates.get(key);
+const rigs = new Map();
+function rigOf(asset, file) {
+  if (rigs.has(file)) return rigs.get(file);
   const scene = cloneSkinned(asset.scene);
-  const drop = [];
-  let body = null;
   // Only the rig's own children -- the meshes sit beside the root bone under
-  // the armature node. Deeper, a multi-material mesh is a group whose
-  // primitives are named arch_guard_1, arch_guard_2... and would be taken
-  // for other archetypes and thrown away.
+  // the armature node. Deeper, a multi-material mesh is a group of primitives.
   const holder = scene.getObjectByName('hips').parent;
-  for (const node of holder.children) {
-    if (node.name.startsWith('arch_')) {
-      if (node.name === `arch_${arch}`) body = node;
-      else drop.push(node);
+  let carrier = null;
+  for (const node of [...holder.children]) {
+    if (node.isBone) continue;
+    if (!carrier) {
+      node.traverse((n) => { if (!carrier && n.isSkinnedMesh) carrier = n; });
+      if (carrier) {
+        carrier.removeFromParent();
+        holder.add(carrier);
+      }
     }
+    if (node !== carrier) node.removeFromParent();
   }
-  if (!body) throw new Error(`actors: ${file}.glb has no arch_${arch}`);
-  for (const node of drop) node.removeFromParent();
-  // Standing height from the body and its bare head, not the hats, read off
-  // the geometry: the rig is at the origin and the geometry is in its rest
-  // pose, while Box3.setFromObject on a skinned mesh asks a skeleton that has
-  // not been posed yet and answers NaN. Any face will do -- they share a skull.
+  if (!carrier) throw new Error(`actors: ${file}.glb has no skinned mesh`);
+  carrier.name = 'person';
+  const record = { scene, heights: new Map() };
+  rigs.set(file, record);
+  return record;
+}
+
+function heightOf(asset, file, arch) {
+  const r = rigOf(asset, file);
+  if (r.heights.has(arch)) return r.heights.get(arch);
+  const holder = asset.scene.getObjectByName('hips').parent;
   let top = 0;
   const face = holder.children.find((node) => node.name.startsWith('face_'));
-  for (const part of [body, face]) {
+  for (const part of [asset.scene.getObjectByName(`arch_${arch}`), face]) {
     part?.traverse((node) => {
       if (!node.isMesh) return;
       if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
       top = Math.max(top, node.geometry.boundingBox.max.y);
     });
   }
-  const record = { scene, height: top };
-  templates.set(key, record);
-  return record;
+  r.heights.set(arch, top);
+  return top;
 }
-
-/**
- * One material per surface and colour, shared by everyone who wears it. The
- * crowd's variety is in the colours, not in how many materials there are:
- * the twenty cityguards of Midgaard share one tabard.
- */
-const personMaterials = new Map();
-function personMaterial(library, tag, hex, ghost) {
-  const key = `${tag}|${hex ?? '-'}|${ghost ? 1 : 0}`;
-  if (personMaterials.has(key)) return personMaterials.get(key);
-  const base = library.materialFor(tag);
-  const m = base.clone();
-  // The baked materials expect a colour attribute; the people carry none,
-  // and a missing one reads as black rather than as white.
-  // Every mesh in the people's files carries a colour -- white where it has
-  // nothing to say, and on the face the cavities, the lips and the flush --
-  // so the material multiplies by it.
-  m.vertexColors = true;
-  if (hex !== undefined && hex !== null) m.color.setHex(hex);
-  if (ghost) {
-    // A shade: see-through, lit from inside, and never in the depth buffer,
-    // so what is behind it still draws.
-    m.transparent = true;
-    m.opacity = tag === 'eye' ? 0.8 : 0.34;
-    m.depthWrite = false;
-    m.emissive = new THREE.Color(0x7f98b2);
-    m.emissiveIntensity = 0.55;
-  }
-  personMaterials.set(key, m);
-  return m;
-}
-
-/** The tags a person's own colours go on. */
-const TINTED = new Set(['cloth', 'cloth2', 'linen', 'skin', 'hair', 'leather', 'bone', 'paint']);
-
-/** A carried model from the library, sharing its geometry with every copy. */
-function carried(library, name, tint, ghost) {
-  const asset = library.get(name);
-  if (!asset) return null;
-  const group = new THREE.Group();
-  group.name = name;
-  for (const p of asset.primitives) {
-    const tag = p.materialName;
-    const hex = tag === 'paint' ? tint.cloth : undefined;
-    const material = (TINTED.has(tag) && hex !== undefined) || ghost
-      ? personMaterial(library, tag, hex, ghost) : p.material;
-    const mesh = new THREE.Mesh(p.geometry, material);
-    mesh.castShadow = false;
-    group.add(mesh);
-  }
-  return group;
-}
-
-const tagOfMaterial = (m) => (m && m.name ? m.name.replace(/^MAT:/, '') : '');
 
 /**
  * A face of one's own. The face meshes are few -- young and old of each sex
@@ -538,9 +493,7 @@ function lookWithEyes(body, mixer, group) {
   let drift = 0;
   const wander = new THREE.Vector3();
   body.traverse((node) => {
-    if (node.isSkinnedMesh && node.name.startsWith('face_')) {
-      node.onBeforeRender = (renderer, scene, camera) => { viewer = camera; };
-    }
+    if (node.isSkinnedMesh) node.onBeforeRender = (renderer, scene, camera) => { viewer = camera; };
   });
   const update = mixer.update.bind(mixer);
   mixer.update = (dt) => {
@@ -594,42 +547,29 @@ function lookWithEyes(body, mixer, group) {
  */
 function buildPerson(library, who, proto, instance) {
   const asset = library.get(who.file);
-  const t = templateOf(asset, who.file, who.arch);
-  const body = cloneSkinned(t.scene);
-  const wear = new Set(who.face ? [...who.pieces, who.face] : who.pieces);
-  const drop = [];
-  // Head pieces are the rig's children that are neither the archetype nor a bone.
-  for (const node of body.getObjectByName('hips').parent.children) {
-    if ((node.isMesh || node.isGroup) && !node.isBone && !node.name.startsWith('arch_')
-        && !wear.has(node.name)) drop.push(node);
-  }
-  for (const node of drop) node.removeFromParent();
+  if (!asset.scene.getObjectByName(`arch_${who.arch}`)) throw new Error(`actors: ${who.file}.glb has no arch_${who.arch}`);
+  const body = cloneSkinned(rigOf(asset, who.file).scene);
   const ghost = who.arch === 'ghost';
-  // One skeleton for the whole person. The loader and the clone give every
-  // primitive of every mesh its own Skeleton over the same bones -- nine or
-  // ten per person -- and the renderer recomputes and re-uploads each one's
-  // bone texture every frame. They are all bound to the same joints with the
-  // same inverse binds (one skin in the file), so one will do, and the
-  // renderer updates a shared skeleton once a frame.
-  let skeleton = null;
-  body.traverse((node) => {
-    if (!node.isSkinnedMesh) return;
-    if (!skeleton) { skeleton = node.skeleton; return; }
-    const same = node.skeleton.bones.length === skeleton.bones.length
-      && node.skeleton.bones.every((b, i) => b === skeleton.bones[i]);
-    if (same) node.bind(skeleton, node.bindMatrix);
-  });
-  body.traverse((node) => {
-    if (!node.isMesh) return;
-    // Figures stay out of the sun's shadow map: a skinned mesh there is a
-    // second skinning pass for a shadow the hand-placed contact patch
-    // already draws.
-    node.castShadow = false;
-    node.receiveShadow = !ghost;
-    const tag = tagOfMaterial(node.material);
-    node.material = personMaterial(library, tag, TINTED.has(tag) ? who.tint[tag] : undefined, ghost);
-    if (ghost) node.renderOrder = 2;
-  });
+  // What it holds, folded into the same mesh on the bone that holds it. The
+  // grip bones are in the weapons' own frame, so a weapon sits in the hand
+  // with no offset at all -- see weapons.py.
+  const held = [];
+  const weaponAsset = who.weapon && library.get(who.weapon);
+  const shieldAsset = who.shield && library.get(who.shield);
+  if (weaponAsset) held.push({ asset: weaponAsset, bone: 'gripR' });
+  if (shieldAsset) held.push({ asset: shieldAsset, bone: 'shieldL' });
+  const names = [`arch_${who.arch}`, ...(who.face ? [who.face] : []), ...who.pieces];
+  const key = `${who.file}|${names.join(',')}|${weaponAsset ? who.weapon : ''}|${shieldAsset ? who.shield : ''}`;
+  const dressed = dressedGeometry(asset, names, held, key);
+  const mesh = body.getObjectByName('person');
+  mesh.geometry = dressed.geometry;
+  mesh.material = dressMaterial(library, who.tint, ghost);
+  // Figures stay out of the sun's shadow map: a skinned mesh there is a
+  // second skinning pass for a shadow the hand-placed contact patch already
+  // draws.
+  mesh.castShadow = false;
+  mesh.receiveShadow = !ghost;
+  if (ghost) mesh.renderOrder = 2;
   shapeFace(body, `${proto.short}#${instance}`);
   // A little of each person's own height, so a crowd is not one stature.
   const scale = who.scale * (0.95 + strHash(`${proto.short}#${instance}`, 3) * 0.10);
@@ -640,23 +580,16 @@ function buildPerson(library, who, proto, instance) {
   }
   const group = new THREE.Group();
   group.add(body);
-
-  // What it holds. The grip bones are in the weapons' own frame, so a
-  // weapon sits in the hand with no offset at all -- see weapons.py.
-  let weapon = null;
-  let shield = null;
-  if (who.weapon) {
-    weapon = carried(library, who.weapon, who.tint, ghost);
-    const grip = body.getObjectByName('gripR');
-    if (weapon && grip) grip.add(weapon);
-    else weapon = null;
-  }
-  if (who.shield) {
-    shield = carried(library, who.shield, who.tint, ghost);
-    const mount = body.getObjectByName('shieldL');
-    if (shield && mount) mount.add(shield);
-    else shield = null;
-  }
+  // The figure contract has always handed back what is held; they are in the
+  // mesh now, so these are markers on the holding bones, named for the model.
+  const marker = (name, bone) => {
+    const o = new THREE.Object3D();
+    o.name = name;
+    body.getObjectByName(bone).add(o);
+    return o;
+  };
+  const weapon = weaponAsset ? marker(who.weapon, 'gripR') : null;
+  const shield = shieldAsset ? marker(who.shield, 'shieldL') : null;
 
   // Where a spell leaves from: the knot of a staff, or else the right fist.
   // weapons.py puts the staff's top at 0.855 m up its own axis.
@@ -703,7 +636,7 @@ function buildPerson(library, who, proto, instance) {
   lookWithEyes(body, mixer, group);
   const facts = CLIP_FACTS[who.file];
   return {
-    group, headGroup: null, height: t.height * scale, scale, mixer, actions, clips,
+    group, headGroup: null, height: heightOf(asset, who.file, who.arch) * scale, scale, mixer, actions, clips,
     stride: { walk: facts.walk * scale, run: facts.run * scale },
     hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
   };

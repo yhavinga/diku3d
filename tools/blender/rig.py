@@ -152,6 +152,10 @@ def build_armature(P, name="rig"):
             bone.use_connect = (V(eb[parent].tail) - V(head)).length < 1e-6
     _roll(arm, P)
     bpy.ops.object.mode_set(mode="OBJECT")
+    import people
+    # Where the middle of the head is, in the head bone's own frame: kept
+    # here because a hunch reposes the bone and the head goes with it.
+    arm["head_center"] = tuple(arm.data.bones["head"].matrix_local.inverted() @ people.head_center(P))
     return arm
 
 
@@ -707,6 +711,40 @@ def foot_slip(arm, frames, stride, stance):
     return worst, sink
 
 
+def head_clearance(arm, P, frames, limbs=("forearm", "hand"), margin=0.045):
+    """The least gap, in metres, between the arms and the head over a clip:
+    points down each forearm and hand against the head's ellipsoid, carried
+    by the head bone, with `margin` for the flesh and the sleeve round the
+    bone. Negative is an arm through the skull -- which a review found the
+    overhand cut doing to every unarmed man and every troll."""
+    import people
+    scene = bpy.context.scene
+    hb = arm.data.bones["head"]
+    hc = V(arm["head_center"])
+    hw, hd, hh = P["head"]
+    radii = V((hw + 0.012, hd + 0.012, hh + 0.010))
+    worst = (9.0, None, None)
+    for f in range(frames[0], frames[1] + 1):
+        scene.frame_set(f)
+        H = arm.pose.bones["head"].matrix
+        Hi = H.inverted()
+        for t in "LR":
+            for limb in limbs:
+                pb = arm.pose.bones[limb + "." + t]
+                for k in range(6):
+                    p = pb.head + (pb.tail - pb.head) * (k / 5.0)
+                    # Into the head bone's rest frame, where the ellipsoid is
+                    # axis-aligned with the figure.
+                    q = hb.matrix_local @ (Hi @ p)
+                    c = hb.matrix_local @ hc
+                    d = q - c
+                    r = V((d.x / radii.x, d.y / radii.y, d.z / radii.z)).length
+                    gap = (r - 1.0) * min(radii) - margin
+                    if gap < worst[0]:
+                        worst = (gap, f, limb + "." + t)
+    return worst
+
+
 # --- poses --------------------------------------------------------------------
 
 # Where the feet stand, per stance: (ankle offset from rest (x, y), yaw, pitch).
@@ -828,14 +866,16 @@ def anim_idle2(arm):
         b = merge(HANG, {"spine": (1, chest * 0.3, 0), "chest": (1, chest * 0.5, 0),
                          "neck": (2, look * 0.45, 0), "head": (-2 + rub * 8, look * 0.55, 0)})
         if rub:
-            b.update({"upperarm.R": (-128, 0, 38), "forearm.R": (-128, 0, 0), "hand.R": (-20, 0, 0)})
+            # Elbow high and out to the side, the hand behind the neck: the
+            # old key rubbed the neck through the middle of the skull.
+            b.update({"upperarm.R": (-135, -40, 110), "forearm.R": (-130, 0, 0), "hand.R": (-20, 0, 0)})
         sway = 0.008 if look > 0 else (-0.008 if look < 0 else 0.0)
         k.append((f, b, ((sway, 0.0, -0.005), 0.0, look * 0.08, -sway * 100), "rest"))
     # The rub itself: two strokes of the hand while it is up.
     act = _clip(arm, "idle2", k)
     p = arm.pose.bones
     for (f, dx) in ((65, -12), (68, 6), (70, -10)):
-        fk(p["forearm.R"], f, x=-128 + dx)
+        fk(p["forearm.R"], f, x=-130 + dx)
     return "idle2", (1, act)
 
 
@@ -862,12 +902,16 @@ def anim_attack(arm):
     off, pitch, hy, roll = GUARD_HIPS
     k = [
         (1, GUARD, GUARD_HIPS, "guard"),
+        # Cocked: the elbow up and out, the upper arm turned out so the
+        # forearm folds back beside the head, not over it. Found by search
+        # against `head_clearance` on all three rigs: the old key (-150, 0, 42)
+        # put the forearm 98 mm into the skull.
         (7, merge(GUARD, {"spine": (0, -4, 0), "chest": (-4, -10, 0), "head": (-6, 14, 0),
-                          "upperarm.R": (-150, 0, 42), "forearm.R": (-105, 0, 0), "hand.R": (30, 0, 0),
+                          "upperarm.R": (-65, 100, 20), "forearm.R": (-130, 0, 0), "hand.R": (30, 0, 0),
                           "upperarm.L": (-40, 40, 14)}),
          ((0.0, 0.02, -0.05), 2.0, -36.0, 0.0), "guard"),
         (9, merge(GUARD, {"spine": (6, 6, 0), "chest": (2, 2, 0), "head": (-6, 4, 0),
-                          "upperarm.R": (-140, 0, 30), "forearm.R": (-70, 0, 0), "hand.R": (40, 0, 0),
+                          "upperarm.R": (-100, 45, 16), "forearm.R": (-85, 0, 0), "hand.R": (40, 0, 0),
                           "upperarm.L": (-36, 40, 14)}),
          ((0.0, -0.02, -0.08), 8.0, -18.0, 0.0), "guard"),
         (11, merge(GUARD, {"spine": (12, 12, 0), "chest": (10, 22, 0), "head": (-14, -8, 0),
@@ -964,7 +1008,63 @@ def anim_death(arm):
         (31, lie, ((0.0, 0.78, -0.83), -89.0, -6.0, 2.0), "guard"),
         (36, lie, ((0.0, 0.78, -0.83), -89.0, -6.0, 2.0), "guard"),
     ]
-    return "death", (1, _clip(arm, "death", k))
+    end = _clip(arm, "death", k)
+    _lay_down_held(arm, lie, (27, 31, 36))
+    return "death", (1, end)
+
+
+def _lay_down_held(arm, lie, frames):
+    """Turn the hands on the ground so what they hold lies flat. A hand at
+    rest on its back holds a sword with the blade straight up at the sky --
+    the thumb side of a fist points up when the arm lies palm-down -- and a
+    review found every dead guard's sword and shield standing on end. So the
+    right hand is turned until the blade (the grip bone's Y) lies level, and
+    the left forearm until the shield's face (the shield bone's Z) is up or
+    down. Searched, keyed on the held frames."""
+    p = arm.pose.bones
+    scene = bpy.context.scene
+    last = frames[-1]
+
+    def measure(bone, axis):
+        scene.frame_set(last)
+        bpy.context.view_layer.update()
+        M = arm.pose.bones[bone].matrix.to_3x3()
+        return (M @ V(axis)).normalized()
+    # First the arms down onto the ground: lie's arms were written against
+    # the torso and left the hands a third of a metre up in the air.
+    for t in "LR":
+        ux, uy, uz = lie["upperarm." + t]
+        best = None
+        for lower in range(-20, 61, 4):
+            for f in frames:
+                fk(p["upperarm." + t], f, x=ux + lower, y=uy, z=uz)
+            scene.frame_set(last)
+            bpy.context.view_layer.update()
+            h = min(arm.pose.bones["hand." + t].head.z, arm.pose.bones["hand." + t].tail.z)
+            if best is None or abs(h - 0.035) < best[0]:
+                best = (abs(h - 0.035), lower)
+        for f in frames:
+            fk(p["upperarm." + t], f, x=ux + best[1], y=uy, z=uz)
+    x, _, z = lie["hand.R"]
+    best = None
+    for twist in range(-90, 91, 10):
+        for f in frames:
+            fk(p["hand.R"], f, x=x, y=twist, z=z)
+        tilt = abs(measure("grip.R", (0, 1, 0)).z)
+        if best is None or tilt < best[0]:
+            best = (tilt, twist)
+    for f in frames:
+        fk(p["hand.R"], f, x=x, y=best[1], z=z)
+    fx, _, fz = lie["forearm.L"]
+    best = None
+    for twist in range(-90, 91, 10):
+        for f in frames:
+            fk(p["forearm.L"], f, x=fx, y=twist, z=fz)
+        flat = abs(measure("shield.L", (0, 0, 1)).z)
+        if best is None or flat > best[0]:
+            best = (flat, twist)
+    for f in frames:
+        fk(p["forearm.L"], f, x=fx, y=best[1], z=fz)
 
 
 def anim_cast(arm):
@@ -1008,7 +1108,7 @@ CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "b
          "cast")
 
 
-def make_all(arm, measure=True):
+def make_all(arm, measure=True, P=None):
     """Author every clip on the IK rig, bake them, strip the controls, and
     write the baked clips back as plain actions. Returns what the viewer
     needs to know about them: durations, strides, contact frames, and the
@@ -1043,7 +1143,14 @@ def make_all(arm, measure=True):
     strip_controls(arm)
     for name, (samples, frames) in baked.items():
         commit(arm, name, samples)
-    if measure:
+    if measure and P is not None:
+        for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2"):
+            arm.animation_data.action = bpy.data.actions[name]
+            gap, f, limb = head_clearance(arm, P, (0, info[name]["frames"]))
+            info[name]["head_gap"] = round(gap, 4)
+            if gap < 0:
+                raise RuntimeError("%s: %s goes %.0f mm into the head at frame %d of %s"
+                                   % (P["name"], limb, -gap * 1000, f, name))
         for name in ("walk", "run"):
             arm.animation_data.action = bpy.data.actions[name]
             fr = (0, info[name]["frames"])

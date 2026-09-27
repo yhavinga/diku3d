@@ -712,7 +712,7 @@ def build_file(fname):
         box_uv(o)
         if o.parent is None:
             rig.bind_groups(arm, o)
-    info = rig.make_all(arm)
+    info = rig.make_all(arm, P=P)
     for o in meshes:
         o.data.name = o.name
         o.data.validate()
