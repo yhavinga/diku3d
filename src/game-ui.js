@@ -83,8 +83,29 @@ const CSS = `
   text-shadow: 0 0 1px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.85),
     0 -1px 2px rgba(0,0,0,0.85), 1px 0 2px rgba(0,0,0,0.85), -1px 0 2px rgba(0,0,0,0.85),
     0 2px 12px rgba(0,0,0,0.8); }
+#g-floats span.world { font-size: 22px; letter-spacing: 0.02em; }
 #g-hurt { position: absolute; inset: 0; opacity: 0; pointer-events: none;
-  background: radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 42%, rgba(150,26,18,0.55) 100%); }
+  background: radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 46%, rgba(120,18,12,0.42) 88%, rgba(70,8,6,0.62) 100%); }
+
+/* ---------------------------------------------------------- foe plate -- */
+/* Over the head of whoever you are fighting, in place of their name label:
+   the name, and the mud's hitpoints as a bar with a pale trailing chunk that
+   drains a beat after each blow, so how much a hit took is readable. */
+#g-foe { position: absolute; left: 0; top: 0; width: 132px; transform: translate(-50%, -100%);
+  text-align: center; opacity: 0; transition: opacity 180ms ease; will-change: transform; }
+#g-foe.on { opacity: 1; }
+#g-foe .n { font-size: 14px; line-height: 1.25; color: #efe2c6; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 0 1px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,0.85),
+    0 -1px 2px rgba(0,0,0,0.85), 1px 0 2px rgba(0,0,0,0.85), -1px 0 2px rgba(0,0,0,0.85); }
+#g-foe .b { position: relative; height: 5px; margin: 4px auto 0; width: 100%;
+  background: rgba(14,11,8,0.72); box-shadow: 0 0 0 1px rgba(224,189,119,0.32), 0 1px 3px rgba(0,0,0,0.6); }
+#g-foe .b i { position: absolute; inset: 0 auto 0 0; display: block; }
+#g-foe .b i.lag { background: rgba(240,222,180,0.8); transition: width 520ms cubic-bezier(.4,0,.2,1) 260ms; }
+#g-foe .b i.now { background: linear-gradient(90deg, #8f3326, #c4553f); transition: width 90ms linear; }
+#g-foe .c { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--gold); opacity: 0.8; margin-top: 3px;
+  text-shadow: 0 0 1px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,0.85); }
 
 /* -------------------------------------------------------------- gates -- */
 #g-gates { position: absolute; left: 26px; top: 132px; width: 300px; padding: 10px 13px 9px;
@@ -236,7 +257,16 @@ export function createGameUi(game) {
   floats.id = 'g-floats';
   const hurt = el('div');
   hurt.id = 'g-hurt';
-  root.append(hurt, floats);
+  const foe = el('div');
+  foe.id = 'g-foe';
+  const foeName = el('div', 'n');
+  const foeBar = el('div', 'b');
+  const foeLag = el('i', 'lag');
+  const foeNow = el('i', 'now');
+  foeBar.append(foeLag, foeNow);
+  const foeCond = el('div', 'c');
+  foe.append(foeName, foeBar, foeCond);
+  root.append(hurt, foe, floats);
 
   // -- gates ----------------------------------------------------------------
   const gatesPanel = el('div', 'panel');
@@ -287,14 +317,18 @@ export function createGameUi(game) {
     }
   }
 
-  /** A number that flies past the crosshair, sized by how hard it landed. */
-  function float(text, colour, { fromLeft = false, size = 26 } = {}) {
-    const node = el('span', null, text);
+  /**
+   * A number that flies past the crosshair, sized by how hard it landed --
+   * or, given `at` (screen pixels), rises off the body it landed on.
+   */
+  function float(text, colour, { fromLeft = false, size = 26, at = null } = {}) {
+    const node = el('span', at ? 'world' : null, text);
     node.style.color = colour;
     node.style.fontSize = `${size}px`;
+    if (at) { node.style.left = `${at.x}px`; node.style.top = `${at.y}px`; }
     floats.appendChild(node);
-    const dx = fromLeft ? -140 - Math.random() * 40 : (Math.random() - 0.5) * 90;
-    const dy = fromLeft ? -10 : -46 - Math.random() * 26;
+    const dx = at ? (Math.random() - 0.5) * 40 : (fromLeft ? -140 - Math.random() * 40 : (Math.random() - 0.5) * 90);
+    const dy = at ? -38 - Math.random() * 16 : (fromLeft ? -10 : -46 - Math.random() * 26);
     node.animate([
       { transform: `translate(-50%, -50%) translate(${dx * 0.25}px, ${fromLeft ? 0 : 14}px) scale(0.82)`, opacity: 0 },
       { transform: `translate(-50%, -50%) translate(${dx * 0.55}px, ${dy * 0.35}px) scale(1.06)`, opacity: 1, offset: 0.18 },
@@ -471,24 +505,63 @@ export function createGameUi(game) {
   }
 
   // -- events ---------------------------------------------------------------
+  /**
+   * Each event shows on its own beat: game.js resolves a round all at once
+   * and stamps every blow with `delay`, the moment its swing connects. The log
+   * line, the number and the flinch all wait for it -- and so does the damage
+   * on the bars, which count what is still on its way back in.
+   */
+  const pending = [];
+  let project = null;
+
   function consume() {
+    const now = performance.now();
     for (const event of game.drain()) {
+      if (event.delay > 0) pending.push({ at: now + event.delay * 1000, event });
+      else show(event);
+    }
+    for (let i = 0; i < pending.length;) {
+      if (pending[i].at <= now) show(pending.splice(i, 1)[0].event);
+      else i++;
+    }
+  }
+
+  /** Damage already dealt by the rules and not yet shown, to you (null) or a mobile. */
+  function unshown(slot) {
+    let dam = 0;
+    for (const { event } of pending) {
+      if (event.kind === 'hit' && (event.to || null) === slot) dam += event.dam;
+    }
+    return dam;
+  }
+
+  /** Where a mobile's head is on screen, if it is on screen. */
+  function headOf(slot, lift = 0.3) {
+    const fig = slot && slot.figure;
+    if (!project || !fig || !fig.at) return null;
+    return project(fig.at.x, fig.at.y + (fig.height || 1.7) + lift, fig.at.z);
+  }
+
+  function show(event) {
+    {
       switch (event.kind) {
         case 'hit':
           say(event.text, event.byPlayer ? 'you' : 'them');
-          if (event.byPlayer) float(String(event.dam), damColour(event.dam), { size: 22 + Math.min(22, event.dam / 2) });
-          else {
+          if (event.byPlayer) {
+            float(String(event.dam), damColour(event.dam), { size: 20 + Math.min(20, event.dam / 2), at: headOf(event.to, 0.05) });
+          } else {
             float(`-${event.dam}`, '#e0705a', { fromLeft: true, size: 22 });
             flashHurt(Math.min(0.6, event.dam / Math.max(1, game.state.maxHit)));
           }
           break;
         case 'miss':
           say(event.text, event.byPlayer ? 'faint' : 'faint');
-          if (event.byPlayer) float('miss', 'rgba(240,227,200,0.45)', { size: 17 });
+          if (event.byPlayer) float('miss', 'rgba(240,227,200,0.5)', { size: 16, at: headOf(event.to, 0.05) });
           break;
         case 'parry': case 'dodge':
           say(event.text, 'faint');
           if (event.defended) float(event.kind, 'rgba(180,200,220,0.6)', { fromLeft: true, size: 16 });
+          else float(event.kind === 'parry' ? 'parried' : 'dodged', 'rgba(200,214,228,0.62)', { size: 15, at: headOf(event.to, 0.05) });
           break;
         case 'death':
           say(event.text, 'dead');
@@ -573,29 +646,48 @@ export function createGameUi(game) {
   // -- the frame ------------------------------------------------------------
   let lastLevel = game.state.level;
   let tick = 0;
+  let lastTarget = null;
 
   function update() {
     consume();
     const s = game.state;
 
     const width = (value, max) => `${Math.max(0, Math.min(100, (value / Math.max(1, max)) * 100))}%`;
-    hpFill.style.width = width(s.hit, s.maxHit);
+    const hitShown = s.hit + unshown(null);
+    hpFill.style.width = width(hitShown, s.maxHit);
     manaFill.style.width = width(s.mana, s.maxMana);
     moveFill.style.width = width(s.move, s.maxMove);
-    promptLeft.textContent = `${Math.max(0, s.hit)}hp ${s.mana}m ${s.move}mv`;
+    promptLeft.textContent = `${Math.max(0, hitShown)}hp ${s.mana}m ${s.move}mv`;
     promptRight.innerHTML = `<b>${s.gold} gold</b>`;
     const span = 1000;
     xpFill.style.width = width(span - Math.min(span, s.expToLevel), span);
     if (s.level !== lastLevel) { lastLevel = s.level; drawGates(); }
 
-    const t = game.target();
+    let t = game.target();
+    // The killing blow is still on its way when the rules already have the
+    // mobile dead: hold its panel until the blow lands.
+    if (t) lastTarget = t;
+    else if (lastTarget && unshown(lastTarget.slot) > 0) t = lastTarget;
+    else lastTarget = null;
+    const percent = t ? Math.max(0, Math.min(100, Math.round(100 * (t.hit + unshown(t.slot)) / Math.max(1, t.maxHit)))) : 0;
     target.classList.toggle('on', !!t);
     if (t) {
       tName.textContent = t.name;
       tSub.textContent = `level ${t.level}${t.aggressive ? ' · aggressive' : ''}${t.fighting ? ' · fighting you' : ''}`;
-      tBar.style.width = `${t.percent}%`;
+      tBar.style.width = `${percent}%`;
       tCond.textContent = t.condition;
       tWarden.textContent = t.warden ? `warden of ${t.warden.name}` : '';
+    }
+
+    // The foe plate, over the head of whoever you are actually fighting.
+    const head = t && t.fighting ? headOf(t.slot, 0.12) : null;
+    foe.classList.toggle('on', !!head);
+    if (head) {
+      foe.style.transform = `translate(${head.x.toFixed(1)}px, ${head.y.toFixed(1)}px) translate(-50%, -100%)`;
+      if (foeName.textContent !== t.name) foeName.textContent = t.name;
+      foeNow.style.width = `${percent}%`;
+      foeLag.style.width = `${percent}%`;
+      foeCond.textContent = `level ${t.level}`;
     }
 
     // The one bit of instruction, and only while it applies.
@@ -616,6 +708,8 @@ export function createGameUi(game) {
 
   return {
     update,
+    /** fn(x, y, z) -> {x, y} in CSS pixels, or null when behind the camera. */
+    setProjector(fn) { project = fn; },
     openInventory: () => openSheet('gear'),
     openShop: () => openSheet('shop'),
     openSkills: () => openSheet('skills'),
