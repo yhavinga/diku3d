@@ -52,6 +52,25 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Faces and one draw per person (heads.py, hair.py, src/dress.js)
+
+- **Blender 5.2's glTF vertex colour survives only in a mesh's first
+  primitive.** Colours travel as the custom attribute `_COL` instead.
+- **An offset of a loft or superellipse "distance" is not a real offset** —
+  it put a wedge off the chin until the loft's outside distance was fixed.
+- **Stepping along a tangent drifts off a convex surface**; hair locks are
+  pulled back onto the head after every step.
+- **`Material.clone` round-trips `userData` through JSON**, so arrays live
+  in a closure, not on `userData`.
+- **Skin normal strength 0.28 → 0.07, no world grain**: that alone ended the
+  "clay head" read. Eyewhite roughness 0.14 so eyes catch a highlight.
+- The build now fails if an arm enters the head in any clip
+  (`rig.head_clearance`); the attack wind-up and the neck-rub idle were
+  re-keyed against it.
+- A person is one skinned mesh, one material: surfaces are layers of a
+  texture array and colours a small uniform array. Market Square 454 → 380
+  calls; 21 people in the barn cost 49 calls. A decimated copy past 15 m.
+
 ### Combat and crowds, second pass (motion.js, fx.js, game-ui.js)
 
 - **A stopped animation action still reports its old weight.** Zero the
