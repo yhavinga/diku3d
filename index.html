@@ -135,6 +135,14 @@
     transition: transform 140ms ease, box-shadow 140ms ease;
   }
   #enter:hover { transform: translateY(-1px); box-shadow: 0 8px 26px rgba(224,189,119,0.22); }
+  #class-pick { margin-top: 14px; display: flex; gap: 4px; align-items: center; pointer-events: auto;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+  #class-pick span { opacity: 0.45; margin-right: 8px; }
+  #class-pick button { font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer;
+    color: var(--gold); background: none; border: 1px solid rgba(224,189,119,0.22); padding: 6px 11px; border-radius: 2px;
+    opacity: 0.65; transition: opacity 140ms ease, border-color 140ms ease, background 140ms ease; }
+  #class-pick button:hover { opacity: 1; }
+  #class-pick button.on { opacity: 1; border-color: rgba(224,189,119,0.8); background: rgba(224,189,119,0.1); }
   #keys {
     margin-top: 26px; display: grid; grid-template-columns: auto auto; gap: 6px 20px;
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; opacity: 0.45;
@@ -201,11 +209,13 @@
   <h2>DikuMUD · Merc 2.1 · in three dimensions</h2>
   <div id="title-stats"></div>
   <button id="enter">enter the temple</button>
+  <div id="class-pick"><span>as a</span><button data-class="3" class="on">warrior</button><button data-class="0">mage</button><button data-class="1">cleric</button><button data-class="2">thief</button></div>
   <div id="keys">
     <b>W A S D</b><span>walk · shift to run</span>
     <b>arrows</b><span>take the exit n / e / s / w · pg up, pg dn for up, down</span>
     <b>mouse</b><span>look · E to examine</span>
     <b>1 – 4</b><span>dawn, noon, dusk, night</span>
+    <b>Z X / C</b><span>a caster's spells: choose / cast · wheel, right-click</span>
     <b>F / V / M / G</b><span>stats · noclip · sound · unlock</span>
   </div>
   <div id="credit">

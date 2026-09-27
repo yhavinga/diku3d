@@ -21,6 +21,7 @@ import { AssetLibrary, ASSET_NAMES } from './assets.js';
 import { createGame, SKY } from './game.js';
 import { createGameUi } from './game-ui.js';
 import { createFx } from './fx.js';
+import { createSpellFx } from './spellfx.js';
 import { createRain } from './rain.js';
 
 const params = new URLSearchParams(location.search);
@@ -505,6 +506,7 @@ async function boot() {
   const fx = createFx({
     scene, camera, composer, actors, game, audio, player, library: assets, sun, hemi, built, lightPool,
   });
+  const spellfx = createSpellFx({ scene, camera, renderer, composer, game, actors, audio, player, quality });
   {
     // Screen position of a world point, for the foe plate and damage numbers.
     const p = new THREE.Vector3();
@@ -690,6 +692,7 @@ async function boot() {
     const daylight = THREE.MathUtils.clamp(preset.elevation / 22, 0, 1) * 0.75;
     actors.setDaylight(preset.haze, daylight);
     fx.setAmbient(daylight / 0.75);
+    spellfx.setDaylight(daylight / 0.75);
     // Whether it is day, for things that are lit *because* it is dark. Fully
     // out above twelve degrees of sun, fully lit below two, so the lamps are a
     // faint glow at golden hour, gone at noon, and the whole light of the town
@@ -1098,6 +1101,7 @@ async function boot() {
     lightPool.update(camera.position, elapsed);
     actors.update(dt, elapsed, camera);
     fx.update(dt);
+    spellfx.update(state.paused ? 0 : dt);
     audio.update(built.rooms.get(state.roomVnum)?.room.sector === 1);
 
     if (!state.paused) {
@@ -1132,7 +1136,7 @@ async function boot() {
 
   // Handy from the console, and how the screenshots for this were framed.
   window.diku = {
-    scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi, options, fx,
+    scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi, options, fx, spellfx,
     // `wetness` is exposed because it is a slow-moving number nothing on screen
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
