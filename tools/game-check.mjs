@@ -542,6 +542,73 @@ const shell = (() => {
 })();
 for (const note of shell.notes) console.log(`  ${note}`);
 
+// ------------------------------------------------------------- wandering --
+
+/**
+ * mobile_update, left to run: ten minutes of the town with nobody in it. The
+ * player stands at the temple and never moves, so nothing fights; everything
+ * else is the mud's own wandering, walked along the layout's streets.
+ */
+console.log('\nWANDERING, TEN MINUTES WITH NOBODY WATCHING');
+const wander = (() => {
+  const game = createGame({ world, layout, built, seed: 77, classIndex: 3 });
+  const temple = built.rooms.get(3001) || built.rooms.values().next().value;
+  const at = { x: temple.center.x, y: temple.center.y + 1.72, z: temple.center.z };
+  const look = { x: 0, y: 0, z: -1 };
+  const start = new Map(game.mobs.map((slot) => [slot, slot.roomVnum]));
+  const moves = [];
+  let prev = new Map(start);
+  let strays = 0;          // a mobile whose room is not the room its position is in
+  let offGround = 0;       // a position outside every built room and routed street
+  let sealedCrossings = 0; // a room change across something that is not an exit
+  const exitBetween = (a, b) => {
+    const room = world.rooms.get(a);
+    return !!room && room.exits.some((e) => e && e.to === b);
+  };
+  const dt = 0.25;
+  for (let t = 0; t < 600; t += dt) {
+    game.update(dt, at, look);
+    for (const slot of game.mobs) {
+      if (slot.dead) continue;
+      const here = game.nav.roomAt(slot.pos.x, slot.pos.y, slot.pos.z);
+      if (here === undefined) offGround++;
+      else if (slot.travel) {
+        // Walking between two rooms, it is in one of the two.
+        if (slot.roomVnum !== slot.travel.from && slot.roomVnum !== slot.travel.to) strays++;
+      } else if (here !== slot.roomVnum) strays++;
+      const was = prev.get(slot);
+      if (slot.roomVnum !== was) {
+        moves.push({ slot, from: was, to: slot.roomVnum });
+        // Walking a routed street goes straight from one end to the other, so
+        // every change of room has to be along an exit of one of the two.
+        if (!exitBetween(was, slot.roomVnum) && !exitBetween(slot.roomVnum, was)) sealedCrossings++;
+        prev.set(slot, slot.roomVnum);
+      }
+    }
+  }
+  const moved = game.mobs.filter((slot) => slot.roomVnum !== start.get(slot));
+  const sentinels = game.mobs.filter((slot) => slot.proto.act & 2);
+  const keepers = game.mobs.filter((slot) => slot.record.shop);
+  const result = {
+    moves: moves.length,
+    movers: new Set(moves.map((m) => m.slot)).size,
+    awayFromStart: moved.length,
+    sentinelMoves: moves.filter((m) => m.slot.proto.act & 2).length,
+    keeperMoves: moves.filter((m) => m.slot.record.shop).length,
+    noMob: moves.filter((m) => (world.rooms.get(m.to).flags & 4)).length,
+    strayAreas: moves.filter((m) => (m.slot.proto.act & 64) && world.rooms.get(m.to).area !== m.slot.proto.area).length,
+    strays, offGround, sealedCrossings,
+    sentinels: sentinels.length, keepers: keepers.length, mobs: game.mobs.length,
+  };
+  console.log(`  ${result.moves} room changes by ${result.movers} of ${result.mobs} mobiles;`
+    + ` ${result.awayFromStart} end somewhere else`);
+  console.log(`  ${result.sentinels} sentinels moved ${result.sentinelMoves} times, ${result.keepers} shopkeepers ${result.keeperMoves} times,`
+    + ` ${result.noMob} entries into NO_MOB rooms, ${result.strayAreas} STAY_AREA strays`);
+  console.log(`  ${result.strays} mobile-frames in a room other than the one its body is in,`
+    + ` ${result.offGround} off the built ground, ${result.sealedCrossings} crossings that are not an exit`);
+  return result;
+})();
+
 // ------------------------------------------------------------- assertions --
 
 const failures = [];
@@ -618,6 +685,14 @@ check(shell.game && shell.game.roads.length > 0, 'there are roads out of the cit
 for (const kind of ['hit', 'miss', 'death', 'xp', 'gold', 'buy', 'sell', 'wear', 'practice']) {
   check(shell.kinds.has(kind), `the queue carries '${kind}' events for the ui`);
 }
+
+check(wander.movers >= Math.min(10, wander.mobs / 4), 'mobile_update walks the town', `${wander.movers} mobiles changed room`);
+check(wander.sentinelMoves === 0 && wander.keeperMoves === 0, 'sentinels and shopkeepers stay put',
+  `${wander.sentinelMoves} + ${wander.keeperMoves}`);
+check(wander.noMob === 0 && wander.strayAreas === 0, 'nobody walks into NO_MOB rooms or out of a STAY_AREA area');
+check(wander.strays === 0 && wander.offGround === 0, 'a mobile is always in the room its body stands in',
+  `${wander.strays} stray, ${wander.offGround} off the ground`);
+check(wander.sealedCrossings === 0, 'every change of room is along an exit', `${wander.sealedCrossings}`);
 
 // A duel that must not be winnable, run against the shell's own rules bundle.
 const executioner = roster.find((r) => r.proto.level >= 40);
