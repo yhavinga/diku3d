@@ -21,6 +21,19 @@ const _quaternion = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
 
 /**
+ * The people's files carry their vertex colour as a custom attribute, `_COL`
+ * (three lowercases it), because Blender's exporter writes the true colour
+ * only into a mesh's first primitive and white into the rest -- see
+ * people.py. Handed back to three under the name its materials read.
+ */
+function takeColour(geometry) {
+  const colour = geometry.getAttribute('_col');
+  if (!colour) return;
+  geometry.setAttribute('color', colour);
+  geometry.deleteAttribute('_col');
+}
+
+/**
  * Tags the models use that the texture baker has no recipe for. Two kinds here:
  * an alias, where an existing baked surface is genuinely the right one, and a
  * plain PBR value for the small things that read better flat.
@@ -55,7 +68,10 @@ const TAG_MATERIALS = {
   // person looking at you. Not black -- nothing lit is.
   eye: { color: 0x1a1410, roughness: 0.22, metalness: 0 },
   // Off-white and not bright: a full white sclera at four pixels is a doll's.
-  eyewhite: { color: 0xb9ae9c, roughness: 0.4, metalness: 0 },
+  // The iris, pupil and limbus are in the eyeball's vertex colour now, on
+  // rings round its pole; this is the wet surface over all of it, glossy
+  // enough to hold a highlight.
+  eyewhite: { color: 0xffffff, roughness: 0.14, metalness: 0 },
   bone: { color: 0xcfc4a6, roughness: 0.78, metalness: 0 },
   // Gilt: a cleric's holy symbol. Bright on purpose -- it has to read at
   // twenty metres against a robe.
@@ -187,6 +203,7 @@ export class AssetLibrary {
       const materialName = tagOf(node.material);
       const material = this.materialFor(materialName);
 
+      takeColour(node.geometry);
       const geometry = node.geometry.clone();
       geometry.applyMatrix4(node.matrixWorld);
 

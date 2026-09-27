@@ -181,8 +181,10 @@ const ARMED = new Set(['guard', 'knight', 'rogue', 'smith', 'troll', 'skeleton',
  * @param proto the mobile prototype, with `equipment` [{proto, wearLoc}] from
  *   its resets and `shop` if it keeps one
  * @param ITEM the item-type table from are.js
- * @returns {{file, arch, scale, headScale, female, weapon, shield, pieces,
- *   tint, sex, kind}} or null for anything that is not a person
+ * @returns {{file, arch, face, scale, headScale, female, weapon, shield, pieces,
+ *   tint, sex, kind}} or null for anything that is not a person. `face` is the
+ *   face mesh to wear (face_male, face_male_old, face_female, face_female_old,
+ *   face_troll) or null for a skeleton.
  */
 /**
  * Not people, and not built like them. Beasts are actors.js's BEASTS; this is
@@ -204,7 +206,7 @@ export function personOf(proto, ITEM, instance = 0) {
   const seed2 = strHash(`${proto.short}#${instance}`, 31);
   const seed3 = strHash(`${proto.keywords}#${instance}`, 57);
   const out = {
-    file: 'person_male', arch: 'peasant', kind: 'person', scale: 1, headScale: 1,
+    file: 'person_male', arch: 'peasant', face: 'face_male', kind: 'person', scale: 1, headScale: 1,
     weapon: null, shield: null, pieces: [], tint: {}, sex: 'male',
   };
   const old = OLD.test(w);
@@ -217,6 +219,7 @@ export function personOf(proto, ITEM, instance = 0) {
     if (kind === 'troll') {
       out.file = 'troll';
       out.arch = 'troll';
+      out.face = 'face_troll';
       const k = TROLL_KINDS.find(([r]) => r.test(w));
       const spec = k ? k[1] : { scale: 1.3, skin: 0x5f6e4c };
       out.scale = spec.scale;
@@ -226,11 +229,13 @@ export function personOf(proto, ITEM, instance = 0) {
     } else {
       out.arch = kind;
       if (kind === 'skeleton') {
+        out.face = null;
         out.tint = { bone: 0xcfc4a6 };
         if (seed < 0.6) out.weapon = 'weapon_sword';
         if (seed < 0.35) out.shield = 'shield_round';
       } else if (kind === 'zombie') {
         const ghoul = /\bghouls?|ghasts?\b/i.test(w);
+        out.face = 'face_male_old';
         out.tint = { skin: ghoul ? 0x6a7362 : 0x7f8a6c, cloth: pick(DRAB, seed), cloth2: pick(DRAB, seed3), hair: 0x4a4238 };
         out.pieces = seed < 0.5 ? ['hair_fringe'] : ['hair_long'];
       } else {
@@ -253,18 +258,25 @@ export function personOf(proto, ITEM, instance = 0) {
   if (/\b(lumberjacks?|woodcutters?|woodsm[ae]n)\b/i.test(w)) out.weapon = 'weapon_axe';
   if (/\b(executioners?|headsm[ae]n)\b/i.test(w)) arch = 'smith';
 
+  // Age. The mud says so for a few; for the rest a trade that takes years
+  // to rise in is more often grey, so a crowd has its elders in it and not
+  // only young men. The old wear the old face and grey hair.
+  const ELDER = { mage: 0.5, priest: 0.35, noble: 0.3, beggar: 0.35, merchant: 0.25, smith: 0.2, peasant: 0.15 };
+  const aged = old || strHash(`${proto.keywords}#${instance}`, 91) < (ELDER[arch] ?? 0.06);
   out.tint.skin = pick(SKIN, strHash(proto.keywords, 7));
-  out.tint.hair = hair;
+  out.tint.hair = aged ? pick(HAIR_OLD, seed2) : hair;
   const cloth = pick(EARTH, seed);
   const cloth2 = pick(EARTH, seed3);
 
   if (isFemale) {
     out.file = 'person_female';
     out.sex = 'female';
+    out.face = aged ? 'face_female_old' : 'face_female';
     arch = arch === 'merchant' || /\b(maids?|nursemaids?|nurses?|barmaids?|waitress|servants?|cooks?|milkmaids?)\b/i.test(w)
       ? 'maid'
       : (/\b(hags?|crones?|witch(es)?|granny|beggars?)\b/i.test(w) || (old && arch !== 'noble')) ? 'crone' : 'woman';
     out.arch = arch;
+    if (arch === 'crone') { out.face = 'face_female_old'; out.tint.hair = pick(HAIR_OLD, seed2); }
     out.tint.cloth = arch === 'crone' ? pick(DRAB, seed) : pick(DRESSES, seed);
     out.tint.cloth2 = pick(EARTH, seed3);
     out.tint.linen = 0xd8cfbc;
@@ -282,6 +294,7 @@ export function personOf(proto, ITEM, instance = 0) {
     }
   } else {
     out.arch = arch;
+    out.face = aged ? 'face_male_old' : 'face_male';
     const beard = () => (seed3 < 0.35 ? 'beard_full' : seed3 < 0.55 ? 'beard_short' : seed3 < 0.7 ? 'moustache' : null);
     const hairs = (list) => pick(list, seed2);
     const P = [];
@@ -309,7 +322,7 @@ export function personOf(proto, ITEM, instance = 0) {
       case 'mage':
         out.tint = { ...out.tint, cloth: pick(ROBES.mage, seed), cloth2: pick(RICH, seed3) };
         P.push(seed2 < 0.55 ? 'hat_wizard' : 'hood');
-        if (seed3 < 0.7 || old) P.push('beard_full');
+        if (seed3 < 0.7 || aged) P.push('beard_full');
         out.weapon = out.weapon || 'weapon_staff';
         break;
       case 'priest': {
@@ -374,6 +387,8 @@ export function personOf(proto, ITEM, instance = 0) {
   if (TODDLER.test(w)) { out.scale = 0.50; out.headScale = 1.32; }
   else if (CHILD.test(w) && !/\b(youths?)\b/i.test(w)) { out.scale = 0.66; out.headScale = 1.18; }
   else if (/\b(youths?)\b/i.test(w)) { out.scale = 0.88; out.headScale = 1.05; }
+  // Nobody that small is old, whatever their trade.
+  if (out.scale < 0.9 && out.face && out.face.endsWith('_old')) { out.face = out.face.replace('_old', ''); out.tint.hair = hair; }
   if (/\b(brownies?|pixies?|sprites?|leprechauns?|gnomes?)\b/i.test(w)) { out.scale = 0.5; out.headScale = 1.2; }
   // Smurfs are three apples high, blue, and wear a white cap; the mud says the first two.
   if (/\bsmurfs?\b/i.test(w)) { out.scale = 0.32; out.headScale = 1.45; out.tint.skin = 0x6a9ad8; out.tint.cloth = 0xe8e4dc; out.tint.cloth2 = 0xe8e4dc; out.pieces = /papa/i.test(w) ? ['hat_cap', 'beard_full'] : ['hat_cap']; }

@@ -423,16 +423,19 @@ function templateOf(asset, file, arch) {
   }
   if (!body) throw new Error(`actors: ${file}.glb has no arch_${arch}`);
   for (const node of drop) node.removeFromParent();
-  // Standing height from the body mesh alone, not the hats, read off the
-  // geometry: the rig is at the origin and the geometry is in its rest pose,
-  // while Box3.setFromObject on a skinned mesh asks a skeleton that has not
-  // been posed yet and answers NaN.
+  // Standing height from the body and its bare head, not the hats, read off
+  // the geometry: the rig is at the origin and the geometry is in its rest
+  // pose, while Box3.setFromObject on a skinned mesh asks a skeleton that has
+  // not been posed yet and answers NaN. Any face will do -- they share a skull.
   let top = 0;
-  body.traverse((node) => {
-    if (!node.isMesh) return;
-    if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
-    top = Math.max(top, node.geometry.boundingBox.max.y);
-  });
+  const face = holder.children.find((node) => node.name.startsWith('face_'));
+  for (const part of [body, face]) {
+    part?.traverse((node) => {
+      if (!node.isMesh) return;
+      if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+      top = Math.max(top, node.geometry.boundingBox.max.y);
+    });
+  }
   const record = { scene, height: top };
   templates.set(key, record);
   return record;
@@ -451,7 +454,10 @@ function personMaterial(library, tag, hex, ghost) {
   const m = base.clone();
   // The baked materials expect a colour attribute; the people carry none,
   // and a missing one reads as black rather than as white.
-  m.vertexColors = false;
+  // Every mesh in the people's files carries a colour -- white where it has
+  // nothing to say, and on the face the cavities, the lips and the flush --
+  // so the material multiplies by it.
+  m.vertexColors = true;
   if (hex !== undefined && hex !== null) m.color.setHex(hex);
   if (ghost) {
     // A shade: see-through, lit from inside, and never in the depth buffer,
@@ -490,6 +496,88 @@ function carried(library, name, tint, ghost) {
 const tagOfMaterial = (m) => (m && m.name ? m.name.replace(/^MAT:/, '') : '');
 
 /**
+ * A face of one's own. The face meshes are few -- young and old of each sex
+ * -- and the difference between two people in a crowd is in the bones that
+ * no clip keys: the jaw (wider or narrower, longer or shorter in the chin) and
+ * the nose (bigger, smaller, more or less of it standing out). Bone-local
+ * axes are x across the face, y out of it, z along it, as rig.py sets them.
+ */
+function shapeFace(body, key) {
+  const jaw = body.getObjectByName('jaw');
+  const nose = body.getObjectByName('nose');
+  const r = (salt) => strHash(key, salt) * 2 - 1;
+  if (jaw) jaw.scale.set(1 + 0.08 * r(41), 1 + 0.04 * r(43), 1 + 0.06 * r(47));
+  if (nose) {
+    const k = 1 + 0.12 * r(53);
+    nose.scale.set(k * (1 + 0.08 * r(59)), k * (1 + 0.14 * r(61)), k);
+  }
+}
+
+/** The camera the people were last drawn for: what their eyes follow. */
+let viewer = null;
+const _eyeTarget = new THREE.Vector3();
+const _eyeInverse = new THREE.Matrix4();
+const _eyeDir = new THREE.Vector3();
+const _eyeTurn = new THREE.Quaternion();
+const EYE_REACH = 0.42;       // radians either way the eyes will turn
+const EYE_RANGE = 9;          // metres inside which someone meets your eye
+
+/**
+ * Eyes that look at you. The eye bones are the rig's and no clip keys them,
+ * so after the mixer has posed the head they are turned towards the camera --
+ * if it is near and in front of the face -- and otherwise let drift a little
+ * about straight ahead, a new point every second or two, which is what eyes
+ * at rest do. Wrapped round the mixer's own update so every caller of it gets
+ * it for nothing; the camera is picked up by whichever face draws first.
+ */
+function lookWithEyes(body, mixer, group) {
+  const eyes = ['eyeL', 'eyeR'].map((n) => body.getObjectByName(n)).filter(Boolean);
+  if (!eyes.length) return;
+  const rest = eyes.map((e) => e.quaternion.clone());
+  const forward = eyes.map((e) => new THREE.Vector3(0, 1, 0).applyQuaternion(e.quaternion));
+  let drift = 0;
+  const wander = new THREE.Vector3();
+  body.traverse((node) => {
+    if (node.isSkinnedMesh && node.name.startsWith('face_')) {
+      node.onBeforeRender = (renderer, scene, camera) => { viewer = camera; };
+    }
+  });
+  const update = mixer.update.bind(mixer);
+  mixer.update = (dt) => {
+    update(dt);
+    const head = eyes[0].parent;
+    if (!viewer || !head) return mixer;
+    group.getWorldPosition(_eyeTarget);
+    const far = _eyeTarget.distanceToSquared(viewer.position) > EYE_RANGE * EYE_RANGE;
+    drift -= dt;
+    if (drift <= 0) {
+      drift = 0.8 + Math.random() * 1.6;
+      wander.set((Math.random() - 0.5) * 0.35, 1, (Math.random() - 0.5) * 0.18);
+    }
+    head.updateWorldMatrix(true, false);
+    _eyeInverse.copy(head.matrixWorld).invert();
+    eyes.forEach((eye, i) => {
+      const fwd = forward[i];
+      if (!far) {
+        _eyeDir.copy(viewer.position).applyMatrix4(_eyeInverse).sub(eye.position).normalize();
+      } else {
+        _eyeDir.set(0, 0, 0);
+      }
+      const angle = _eyeDir.lengthSq() ? fwd.angleTo(_eyeDir) : Infinity;
+      if (angle > EYE_REACH * 1.8) {
+        // Out of reach: rest ahead, with the drift.
+        _eyeDir.copy(fwd).add(_eyeTarget.set(wander.x, 0, wander.z).applyQuaternion(rest[i])).normalize();
+      } else if (angle > EYE_REACH) {
+        _eyeDir.lerp(fwd, 1 - EYE_REACH / angle).normalize();
+      }
+      _eyeTurn.setFromUnitVectors(fwd, _eyeDir);
+      eye.quaternion.copy(_eyeTurn).multiply(rest[i]);
+    });
+    return mixer;
+  };
+}
+
+/**
  * A person, dressed. Returns the figure record the rest of the viewer drives:
  *
  *   { group, headGroup, height, scale, mixer, actions, clips, stride,
@@ -508,7 +596,7 @@ function buildPerson(library, who, proto, instance) {
   const asset = library.get(who.file);
   const t = templateOf(asset, who.file, who.arch);
   const body = cloneSkinned(t.scene);
-  const wear = new Set(who.pieces);
+  const wear = new Set(who.face ? [...who.pieces, who.face] : who.pieces);
   const drop = [];
   // Head pieces are the rig's children that are neither the archetype nor a bone.
   for (const node of body.getObjectByName('hips').parent.children) {
@@ -542,6 +630,7 @@ function buildPerson(library, who, proto, instance) {
     node.material = personMaterial(library, tag, TINTED.has(tag) ? who.tint[tag] : undefined, ghost);
     if (ghost) node.renderOrder = 2;
   });
+  shapeFace(body, `${proto.short}#${instance}`);
   // A little of each person's own height, so a crowd is not one stature.
   const scale = who.scale * (0.95 + strHash(`${proto.short}#${instance}`, 3) * 0.10);
   body.scale.setScalar(scale);
@@ -611,6 +700,7 @@ function buildPerson(library, who, proto, instance) {
   // skeleton is in its bind pose, and `state.benchmark` stops the loop before
   // the actors are updated.
   mixer.update(0);
+  lookWithEyes(body, mixer, group);
   const facts = CLIP_FACTS[who.file];
   return {
     group, headGroup: null, height: t.height * scale, scale, mixer, actions, clips,

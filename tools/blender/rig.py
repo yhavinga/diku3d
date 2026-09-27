@@ -87,7 +87,40 @@ def bone_table(P):
             ("foot." + tag, tuple(a), tuple(ball), "shin." + tag, True),
             ("toe." + tag, tuple(ball), tuple(tip), "foot." + tag, True),
         ]
+    out += face_bones(P)
     return out
+
+
+# Bones in the face that no clip ever keys: the eyes, which the viewer turns
+# towards whatever the person is looking at, and the jaw and the nose, which it
+# scales a little per person so a crowd is not one face twenty times. They
+# point forward out of the face, so their local Y is the line of sight (or of
+# the nose) and X is the figure's left, like every other bone here. Created
+# non-deforming, so bone heat on the body never hands them the neck; switched
+# to deforming once the body is bound (`deform_face`).
+FACE_BONES = ("eye.L", "eye.R", "jaw", "nose")
+
+
+def face_bones(P):
+    import heads
+    S = heads.spec_for(P)
+    ex, ey, ez = S["eye"]
+    fwd = (0.0, -0.02, 0.0)
+    out = []
+    for (sx, tag) in ((1, "L"), (-1, "R")):
+        c = heads.canon_to_world(P, (sx * ex, ey, ez))
+        out.append(("eye." + tag, c, tuple(V(c) + V(fwd)), "head", False))
+    for name, at in (("jaw", heads.JAW_PIVOT), ("nose", heads.NOSE_PIVOT)):
+        c = heads.canon_to_world(P, at)
+        out.append((name, c, tuple(V(c) + V(fwd)), "head", False))
+    return out
+
+
+def deform_face(arm):
+    select_only([arm], arm)
+    for n in FACE_BONES:
+        if n in arm.data.bones:
+            arm.data.bones[n].use_deform = True
 
 
 # The Z axis each holding bone's roll aims at, in the A-pose.
@@ -376,7 +409,9 @@ def bake(arm, act, frames):
     three can play without a solver. Returns the samples; `commit` writes
     them into a clean action once the controls are gone."""
     arm.animation_data.action = act
-    names = [b.name for b in arm.data.bones if b.name not in CONTROLS]
+    # The face bones are the viewer's to move, not the clips': a clip that
+    # carried them would put every eye back to the front every frame.
+    names = [b.name for b in arm.data.bones if b.name not in CONTROLS and b.name not in FACE_BONES]
     samples = []
     scene = bpy.context.scene
     for f in range(frames[0], frames[1] + 1):
@@ -703,7 +738,7 @@ def pose(arm, frame, bones, hips=None, stance="rest", feet=True):
     if feet:
         stance_feet(arm, stance, frame)
     for pb in p:
-        if pb.name in CONTROLS or pb.name == "hips" or pb.name.startswith(("grip", "shield")):
+        if pb.name in CONTROLS or pb.name in FACE_BONES or pb.name == "hips" or pb.name.startswith(("grip", "shield")):
             continue
         if pb.name.startswith(("thigh", "shin", "foot")):
             continue

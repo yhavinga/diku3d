@@ -752,7 +752,11 @@ const RECIPES = {
   // A person is 1.75 m, so a 0.7 m tile puts two and a half repeats down a
   // sleeve -- close enough that nothing reads as a pattern.
   cloth: { surface: 'cloth', scale: 0.7, normalScale: 0.55, env: 0.35, wet: 0, detail: 0.5 },
-  skin: { surface: 'skin', scale: 0.5, normalScale: 0.28, env: 0.5, wet: 0, detail: 0.35 },
+  // Faces carry their own form in their normals now (heads.py sets every one
+  // from the sculpt), and at 0.28 with the world-space grain on top the skin's
+  // relief was the lumpiness a review called clay: a one-centimetre bump on a
+  // face fifteen wide. The mottling stays in the colour; the relief is a whisper.
+  skin: { surface: 'skin', scale: 0.5, normalScale: 0.07, env: 0.5, wet: 0, detail: 0 },
   plaster: { surface: 'plaster', scale: 3, normalScale: 0.34, env: 0.7, wet: 0, detail: 0.45 },
   stonewall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55 },
   timber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45 },

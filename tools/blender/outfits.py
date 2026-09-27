@@ -1140,27 +1140,10 @@ def skeleton(body, arm, C):
     tl = lambda n: b[n].tail_local.copy()
     P = C.P
     out = []
-    # The skull is the head with the face taken off it: no nose, the sockets
-    # and the nose hole dark.
-    sk = _skull(dict(P, nose=0.0, brow=1.6, chin=P["chin"] * 1.3))
-    for v in sk.data.vertices:
-        c = people.head_center(P)
-        v.co = c + (v.co - c) * 0.94
-    sk.data.materials.clear()
-    sk.data.materials.append(lib.material("bone"))
+    import heads
+    sk = heads.skull(P)
     rig.set_rigid(sk, "head")
     out.append(sk)
-    c = people.head_center(P)
-    hw, hd, hh = P["head"]
-    for sx in (-1, 1):
-        e = people.ellipsoid(tuple(c + V((sx * 0.031, -hd * 0.84, 0.004))), (0.017, 0.012, 0.016),
-                             name="socket", mat="eye", seg=8, rings=6)
-        rig.set_rigid(e, "head")
-        out.append(e)
-    nh = people.ellipsoid(tuple(c + V((0.0, -hd * 0.86, -0.030))), (0.010, 0.010, 0.014),
-                          name="nosehole", mat="eye", seg=8, rings=6)
-    rig.set_rigid(nh, "head")
-    out.append(nh)
     # Spine: neck to sacrum, bumped every vertebra.
     for (name, r) in (("neck", 0.016), ("chest", 0.019), ("spine", 0.021)):
         h, t = hl(name) + V((0, 0.03, 0)), tl(name) + V((0, 0.03, 0))

@@ -83,6 +83,9 @@ PROP_BUDGET = 800
 # times a frame, not per chunk.
 PERSON_BUDGET = 6500
 HEAD_PIECE_BUDGET = 1000
+# A face is the skin with the ears, two eyeballs and the brows: the part of a
+# person that is looked at hardest, and so the densest.
+FACE_BUDGET = 3800
 TREE_BUDGET = 1500
 
 
@@ -137,6 +140,7 @@ def check(report):
         name, tris = bits[0], int(bits[1])
         cap = BUDGET.get(name, TREE_BUDGET if name.startswith("tree") else
                          PERSON_BUDGET if name.startswith("arch_") else
+                         FACE_BUDGET if name.startswith("face_") else
                          HEAD_PIECE_BUDGET if name.startswith(("hair_", "beard_", "helm_", "hat_",
                                                                "hood", "coif", "scarf", "moustache"))
                          else PROP_BUDGET)
