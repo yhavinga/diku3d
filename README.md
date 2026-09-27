@@ -57,7 +57,14 @@ are fifteen modelled bodies, bred into dogs, wolves, foxes, horses, cattle,
 swans and a green dragon by coat and proportion. They wander the way Merc's
 `mobile_update` has them wander, through a random open exit every so often,
 and walk the routed street to get there; fights are Merc's `fight.c`, played
-on the beat with the swing's contact frame landing on the blow.
+on the beat with the swing's contact frame landing on the blow. The casters
+cast: `spec_cast_mage`, `_cleric`, `_undead`, `_adept` and the dragons' breath
+run on the mobile pulse, with 57 spells out of `magic.c` — each family drawn
+as its own effect, with affects like sanctuary worn as an aura while they last. The rest of Merc is there
+too, in `src/rules/`: area resets, hunger and thirst, corpses that rot and
+can be searched, containers, keys and locks, kick, backstab, disarm, rescue
+and steal, the janitor, the fido, the thief and the mayor walking his route
+opening the gates, and a character saved to the browser to continue from.
 
     node tools/people-check.mjs [--all]   # who every mobile is dressed as
 
@@ -73,7 +80,7 @@ through the river gate in the east wall).
 | `W A S D` | walk, `shift` to run, `space` to jump |
 | arrow keys | take the exit north, east, south or west, and turn to face that way — the mud's own navigation, so north is north whichever way you were looking. Your pace carries over: step east while walking and you keep the same speed, now heading east |
 | `page up` / `page down` | take the exit up or down, leaving you looking where you were |
-| mouse | look, `E` to examine what you're looking at or open a door; `E` again closes it |
+| mouse | look, `E` to examine, open, unlock (with the key you carry), drink, search a body or pick up; `E` again closes it |
 | `1` – `4` | dawn, noon, dusk, night |
 | `P` | cycle quality: low, medium, high, max |
 | `F` | frame rate, draw calls, triangles, GPU milliseconds |
@@ -82,6 +89,9 @@ through the river gate in the east wall).
 | `G` | force every lock in the world |
 | left mouse | attack what you are facing |
 | `I` `B` `K` `R` `T` `Q` | inventory, trade, skills, rest, take, recall |
+| `Z` `X` / wheel, `C` / right mouse | mage and cleric: choose a spell, cast it |
+| `Z` `X` `C` `H` `J` `L` `N` | warrior and thief: the skill bar — kick, backstab, disarm, sneak, hide, steal, pick |
+| `enter` | the mud's own command line: Merc's command table, abbreviations and all 90 socials; `enter` on an empty line closes it |
 | `esc` | release the mouse |
 
 ## URL parameters
@@ -93,6 +103,7 @@ through the river gate in the east wall).
 | `?max=400` | stop placing after this many rooms |
 | `?time=dusk` | `dawn`, `noon`, `dusk`, `night` |
 | `?quality=medium` | `low`, `medium`, `high`, `max` |
+| `?class=mage` | start as `warrior`, `mage`, `cleric` or `thief` (also on the title screen) |
 | `?fps=30` | override the preset's frame cap; `0` uncaps it |
 
 Try `?areas=moria&room=7000`, `?areas=sewer&room=7100`, `?areas=haon&room=6500`

@@ -122,8 +122,9 @@ export class Audio {
     this.burst({ ...preset, gain: sprint ? 0.34 : 0.22 });
   }
 
-  door(open) {
+  door(open, place = null) {
     if (!this.ctx || this.muted) return;
+    const dest = place ? this.out(place) : this.master;
     const osc = this.ctx.createOscillator();
     osc.type = 'sawtooth';
     const now = this.ctx.currentTime;
@@ -137,10 +138,92 @@ export class Audio {
     envelope.gain.setValueAtTime(0.0001, now);
     envelope.gain.linearRampToValueAtTime(0.13, now + 0.05);
     envelope.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
-    osc.connect(filter).connect(envelope).connect(this.master);
+    osc.connect(filter).connect(envelope).connect(dest);
     osc.start(now);
     osc.stop(now + 0.55);
     this.burst({ frequency: 260, q: 0.9, gain: 0.1, decay: 0.2 });
+  }
+
+  // -- the mud's small verbs ----------------------------------------------
+  //
+  // Each is a few hundred milliseconds of the same noise and sines the rest
+  // of the file is made of, levelled against a footstep: a lock is two
+  // clicks, a coin is a ring, a drink is three swallows.
+
+  /** A key turning (two dry clicks and a clunk), or a pick at work. */
+  lock({ pan, gain, pick = false, failed = false } = {}) {
+    if (!this.ctx || this.muted) return;
+    const dest = this.out({ pan, gain });
+    const clicks = pick ? [0, 0.09, 0.16, 0.27, 0.34] : [0, 0.07];
+    clicks.forEach((t, i) => this.noiseHit(dest, { frequency: 3600 + i * 300, q: 6, gain: 0.35, decay: 0.03, delay: t }));
+    if (!failed) {
+      this.noiseHit(dest, { frequency: 900, q: 2, gain: 0.45, decay: 0.07, delay: clicks[clicks.length - 1] + 0.1 });
+      this.ring(dest, { base: 1400, ratios: [1, 2.3], gain: 0.02, decay: 0.2, delay: clicks[clicks.length - 1] + 0.1 });
+    }
+  }
+
+  /** Coins into a purse: a few small rings, close together. */
+  coins({ one = false } = {}) {
+    if (!this.ctx || this.muted) return;
+    const dest = this.out({ gain: 0.8 });
+    const n = one ? 1 : 4;
+    for (let i = 0; i < n; i++) {
+      const delay = i * 0.045 + Math.random() * 0.02;
+      this.ring(dest, { base: 2600 + Math.random() * 900, ratios: [1, 1.52, 2.33], gain: 0.03, decay: 0.28, delay });
+      this.noiseHit(dest, { frequency: 5200, q: 3, gain: 0.12, decay: 0.02, delay });
+    }
+  }
+
+  /** Something taken up: cloth and leather, a short rustle. */
+  pickup() {
+    if (!this.ctx || this.muted) return;
+    const dest = this.out({ gain: 0.7 });
+    this.noiseHit(dest, { frequency: 2400, to: 1200, q: 0.8, gain: 0.3, attack: 0.02, decay: 0.12 });
+    this.noiseHit(dest, { frequency: 700, q: 1, gain: 0.2, decay: 0.06, delay: 0.08 });
+  }
+
+  /** Something let fall at your feet; money rings as it lands. */
+  drop(gold = false) {
+    if (!this.ctx || this.muted) return;
+    const dest = this.out({ gain: 0.8 });
+    this.thump(dest, { from: 140, to: 60, gain: 0.08, decay: 0.12, delay: 0.18 });
+    this.noiseHit(dest, { frequency: 600, type: 'lowpass', q: 0.7, gain: 0.3, decay: 0.08, delay: 0.18 });
+    if (gold) this.coins();
+  }
+
+  /** Bites: three crisp, chewed bursts. */
+  eat() {
+    if (!this.ctx || this.muted) return;
+    const dest = this.out({ gain: 0.8 });
+    for (let i = 0; i < 3; i++) {
+      this.noiseHit(dest, { frequency: 1800 - i * 200, q: 1.3, gain: 0.35, attack: 0.008, decay: 0.07, delay: i * 0.32 });
+      this.noiseHit(dest, { frequency: 450, q: 1, gain: 0.25, decay: 0.12, delay: i * 0.32 + 0.05 });
+    }
+  }
+
+  /** Swallows -- a low glug, three times -- or water filling a skin. */
+  drink({ fill = false } = {}) {
+    if (!this.ctx || this.muted) return;
+    const dest = this.out({ gain: 0.8 });
+    if (fill) {
+      this.noiseHit(dest, { frequency: 900, to: 2200, q: 1.2, gain: 0.3, attack: 0.1, decay: 0.9 });
+      return;
+    }
+    for (let i = 0; i < 3; i++) {
+      const now = this.ctx.currentTime + i * 0.38;
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(210, now);
+      osc.frequency.exponentialRampToValueAtTime(120, now + 0.14);
+      const env = this.ctx.createGain();
+      env.gain.setValueAtTime(0.0001, now);
+      env.gain.linearRampToValueAtTime(0.14, now + 0.02);
+      env.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+      osc.connect(env).connect(dest);
+      osc.start(now);
+      osc.stop(now + 0.2);
+      this.noiseHit(dest, { frequency: 500, q: 2, gain: 0.15, decay: 0.08, delay: i * 0.38 + 0.03 });
+    }
   }
 
   portal() {

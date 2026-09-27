@@ -464,8 +464,8 @@ const shell = (() => {
     ? `killed ${prey.proto.short} in ${elapsed.toFixed(0)}s of wall time`
     : `FAILED to kill ${prey.proto.short} in 600s`);
 
-  const corpses = game.here().filter((pile) => pile.kind === 'corpse');
-  notes.push(`${corpses.length} corpse on the ground holding ${corpses[0] ? corpses[0].contents.length : 0} item(s)`);
+  const corpses = game.here().filter((obj) => obj.itemType === 23);
+  notes.push(`${corpses.length} corpse on the ground holding ${corpses[0] ? corpses[0].contains.length : 0} item(s)`);
   if (corpses[0]) game.takeAll(corpses[0]);
   notes.push(`exp ${before.exp} -> ${game.state.exp}, gold ${before.gold} -> ${game.state.gold},`
     + ` carrying ${game.state.inventory.length}`);
@@ -593,7 +593,10 @@ const wander = (() => {
     moves: moves.length,
     movers: new Set(moves.map((m) => m.slot)).size,
     awayFromStart: moved.length,
-    sentinelMoves: moves.filter((m) => m.slot.proto.act & 2).length,
+    // spec_mayor walks his round by move_char whatever ACT_SENTINEL says,
+    // exactly as in the mud; every other sentinel stays put.
+    sentinelMoves: moves.filter((m) => (m.slot.proto.act & 2) && m.slot.record.special !== 'spec_mayor').length,
+    sentinelWho: [...new Set(moves.filter((m) => m.slot.proto.act & 2).map((m) => `${m.slot.proto.short} (${m.slot.record.special || 'no spec'})`))],
     keeperMoves: moves.filter((m) => m.slot.record.shop).length,
     noMob: moves.filter((m) => (world.rooms.get(m.to).flags & 4)).length,
     strayAreas: moves.filter((m) => (m.slot.proto.act & 64) && world.rooms.get(m.to).area !== m.slot.proto.area).length,
@@ -604,6 +607,7 @@ const wander = (() => {
     + ` ${result.awayFromStart} end somewhere else`);
   console.log(`  ${result.sentinels} sentinels moved ${result.sentinelMoves} times, ${result.keepers} shopkeepers ${result.keeperMoves} times,`
     + ` ${result.noMob} entries into NO_MOB rooms, ${result.strayAreas} STAY_AREA strays`);
+  console.log('  sentinels that moved:', result.sentinelWho.join(', '));
   console.log(`  ${result.strays} mobile-frames in a room other than the one its body is in,`
     + ` ${result.offGround} off the built ground, ${result.sealedCrossings} crossings that are not an exit`);
   return result;
