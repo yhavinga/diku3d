@@ -44,14 +44,18 @@ const params = new URLSearchParams(location.search);
 // anything on the surface -- 460 rooms, 94% walkable, Midgaard still 93%.
 // The Great Eastern Desert is the clean-branch shape again: one two-way
 // anchor, the river through the east wall at #3205 -- 507 rooms, 94%.
-const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden,grave,sewer,eastern')
+// Raff's Dangerous Neighborhood hangs off the East Gate the same way, one
+// two-way anchor #3041 <-> #2171 -- 579 rooms, 95%, Midgaard still 93%.
+// It shares its side of town with the desert, so layout.js lays it down
+// whole (see LAID_WHOLE) and Wall Road becomes the long street it says it is.
+const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden,grave,sewer,eastern,hood')
   .split(',').filter(Boolean).map((f) => (f.endsWith('.are') ? f : `${f}.are`));
 const START_VNUM = Number(params.get('room') || 3001);
 // A live trap: the breadth-first placement stops mid-walk at the cap, and
 // whole areas silently get zero rooms while their exits degrade to gates.
-// The default set is 507 rooms; anything bigger must raise ?max= with it.
+// The default set is 579 rooms; anything bigger must raise ?max= with it.
 // tools/world-check.mjs guards this number for the shipping set.
-const MAX_ROOMS = Number(params.get('max') || 560);
+const MAX_ROOMS = Number(params.get('max') || 640);
 const AREA_URL = params.get('areaDir') || 'merc21/area';
 
 /**

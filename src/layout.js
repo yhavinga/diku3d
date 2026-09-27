@@ -136,6 +136,29 @@ function routePath(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Se
   return null;
 }
 
+/**
+ * Areas laid down whole, as a block, after everything else is placed.
+ *
+ * Breadth-first placement grows every area outward from its anchor at once,
+ * and two areas that hang off the same side of town share whatever ground is
+ * there. The Dangerous Neighborhood and the Great Eastern Desert both leave
+ * Midgaard eastward -- one through the East Gate, one down the river through
+ * the wall -- and the mud's own distances put them on the same cells: laid
+ * out together, the desert's river caves ran straight through the middle of
+ * the neighborhood, its mountain stood between Yellow Dragon Road and
+ * No Man's Land and its dunes came up to Bronze Dragon Street (measured:
+ * 38 of the neighborhood's 72 rooms had one of the desert's rooms within
+ * two cells).
+ *
+ * So the neighborhood is laid out on its own -- where it is 100% walkable --
+ * and set down whole in the nearest free ground along its anchor, with one
+ * empty ring round it. What that costs is the anchor: Wall Road becomes a
+ * long street, which is what the mud says it is ("The road extends south
+ * along the inside of the wall surrounding the city"). Nothing else moves:
+ * every other area's placement is identical to the world without it.
+ */
+const LAID_WHOLE = new Set(['hood.are']);
+
 export function layoutWorld(world, options = {}) {
   const {
     startVnum = 3001,
@@ -161,6 +184,45 @@ export function layoutWorld(world, options = {}) {
   place(start, 0, 0, 0);
   const queue = [start];
 
+  // Anchors into a LAID_WHOLE area wait until the rest of the world is down.
+  const waiting = [];
+  let rest = false;
+  const reach = new Map(); // anchor pair -> how long its street may be
+  const pair = (a, b) => `${Math.min(a, b)}-${Math.max(a, b)}`;
+  const layWhole = (room, target, dir, here) => {
+    const file = target.areaFile;
+    if (!LAID_WHOLE.has(file) || file === room.areaFile || dir > 3) return false;
+    if (!rest) { if (!waiting.includes(room)) waiting.push(room); return true; }
+    const sub = layoutWorld(world, {
+      startVnum: target.vnum, compact: true,
+      includeVnum: (v) => world.rooms.get(v)?.areaFile === file && includeVnum(v),
+    });
+    if (cells.size + sub.order.length > maxRooms) return false;
+    const [dx, , dz] = DIR_STEP[dir];
+    const clear = (ox, oz) => sub.order.every((c) => {
+      for (let a = -1; a <= 1; a++) {
+        for (let b = -1; b <= 1; b++) if (occupied.has(key(here.level + c.level, c.x + ox + a, c.z + oz + b))) return false;
+      }
+      return true;
+    });
+    // Out along the anchor first, then sideways, nearest first.
+    for (let far = 0; far < 40; far++) {
+      for (let along = 0; along <= far; along++) {
+        const side = far - along;
+        for (const sign of side ? [1, -1] : [1]) {
+          const ox = here.x + dx * (1 + along) - dz * side * sign;
+          const oz = here.z + dz * (1 + along) + dx * side * sign;
+          if (!clear(ox, oz)) continue;
+          for (const c of sub.order) { place(c.room, here.level + c.level, c.x + ox, c.z + oz); queue.push(c.room); }
+          reach.set(pair(room.vnum, target.vnum), 2 * far + 12);
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  for (;;) {
   while (queue.length && cells.size < maxRooms) {
     const room = queue.shift();
     const here = cells.get(room.vnum);
@@ -204,6 +266,7 @@ export function layoutWorld(world, options = {}) {
         return satisfied;
       };
 
+      if (layWhole(room, target, dir, here)) continue;
       let best = null;
       let bestScore = -Infinity;
       const candidates = [[0, 0], ...SPIRAL];
@@ -223,8 +286,13 @@ export function layoutWorld(world, options = {}) {
       queue.push(target);
     }
   }
+    if (rest || !waiting.length) break;
+    rest = true;
+    queue.push(...waiting);
+  }
 
   relax(world, cells, occupied, order);
+  if (options.compact) return { order };
 
   // Spread the grid: rooms keep the even coordinates and every cell between
   // them becomes routable. That is what turns "the shop is one step north" into
@@ -300,7 +368,8 @@ export function layoutWorld(world, options = {}) {
     if (link.from.level !== link.to.level) continue;
     const forbidFirst = new Set([0, 1, 2, 3].filter((d) => !free(link.from.vnum, d)));
     const forbidLast = new Set([0, 1, 2, 3].filter((d) => !free(link.to.vnum, REVERSE_DIR[d])));
-    const route = routePath(link.from, link.to, link.dir, occupied, 6, forbidFirst, forbidLast);
+    const route = routePath(link.from, link.to, link.dir, occupied,
+      reach.get(pair(link.from.vnum, link.to.vnum)) || 6, forbidFirst, forbidLast);
     if (!route) continue;
     link.kind = 'alley';
     link.path = route.cells;
