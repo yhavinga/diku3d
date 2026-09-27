@@ -53,8 +53,9 @@ The people in it are the mud's mobiles, dressed by what the area file says
 they are: `src/people.js` reads keywords, flags and shops and picks one of
 seventeen archetypes — cityguard, knight, priest, mage, merchant, beggar,
 troll, zombie and so on — with a weapon from the mobile's own resets. Animals
-are fifteen modelled bodies, bred into dogs, wolves, foxes, horses, cattle,
-swans and a green dragon by coat and proportion. They wander the way Merc's
+and monsters are thirty modelled bodies, bred by coat and proportion into
+dogs, wolves, horses, cattle and swans, and into spiders, scorpions, a sand
+worm, the dracolich and a Will-O-Wisp that carries its own light over the bog. They wander the way Merc's
 `mobile_update` has them wander, through a random open exit every so often,
 and walk the routed street to get there; fights are Merc's `fight.c`, played
 on the beat with the swing's contact frame landing on the blow. The casters
