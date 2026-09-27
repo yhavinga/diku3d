@@ -9,7 +9,7 @@
  */
 
 import { ITEM, EX_ISDOOR, EX_CLOSED, EX_LOCKED, REVERSE_DIR, DIR_NAME } from '../are.js';
-import { capitalise, doorName, makeObject, affectStrip, AFF } from './handler.js';
+import { capitalise, doorName, makeObject } from './handler.js';
 
 const ROOM_VNUM_SCHOOL = 3700;
 
@@ -158,7 +158,9 @@ export function installWorld(k) {
   const countIn = (vnum, list) => list.reduce((n, o) => n + (o.vnum === vnum ? 1 : 0), 0);
 
   /**
-   * db.c: reset_area. DIVERGES in one place: a mobile comes back into the
+   * db.c: reset_area. Its rolls (an object's level) come from the world's own
+   * generator, not the one fights are rolled from, for the weather's reason in
+   * game.js. DIVERGES in one place: a mobile comes back into the
    * body that its own M line put in the world at boot, so a line refills only
    * when that one is dead -- and its corpse gone, because the body is the
    * corpse -- rather than whenever the prototype's count is under the limit.
@@ -186,7 +188,7 @@ export function installWorld(k) {
           const room = world.rooms.get(line.arg3);
           if (!proto || !room || !built.rooms.has(room.vnum)) { last = false; break; }
           if (occupied || countIn(proto.vnum, ground.filter((o) => o.inRoom === room.vnum)) > 0) { last = false; break; }
-          const obj = k.game.MERC.createObject(proto, k.rng.fuzzy(level));
+          const obj = k.game.MERC.createObject(proto, k.wanderRng.fuzzy(level));
           obj.cost = 0;
           placeReset(obj, room.vnum, line.index || 0);
           last = true;
@@ -197,7 +199,7 @@ export function installWorld(k) {
           if (!proto) { last = false; break; }
           const to = ground.find((o) => o.vnum === line.arg3);
           if (occupied || !to || countIn(proto.vnum, to.contains) > 0) { last = false; break; }
-          to.contains.push(k.game.MERC.createObject(proto, k.rng.fuzzy(to.level)));
+          to.contains.push(k.game.MERC.createObject(proto, k.wanderRng.fuzzy(to.level)));
           last = true;
           break;
         }
@@ -264,7 +266,7 @@ export function installWorld(k) {
     slot.anchor = { ...slot.origin };
     const entry = entryPoint(home, slot.origin) || slot.origin;
     slot.pos = { ...entry };
-    k.wake(slot);
+    k.wake(slot, k.wanderRng);
     if (k.actors && k.actors.respawn) k.actors.respawn(slot.figure, entry);
     if (entry !== slot.origin) slot.task = { kind: 'arrive', order: { kind: 'go', to: { ...slot.origin } } };
     emit({ kind: 'respawn', slot, text: '' });
@@ -359,31 +361,6 @@ export function installWorld(k) {
     if (worn >= 0) k.unequipChar(state, obj);
   }
 
-  // ------------------------------------------------------------ affects ----
-
-  const MSG_OFF = { poison: 'You feel less sick.' };
-
-  /**
-   * update.c's affect loop in char_update: a duration ticks down, and at zero
-   * the affect goes with its skill's msg_off. (sneak has none.)
-   */
-  function affectUpdate(ch) {
-    if (!ch.affected || !ch.affected.length) return;
-    for (const af of ch.affected.slice()) {
-      if (af.duration > 0) af.duration -= 1;
-      else if (af.duration < 0) continue;
-      else {
-        affectStrip(ch, af.type);
-        if (MSG_OFF[af.type] && ch === state) emit({ kind: 'note', text: MSG_OFF[af.type] });
-      }
-    }
-    // update.c: "You shiver and suffer." -- two points a tick while it lasts.
-    if (ch.affectedBy & AFF.POISON) {
-      if (ch === state) emit({ kind: 'note', text: 'You shiver and suffer.' });
-      k.damage(ch, ch, 2, 'poison');
-    }
-  }
-
   // ------------------------------------------------------------- boot ----
 
   // boot_db ends with area_update(): every area resets once, empty. The M
@@ -393,7 +370,6 @@ export function installWorld(k) {
 
   rules.areaUpdate = areaUpdate;
   rules.objUpdate = objUpdate;
-  rules.affectUpdate = affectUpdate;
 
   Object.assign(k, { setExitFlags, syncDoor, hingesOf, resetArea, areas, extract, respawn });
   Object.assign(game, {

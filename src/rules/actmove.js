@@ -11,7 +11,7 @@
 
 import { ITEM, EX_ISDOOR, EX_CLOSED, EX_LOCKED, EX_PICKPROOF, REVERSE_DIR, DIR_NAME } from '../are.js';
 import {
-  CONT, AFF, DIR_WORDS, capitalise, doorName, isName, affectStrip, affectToChar, isAffected,
+  CONT, AFF, DIR_WORDS, capitalise, doorName, isName, affectStrip, affectToChar, hasAff,
 } from './handler.js';
 
 const ACT_TRAIN = 512;
@@ -259,7 +259,7 @@ export function installMove(k) {
   function stand() {
     switch (state.position) {
       case POS.SLEEPING:
-        if (isAffected(state, AFF.SLEEP)) return out(false, "You can't wake up!");
+        if (hasAff(state, AFF.SLEEP)) return out(false, "You can't wake up!");
         state.position = POS.STANDING;
         emit({ kind: 'position', text: 'You wake and stand up.', position: 'standing' });
         return out(true, 'You wake and stand up.');

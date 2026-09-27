@@ -21,6 +21,7 @@ import { AssetLibrary, ASSET_NAMES } from './assets.js';
 import { createGame, SKY } from './game.js';
 import { createGameUi } from './game-ui.js';
 import { createFx } from './fx.js';
+import { createSpellFx } from './spellfx.js';
 import { createRain } from './rain.js';
 import { createItems } from './items.js';
 import { installSave } from './save.js';
@@ -41,14 +42,20 @@ const params = new URLSearchParams(location.search);
 // and its 13 tombs hang below on DOWN exits, so nothing gets shoved skyward.
 // It also *raises* Midgaard's own number to 93.5%: the dead gate at #3129
 // south becomes a walk.
-const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden,grave')
+// The sewer is the one that goes *under*: five of Midgaard's own rooms drop
+// into it (the Dump's ladder and the guild wells), every anchor is vertical
+// and downward, so it lays out a level below the town and cannot shove
+// anything on the surface -- 460 rooms, 94% walkable, Midgaard still 93%.
+// The Great Eastern Desert is the clean-branch shape again: one two-way
+// anchor, the river through the east wall at #3205 -- 507 rooms, 94%.
+const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden,grave,sewer,eastern')
   .split(',').filter(Boolean).map((f) => (f.endsWith('.are') ? f : `${f}.are`));
 const START_VNUM = Number(params.get('room') || 3001);
 // A live trap: the breadth-first placement stops mid-walk at the cap, and
 // whole areas silently get zero rooms while their exits degrade to gates.
-// The default set is 285 rooms; anything bigger must raise ?max= with it.
+// The default set is 507 rooms; anything bigger must raise ?max= with it.
 // tools/world-check.mjs guards this number for the shipping set.
-const MAX_ROOMS = Number(params.get('max') || 400);
+const MAX_ROOMS = Number(params.get('max') || 560);
 const AREA_URL = params.get('areaDir') || 'merc21/area';
 
 /**
@@ -508,6 +515,7 @@ async function boot() {
   const fx = createFx({
     scene, camera, composer, actors, game, audio, player, library: assets, sun, hemi, built, lightPool,
   });
+  const spellfx = createSpellFx({ scene, camera, renderer, composer, game, actors, audio, player, quality });
   {
     // Screen position of a world point, for the foe plate and damage numbers.
     const p = new THREE.Vector3();
@@ -738,6 +746,7 @@ async function boot() {
     const daylight = THREE.MathUtils.clamp(preset.elevation / 22, 0, 1) * 0.75;
     actors.setDaylight(preset.haze, daylight);
     fx.setAmbient(daylight / 0.75);
+    spellfx.setDaylight(daylight / 0.75);
     // Whether it is day, for things that are lit *because* it is dark. Fully
     // out above twelve degrees of sun, fully lit below two, so the lamps are a
     // faint glow at golden hour, gone at noon, and the whole light of the town
@@ -1127,25 +1136,9 @@ async function boot() {
     dom.hint.classList.add('visible');
   });
 
-  // comm.c's nanny, asked once on the title: which class, or the saved
-  // character back. A class you pick is a fresh first-level one of it.
-  const CLASS_NOTES = [
-    'The mage: spells, few hit points, and a staff.',
-    'The cleric: prayers, healing, a mace.',
-    'The thief: backstab, sneak, hide, steal and pick lock. Stay behind them.',
-    'The warrior: kick, parry, a second and third attack. Front on.',
-  ];
-  let chosenClass = game.state.class;
-  const classButtons = [...document.querySelectorAll('#classes button')];
-  const classNote = document.getElementById('class-note');
+  // The saved character back, from the title screen (the class question
+  // itself is game-ui.js's #class-pick). Continuing replaces whatever was picked.
   const continueButton = document.getElementById('continue');
-  const pickClass = (index) => {
-    chosenClass = index;
-    for (const b of classButtons) b.classList.toggle('on', Number(b.dataset.class) === index);
-    classNote.textContent = CLASS_NOTES[index];
-  };
-  for (const b of classButtons) b.addEventListener('click', () => pickClass(Number(b.dataset.class)));
-  pickClass(chosenClass);
   let saved = null;
   try { saved = game.savedCharacter(); } catch (error) { console.error(error); }
   if (saved) {
@@ -1159,7 +1152,7 @@ async function boot() {
     player.controls.lock();
   });
   dom.enter.addEventListener('click', () => {
-    if (!begun) { begun = true; if (chosenClass !== game.state.class) game.setClass(chosenClass); }
+    begun = true;
     audio.start();
     player.controls.lock();
   });
@@ -1251,6 +1244,7 @@ async function boot() {
     lightPool.update(camera.position, elapsed);
     actors.update(dt, elapsed, camera);
     fx.update(dt);
+    spellfx.update(state.paused ? 0 : dt);
     kick.update(dt);
     audio.update(built.rooms.get(state.roomVnum)?.room.sector === 1);
 
@@ -1286,7 +1280,7 @@ async function boot() {
 
   // Handy from the console, and how the screenshots for this were framed.
   window.diku = {
-    scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi, options, fx,
+    scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi, options, fx, spellfx,
     // `wetness` is exposed because it is a slow-moving number nothing on screen
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
@@ -1423,6 +1417,35 @@ async function boot() {
         (r) => (/gate/i.test(r.name) ? 3 : 0) + ways(r) + stuff(r)),
         'a sealed gate out of the world');
       add('crowd', pick((r) => r.mobs.length >= 2), 'several mobiles together');
+      // Under the town. The works are the sewer's brick-vaulted pipe rooms on
+      // the first level down; the more ways out, the more tunnel mouths there
+      // are to look down, and a room the mud says is lit has its own light.
+      const sewer = (r) => r.areaFile === 'sewer.are';
+      const level = (r) => built.rooms.get(r.vnum).cell.level;
+      add('sewer', pick((r) => sewer(r) && level(r) === -1 && /\b(junction|sewer|pipe)\b/i.test(r.name),
+        (r) => ways(r) * 2 + (/\b(torch|lit|light)/i.test(r.description) ? 4 : 0) + stuff(r)),
+        'the sewer: brick vaults, tunnel mouths, a channel of standing sewage');
+      // Where the street goes down into it: the room above a stair whose foot
+      // is in the sewer, which is where the two worlds share a frame.
+      // A stair, not a well: the room below has to be directly underneath,
+      // so the frame has the parapet and the shaft in it.
+      const below = (r, e) => {
+        const a = built.rooms.get(r.vnum)?.cell; const b = built.rooms.get(e.to)?.cell;
+        return !!a && !!b && b.level < a.level && a.x === b.x && a.z === b.z;
+      };
+      add('manhole', pick((r) => !sewer(r) && r.exits.some((e) => e && !e.offMap
+          && built.rooms.has(e.to) && sewer(world.rooms.get(e.to)) && below(r, e)),
+        (r) => (built.rooms.get(r.vnum).outdoor ? 3 : 0) + ways(r)),
+        'a way down from the street into the sewer: parapet, shaft, daylight falling in');
+      // The desert: sand to the horizon, dunes, the cliffs the river comes out
+      // of; and the oasis in it, palms over water and the nomads' tents.
+      add('desert', pick((r) => r.areaFile === 'eastern.are' && r.sector === 10,
+        (r) => ways(r) + stuff(r)), 'open desert: dunes, sandstone cliffs, a cave mouth');
+      add('oasis', pick((r) => r.areaFile === 'eastern.are' && /\b(oasis|camp|tent)\b/i.test(`${r.name} ${r.description}`),
+        (r) => (/oasis/i.test(r.description) ? 3 : 0) + ways(r)), 'the oasis: palms, a pool, the nomads\' tents');
+      add('cavern', pick((r) => sewer(r) && /\b(cave|stalag\w*)\b/i.test(r.name),
+        (r) => (/stalag/i.test(r.name) ? 3 : 0) + ways(r) + stuff(r)),
+        'a cave the sewer breaks into: rock, flowstone, torchless dark');
       return out;
     },
 
@@ -1453,6 +1476,7 @@ async function boot() {
         if (room.sector === 6 || room.sector === 7) { score += 3; why.push('water'); }
         if (room.sector === 3 || room.sector === 2) { score += 1; why.push(SECTOR_NAME[room.sector]); }
         if (info.cell.level > 0) { score += 2; why.push(`level ${info.cell.level}`); }
+        if (info.cell.level < 0) { score += 2; why.push('underground'); }
         if (/fountain|statue|altar|fire|forge|tree|pool|bridge|stair|gate/i.test(
           `${room.name} ${room.description}`)) { score += 2; why.push('something named in the prose'); }
         if (score <= 1) continue;

@@ -104,6 +104,7 @@ export function installObjects(k) {
   /** do_eat. A pill is a spell: magic.js's `objCastSpell`, through itemVerbs. */
   function eat(obj) {
     if (!carried().includes(obj)) return out(false, 'You do not have that item.');
+    if (obj.itemType === ITEM.PILL && game.useItem) return game.useItem(obj);
     if (obj.itemType !== ITEM.FOOD && obj.itemType !== ITEM.PILL) return out(false, "That's not edible.");
     if (state.condition[COND.FULL] > 40) return out(false, 'You are too full to eat more.');
     const lines = [`You eat ${obj.name}.`];
@@ -116,8 +117,6 @@ export function installObjects(k) {
         lines.push('You choke and gag.');
         affectJoin(state, { type: 'poison', duration: 2 * obj.values[0], bitvector: AFF.POISON });
       }
-    } else if (game.castFromObject) {
-      for (const sn of [obj.values[1], obj.values[2], obj.values[3]]) game.castFromObject(sn, obj.values[0], obj);
     }
     carried().splice(carried().indexOf(obj), 1);
     emit({ kind: 'eat', text: lines.join(' '), item: obj.name, poisoned: obj.values[3] !== 0 });
@@ -266,13 +265,16 @@ export function installObjects(k) {
   function itemVerbs(obj, where) {
     const verbs = [];
     if (where === 'carried') {
-      if (obj.itemType === ITEM.FOOD || obj.itemType === ITEM.PILL) verbs.push({ verb: 'eat', run: () => eat(obj) });
+      if (obj.itemType === ITEM.FOOD) verbs.push({ verb: 'eat', run: () => eat(obj) });
       if (obj.itemType === ITEM.DRINK_CON) {
         verbs.push({ verb: 'drink', run: () => drink(obj) });
         if (fountainHere()) verbs.push({ verb: 'fill', run: () => fill(obj) });
       }
       if (obj.itemType === ITEM.LIGHT) verbs.push({ verb: 'hold', run: () => game.wear(obj) });
-      else if (obj.wearFlags & ~ITEM_TAKE) verbs.push({ verb: obj.wearFlags & 8192 ? 'wield' : 'wear', run: () => game.wear(obj) });
+      else if (obj.wearFlags & ~ITEM_TAKE) {
+        const verb = obj.wearFlags & 8192 ? 'wield' : (obj.wearFlags & 16384 ? 'hold' : 'wear');
+        verbs.push({ verb, run: () => game.wear(obj) });
+      }
       const shop = game.shopHere();
       if (!shop) verbs.push({ verb: 'drop', run: () => game.drop(obj) });
     } else if (where === 'ground') {

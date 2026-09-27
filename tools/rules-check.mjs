@@ -283,9 +283,13 @@ console.log('\nSPEC_FUNS');
   t.eye.x = beggar.pos.x + 1.2; t.eye.z = beggar.pos.z; t.game.update(0.02, t.eye, t.look);
   t.game.attackSlot(beggar);
   beggar.instance.alignment = -800;
-  for (let i = 0; i < 200 && !(guard.instance && guard.instance.fighting); i++) t.game.update(0.1, t.eye, t.look);
-  check(guard.instance && guard.instance.fighting === beggar.instance, 'spec_guard sets upon the evil one fighting you',
-    t.said.filter((l) => /PROTECT/.test(l)).join(' | '));
+  let target = null;
+  for (let i = 0; i < 200 && !target; i++) {
+    t.game.update(0.1, t.eye, t.look);
+    if (guard.instance && guard.instance.fighting) target = guard.instance.fighting;
+  }
+  check(!!target && target.slot === beggar, 'spec_guard sets upon the evil one fighting you',
+    `${t.said.filter((l) => /PROTECT/.test(l)).join(' | ')} -> ${target ? target.name : 'nobody'}`);
 }
 // spec_thief: stand by a thief with a purse and it sidles up and dips.
 {

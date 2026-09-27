@@ -7,6 +7,12 @@
  */
 
 import { ITEM } from '../are.js';
+import { AFF, affectToChar, affectStrip, affectJoin } from '../magic.js';
+
+// One affect system, magic.js's (handler.c's affect_to_char and friends, with
+// affect_modify's applies): what this half of the port puts on a character --
+// sneak, a poisoned mushroom -- goes through it and ticks with the spells.
+export { AFF, affectToChar, affectStrip, affectJoin };
 
 // ---------------------------------------------------------------- merc.h ----
 
@@ -15,14 +21,6 @@ export const CONT = { CLOSEABLE: 1, PICKPROOF: 2, CLOSED: 4, LOCKED: 8 };
 
 /** COND_* -- indices into pcdata->condition. */
 export const COND = { DRUNK: 0, FULL: 1, THIRST: 2 };
-
-/** AFF_* -- the bits of affected_by this half of the port reads or writes. */
-export const AFF = {
-  BLIND: 1, INVISIBLE: 2, DETECT_EVIL: 4, DETECT_INVIS: 8, DETECT_MAGIC: 16,
-  DETECT_HIDDEN: 32, SANCTUARY: 128, FAERIE_FIRE: 256, INFRARED: 512, CURSE: 1024,
-  POISON: 4096, PROTECT: 8192, SNEAK: 32768, HIDE: 65536, SLEEP: 131072,
-  CHARM: 262144, FLYING: 524288, PASS_DOOR: 1048576,
-};
 
 /** PLR_* -- a player's act bits. */
 export const PLR = { AUTOEXIT: 8, AUTOLOOT: 16, AUTOSAC: 32, THIEF: 4194304, KILLER: 8388608 };
@@ -168,43 +166,10 @@ export function* nested(list) {
   }
 }
 
-// --------------------------------------------------------------- affects ----
+// ---------------------------------------------------------------- seeing ----
 
-/**
- * handler.c: affect_to_char / affect_strip / affect_join, over `ch.affected`
- * and the `ch.affectedBy` bitvector -- the only two fields the mud keeps.
- * `type` is the skill's name ('sneak', 'poison'), where Merc uses its gsn.
- * Only the bitvector half is applied here: every affect this half of the port
- * makes is APPLY_NONE.
- */
-export function affectToChar(ch, af) {
-  if (!ch.affected) ch.affected = [];
-  ch.affected.push({ location: 0, modifier: 0, bitvector: 0, ...af });
-  ch.affectedBy = (ch.affectedBy || 0) | (af.bitvector || 0);
-}
-
-export function affectStrip(ch, type) {
-  if (!ch.affected) return;
-  const kept = [];
-  for (const af of ch.affected) {
-    if (af.type === type) ch.affectedBy &= ~(af.bitvector || 0);
-    else kept.push(af);
-  }
-  ch.affected = kept;
-  // Another affect may carry the same bit (two poisons): put it back.
-  for (const af of kept) ch.affectedBy |= af.bitvector || 0;
-}
-
-export function affectJoin(ch, af) {
-  const old = (ch.affected || []).find((a) => a.type === af.type);
-  if (old) {
-    af = { ...af, duration: af.duration + old.duration, modifier: (af.modifier || 0) + (old.modifier || 0) };
-    affectStrip(ch, af.type);
-  }
-  affectToChar(ch, af);
-}
-
-export const isAffected = (ch, bit) => ((ch.affectedBy || 0) & bit) !== 0;
+/** IS_AFFECTED: a bit of affected_by (magic.js's `isAffected` asks by spell name). */
+export const hasAff = (ch, bit) => ((ch.affectedBy || 0) & bit) !== 0;
 
 /**
  * handler.c: can_see, minus what this world has no use for (wizinvis, holy
@@ -213,9 +178,9 @@ export const isAffected = (ch, bit) => ((ch.affectedBy || 0) & bit) !== 0;
  */
 export function canSee(ch, victim) {
   if (ch === victim) return true;
-  if (isAffected(ch, AFF.BLIND)) return false;
-  if (isAffected(victim, AFF.INVISIBLE) && !isAffected(ch, AFF.DETECT_INVIS)) return false;
-  if (isAffected(victim, AFF.HIDE) && !isAffected(ch, AFF.DETECT_HIDDEN)
+  if (hasAff(ch, AFF.BLIND)) return false;
+  if (hasAff(victim, AFF.INVISIBLE) && !hasAff(ch, AFF.DETECT_INVIS)) return false;
+  if (hasAff(victim, AFF.HIDE) && !hasAff(ch, AFF.DETECT_HIDDEN)
     && !victim.fighting && (ch.npc === true) !== (victim.npc === true)) return false;
   return true;
 }

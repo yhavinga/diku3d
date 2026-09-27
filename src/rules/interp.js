@@ -13,7 +13,7 @@
 import { ITEM, DIR_NAME, EX_CLOSED, EX_ISDOOR, SECTOR } from '../are.js';
 import {
   AFF, PLR, COND, LIQUIDS, capitalise, isName, isPrefix, oneArgument, numberArgument, findNamed,
-  doorName, isAffected,
+  doorName, hasAff,
 } from './handler.js';
 import { SOCIALS } from './socials.js';
 
@@ -159,7 +159,7 @@ export function installInterp(k) {
   /** act_info.c: show_char_to_char_0 -- one line for someone in the room. */
   function showChar0(slot) {
     const mob = slot.instance;
-    const flags = mob && isAffected(mob, AFF.SANCTUARY) ? '(White Aura) ' : '';
+    const flags = mob && hasAff(mob, AFF.SANCTUARY) ? '(White Aura) ' : '';
     if (!mob || mob.position === POS.STANDING) return `${flags}${slot.proto.long}`;
     const where = {
       [POS.DEAD]: ' is DEAD!!', [POS.MORTAL]: ' is mortally wounded.', [POS.INCAP]: ' is incapacitated.',
@@ -280,7 +280,7 @@ export function installInterp(k) {
     }
     const area = room && room.area;
     const slot = mobs.find((s) => !s.dead && world.rooms.get(s.roomVnum)?.area === area && isName(arg, s.proto.keywords)
-      && !(s.instance && isAffected(s.instance, AFF.HIDE | AFF.SNEAK)));
+      && !(s.instance && hasAff(s.instance, AFF.HIDE | AFF.SNEAK)));
     if (!slot) return send(`You didn't find any ${arg}.`);
     send(`${capitalise(slot.proto.short).padEnd(28)} ${world.rooms.get(slot.roomVnum).name}`);
   }
@@ -613,7 +613,7 @@ export function installInterp(k) {
     if (slot === 'self') { if (charAuto) send(act(charAuto, state)); return true; }
     const victim = k.wake(slot);
     if (charFound) send(act(charFound, state, victim));
-    if (!victim.npc || isAffected(victim, AFF.CHARM) || !MERC.isAwake(victim)) return true;
+    if (!victim.npc || hasAff(victim, AFF.CHARM) || !MERC.isAwake(victim)) return true;
     const roll = k.rng.bits(4);
     if (roll === 0) {
       k.ctx.round = { player: 0, npc: 0.5 };
@@ -727,9 +727,10 @@ export function installInterp(k) {
     if (!arg1) return send(`${capitalise(verb)} what?`);
     const obj = getObjCarry(arg1) || getObjWear(arg1);
     if (!obj) return send('You do not have that item.');
-    const v = game.itemVerbs(obj, 'carried').find((x) => x.verb === verb);
-    if (!v) return send(`You can ${verb} only what is made for it.`);
-    reply(v.run());
+    if (!game.magic || game.magic.itemVerb(obj) !== verb || !game.useItem) {
+      return send(`You can ${verb} only what is made for it.`);
+    }
+    reply(game.useItem(obj));
   }
 
   /** DIVERGES: help.are is not loaded; this is the list of what there is to type. */

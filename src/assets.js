@@ -355,6 +355,16 @@ export const ASSET_NAMES = [
   'tree_fir', 'tree_snag', 'fern', 'salal_bush', 'moss_rock',
   'reed_clump', 'tussock', 'dead_log',
   'headstone', 'grave_slab', 'iron_fence',
+  // the sewer: tools/blender/sewer.py
+  'sewer_tunnel', 'sewer_arm', 'sewer_hub', 'sewer_hub_end', 'sewer_chamber', 'sewer_chamber_air', 'sewer_shaft',
+  'sewer_wall_open', 'sewer_wall_solid', 'sewer_shaft_open', 'sewer_shaft_solid',
+  'sewer_grate', 'sewer_door_end', 'sewer_pit', 'sewer_ladder', 'town_well',
+  'cave_rock_a', 'cave_rock_b', 'stalagmites', 'stalactites', 'bone_pile', 'rubble',
+  'cave_wall', 'cave_wall_door', 'cave_wall_long', 'cave_wall_long_door', 'cave_roof',
+  'refuse_heap', 'sewer_sconce',
+  // the Great Eastern Desert: tools/blender/desert.py
+  'massif_a', 'massif_b', 'massif_mouth', 'dune_a', 'dune_b', 'palm_a', 'palm_b',
+  'tent_roof', 'tent_wall', 'tent_wall_door', 'rug', 'cushions', 'hitch_line', 'fungus_cluster', 'lantern',
   'townsperson', 'person_male', 'person_female', 'troll',
   'weapon_sword', 'weapon_dagger', 'weapon_axe', 'weapon_mace', 'weapon_spear',
   'weapon_staff', 'shield_round', 'shield_kite',

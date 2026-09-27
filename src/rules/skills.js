@@ -12,7 +12,7 @@
  */
 
 import { ITEM } from '../are.js';
-import { AFF, XF, capitalise, isAffected, canSee } from './handler.js';
+import { AFF, XF, capitalise, hasAff, canSee } from './handler.js';
 
 const WEAR_WIELD = 16;
 const MELEE = 3.2;
@@ -162,8 +162,8 @@ export function installSkills(k) {
     { key: 'kick', label: 'kick', run: () => kick(), needs: () => !!state.fighting },
     { key: 'backstab', label: 'backstab', run: () => backstab(), needs: () => !state.fighting && !!inReach() },
     { key: 'disarm', label: 'disarm', run: () => disarm(), needs: () => !!state.fighting },
-    { key: 'sneak', label: 'sneak', run: () => game.sneak(), needs: () => !state.fighting, on: () => isAffected(state, AFF.SNEAK) },
-    { key: 'hide', label: 'hide', run: () => game.hide(), needs: () => !state.fighting, on: () => isAffected(state, AFF.HIDE) },
+    { key: 'sneak', label: 'sneak', run: () => game.sneak(), needs: () => !state.fighting, on: () => hasAff(state, AFF.SNEAK) },
+    { key: 'hide', label: 'hide', run: () => game.hide(), needs: () => !state.fighting, on: () => hasAff(state, AFF.HIDE) },
     { key: 'steal', label: 'steal', run: () => steal('gold'), needs: () => !state.fighting && !!inReach() },
     { key: 'pickLock', label: 'pick', run: () => pickFacing(), needs: () => !state.fighting },
   ];

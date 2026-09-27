@@ -135,15 +135,16 @@
     transition: transform 140ms ease, box-shadow 140ms ease;
   }
   #enter:hover { transform: translateY(-1px); box-shadow: 0 8px 26px rgba(224,189,119,0.22); }
-  /* The nanny's class question, and a way back to the character you saved. */
-  #classes { display: flex; gap: 4px; margin-top: 18px; pointer-events: auto; }
-  #classes button { cursor: pointer; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em;
-    text-transform: uppercase; color: var(--dim); background: transparent; border: 1px solid rgba(224,189,119,0.18);
-    padding: 7px 13px 6px; border-radius: 2px; transition: color 140ms ease, border-color 140ms ease, background 140ms ease; }
-  #classes button:hover { color: var(--ink); border-color: rgba(224,189,119,0.4); }
-  #classes button.on { color: var(--gold); border-color: rgba(224,189,119,0.62); background: rgba(224,189,119,0.08); }
-  #class-note { font-size: 13.5px; font-style: italic; color: var(--dim); opacity: 0.8; margin-top: -4px; min-height: 1.3em; }
-  #continue { margin-top: -6px; pointer-events: auto; cursor: pointer; font-family: var(--mono); font-size: 10.5px;
+  #class-pick { margin-top: 14px; display: flex; gap: 4px; align-items: center; pointer-events: auto;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+  #class-pick span { opacity: 0.45; margin-right: 8px; }
+  #class-pick button { font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer;
+    color: var(--gold); background: none; border: 1px solid rgba(224,189,119,0.22); padding: 6px 11px; border-radius: 2px;
+    opacity: 0.65; transition: opacity 140ms ease, border-color 140ms ease, background 140ms ease; }
+  #class-pick button:hover { opacity: 1; }
+  #class-pick button.on { opacity: 1; border-color: rgba(224,189,119,0.8); background: rgba(224,189,119,0.1); }
+  /* A way back to the character you saved. */
+  #continue { margin-top: 4px; pointer-events: auto; cursor: pointer; font-family: var(--mono); font-size: 10.5px;
     letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); background: transparent;
     border: 1px solid rgba(224,189,119,0.45); padding: 10px 22px; border-radius: 2px; }
   #continue:hover { background: rgba(224,189,119,0.08); }
@@ -213,22 +214,16 @@
   <h1>MIDGAARD</h1>
   <h2>DikuMUD · Merc 2.1 · in three dimensions</h2>
   <div id="title-stats"></div>
-  <div id="classes">
-    <button data-class="3" class="on">warrior</button>
-    <button data-class="2">thief</button>
-    <button data-class="1">cleric</button>
-    <button data-class="0">mage</button>
-  </div>
-  <div id="class-note"></div>
   <button id="enter">enter the temple</button>
+  <div id="class-pick"><span>as a</span><button data-class="3" class="on">warrior</button><button data-class="0">mage</button><button data-class="1">cleric</button><button data-class="2">thief</button></div>
   <button id="continue" hidden></button>
   <div id="keys">
     <b>W A S D</b><span>walk · shift to run</span>
     <b>arrows</b><span>take the exit n / e / s / w · pg up, pg dn for up, down</span>
     <b>mouse</b><span>look · click to attack · E to use, open, loot, drink</span>
     <b>enter</b><span>the command line — look, get all corpse, unlock gate …</span>
-    <b>Z X C H</b><span>your skills · T take everything · R rest</span>
-    <b>I / B / K</b><span>inventory · trade · skills and training</span>
+    <b>Z X / C</b><span>a caster's spells: choose / cast · a fighter's or thief's skills on Z X C H J L</span>
+    <b>I B K · T R</b><span>inventory, trade, skills and training · take everything · rest</span>
     <b>1 – 4 · F V M G</b><span>the hour · stats, noclip, sound, force every lock</span>
   </div>
   <div id="credit">

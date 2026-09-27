@@ -309,6 +309,12 @@ choose.
   at ROOM/2 = 5 m, routed passages start at HALF = 6.5 m) and pitched roofs
   breaking up through the graveyard turf. Anything built per-room must be
   checked against buried rooms explicitly.
+- **Underground has no sky, and three things forget it.** Hiding the town
+  with `visible = false` also hides it from the shadow pass, so the noon sun
+  shone into a lair three levels down; the night "sun" is the moon at -8°,
+  a light from *below* that draws lines up buried corners; and a metal
+  underground reflects nothing bright and renders at RGB 0. Anything built
+  per-room has to be checked in the sewer as well as in the town.
 - **Test a prose vocabulary over all 45 areas before shipping it.** `pond`
   took Midgaard's park pond into the bog set, `chapel` matched a street in
   hood.are, `den` as a substring matches "Gamgee Resi**den**ce". The
@@ -332,6 +338,17 @@ choose.
 - UVs coming out of Blender are in metres and must be **multiplied** by
   `material.userData.uvScale`, which is already `1/tile`. Dividing tiles the
   texture tile-size-squared times too often and reads as a dark grid.
+- **glTF out of Blender, three more ways.** The exporter writes a key at
+  frame f to time f/fps, so a clip keyed from frame 1 holds its first frame
+  and hitches every loop — bake from 0. It bakes a `.scale` track on every
+  bone, which resets any scale you set on a bone at load. And in a
+  multi-material mesh every material after the first gets white vertex
+  colours; export one object per material. three also drops the dots from
+  bone names: `grip.R` is `gripR`.
+- **A walk clip's stride is measured, not assumed.** `motion.js` sets the
+  walk playback rate from the rig's `stride` (m per cycle) and the clip
+  length. Change a walk cycle and re-measure it as the median backward speed
+  of the foot that is low *and* moving back, or every figure skates.
 - Figures are skinned meshes: one draw each, no instancing, and a second pass if
   they cast shadows. They are kept out of the shadow map and culled past 46 m.
 - Large soft sprites are the most expensive thing per pixel in the scene. The

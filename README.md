@@ -49,6 +49,26 @@ exits leaves a lane between two terraces, and either way the facades finish
 Anything still unreachable — an exit into an area you haven't loaded — becomes a
 barred gate with a sign saying which vnum is on the other side.
 
+The people in it are the mud's mobiles, dressed by what the area file says
+they are: `src/people.js` reads keywords, flags and shops and picks one of
+seventeen archetypes — cityguard, knight, priest, mage, merchant, beggar,
+troll, zombie and so on — with a weapon from the mobile's own resets. Animals
+are fifteen modelled bodies, bred into dogs, wolves, foxes, horses, cattle,
+swans and a green dragon by coat and proportion. They wander the way Merc's
+`mobile_update` has them wander, through a random open exit every so often,
+and walk the routed street to get there; fights are Merc's `fight.c`, played
+on the beat with the swing's contact frame landing on the blow. The casters
+cast: `spec_cast_mage`, `_cleric`, `_undead`, `_adept` and the dragons' breath
+run on the mobile pulse, with 57 spells out of `magic.c` — each family drawn
+as its own effect, with affects like sanctuary worn as an aura while they last.
+
+    node tools/people-check.mjs [--all]   # who every mobile is dressed as
+
+The default world is eight areas and 507 rooms: Midgaard, Haon Dor, the Shire,
+the marsh, the troll den, the graveyard, the sewer under the town (down
+through the Dump or the guild wells) and the Great Eastern Desert (out
+through the river gate in the east wall).
+
 ## Controls
 
 | | |
@@ -65,17 +85,19 @@ barred gate with a sign saying which vnum is on the other side.
 | `G` | force every lock in the world |
 | left mouse | attack what you are facing |
 | `I` `B` `K` `R` `T` `Q` | inventory, trade, skills, rest, take, recall |
+| `Z` `X` / wheel, `C` / right mouse | mage and cleric: choose a spell, cast it |
 | `esc` | release the mouse |
 
 ## URL parameters
 
 | | |
 |---|---|
-| `?areas=midgaard,school` | which `.are` files to load (default `midgaard`) |
+| `?areas=midgaard,school` | which `.are` files to load (default the eight listed above) |
 | `?room=3001` | where to start, and what the layout is built around |
 | `?max=400` | stop placing after this many rooms |
 | `?time=dusk` | `dawn`, `noon`, `dusk`, `night` |
 | `?quality=medium` | `low`, `medium`, `high`, `max` |
+| `?class=mage` | start as `warrior`, `mage`, `cleric` or `thief` (also on the title screen) |
 | `?fps=30` | override the preset's frame cap; `0` uncaps it |
 
 Try `?areas=moria&room=7000`, `?areas=sewer&room=7100`, `?areas=haon&room=6500`

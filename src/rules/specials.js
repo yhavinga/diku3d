@@ -11,7 +11,7 @@
  */
 
 import { ITEM } from '../are.js';
-import { AFF, PLR, ITEM_TAKE, capitalise, canSee, isAffected, doorName } from './handler.js';
+import { AFF, PLR, ITEM_TAKE, capitalise, canSee, hasAff, doorName } from './handler.js';
 
 const MOB_VNUM_CITYGUARD = 3060;
 const LEVEL_IMMORTAL = 37;
@@ -270,9 +270,9 @@ export function installSpecials(k) {
 
   // The mayor has to be up and about to keep his hours whether or not you
   // are near him: a spec_fun only runs for a mobile that has been created,
-  // and this viewer creates them when first seen. Everyone with a spec_fun
-  // is created at once, as db.c creates everyone.
-  for (const slot of mobs) if (slot.record.special) k.wake(slot);
+  // and this viewer creates them when first seen. The others only ever act
+  // on someone in their room, and are awake by the time you are there.
+  for (const slot of mobs) if (slot.record.special === 'spec_mayor') k.wake(slot, k.wanderRng);
 
   Object.assign(game, {
     /**
@@ -282,5 +282,5 @@ export function installSpecials(k) {
     mayorState: () => mayor,
     setMudHour(hour) { k.weather().hour = hour; },
   });
-  void isAffected; void AFF;
+  void hasAff; void AFF;
 }

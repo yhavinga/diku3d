@@ -6,6 +6,113 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-09-27 — people, animals, and a town that walks
+
+Five agents in parallel, each in its own worktree with its own port and a
+headless GPU Chromium (`/tmp/pw/shot.mjs`, Playwright over Metal), because the
+shared chrome-devtools and Blender MCP instances serialise everything. Blender
+runs headless per agent: `Blender -b --factory-startup --python-expr …`.
+`lib.py` had the main checkout's path hard-coded, so a worktree's models
+landed in the wrong `assets/`; it derives it from `__file__` now.
+
+### Motion (src/nav.js, src/motion.js)
+
+- **Stride is the median backward speed of the foot that is low *and*
+  moving back.** On the old clip the swinging foot passes lower than the
+  planted one; a height-only test gave 0.16 m per cycle. The mean runs
+  25–35% fast because of heel-off; a multiplier sweep put the minimum slip
+  at the median.
+- **Pace comes from the rig, not from a constant.** A duck at human pace
+  needed its walk clip at 7× speed. Pace = stride / cycle length.
+- **Two passages can share a street cell.** `passageAt` names one owner and
+  build.js builds the cell twice. Before the room rule was fixed, 78 of 179
+  room changes went through a third room.
+- **Axis-aligned boxes round rotated props seal trails shut.** Use the
+  rotated footprint.
+- **`RenderPass.clearDepth` clears before `setRenderTarget`,** so it clears
+  whatever target was bound last, not its own.
+- **A swing in progress has to win.** A flinch laid over a swing cancelled
+  the blow about to land, and the next beat's wind-up cut the first swing
+  off before its hit frame.
+- **Merc resolves a whole round on one pulse.** Every event needs its own
+  presentation beat or four blows land on one frame.
+- Measured: 60 s over six areas, 249 figures, zero frames inside a wall
+  collider, sideways drift 0° at p99; 10 minutes of Midgaard headless: 161
+  room changes by 23 of 71 mobiles, sentinels and shopkeepers never moved.
+
+### Animals (tools/blender/beasts.py)
+
+- **Blender 5.2's glTF exporter writes white vertex colours for every
+  material after the first** in a multi-material mesh — the eyes came out
+  as white marbles. One object per material.
+- **Smooth-blending chain segments end to end makes a bead at every joint.**
+  Join a chain with a plain minimum, then blend it into the body.
+- **A distance field returning 1e3 outside a part's box breaks marching**
+  unless every step is capped — one eye came back 269 m up.
+- `export_force_sampling=False` and linear keys halved the files.
+- 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
+
+### Spells (src/magic.js, src/spellfx.js)
+
+- **Additive effects over sunlit ground only bleach towards white.** Give
+  emissive particles a share of cover — premultiplied colour, blend ONE /
+  ONE_MINUS_SRC_ALPHA, alpha = a × occlusion. That is what made fire read
+  orange at noon.
+- **three's ACES does `color *= exposure / 0.6`.** Author effect colours in
+  display units and multiply by `0.6 / exposure`; the bloom threshold in
+  those units is about 12 at noon, 23 at dusk and 4 at night.
+- **An effect light toggled by `visible` changes the light count and
+  recompiles every lit material mid-fight.** Two pooled lights stay in the
+  scene at intensity 0; ~0.12 ms each at 720p.
+- **Aura shells on every mesh stack rims and turn a figure to glass.** Only
+  skinned meshes over 150 vertices, lit on the silhouette.
+- Aim things that fly at the player 0.8 m ahead of the face, burst them at
+  2.6 m, or the frame blows out.
+- Fireball at night 6.4 → 7.7 ms median; sanctuary on the target costs
+  nothing measurable.
+
+### Sewer and desert (tools/blender/sewer.py, desert.py)
+
+- **`visible = false` also hides a group from the shadow pass.** With the
+  town hidden, the noon sun lit a lair three levels down (luminance 111
+  against 30). The world is split above/below ground and each half drawn
+  only when the camera could see it — the sewer cost 985 draw calls in the
+  Market Square without a visible pixel — but every half is shown for the
+  shadow pass.
+- **The night sun is the moon at -8°, a light from below the world.**
+  Underground it drew blue lines down every corner; buried surfaces ignore
+  any sun below the horizon.
+- **Metal underground is RGB 0.** A metal only reflects its surroundings and
+  there is nothing bright down there. Rust, not iron.
+- **The gap between a room's wall and its cell edge beside every doorway**
+  faces a neighbour in town and showed the sky underground; buried rooms
+  close it.
+- **The area flags lie.** 170 of 177 sewer rooms are DARK, 26 drains are
+  sectored FOREST (and were planted with firs), exits to room -1 mean no
+  exit, and "Strange Glowing Sand" is INDOORS but open desert.
+- **Sand ripples as colour or strong relief read as zebra stripes** under a
+  low dusk sun.
+- 507 rooms (was 285), MAX_ROOMS 560; world build 146 → 255 ms; Market
+  Square 748 → 863 calls before the split's remaining cost (the sewer's
+  mobiles, still drawn under the street).
+
+### People (tools/blender/people.py, src/people.js)
+
+- **The exporter writes a key at frame f to time f/fps.** Clips keyed from
+  frame 1 hold their first frame and hitch every loop; bake from 0.
+- **It bakes a `.scale` track on every bone.** Strip them at load, or a
+  child's bigger head is reset to 1 every frame.
+- **three drops the dots from bone names** (`grip.R` → `gripR`).
+- **`Box3.setFromObject` on an unposed skinned mesh is NaN**; use the
+  geometry's bounding box.
+- **Decimate's vertex-group weight is violently non-linear**: 0.97 against
+  1.0 already keeps 70% of that side. Search for it.
+- **Bone heat fails on tiny loose islands**: bind the trunk alone, weld the
+  head rigidly.
+- One skeleton shared by every mesh of a figure uploads its bone texture
+  once; materials cached by surface and colour. Market Square people cost
+  0.56 → 0.87 ms for 2.6× the triangles.
+
 ## 2026-09-07 — six areas, and the judge's third round
 
 The graveyard joined, the marsh became a bog, the Shire became halfling,

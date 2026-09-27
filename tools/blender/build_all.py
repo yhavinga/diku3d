@@ -31,6 +31,8 @@ MODULES = [
     "props",
     "trees",
     "marsh",
+    "sewer",
+    "desert",
     "townsperson",
     "weapons",
     "people",
@@ -62,6 +64,31 @@ BUDGET = {
     # to PROP_BUDGET's 800. A headstone gets scattered by the dozen and a fence
     # by the segment, so the loose cap would not have caught a regression here.
     "headstone": 250, "grave_slab": 120, "iron_fence": 450,
+    # The sewer kit. Like the room kit these are pieces of a building, one per
+    # cell side, so read them against a wall panel's 2000 rather than a prop's
+    # 800: a chamber is a groin vault, four piers and two ribs; a tunnel is a
+    # whole 13 m cell of barrel vault with its floor, and is cheap because it
+    # is one sweep.
+    "sewer_tunnel": 600, "sewer_arm": 700, "sewer_hub": 1200, "sewer_hub_end": 300,
+    "sewer_chamber": 2700, "sewer_chamber_air": 2900, "sewer_shaft": 400, "sewer_grate": 400, "sewer_door_end": 300,
+    "sewer_wall_open": 1000, "sewer_wall_solid": 400, "sewer_shaft_open": 1100,
+    "sewer_shaft_solid": 500, "sewer_pit": 750, "town_well": 750, "sewer_ladder": 900,
+    "stalagmites": 750, "stalactites": 850, "bone_pile": 900, "rubble": 550,
+    "cave_rock_a": 200, "cave_rock_b": 200,
+    # Rock lining over a whole wall or ceiling, at 0.3 m a face: the relief has
+    # to hold up at arm's length under a torch, which a coarser grid did not.
+    "cave_wall": 1400, "cave_wall_door": 1200, "cave_wall_long": 1750,
+    "cave_wall_long_door": 1550, "cave_roof": 1850,
+    # Four of them in the whole world, all in the Dump.
+    "refuse_heap": 1000, "sewer_sconce": 400,
+    # The Great Eastern Desert. A massif block is a whole 13 m cell of cliff,
+    # displaced at 0.7 m a face so the bedding ledges cast real shadow; there
+    # are a few dozen of them. Dunes are placed by the hundred in the sand sea
+    # past the rooms, so they are held under a thousand.
+    "massif_a": 3800, "massif_b": 3000, "massif_mouth": 3300,
+    "dune_a": 1000, "dune_b": 1000, "palm_a": 2500, "palm_b": 2500,
+    "tent_roof": 2600, "tent_wall": 1000, "tent_wall_door": 900,
+    "rug": 200, "cushions": 600, "hitch_line": 450, "fungus_cluster": 1300, "lantern": 400,
     # Carried, so paid for once per armed mobile and once more in first person.
     "weapon_sword": 600, "weapon_dagger": 400, "weapon_axe": 500, "weapon_mace": 600,
     "weapon_spear": 400, "weapon_staff": 500, "shield_round": 1100, "shield_kite": 1000,
