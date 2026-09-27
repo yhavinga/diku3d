@@ -1108,7 +1108,9 @@ def build():
         build_pit(),
         # The same well in a guild-hall floor, in the town's materials: it is
         # lit like the room it stands in, not like the drain it goes down to.
-        build_pit("town_well", stone="stonewall", dark="peat", water="bogwater", iron="iron"),
+        # The throat is masonry, not peat: peat is the darkest surface in the
+        # world and inside a torch-lit guild hall at night it read RGB 0.
+        build_pit("town_well", stone="stonewall", dark="stonewall", water="bogwater", iron="rust"),
         build_ladder(),
         build_cave_rock("cave_rock_a", 71010, 1.25, 0.95, 1.2),
         build_cave_rock("cave_rock_b", 71011, 1.9, 1.3, 1.5),

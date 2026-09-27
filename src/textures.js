@@ -718,6 +718,24 @@ const SURFACES = {
     s.rough = 0.9 - damp * 0.55;
   },
 
+  /**
+   * Wrought iron that has been wet for a century: more rust than metal. The
+   * town's `iron` is 85% metallic, and a metal is only ever as bright as what
+   * it reflects -- underground that is the fixed near-black sheen, so every
+   * grating, rung and sconce down there rendered at RGB 0. Rust is not a
+   * metal, and it is what those things are covered in.
+   */
+  rust(u, v, s) {
+    const scale = fbm(u * 10, v * 10, 10, 563, 4);
+    const pit = fbm(u * 60, v * 60, 60, 569, 2);
+    const bare = clamp01(1.4 - scale * 2.2);
+    const c = mix(rgb(0x5a3421), rgb(0x7d4a2a), scale);
+    s.color = mix(c, rgb(0x3a3834), bare * 0.6);
+    s.height = 0.5 + scale * 0.2 + pit * 0.1;
+    s.rough = 0.72 + pit * 0.2 - bare * 0.3;
+    s.metal = bare * 0.55;
+  },
+
   /** Old bone: ivory gone the colour of the floor it has lain on. */
   bone(u, v, s) {
     const stain = fbm(u * 6, v * 6, 6, 487, 4);
@@ -904,7 +922,9 @@ const RECIPES = {
   sewerflag: { surface: 'flagstone', scale: 2.6, normalScale: 0.85, env: 1, wet: 0, detail: 0.5, buried: true },
   caverock: { surface: 'caverock', scale: 4.4, normalScale: 1.0, env: 1, wet: 0, detail: 0.6, buried: true },
   cavefloor: { surface: 'cavefloor', scale: 3.2, normalScale: 0.8, env: 1, wet: 0, detail: 0.6, buried: true },
-  rustiron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1, wet: 0, detail: 0.3, buried: true },
+  rustiron: { surface: 'rust', scale: 1.2, normalScale: 0.5, env: 1, wet: 0, detail: 0.3, buried: true },
+  // The same, above ground: the guild wells' rungs.
+  rust: { surface: 'rust', scale: 1.2, normalScale: 0.5, env: 0.9, wet: 0, detail: 0.3 },
   bone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 1, wet: 0, detail: 0.3, buried: true },
   sewerwood: { surface: 'bark', scale: 1.6, normalScale: 0.6, env: 1, wet: 0, detail: 0.4, buried: true },
   // The animals. A 0.4 m tile is a hand's-breadth clump pattern on a dog and
