@@ -1137,7 +1137,7 @@ async function boot() {
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
     pipeline, environment, materials, wetness,
-    player, hud, layout, built, actors, world, applyTime, applyWeather, state,
+    player, hud, layout, built, actors, world, applyTime, applyWeather, state, audio,
     times: TIMES, overcast: OVERCAST, rain,
     /**
      * Make it rain now, whatever the mud's barometer says.

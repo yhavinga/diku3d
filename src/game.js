@@ -1571,6 +1571,16 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (!mob || mob.fighting || !isAwake(mob)) continue;
       if (!(mob.act & ACT_AGGRESSIVE)) continue;
       if ((mob.act & ACT_WIMPY) && isAwake(state)) continue;
+      // DIVERGES: the mud's multi_hit here is from anywhere in the room, and
+      // AGGRO stands in for the room at nine metres -- so the first round
+      // used to land from across the street. Out of reach, the mobile only
+      // picks the fight (set_fighting, both ways, as damage() would) and
+      // comes at you; the violence pulse swings once it is there.
+      if (dist2(slot.pos, position) > MELEE * MELEE) {
+        ctx.setFighting(mob, state);
+        if (!state.fighting) ctx.setFighting(state, mob);
+        continue;
+      }
       ctx.round = { player: 0, npc: AMBUSH_WINDUP };
       try { multiHit(mob, state, undefined, ctx); } finally { ctx.round = null; ctx.now = undefined; }
     }
