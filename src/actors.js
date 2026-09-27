@@ -677,9 +677,9 @@ const BEASTS = [
   // the same creature four times over, in stone grey.
   { test: /\bgargoyles?\b/, asset: 'beast_imp', scale: 4.0, coat: 0x6a6964, pale: 0x7c7b76, points: 0x3c3b38, glow: 0xff5a24, box: [1.9, 0.8, 'quad', 0x6a6964] },
   { test: /\b(homonc?ulus|imps?|quasits?)\b/, asset: 'beast_imp', scale: 1.0, coat: 0x4a5a28, pale: 0x7a8a48, points: 0x283018, glow: 0xffc020, box: [0.45, 0.3, 'quad', 0x4a5a28] },
-  { test: /\bnagas?\b/, asset: 'beast_naga', scale: 1.0, coat: 0x56662a, pale: 0xc8b25e, points: 0x56662a, patch: 0x8a8a3a, cover: 0.35, box: [0.3, 5, 'quad', 0x56662a] },
+  { test: /\bnagas?\b/, asset: 'beast_naga', scale: 1.0, stands: 1.9, coat: 0x56662a, pale: 0xc8b25e, points: 0x56662a, patch: 0x8a8a3a, cover: 0.35, box: [0.3, 5, 'quad', 0x56662a] },
   { test: /\bbasilisks?\b/, asset: 'beast_basilisk', scale: 1.0, coat: 0x5a4a32, pale: 0xbca264, points: 0x3a3020, patch: 0x4a3c28, cover: 0.3, glow: 0x9cff9c, box: [0.5, 2.5, 'quad', 0x5a4a32] },
-  { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, coat: 0x5c2c68, pale: 0x8e6096, points: 0x3a1a44, patch: 0x4a2254, cover: 0.3, box: [0.8, 9, 'quad', 0x5c2c68] },
+  { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, stands: 3.6, coat: 0x5c2c68, pale: 0x8e6096, points: 0x3a1a44, patch: 0x4a2254, cover: 0.3, box: [0.8, 9, 'quad', 0x5c2c68] },
   { test: /\bdustdiggers?\b/, asset: 'beast_dustdigger', scale: 1.0, coat: 0xc2a070, pale: 0x9a7c58, points: 0x7a5a3a, patch: 0xb08c5c, cover: 0.35, box: [0.3, 4, 'quad', 0xc2a070] },
   { test: /\bcamels?\b/, asset: 'beast_camel', scale: 1.0, coat: 0xb48c5c, pale: 0xd6be96, points: 0x8a6a44, box: [1.9, 3, 'quad', 0xb48c5c] },
   // The dracolich lies as a heap of bones until it rises: its idle is the
@@ -1040,8 +1040,11 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   // A flier is built on the ground and flown by its clips, `hover` metres up
   // (in the model's units): its name and its examine point go up with it.
   const hover = spec.air ? (info.hover || 0) * scale : 0;
+  // A body that stands up out of its rest pose -- the reared naga, the worm
+  // out of the sand -- says how tall it really is, for the label over it.
+  const height = spec.stands ? spec.stands * scale : size.y * scale + hover;
   return {
-    group, headGroup: null, height: size.y * scale + hover, scale, mixer, actions, clips, stride,
+    group, headGroup: null, height, scale, mixer, actions, clips, stride,
     hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
     afloat,
   };

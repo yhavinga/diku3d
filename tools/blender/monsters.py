@@ -933,7 +933,7 @@ def bat():
     return dict(name="beast_bat", archetype="bat", bones=bones, body=body, masks=masks, parts=parts,
                 patch=lambda co: np.zeros(len(co)), h=0.0014, tris=1200, mat="fur",
                 clips=bat_clips, hover=1.2, extras={"hover": 1.2},
-                gait=dict(flap=8, walk_stride=0.64, run_stride=0.8, run_frames=6))
+                gait=dict(flap=10, walk_stride=0.5, run_stride=0.8, run_frames=7))
 
 
 def bat_clips(arm, spec):
