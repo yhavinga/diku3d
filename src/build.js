@@ -1137,7 +1137,10 @@ export function buildScene(world, layout, materials, assets = null) {
       // shaft, whose walls already run the whole way up.
       buried: isBuried(lowerMats, plan.lower),
       shaftWalls: sewerKit && isVault(plan.lower.room),
-      kerb: isSewer(plan.upper.room) ? 'ashlar' : 'stonewall',
+      // The kerb is built of what the room above is built of: marble in the
+      // sanctum, not the street's rubble with the temple's blue light on it.
+      kerb: isSewer(plan.upper.room) ? 'ashlar'
+        : (isOpenAir(plan.upper.room) ? 'stonewall' : pickMaterials(plan.upper.room, plan.upper.room.area).wallIn),
     });
   }
 
@@ -3642,6 +3645,23 @@ function buildSewerChamber({
   // leads up into sunlight": a round hole in the crown with the hour's sky at
   // the top of it.
   const air = !shaft && SEWER_AIR.test(room.description);
+  // The far end of a way up or down that the grid could not stack: the
+  // layout hands its wall to the room it was walked from, so "the Dark Pit"
+  // itself had no pit. It gets one against a blank wall, and a trigger.
+  for (const link of layout.links) {
+    if (link.kind !== 'portal' || link.to !== cell || link.dir < 4 || !link.twoWay || !blind.length) continue;
+    const dir = blind.shift();
+    const down = link.dir === 4; // walked up from below: this end is the top
+    const at = sewerAt(pos, dir, down ? SW_CA - 1.55 : SW_CA, 0);
+    instances.add(down ? 'sewer_pit' : 'sewer_ladder', { x: at.x, y, z: at.z, rotY: FACE_ROT[dir] }, chunk);
+    if (down) addCollider(at.x - 1.0, at.x + 1.0, at.z - 1.0, at.z + 1.0, y, y + 0.62);
+    const trigger = down ? at : sewerAt(pos, dir, SW_CA - 0.7, 0);
+    portals.push({
+      x: trigger.x, y, z: trigger.z, radius: down ? 1.55 : 1.2, target: link.from.vnum,
+      from: room.vnum, label: link.from.room.name, dir: link.dir === 4 ? 5 : 4,
+    });
+  }
+
   instances.add(shaft ? 'sewer_shaft' : (air ? 'sewer_chamber_air' : 'sewer_chamber'), { x: pos.x, y, z: pos.z, rotY: 0 }, chunk);
   if (air) skyHoles.push({ x: pos.x, y: y + AIR_TOP, z: pos.z });
   for (const sx of [-1, 1]) {

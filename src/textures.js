@@ -956,6 +956,7 @@ const indoorBounce = { value: 1 };
 
 const HEMI_LINE = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
 const POINT_LINE = 'getPointLightInfo( pointLight, geometryPosition, directLight );';
+const SUN_LINE = 'getDirectionalLightInfo( directionalLight, directLight );';
 const LIGHTS_FRAGMENT_INDOOR = THREE.ShaderChunk.lights_fragment_begin.replace(
   HEMI_LINE,
   'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal )'
@@ -963,8 +964,16 @@ const LIGHTS_FRAGMENT_INDOOR = THREE.ShaderChunk.lights_fragment_begin.replace(
 ).replace(
   POINT_LINE,
   `${POINT_LINE}\n#ifdef DIKU_BURIED\n\t\tdirectLight.color *= dikuBuriedGain;\n#endif`,
+).replace(
+  SUN_LINE,
+  // The night "sun" is the moon at -8 degrees: a light from *under* the
+  // world, which nothing underground is between -- it drew moonlit blue
+  // hairlines down every corner of the sewer. Underground, a sun below the
+  // horizon gives nothing; one above it still falls down a shaft.
+  `${SUN_LINE}\n#ifdef DIKU_BURIED\n\t\tdirectLight.color *= smoothstep( 0.02, 0.12, dot( directionalLight.direction, viewMatrix[ 1 ].xyz ) );\n#endif`,
 );
-if (!LIGHTS_FRAGMENT_INDOOR.includes('indoorBounce') || !LIGHTS_FRAGMENT_INDOOR.includes('dikuBuriedGain')) {
+if (!LIGHTS_FRAGMENT_INDOOR.includes('indoorBounce') || !LIGHTS_FRAGMENT_INDOOR.includes('dikuBuriedGain')
+  || !LIGHTS_FRAGMENT_INDOOR.includes('directionalLight.direction, viewMatrix')) {
   throw new Error('textures: three\'s light loop moved; the indoor-bounce or buried-gain injection missed');
 }
 
