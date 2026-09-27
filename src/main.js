@@ -519,7 +519,7 @@ async function boot() {
   const fx = createFx({
     scene, camera, composer, actors, game, audio, player, library: assets, sun, hemi, built, lightPool,
   });
-  const spellfx = createSpellFx({ scene, camera, renderer, composer, game, actors, audio, player, quality });
+  const spellfx = createSpellFx({ scene, camera, renderer, composer, game, actors, audio, player, quality, viewModel: fx.viewModel });
   {
     // Screen position of a world point, for the foe plate and damage numbers.
     const p = new THREE.Vector3();

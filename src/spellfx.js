@@ -62,7 +62,7 @@ const PAL = {
   missile: { glow: C(0.6, 0.34, 1.6), core: C(7, 5.5, 12), trail: C(0.42, 0.24, 1.3), light: 0x9a7cff },
   fire: { glow: C(1.35, 0.42, 0.07), core: C(10, 5.5, 1.8), ember: C(2.6, 0.9, 0.15), dark: C(0.4, 0.07, 0.015), light: 0xff8a3a },
   lightning: { glow: C(0.55, 0.75, 1.9), core: C(14, 16, 22), light: 0xb8d4ff },
-  frost: { glow: C(0.45, 0.85, 1.7), crystal: C(1.6, 2.4, 3.6), mist: C(0.5, 0.7, 1.0), light: 0x9fd0ff },
+  frost: { glow: C(0.45, 0.85, 1.7), crystal: C(1.6, 2.4, 3.6), mist: C(0.5, 0.7, 1.0), rime: C(0.75, 0.9, 1.1), light: 0x9fd0ff },
   acid: { glow: C(0.55, 1.6, 0.18), drop: C(0.9, 2.6, 0.22), fume: C(0.42, 0.55, 0.16), light: 0x8cff4a },
   heal: { glow: C(1.9, 1.5, 0.8), mote: C(3.0, 2.5, 1.3), light: 0xffd9a0 },
   refresh: { glow: C(0.7, 1.7, 1.3), mote: C(1.4, 3.0, 2.3), light: 0xa0ffd8 },
@@ -75,10 +75,73 @@ const PAL = {
   faerie: { glow: C(2.0, 0.55, 1.3), mote: C(3.4, 1.1, 2.4), light: 0xff78c8 },
   holy: { glow: C(2.0, 1.8, 1.2), core: C(14, 12, 8), light: 0xfff0c8 },
   dispel: { glow: C(0.6, 1.6, 1.9), light: 0x9ff0ff },
-  dust: { smoke: C(0.46, 0.41, 0.34) },
+  dust: { smoke: C(0.46, 0.41, 0.34), grit: C(0.3, 0.26, 0.21) },
   gas: { smoke: C(0.34, 0.46, 0.14), glow: C(0.5, 1.2, 0.2), light: 0xb8ff6a },
 };
+const BOLT_MID = C(1.1, 1.5, 3.6);
+const MISSILE_STREAK = C(3.2, 2.4, 6);
+const TRAIL = 12;
+const WHITE_HOT = C(9, 9, 10);
+// A fire tongue, drawn with functions made once.
+const tongue = { a: 1, big: 1, c0: null, c1: null };
+const _tc = new THREE.Color();
+const tongueWidth = (u) => (0.06 + u * 0.55) * tongue.big;
+const tongueColour = (u) => _tc.copy(tongue.c0).lerp(tongue.c1, Math.sqrt(u));
+const tongueAlpha = (u) => tongue.a * 0.55 * Math.pow(1 - u, 1.4) * Math.min(1, u * 10);
+const C_PRISM_FLARE = C(1.6, 1.5, 1.7);
+/** A colour of the spectrum, `hue` wrapping, in display units, into `_spec`. */
+const _spec = new THREE.Color();
+const spectral = (hue, k = 2.4) => _spec.setHSL(((hue % 1) + 1) % 1, 1, 0.5).multiplyScalar(k);
+// The colour spray's ray, drawn with functions made once (see drawRibbons).
+const prismRay = { hue: 0, a: 1 };
+const _spec2 = new THREE.Color();
+const prismWide = (u) => 0.04 + u * 0.42;
+const prismThin = (u) => 0.012 + u * 0.05;
+const prismColour = (u) => spectral(prismRay.hue + u * 0.4, 1.3);
+const prismColourHot = (u) => _spec2.copy(spectral(prismRay.hue + u * 0.4, 2.6)).addScalar(1.6 * (1 - u));
+const prismAlphaWide = (u) => prismRay.a * 0.5 * Math.pow(1 - u, 1.2) * Math.min(1, u * 8);
+const prismAlphaThin = (u) => prismRay.a * Math.pow(1 - u, 1.6);
+// Width and alpha along a ribbon, made once: u is 0 at the head.
+const tapers = new Map();
+const taper1 = (w) => tapers.get('w' + w) || tapers.set('w' + w, (u) => w * (1 - u)).get('w' + w);
+const fadeSq = (a) => tapers.get('a' + a) || tapers.set('a' + a, (u) => a * (1 - u) * (1 - u)).get('a' + a);
+const BOLT_GHOST = C(0.55, 0.42, 1.8);
+/** Return strokes of a lightning flash, seconds after the leader. */
+const STROKES = [0, 0.07, 0.15, 0.27];
+const CRACKLE = new Set(['lightning', 'shock', 'storm', 'breath-lightning']);
 const PRISM = [C(2.6, 0.2, 0.15), C(2.6, 1.0, 0.1), C(2.3, 2.1, 0.2), C(0.3, 2.4, 0.35), C(0.2, 1.2, 2.8), C(0.9, 0.3, 2.8), C(2.2, 0.35, 2.0)];
+
+/**
+ * A breath (or burning hands): what its stream is made of. `hot`/`cool` the
+ * body's colour from the lips to the far end, `shape` its sprite (see
+ * POINT_FRAG), `lift` its gravity (negative rises); `bit` what is flung
+ * through it; `smoke` what hangs off its end; `tongue` the ribbons.
+ */
+const STREAMS = {
+  flame: null,
+  'breath-fire': {
+    hot: C(1.7, 0.52, 0.06), cool: C(0.5, 0.05, 0.0), alpha: 0.55, shape: 4, lift: -2.2, occ: 0.7,
+    bit: PAL.fire.ember, bit2: PAL.fire.dark, bitShape: 1, bitSize: 0.03, bitFall: 5, bitOcc: 0,
+    smoke: C(0.1, 0.09, 0.08), smoke2: C(0.24, 0.23, 0.22), smokeAlpha: 0.42, smokeRise: 1,
+    lip: C(5, 3.2, 1.2), glow: PAL.fire.glow, tongue0: C(2.4, 1.3, 0.35), tongue1: C(1.0, 0.18, 0.02), tongueA: 1,
+    heat: true, light: PAL.fire.light, lit: 1,
+  },
+  'breath-frost': {
+    hot: C(1.3, 1.8, 2.6), cool: C(0.35, 0.55, 0.9), alpha: 0.55, shape: 3, lift: 0.4, occ: 0.55,
+    bit: PAL.frost.crystal, bit2: PAL.frost.glow, bitShape: 2, bitSize: 0.08, bitFall: 1.5, bitOcc: 0.35,
+    smoke: C(0.62, 0.7, 0.8), smoke2: C(0.7, 0.76, 0.84), smokeAlpha: 0.3, smokeRise: -0.3,
+    lip: C(3, 4, 6), glow: PAL.frost.glow, tongue0: C(1.6, 2.2, 3.2), tongue1: C(0.3, 0.55, 1.1), tongueA: 0.8,
+    heat: false, light: PAL.frost.light, lit: 0.6,
+  },
+  'breath-acid': {
+    hot: C(0.7, 1.9, 0.25), cool: C(0.25, 0.5, 0.06), alpha: 0.6, shape: 3, lift: 1.2, occ: 0.55,
+    bit: PAL.acid.drop, bit2: PAL.acid.glow, bitShape: 6, bitSize: 0.07, bitFall: 7, bitOcc: 0.6,
+    smoke: C(0.3, 0.38, 0.1), smoke2: C(0.36, 0.42, 0.16), smokeAlpha: 0.45, smokeRise: 0.6,
+    lip: C(2.4, 5, 1), glow: PAL.acid.glow, tongue0: C(1.0, 2.4, 0.3), tongue1: C(0.3, 0.7, 0.05), tongueA: 0.7,
+    heat: false, light: PAL.acid.light, lit: 0.6,
+  },
+};
+STREAMS.flame = { ...STREAMS['breath-fire'] };
 
 /** Which palette a spell family is gathered, cast and landed in. */
 const FAMILY = {
@@ -137,6 +200,7 @@ const POINT_VERT = `
 
 const POINT_FRAG = `
   uniform sampler2D uNoise;
+  uniform float uTime;
   uniform float uGain;
   uniform float uMatter;
   varying vec3 vColor;
@@ -151,6 +215,7 @@ const POINT_FRAG = `
     float shape = vInfo.x;
     float seed = vInfo.y;
     float a;
+    float hot = 0.0;
     if (shape < 0.5) {                 // soft glow
       a = exp(-r2 * 3.2) - 0.04;
     } else if (shape < 1.5) {          // spark: hot point, small halo
@@ -165,21 +230,33 @@ const POINT_FRAG = `
       vec2 q = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * c;
       float n = texture2D(uNoise, q * 0.34 + vec2(seed * 7.3, seed * 3.1)).r;
       a = smoothstep(1.0, 0.1, r2) * smoothstep(0.22, 0.78, n + (1.0 - r2) * 0.35);
-    } else if (shape < 4.5) {          // flame: soft, with a torn edge
-      float n = texture2D(uNoise, c * 0.3 + vec2(seed * 5.1, seed * 9.7)).r;
-      a = exp(-r2 * 2.4) * smoothstep(0.15, 0.7, n + (1.0 - r2) * 0.55) * 1.25;
+    } else if (shape < 4.5) {          // flame: a torn edge that licks upward, whiter where it is dense
+      vec2 q = c * 0.42 + vec2(seed * 5.1, seed * 9.7 + uTime * 0.55);
+      float n = texture2D(uNoise, q).r * 0.65 + texture2D(uNoise, q * 2.3 - vec2(0.0, uTime * 0.9)).r * 0.35;
+      n = (n - 0.5) * 2.6 + 0.5;   // the field is mostly mid-grey: stretch it, so the edge tears
+      a = exp(-r2 * 1.6) * smoothstep(0.3, 0.8, n * 0.75 + (1.0 - r2) * 0.5) * 1.3;
+      // Temperature, not just density: the thick middle of a tongue is
+      // yellow, its ragged edge the colour it was given.
+      hot = smoothstep(0.8, 1.25, a) * 0.6;
     } else if (shape < 5.5) {          // bubble: a thin ring with a lit rim
       float r = sqrt(r2);
       a = smoothstep(0.62, 0.8, r) * smoothstep(1.0, 0.86, r) * 0.9 + exp(-dot(c - vec2(-0.3, 0.35), c - vec2(-0.3, 0.35)) * 40.0) * 0.6;
-    } else {                           // blob: a bead of liquid with a highlight
+    } else if (shape < 6.5) {          // blob: a bead of liquid with a highlight
       a = smoothstep(1.0, 0.55, r2) * 0.85 + exp(-dot(c - vec2(-0.3, 0.3), c - vec2(-0.3, 0.3)) * 18.0) * 0.8;
+    } else {                           // glint: a four-point star that twinkles
+      float ang = seed * 1.57;
+      vec2 q = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * c;
+      float tw = 0.55 + 0.45 * sin(uTime * 23.0 + seed * 61.0);
+      a = (exp(-abs(q.x) * 28.0) * exp(-abs(q.y) * 2.6) + exp(-abs(q.y) * 28.0) * exp(-abs(q.x) * 2.6)) * 0.9 * tw
+        + exp(-r2 * 30.0) * 1.4;
+      hot = exp(-r2 * 30.0);
     }
     a = clamp(a, 0.0, 2.0) * vAlpha * fogT(vDist);
     // Both pools blend ONE / ONE_MINUS_SRC_ALPHA on premultiplied colour.
     // Matter covers what is behind it and is lit, not emissive. Light adds,
     // except for its occlusion share: fire has body, and over a sunlit
     // wall a purely additive flame only ever bleaches it towards white.
-    vec3 col = vColor * uGain;
+    vec3 col = vColor * (1.0 + hot * vec3(0.35, 0.8, 1.6)) * uGain;
     gl_FragColor = uMatter > 0.5 ? vec4(col * min(a, 1.0), min(a, 1.0)) : vec4(col * a, min(a, 1.0) * vInfo.z);
   }
 `;
@@ -241,8 +318,11 @@ const DECAL_FRAG = `
   uniform float uRadius;    // for the ring: where the front is, 0..1
   uniform vec3 uColor;
   uniform float uGain;
+  uniform float uSeed;
+  uniform float uHeat;      // for the marks: 1 fresh, falling to 0 as it cools
   varying vec2 vUv;
   varying float vDist;
+  ${NOISE_GLSL}
   ${FOG_GLSL}
   float h1(float n) { return fract(sin(n * 127.1) * 43758.5453); }
   float line(vec2 p, vec2 a, vec2 b) {
@@ -293,8 +373,71 @@ const DECAL_FRAG = `
     } else if (uMode < 1.5) {
       float front = uRadius;
       a = exp(-pow((r - front) / 0.06, 2.0)) * (1.0 - front * 0.6) + smoothstep(front, 0.0, r) * 0.12 * (1.0 - front);
-    } else {
+    } else if (uMode < 2.5) {
       a = exp(-r * r * 3.5);
+    } else {
+      // The marks a spell leaves: ground cover (alpha, darkening what is
+      // under it) and a little light of its own (colour) that dies first.
+      vec3 p3 = vec3(vUv * 2.2, uSeed);
+      float n = fbm(p3);
+      float edge = r + (n - 0.5) * 0.55;
+      float cover = 0.0;
+      vec3 lit = vec3(0.0);
+      if (uMode < 3.5) {
+        // Scorch: charred in the middle, a brown singe out to a torn edge,
+        // embers in the char while it is hot.
+        float char = smoothstep(0.62, 0.2, edge);
+        float singe = smoothstep(0.95, 0.45, edge);
+        cover = singe * 0.45 + char * 0.45;
+        float ember = smoothstep(0.58, 0.8, fbm(vec3(vUv * 7.0, uSeed + uTime * 0.25))) * char;
+        lit = vec3(2.4, 0.75, 0.12) * ember * uHeat * 1.6 + uColor * exp(-r * r * 6.0) * uHeat * 0.5;
+      } else if (uMode < 4.5) {
+        // Where lightning went to ground: a burnt star of forking channels
+        // (Lichtenberg figures), glowing white-blue for a moment.
+        float ang = atan(vUv.y, vUv.x);
+        float w = fbm(vec3(r * 3.0, ang * 1.3, uSeed)) * 5.0 + fbm(vec3(r * 9.0, ang * 4.0, uSeed + 3.0)) * 1.4;
+        float ch = abs(sin(ang * 4.0 + w));
+        float ch2 = abs(sin(ang * 9.0 + w * 1.7 + 1.3));
+        float thin = mix(0.16, 0.035, r);
+        float reach = smoothstep(1.0, 0.55, edge);
+        float lines = max(smoothstep(thin, 0.0, ch), smoothstep(thin * 0.7, 0.0, ch2) * smoothstep(0.25, 0.5, r)) * reach;
+        // The burn is wider than the glowing channel was.
+        float burnt = max(smoothstep(thin * 3.0, 0.0, ch), smoothstep(thin * 2.2, 0.0, ch2) * smoothstep(0.25, 0.5, r)) * reach;
+        float core = smoothstep(0.32, 0.0, edge);
+        cover = max(burnt * 0.85, core * 0.62);
+        lit = uColor * (lines * 0.9 + core * 1.2) * uHeat * uHeat;
+      } else if (uMode < 5.5) {
+        // Rime: pale frost feathered at its edge, with a cold glint.
+        // Ridged noise for the feathering of frost, finer points of it lit.
+        float fe = fbm(vec3(vUv * 7.0, uSeed));
+        float ridge = 1.0 - abs(2.0 * fbm(vec3(vUv * 5.0 + 3.0, uSeed + 7.0)) - 1.0);
+        float body = smoothstep(0.9, 0.3, edge + (fe - 0.5) * 0.5);
+        float feather = pow(ridge, 5.0) * body;
+        float glint = smoothstep(0.72, 0.9, fbm(vec3(vUv * 26.0, uSeed + 11.0))) * body;
+        cover = body * 0.12 + feather * 0.35;
+        lit = uColor * (body * 0.12 + feather * 0.75 + glint * 1.6) + uColor * exp(-r * r * 5.0) * uHeat * 0.6;
+      } else if (uMode < 6.5) {
+        // Acid: a dark etched stain, and it still seethes.
+        float body = smoothstep(0.8, 0.35, edge);
+        float pits = smoothstep(0.55, 0.75, fbm(vec3(vUv * 8.0, uSeed + uTime * 0.6)));
+        cover = body * (0.5 + pits * 0.25);
+        lit = uColor * body * (0.15 + pits * 1.3) * (0.4 + 0.6 * uHeat);
+      } else {
+        // Earthquake: the ground split in jagged lines out from the middle.
+        float ang = atan(vUv.y, vUv.x);
+        float w = fbm(vec3(r * 2.5, ang * 1.1, uSeed)) * 6.0;
+        float ch = abs(sin(ang * 3.5 + w));
+        float ch2 = abs(sin(ang * 8.0 + w * 1.6 + 2.0));
+        float lines = smoothstep(mix(0.13, 0.03, r), 0.0, ch) * smoothstep(0.04, 0.16, r) * smoothstep(1.0, 0.6, edge);
+        lines = max(lines, smoothstep(mix(0.08, 0.02, r), 0.0, ch2) * smoothstep(0.3, 0.55, r) * smoothstep(1.0, 0.6, edge) * 0.8);
+        // Dust settled round the splits.
+        float dust = smoothstep(0.9, 0.2, edge) * 0.12;
+        cover = lines * 0.9 + dust;
+        lit = vec3(0.0);
+      }
+      float f = uAlpha * fogT(vDist);
+      gl_FragColor = vec4(lit * uGain * f, cover * f);
+      return;
     }
     a *= uAlpha * fogT(vDist);
     gl_FragColor = vec4(uColor * uGain * a, 0.0);
@@ -372,6 +515,7 @@ const AURA_FRAG = `
   uniform float uTime;
   uniform float uGain;
   uniform float uFlicker;
+  uniform float uSoft;
   varying vec3 vN;
   varying vec3 vV;
   varying vec3 vW;
@@ -383,7 +527,15 @@ const AURA_FRAG = `
     // Only the silhouette: facing surfaces add nothing, so the body stays
     // readable inside its halo even at arm's length.
     float f = pow(rim, 3.2);
+    // Soft (sanctuary): a broad glow that peaks inside the shell's outline
+    // and fades to nothing at it, so there is no drawn edge -- a shell's
+    // outline is a hard line at arm's length however it is lit -- and gentler
+    // still up close.
+    float soft = pow(rim, 1.7) * smoothstep(1.0, 0.7, rim) * 1.7 * (0.55 + 0.45 * smoothstep(0.8, 3.5, vDist));
+    f = mix(f, soft, uSoft);
     float n = vnoise(vW * 3.2 + vec3(0.0, -uTime * 1.3, 0.0));
+    // A slow shimmer rising through it.
+    n = mix(n, 0.5 + 0.5 * sin(vW.y * 9.0 - uTime * 3.0 + vnoise(vW * 2.0) * 5.0), uSoft * 0.5);
     float flick = mix(1.0, 0.6 + 0.8 * vnoise(vec3(uTime * 9.0, vW.y * 2.0, 0.0)), uFlicker);
     float a = f * 1.5 * (0.25 + 1.0 * n) * uIntensity * flick * fogT(vDist);
     gl_FragColor = vec4(uColor * uGain * a, 0.0);
@@ -442,7 +594,7 @@ class Pool {
     this.life = F(1); this.age = F(1); this.s0 = F(1); this.s1 = F(1); this.a0 = F(1);
     this.drag = F(1); this.grav = F(1); this.shape = F(1); this.seed = F(1);
     this.fadeIn = F(1); this.anchor = new Int16Array(max); this.swirl = F(1); this.pull = F(1); this.occ = F(1);
-    this.floor = F(1);
+    this.floor = F(1); this.hold = F(1);
 
     const g = new THREE.BufferGeometry();
     this.gp = F(3); this.gc = F(3); this.gi = F(3); this.gs = F(1); this.ga = F(1);
@@ -497,6 +649,7 @@ class Pool {
     this.anchor[i] = o.anchor ?? -1;
     this.swirl[i] = o.swirl || 0; this.pull[i] = o.pull || 0;
     this.floor[i] = o.floor ?? -1e9;
+    this.hold[i] = o.hold || 0;
     // Flame has a body; a soft glow a little; a spark none.
     this.occ[i] = o.occ ?? (this.shape[i] > 3.5 && this.shape[i] < 4.5 ? 0.45 : this.shape[i] < 0.5 ? 0.08 : 0);
     if (o.anchor !== undefined && o.anchor >= 0 && this.anchors) this.anchors.ref(o.anchor, 1);
@@ -510,7 +663,7 @@ class Pool {
     const move1 = (arr) => { arr[i] = arr[last]; };
     move3(this.p); move3(this.v); move3(this.c0); move3(this.c1);
     for (const arr of [this.life, this.age, this.s0, this.s1, this.a0, this.drag, this.grav, this.shape,
-      this.seed, this.fadeIn, this.anchor, this.swirl, this.pull, this.floor, this.occ]) move1(arr);
+      this.seed, this.fadeIn, this.anchor, this.swirl, this.pull, this.floor, this.occ, this.hold]) move1(arr);
   }
 
   update(dt, anchors) {
@@ -545,7 +698,11 @@ class Pool {
       this.gs[i] = lerp(this.s0[i], this.s1[i], 1 - (1 - u) * (1 - u));
       const fi = this.fadeIn[i];
       const inA = fi > 0 ? Math.min(1, u / fi) : 1;
-      this.ga[i] = this.a0[i] * inA * (1 - u) * (1 - u * 0.35);
+      // `hold`: full strength for that share of its life before it fades --
+      // a stream has to arrive, not die on the way.
+      const h = this.hold[i];
+      const uf = h > 0 ? Math.max(0, (u - h) / (1 - h)) : u;
+      this.ga[i] = this.a0[i] * inA * (1 - uf) * (1 - uf * 0.35);
       this.gi[i3] = this.shape[i]; this.gi[i3 + 1] = this.seed[i]; this.gi[i3 + 2] = this.occ[i];
     }
     const g = this.points.geometry;
@@ -635,10 +792,11 @@ class Ribbons {
 
   /**
    * `pts` an array of {x,y,z}; `width(u)` metres; `color(u)` a Color;
-   * `alpha(u)`; `sharp` 0 soft to 1 hard-edged.
+   * `alpha(u)`; `sharp` 0 soft to 1 hard-edged; only the first `count`
+   * points (a bolt still reaching its target).
    */
-  strip(pts, width, color, alpha, sharp = 0) {
-    const n = pts.length;
+  strip(pts, width, color, alpha, sharp = 0, count = pts.length) {
+    const n = Math.min(count, pts.length);
     if (n < 2 || this.v + n * 2 > this.max) return;
     const base = this.v;
     for (let k = 0; k < n; k++) {
@@ -683,22 +841,85 @@ class Ribbons {
   }
 }
 
-/** A jagged path from a to b: midpoint displacement, `depth` times. */
-function bolt(a, b, jag = 0.22, depth = 5) {
-  let pts = [a, b];
-  let amp = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) * jag;
-  for (let d = 0; d < depth; d++) {
-    const next = [pts[0]];
-    for (let k = 0; k < pts.length - 1; k++) {
-      const p = pts[k]; const q = pts[k + 1];
-      next.push({ x: (p.x + q.x) / 2 + rand(-amp, amp), y: (p.y + q.y) / 2 + rand(-amp, amp) * 0.8, z: (p.z + q.z) / 2 + rand(-amp, amp) });
-      next.push(q);
+const P3 = (n) => Array.from({ length: n }, () => ({ x: 0, y: 0, z: 0 }));
+
+/**
+ * A jagged path from a to b written into `out` (2^depth + 1 points, from
+ * `at`): midpoint displacement, the kick halving with each level.
+ */
+function jag(out, a, b, amount, depth, at = 0) {
+  const N = 1 << depth;
+  const s = out[at]; const e = out[at + N];
+  s.x = a.x; s.y = a.y; s.z = a.z; e.x = b.x; e.y = b.y; e.z = b.z;
+  let amp = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) * amount;
+  for (let step = N >> 1; step >= 1; step >>= 1) {
+    for (let i = step; i < N; i += step * 2) {
+      const p = out[at + i - step]; const q = out[at + i + step]; const m = out[at + i];
+      m.x = (p.x + q.x) / 2 + rand(-amp, amp);
+      m.y = (p.y + q.y) / 2 + rand(-amp, amp) * 0.8;
+      m.z = (p.z + q.z) / 2 + rand(-amp, amp);
     }
-    pts = next;
     amp *= 0.52;
   }
-  return pts;
+  return out;
 }
+
+/** A jagged path from a to b: midpoint displacement, `depth` times (allocates; for the few-per-cast arcs). */
+function bolt(a, b, amount = 0.22, depth = 5) {
+  return jag(P3((1 << depth) + 1), a, b, amount, depth);
+}
+
+/**
+ * A lightning stroke as it is seen: a main channel whose big kinks hold from
+ * one return stroke to the next while the fine ones change, forks that burn
+ * for a moment off each stroke, and the channel it was a moment ago left
+ * behind on the eye. Everything preallocated when the spell is released.
+ */
+class Bolt {
+  constructor(branches = 6) {
+    this.coarse = P3(5);                 // the four kinks that hold
+    this.main = P3(4 * 16 + 1);          // each coarse leg split 16 ways
+    this.ghost = P3(this.main.length);
+    this.ghostAt = -1;
+    this.branches = Array.from({ length: branches }, () => ({ pts: P3(17), sub: P3(9), on: false, sub_on: false, len: 1 }));
+  }
+
+  /** Lay out the big kinks between a and b. */
+  shape(a, b, amount = 0.2) { jag(this.coarse, a, b, amount, 2); }
+
+  /** A return stroke: new fine detail, new forks, the old channel kept as an afterimage. */
+  strike(a, b, now, reach = 2.2, forks = this.branches.length) {
+    for (let i = 0; i < this.main.length; i++) { const g = this.ghost[i]; const m = this.main[i]; g.x = m.x; g.y = m.y; g.z = m.z; }
+    this.ghostAt = now;
+    const c = this.coarse;
+    c[0].x = a.x; c[0].y = a.y; c[0].z = a.z; c[4].x = b.x; c[4].y = b.y; c[4].z = b.z;
+    for (let k = 0; k < 4; k++) jag(this.main, c[k], c[k + 1], 0.16, 4, k * 16);
+    const dx = b.x - a.x; const dy = b.y - a.y; const dz = b.z - a.z;
+    const L = Math.hypot(dx, dy, dz) || 1;
+    for (let k = 0; k < this.branches.length; k++) {
+      const br = this.branches[k];
+      br.on = k < forks && Math.random() < 0.8;
+      if (!br.on) continue;
+      // Forks lean the way the stroke is going and spread off it.
+      const from = this.main[Math.floor(rand(6, this.main.length - 10))];
+      const len = rand(0.35, 1) * reach;
+      _bv.set(dx / L + rand(-1, 1), dy / L + rand(-0.9, 0.4), dz / L + rand(-1, 1)).normalize().multiplyScalar(len);
+      _bw.set(from.x + _bv.x, from.y + _bv.y, from.z + _bv.z);
+      jag(br.pts, from, _bw, 0.24, 4);
+      br.len = len;
+      br.sub_on = Math.random() < 0.6;
+      if (br.sub_on) {
+        const at = br.pts[Math.floor(rand(4, 10))];
+        _bv.multiplyScalar(0.45).add(_bx.set(rand(-0.5, 0.5), rand(-0.5, 0.2), rand(-0.5, 0.5)).multiplyScalar(len * 0.4));
+        _bw.set(at.x + _bv.x, at.y + _bv.y, at.z + _bv.z);
+        jag(br.sub, at, _bw, 0.25, 3);
+      }
+    }
+  }
+}
+const _bv = new THREE.Vector3();
+const _bw = new THREE.Vector3();
+const _bx = new THREE.Vector3();
 
 // ------------------------------------------------------------- heat haze ----
 
@@ -707,11 +928,42 @@ function bolt(a, b, jag = 0.22, depth = 5) {
  * then one full-screen pass that reads the frame through it. Runs only while
  * something hot is in the air; otherwise `enabled` is false and it costs
  * nothing.
+ *
+ * The pass runs on the finished frame, so it would bend a painted shop sign
+ * as readily as the wall behind it -- and text that swims is the one thing
+ * that reads as a rendering fault rather than as heat. Every label sprite in
+ * the scene is drawn into the offset target as a mask (its glyphs, dilated a
+ * little) that zeroes the offset over it.
  */
+const LABEL_MASK_VERT = `
+  uniform vec2 uCenter;
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    vec4 mv = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+    vec2 sc = vec2(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz));
+    mv.xy += (position.xy - (uCenter - vec2(0.5))) * sc * 1.06;
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+const LABEL_MASK_FRAG = `
+  uniform sampler2D map;
+  uniform vec2 uTexel;
+  varying vec2 vUv;
+  void main() {
+    float m = 0.0;
+    for (int i = -2; i <= 2; i++) for (int j = -1; j <= 1; j++) {
+      m = max(m, texture2D(map, vUv + vec2(float(i), float(j) * 2.0) * uTexel * 5.0).a);
+    }
+    gl_FragColor = vec4(0.0, 0.0, 0.0, clamp(m * 2.0, 0.0, 1.0));
+  }
+`;
+
 class HeatPass extends Pass {
-  constructor(camera, noise) {
+  constructor(camera, noise, world) {
     super();
     this.camera = camera;
+    this.world = world;
     this.needsSwap = true;
     this.enabled = false;
     this.target = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType });
@@ -737,17 +989,21 @@ class HeatPass extends Pass {
           gl_PointSize = min(aSize * uScale / max(0.05, -mv.z), 260.0);
           vA = aAlpha; vSeed = aSeed;
         }`,
+      // Rising, fine-grained ripple, not a smear: two octaves of the noise
+      // moving up at different speeds, differentiated into an offset.
       fragmentShader: `
         uniform sampler2D uNoise; uniform float uTime;
         varying float vA; varying float vSeed;
+        float h(vec2 q) { return texture2D(uNoise, q).r * 0.6 + texture2D(uNoise, q * 2.7 + vec2(0.3, -uTime * 0.7)).r * 0.4; }
         void main() {
           vec2 c = gl_PointCoord * 2.0 - 1.0;
           float r2 = dot(c, c);
           if (r2 > 1.0) discard;
-          vec2 q = c * 0.4 + vec2(vSeed * 5.0, vSeed * 3.0 - uTime * 0.9);
-          float nx = texture2D(uNoise, q).r - texture2D(uNoise, q + vec2(0.07, 0.0)).r;
-          float ny = texture2D(uNoise, q).r - texture2D(uNoise, q + vec2(0.0, 0.07)).r;
-          float w = exp(-r2 * 2.5) * vA;
+          vec2 q = c * vec2(0.55, 0.3) + vec2(vSeed * 5.0, vSeed * 3.0 - uTime * 0.6);
+          float e = 0.035;
+          float nx = h(q) - h(q + vec2(e, 0.0));
+          float ny = h(q) - h(q + vec2(0.0, e));
+          float w = exp(-r2 * 3.0) * vA;
           gl_FragColor = vec4(nx * w, ny * w, 0.0, 1.0);
         }`,
       uniforms: { uNoise: { value: noise }, uScale: { value: 400 }, uTime: { value: 0 } },
@@ -760,7 +1016,7 @@ class HeatPass extends Pass {
     this.points.frustumCulled = false;
     this.scene.add(this.points);
     this.quad = new FullScreenQuad(new THREE.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, tHeat: { value: null }, uStrength: { value: 0.028 } },
+      uniforms: { tDiffuse: { value: null }, tHeat: { value: null }, uStrength: { value: 0.02 } },
       vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       fragmentShader: `
         uniform sampler2D tDiffuse; uniform sampler2D tHeat; uniform float uStrength;
@@ -773,6 +1029,42 @@ class HeatPass extends Pass {
       depthWrite: false,
     }));
     this.live = [];
+    // Label masks: one sprite per label, sharing its texture; found when the
+    // pass wakes, so labels made since are picked up.
+    this.maskScene = new THREE.Scene();
+    this.maskScene.matrixWorldAutoUpdate = false;
+    this.masks = new Map();   // label sprite -> mask sprite
+    this.maskMaterials = new Map();   // texture -> material
+  }
+
+  findLabels() {
+    if (!this.world) return;
+    const seen = new Set();
+    this.world.traverse((o) => {
+      if (!o.isSprite || !o.material || !o.material.map || o.material.toneMapped !== false || !o.material.map.image) return;
+      seen.add(o);
+      if (this.masks.has(o)) return;
+      const tex = o.material.map;
+      let m = this.maskMaterials.get(tex);
+      if (!m) {
+        m = new THREE.ShaderMaterial({
+          vertexShader: LABEL_MASK_VERT,
+          fragmentShader: LABEL_MASK_FRAG,
+          uniforms: { map: { value: tex }, uCenter: { value: o.center }, uTexel: { value: new THREE.Vector2(1 / tex.image.width, 1 / tex.image.height) } },
+          transparent: true, depthTest: false, depthWrite: false,
+          blending: THREE.CustomBlending,
+          blendSrc: THREE.ZeroFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+          blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor,
+        });
+        this.maskMaterials.set(tex, m);
+      }
+      const mask = new THREE.Sprite(m);
+      mask.matrixAutoUpdate = false;
+      mask.frustumCulled = false;
+      this.maskScene.add(mask);
+      this.masks.set(o, mask);
+    });
+    for (const [label, mask] of this.masks) if (!seen.has(label)) { this.maskScene.remove(mask); this.masks.delete(label); }
   }
 
   setSize(width, height) {
@@ -806,16 +1098,26 @@ class HeatPass extends Pass {
     const g = this.points.geometry;
     g.setDrawRange(0, n);
     for (const k of ['position', 'aSize', 'aAlpha', 'aSeed']) g.attributes[k].needsUpdate = n > 0;
+    if (n > 0 && !this.enabled) this.findLabels();
     this.enabled = n > 0;
   }
 
   render(renderer, writeBuffer, readBuffer) {
-    const old = renderer.getClearColor(new THREE.Color());
+    const old = renderer.getClearColor(_heatClear);
     const oldAlpha = renderer.getClearAlpha();
     renderer.setRenderTarget(this.target);
     renderer.setClearColor(0x000000, 0);
     renderer.clear(true, false, false);
     renderer.render(this.scene, this.camera);
+    // Labels: undo the offset over each one that is showing.
+    let any = false;
+    for (const [label, mask] of this.masks) {
+      let shown = label.visible;
+      for (let o = label.parent; shown && o; o = o.parent) shown = o.visible;
+      mask.visible = shown;
+      if (shown) { mask.matrixWorld.copy(label.matrixWorld); any = true; }
+    }
+    if (any) renderer.render(this.maskScene, this.camera);
     renderer.setClearColor(old, oldAlpha);
     this.quad.material.uniforms.tDiffuse.value = readBuffer.texture;
     this.quad.material.uniforms.tHeat.value = this.target.texture;
@@ -823,6 +1125,8 @@ class HeatPass extends Pass {
     this.quad.render(renderer);
   }
 }
+const _heatClear = new THREE.Color();
+const _down = new THREE.Vector3(0, -0.3, 0);
 
 // ------------------------------------------------------------- the module ----
 
@@ -832,11 +1136,12 @@ const _w = new THREE.Vector3();
 /**
  * @param deps scene, camera, renderer, composer, game, actors (figures,
  *   motion.perform), audio (its context and the combat helpers), player (for
- *   shake), quality (for the preset).
+ *   shake), quality (for the preset), viewModel (fx.js's hands: `castPoint`).
  */
-export function createSpellFx({ scene, camera, renderer, composer, game, actors, audio, player, quality }) {
+export function createSpellFx({ scene, camera, renderer, composer, game, actors, audio, player, quality, viewModel = null }) {
   const noise = noiseTexture(128);
   const shared = {
+    uTime: { value: 0 },
     uGain: { value: 1 },
     uFogDensity: { value: 0 },
   };
@@ -860,20 +1165,24 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     fragmentShader: DECAL_FRAG,
     uniforms: {
       uMode: { value: 0 }, uTime: { value: 0 }, uOpen: { value: 0 }, uAlpha: { value: 0 },
-      uRadius: { value: 0 }, uColor: { value: new THREE.Color() },
+      uRadius: { value: 0 }, uColor: { value: new THREE.Color() }, uSeed: { value: 0 }, uHeat: { value: 1 },
       uGain: shared.uGain, uFogDensity: shared.uFogDensity,
     },
     transparent: true,
     depthWrite: false,
+    // Premultiplied: the glowing modes write no alpha and so add, the marks
+    // left on the ground write cover and darken what is under them.
     blending: THREE.CustomBlending,
     blendSrc: THREE.OneFactor,
-    blendDst: THREE.OneFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+    blendSrcAlpha: THREE.ZeroFactor,
+    blendDstAlpha: THREE.OneFactor,
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -4,
   });
   const decals = [];
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 18; i++) {
     const m = decalBase.clone();
     m.uniforms.uGain = shared.uGain;
     m.uniforms.uFogDensity = shared.uFogDensity;
@@ -887,16 +1196,34 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
 
   /** A decal on the ground at `p`, radius `r`, driven by `drive(u, uniforms, t)`. */
   function decal(p, r, mode, color, life, drive) {
-    const d = decals.find((x) => !x.busy);
-    if (!d) return null;
+    let d = decals.find((x) => !x.busy);
+    // Full: a mark left on the ground gives way first -- it is the one thing
+    // here that is only lingering.
+    if (!d) {
+      d = decals.reduce((best, x) => (x.mesh.material.uniforms.uMode.value >= 3 && (!best || x.life - x.t < best.life - best.t) ? x : best), null);
+      if (!d || mode >= 3) return null;
+    }
     d.busy = true; d.t = 0; d.life = life; d.drive = drive; d.anchorFn = null;
     d.mesh.position.set(p.x, p.y + 0.04, p.z);
     d.mesh.scale.setScalar(r);
     d.mesh.rotation.y = rand(0, TAU);
     const u = d.mesh.material.uniforms;
     u.uMode.value = mode; u.uColor.value.copy(color); u.uOpen.value = 0; u.uAlpha.value = 0; u.uRadius.value = 0;
+    u.uSeed.value = rand(0, 40); u.uHeat.value = 1;
     d.mesh.visible = true;
     return d;
+  }
+
+  /**
+   * What a spell leaves on the ground where it struck -- a scorch (3), a
+   * lightning burn (4), rime (5), an acid stain (6), a crack (7). It cools
+   * over `cool` seconds and fades out over the last third of `life`.
+   */
+  function mark(p, r, mode, color, life = 7, cool = 1.6) {
+    return decal(p, r, mode, color, life, (d, u, t) => {
+      u.uAlpha.value = Math.min(1, t / 0.06) * (1 - smooth((t - life * 0.66) / (life * 0.34)));
+      u.uHeat.value = Math.max(0, 1 - t / cool);
+    });
   }
 
   // -- fire spheres ---------------------------------------------------------
@@ -962,7 +1289,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   }
 
   // -- heat -----------------------------------------------------------------
-  const heat = new HeatPass(camera, noise);
+  const heat = new HeatPass(camera, noise, scene);
   {
     const bloomIndex = composer.passes.findIndex((p) => p.constructor.name === 'UnrealBloomPass');
     composer.insertPass(heat, bloomIndex >= 0 ? bloomIndex : composer.passes.length - 2);
@@ -1017,6 +1344,9 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   /** Where a caster's spell leaves from: its hand, or just in front of your chest. */
   function handPoint(who, out) {
     if (who.player) {
+      // Your own hand, where the view model has it -- so a bolt leaves the
+      // fist you can see thrusting out, not a point in the middle of the air.
+      if (viewModel && viewModel.castPoint) return viewModel.castPoint(out);
       camera.getWorldDirection(_v);
       _w.set(1, 0, 0).applyQuaternion(camera.quaternion);
       out.copy(camera.position).addScaledVector(_v, 0.62).addScaledVector(_w, 0.2);
@@ -1037,6 +1367,9 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     forwardOf(fig, _w);
     return out.set(fig.at.x, fig.at.y + fig.height * 0.62, fig.at.z).addScaledVector(_w, 0.38);
   }
+
+  /** Where a spell leaves from: a breath from the mouth, anything else the hand. */
+  const sourcePoint = (fx, out) => (fx.source === 'breath' ? mouthPoint(fx.from, out) : handPoint(fx.from, out));
 
   /** A dragon's mouth, or a head. */
   function mouthPoint(who, out) {
@@ -1277,7 +1610,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       from, to, t: 0, windup: e.windup, flight: e.flight, released: false, landed: false, done: false,
       lost: !!e.lost, hand: new THREE.Vector3(), aim: new THREE.Vector3(), anchor: -1, data: {},
     };
-    handPoint(from, fx.hand);
+    sourcePoint(fx, fx.hand);
     fx.anchor = anchors.take(fx.hand);
     effects.push(fx);
     byId.set(e.id, fx);
@@ -1375,7 +1708,10 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         const fan = count > 1 ? (i / (count - 1)) * 2 - 1 : (Math.random() < 0.5 ? -0.6 : 0.6);
         const side = across.clone().multiplyScalar(fan * 0.9 + rand(-0.15, 0.15)).add(new THREE.Vector3(0, rand(0.15, 0.55), 0));
         const bend2 = across.clone().multiplyScalar(-fan * 0.4 + rand(-0.2, 0.2)).add(new THREE.Vector3(0, rand(-0.1, 0.3), 0));
-        fx.data.bolts.push({ delay: i * 0.055, bend: side, bend2, trail: [], hit: false });
+        fx.data.bolts.push({
+          delay: i * 0.055, bend: side, bend2, trail: P3(TRAIL), n: 0, hit: false, head: new THREE.Vector3(),
+          across, weave: rand(0.07, 0.13) * (Math.random() < 0.5 ? -1 : 1), phase: rand(0, TAU),
+        });
       }
       S.missile(src);
       takeLight(PAL.missile.light, (t) => (t < fx.flight + 0.15 && !fx.done ? { p: fx.data.head || src, intensity: 7, distance: 9 } : null));
@@ -1383,21 +1719,44 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       fx.data.ball = sphere();
       S.roar(src, fx.flight + 0.2);
       takeLight(PAL.fire.light, (t) => (fx.data.ballPos && !fx.landed ? { p: fx.data.ballPos, intensity: 24, distance: 13 } : null));
-    } else if (f === 'lightning' || f === 'breath-lightning') {
+    } else if ((f === 'lightning' || f === 'breath-lightning') && fx.to) {
       S.crack(src, 1);
-      takeLight(PAL.lightning.light, (t) => (t < 0.32 ? { p: fx.data.mid || src, intensity: 90 * (0.55 + 0.45 * Math.random()) * (1 - t / 0.32), distance: 22 } : null));
+      fx.data.strike = { bolt: new Bolt(f === 'breath-lightning' ? 9 : 6), stroke: -1, env: 1, jag: 0.2 };
+      fx.data.boltLife = Math.max(0.42, fx.flight + 0.34);
+      // The room lit in time with the strokes, not a steady lamp.
+      takeLight(PAL.lightning.light, (t) => (t < fx.data.boltLife ? { p: fx.data.strike.bolt.main[32], intensity: 75 * fx.data.strike.env, distance: 22 } : null));
     } else if (f === 'shock') {
       S.crack(src, 0.5);
-    } else if (f === 'frost' || f === 'breath-frost') {
+    } else if (f === 'frost') {
       S.frost(src);
-    } else if (f === 'acid' || f === 'breath-acid') {
+    } else if (f === 'acid') {
       S.hiss(src, 0.6);
-    } else if (f === 'prism') {
+    } else if (f === 'prism' && fx.to) {
       S.prism(src);
+      // The fan: rays in a cone about the line to the target, wide enough
+      // to wash over a body at the far end, each with its own place in the
+      // spectrum and its own shimmer.
+      const d0 = _w.subVectors(fx.aim, src);
+      const len = d0.length(); d0.normalize();
+      const cone = Math.max(0.12, Math.min(0.3, 1.0 / Math.max(1, len)));
+      const u0 = new THREE.Vector3(-d0.z, 0, d0.x).normalize();
+      const v0 = new THREE.Vector3().crossVectors(u0, d0);
+      fx.data.fan = Array.from({ length: n(13) }, (_, k) => {
+        const a = rand(0, TAU); const r = Math.sqrt(Math.random()) * cone;
+        const dir = d0.clone().addScaledVector(u0, Math.cos(a) * r).addScaledVector(v0, Math.sin(a) * r * 0.7).normalize();
+        return { dir, len: len * rand(0.95, 1.25), hue: k / 13 + rand(-0.03, 0.03), phase: rand(0, TAU), pts: P3(7) };
+      });
       takeLight(0xffffff, (t) => (t < 0.35 ? { p: src, intensity: 14 * (1 - t / 0.35), distance: 10 } : null));
-    } else if (f === 'flame' || f === 'breath-fire') {
-      S.roar(src, 0.6);
-      takeLight(PAL.fire.light, (t) => (t < 0.7 ? { p: src, intensity: 16 * Math.sin(Math.PI * t / 0.7), distance: 10 } : null));
+    } else if ((f === 'flame' || f === 'breath-fire' || f === 'breath-frost' || f === 'breath-acid') && fx.to) {
+      const big = f !== 'flame';
+      if (f === 'breath-frost') S.frost(src);
+      else if (f === 'breath-acid') S.hiss(src, 1.2);
+      S.roar(src, big ? 1.1 : 0.6);
+      // The stream outlives the landing: a breath pours on after it hits.
+      fx.data.stream = fx.flight + (big ? 0.55 : 0.3);
+      fx.data.tongues = Array.from({ length: big ? 6 : 4 }, () => ({ pts: P3(10), phase: rand(0, TAU), ang: rand(0, TAU), wob: rand(0.6, 1.2) }));
+      fx.data.firePos = new THREE.Vector3().copy(src);
+      takeLight(STREAMS[f].light, (t) => (t < fx.data.stream + 0.2 ? { p: fx.data.firePos, intensity: (big ? 34 : 16) * STREAMS[f].lit * Math.min(1, t / 0.08) * (1 - smooth((t - fx.data.stream) / 0.2)) * (0.8 + 0.2 * Math.random()), distance: big ? 14 : 10 } : null));
     } else if (f === 'breath-gas') {
       S.roar(src, 1.0);
     } else if (f === 'drain' || f === 'curse' || f === 'harm' || f === 'weaken' || f === 'blind' || f === 'hex') {
@@ -1421,34 +1780,46 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       case 'missile': {
         if (!fx.to) break;
         const bolts = fx.data.bolts || [];
-        bolts.forEach((b, i) => {
+        for (let i = 0; i < bolts.length; i++) {
+          const b = bolts[i];
           const span = Math.max(0.08, fx.flight - (bolts.length - 1) * 0.045);
           const bu = clamp((tf - b.delay) / span, 0, 1);
-          if (tf < b.delay || b.hit) return;
-          // A cubic from the hand, bowing out to one side, into the chest.
+          if (tf < b.delay || b.hit) continue;
+          // A cubic from the hand, bowing out to one side, into the chest --
+          // and weaving across it as it goes, which is what makes a bolt
+          // dart rather than glide. The weave dies at both ends.
           const p1 = tmpA.copy(src).addScaledVector(b.bend, Math.min(3, dist * 0.35));
           const p2 = tmpB.copy(aim).addScaledVector(b.bend2, Math.min(2, dist * 0.25));
           const s = 1 - bu;
-          const head = new THREE.Vector3(
+          const head = b.head.set(
             s * s * s * src.x + 3 * s * s * bu * p1.x + 3 * s * bu * bu * p2.x + bu * bu * bu * aim.x,
             s * s * s * src.y + 3 * s * s * bu * p1.y + 3 * s * bu * bu * p2.y + bu * bu * bu * aim.y,
             s * s * s * src.z + 3 * s * s * bu * p1.z + 3 * s * bu * bu * p2.z + bu * bu * bu * aim.z,
           );
-          b.trail.unshift(head);
-          if (b.trail.length > 14) b.trail.pop();
+          const wv = Math.sin(bu * TAU * 1.6 + b.phase) * b.weave * Math.sin(Math.PI * bu) * Math.min(1, dist / 4);
+          head.addScaledVector(b.across, wv);
+          head.y += Math.cos(bu * TAU * 1.3 + b.phase) * Math.abs(b.weave) * 0.6 * Math.sin(Math.PI * bu);
+          // The trail: a ring of the last few positions, newest first.
+          const tr = b.trail;
+          b.n = Math.min(TRAIL, b.n + 1);
+          for (let k = b.n - 1; k > 0; k--) { tr[k].x = tr[k - 1].x; tr[k].y = tr[k - 1].y; tr[k].z = tr[k - 1].z; }
+          tr[0].x = head.x; tr[0].y = head.y; tr[0].z = head.z;
           if (i === 0) fx.data.head = head;
-          glowAt(light, head, PAL.missile.glow, 0.42, 0.04, 1, 0, 0.35);
-          glowAt(light, head, PAL.missile.core, 0.1, 0.04, 1, 1);
-          if (Math.random() < 0.7 * budget.density) {
-            light.spawn({ x: head.x, y: head.y, z: head.z, vx: rand(-0.4, 0.4), vy: rand(-0.4, 0.4), vz: rand(-0.4, 0.4), life: rand(0.2, 0.4), size: rand(0.02, 0.04), color: PAL.missile.trail, shape: 1, drag: 2 });
+          const pulse = 0.85 + 0.15 * Math.sin(clock * 60 + i * 2);
+          glowAt(light, head, PAL.missile.glow, 0.5 * pulse, 0.04, 1, 0, 0.45);
+          glowAt(light, head, PAL.missile.core, 0.16, 0.04, 1, 1);
+          if (Math.random() < 0.9 * budget.density) {
+            light.spawn({ x: head.x, y: head.y, z: head.z, vx: rand(-0.5, 0.5), vy: rand(-0.3, 0.6), vz: rand(-0.5, 0.5), life: rand(0.25, 0.5), size: rand(0.05, 0.09), color: PAL.missile.trail, color2: PAL.missile.glow, shape: 7, drag: 2.5 });
           }
           if (bu >= 1) {
             b.hit = true;
-            burst(light, head, 14, { speed: [1, 3.5], life: [0.15, 0.35], size: [0.02, 0.05], color: PAL.missile.core, color2: PAL.missile.trail, drag: 4, shape: 1 });
-            glowAt(light, head, PAL.missile.glow, 0.9, 0.2, 1);
+            burst(light, head, 18, { speed: [1.5, 4.5], life: [0.15, 0.35], size: [0.025, 0.05], color: PAL.missile.core, color2: PAL.missile.trail, drag: 4, shape: 1 });
+            burst(light, head, 6, { speed: [0.4, 1.2], life: [0.3, 0.55], size: [0.06, 0.1], color: PAL.missile.core, color2: PAL.missile.glow, drag: 3, shape: 7 });
+            glowAt(light, head, PAL.missile.glow, 1.0, 0.18, 1, 0, 0.3);
+            glowAt(light, head, PAL.missile.core, 0.35, 0.07, 1, 1);
             S.pop(head, 1.4);
           }
-        });
+        }
         break;
       }
       case 'fireball': {
@@ -1488,13 +1859,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         if (budget.heat) heat.add(pos.x, pos.y, pos.z, 0.9, 0.55, 1);
         break;
       }
-      case 'lightning': case 'breath-lightning': {
-        if (!fx.to) break;
-        fx.data.mid = fx.data.mid || new THREE.Vector3();
-        fx.data.mid.lerpVectors(src, aim, 0.5);
-        break;
-      }
-      case 'acid': case 'breath-acid': {
+      case 'acid': {
         if (!fx.to) break;
         // Droplets thrown so each arrives on the chest as the flight ends.
         const rate = (f === 'acid' ? 130 : 160) * budget.density;
@@ -1513,7 +1878,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         }
         break;
       }
-      case 'frost': case 'breath-frost': {
+      case 'frost': {
         if (!fx.to) break;
         const rate = (f === 'frost' ? 50 : 90) * budget.density;
         fx.data.acc = (fx.data.acc || 0) + dt * rate;
@@ -1533,27 +1898,6 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         }
         break;
       }
-      case 'flame': case 'breath-fire': {
-        if (!fx.to) break;
-        const big = f === 'breath-fire';
-        const rate = (big ? 110 : 90) * budget.density;
-        fx.data.acc = (fx.data.acc || 0) + dt * rate;
-        const dir = _v.subVectors(aim, src);
-        const len = dir.length(); dir.normalize();
-        const speed = Math.max(4, len / Math.max(0.15, fx.flight));
-        while (fx.data.acc >= 1) {
-          fx.data.acc -= 1;
-          const spread = big ? 0.28 : 0.18;
-          light.spawn({
-            x: src.x, y: src.y, z: src.z,
-            vx: (dir.x + rand(-spread, spread)) * speed, vy: (dir.y + rand(-spread, spread)) * speed, vz: (dir.z + rand(-spread, spread)) * speed,
-            life: rand(0.35, 0.55) * (len / speed + 0.35), size: rand(0.16, 0.3) * (big ? 1.5 : 1), grow: 3,
-            color: PAL.fire.glow.clone().multiplyScalar(1.5), color2: PAL.fire.dark, shape: 4, drag: 1.6, gravity: -2, fadeIn: 0.04,
-          });
-        }
-        if (budget.heat) heat.add(src.x + dir.x * len * 0.5, src.y, src.z + dir.z * len * 0.5, 1.4, 0.5, 0.8);
-        break;
-      }
       case 'breath-gas': {
         // A green cloud rolling out of the dragon and across the room.
         const rate = 36 * budget.density;
@@ -1569,13 +1913,17 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         break;
       }
       case 'prism': {
-        if (!fx.to) break;
-        const dir = _v.subVectors(aim, src).normalize();
-        for (let k = 0; k < n(6); k++) {
-          const c = PRISM[Math.floor(rand(0, PRISM.length))];
-          const sp = rand(9, 14);
-          light.spawn({ x: src.x, y: src.y, z: src.z, vx: (dir.x + rand(-0.3, 0.3)) * sp, vy: (dir.y + rand(-0.2, 0.2)) * sp, vz: (dir.z + rand(-0.3, 0.3)) * sp, life: dist / sp * rand(0.8, 1.2), size: rand(0.03, 0.06), color: c, shape: 1, drag: 0.2 });
+        if (!fx.to || !fx.data.fan) break;
+        // Glints hanging in the fan, each the colour of the ray it is on, and
+        // a white flare at the hand that the rays pour out of.
+        for (let k = 0; k < n(5); k++) {
+          const ray = fx.data.fan[Math.floor(rand(0, fx.data.fan.length))];
+          const along = rand(0.1, 1) * ray.len * smooth(u * 1.4);
+          spectral(ray.hue + along * 0.08 + clock * 1.3, 2.6);
+          light.spawn({ x: src.x + ray.dir.x * along, y: src.y + ray.dir.y * along, z: src.z + ray.dir.z * along, vx: ray.dir.x * 1.5, vy: rand(-0.2, 0.4), vz: ray.dir.z * 1.5, life: rand(0.2, 0.45), size: rand(0.06, 0.13), color: _spec, shape: 7, drag: 3, occ: 0.2 });
         }
+        glowAt(light, src, WHITE_HOT, fx.from.player ? 0.14 : 0.26, 0.04, 1, 1);
+        glowAt(light, src, C_PRISM_FLARE, fx.from.player ? 0.4 : 0.8, 0.04, 0.7, 0, 0.2);
         break;
       }
       case 'curse': case 'drain': case 'weaken': case 'hex': case 'blind': case 'poison': case 'faerie': case 'dispel': case 'holy': {
@@ -1631,6 +1979,90 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     }
   }
 
+  /**
+   * A stream of fire out of a hand or a mouth: flame tongues that widen and
+   * cool from white-yellow at the lips to red at the far end, embers thrown
+   * through it, smoke rolling off its end, and the air bending over it. It
+   * is built to read from any side -- end-on the tongues fan out radially
+   * and the smoke rims it -- because a breath is most often aimed at you.
+   */
+  function stream(fx, dt) {
+    const K = STREAMS[fx.family];
+    const big = fx.family !== 'flame';
+    const tf = fx.t - fx.releaseT;
+    const src = fx.data.src;
+    sourcePoint(fx, src);
+    // At you, the cone opens wider and stops short of your face, so it
+    // pours past the edges of the frame instead of arriving as one sprite
+    // pressed to the lens (which the size cap would fade to nothing).
+    const atYou = fx.to.player;
+    const aim = atYou ? camera.getWorldDirection(fx.aim).multiplyScalar(1.1).add(camera.position).add(_down) : chestPoint(fx.to, fx.aim, true);
+    const dir = _v.subVectors(aim, src);
+    const len = Math.max(0.5, dir.length()); dir.normalize();
+    const tail = 1 - smooth((tf - (fx.data.stream - 0.2)) / 0.2);
+    const reach = smooth(tf / Math.max(0.1, fx.flight));
+    // Across the cone: two directions square to it.
+    const ax = _w.set(-dir.z, 0, dir.x); if (ax.lengthSq() < 1e-4) ax.set(1, 0, 0); ax.normalize();
+    const ay = tmpB.crossVectors(ax, dir);
+    const spread = atYou ? 0.75 : big ? 0.3 : 0.2;
+    const speed = Math.max(5, len / Math.max(0.15, fx.flight) * 1.1);
+    fx.data.firePos.copy(src).addScaledVector(dir, len * 0.45 * reach);
+    const floorY = feetPoint(fx.to, tmpA).y + 0.02;
+
+    // The body of it: dense near the lips, so it is one stream and not a
+    // string of beads, each puff growing and cooling as it goes.
+    fx.data.acc = (fx.data.acc || 0) + dt * (big ? 280 : 170) * budget.density * tail;
+    while (fx.data.acc >= 1) {
+      fx.data.acc -= 1;
+      const a = rand(0, TAU); const r = Math.sqrt(Math.random()) * spread;
+      const cx = Math.cos(a) * r; const cy = Math.sin(a) * r;
+      const sp = speed * rand(0.75, 1.1);
+      const back = rand(0, sp / 60);   // spread along the frame's step, so there are no beads
+      light.spawn({
+        x: src.x + dir.x * back, y: src.y + dir.y * back, z: src.z + dir.z * back,
+        vx: (dir.x + ax.x * cx + ay.x * cy) * sp, vy: (dir.y + ax.y * cx + ay.y * cy) * sp, vz: (dir.z + ax.z * cx + ay.z * cy) * sp,
+        life: rand(0.75, 1.05) * (len / sp * 1.25 + (atYou ? 0.1 : 0.18)), size: rand(0.1, 0.2) * (big ? 1.35 : 1), grow: atYou ? 2.8 : big ? 4.5 : 3.6,
+        color: K.hot, color2: K.cool, alpha: K.alpha, shape: K.shape, drag: 1.3, gravity: K.lift * (atYou ? 0.35 : 1), fadeIn: 0.03, occ: K.occ, hold: 0.45,
+      });
+    }
+    // What is flung through it -- embers, ice, drops -- and what is left
+    // hanging off its end: smoke, freezing mist, fumes.
+    if (Math.random() < (big ? 1.4 : 0.6) * budget.density * tail) {
+      const sp = speed * rand(0.9, 1.3);
+      light.spawn({ x: src.x, y: src.y, z: src.z, vx: (dir.x + rand(-spread, spread)) * sp, vy: (dir.y + rand(-0.1, spread)) * sp, vz: (dir.z + rand(-spread, spread)) * sp, life: rand(0.5, 1.0), size: K.bitSize * rand(0.7, 1.3), color: K.bit, color2: K.bit2, shape: K.bitShape, drag: 1.4, gravity: K.bitFall, floor: floorY, occ: K.bitOcc });
+    }
+    if (Math.random() < (big ? 0.6 : 0.3) * budget.density * tail * reach) {
+      const at = rand(0.55, 1) * len * reach;
+      matter.spawn({ x: src.x + dir.x * at + rand(-0.3, 0.3), y: src.y + dir.y * at + rand(0, 0.3), z: src.z + dir.z * at + rand(-0.3, 0.3), vx: dir.x * 1.2, vy: rand(0.2, 0.8) * K.smokeRise, vz: dir.z * 1.2, life: rand(1.2, 2.0), size: rand(0.35, 0.55) * (big ? 1.3 : 1), grow: 2.6, color: K.smoke, color2: K.smoke2, alpha: K.smokeAlpha, shape: 3, drag: 1.2, gravity: -0.5 * K.smokeRise, fadeIn: 0.25, floor: floorY + 0.2 });
+    }
+    if (K.heat && budget.heat && Math.random() < 0.7) {
+      const at = rand(0.2, 1) * len * reach;
+      heat.add(src.x + dir.x * at, src.y + dir.y * at + 0.2, src.z + dir.z * at, big ? 1.5 : 1.0, 0.5, 0.8);
+    }
+    // The lips of it: hottest where it leaves.
+    glowAt(light, src, K.lip, big ? 0.34 : 0.2, 0.04, tail, 1);
+    glowAt(light, src, K.glow, big ? 1.3 : 0.7, 0.04, 0.8 * tail, 0, 0.3);
+
+    // Tongues: wavy strips along the cone, each on its own side of it.
+    const T = fx.data.tongues;
+    tongue.c0 = K.tongue0; tongue.c1 = K.tongue1;
+    for (let k = 0; k < T.length; k++) {
+      const tg = T[k];
+      const ca = Math.cos(tg.ang + tf * 2.5 * tg.wob); const sa = Math.sin(tg.ang + tf * 2.5 * tg.wob);
+      for (let j = 0; j < 10; j++) {
+        const u = j / 9;
+        const along = u * len * reach * 1.05;
+        const out = u * len * spread * 0.8 * (0.7 + 0.3 * Math.sin(u * 7 + clock * 13 * tg.wob + tg.phase));
+        const q = tg.pts[j];
+        q.x = src.x + dir.x * along + (ax.x * ca + ay.x * sa) * out;
+        q.y = src.y + dir.y * along + (ax.y * ca + ay.y * sa) * out + u * u * 0.25 * K.lift / -2;
+        q.z = src.z + dir.z * along + (ax.z * ca + ay.z * sa) * out;
+      }
+      tongue.a = tail * K.tongueA * (0.7 + 0.3 * Math.sin(clock * 29 + tg.phase)); tongue.big = big ? 1.4 : 1;
+      glow.strip(tg.pts, tongueWidth, tongueColour, tongueAlpha, 0);
+    }
+  }
+
   /** The moment it lands: what the rules just decided, drawn. */
   function impact(fx) {
     const f = fx.family;
@@ -1674,6 +2106,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         burst(light, aim, big ? 40 : 22, { speed: [1, big ? 4 : 2.5], up: 0.3, life: [0.35, 0.7], size: [0.18, 0.34], grow: 2.4, color: PAL.fire.glow.clone().multiplyScalar(1.5), color2: PAL.fire.dark, drag: 2.6, gravity: -2, shape: 4, fadeIn: 0.05 });
         burst(light, aim, big ? 30 : 16, { speed: [2, 6], life: [0.4, 0.9], size: [0.02, 0.035], color: PAL.fire.ember, color2: PAL.fire.dark, drag: 1, gravity: 6, shape: 1, floor: feet.y + 0.02 });
         burst(matter, aim, big ? 14 : 8, { speed: [0.3, 1], up: 0.8, life: [1.2, 2], size: [0.4, 0.7], grow: 2.2, color: C(0.16, 0.14, 0.13), alpha: 0.45, drag: 1.4, gravity: -0.45, shape: 3, fadeIn: 0.2 });
+        mark(feet, f === 'flame' ? 0.9 : 1.5, 3, PAL.fire.glow, f === 'flame' ? 6 : 9, 2.5);
         if (f === 'flamestrike') {
           decal(feet, 1.8, 1, PAL.fire.glow, 0.55, (d, u, t) => { u.uRadius.value = smooth(t / 0.45); u.uAlpha.value = 1 - t / 0.55; });
           takeLight(PAL.fire.light, (t) => (t < 0.8 ? { p: aim, intensity: 70 * Math.pow(1 - t / 0.8, 2), distance: 16 } : null));
@@ -1686,9 +2119,16 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       }
       case 'lightning': case 'breath-lightning': case 'shock': case 'storm': {
         const strikes = f === 'storm' ? fx.hits.map((h) => who(h.to, h.player)) : [target];
-        fx.data.strikes = strikes.filter(Boolean).map((w) => ({ w, until: fx.t + (f === 'shock' ? 0.45 : 0.3), path: null, next: 0 }));
+        fx.data.strikes = strikes.filter(Boolean).map((w) => ({ w, until: fx.t + (f === 'shock' ? 0.45 : f === 'storm' ? 0.55 : 0.3), path: null, next: 0 }));
         for (const s of fx.data.strikes) {
           const p = chestPoint(s.w, new THREE.Vector3());
+          if (f !== 'shock') {
+            // It went to ground through them: a burn star at their feet, and
+            // the ground lit for a moment round it.
+            const ft = feetPoint(s.w, new THREE.Vector3());
+            mark(ft, f === 'storm' ? 1.7 : 1.25, 4, PAL.lightning.glow, 6, 0.5);
+            decal(ft, f === 'storm' ? 4 : 2.6, 2, BOLT_MID, 0.3, (d, u, t) => { u.uAlpha.value = 0.45 * Math.pow(1 - t / 0.3, 2) * (0.7 + 0.3 * Math.random()); });
+          }
           burst(light, p, 26, { speed: [2, 7], life: [0.1, 0.3], size: [0.015, 0.035], color: PAL.lightning.core, color2: PAL.lightning.glow, drag: 3, shape: 1 });
           glowAt(light, p, PAL.lightning.glow, 1.4 * scale, 0.22, 1);
           hurtFigure(s.w, 0.7);
@@ -1705,6 +2145,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         burst(light, aim, 18, { speed: [0.2, 0.9], life: [1.4, 2.2], size: [0.35, 0.6], grow: 2, color: PAL.frost.mist, alpha: 0.3, drag: 1.5, gravity: 0.15, shape: 3, fadeIn: 0.15, floor: feet.y + 0.1, occ: 0.5 });
         glowAt(light, aim, PAL.frost.glow, 1.3 * scale, 0.35, 0.8, 0, 0.3);
         decal(feet, 1.1, 2, PAL.frost.glow.clone().multiplyScalar(0.7), 2.2, (d, u, t) => { u.uAlpha.value = Math.min(1, t / 0.1) * (1 - t / 2.2); });
+        mark(feet, f === 'breath-frost' ? 1.6 : 1.0, 5, PAL.frost.rime, 7, 1.2);
         if (target) auraPulse(target, PAL.frost.crystal.clone().multiplyScalar(0.5), 1.6, 2.2);
         if (hitAny) hurtFigure(target, 0.5);
         S.frost(aim);
@@ -1715,7 +2156,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         burst(light, aim, onYou ? 16 : 44, { speed: [1.2, 4], life: [0.4, 0.9], size: [0.04 * scale, 0.08 * scale], color: PAL.acid.drop, color2: PAL.acid.glow, drag: 1, gravity: 7, shape: 6, floor: feet.y + 0.02, occ: 0.6 });
         burst(matter, aim, onYou ? 6 : 20, { speed: [0.2, 0.8], up: 0.8, life: [1.6, 2.6], size: [0.3 * scale, 0.55 * scale], grow: 2.4, color: PAL.acid.fume, alpha: 0.55, drag: 1.2, gravity: -0.5, shape: 3, fadeIn: 0.2 });
         auraPulse(target, PAL.acid.glow, 1.4, 1.2);
-        decal(feet, 0.9, 2, PAL.acid.glow.clone().multiplyScalar(0.6), 2.4, (d, u, t) => { u.uAlpha.value = (1 - t / 2.4) * Math.min(1, t / 0.1); });
+        mark(feet, f === 'breath-acid' ? 1.5 : 1.0, 6, PAL.acid.glow, 7, 3);
         glowAt(light, aim, PAL.acid.glow, 1.0 * scale, 0.3, 0.8);
         if (hitAny) hurtFigure(target, 0.7);
         S.hiss(aim, 1.4);
@@ -1745,7 +2186,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       case 'ward': case 'bless': case 'sanctuary': case 'sight': {
         const w = target || fx.from;
         const strong = f === 'sanctuary';
-        auraPulse(w, palette.glow, strong ? 1.8 : 1.2, strong ? 2.2 : 1.3);
+        auraPulse(w, palette.glow, strong ? 1.4 : 1.2, strong ? 2.2 : 1.3, strong ? 1 : 0);
         if (f === 'bless') {
           // Gold falling on them from above.
           const top = new THREE.Vector3(feet.x, feet.y + heightOf(w) + 1.4, feet.z);
@@ -1820,16 +2261,33 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         break;
       }
       case 'quake': {
+        // The ground heaves out from the caster: a front of dust and thrown
+        // grit running outward at ten metres a second, the paving split
+        // behind it. Dust is lit matter, so it is kept pale enough to show
+        // against a dark street at night (see setDaylight).
         const c = feetPoint(fx.from, new THREE.Vector3());
-        for (let k = 0; k < n(46); k++) {
-          const a = rand(0, TAU); const r = rand(0.5, 9);
-          matter.spawn({ x: c.x + Math.cos(a) * r, y: c.y + 0.1, z: c.z + Math.sin(a) * r, vx: Math.cos(a) * rand(0.2, 0.8), vy: rand(0.3, 1.2), vz: Math.sin(a) * rand(0.2, 0.8), life: rand(1.4, 2.4), size: rand(0.5, 1.1), grow: 2, color: PAL.dust.smoke, alpha: 0.35, drag: 1.2, gravity: 0.3, shape: 3, fadeIn: 0.15 });
-        }
-        for (let k = 0; k < n(40); k++) {
-          const a = rand(0, TAU); const r = rand(0.5, 8);
-          light.spawn({ x: c.x + Math.cos(a) * r, y: c.y + 0.05, z: c.z + Math.sin(a) * r, vx: rand(-0.5, 0.5), vy: rand(1.5, 3.5), vz: rand(-0.5, 0.5), life: rand(0.5, 0.9), size: rand(0.03, 0.06), color: C(0.3, 0.26, 0.2), shape: 1, drag: 0.5, gravity: 9, floor: c.y + 0.02 });
-        }
-        decal(c, 9, 1, C(0.55, 0.45, 0.3), 1.0, (d, u, t) => { u.uRadius.value = smooth(t / 0.9); u.uAlpha.value = 0.8 * (1 - t / 1.0); });
+        const t0 = clock;
+        let acc = 0;
+        effects.push({ kind: 'custom', update() {
+          const t = clock - t0;
+          if (t > 1.2) return false;
+          const last = this.last || 0; this.last = t;
+          const front = 1 + t * 9;
+          acc += (t - last) * 220 * budget.density * (1 - t / 1.2);
+          while (acc >= 1) {
+            acc -= 1;
+            const a = rand(0, TAU); const r = front + rand(-0.6, 0.4);
+            const x = c.x + Math.cos(a) * r; const z = c.z + Math.sin(a) * r;
+            if (Math.random() < 0.6) {
+              matter.spawn({ x, y: c.y + 0.15, z, vx: Math.cos(a) * rand(0.8, 2), vy: rand(0.6, 1.6), vz: Math.sin(a) * rand(0.8, 2), life: rand(1.6, 2.8), size: rand(0.5, 1.0), grow: 2.4, color: PAL.dust.smoke, alpha: 0.5, drag: 1.3, gravity: 0.25, shape: 3, fadeIn: 0.12 });
+            } else {
+              matter.spawn({ x, y: c.y + 0.05, z, vx: Math.cos(a) * rand(0.3, 1.2), vy: rand(2, 4.5), vz: Math.sin(a) * rand(0.3, 1.2), life: rand(0.7, 1.2), size: rand(0.05, 0.1), color: PAL.dust.grit, alpha: 1, drag: 0.3, gravity: 9.8, shape: 6, fadeIn: 0, floor: c.y + 0.03 });
+            }
+          }
+          return true;
+        } });
+        mark(c, 6, 7, PAL.dust.smoke, 7, 1);
+        decal(c, 11, 1, C(0.5, 0.42, 0.3), 1.2, (d, u, t) => { u.uRadius.value = smooth(t / 1.1); u.uAlpha.value = 0.7 * (1 - t / 1.2); });
         const d = distToCamera(c);
         if (player && player.shake) player.shake(clamp(1.1 - d / 20, 0.25, 1));
         for (const h of fx.hits || []) hurtFigure(who(h.to, h.player), 0.8);
@@ -1881,6 +2339,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     burst(light, p, 40, { speed: [1.5, 5], life: [0.55, 1.05], size: [0.25, 0.5].map((x) => x * size), grow: 2.2, color: PAL.fire.glow.clone().multiplyScalar(1.5), color2: PAL.fire.dark, drag: 3.2, gravity: -1.8, shape: 4, fadeIn: 0.06 });
     burst(light, p, 60, { speed: [4, 11], life: [0.5, 1.2], size: [0.02, 0.04], color: PAL.fire.ember, color2: PAL.fire.dark, drag: 1.1, gravity: 7, shape: 1, floor: ground.y + 0.02 });
     burst(matter, p, 24, { speed: [0.5, 2.0], up: 0.5, life: [1.8, 3.2], size: [0.5, 0.95].map((x) => x * size), grow: 2.4, color: C(0.11, 0.1, 0.09), color2: C(0.26, 0.25, 0.24), alpha: 0.6, drag: 1.8, gravity: -0.6, shape: 3, fadeIn: 0.35 });
+    if (p.y - ground.y < 2.5) mark(ground, 2.1 * size, 3, PAL.fire.glow, 10, 3);
     decal(ground, 3.8 * size, 1, PAL.fire.glow, 0.55, (d, u, t) => { u.uRadius.value = smooth(t / 0.45); u.uAlpha.value = 1.3 * (1 - t / 0.55); });
     decal(ground, 1.8 * size, 2, C(1.6, 0.45, 0.08), 1.6, (d, u, t) => { u.uAlpha.value = Math.pow(1 - t / 1.6, 2) * 0.8; });
     takeLight(PAL.fire.light, (t) => (t < 0.9 ? { p, intensity: 190 * size * Math.pow(1 - t / 0.9, 2.2) * (0.85 + 0.15 * Math.random()), distance: 20 } : null));
@@ -1922,7 +2381,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   const auras = new Map();   // figure -> { meshes, material, pulse }
   const AURA_KIND = [
     // flag or affect type, colour, intensity, thickness, flicker
-    { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.62, thick: 0.035, flicker: 0.15 },
+    { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.5, thick: 0.07, flicker: 0.1, soft: 1 },
     { test: (ch) => ch.affectedBy & AFF.FAERIE_FIRE, color: PAL.faerie.glow, intensity: 0.9, thick: 0.025, flicker: 0.6 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'shield' || a.type === 'stone skin'), color: PAL.ward.glow, intensity: 0.55, thick: 0.03, flicker: 0 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'armor' || a.type === 'protection'), color: PAL.ward.glow, intensity: 0.35, thick: 0.025, flicker: 0 },
@@ -1935,7 +2394,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       fragmentShader: AURA_FRAG,
       uniforms: {
         uColor: { value: new THREE.Color() }, uIntensity: { value: 0 }, uTime: { value: 0 },
-        uThick: { value: 0.03 }, uFlicker: { value: 0 },
+        uThick: { value: 0.03 }, uFlicker: { value: 0 }, uSoft: { value: 0 },
         uGain: shared.uGain, uFogDensity: shared.uFogDensity,
       },
       transparent: true,
@@ -1985,12 +2444,12 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   }
 
   /** A shell flaring over a body for a moment: the landing of a ward, a frost rime. */
-  function auraPulse(w, color, intensity, life) {
+  function auraPulse(w, color, intensity, life, soft = 0) {
     if (w.player) return;
     const fig = figureOf(w.slot);
     if (!fig) return;
     const a = auraFor(fig);
-    a.pulse = { color: color.clone(), intensity, life, t: 0 };
+    a.pulse = { color: color.clone(), intensity, life, t: 0, soft };
   }
 
   /** Each visible figure's affects, as a shell and a little matter. */
@@ -2008,7 +2467,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       a = a || auraFor(fig);
       const u = a.material.uniforms;
       let intensity = kind ? kind.intensity : 0;
-      if (kind) { u.uColor.value.copy(kind.color); u.uThick.value = kind.thick; u.uFlicker.value = kind.flicker; }
+      if (kind) { u.uColor.value.copy(kind.color); u.uThick.value = kind.thick; u.uFlicker.value = kind.flicker; u.uSoft.value = kind.soft || 0; }
       if (a.pulse) {
         a.pulse.t += dt;
         const pu = a.pulse.t / a.pulse.life;
@@ -2017,8 +2476,9 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
           const k = Math.sin(Math.PI * Math.min(1, pu * 2.5)) * (1 - pu * 0.3);
           if (!kind || a.pulse.intensity * k > intensity) {
             u.uColor.value.copy(a.pulse.color);
-            u.uThick.value = 0.03;
+            u.uThick.value = a.pulse.soft ? 0.07 : 0.03;
             u.uFlicker.value = 0.1;
+            u.uSoft.value = a.pulse.soft;
             intensity = a.pulse.intensity * k;
           }
         }
@@ -2089,6 +2549,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   let lastScale = 0;
   function update(dt) {
     clock += dt;
+    shared.uTime.value = clock;
     const b = budgetOf();
     if (b !== budget) budget = b;
 
@@ -2116,7 +2577,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       if (fx.kind === 'custom') { if (!fx.update()) effects.splice(i, 1); continue; }
       fx.t += dt;
       if (!fx.released && !fx.fizzled) {
-        handPoint(fx.from, fx.hand);
+        sourcePoint(fx, fx.hand);
         anchors.set(fx.anchor, fx.hand);
         if (fx.lost) {
           if (fx.t < fx.windup) gather(fx, dt);
@@ -2124,6 +2585,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         } else if (fx.t < fx.windup) gather(fx, dt);
         else release(fx);
       }
+      if (fx.released && !fx.fizzled && fx.data.stream && fx.to && fx.t - fx.releaseT < fx.data.stream) stream(fx, dt);
       if (fx.released && !fx.landed && !fx.fizzled) {
         fly(fx, dt);
         // The rules never answered (paused, or a lost event): give up quietly.
@@ -2156,6 +2618,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       if (!d.busy) continue;
       d.t += dt;
       if (d.t >= d.life) { d.busy = false; d.mesh.visible = false; continue; }
+      d.mesh.material.uniforms.uTime.value = clock;
       d.drive(d, d.mesh.material.uniforms, d.t);
     }
 
@@ -2179,43 +2642,77 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     heat.step(dt, clock);
   }
 
+  /**
+   * A lightning bolt from a to b, `tf` seconds into a life of `L`: a leader
+   * that reaches across in two frames, then return strokes down the same
+   * channel -- each a flash that dies in a few hundredths of a second, new
+   * forks, and the last channel lingering on the eye in violet. `st` holds
+   * the Bolt and which stroke it is on; `st.env` is left at the brightness,
+   * for the light.
+   */
+  function drawBolt(st, a, b, tf, L, w = 1, reach = 2.2) {
+    const bl = st.bolt;
+    while (st.stroke + 1 < STROKES.length && tf >= STROKES[st.stroke + 1] && STROKES[st.stroke + 1] < L - 0.1) {
+      st.stroke++;
+      if (st.stroke === 0) bl.shape(a, b, st.jag);
+      bl.strike(a, b, tf, reach);
+    }
+    let env = 0;
+    for (let k = 0; k <= st.stroke; k++) env = Math.max(env, Math.exp(-(tf - STROKES[k]) / 0.035));
+    const fade = 1 - smooth((tf - (L - 0.14)) / 0.14);
+    const B = (0.2 + 0.8 * env) * fade * (0.85 + 0.15 * Math.random());
+    st.env = B;
+    const lead = clamp(tf / 0.035, 0, 1);
+    const count = Math.max(2, Math.ceil(bl.main.length * lead));
+    glow.strip(bl.main, 1.1 * w, PAL.lightning.glow, 0.24 * B, 0, count);
+    glow.strip(bl.main, 0.2 * w, BOLT_MID, 0.7 * B, 0, count);
+    glow.strip(bl.main, 0.045 * w, PAL.lightning.core, Math.min(1, 0.3 + B), 1, count);
+    if (lead < 1) return;
+    const since = tf - bl.ghostAt;
+    if (st.stroke > 0 && since < 0.12) glow.strip(bl.ghost, 0.13 * w, BOLT_GHOST, 0.5 * (1 - since / 0.12) * fade, 0.3);
+    const ba = Math.max(0, 1 - since / 0.09) * fade;
+    if (ba <= 0) return;
+    for (const br of bl.branches) {
+      if (!br.on) continue;
+      glow.strip(br.pts, (u) => 0.34 * w * (1 - u), PAL.lightning.glow, (u) => 0.38 * ba * (1 - u), 0);
+      glow.strip(br.pts, (u) => 0.024 * w * (1 - 0.7 * u), PAL.lightning.core, (u) => ba * (1 - u * 0.8), 1);
+      if (br.sub_on) glow.strip(br.sub, (u) => 0.016 * w * (1 - 0.7 * u), PAL.lightning.core, (u) => 0.8 * ba * (1 - u), 1);
+    }
+  }
+
   /** The polyline parts of an effect, rebuilt every frame. */
   function drawRibbons(fx) {
     const f = fx.family;
-    if (f === 'missile' && fx.data.bolts) {
-      for (const b of fx.data.bolts) {
-        if (b.trail.length < 2 || b.hit) continue;
-        glow.strip(b.trail, (u) => 0.16 * (1 - u), PAL.missile.trail, (u) => (1 - u) * 0.9, 0);
-        glow.strip(b.trail.slice(0, 6), (u) => 0.03 * (1 - u), PAL.missile.core.clone().multiplyScalar(0.4), (u) => 1 - u, 1);
+    // Lightning gathering: little arcs snapping about the hand.
+    if (!fx.released && !fx.fizzled && CRACKLE.has(f)) {
+      const u = clamp(fx.t / Math.max(0.05, fx.windup), 0, 1);
+      if (u > 0.2 && Math.random() < 0.35 + 0.6 * u) {
+        const arcs = fx.data.arcs || (fx.data.arcs = [P3(9), P3(9)]);
+        const r = fx.from.player ? 0.06 : 0.14 + u * 0.08;
+        for (const arc of arcs) {
+          _v.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize().multiplyScalar(r).add(fx.hand);
+          _w.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize().multiplyScalar(r * 1.2).add(fx.hand);
+          jag(arc, _v, _w, 0.4, 3);
+          glow.strip(arc, 0.05 * (fx.from.player ? 0.5 : 1), PAL.lightning.glow, 0.5, 0);
+          glow.strip(arc, 0.01, PAL.lightning.core, 0.9, 1);
+        }
       }
     }
-    // Lightning: a new path every few frames while it lasts, the core hard and white, the glow wide and blue.
-    const lightning = (f === 'lightning' || f === 'breath-lightning') && fx.released && !fx.fizzled && fx.to;
-    if (lightning && fx.t - fx.releaseT < Math.max(0.32, fx.flight + 0.25)) {
-      const src = fx.data.src;
-      const aim = chestPoint(fx.to, tmpA, true);
-      if (!fx.data.path || clock >= (fx.data.nextPath || 0)) {
-        fx.data.path = bolt(src, aim.clone(), 0.2, 5);
-        fx.data.branches = [];
-        const count = f === 'breath-lightning' ? 5 : 3;
-        for (let k = 0; k < count; k++) {
-          const from = fx.data.path[Math.floor(rand(4, fx.data.path.length - 6))];
-          const dir = new THREE.Vector3(aim.x - src.x, aim.y - src.y, aim.z - src.z).normalize();
-          const len = rand(0.8, 2.2);
-          const to = { x: from.x + (dir.x + rand(-0.9, 0.9)) * len, y: from.y + (dir.y + rand(-0.9, 0.5)) * len, z: from.z + (dir.z + rand(-0.9, 0.9)) * len };
-          fx.data.branches.push(bolt(from, to, 0.25, 3));
-        }
-        fx.data.nextPath = clock + 0.045;
+    if (f === 'missile' && fx.data.bolts) {
+      for (const b of fx.data.bolts) {
+        if (b.n < 2 || b.hit) continue;
+        // A wide violet wake, a hot streak at the head of it: read as a
+        // thing moving fast, not as a line drawn across the square.
+        glow.strip(b.trail, taper1(0.24), PAL.missile.trail, fadeSq(0.75), 0, b.n);
+        glow.strip(b.trail, taper1(0.05), MISSILE_STREAK, fadeSq(1), 1, Math.min(b.n, 6));
       }
-      const age = fx.t - fx.releaseT;
-      const fade = 1 - smooth(age / Math.max(0.32, fx.flight + 0.25));
-      const flick = 0.6 + 0.4 * Math.random();
-      glow.strip(fx.data.path, 0.5, PAL.lightning.glow, 0.55 * fade * flick, 0);
-      glow.strip(fx.data.path, 0.05, PAL.lightning.core, fade, 1);
-      for (const br of fx.data.branches) {
-        glow.strip(br, (u) => 0.22 * (1 - u), PAL.lightning.glow, (u) => 0.45 * (1 - u) * fade, 0);
-        glow.strip(br, (u) => 0.025 * (1 - u * 0.6), PAL.lightning.core.clone().multiplyScalar(0.6), (u) => (1 - u) * fade, 1);
-      }
+    }
+    // Lightning: strokes down one channel (see `drawBolt`).
+    const lightning = (f === 'lightning' || f === 'breath-lightning') && fx.released && !fx.fizzled && fx.to && fx.data.strike;
+    if (lightning) {
+      const tf = fx.t - fx.releaseT;
+      if (tf < fx.data.boltLife) drawBolt(fx.data.strike, fx.data.src, chestPoint(fx.to, tmpA, true), tf, fx.data.boltLife, 1, f === 'breath-lightning' ? 2.8 : 2.1);
+      else fx.data.strike.env = 0;
     }
     // Arcs crawling over a body: shocking grasp, and the strike of a sky bolt.
     if (fx.data.strikes) {
@@ -2225,12 +2722,11 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         const feet = feetPoint(s.w, tmpA);
         const h = heightOf(s.w);
         if (f === 'storm') {
-          const top = { x: feet.x + rand(-2, 2), y: feet.y + 40, z: feet.z + rand(-2, 2) };
-          const end = { x: feet.x, y: feet.y + h * 0.6, z: feet.z };
-          if (!s.path || clock >= s.next) { s.path = bolt(top, end, 0.12, 6); s.next = clock + 0.05; }
-          glow.strip(s.path, 1.2, PAL.lightning.glow, 0.5 * fade, 0);
-          glow.strip(s.path, 0.12, PAL.lightning.core, fade, 1);
-        } else if (!s.w.player) {
+          if (!s.sky) s.sky = { bolt: new Bolt(8), stroke: -1, env: 1, jag: 0.1, top: { x: feet.x + rand(-3, 3), y: feet.y + 34, z: feet.z + rand(-3, 3) }, t0: fx.t };
+          _v.set(feet.x, feet.y + h * 0.6, feet.z);
+          drawBolt(s.sky, s.sky.top, _v, fx.t - s.sky.t0, 0.55, 2.6, 7);
+        }
+        if (!s.w.player) {
           for (let k = 0; k < 3; k++) {
             const a0 = rand(0, TAU); const a1 = a0 + rand(0.6, 1.6);
             const p0 = { x: feet.x + Math.cos(a0) * 0.3, y: feet.y + rand(0.3, h), z: feet.z + Math.sin(a0) * 0.3 };
@@ -2262,23 +2758,27 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       glow.strip(pts, (u) => 0.5 + u * 0.5, PAL.fire.glow, (u) => fade * (0.35 + 0.65 * u), 0);
       glow.strip(pts, (u) => 0.12 + u * 0.12, C(4, 2.4, 0.8), (u) => fade * u, 0.5);
     }
-    // Colour spray: a fan of rays from the hand, each its own colour.
-    if (f === 'prism' && fx.released && fx.to) {
+    // Colour spray: a fan of light out of the hand -- each ray running
+    // through the spectrum along its length and over time, wide and soft
+    // where it spreads, with a thin bright line down it, dying into the air.
+    if (f === 'prism' && fx.released && fx.to && fx.data.fan) {
       const age = fx.t - fx.releaseT;
-      const life = fx.flight + 0.3;
+      const life = fx.flight + 0.34;
       if (age < life) {
         const src = fx.data.src;
-        const aim = chestPoint(fx.to, tmpA, true);
-        const dir = _v.set(aim.x - src.x, aim.y - src.y, aim.z - src.z);
-        const len = dir.length() * 1.08; dir.normalize();
-        const side = _w.set(-dir.z, 0, dir.x).normalize();
-        const reach = smooth(age / Math.max(0.08, fx.flight));
-        const fade = 1 - smooth((age - fx.flight) / 0.3);
-        PRISM.forEach((c, k) => {
-          const off = (k - (PRISM.length - 1) / 2) * 0.09;
-          const end = { x: src.x + (dir.x + side.x * off) * len * reach, y: src.y + (dir.y + (k % 2 ? 0.04 : -0.04)) * len * reach, z: src.z + (dir.z + side.z * off) * len * reach };
-          glow.strip([src, end], (u) => 0.04 + u * 0.16, c.clone().multiplyScalar(0.32), (u) => 0.9 * fade * (1 - u * 0.4), 0.4);
-        });
+        const reach = smooth(age / Math.max(0.08, fx.flight * 0.8));
+        const fade = 1 - smooth((age - fx.flight) / 0.34);
+        for (const ray of fx.data.fan) {
+          const L = ray.len * reach;
+          for (let k = 0; k < 7; k++) {
+            const q = ray.pts[k]; const t = (k / 6) * L;
+            q.x = src.x + ray.dir.x * t; q.y = src.y + ray.dir.y * t; q.z = src.z + ray.dir.z * t;
+          }
+          const shimmer = fade * (0.62 + 0.38 * Math.sin(clock * 31 + ray.phase * 7)) * (0.8 + 0.2 * Math.sin(clock * 11 + ray.phase));
+          prismRay.hue = ray.hue + clock * 1.3; prismRay.a = shimmer;
+          glow.strip(ray.pts, prismWide, prismColour, prismAlphaWide, 0);
+          glow.strip(ray.pts, prismThin, prismColourHot, prismAlphaThin, 0.6);
+        }
       }
     }
     // Tendrils: a curse or a drain reaching across, writhing.
@@ -2352,8 +2852,12 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       dayBoost = 1 + 0.25 * d;
       lightBoost = 1 + 0.8 * d;
       // Smoke is lit, not emissive: dark at night, pale grey at noon.
-      const m = 0.25 + 0.75 * d;
-      PAL.dust.smoke.setRGB(0.46 * m, 0.41 * m, 0.34 * m);
+      // Not as dark as the street it rises from, even at night -- a dust
+      // cloud catches the lamps and the moon, and one the colour of the
+      // ground is simply not there.
+      const m = 0.55 + 0.45 * d;
+      PAL.dust.smoke.setRGB(0.5 * m, 0.45 * m, 0.38 * m);
+      PAL.dust.grit.setRGB(0.3 * m, 0.26 * m, 0.21 * m);
     },
     /** For the harness: how much is alive right now. */
     stats() {
@@ -2364,6 +2868,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       };
     },
     pools: { light, matter, glow, shade },
+    /** For the harness: leave a mark (see `mark`) at a point. */
+    mark: (p, r, mode, color = PAL.fire.glow, life = 7, cool = 1.6) => mark(p, r, mode, color, life, cool),
     heat,
     dispose() { unlisten(); scene.remove(group); overlay.remove(); for (const l of lights) scene.remove(l.light); },
   };

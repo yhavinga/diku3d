@@ -491,6 +491,12 @@ const POSES = {
   },
 };
 
+/** The casting gesture, for the right hand whatever it holds. */
+const CAST = {
+  gather: { p: [0.2, -0.17, -0.4], blade: [-0.35, 0.85, -0.4], elbow: [0.35, -0.85, 0.4] },
+  release: { p: [0.1, -0.13, -0.68], blade: [-0.2, 0.55, -0.81], elbow: [0.25, -0.35, 0.9] },
+};
+
 const _q1 = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _v = new THREE.Vector3();
@@ -557,6 +563,23 @@ class ViewModel {
     this.lag = { x: 0, y: 0 };
     this.beat = 0;
     this.primedFor = null;
+    this.casting = null;
+  }
+
+  /**
+   * Say the words: the hand draws back and up while the spell gathers, and
+   * thrusts out at the release, `windup` seconds from now -- so what leaves
+   * the hand (spellfx.js reads `castPoint`) leaves it at full reach. A lost
+   * spell just sinks back.
+   */
+  cast(windup, lost = false) {
+    this.casting = { t: 0, windup: Math.max(0.2, windup), lost };
+  }
+
+  /** Where a spell sits in your hand: just past the knuckles, in world space. */
+  castPoint(out) {
+    return out.set(this.hand.position.x - 0.03, this.hand.position.y + 0.07, this.hand.position.z - 0.08)
+      .applyQuaternion(this.camera.quaternion).add(this.camera.position);
   }
 
   equip(kind, shieldKind) {
@@ -623,7 +646,7 @@ class ViewModel {
 
     const armed = !!this.kind;
     this.fight += ((fighting ? 1 : 0) - this.fight) * Math.min(1, dt * 5);
-    const wantShow = armed || fighting || !!this.swing || this.queue.length ? 1 : 0;
+    const wantShow = armed || fighting || !!this.swing || this.queue.length || this.casting ? 1 : 0;
     this.show += (wantShow - this.show) * Math.min(1, dt * (wantShow ? 7 : 3));
     this.scene.visible = this.show > 0.01;
     if (!this.scene.visible) return;
@@ -698,6 +721,26 @@ class ViewModel {
       if (seg) { if (s.hand === 'off') off = seg; else main = seg; }
     }
 
+    // Casting: back and up to gather, out at the release, and home again.
+    if (this.casting) {
+      const c = this.casting;
+      c.t += dt;
+      const thrust = c.windup - 0.1;
+      const base = mix(main);
+      let seg = null;
+      if (c.t < thrust) seg = { a: base, b: CAST.gather, u: easeOut(clamp(c.t / Math.min(0.3, thrust), 0, 1)) };
+      else if (c.lost) seg = c.t < thrust + 0.45 ? { a: CAST.gather, b: base, u: ease((c.t - thrust) / 0.45) } : null;
+      else if (c.t < c.windup) seg = { a: CAST.gather, b: CAST.release, u: easeIn((c.t - thrust) / 0.1) };
+      else if (c.t < c.windup + 0.16) seg = { a: CAST.release, b: CAST.release, u: 0 };
+      else if (c.t < c.windup + 0.6) seg = { a: CAST.release, b: base, u: ease((c.t - c.windup - 0.16) / 0.44) };
+      if (seg) {
+        // A tremble while it gathers: the words are an effort.
+        const tr = c.t < thrust ? Math.sin(c.t * 47) * 0.004 : 0;
+        seg = { a: seg.a, b: seg.b, u: seg.u, tr };
+        main = seg;
+      } else this.casting = null;
+    }
+
     // Coming into view from below, not popping in.
     const drop = (1 - ease(this.show)) * 0.45;
     const jolt = this.jolt > 0 ? Math.sin((1 - this.jolt / 0.25) * Math.PI) * 0.045 : 0;
@@ -708,6 +751,7 @@ class ViewModel {
       obj.position.y += by - drop - this.lag.y * 0.6 - jolt;
     };
     place(this.hand, main, false);
+    if (main.tr) this.hand.position.y += main.tr;
     if (this.shield) {
       // A shield is not held like a blade: its board stays square to you, low
       // and out to the left, and comes up across the body in a fight.
@@ -861,6 +905,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
    */
   function onEvent(event) {
     // A spell's blow is spellfx.js's to draw: no swing, no spark, no clang.
+    if (event.kind === 'cast' && event.fromPlayer && !['quaff', 'eat'].includes(event.source)) vm.cast(event.windup, event.lost);
     if (event.spell) return;
     const delay = event.delay || 0;
     if (['hit', 'miss', 'parry', 'dodge'].includes(event.kind)) {
