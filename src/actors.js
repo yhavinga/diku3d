@@ -352,9 +352,10 @@ function buildModelledFigure(asset, proto, library) {
  * Tested over all 45 stock areas. The reject list is as load-bearing as the
  * match list: a wererat is a man, Herald the ettin has "mouse" in his
  * keywords, a wolf spider is a spider, the dark horseman rides nothing, and
- * the dragon master and the Dragonknights are people.
+ * the dragon master, the Dragonknights and the attendant of the dragon are
+ * people.
  */
-const NOT_A_BEAST = /\b(were\w*|ettin|herald|horseman|horsehead|nebula|vampire|lamia|centaur|minotaur|master|dragonlord|dragonknight|spider|hierophant)\b/;
+const NOT_A_BEAST = /\b(were\w*|ettin|herald|horseman|horsehead|nebula|vampire|lamia|centaur|minotaur|master|dragonlord|dragonknight|spider|hierophant|attendant)\b/;
 
 const BEASTS = [
   // --- canines. Two ear sets are modelled; `hide` collapses the one a breed
@@ -408,7 +409,7 @@ const BEASTS = [
   { test: /\b(fairy dragon|pet dragon)\b/, asset: 'beast_dragon', scale: 0.12, coat: 0x6a8a4a, pale: 0xc8c890, points: 0x3a4a2a, box: [0.2, 1, 'quad', 0x6a8a4a] },
   { test: /\b(hatchling|baby|young)\b.*\bdragon\b|\bdragon\b.*\b(hatchling|baby|young)\b/, asset: 'beast_dragon', scale: 0.3, coat: 0x5a7a3a, pale: 0xb8b880, points: 0x2e3e20, box: [0.5, 2.5, 'quad', 0x5a7a3a] },
   { test: /\bwyverns?\b/, asset: 'beast_dragon', scale: 0.75, coat: 0x5a5244, pale: 0xa89c80, points: 0x2e2a22, box: [1.3, 6, 'quad', 0x5a5244] },
-  { test: /\bdragons?\b/, asset: 'beast_dragon', scale: 1.0, coat: 0x3a5a2a, pale: 0xa8a870, points: 0x1e2e16, patch: 0x2a3a1c, cover: 0.3, box: [1.7, 9, 'quad', 0x3a5a2a] },
+  { test: /\bdragons?\b/, asset: 'beast_dragon', scale: 0.8, coat: 0x3a5a2a, pale: 0xa8a870, points: 0x1e2e16, patch: 0x2a3a1c, cover: 0.3, box: [1.7, 9, 'quad', 0x3a5a2a] },
   // --- serpents. A python is three metres; the marsh's anaconda is ten in the
   // mud's own words, and gets six, which is still the largest thing in it.
   { test: /\banaconda\b/, asset: 'beast_snake', scale: 2.0, coat: 0x4a5230, pale: 0x9a9468, points: 0x4a5230, patch: 0x1a1c12, cover: 0.4, box: [0.3, 6, 'quad', 0x4a5230] },

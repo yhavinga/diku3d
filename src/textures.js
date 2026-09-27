@@ -518,9 +518,11 @@ const SURFACES = {
     const tone = fbm(u * 4, v * 4, 4, 419, 3);
     const clump = clamp01(edge * 3.2);
     const base = mix(rgb(0x9e9e9e), rgb(0xb4b4b4), tone);
-    const shade = (0.9 + id * 0.16) * (0.9 + clump * 0.1) * (0.94 + fine * 0.1);
+    // Kept low: at 0.16 of tone and 0.07 of relief a horse's short coat read
+    // as a fleece at two metres.
+    const shade = (0.95 + id * 0.08) * (0.95 + clump * 0.05) * (0.95 + fine * 0.08);
     s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
-    s.height = 0.5 + clump * 0.07 + fine * 0.03 - d1 * 0.02;
+    s.height = 0.5 + clump * 0.035 + fine * 0.025 - d1 * 0.01;
     s.rough = 0.86 + fine * 0.1;
   },
 
@@ -734,7 +736,7 @@ const RECIPES = {
   // still reads as a coat on a horse. `moving` keeps the world-space effects
   // off them: a splash line fixed to the paving and a grain fixed to the world
   // both slide over anything that walks through them.
-  fur: { surface: 'fur', scale: 0.4, normalScale: 0.45, env: 0.35, wet: 0, detail: 0, moving: true },
+  fur: { surface: 'fur', scale: 0.4, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, moving: true },
   feather: { surface: 'feather', scale: 0.3, normalScale: 0.3, env: 0.5, wet: 0, detail: 0, moving: true },
 };
 
