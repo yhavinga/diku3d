@@ -533,6 +533,7 @@ class ViewModel {
     this.kind = undefined;
     this.shield = undefined;
     this.swing = null;
+    this.queue = [];
     this.block = 0;
     this.jolt = 0;
     this.fight = 0;
@@ -586,7 +587,7 @@ class ViewModel {
    * about a quarter second; with more time than that the swing simply starts
    * later, with less it is quicker.
    */
-  strike(contactIn) {
+  strike(contactIn, miss = false) {
     const windup = clamp(contactIn - 0.1, 0.08, 0.26);
     const start = Math.max(0, contactIn - windup - 0.1);
     const set = POSES[this.style].swings;
@@ -594,7 +595,10 @@ class ViewModel {
     // Bare hands alternate: a jab with the right, a cross with the left.
     const hand = this.style === 'punch' && this.beat % 2 ? 'off' : 'hand';
     this.beat++;
-    this.swing = { t: -start, windup, strike: 0.1, shape, hand };
+    // Queued, not replacing: a round's second blow is known the moment the
+    // first is, and writing it over the first swing cut that one off before
+    // it landed -- two hits, one swing.
+    this.queue.push({ t: -start, windup, strike: 0.1, shape, hand, miss });
   }
 
   update(dt, player, fighting) {
@@ -604,7 +608,7 @@ class ViewModel {
 
     const armed = !!this.kind;
     this.fight += ((fighting ? 1 : 0) - this.fight) * Math.min(1, dt * 5);
-    const wantShow = armed || fighting || !!this.swing ? 1 : 0;
+    const wantShow = armed || fighting || !!this.swing || this.queue.length ? 1 : 0;
     this.show += (wantShow - this.show) * Math.min(1, dt * (wantShow ? 7 : 3));
     this.scene.visible = this.show > 0.01;
     if (!this.scene.visible) return;
@@ -631,6 +635,17 @@ class ViewModel {
     }
     this.lastYaw = yaw; this.lastPitch = pitch;
 
+    // A blow that meets nothing carries on past where it should have stopped:
+    // the follow-through a third again as far, which is what a miss looks
+    // like from behind the blade.
+    const follow = (s) => {
+      if (!s.miss) return s.shape.follow;
+      if (!s.over) {
+        const c = s.shape.contact; const f = s.shape.follow;
+        s.over = { p: f.p.map((v, i) => v + (v - c.p[i]) * 0.4), blade: f.blade, elbow: f.elbow };
+      }
+      return s.over;
+    };
     const mix = (m) => {
       // Collapse a two-pose blend to a single pose object.
       const a = m.a; const b = m.b; const t = m.u;
@@ -646,6 +661,12 @@ class ViewModel {
       if (!this.kind) off = { a: mix(off), b: P.block, u: w };
     }
 
+    // The latest queued swing that has started is the one on screen.
+    for (let i = 0; i < this.queue.length; i++) this.queue[i].t += dt;
+    while (this.queue.length && this.queue[0].t >= 0) {
+      this.swing = this.queue.shift();
+      this.swing.t -= dt; // advanced once below
+    }
     if (this.swing) {
       const s = this.swing;
       s.t += dt;
@@ -656,8 +677,8 @@ class ViewModel {
       if (t < 0) seg = { a: base, b: base, u: 0 };
       else if (t < s.windup) seg = { a: base, b: s.shape.windup, u: easeOut(t / s.windup) };
       else if (t < s.windup + s.strike) seg = { a: s.shape.windup, b: s.shape.contact, u: easeIn((t - s.windup) / s.strike) };
-      else if (t < s.windup + s.strike + 0.12) seg = { a: s.shape.contact, b: s.shape.follow, u: easeOut((t - s.windup - s.strike) / 0.12) };
-      else if (t < s.windup + s.strike + 0.55) seg = { a: s.shape.follow, b: base, u: ease((t - s.windup - s.strike - 0.12) / 0.43) };
+      else if (t < s.windup + s.strike + 0.12) seg = { a: s.shape.contact, b: follow(s), u: easeOut((t - s.windup - s.strike) / 0.12) };
+      else if (t < s.windup + s.strike + 0.55) seg = { a: follow(s), b: base, u: ease((t - s.windup - s.strike - 0.12) / 0.43) };
       else { this.swing = null; seg = null; }
       if (seg) { if (s.hand === 'off') off = seg; else main = seg; }
     }
@@ -833,7 +854,12 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
         if (fig && !primed) motion.strike(fig, event.beat % 2 ? 'attack2' : 'attack', delay);
       } else {
         const primed = event.beat === 0 && vm.primedFor !== null && Math.abs(vm.primedFor - (clock + delay)) < 0.2;
-        if (!primed) vm.strike(delay);
+        if (!primed) vm.strike(delay, event.kind === 'miss');
+        else if (event.kind === 'miss') {
+          // The swing was started before the round said it would miss.
+          const s = vm.queue[vm.queue.length - 1] || vm.swing;
+          if (s) s.miss = true;
+        }
       }
       // The air moving, a moment before the contact.
       queue.push({ at: clock + Math.max(0, delay - 0.12), kind: 'whoosh', event });
@@ -873,6 +899,9 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
         break;
       }
       case 'miss':
+        // A miss is a blow too: the one it missed leans out of its way, and
+        // the blade passes through the air where they were.
+        if (toFig) motion.react(toFig, 'evade');
         break;
       case 'parry': {
         if (toFig) motion.react(toFig, 'block');
@@ -919,10 +948,16 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     for (const slot of game.mobs) {
       if (slot.dead || !slot.instance || !slot.instance.fighting) continue;
       const fig = figureOf(slot);
-      if (!fig || slot.primedAt !== undefined || !game.willSwing(slot)) continue;
+      if (!fig) continue;
       const contactIn = vIn + MOB_BEAT;
       const clip = fig.clips && fig.clips.attack ? fig.clips.attack : 0.9;
       const windup = (fig.hitFrame && fig.hitFrame.attack ? fig.hitFrame.attack : 0.4) * clip;
+      // How long the body has before it must start its next swing: the
+      // footwork and feints between blows (motion.js fidget) fit inside it.
+      const swinging = game.willSwing(slot);
+      const primedNow = slot.primedAt !== undefined && clock < slot.primedAt + 0.3;
+      fig.m.swingIn = !swinging ? 9 : (primedNow ? 0 : contactIn - windup);
+      if (slot.primedAt !== undefined || !swinging) continue;
       if (contactIn <= windup + 0.02) {
         motion.strike(fig, 'attack', contactIn);
         slot.primedAt = clock + contactIn;
@@ -958,6 +993,12 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
 
     // The weapon in your hand, from what you are actually wielding.
     const s = game.state;
+    // A foe low in the frame draws the view down to it (player.js).
+    const foeFig = s.fighting && s.fighting.slot ? figureOf(s.fighting.slot) : null;
+    if (foeFig && !foeFig.m.dead) {
+      player.lookAssist = player.lookAssist || new THREE.Vector3();
+      player.lookAssist.set(foeFig.at.x, foeFig.at.y + foeFig.height * 0.6, foeFig.at.z);
+    } else player.lookAssist = null;
     const wield = s.equipment[WEAR.WIELD];
     const shield = s.equipment[WEAR.SHIELD];
     vm.equip(weaponKind(wield), shield ? (/kite|tower|heater/i.test(shield.name) ? 'kite' : 'round') : null);

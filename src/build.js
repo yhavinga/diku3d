@@ -981,8 +981,8 @@ export function buildScene(world, layout, materials, assets = null) {
           lights.push({ x: ax, y: pos.y + 2.2, z: az, color: 0x7fd8ff, intensity: 5, radius: 10 });
         } else {
           decor.push({
-            kind: 'gateSign', x: ax - dx * 0.9, y: pos.y + 2.7, z: az - dz * 0.9, rotY,
-            text: `${DIR_NAME[side.link.dir]} · #${side.exit ? side.exit.to : '?'} — outside the loaded world`,
+            kind: 'gateSign', x: ax - dx * 0.9, y: pos.y + 2.7, z: az - dz * 0.9, rotY, dx, dz,
+            text: DIR_NAME[side.link.dir],
           });
         }
       }

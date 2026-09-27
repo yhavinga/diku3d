@@ -364,7 +364,10 @@ export class Hud {
   }
 
   setLook(target) {
-    if (!target) {
+    // A creature is named over its own head (game-ui.js's plate), with its
+    // keys under the crosshair; a second copy of the name down here was one
+    // label too many.
+    if (!target || target.kind === 'mob') {
       this.el.look.style.opacity = '0';
       return;
     }

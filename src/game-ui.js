@@ -41,7 +41,8 @@ const CSS = `
   transition: width 300ms ease; }
 
 /* ------------------------------------------------------------- target -- */
-/* Clears the minimap block, which is the map plus the compass under it. */
+/* Only for a foe you cannot see: off the screen, behind you, round a wall.
+   Whoever is in view is named over their own head (the plates below). */
 #g-target { position: absolute; right: 24px; top: 446px; width: 330px; padding: 11px 13px 10px;
   opacity: 0; transition: opacity 160ms ease; }
 #g-target.on { opacity: 1; }
@@ -49,13 +50,17 @@ const CSS = `
 #g-target .sub { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em;
   text-transform: uppercase; color: var(--gold); opacity: 0.75; margin-top: 4px; }
 #g-target .cond { font-size: 13.5px; color: var(--dim); margin-top: 6px; font-style: italic; }
-#g-target .warden { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
-  text-transform: uppercase; color: #d8a24e; margin-top: 6px; }
+#g-target .where { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: #e8b96a; margin-top: 6px; }
 #g-target .g-bar { margin-top: 8px; margin-bottom: 0; }
 
 /* ---------------------------------------------------------------- log -- */
-#g-log { position: absolute; right: 24px; bottom: 140px; width: 330px;
-  max-height: min(30vh, 220px); overflow: hidden; display: flex;
+/* The left column, above the room's description and below the ways out:
+   the right-hand one is the map, the compass and the vitals, and the log
+   used to climb over all three. Its bottom and height are set from those
+   two panels as they grow and shrink (placeLog). */
+#g-log { position: absolute; left: 26px; bottom: 220px; width: min(40vw, 470px);
+  max-height: 180px; overflow: hidden; display: flex;
   flex-direction: column; justify-content: flex-end; gap: 2px; }
 /* A soft glow was the only thing separating these lines from the world, and
    over sunlit paving or a night street they simply drowned. Same cure as the
@@ -64,7 +69,7 @@ const CSS = `
    own trick, so a message reads on any background at all. */
 #g-log p { margin: 0; font-size: 13.5px; line-height: 1.42; color: #d9cdb4;
   background: rgba(16, 13, 9, 0.62); padding: 3px 9px; border-radius: 2px;
-  align-self: flex-end; max-width: 100%;
+  align-self: flex-start; max-width: 100%;
   text-shadow: 0 0 1px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.85),
     0 -1px 2px rgba(0,0,0,0.85), 1px 0 2px rgba(0,0,0,0.85), -1px 0 2px rgba(0,0,0,0.85);
   animation: g-in 200ms ease both; }
@@ -77,35 +82,46 @@ const CSS = `
 @keyframes g-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
 
 /* ------------------------------------------------------------- floats -- */
+/* Damage is a number beside the body it landed on, never under the plate:
+   heavy, pale, and edged in near-black so it holds over noon paving and a
+   night street alike. Size and colour climb with the share of the victim's
+   health the blow took; a blow that takes a fifth or more is a crit and
+   lands bigger, hotter, with a jolt. A miss is a word, in the same place. */
 #g-floats { position: absolute; inset: 0; }
 #g-floats span { position: absolute; left: 50%; top: 50%; font-family: var(--serif);
-  font-size: 26px; font-weight: 400; white-space: nowrap;
-  text-shadow: 0 0 1px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.85),
-    0 -1px 2px rgba(0,0,0,0.85), 1px 0 2px rgba(0,0,0,0.85), -1px 0 2px rgba(0,0,0,0.85),
-    0 2px 12px rgba(0,0,0,0.8); }
-#g-floats span.world { font-size: 22px; letter-spacing: 0.02em; }
+  font-size: 30px; font-weight: 700; line-height: 1; white-space: nowrap; letter-spacing: 0.01em;
+  -webkit-text-stroke: 5px rgba(12,8,5,0.92); paint-order: stroke fill;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.55); will-change: transform, opacity; }
+#g-floats span.word { font-weight: 600; font-style: italic; letter-spacing: 0.04em;
+  -webkit-text-stroke: 4px rgba(12,8,5,0.9); }
+#g-floats span.crit { text-shadow: 0 0 18px rgba(255,120,40,0.55), 0 2px 10px rgba(0,0,0,0.6); }
+#g-floats span.note { font-size: 19px; font-weight: 600; -webkit-text-stroke: 3.5px rgba(12,8,5,0.85); }
 #g-hurt { position: absolute; inset: 0; opacity: 0; pointer-events: none;
   background: radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 46%, rgba(120,18,12,0.42) 88%, rgba(70,8,6,0.62) 100%); }
 
-/* ---------------------------------------------------------- foe plate -- */
-/* Over the head of whoever you are fighting, in place of their name label:
-   the name, and the mud's hitpoints as a bar with a pale trailing chunk that
-   drains a beat after each blow, so how much a hit took is readable. */
-#g-foe { position: absolute; left: 0; top: 0; width: 132px; transform: translate(-50%, -100%);
+/* ------------------------------------------------------------- plates -- */
+/* Over the head of whoever you are fighting (the foe plate) and of whatever
+   you are looking at (the focus plate): the name, and for a foe the mud's
+   hitpoints as a bar with a pale trailing chunk that drains a beat after
+   each blow, so how much a hit took is readable. Nobody else is named: a
+   name over every head in ten metres was a coop of five "a chicken"s. */
+.g-plate { position: absolute; left: 0; top: 0; width: 176px; transform: translate(-50%, -100%);
   text-align: center; opacity: 0; transition: opacity 180ms ease; will-change: transform; }
-#g-foe.on { opacity: 1; }
-#g-foe .n { font-size: 14px; line-height: 1.25; color: #efe2c6; white-space: nowrap;
+.g-plate.on { opacity: 1; }
+.g-plate .n { font-size: 15.5px; line-height: 1.25; color: #f3e7cc; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
   text-shadow: 0 0 1px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,0.85),
     0 -1px 2px rgba(0,0,0,0.85), 1px 0 2px rgba(0,0,0,0.85), -1px 0 2px rgba(0,0,0,0.85); }
-#g-foe .b { position: relative; height: 5px; margin: 4px auto 0; width: 100%;
+.g-plate .b { position: relative; height: 6px; margin: 4px auto 0; width: 140px;
   background: rgba(14,11,8,0.72); box-shadow: 0 0 0 1px rgba(224,189,119,0.32), 0 1px 3px rgba(0,0,0,0.6); }
-#g-foe .b i { position: absolute; inset: 0 auto 0 0; display: block; }
-#g-foe .b i.lag { background: rgba(240,222,180,0.8); transition: width 520ms cubic-bezier(.4,0,.2,1) 260ms; }
-#g-foe .b i.now { background: linear-gradient(90deg, #8f3326, #c4553f); transition: width 90ms linear; }
-#g-foe .c { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
-  color: var(--gold); opacity: 0.8; margin-top: 3px;
-  text-shadow: 0 0 1px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,0.85); }
+.g-plate .b i { position: absolute; inset: 0 auto 0 0; display: block; }
+.g-plate .b i.lag { background: rgba(240,222,180,0.8); transition: width 520ms cubic-bezier(.4,0,.2,1) 260ms; }
+.g-plate .b i.now { background: linear-gradient(90deg, #8f3326, #c4553f); transition: width 90ms linear; }
+.g-plate .c { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--gold); opacity: 0.85; margin-top: 4px; white-space: nowrap;
+  text-shadow: 0 0 1px rgba(0,0,0,0.95), 0 1px 2px rgba(0,0,0,0.85), 0 0 6px rgba(0,0,0,0.6); }
+.g-plate .c.warden { color: #e0a24e; }
+#g-focus .n { font-size: 14.5px; }
 
 /* -------------------------------------------------------------- gates -- */
 #g-gates { position: absolute; left: 26px; top: 132px; width: 300px; padding: 10px 13px 9px;
@@ -148,7 +164,7 @@ const CSS = `
 #g-sheet .stats b { color: var(--ink); font-weight: 400; }
 
 /* ------------------------------------------------------------ prompts -- */
-#g-hint { position: absolute; left: 50%; bottom: 62px; transform: translateX(-50%);
+#g-hint { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
   font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--gold); opacity: 0; transition: opacity 150ms ease;
   text-shadow: 0 0 1px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.85),
@@ -174,7 +190,7 @@ const CSS = `
 #g-spells { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
   padding: 7px 9px 8px; display: none; }
 #game-ui.caster #g-spells { display: block; }
-#game-ui.caster #g-hint { bottom: 104px; }
+#game-ui.caster #g-hint { bottom: 112px; }
 #g-spells .keys { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase;
   color: var(--gold); opacity: 0.6; margin: 0 2px 6px; display: flex; justify-content: space-between; gap: 18px; }
 #g-spells .slots { display: flex; gap: 5px; }
@@ -215,16 +231,6 @@ const el = (tag, className, html) => {
   if (html !== undefined) node.innerHTML = html;
   return node;
 };
-
-/** dam_message's own bands, as colour: a scratch is not a MASSACRE. */
-function damColour(dam) {
-  if (dam <= 0) return 'rgba(240,227,200,0.55)';
-  if (dam <= 8) return '#e6dcc6';
-  if (dam <= 16) return '#f0d9a8';
-  if (dam <= 28) return '#e8b96a';
-  if (dam <= 48) return '#e0913f';
-  return '#e8683a';
-}
 
 export function createGameUi(game) {
   const style = el('style');
@@ -269,8 +275,8 @@ export function createGameUi(game) {
   const tBar = el('i');
   tBarBox.appendChild(tBar);
   const tCond = el('div', 'cond');
-  const tWarden = el('div', 'warden');
-  target.append(tName, tSub, tBarBox, tCond, tWarden);
+  const tWhere = el('div', 'where');
+  target.append(tName, tSub, tBarBox, tCond, tWhere);
   root.appendChild(target);
 
   // -- log ------------------------------------------------------------------
@@ -283,7 +289,7 @@ export function createGameUi(game) {
   floats.id = 'g-floats';
   const hurt = el('div');
   hurt.id = 'g-hurt';
-  const foe = el('div');
+  const foe = el('div', 'g-plate');
   foe.id = 'g-foe';
   const foeName = el('div', 'n');
   const foeBar = el('div', 'b');
@@ -292,7 +298,12 @@ export function createGameUi(game) {
   foeBar.append(foeLag, foeNow);
   const foeCond = el('div', 'c');
   foe.append(foeName, foeBar, foeCond);
-  root.append(hurt, foe, floats);
+  const focusPlate = el('div', 'g-plate');
+  focusPlate.id = 'g-focus';
+  const focusName = el('div', 'n');
+  const focusSub = el('div', 'c');
+  focusPlate.append(focusName, focusSub);
+  root.append(hurt, focusPlate, foe, floats);
 
   // -- gates ----------------------------------------------------------------
   const gatesPanel = el('div', 'panel');
@@ -351,23 +362,98 @@ export function createGameUi(game) {
     }
   }
 
+  /** Experience, gold: a note that rises over the crosshair and goes. */
+  function float(text, colour) {
+    const node = el('span', 'note', text);
+    node.style.color = colour;
+    floats.appendChild(node);
+    const dx = (Math.random() - 0.5) * 60;
+    node.animate([
+      { transform: `translate(-50%, -50%) translate(${dx * 0.25}px, 40px) scale(0.85)`, opacity: 0 },
+      { transform: `translate(-50%, -50%) translate(${dx * 0.55}px, 10px) scale(1.04)`, opacity: 1, offset: 0.18 },
+      { transform: `translate(-50%, -50%) translate(${dx}px, -40px) scale(1)`, opacity: 0 },
+    ], { duration: 1500, easing: 'cubic-bezier(.2,.7,.3,1)' }).onfinish = () => node.remove();
+  }
+
+  /** A body's chest on screen, and how many pixels a metre is at its distance. */
+  function bodyOnScreen(slot) {
+    const fig = slot && slot.figure;
+    if (!project || !fig || !fig.at) return null;
+    const h = fig.height || 1.7;
+    const y = fig.at.y + Math.min(h * 0.62, 1.4);
+    const chest = project(fig.at.x, y, fig.at.z);
+    const above = project(fig.at.x, y + 0.5, fig.at.z);
+    if (!chest || !above) return null;
+    const perMetre = Math.max(12, Math.abs(chest.y - above.y) * 2);
+    const reach = fig.body ? fig.body.r + fig.body.h * 0.6 : 0.3;
+    return { x: chest.x, y: chest.y, half: Math.max(0.24, reach) * perMetre };
+  }
+
   /**
-   * A number that flies past the crosshair, sized by how hard it landed --
-   * or, given `at` (screen pixels), rises off the body it landed on.
+   * The number (or the word) for one blow, beside the body it landed on --
+   * alternating sides so a flurry does not stack on itself -- or, for a blow
+   * on you, down and left of the crosshair where the vignette already says
+   * you were hit. Spells are blows here too, drawn the same way.
    */
-  function float(text, colour, { fromLeft = false, size = 26, at = null } = {}) {
-    const node = el('span', at ? 'world' : null, text);
+  const recent = new Map();
+  function blowNumber(event) {
+    const onYou = !event.to;
+    let text; let colour; let size; let cls = ''; let crit = false;
+    if (event.kind === 'hit') {
+      const share = event.dam / Math.max(1, event.maxHp || (onYou ? game.state.maxHit : 20));
+      crit = share >= 0.2 && event.dam >= 4;
+      text = onYou ? `-${event.dam}` : String(event.dam);
+      size = Math.round(28 + Math.min(22, share * 90) + (crit ? 8 : 0));
+      colour = onYou ? '#ff6b52'
+        : crit ? '#ff8a3a' : share >= 0.1 ? '#ffc86a' : share >= 0.05 ? '#ffe3a8' : '#f6eedc';
+      if (crit) cls = 'crit';
+    } else {
+      text = event.kind === 'miss' ? 'miss' : (onYou ? event.kind : (event.kind === 'parry' ? 'parried' : 'dodged'));
+      colour = event.kind === 'miss' ? '#d9d2c2' : '#b9d2f4';
+      size = 23;
+      cls = 'word';
+    }
+    let x; let y; let side;
+    const body = onYou ? null : bodyOnScreen(event.to);
+    if (body) {
+      const key = event.to;
+      const last = recent.get(key) || { side: -1, t: 0, n: 0 };
+      const now = performance.now();
+      side = -last.side;
+      const n = now - last.t < 700 ? last.n + 1 : 0;
+      recent.set(key, { side, t: now, n });
+      x = body.x + side * (body.half + 14);
+      y = body.y - 8 - (n % 3) * 20;
+    } else {
+      // On you, or on something out of sight: beside the crosshair.
+      side = onYou ? -1 : 1;
+      x = window.innerWidth / 2 + side * 70;
+      y = window.innerHeight / 2 + (onYou ? 46 : -30);
+    }
+    const node = el('span', cls, text);
     node.style.color = colour;
     node.style.fontSize = `${size}px`;
-    if (at) { node.style.left = `${at.x}px`; node.style.top = `${at.y}px`; }
+    node.style.left = `${x.toFixed(1)}px`;
+    node.style.top = `${y.toFixed(1)}px`;
     floats.appendChild(node);
-    const dx = at ? (Math.random() - 0.5) * 40 : (fromLeft ? -140 - Math.random() * 40 : (Math.random() - 0.5) * 90);
-    const dy = at ? -38 - Math.random() * 16 : (fromLeft ? -10 : -46 - Math.random() * 26);
-    node.animate([
-      { transform: `translate(-50%, -50%) translate(${dx * 0.25}px, ${fromLeft ? 0 : 14}px) scale(0.82)`, opacity: 0 },
-      { transform: `translate(-50%, -50%) translate(${dx * 0.55}px, ${dy * 0.35}px) scale(1.06)`, opacity: 1, offset: 0.18 },
-      { transform: `translate(-50%, -50%) translate(${dx}px, ${dy}px) scale(1)`, opacity: 0 },
-    ], { duration: 1100, easing: 'cubic-bezier(.2,.7,.3,1)' }).onfinish = () => node.remove();
+    const ax = side > 0 ? '0%' : '-100%';
+    const drift = side * (10 + Math.random() * 8);
+    const rise = onYou ? 34 : 58;
+    const frames = crit
+      ? [
+        { transform: `translate(${ax}, -50%) scale(1.75)`, opacity: 0 },
+        { transform: `translate(${ax}, -50%) translate(${side * 4}px, -4px) scale(1.2)`, opacity: 1, offset: 0.08 },
+        { transform: `translate(${ax}, -50%) translate(${-side * 3}px, -8px) scale(1.05)`, opacity: 1, offset: 0.16 },
+        { transform: `translate(${ax}, -50%) translate(${drift * 0.5}px, -${rise * 0.4}px) scale(1)`, opacity: 1, offset: 0.62 },
+        { transform: `translate(${ax}, -50%) translate(${drift}px, -${rise}px) scale(0.96)`, opacity: 0 },
+      ]
+      : [
+        { transform: `translate(${ax}, -50%) scale(1.3)`, opacity: 0 },
+        { transform: `translate(${ax}, -50%) translate(0, -4px) scale(1)`, opacity: 1, offset: 0.1 },
+        { transform: `translate(${ax}, -50%) translate(${drift * 0.5}px, -${rise * 0.45}px) scale(1)`, opacity: 1, offset: 0.6 },
+        { transform: `translate(${ax}, -50%) translate(${drift}px, -${rise}px) scale(0.95)`, opacity: 0 },
+      ];
+    node.animate(frames, { duration: crit ? 1500 : 1250, easing: 'cubic-bezier(.2,.7,.3,1)' }).onfinish = () => node.remove();
   }
 
   function flashHurt(strength) {
@@ -595,6 +681,63 @@ export function createGameUi(game) {
     return dam;
   }
 
+  /**
+   * Where a plate goes: over the head, if the head is on screen and not
+   * behind a wall. The dragon's plate was drawn on the wall of its cave. The
+   * line of sight is a slab test against the colliders (nav.js), asked every
+   * sixth frame per body, which is cheap enough to never think about.
+   */
+  const sight = new Map();
+  let frame = 0;
+  function plateAt(slot, lift) {
+    const at = headOf(slot, lift);
+    if (!at) return null;
+    const fig = slot.figure;
+    let seen = sight.get(slot);
+    if (!seen || frame - seen.frame >= 6) {
+      const eye = game.eye;
+      const blocked = !!(game.nav && game.nav.sightBlocked && game.nav.sightBlocked(
+        eye.x, eye.y, eye.z, fig.at.x, fig.at.y + (fig.height || 1.7) * 0.9, fig.at.z));
+      seen = { frame, blocked };
+      sight.set(slot, seen);
+    }
+    if (seen.blocked) return null;
+    // Close up the head is off the top of the frame; the plate is not.
+    at.y = Math.max(at.y, 64);
+    return at;
+  }
+
+  /** Which way to turn to find someone you cannot see. */
+  function whereIs(slot) {
+    const fig = slot && slot.figure;
+    if (!fig) return '';
+    const eye = game.eye; const face = game.facing;
+    const dx = fig.at.x - eye.x; const dz = fig.at.z - eye.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const ahead = (dx * face.x + dz * face.z) / d;
+    // Right of facing (x, z) is (-z, x) with north at -z.
+    const right = (dx * -face.z + dz * face.x) / d;
+    if (ahead < -0.55) return 'behind you';
+    if (ahead > 0.6) return 'ahead, out of sight';
+    return right > 0 ? 'to your right' : 'to your left';
+  }
+
+  /**
+   * The log sits between the ways out (or the room's title) and the room's
+   * description, whose height changes with every room.
+   */
+  function placeLog() {
+    const desc = document.getElementById('desc-block');
+    const title = document.getElementById('room-block');
+    if (!desc) return;
+    const d = desc.getBoundingClientRect();
+    let top = title ? title.getBoundingClientRect().bottom : 0;
+    if (gatesPanel.classList.contains('on')) top = Math.max(top, gatesPanel.getBoundingClientRect().bottom);
+    const bottom = window.innerHeight - d.top + 10;
+    log.style.bottom = `${Math.round(bottom)}px`;
+    log.style.maxHeight = `${Math.max(60, Math.round(d.top - 10 - (top + 12)))}px`;
+  }
+
   /** Where a mobile's head is on screen, if it is on screen. */
   function headOf(slot, lift = 0.3) {
     const fig = slot && slot.figure;
@@ -607,21 +750,16 @@ export function createGameUi(game) {
       switch (event.kind) {
         case 'hit':
           say(event.text, event.byPlayer ? 'you' : 'them');
-          if (event.byPlayer) {
-            float(String(event.dam), damColour(event.dam), { size: 20 + Math.min(20, event.dam / 2), at: headOf(event.to, 0.05) });
-          } else {
-            float(`-${event.dam}`, '#e0705a', { fromLeft: true, size: 22 });
-            flashHurt(Math.min(0.6, event.dam / Math.max(1, game.state.maxHit)));
-          }
+          blowNumber(event);
+          if (!event.to) flashHurt(Math.min(0.6, event.dam / Math.max(1, game.state.maxHit)));
           break;
         case 'miss':
-          say(event.text, event.byPlayer ? 'faint' : 'faint');
-          if (event.byPlayer) float('miss', 'rgba(240,227,200,0.5)', { size: 16, at: headOf(event.to, 0.05) });
+          say(event.text, 'faint');
+          blowNumber(event);
           break;
         case 'parry': case 'dodge':
           say(event.text, 'faint');
-          if (event.defended) float(event.kind, 'rgba(180,200,220,0.6)', { fromLeft: true, size: 16 });
-          else float(event.kind === 'parry' ? 'parried' : 'dodged', 'rgba(200,214,228,0.62)', { size: 15, at: headOf(event.to, 0.05) });
+          blowNumber(event);
           break;
         case 'death':
           say(event.text, 'dead');
@@ -629,11 +767,11 @@ export function createGameUi(game) {
           break;
         case 'xp':
           say(event.text, 'gain');
-          if (event.amount > 0) float(`+${event.amount} exp`, '#e0bd77', { size: 19 });
+          if (event.amount > 0) float(`+${event.amount} exp`, '#e0bd77');
           break;
         case 'gold':
           say(event.text, 'gain');
-          float(`+${event.amount} gold`, '#e8c979', { size: 19 });
+          float(`+${event.amount} gold`, '#e8c979');
           break;
         case 'level':
           say(event.text, 'gain');
@@ -761,6 +899,8 @@ export function createGameUi(game) {
       const at = list.findIndex((x) => x.name === keep);
       spellSel = at >= 0 ? at : Math.min(spellSel, Math.max(0, list.length - 1));
       root.classList.toggle('caster', list.length > 0);
+      // index.html's prompt under the crosshair moves up over the spell bar.
+      document.body.classList.toggle('g-caster', list.length > 0);
       drawSpells();
     }
     if (!spellList.length) return;
@@ -850,40 +990,63 @@ export function createGameUi(game) {
 
     let t = game.target();
     // The killing blow is still on its way when the rules already have the
-    // mobile dead: hold its panel until the blow lands.
+    // mobile dead: hold its plate until the blow lands.
     if (t) lastTarget = t;
     else if (lastTarget && unshown(lastTarget.slot) > 0) t = lastTarget;
     else lastTarget = null;
     const percent = t ? Math.max(0, Math.min(100, Math.round(100 * (t.hit + unshown(t.slot)) / Math.max(1, t.maxHit)))) : 0;
-    target.classList.toggle('on', !!t);
-    if (t) {
-      tName.textContent = t.name;
-      tSub.textContent = `level ${t.level}${t.aggressive ? ' · aggressive' : ''}${t.fighting ? ' · fighting you' : ''}`;
-      tBar.style.width = `${percent}%`;
-      tCond.textContent = t.condition;
-      tWarden.textContent = t.warden ? `warden of ${t.warden.name}` : '';
-    }
+    frame++;
 
-    // The foe plate, over the head of whoever you are actually fighting.
-    const head = t && t.fighting ? headOf(t.slot, 0.12) : null;
+    // Whoever you are fighting: a plate over their head while they can be
+    // seen, and the panel on the right only while they cannot.
+    const foeT = t && t.fighting ? t : null;
+    const head = foeT ? plateAt(foeT.slot, 0.16) : null;
     foe.classList.toggle('on', !!head);
     if (head) {
       foe.style.transform = `translate(${head.x.toFixed(1)}px, ${head.y.toFixed(1)}px) translate(-50%, -100%)`;
       if (foeName.textContent !== t.name) foeName.textContent = t.name;
       foeNow.style.width = `${percent}%`;
       foeLag.style.width = `${percent}%`;
-      foeCond.textContent = `level ${t.level}`;
+      const cond = `level ${t.level} · ${t.condition}`;
+      if (foeCond.textContent !== cond) foeCond.textContent = cond;
     }
+    const lost = !!foeT && !head;
+    target.classList.toggle('on', lost);
+    if (lost) {
+      tName.textContent = t.name;
+      tSub.textContent = `level ${t.level} · fighting you`;
+      tBar.style.width = `${percent}%`;
+      tCond.textContent = t.condition;
+      tWhere.textContent = whereIs(t.slot);
+    }
+
+    // Whatever is in the crosshair, named over its own head -- unless it is
+    // the one being fought, whose plate already says so.
+    const f = game.focused();
+    const fhead = f && (!foeT || f.slot !== foeT.slot) ? plateAt(f.slot, 0.12) : null;
+    focusPlate.classList.toggle('on', !!fhead);
+    if (fhead) {
+      focusPlate.style.transform = `translate(${fhead.x.toFixed(1)}px, ${fhead.y.toFixed(1)}px) translate(-50%, -100%)`;
+      if (focusName.textContent !== f.name) focusName.textContent = f.name;
+      const sub = f.warden ? `level ${f.level} · warden of ${f.warden.name}`
+        : `level ${f.level}${f.shop ? ' · shopkeeper' : ''}${f.aggressive ? ' · aggressive' : ''}`;
+      if (focusSub.textContent !== sub) focusSub.textContent = sub;
+      focusSub.classList.toggle('warden', !!f.warden);
+    }
+    document.body.classList.toggle('g-fighting', !!s.fighting);
 
     // The one bit of instruction, and only while it applies.
     const pile = game.here()[0];
     const shop = !sheetMode && game.shopHere();
     const prompts = [];
-    if (t && !t.fighting) prompts.push('click — attack');
+    if (f && !s.fighting) prompts.push('e — examine', 'click — attack');
+    else if (f) prompts.push('e — examine');
     if (pile) prompts.push('t — take everything');
     if (shop) prompts.push('b — trade');
-    hint.textContent = prompts.join('   ·   ');
+    const line = prompts.join('   ·   ');
+    if (hint.textContent !== line) hint.textContent = line;
     hint.classList.toggle('on', prompts.length > 0 && !sheetMode);
+    if (frame % 10 === 0) placeLog();
 
     // These two change under you as you walk about; the skills sheet does not.
     if ((sheetMode === 'shop' || sheetMode === 'gear') && (tick = (tick + 1) % 20) === 0) drawSheet();
