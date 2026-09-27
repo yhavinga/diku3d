@@ -365,9 +365,9 @@ export function createMotion({ figures, nav }) {
       m.path = null;
       m.turnTo = null;
       if (order.kind === 'travel') {
-        m.path = order.route.points.slice();
-        m.pi = 0;
-        m.stage = 'walk';
+        // A flight waits for the blow that caused it to be seen landing.
+        m.stage = order.wait > 0 ? 'wait' : 'walk';
+        if (m.stage === 'walk') { m.path = order.route.points.slice(); m.pi = 0; }
       }
     }
     m.fighting = false;
@@ -378,7 +378,13 @@ export function createMotion({ figures, nav }) {
         m.want = 0;
         return;
       case 'travel': {
-        m.want = fig.pace * 1.04;
+        m.want = order.run ? RUN : fig.pace * 1.04;
+        if (m.stage === 'wait') {
+          order.wait -= dt;
+          m.want = 0;
+          if (order.wait <= 0) { m.stage = 'walk'; m.path = order.route.points.slice(); m.pi = 0; }
+          return;
+        }
         if (m.stage === 'walk' && !m.path) {
           if (order.route.portal) { m.stage = 'out'; m.fading = -1; } else { order.done = true; }
         }

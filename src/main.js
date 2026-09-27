@@ -503,7 +503,7 @@ async function boot() {
   const game = createGame({ world, layout, built, actors });
   const gameUi = createGameUi(game);
   const fx = createFx({
-    scene, camera, composer, actors, game, audio, player, library: assets, sun, hemi, built,
+    scene, camera, composer, actors, game, audio, player, library: assets, sun, hemi, built, lightPool,
   });
   {
     // Screen position of a world point, for the foe plate and damage numbers.

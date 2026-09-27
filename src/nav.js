@@ -253,6 +253,9 @@ export function createNav({ layout, built, world }) {
       const path = side.link.from.vnum === vnum ? side.link.path : [...side.link.path].reverse();
       const first = path[0];
       const other = side.link.from.vnum === vnum ? side.link.to : side.link.from;
+      // Only a street cell this passage owns: two passages may share a cell,
+      // and `roomAt` would put someone standing in it in a third room.
+      if (layout.passageAt(cell.level, first.x, first.z) !== side.link) continue;
       cells.push({ level: cell.level, x: first.x, z: first.z, own: false, other });
     }
     return { cell, cells };

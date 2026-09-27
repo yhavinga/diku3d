@@ -1191,12 +1191,27 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
         emit({ kind: 'state', text: `${capitalise(ch.name)} disarms you!` });
       }
     },
+    /**
+     * fight.c: do_flee, for a mobile: six tries at a random door, and out
+     * through the first one that is open and not NO_MOB -- run, not walked,
+     * and only once the blow that frightened it has been seen to land. If none
+     * opens, it stays and fights, as it does in the mud.
+     */
     flee(ch) {
       if (isNpc(ch)) {
         const slot = ch.slot;
-        ctx.stopFighting(ch);
-        if (slot) slot.fleeing = 4;   // seconds of running away
-        emit({ kind: 'flee', text: `${capitalise(ch.name)} has fled!` });
+        if (!slot) return;
+        const room = world.rooms.get(slot.roomVnum);
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const door = rng.range(0, 5);
+          const exit = room && room.exits[door];
+          const to = exit && !exit.offMap ? world.rooms.get(exit.to) : null;
+          if (!to || (to.flags & ROOM_NO_MOB)) continue;
+          if (!moveMobile(slot, door, true, (ctx.now ?? 0) + 0.35)) continue;
+          ctx.stopFighting(ch);
+          emit({ kind: 'flee', text: `${capitalise(ch.name)} has fled!`, from: slot });
+          return;
+        }
       } else {
         breakOff(true);
       }
@@ -1621,7 +1636,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
    * exit into an area that was not loaded, a room that was never built -- is
    * one more refusal, which the mud never needed.
    */
-  function moveMobile(slot, door, run = false) {
+  function moveMobile(slot, door, run = false, wait = 0) {
     const room = world.rooms.get(slot.roomVnum);
     const exit = room && room.exits[door];
     if (!exit || exit.offMap) return false;
@@ -1631,7 +1646,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     const route = ways.route(slot.roomVnum, door, to, slot.pos, wanderRand);
     if (!route) return false;
     slot.travel = { from: slot.roomVnum, to, door, route, run };
-    order(slot, { kind: 'travel', route, run });
+    order(slot, { kind: 'travel', route, run, wait });
     return true;
   }
 
@@ -1650,7 +1665,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     if (state.roomVnum !== undefined) counts.set(state.roomVnum, (counts.get(state.roomVnum) || 0) + 1);
 
     for (const slot of mobs) {
-      if (slot.dead || slot.travel || slot.fleeing > 0) continue;
+      if (slot.dead || slot.travel) continue;
       const mob = slot.instance;
       const act = slot.proto.act;
       // "That's all for sleeping / busy monster": fighting is busy.
@@ -1764,16 +1779,20 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
           slot.travel = null;          // caught on the way: stand and fight
         } else {
           if (!figure) stepHeadless(slot, dt);
-          settleRoom(slot);
+          // On the way, the room is whichever end of the journey is nearer --
+          // not whatever `roomAt` says of the street underfoot, because
+          // layout.js lets two passages share a cell and names only one of
+          // them its owner (measured: 78 of 179 room changes in ten minutes
+          // went through a room that was neither end).
+          const from = built.rooms.get(slot.travel.from).center;
+          const to = built.rooms.get(slot.travel.to).center;
+          slot.roomVnum = dist2(slot.pos, to) < dist2(slot.pos, from) ? slot.travel.to : slot.travel.from;
+          rebucket(slot);
           continue;
         }
       }
 
-      if (slot.fleeing > 0) {
-        slot.fleeing -= dt;
-        order(slot, { kind: 'go', to: slot.anchor, run: true });
-        if (!figure) step(slot, slot.anchor, MOB_SPEED * 1.4, 0.4, dt);
-      } else if (mob && mob.fighting) {
+      if (mob && mob.fighting) {
         const target = mob.fighting === state ? playerFeet : (mob.fighting.slot ? mob.fighting.slot.pos : playerFeet);
         // ACT_SENTINEL never leaves its room in the mud; here it never leaves
         // the spot it was reset on, and you have to come to it.

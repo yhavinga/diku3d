@@ -198,15 +198,46 @@ function proceduralWeapon(kind, M) {
   return g;
 }
 
-/** A modelled weapon from the library: its baked primitives in one group. */
+/** The arms tools/blender/weapons.py makes; fx.js loads them if boot did not. */
+export const WEAPON_ASSETS = [
+  'weapon_sword', 'weapon_dagger', 'weapon_axe', 'weapon_mace', 'weapon_spear',
+  'weapon_staff', 'shield_round', 'shield_kite',
+];
+
+/**
+ * Tags the weapons use that a textures.js without their recipes cannot
+ * dress. `materialFor` answers an unknown tag with stone, which on a blade is
+ * the stick of charcoal weapons.py's docstring warns about -- so until the
+ * `steel` and `paint` recipes are there, these stand in.
+ */
+const STAND_IN = {
+  steel: { color: 0xb4b9be, metalness: 0.95, roughness: 0.3 },
+  paint: { color: 0x7d2a22, metalness: 0, roughness: 0.66 },
+};
+
+/**
+ * A modelled weapon from the library, turned into the hand's frame. The file's
+ * frame (weapons.py): grip centre at the origin, +Y up the blade, +Z the
+ * striking side, flats facing X. The hand's weapon frame here puts the edge on
+ * X and the flats on Z, so a quarter turn about Y; the grip centre is already
+ * where the fist closes.
+ */
 function modelledWeapon(library, name) {
   const asset = library && library.get && library.get(name);
   if (!asset) return null;
   const g = new THREE.Group();
+  const inner = new THREE.Group();
+  if (name.startsWith('weapon_')) inner.rotation.y = -Math.PI / 2;
   for (const p of asset.primitives) {
-    const m = new THREE.Mesh(p.geometry, p.material);
-    g.add(m);
+    let material = p.material;
+    const standIn = STAND_IN[p.materialName];
+    if (standIn && !(library.materials && library.materials[p.materialName])) {
+      material = new THREE.MeshStandardMaterial({ vertexColors: true, ...standIn });
+    }
+    inner.add(new THREE.Mesh(p.geometry, material));
   }
+  g.add(inner);
+  g.userData.modelled = true;
   return g;
 }
 
@@ -331,6 +362,64 @@ class Particles {
   }
 }
 
+/**
+ * Sparks as the eye (and a camera) sees them: streaks, each the distance it
+ * travels in about a thirtieth of a second, bright at the head and dying to
+ * nothing at the tail. Drawn as points they read as flecks of gold paint
+ * stuck to whatever they came off.
+ */
+class Streaks {
+  constructor(max) {
+    this.max = max;
+    this.live = [];
+    this.pos = new Float32Array(max * 6);
+    this.col = new Float32Array(max * 6);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute('color', new THREE.BufferAttribute(this.col, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setDrawRange(0, 0);
+    this.material = new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+    });
+    this.lines = new THREE.LineSegments(g, this.material);
+    this.lines.frustumCulled = false;
+    this.lines.renderOrder = 4;
+    this.lines.layers.set(OVERLAY_LAYER);
+  }
+
+  spawn(p) {
+    if (this.live.length >= this.max) this.live.shift();
+    this.live.push({ t: 0, drag: 2, gravity: 9.8, ...p });
+  }
+
+  update(dt) {
+    let n = 0;
+    for (let i = this.live.length - 1; i >= 0; i--) {
+      const p = this.live[i];
+      p.t += dt;
+      if (p.t >= p.life) { this.live.splice(i, 1); continue; }
+      const k = Math.exp(-p.drag * dt);
+      p.vx *= k; p.vz *= k; p.vy = p.vy * k - p.gravity * dt;
+      p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+      if (p.floor !== undefined && p.y < p.floor) { p.y = p.floor; p.vy = Math.abs(p.vy) * 0.3; p.vx *= 0.5; p.vz *= 0.5; }
+    }
+    for (const p of this.live) {
+      const fade = Math.pow(1 - p.t / p.life, 1.5);
+      const len = 0.034;
+      const o = n * 6;
+      this.pos[o] = p.x; this.pos[o + 1] = p.y; this.pos[o + 2] = p.z;
+      this.pos[o + 3] = p.x - p.vx * len; this.pos[o + 4] = p.y - p.vy * len; this.pos[o + 5] = p.z - p.vz * len;
+      this.col[o] = p.r * fade; this.col[o + 1] = p.g * fade; this.col[o + 2] = p.b * fade;
+      this.col[o + 3] = p.r * fade * 0.12; this.col[o + 4] = p.g * fade * 0.08; this.col[o + 5] = p.b * fade * 0.05;
+      n++;
+    }
+    const g = this.lines.geometry;
+    g.setDrawRange(0, n * 2);
+    g.attributes.position.needsUpdate = n > 0;
+    g.attributes.color.needsUpdate = n > 0;
+  }
+}
+
 // ------------------------------------------------------------ view model ----
 
 /**
@@ -350,10 +439,12 @@ const POSES = {
       { windup: { p: [0.34, -0.06, -0.36], blade: [0.5, 0.55, 0.67], elbow: [0.35, -0.9, 0.25] },
         contact: { p: [0.02, -0.21, -0.6], blade: [-0.86, 0.06, -0.5], elbow: [0.45, -0.45, 0.75] },
         follow: { p: [-0.26, -0.36, -0.46], blade: [-0.62, -0.42, 0.66], elbow: [0.7, -0.3, 0.6] } },
-      // overhead, straight down
-      { windup: { p: [0.17, 0.04, -0.4], blade: [0.04, 0.5, 0.86], elbow: [0.35, -0.9, 0.2] },
-        contact: { p: [0.06, -0.16, -0.62], blade: [0.0, -0.35, -0.94], elbow: [0.3, -0.6, 0.7] },
-        follow: { p: [0.05, -0.42, -0.52], blade: [0.0, -0.78, -0.62], elbow: [0.3, -0.35, 0.85] } },
+      // high right to low left, the heavy cut: seen at contact as a diagonal
+      // across the frame, where a straight overhead one is end-on and hides
+      // behind its own hand
+      { windup: { p: [0.2, 0.05, -0.4], blade: [0.2, 0.55, 0.81], elbow: [0.35, -0.9, 0.2] },
+        contact: { p: [0.03, -0.17, -0.62], blade: [-0.5, -0.12, -0.86], elbow: [0.4, -0.55, 0.72] },
+        follow: { p: [-0.12, -0.4, -0.52], blade: [-0.55, -0.6, -0.58], elbow: [0.45, -0.3, 0.84] } },
       // left to right, rising
       { windup: { p: [-0.08, -0.3, -0.46], blade: [-0.8, -0.2, -0.55], elbow: [0.55, -0.4, 0.7] },
         contact: { p: [0.12, -0.19, -0.6], blade: [0.82, 0.3, -0.48], elbow: [0.1, -0.6, 0.8] },
@@ -366,21 +457,21 @@ const POSES = {
     block: { p: [0.06, -0.16, -0.46], blade: [-1, 0.2, -0.1], elbow: [0.35, -0.75, 0.55] },
     swings: [
       { windup: { p: [0.23, -0.27, -0.28], blade: [-0.06, 0.18, -0.98], elbow: [0.35, -0.45, 0.82] },
-        contact: { p: [0.07, -0.17, -0.8], blade: [-0.08, 0.06, -1], elbow: [0.25, -0.2, 0.95] },
-        follow: { p: [0.09, -0.19, -0.72], blade: [-0.08, 0.06, -1], elbow: [0.25, -0.22, 0.95] } },
+        contact: { p: [0.08, -0.16, -0.78], blade: [-0.26, 0.24, -0.93], elbow: [0.3, -0.25, 0.92] },
+        follow: { p: [0.1, -0.18, -0.7], blade: [-0.24, 0.22, -0.94], elbow: [0.3, -0.27, 0.91] } },
       { windup: { p: [0.3, -0.2, -0.32], blade: [-0.3, 0.3, -0.9], elbow: [0.5, -0.5, 0.7] },
         contact: { p: [0.02, -0.19, -0.76], blade: [0.12, 0.02, -1], elbow: [0.3, -0.25, 0.92] },
         follow: { p: [0.0, -0.22, -0.66], blade: [0.12, 0.0, -1], elbow: [0.3, -0.3, 0.9] } },
     ],
   },
   punch: {
-    rest: { p: [0.24, -0.46, -0.38], blade: [-0.9, 0.2, -0.35], elbow: [0.2, -0.95, 0.2] },
-    ready: { p: [0.17, -0.25, -0.4], blade: [-0.95, 0.15, -0.25], elbow: [0.15, -0.95, 0.25] },
-    block: { p: [0.07, -0.15, -0.32], blade: [-0.2, 0.97, 0.05], elbow: [0.15, -0.9, 0.35] },
+    rest: { p: [0.24, -0.4, -0.42], blade: [-0.9, 0.3, -0.3], elbow: [0.3, -0.8, 0.5] },
+    ready: { p: [0.19, -0.2, -0.45], blade: [-0.9, 0.3, -0.3], elbow: [0.3, -0.65, 0.7] },
+    block: { p: [0.08, -0.12, -0.36], blade: [-0.25, 0.96, 0.05], elbow: [0.2, -0.85, 0.45] },
     swings: [
-      { windup: { p: [0.2, -0.27, -0.3], blade: [-0.95, 0.1, -0.2], elbow: [0.2, -0.85, 0.45] },
-        contact: { p: [0.05, -0.16, -0.62], blade: [-1, 0.05, 0.05], elbow: [0.1, -0.2, 0.97] },
-        follow: { p: [0.06, -0.17, -0.58], blade: [-1, 0.05, 0.05], elbow: [0.1, -0.22, 0.97] } },
+      { windup: { p: [0.22, -0.22, -0.34], blade: [-0.9, 0.25, -0.3], elbow: [0.3, -0.7, 0.65] },
+        contact: { p: [0.06, -0.13, -0.66], blade: [-1, 0.1, 0.0], elbow: [0.2, -0.3, 0.93] },
+        follow: { p: [0.07, -0.14, -0.62], blade: [-1, 0.1, 0.0], elbow: [0.2, -0.32, 0.92] } },
     ],
   },
 };
@@ -431,6 +522,14 @@ class ViewModel {
     this.sun = new THREE.DirectionalLight(0xffffff, 1);
     this.fill = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
     this.scene.add(this.sun, this.sun.target, this.fill);
+    // The two strongest practicals the pool has bound this frame -- the lamp
+    // on the kerb, the torch on the wall -- so a blade at night catches the
+    // fire it is held beside. A fixed two, so the program never changes.
+    this.lamps = [0, 1].map(() => {
+      const l = new THREE.PointLight(0xffffff, 0, 16, 2);
+      this.scene.add(l);
+      return l;
+    });
     this.kind = undefined;
     this.shield = undefined;
     this.swing = null;
@@ -455,11 +554,15 @@ class ViewModel {
     if (kind) {
       const weapon = modelledWeapon(this.library, `weapon_${kind}`) || proceduralWeapon(kind, this.M);
       weapon.rotation.z = -Math.PI / 2;
-      weapon.position.x = -0.055;
+      // The procedural grips start at their own origin; a modelled one is
+      // centred on it already.
+      weapon.position.x = weapon.userData.modelled ? 0 : -0.055;
       this.hand.add(weapon);
     }
     if (shieldKind) {
       const s = modelledWeapon(this.library, `shield_${shieldKind}`) || this.proceduralShield();
+      // Face (+Z in the file) away from you.
+      s.rotation.y = Math.PI;
       this.off.add(s);
     } else if (!kind) {
       const f = proceduralWeapon('fist', this.M);
@@ -570,16 +673,27 @@ class ViewModel {
     };
     place(this.hand, main, false);
     if (this.shield) {
-      const shieldRest = { p: [-0.34, -0.44, -0.52], blade: [0.2, 0.9, -0.3], elbow: [-0.3, -0.8, 0.5] };
-      const shieldUp = { p: [-0.24, -0.3, -0.5], blade: [0.3, 0.9, -0.2], elbow: [-0.3, -0.8, 0.5] };
-      place(this.off, { a: shieldRest, b: shieldUp, u: this.block > 0 ? 1 : u }, false);
+      // A shield is not held like a blade: its board stays square to you, low
+      // and out to the left, and comes up across the body in a fight.
+      const up = this.block > 0 ? 1 : u;
+      this.off.position.set(-0.56 + 0.14 * up + bx - this.lag.x, -0.74 + 0.26 * up + by - drop - this.lag.y * 0.6, -0.82 + 0.06 * up);
+      this.off.rotation.set(-0.12 + 0.1 * up, 0.5 - 0.25 * up, 0.15 - 0.1 * up);
     } else {
       place(this.off, off, true);
     }
     this.off.visible = !this.kind || !!this.shield;
   }
 
-  light(sun, hemi, scene, indoor) {
+  light(sun, hemi, scene, indoor, pool) {
+    this.lamps.forEach((lamp, i) => {
+      const src = pool && pool.lights[i];
+      if (!src || !src.visible) { lamp.intensity = 0; return; }
+      lamp.position.copy(src.position);
+      lamp.color.copy(src.color);
+      lamp.distance = src.distance;
+      lamp.decay = src.decay;
+      lamp.intensity = src.intensity;
+    });
     this.sun.color.copy(sun.color);
     this.sun.intensity = sun.intensity * (indoor ? 0.08 : 1);
     this.sun.position.copy(this.camera.position).add(_v.copy(sun.position).sub(sun.target.position).normalize());
@@ -605,11 +719,18 @@ class ViewModel {
  *   sun, hemi -- the lights the view model should match
  *   built   -- to tell an interior from the street
  */
-export function createFx({ scene, camera, composer, actors, game, audio, player, library, sun, hemi, built }) {
-  const sparks = new Particles(260, true, true);
+export function createFx({ scene, camera, composer, actors, game, audio, player, library, sun, hemi, built, lightPool = null }) {
+  const sparks = new Particles(80, true, true);
+  const streaks = new Streaks(240);
   const matter = new Particles(260, false, false);
-  scene.add(sparks.points, matter.points);
+  scene.add(sparks.points, streaks.lines, matter.points);
   const vm = new ViewModel(camera, library, makeMaterials(library));
+  // The arms are not in the boot list until the branch that made them brings
+  // its assets.js along; load whatever is missing, and re-dress when it lands.
+  if (library && library.load) {
+    const missing = WEAPON_ASSETS.filter((name) => !library.has(name) && !library.missing.has(name));
+    if (missing.length) library.load(missing).then(() => { vm.kind = '(reload)'; });
+  }
   const pass = new ViewModelPass(vm.scene, camera);
   // After GTAO (index 1) and before the shafts and the bloom.
   composer.insertPass(pass, 2);
@@ -626,8 +747,11 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
   function chest(slot, out = new THREE.Vector3()) {
     const fig = figureOf(slot);
     if (fig) return out.set(fig.at.x, fig.at.y + fig.height * 0.66, fig.at.z);
+    // Out where your blade meets theirs: a little right of centre, most of a
+    // metre off, below the eye.
     camera.getWorldDirection(out);
-    return out.multiplyScalar(0.55).add(camera.position).add(_v.set(0, -0.22, 0));
+    const right = _v.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    return out.multiplyScalar(0.9).add(camera.position).addScaledVector(right, 0.12).add(_v.set(0, -0.2, 0));
   }
 
   /** Stereo placement and distance for a sound at a point. */
@@ -650,10 +774,10 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
         away.x + (Math.random() - 0.5) * 1.4, 0.35 + Math.random() * 0.9, away.z + (Math.random() - 0.5) * 1.4,
       ).normalize();
       const hot = 0.75 + Math.random() * 0.25;
-      sparks.spawn({
+      streaks.spawn({
         x: p.x, y: p.y, z: p.z, vx: dir.x * s, vy: dir.y * s, vz: dir.z * s,
-        life: 0.16 + Math.random() * 0.22, size: 0.022 + Math.random() * 0.016, gravity: 9.8, drag: 2.2,
-        r: 2.6 * hot, g: 1.55 * hot, b: 0.55 * hot, alpha: 1, fade: 1.4, floor: p.floor,
+        life: 0.14 + Math.random() * 0.24, drag: 2.2, floor: p.floor,
+        r: 4.2 * hot, g: 2.6 * hot, b: 1.0 * hot,
       });
     }
     // The flash itself: one small hot point, gone in two frames. Kept under
@@ -733,8 +857,12 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
       case 'hit': {
         const strength = clamp(event.dam / Math.max(8, event.maxHp || 20) * 2.2, 0.3, 1.4);
         if (toFig) motion.react(toFig, 'hit', strength);
-        if (event.metal) spark(contact, away, strength);
-        else flesh(contact, away, strength);
+        // A blow on you is felt -- the shake, the vignette -- not seen as
+        // debris hanging in front of your eye.
+        if (event.to) {
+          if (event.metal) spark(contact, away, strength);
+          else flesh(contact, away, strength);
+        }
         audio.impact && audio.impact(event.metal ? 'armour' : (event.attack === 'pound' || event.attack === 'crush' || !event.armed ? 'blunt' : 'flesh'), { ...place, strength });
         if (!event.to) {
           player.shake(clamp(0.25 + strength * 0.4, 0.25, 0.85));
@@ -819,6 +947,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     }
 
     sparks.update(dt);
+    streaks.update(dt);
     matter.update(dt);
     const h = composer.renderTarget1 ? composer.renderTarget1.height : window.innerHeight;
     const scale = h / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
@@ -831,7 +960,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     const shield = s.equipment[WEAR.SHIELD];
     vm.equip(weaponKind(wield), shield ? (/kite|tower|heater/i.test(shield.name) ? 'kite' : 'round') : null);
     const room = built.rooms.get(s.roomVnum);
-    vm.light(sun, hemi, scene, room ? !room.outdoor : false);
+    vm.light(sun, hemi, scene, room ? !room.outdoor : false, lightPool);
     vm.update(dt, player, !!s.fighting);
   }
 
@@ -840,7 +969,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     /** 0 at night to 1 at noon: dark matter (dust, droplets) is lit by the hour. */
     setAmbient(k) { ambient = clamp(0.18 + k * 0.82, 0.18, 1); },
     viewModel: vm,
-    particles: { sparks, matter },
+    particles: { sparks, streaks, matter },
     pass,
     dispose() { unlisten(); },
   };
