@@ -2258,7 +2258,10 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (!mob.fighting) ctx.setFighting(mob, state);
       return { ok: true, text: `You attack ${mob.name}.` };
     }
-    if (state.fighting === mob) return { ok: false, text: 'You do the best you can!' };
+    // fight.c do_kill refuses anyone at all while you are fighting, not just
+    // the one you are fighting: a click on the troll in the crosshair must not
+    // open a second fight beside the marsh wolf you are already in.
+    if (state.fighting && !state.fighting.slot.dead) return { ok: false, text: 'You do the best you can!' };
     state.position = POS.STANDING;
     ctx.round = { player: CLICK_WINDUP, npc: MOB_BEAT };
     try { multiHit(state, mob, undefined, ctx); } finally { ctx.round = null; ctx.now = undefined; }

@@ -533,11 +533,18 @@ export function createGameUi(game) {
       recent.set(key, { side, t: now, n });
       x = body.x + side * (body.half + 14);
       y = body.y - 8 - (n % 3) * 20;
+    } else if (onYou) {
+      // Off your own health bar, where it is being taken from: in the middle
+      // of the frame it sat on whoever was hitting you.
+      const r = hpFill.parentNode.getBoundingClientRect();
+      side = 1;
+      x = r.left + 16 + Math.random() * 90;
+      y = r.top - 18;
     } else {
-      // On you, or on something out of sight: beside the crosshair.
-      side = onYou ? -1 : 1;
-      x = window.innerWidth / 2 + side * 70;
-      y = window.innerHeight / 2 + (onYou ? 46 : -30);
+      // Something out of sight: beside the crosshair.
+      side = 1;
+      x = window.innerWidth / 2 + 70;
+      y = window.innerHeight / 2 - 30;
     }
     // One mobile on another -- a guard on a thief: seen, not felt.
     const aside = !onYou && !event.byPlayer;
@@ -1349,7 +1356,7 @@ export function createGameUi(game) {
     // seen, and the panel on the right only while they cannot.
     const foeT = t && t.fighting ? t : null;
     lastFoeSlot = foeT ? foeT.slot : null;
-    const head = foeT ? plateAt(foeT.slot, 0.06) : null;
+    const head = foeT ? plateAt(foeT.slot, 0) : null;
     foe.classList.toggle('on', !!head);
     if (head) {
       foe.style.transform = `translate(${head.x.toFixed(1)}px, ${head.y.toFixed(1)}px) translate(-50%, -100%)`;
@@ -1373,7 +1380,7 @@ export function createGameUi(game) {
     // the one being fought, whose plate already says so.
     const f = game.focused();
     lastFocusSlot = f ? f.slot : null;
-    const fhead = f && (!foeT || f.slot !== foeT.slot) ? plateAt(f.slot, 0.06) : null;
+    const fhead = f && (!foeT || f.slot !== foeT.slot) ? plateAt(f.slot, 0) : null;
     focusPlate.classList.toggle('on', !!fhead);
     if (fhead) {
       focusPlate.style.transform = `translate(${fhead.x.toFixed(1)}px, ${fhead.y.toFixed(1)}px) translate(-50%, -100%)`;
