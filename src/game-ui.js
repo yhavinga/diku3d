@@ -1003,7 +1003,9 @@ export function createGameUi(game) {
     target.classList.toggle('on', !!t);
     // The log shares the right rail with this panel: while it is up, the log
     // keeps to the room under it rather than running up over it.
-    log.style.maxHeight = t ? `${Math.max(46, window.innerHeight - (vitals.offsetHeight + 52) - (446 + target.offsetHeight + 12))}px` : '';
+    // On a short screen that can be no room at all: the lines are still in
+    // the command line's scrollback (Enter), and the numbers still fly.
+    log.style.maxHeight = t ? `${Math.max(0, window.innerHeight - (vitals.offsetHeight + 52) - (446 + target.offsetHeight + 12))}px` : '';
     if (t) {
       tName.textContent = t.name;
       tSub.textContent = `level ${t.level}${t.aggressive ? ' · aggressive' : ''}${t.fighting ? ' · fighting you' : ''}`;

@@ -270,12 +270,28 @@ export function createItems({ scene, game, library, built }) {
   const cache = new Map();       // shape key -> { parts: [[geometry, material]], ... }
   const materials = new Map();
 
+  /**
+   * The baked surfaces (iron, planks, bark) come from the library as the town
+   * wears them, and the tints here multiply their albedo. The flat ones the
+   * library makes for figures (cloth, skin, oak, leather) carry a colour of
+   * their own, which would multiply every tint here down to near black -- so
+   * those are made here, white, with the same shared grain for relief.
+   */
+  const FLAT = {
+    cloth: { roughness: 0.95, grain: 0.5 }, skin: { roughness: 0.62, grain: 0.22 },
+    oak: { roughness: 0.72, grain: 0.35 }, leather: { roughness: 0.58, grain: 0.45 },
+  };
   const materialFor = (tag) => {
     if (materials.has(tag)) return materials.get(tag);
     let material;
     if (tag === 'glass') {
       material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.72 });
       material.userData.uvScale = 1;
+    } else if (FLAT[tag]) {
+      const grain = library && library.materials ? library.materials.$grain : null;
+      material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: FLAT[tag].roughness, metalness: 0 });
+      if (grain) { material.normalMap = grain; material.normalScale = new THREE.Vector2(FLAT[tag].grain, FLAT[tag].grain); }
+      material.userData.uvScale = 1 / 0.6;
     } else if (library) material = library.materialFor(tag);
     else material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 });
     materials.set(tag, material);

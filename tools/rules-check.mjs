@@ -255,6 +255,90 @@ console.log('\nSPEC_FUNS');
   check(bottle.inRoom === null && janitor.instance.inventory.includes(bottle), 'the janitor walks over and picks up a bottle');
 }
 
+// A fido and a corpse: it crosses the room and eats it, leaving the gear.
+{
+  const t = fresh(3, 31);
+  const fido = t.game.mobs.find((s) => s.record.special === 'spec_fido');
+  t.stand(fido.roomVnum);
+  const corpse = t.game.MERC.createObject(world.objProtos.get(3009), 1);
+  Object.assign(corpse, { itemType: ITEM.CORPSE_NPC, name: 'corpse of a rat', keywords: 'corpse', contains: [t.obj(3020)], inRoom: fido.roomVnum, at: { ...fido.pos, x: fido.pos.x + 2 } });
+  t.game.ground.push(corpse);
+  for (let i = 0; i < 600 && corpse.inRoom !== null; i++) t.game.update(0.1, t.eye, t.look);
+  check(corpse.inRoom === null && t.game.ground.some((o) => o.vnum === 3020), 'fido walks to a corpse, devours it and leaves the dagger',
+    t.said.filter((l) => /devours/.test(l)).join(' | '));
+}
+// spec_guard: a mobile fighting you, more evil than you, is set upon.
+{
+  const t = fresh(3, 41);
+  const guard = t.game.mobs.find((s) => s.record.special === 'spec_guard' && s.roomVnum === 3014);
+  t.stand(3014);
+  t.game.grace(1e9);
+  const evil = t.game.mobs.find((s) => s !== guard && s.roomVnum === 3014 && !s.record.special)
+    || t.game.mobs.find((s) => s.proto.vnum === 3065);
+  const mob = t.game.MERC && evil ? (evil.instance || null) : null;
+  void mob;
+  const beggar = t.game.mobs.find((s) => s.proto.vnum === 3065);
+  // Walk a beggar into the square and have it pick a fight with you.
+  beggar.roomVnum = 3014; beggar.pos = { ...guard.pos, x: guard.pos.x + 1.5 }; beggar.anchor = { ...beggar.pos };
+  t.eye.x = beggar.pos.x + 1.2; t.eye.z = beggar.pos.z; t.game.update(0.02, t.eye, t.look);
+  t.game.attackSlot(beggar);
+  beggar.instance.alignment = -800;
+  for (let i = 0; i < 200 && !(guard.instance && guard.instance.fighting); i++) t.game.update(0.1, t.eye, t.look);
+  check(guard.instance && guard.instance.fighting === beggar.instance, 'spec_guard sets upon the evil one fighting you',
+    t.said.filter((l) => /PROTECT/.test(l)).join(' | '));
+}
+// spec_thief: stand by a thief with a purse and it sidles up and dips.
+{
+  const t = fresh(3, 51);
+  const thief = t.game.mobs.find((s) => s.record.special === 'spec_thief' && s.proto.vnum === 3005);
+  t.stand(thief.roomVnum);
+  t.eye.x = thief.pos.x + 4; t.eye.z = thief.pos.z; t.game.update(0.02, t.eye, t.look);
+  t.game.state.gold = 1000;
+  let caught = false;
+  for (let i = 0; i < 1200 && t.game.state.gold === 1000 && !caught; i++) {
+    t.game.update(0.1, t.eye, t.look);
+    caught = t.said.some((l) => /hands in your wallet/.test(l));
+  }
+  check(t.game.state.gold < 1000 || caught, 'spec_thief comes up and steals gold (or is caught at it)',
+    caught ? 'caught' : `${1000 - t.game.state.gold} gold gone`);
+}
+// Training at the sailor.
+{
+  const t = fresh(3, 61);
+  const sailor = t.game.mobs.find((s) => s.proto.vnum === 3007);
+  t.stand(sailor.roomVnum);
+  t.eye.x = sailor.pos.x + 1.5; t.eye.z = sailor.pos.z; t.game.update(0.02, t.eye, t.look);
+  const before = t.game.state.permStr;
+  t.say('train str');
+  check(t.game.state.permStr === before + 1 && t.game.state.practice === 18, 'train str at the sailor: +1 for 3 practices (a warrior\'s prime)',
+    t.said.join(' | '));
+}
+// Hiding: an aggressive mobile cannot see you -- a grey wolf in Haon Dor,
+// which jumps anyone it can see (it is not ACT_WIMPY).
+{
+  const wolf = (t) => t.game.mobs.find((m) => m.proto.vnum === 6102);
+  const seen = fresh(2, 71);
+  const w0 = wolf(seen);
+  seen.stand(w0.roomVnum);
+  seen.eye.x = w0.pos.x + 2; seen.eye.z = w0.pos.z; seen.game.grace(0);
+  for (let i = 0; i < 40; i++) seen.game.update(0.1, seen.eye, seen.look);
+  check(!!(w0.instance && w0.instance.fighting === seen.game.state), 'a grey wolf jumps you in plain sight');
+  const t = fresh(2, 71);
+  const s = t.game.state;
+  s.level = 20; s.learned.hide = 100;
+  const agg = wolf(t);
+  t.stand(agg.roomVnum);
+  t.eye.x = agg.pos.x + 2; t.eye.z = agg.pos.z; t.game.update(0.02, t.eye, t.look);
+  s.fighting = null;
+  t.say('hide');
+  const hidden = !!(s.affectedBy & 65536);
+  t.game.grace(0);
+  for (let i = 0; i < 40; i++) t.game.update(0.1, t.eye, t.look);
+  check(hidden && !(agg.instance && agg.instance.fighting === s), `hidden, ${agg.proto.short} (aggressive) leaves you be`);
+  t.eye.x += 3; t.game.update(0.1, t.eye, t.look);
+  check(!(s.affectedBy & 65536), 'and walking off the spot gives you away');
+}
+
 // -------------------------------------------------------------- skills ----
 console.log('\nSKILLS');
 {
