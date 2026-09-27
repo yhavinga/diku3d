@@ -32,6 +32,7 @@ MODULES = [
     "trees",
     "marsh",
     "townsperson",
+    "weapons",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a
@@ -59,6 +60,9 @@ BUDGET = {
     # to PROP_BUDGET's 800. A headstone gets scattered by the dozen and a fence
     # by the segment, so the loose cap would not have caught a regression here.
     "headstone": 250, "grave_slab": 120, "iron_fence": 450,
+    # Carried, so paid for once per armed mobile and once more in first person.
+    "weapon_sword": 600, "weapon_dagger": 400, "weapon_axe": 500, "weapon_mace": 600,
+    "weapon_spear": 400, "weapon_staff": 500, "shield_round": 1100, "shield_kite": 1000,
 }
 PROP_BUDGET = 800
 TREE_BUDGET = 1500

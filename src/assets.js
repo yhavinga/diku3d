@@ -337,4 +337,6 @@ export const ASSET_NAMES = [
   'reed_clump', 'tussock', 'dead_log',
   'headstone', 'grave_slab', 'iron_fence',
   'townsperson',
+  'weapon_sword', 'weapon_dagger', 'weapon_axe', 'weapon_mace', 'weapon_spear',
+  'weapon_staff', 'shield_round', 'shield_kite',
 ];

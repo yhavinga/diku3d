@@ -41,6 +41,12 @@ PALETTE = {
     # put both of these.
     "water": (0.18, 0.34, 0.40, 1.0),
     "grass": (0.22, 0.34, 0.12, 1.0),
+    # Arms and people. `steel` and `paint` have viewer recipes of their own;
+    # the rest are flat materials in assets.js.
+    "steel": (0.62, 0.64, 0.66, 1.0),
+    "paint": (0.50, 0.12, 0.10, 1.0),
+    "leather": (0.29, 0.21, 0.14, 1.0),
+    "hair": (0.23, 0.16, 0.11, 1.0),
 }
 
 
