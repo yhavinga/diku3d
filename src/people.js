@@ -25,13 +25,13 @@
  * fraction of the clip at which the blow lands.
  */
 export const CLIP_FACTS = {
-  person_male: { walk: 1.20, run: 2.60 },
-  person_female: { walk: 1.20 * (0.905 - 0.085) / 0.866, run: 2.60 * (0.905 - 0.085) / 0.866 },
-  troll: { walk: 1.20 * (0.860 - 0.095) / 0.866, run: 2.60 * (0.860 - 0.095) / 0.866 },
+  person_male: { walk: 1.200, run: 2.600 },
+  person_female: { walk: 1.137, run: 2.464 },
+  troll: { walk: 1.063, run: 2.304 },
 };
-export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21 };
+export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21, cast: 14 / 24 };
 export const LOOPS = new Set(['idle', 'idle2', 'walk', 'run', 'fight']);
-export const CLIPS = ['idle', 'idle2', 'walk', 'run', 'fight', 'attack', 'attack2', 'hit', 'block', 'death'];
+export const CLIPS = ['idle', 'idle2', 'walk', 'run', 'fight', 'attack', 'attack2', 'hit', 'block', 'death', 'cast'];
 
 // --- vocabulary -------------------------------------------------------------
 
@@ -111,7 +111,7 @@ const WEAPON_WORDS = [
 
 // --- palettes ---------------------------------------------------------------
 
-const SKIN = [0xe2bf9a, 0xd5a67a, 0xc49068, 0xa87650, 0x8a5a38, 0x6d4526, 0xe8c8a8, 0xb98a60];
+const SKIN = [0xd4a482, 0xc8946c, 0xb98460, 0xa87650, 0x8a5a38, 0x6d4526, 0xdcb090, 0xb07c58];
 const HAIR = [0x2a1d14, 0x3b2a1c, 0x4f3622, 0x6b4a2a, 0x8f6d3e, 0x1c1714, 0x7a3a1e, 0x5a4a3a];
 const HAIR_OLD = [0x9a968c, 0xb8b4aa, 0x7e7a72, 0xcfcac0];
 const EARTH = [0x6b4f3a, 0x5a5a44, 0x4d5a3c, 0x6e5f44, 0x7a6048, 0x55493c, 0x646a58, 0x7c6a52,
@@ -318,8 +318,10 @@ export function personOf(proto, ITEM, instance = 0) {
         P.push(pick(['hair_fringe', 'hood', 'hair_short', 'hair_fringe'], seed2));
         const b = beard();
         if (b) P.push(b);
-        if (druid || /\b(hermits?|pilgrims?|healers?)\b/i.test(w)) out.weapon = out.weapon || 'weapon_staff';
-        else if (seed < 0.3) out.weapon = out.weapon || 'weapon_mace';
+        // A caster should look like one: most carry the staff, the rest the
+        // mace the mud's clerics are trained in.
+        if (druid || /\b(hermits?|pilgrims?|healers?)\b/i.test(w) || seed < 0.7) out.weapon = out.weapon || 'weapon_staff';
+        else out.weapon = out.weapon || 'weapon_mace';
         break;
       }
       case 'rogue':

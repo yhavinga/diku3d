@@ -609,12 +609,12 @@ def head(P):
     # themselves are clean quads. So the head keeps its own topology, spent
     # where a face is looked at: columns crowd towards the front, rings
     # towards the band from chin to brow. The neck ends inside it.
-    sides = 26
+    sides = 30
     # Evenly up the face from the chin to the brow, then by latitude over the
     # crown -- even steps in z put two rings on the whole dome and made a cone.
-    zs = [-0.118 + (0.030 + 0.118) * i / 16.0 for i in range(17)]
-    for i in range(1, 8):
-        phi = (math.pi / 2) * i / 8.0
+    zs = [-0.118 + (0.030 + 0.118) * i / 17.0 for i in range(18)]
+    for i in range(1, 7):
+        phi = (math.pi / 2) * i / 7.0
         zs.append(0.030 + (0.118 - 0.030) * math.sin(phi))
     def g(u, s):
         return math.exp(-(u / s) ** 2)
@@ -699,7 +699,7 @@ def body_parts(P):
     return parts
 
 
-def build_body(P, target=3000):
+def build_body(P, target=2700):
     parts = body_parts(P)
     neck = P["head_joint"] - 0.02
     # The head and the hands, graded so the membership has no hard edge for
@@ -710,14 +710,26 @@ def build_body(P, target=3000):
         return min(1.0, max(0.0, (co.z - neck) / 0.03))
     body = fuse(parts, "body_" + P["name"], voxel=0.0045, smooth=3, smooth_factor=0.5,
                 target=target)
-    hp = head(P) + face_parts(P)
+    hd_parts = head(P)
+    hp = hd_parts + face_parts(P, hd_parts[0])
     for o in hp:
         for poly in o.data.polygons:
             poly.use_smooth = True
     return body, join(hp, "head_" + P["name"])
 
 
-def face_parts(P):
+def _face_y(skull, x, z):
+    """Where the face surface is, front-on, at (x, z): a ray in from the front."""
+    from mathutils.bvhtree import BVHTree
+    bm = bmesh.new()
+    bm.from_mesh(skull.data)
+    tree = BVHTree.FromBMesh(bm)
+    bm.free()
+    loc, _, _, _ = tree.ray_cast(V((x, -0.5, z)), V((0.0, 1.0, 0.0)), 1.0)
+    return loc.y if loc is not None else None
+
+
+def face_parts(P, skull=None):
     """Eyes and brows. At three metres an eye is four pixels, and what makes
     those four pixels read as a person looking back is a dark iris with a
     glint in it set in a little white -- so the iris is its own glossy
@@ -728,10 +740,17 @@ def face_parts(P):
     c = head_center(P)
     out = []
     for sx in (-1, 1):
-        ec = c + V((sx * 0.0325 * sw, -(0.0880 - 0.0205) * sd, 0.0045 * sh))
-        out.append(ellipsoid(tuple(ec), (0.0118 * sw, 0.0105 * sd, 0.0085 * sh),
-                             name="eyeball", mat="eyewhite", seg=8, rings=6))
-        out.append(ellipsoid(tuple(ec + V((0.0, -0.0098 * sd, 0.0))), (0.0058 * sw, 0.0022, 0.0058 * sh),
+        # Proud of the socket by a few millimetres: set flush, the white was
+        # buried in the face and all that showed in the game was a black bead.
+        ex, ez = sx * 0.0325 * sw, c.z + 0.0045 * sh
+        # The white stands 2.5 mm proud of the socket floor under it, found by
+        # a ray rather than by formula.
+        fy = _face_y(skull, ex, ez) if skull else None
+        front = (fy if fy is not None else c.y - 0.078 * sd) - 0.0025
+        ec = V((ex, front + 0.0108 * sd, ez))
+        out.append(ellipsoid(tuple(ec), (0.0126 * sw, 0.0108 * sd, 0.0078 * sh),
+                             name="eyeball", mat="eyewhite", seg=10, rings=6))
+        out.append(ellipsoid((ex, front + 0.0012, ez - 0.0006), (0.0060 * sw, 0.0022, 0.0062 * sh),
                              name="iris", mat="eye", seg=8, rings=4))
         # The brow: a thin tapering bar along the ridge, in hair.
         inner = c + V((sx * 0.012 * sw, -0.0975 * sd, 0.026 * sh))
@@ -740,10 +759,40 @@ def face_parts(P):
             (0.0, 0.0035, 0.004, 0.002), ((outer - inner).length * 0.45, 0.0045, 0.004, 0.002),
             ((outer - inner).length, 0.002, 0.002, 0.0015)],
             sides=6, side=(0, 0, 1), name="brow", mat="hair"))
+    # The nose, as its own solid. On the head's rings it was two columns wide
+    # and came out as nothing at all: in the game the face had no nose. A
+    # bridge from between the eyes down and out to a rounded tip, and the
+    # wings either side of it.
+    nk = P["nose"]
+    top = c + V((0.0, -hd * 0.88, 0.014 * sh))
+    tip = c + V((0.0, -hd * 0.88 - 0.021 * nk, -0.036 * sh))
+    d = tip - top
+    out.append(ring_loft(top, d, [
+        (0.000, 0.0055, 0.0030, 0.006), (d.length * 0.35, 0.0065, 0.0050, 0.007),
+        (d.length * 0.75, 0.0095, 0.0075, 0.009), (d.length, 0.0125, 0.0090, 0.011),
+        (d.length + 0.006, 0.0085, 0.0045, 0.009)],
+        sides=10, side=(1, 0, 0), name="nose", mat="skin"))
+    for sx in (-1, 1):
+        out.append(ellipsoid(tuple(tip + V((sx * 0.0115 * sw, 0.0065, 0.001))), (0.0068, 0.0072, 0.0060),
+                             name="nostril", mat="skin", seg=8, rings=6))
+    # A mouth: fuller lips in the skin and a dark line between them, which is
+    # the one mark on a face that reads at street distance after the eyes.
+    mz = c.z - 0.0665 * sh
+    fy = _face_y(skull, 0.0, mz) if skull else None
+    my = fy if fy is not None else c.y - hd * 0.86
+    # One lip roll above the line and one below, sunk mostly into the face so
+    # only their fronts show.
+    out.append(ellipsoid((0.0, my + 0.0030, mz + 0.0048), (0.020 * sw, 0.0058, 0.0040),
+                         name="lip", mat="skin", seg=12, rings=6))
+    out.append(ellipsoid((0.0, my + 0.0036, mz - 0.0050), (0.017 * sw, 0.0058, 0.0042),
+                         name="lip", mat="skin", seg=12, rings=6))
+    out.append(ring_loft(V((-0.019 * sw, my - 0.0018, mz)), (1, 0, 0), [
+        (0.0, 0.0010, 0.0007, 0.0007), (0.019 * sw, 0.0014, 0.0010, 0.0010),
+        (0.038 * sw, 0.0010, 0.0007, 0.0007)], sides=4, side=(0, 0, 1), name="mouth", mat="eye"))
     return out
 
 
-def base(P, target=3000):
+def base(P, target=2700):
     """The body, bound and stood arms-down on its rig. Returns (body, rig)."""
     import rig
     body, hd = build_body(P, target)
@@ -757,10 +806,10 @@ def base(P, target=3000):
     body = join([body, hd], "body_" + P["name"])
     rig.arms_down(arm, [body], P)
     if P["name"] == "troll":
-        rig.repose(arm, [body], {"spine": (14, 0, 0), "chest": (20, 0, 0), "neck": (-16, 0, 0),
-                                 "head": (-16, 0, 0), "upperarm.L": (-8, 0, -6),
-                                 "upperarm.R": (-8, 0, 6), "forearm.L": (-14, 0, 0),
-                                 "forearm.R": (-14, 0, 0)})
+        rig.repose(arm, [body], {"hips": (6, 0, 0), "spine": (18, 0, 0), "chest": (24, 0, 0),
+                                 "neck": (-20, 0, 0), "head": (-24, 0, 0),
+                                 "upperarm.L": (-12, 0, -8), "upperarm.R": (-12, 0, 8),
+                                 "forearm.L": (-16, 0, 0), "forearm.R": (-16, 0, 0)})
     return body, arm
 
 
@@ -832,7 +881,7 @@ def build_file(fname):
         report.append("%-16s %5d tris" % (fn.__name__, tri_count(o)))
     bpy.data.objects.remove(body, do_unlink=True)
     for o in meshes:
-        lib.uv_project(o)
+        box_uv(o)
         if o.parent is None:
             rig.bind_groups(arm, o)
     info = rig.make_all(arm)
@@ -852,6 +901,26 @@ def build_file(fname):
                export_bake_animation=True,
                export_optimize_animation_size=False)
     return report, info
+
+
+def box_uv(obj):
+    """Cube-projected UVs in metres, like lib.uv_project, without the edit
+    mode operator: that one's poll fails in a background Blender that has
+    just built another module's assets ("context is incorrect"), which is
+    exactly how build_all runs this."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    uv = bm.loops.layers.uv.verify()
+    for f in bm.faces:
+        n = f.normal
+        ax = max(range(3), key=lambda i: abs(n[i]))
+        a, b = [(1, 2), (0, 2), (0, 1)][ax]
+        for loop in f.loops:
+            co = loop.vert.co
+            loop[uv].uv = (co[a], co[b])
+    bm.to_mesh(obj.data)
+    bm.free()
+    return obj
 
 
 def select_mesh(o):

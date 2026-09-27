@@ -932,6 +932,36 @@ def anim_death(arm):
     return "death", (1, _clip(arm, "death", k))
 
 
+def anim_cast(arm):
+    """A spell, 1.0 s. Gather: both hands drawn in together before the chest,
+    the head bowed over them and the weight settling. Release at 0.58: the
+    right arm drives up and forward -- so a staff in it is thrust at the sky
+    and an empty hand opens at the target -- the left palm pushes out, the
+    chest lifts and the head comes up after it. Then back to standing. Written
+    from the plain stance, not the guard, so it reads the same for a wizard
+    in a street as for a priest in a fight."""
+    gather = merge(HANG, {"spine": (6, 0, 0), "chest": (8, 0, 0), "neck": (8, 0, 0), "head": (10, 0, 0),
+                          "upperarm.R": (-34, 0, -18), "forearm.R": (-104, 0, 0), "hand.R": (-10, 0, 0),
+                          "upperarm.L": (-34, 0, 18), "forearm.L": (-104, 0, 0), "hand.L": (-10, 0, 0)})
+    release = merge(HANG, {"spine": (-4, 0, 0), "chest": (-8, 0, 0), "neck": (-4, 0, 0),
+                           "head": (-10, 0, 0),
+                           # Arm out in front with the forearm up past level: a
+                           # staff in the fist stands straight up, high, and an
+                           # empty hand is raised at the target.
+                           "upperarm.R": (-78, 0, 8), "forearm.R": (-26, 0, 0), "hand.R": (4, 0, 0),
+                           "upperarm.L": (-84, 0, -6), "forearm.L": (-12, 0, 0), "hand.L": (-60, 0, 0)})
+    k = [
+        (1, HANG, ((0, 0, -0.004), 0, 0, 0), "rest"),
+        (6, blend(HANG, gather, 0.7), ((0, 0.01, -0.03), 4, 0, 0), "rest"),
+        (11, gather, ((0, 0.015, -0.045), 6, 0, 0), "rest"),
+        (13, blend(gather, release, 0.45), ((0, 0.0, -0.03), 2, 0, 0), "rest"),
+        (15, release, ((0, -0.02, -0.01), -3, 0, 0), "rest"),
+        (19, release, ((0, -0.02, -0.012), -3, 0, 0), "rest"),
+        (25, HANG, ((0, 0, -0.004), 0, 0, 0), "rest"),
+    ]
+    return "cast", (1, _clip(arm, "cast", k)), (15 - 1) / 24.0
+
+
 def anim_carry(arm, name):
     new_action(arm, name)
     pose(arm, 1, CARRY[name])
@@ -939,7 +969,8 @@ def anim_carry(arm, name):
     return name, (1, 2)
 
 
-CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "block", "death")
+CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "block", "death",
+         "cast")
 
 
 def make_all(arm, measure=True):
@@ -953,7 +984,7 @@ def make_all(arm, measure=True):
     baked = {}
     info = {}
     fns = [anim_idle, anim_idle2, anim_walk, anim_run, anim_fight, anim_attack, anim_attack2,
-           anim_hit, anim_block, anim_death]
+           anim_hit, anim_block, anim_death, anim_cast]
     for fn in fns:
         r = fn(arm)
         name, frames = r[0], r[1]

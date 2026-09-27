@@ -491,14 +491,16 @@ const tagOfMaterial = (m) => (m && m.name ? m.name.replace(/^MAT:/, '') : '');
  * A person, dressed. Returns the figure record the rest of the viewer drives:
  *
  *   { group, headGroup, height, scale, mixer, actions, clips, stride,
- *     hitFrame, weapon, shield, archetype }
+ *     hitFrame, weapon, shield, castPoint, archetype }
  *
- * `actions` holds all ten clips (idle idle2 walk run fight attack attack2 hit
- * block death). The five loops are playing, idle at weight 1 and the rest at
- * 0; the five one-shots are set to play once and clamp on their last frame,
- * at weight 0 and not started -- `reset().play()` them. `clips` is name to
- * seconds, `stride` metres of ground per cycle at this figure's size, and
- * `hitFrame` the fraction of `attack` and `attack2` at which the blow lands.
+ * `actions` holds all eleven clips (idle idle2 walk run fight attack attack2
+ * hit block death cast). The five loops are playing, idle at weight 1 and the
+ * rest at 0; the six one-shots are set to play once and clamp on their last
+ * frame, at weight 0 and not started -- `reset().play()` them. `clips` is name
+ * to seconds, `stride` metres of ground per cycle at this figure's size, and
+ * `hitFrame` the fraction of `attack` and `attack2` at which the blow lands
+ * and of `cast` at which the spell is released. `castPoint` is an Object3D at
+ * the tip of a staff, or in the right fist.
  */
 function buildPerson(library, who, proto, instance) {
   const asset = library.get(who.file);
@@ -513,6 +515,20 @@ function buildPerson(library, who, proto, instance) {
   }
   for (const node of drop) node.removeFromParent();
   const ghost = who.arch === 'ghost';
+  // One skeleton for the whole person. The loader and the clone give every
+  // primitive of every mesh its own Skeleton over the same bones -- nine or
+  // ten per person -- and the renderer recomputes and re-uploads each one's
+  // bone texture every frame. They are all bound to the same joints with the
+  // same inverse binds (one skin in the file), so one will do, and the
+  // renderer updates a shared skeleton once a frame.
+  let skeleton = null;
+  body.traverse((node) => {
+    if (!node.isSkinnedMesh) return;
+    if (!skeleton) { skeleton = node.skeleton; return; }
+    const same = node.skeleton.bones.length === skeleton.bones.length
+      && node.skeleton.bones.every((b, i) => b === skeleton.bones[i]);
+    if (same) node.bind(skeleton, node.bindMatrix);
+  });
   body.traverse((node) => {
     if (!node.isMesh) return;
     // Figures stay out of the sun's shadow map: a skinned mesh there is a
@@ -551,6 +567,20 @@ function buildPerson(library, who, proto, instance) {
     else shield = null;
   }
 
+  // Where a spell leaves from: the knot of a staff, or else the right fist.
+  // weapons.py puts the staff's top at 0.855 m up its own axis.
+  const castPoint = new THREE.Object3D();
+  castPoint.name = 'castPoint';
+  if (weapon && who.weapon === 'weapon_staff') {
+    castPoint.position.set(0, 0.86, 0);
+    weapon.add(castPoint);
+  } else {
+    const grip = body.getObjectByName('gripR');
+    if (!grip) throw new Error(`actors: ${who.file}.glb has no gripR bone`);
+    castPoint.position.set(0, 0.03, 0);
+    grip.add(castPoint);
+  }
+
   const carry = carryOf({ weapon: weapon ? who.weapon : null, shield: shield ? who.shield : null });
   const mixer = new THREE.AnimationMixer(body);
   const actions = {};
@@ -583,7 +613,7 @@ function buildPerson(library, who, proto, instance) {
   return {
     group, headGroup: null, height: t.height * scale, scale, mixer, actions, clips,
     stride: { walk: facts.walk * scale, run: facts.run * scale },
-    hitFrame: { ...HIT_FRAME }, weapon, shield, archetype: who.arch,
+    hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
   };
 }
 
@@ -1132,7 +1162,8 @@ export function populate(world, layout, built, options = {}) {
         object: fig, head: headGroup, label, home: fig.position.clone(), height,
         mixer: built.mixer || null, actions: built.actions || null, legs: built.legs || null,
         clips: built.clips || null, stride: built.stride || null, hitFrame: built.hitFrame || null,
-        weapon: built.weapon || null, archetype: built.archetype || null, scale: built.scale || 1,
+        weapon: built.weapon || null, castPoint: built.castPoint || null,
+        archetype: built.archetype || null, scale: built.scale || 1,
         last: fig.position.clone(), speed: 0,
         phase: strHash(mob.proto.short, 5) * 6.28, aggressive, walking: false,
         sentinel: !!(mob.proto.act & ACT_SENTINEL),

@@ -55,6 +55,9 @@ const TAG_MATERIALS = {
   // Off-white and not bright: a full white sclera at four pixels is a doll's.
   eyewhite: { color: 0xb9ae9c, roughness: 0.4, metalness: 0 },
   bone: { color: 0xcfc4a6, roughness: 0.78, metalness: 0 },
+  // Gilt: a cleric's holy symbol. Bright on purpose -- it has to read at
+  // twenty metres against a robe.
+  gold: { color: 0xd4a64a, roughness: 0.32, metalness: 0.9 },
   glass: {
     color: 0xd8c48a, roughness: 0.12, metalness: 0,
     transparent: true, opacity: 0.55, emissive: 0x000000,

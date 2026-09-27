@@ -33,6 +33,7 @@ MODULES = [
     "marsh",
     "townsperson",
     "weapons",
+    "people",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a
@@ -65,6 +66,12 @@ BUDGET = {
     "weapon_spear": 400, "weapon_staff": 500, "shield_round": 1100, "shield_kite": 1000,
 }
 PROP_BUDGET = 800
+# people.py: an archetype is a whole dressed person, one skinned draw per
+# material; a head piece is worn on top of one. Figures are culled at 46 m
+# and a busy square shows about a dozen, so these are paid perhaps twelve
+# times a frame, not per chunk.
+PERSON_BUDGET = 6500
+HEAD_PIECE_BUDGET = 1000
 TREE_BUDGET = 1500
 
 
@@ -117,7 +124,11 @@ def check(report):
         if len(bits) < 3 or bits[2] != "tris":
             continue
         name, tris = bits[0], int(bits[1])
-        cap = BUDGET.get(name, TREE_BUDGET if name.startswith("tree") else PROP_BUDGET)
+        cap = BUDGET.get(name, TREE_BUDGET if name.startswith("tree") else
+                         PERSON_BUDGET if name.startswith("arch_") else
+                         HEAD_PIECE_BUDGET if name.startswith(("hair_", "beard_", "helm_", "hat_",
+                                                               "hood", "coif", "scarf", "moustache"))
+                         else PROP_BUDGET)
         if tris > cap:
             bad.append("%s %d > %d" % (name, tris, cap))
     return "OVER BUDGET: " + ", ".join(bad) if bad else "all within budget"

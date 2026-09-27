@@ -95,7 +95,7 @@ def copy_object(obj, name):
 # --- shells ---------------------------------------------------------------------
 
 def shell(body, arm, name, keep, offset=0.010, mat="cloth", planes=(), thick=0.006,
-          push=None, keep_ratio=0.55):
+          push=None, keep_ratio=0.45):
     """A garment cut from the body where `keep(co, bone)` is true, pushed out
     `offset` along the normals (or by `push(co, bone)` where given), with its
     open edges snapped onto the nearest of `planes` [(point, normal)] and a
@@ -728,8 +728,7 @@ def guard(body, arm, C):
     bt = belt(body, C.z(1.03), under=[mail, skirt] + tb)
     for b in bt:
         hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
-    hands = gloves(body, arm, C)
-    return [mail, skirt, legs, feet, hands] + tb + bt
+    return [mail, skirt, legs, feet] + tb + bt
 
 
 def apron(body, arm, C, top, hem, width=0.15, mat="linen", under=(), bib=False, name="apron"):
@@ -900,15 +899,44 @@ def smith(body, arm, C):
     return [top, skirt, legs, feet, ap] + bt
 
 
+def holy_symbol(body, arm, C, under=()):
+    """A cleric's holy symbol: a gilt disc with a sunburst cross, on a cord
+    round the neck, lying on the breastbone. It is the one thing that tells a
+    priest from a monk from a hermit at street distance, so it is overscaled
+    and bright."""
+    tree = bvh([body] + list(under))
+    z = C.z(1.30)
+    y = drape(tree, 0.0, z, -1, -0.12) - 0.008
+    disc = people.ring_loft(V((0.0, y + 0.004, z)), (0, -1, 0), [
+        (0.0, 0.036, 0.036, 0.036), (0.006, 0.038, 0.038, 0.038), (0.008, 0.030, 0.030, 0.030)],
+        sides=16, side=(1, 0, 0), name="symbol", mat="gold")
+    bar_v = lib.box((0.012, 0.008, 0.062), (0.0, y - 0.006, z), name="symbol_v", mat="gold")
+    bar_h = lib.box((0.050, 0.008, 0.012), (0.0, y - 0.006, z + 0.008), name="symbol_h", mat="gold")
+    # The cord: from the disc up over the collar on either side.
+    cord = []
+    for sx in (-1, 1):
+        a = V((sx * 0.012, y + 0.002, z + 0.034))
+        b = V((sx * 0.060, drape(tree, sx * 0.06, C.neck - 0.02, -1, y) + 0.004, C.neck - 0.012))
+        cord.append(people.ring_loft(a, b - a, [(0.0, 0.0022, 0.0022, 0.0022),
+                                                ((b - a).length, 0.0022, 0.0022, 0.0022)],
+                                     sides=4, name="cord", mat="leather"))
+    parts = [disc, bar_v, bar_h] + cord
+    for o in parts:
+        rig.set_rigid(o, "chest")
+    return parts
+
+
 def priest(body, arm, C):
-    """A cleric: an ankle-length robe with a hood worn down, and a cord."""
+    """A cleric: an ankle-length robe with a hood worn down, a cord, and the
+    holy symbol on his breast."""
     parts = robe(body, arm, C, mat="cloth", hem=0.05, flare=1.35, sleeve=0.9, wide=True)
     feet = boots(body, arm, C, top=0.92)
     cw = cowl(body, arm, C, mat="cloth")
     bt = belt(body, C.z(1.06), under=parts, width=0.016, buckle=None, mat="linen")
     for b in bt:
         hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
-    return parts + [feet, cw] + bt
+    sym = holy_symbol(body, arm, C, under=parts + [cw])
+    return parts + [feet, cw] + bt + sym
 
 
 def mage(body, arm, C):
@@ -1387,7 +1415,7 @@ def beard_short(P):
 
 
 def moustache(P):
-    return cap(P, "moustache", lambda l: abs(l.x) < 0.030 and -0.064 < l.z < -0.050 and
+    return cap(P, "moustache", lambda l: abs(l.x) < 0.034 and -0.070 < l.z < -0.040 and
                abs(math.degrees(_theta(l))) < 50, lambda l: 0.004)
 
 
