@@ -1049,11 +1049,15 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     return out.set(fig.at.x, fig.at.y + fig.height * 0.88, fig.at.z).addScaledVector(_w, fig.legs ? 0.6 : 0.25);
   }
 
-  /** Where a spell strikes: the chest, or a little in front of your eye. */
-  function chestPoint(who, out) {
+  /**
+   * Where a spell strikes: the chest, or in front of your eye -- `near` for
+   * what flies at you (a stream or a bolt has to arrive in your face), far
+   * enough for a burst to go off without filling the frame otherwise.
+   */
+  function chestPoint(who, out, near = false) {
     if (who.player) {
       camera.getWorldDirection(_v);
-      return out.copy(camera.position).addScaledVector(_v, 1.7).add({ x: 0, y: -0.3, z: 0 });
+      return out.copy(camera.position).addScaledVector(_v, near ? 0.8 : 1.7).add({ x: 0, y: near ? -0.22 : -0.3, z: 0 });
     }
     const fig = figureOf(who.slot);
     if (!fig) return who.slot ? out.set(who.slot.pos.x, who.slot.pos.y + 1.1, who.slot.pos.z) : out.copy(camera.position);
@@ -1355,7 +1359,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     const from = fx.from;
     const src = fx.hand.clone();
     fx.data.src = src;
-    if (fx.to) chestPoint(fx.to, fx.aim);
+    if (fx.to) chestPoint(fx.to, fx.aim, true);
     const palette = pal(f);
     // A flash as it leaves the hand.
     glowAt(light, src, palette.glow, fx.from.player ? 0.5 : 0.8, 0.18, 0.9);
@@ -1409,7 +1413,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     const tf = fx.t - fx.releaseT;
     const u = clamp(tf / Math.max(0.05, fx.flight), 0, 1);
     const src = fx.data.src;
-    if (fx.to) chestPoint(fx.to, fx.aim);
+    if (fx.to) chestPoint(fx.to, fx.aim, true);
     const aim = fx.aim;
     const dist = src.distanceTo(aim);
 
@@ -1450,7 +1454,9 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       case 'fireball': {
         if (!fx.to) break;
         const pos = fx.data.ballPos || (fx.data.ballPos = new THREE.Vector3());
-        pos.lerpVectors(src, aim, u);
+        // At you, it bursts at arm's length (see impact), so it flies there.
+        const end = fx.to.player ? camera.getWorldDirection(_w).multiplyScalar(2.6).add(camera.position).add({ x: 0, y: -0.35, z: 0 }) : aim;
+        pos.lerpVectors(src, end, u);
         pos.y += Math.sin(Math.PI * u) * Math.min(1.2, dist * 0.08);
         const ball = fx.data.ball;
         const r = (fx.from.player ? 0.2 : 0.26) * (0.6 + 0.4 * Math.min(1, tf / 0.12));
@@ -2062,7 +2068,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     const bits = s.affectedBy || 0;
     let css = '';
     let op = 0;
-    if (bits & AFF.BLIND) { css = 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0.25) 0%, rgba(4,2,8,0.9) 55%, rgba(0,0,0,0.97) 100%)'; op = 1; }
+    // Blind is a long affect (1 + level ticks), so it narrows the view rather than ending it.
+    if (bits & AFF.BLIND) { css = 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0.3) 0%, rgba(4,2,8,0.72) 45%, rgba(0,0,0,0.95) 100%)'; op = 1; }
     else if (bits & AFF.SANCTUARY) { css = 'radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0) 55%, rgba(240,244,255,0.32) 85%, rgba(250,252,255,0.5) 100%)'; op = 1; }
     else if (bits & AFF.FAERIE_FIRE) { css = 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 60%, rgba(255,110,200,0.38) 100%)'; op = 1; }
     else if (bits & AFF.POISON) { css = 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 55%, rgba(60,120,20,0.38) 100%)'; op = 1; }
@@ -2186,7 +2193,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     const lightning = (f === 'lightning' || f === 'breath-lightning') && fx.released && !fx.fizzled && fx.to;
     if (lightning && fx.t - fx.releaseT < Math.max(0.32, fx.flight + 0.25)) {
       const src = fx.data.src;
-      const aim = chestPoint(fx.to, tmpA);
+      const aim = chestPoint(fx.to, tmpA, true);
       if (!fx.data.path || clock >= (fx.data.nextPath || 0)) {
         fx.data.path = bolt(src, aim.clone(), 0.2, 5);
         fx.data.branches = [];
@@ -2237,7 +2244,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     }
     // Shocking grasp: the arc from the hand while the spell is on its way.
     if (f === 'shock' && fx.released && fx.to && (!fx.landed || fx.t - fx.landT < 0.3)) {
-      const aim = chestPoint(fx.to, tmpA).clone();
+      const aim = chestPoint(fx.to, tmpA, true).clone();
       const path = bolt(fx.data.src, aim, 0.3, 4);
       glow.strip(path, 0.3, PAL.lightning.glow, 0.5, 0);
       glow.strip(path, 0.035, PAL.lightning.core, 1, 1);
@@ -2261,7 +2268,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       const life = fx.flight + 0.3;
       if (age < life) {
         const src = fx.data.src;
-        const aim = chestPoint(fx.to, tmpA);
+        const aim = chestPoint(fx.to, tmpA, true);
         const dir = _v.set(aim.x - src.x, aim.y - src.y, aim.z - src.z);
         const len = dir.length() * 1.08; dir.normalize();
         const side = _w.set(-dir.z, 0, dir.x).normalize();
@@ -2280,7 +2287,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       const life = fx.flight + 0.5;
       if (age < life) {
         const src = fx.data.src;
-        const aim = chestPoint(fx.to, tmpA).clone();
+        const aim = chestPoint(fx.to, tmpA, true).clone();
         const reach = smooth(age / Math.max(0.1, fx.flight));
         const fade = 1 - smooth((age - fx.flight) / 0.5);
         // Three strands wound round the line between them, each turning and
