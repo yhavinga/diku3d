@@ -373,9 +373,9 @@ export class Hud {
     }
     this.el.look.style.opacity = '1';
     const action = this.examineOpen ? 'E — close'
-      : (target.kind === 'door'
-        ? (target.door.open ? 'E — close' : 'E — open')
-        : 'E — examine');
+      : (target.action || (target.kind === 'door'
+        ? (target.door.open ? 'E — close' : (target.door.spec.locked ? 'E — unlock' : 'E — open'))
+        : 'E — examine'));
     this.el.look.innerHTML = `<span class="look-name">${escapeHtml(target.title)}</span>`
       + (target.subtitle ? `<span class="look-sub">${escapeHtml(target.subtitle)}</span>` : '')
       + `<span class="look-key">${action}</span>`;

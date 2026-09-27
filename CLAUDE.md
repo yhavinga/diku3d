@@ -13,9 +13,12 @@ the measurement that settled each finding; add to it at the end of a round.
 There is no build step, no bundler, no test framework and no linter. So
 "run the project's checks before calling it done" means, in order:
 
-    node --check src/*.js               # nothing else will catch a syntax slip
+    node --check src/*.js src/rules/*.js # nothing else will catch a syntax slip
+    node tools/import-check.mjs         # every module actually loads
     node tools/parse-check.mjs          # the .are reader, over all 45 areas
     node tools/layout-check.mjs         # layout quality per area
+    node tools/world-check.mjs          # structural faults across stages
+    node tools/game-check.mjs; node tools/magic-check.mjs; node tools/rules-check.mjs
 
 `layout-check` prints a walkable percentage per area. That number is the
 project's main quality metric — if a change drops it, the change is wrong.
