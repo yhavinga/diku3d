@@ -1958,8 +1958,18 @@ export function populate(world, layout, built, options = {}) {
   if (assets) nav.addInstances([built.group, group], assets, THREE);
   const motion = createMotion({ figures, nav });
 
+  /**
+   * Play a clip on a mobile's body -- `target` is a figure, a game slot
+   * (`game.mobs[i]`) or a mobile instance (`slot.instance`). See
+   * motion.js `perform`: `{ onContact, contactIn }`, returns seconds to contact.
+   */
+  function perform(target, clip, options) {
+    const fig = target && (target.m ? target : (target.figure || (target.slot && target.slot.figure)));
+    return motion.perform(fig || null, clip, options);
+  }
+
   return {
-    group, interactables, update, doors, figures, nav, motion,
+    group, interactables, update, doors, figures, nav, motion, perform,
     setSun, setDaylight, setSky, lights: windowLights,
   };
 }

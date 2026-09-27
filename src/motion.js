@@ -879,6 +879,43 @@ export function createMotion({ figures, nav }) {
     }
   }
 
+  /**
+   * Play any clip on a figure and hear back when it connects -- the hook for
+   * whatever else wants a body to act: a mobile casting, breathing, biting.
+   * `onContact` fires on the clip's contact frame (`hitFrame[name]`, else
+   * halfway through), on the frame loop's clock, not a timer. `contactIn`,
+   * given, times the clip so that frame lands then, as `strike` does. A
+   * figure without the clip lunges instead. Returns the seconds until contact,
+   * or null for a figure that cannot act (dead, gone).
+   */
+  function perform(fig, name, { onContact = null, contactIn = null } = {}) {
+    if (!fig || !fig.m || fig.m.dead || fig.m.gone) {
+      if (onContact) onContact();
+      return null;
+    }
+    const has = fig.actions && fig.actions[name];
+    const fraction = (fig.hitFrame && fig.hitFrame[name]) ?? 0.5;
+    let at;
+    if (has && (/^attack/.test(name) || contactIn !== null)) {
+      const natural = fraction * fig.clips[name];
+      at = contactIn ?? natural;
+      if (/^attack/.test(name)) strike(fig, name, at);
+      else {
+        const speed = clamp(natural / Math.max(0.05, at), 0.5, 2.4);
+        playOnce(fig, name, { timeScale: speed });
+        at = natural / speed;
+      }
+    } else if (has) {
+      playOnce(fig, name);
+      at = fraction * fig.clips[name];
+    } else {
+      at = contactIn ?? 0.35;
+      fig.m.lunge = { t: 0, dur: Math.max(0.5, at + 0.35), contact: clamp(at / Math.max(0.5, at + 0.35), 0.3, 0.8), reach: fig.legs ? 1 : 0.6 };
+    }
+    if (onContact) (fig.m.calls || (fig.m.calls = [])).push({ at, fn: onContact });
+    return at;
+  }
+
   function die(fig) {
     const m = fig.m;
     if (m.dead) return;
@@ -926,6 +963,13 @@ export function createMotion({ figures, nav }) {
         fig.sink = u * 0.5;
         if (!far) setOpacity(fig, 1 - u);
         if (u >= 1) { m.gone.done = true; fig.object.visible = false; continue; }
+      }
+
+      if (m.calls && m.calls.length) {
+        for (let i = m.calls.length - 1; i >= 0; i--) {
+          m.calls[i].at -= dt;
+          if (m.calls[i].at <= 0) m.calls.splice(i, 1)[0].fn();
+        }
       }
 
       if (m.pending) {
@@ -1020,5 +1064,5 @@ export function createMotion({ figures, nav }) {
     return { moving, idle, travelling, figures: figures.length };
   }
 
-  return { update, strike, react, die, setOpacity, stats, orderOf, CLOSE };
+  return { update, strike, react, perform, die, setOpacity, stats, orderOf, CLOSE };
 }

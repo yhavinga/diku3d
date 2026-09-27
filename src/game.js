@@ -1664,11 +1664,12 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
    * update.c: mobile_update -- scavenging, wandering and the wounded slipping
    * away -- every PULSE_MOBILE, over every mobile in the world.
    *
-   * DIVERGES: spec_funs are not ported (a guard's spec_guard, a janitor's
-   * spec_janitor), so the `continue` that follows a spec_fun that acted never
-   * fires. And a mobile already walking between two rooms is left to finish:
-   * the mud's move is instant, so it never has to ask.
+   * The spec_funs themselves are not in this file: `game.mobileSpec`, when
+   * set, is called first for each woken mobile and a true return ends its
+   * turn. DIVERGES: a mobile already walking between two rooms is left to
+   * finish: the mud's move is instant, so it never has to ask.
    */
+  let mobileSpec = null;
   function mobileUpdate() {
     const counts = new Map();
     for (const slot of mobs) if (!slot.dead) counts.set(slot.roomVnum, (counts.get(slot.roomVnum) || 0) + 1);
@@ -1678,6 +1679,9 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (slot.dead || slot.travel) continue;
       const mob = slot.instance;
       const act = slot.proto.act;
+      // "Examine call for special procedure": a spec_fun that acted ends this
+      // mobile's turn, as in update.c. `game.mobileSpec` is where one plugs in.
+      if (mobileSpec && mob && mobileSpec(slot, mob)) continue;
       // "That's all for sleeping / busy monster": fighting is busy.
       if (mob && mob.position !== POS.STANDING) continue;
       const room = world.rooms.get(slot.roomVnum);
@@ -2128,6 +2132,13 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       listeners.push(fn);
       return () => listeners.splice(listeners.indexOf(fn), 1);
     },
+
+    /**
+     * update.c's spec_fun call in mobile_update: fn(slot, mob) -> true if it
+     * acted, which ends that mobile's turn (no wandering, no scavenging).
+     */
+    set mobileSpec(fn) { mobileSpec = fn; },
+    get mobileSpec() { return mobileSpec; },
 
     /** Seconds until the next violence pulse resolves a round. */
     violenceIn() {
