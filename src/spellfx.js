@@ -1731,7 +1731,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         decal(feet, big ? 1.2 : 0.95, 2, palette.glow.clone().multiplyScalar(0.8), 1.3, (d, u, t) => { u.uAlpha.value = Math.sin(Math.PI * clamp(t / 1.3, 0, 1)); });
         auraPulse(target || fx.from, palette.glow, 1.2, big ? 1.6 : 1);
         takeLight(palette.light, (t) => (t < 1.1 ? { p: aim, intensity: (big ? 14 : 8) * Math.sin(Math.PI * t / 1.1), distance: 7 } : null));
-        if (big) column(feet, palette.mote, 1.4);
+        if (big && !(target || fx.from).player) column(feet, palette.mote, 1.4);
         S.chord(aim, fx.spell === 'refresh' ? 440 : 392, big ? 1.5 : 1);
         if ((target || fx.from).player) flashScreen('radial-gradient(ellipse at 50% 55%, rgba(255,225,160,0.45) 0%, rgba(255,210,140,0) 75%)', 0.7, 1100);
         break;
@@ -1747,7 +1747,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         } else {
           motes(w, palette.mote, strong ? 50 : 28, strong ? 1.8 : 1.2);
         }
-        if (strong) column(feet, palette.mote, 1.8);
+        if (strong && !w.player) column(feet, palette.mote, 1.8);
         decal(feet, strong ? 1.3 : 1.0, 1, palette.glow, 0.7, (d, u, t) => { u.uRadius.value = smooth(t / 0.6); u.uAlpha.value = 1 - t / 0.7; });
         takeLight(palette.light, (t) => (t < 0.9 ? { p: aim, intensity: (strong ? 16 : 7) * Math.sin(Math.PI * t / 0.9), distance: 7 } : null));
         S.chord(aim, strong ? 523 : f === 'bless' ? 440 : 349, strong ? 2 : 1);
@@ -1810,7 +1810,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         auraPulse(w, PAL.dispel.glow, 1.5, 0.7);
         burst(light, chestPoint(w, new THREE.Vector3()), 24, { speed: [1.5, 3.5], flat: true, life: [0.3, 0.6], size: [0.03, 0.05], color: PAL.dispel.glow, drag: 2.5, shape: 1 });
         S.chord(aim, 470, 1);
-        if (fx.spell === 'teleport' || fx.spell === 'word of recall') column(feetPoint(w, new THREE.Vector3()), C(2, 2.4, 3), 1.2);
+        if ((fx.spell === 'teleport' || fx.spell === 'word of recall') && !w.player) column(feetPoint(w, new THREE.Vector3()), C(2, 2.4, 3), 1.2);
         break;
       }
       case 'quake': {
@@ -1840,7 +1840,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       }
       case 'teleport': {
         const w = target || fx.from;
-        column(feetPoint(w, new THREE.Vector3()), C(2.2, 2.6, 3.2), 1.4);
+        if (!w.player) column(feetPoint(w, new THREE.Vector3()), C(2.2, 2.6, 3.2), 1.4);
         auraPulse(w, PAL.dispel.glow, 2, 0.9);
         S.chord(aim, 587, 1.5);
         break;
