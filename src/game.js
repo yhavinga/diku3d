@@ -26,6 +26,11 @@ import {
   ROOM_NO_MOB, ROOM_PRIVATE, ROOM_SOLITARY,
 } from './are.js';
 import { createNav } from './nav.js';
+import {
+  AFF, COND, OBJ_VNUM, ITEM_TAKE, LEVEL_IMMORTAL, createMoney, makeObject, isAffected, canSee,
+  objWeight, objNumber,
+} from './rules/handler.js';
+import { installRules } from './rules/index.js';
 
 // --------------------------------------------------------------- merc.h ----
 
@@ -33,6 +38,7 @@ const PULSE_PER_SECOND = 4;
 const PULSE_VIOLENCE = 3 * PULSE_PER_SECOND;
 const PULSE_TICK = 30 * PULSE_PER_SECOND;
 const PULSE_MOBILE = 4 * PULSE_PER_SECOND;
+const PULSE_AREA = 60 * PULSE_PER_SECOND;
 
 const MAX_LEVEL = 40;
 const LEVEL_HERO = MAX_LEVEL - 4;
@@ -131,6 +137,15 @@ export const SKILLS = [
   { key: 'enhancedDamage', name: 'enhanced damage', level: [37, 37, 37, 1] },
   { key: 'kick', name: 'kick', level: [37, 37, 37, 1] },
   { key: 'disarm', name: 'disarm', level: [37, 37, 10, 37] },
+  // The rest of const.c's non-spell skills: what act_move.c, act_obj.c and
+  // fight.c's do_* commands roll against.
+  { key: 'backstab', name: 'backstab', level: [37, 37, 1, 37] },
+  { key: 'hide', name: 'hide', level: [37, 37, 1, 37] },
+  { key: 'peek', name: 'peek', level: [37, 37, 1, 37] },
+  { key: 'pickLock', name: 'pick lock', level: [37, 37, 1, 37] },
+  { key: 'rescue', name: 'rescue', level: [37, 37, 37, 1] },
+  { key: 'sneak', name: 'sneak', level: [37, 37, 1, 37] },
+  { key: 'steal', name: 'steal', level: [37, 37, 1, 37] },
 ];
 
 /** dam_message's attack_table, indexed by a weapon's value[3]. */
@@ -305,6 +320,13 @@ export function createCharacter(classIndex, { level = 1, sex = 1, rng = new Rng(
     equipment: new Array(MAX_WEAR).fill(null),
     learned: {},
     fighting: null,
+    // pcdata->condition, as nanny leaves it: sober, fed and watered.
+    condition: [0, 48, 48],
+    act: 0,
+    affectedBy: 0,
+    affected: [],
+    // WAIT_STATE, in pulses: what a skill costs you in time before the next.
+    wait: 0,
   };
   for (const skill of SKILLS) ch.learned[skill.key] = 0;
 
@@ -366,6 +388,31 @@ export function gainExp(ch, gain, rng, onLevel) {
 
 export const expToLevel = (ch) => Math.max(0, 1000 * (ch.level + 1) - ch.exp);
 
+/**
+ * update.c: hit_gain, mana_gain, move_gain. A player's come off level and
+ * position, halved for an empty stomach and again for a dry throat; poison
+ * quarters anyone's.
+ */
+function regain(ch, npcGain, base, sleeping, resting, max, current) {
+  let gain;
+  if (isNpc(ch)) gain = npcGain;
+  else {
+    gain = base;
+    if (ch.position === POS.SLEEPING) gain += sleeping;
+    else if (ch.position === POS.RESTING) gain += resting;
+    if (ch.condition[1] === 0) gain = idiv(gain, 2);
+    if (ch.condition[2] === 0) gain = idiv(gain, 2);
+  }
+  if (isAffected(ch, AFF.POISON)) gain = idiv(gain, 4);
+  return Math.min(gain, max - current);
+}
+export const hitGain = (ch) => regain(ch, idiv(ch.level * 3, 2), Math.min(5, ch.level),
+  currCon(ch), idiv(currCon(ch), 2), ch.maxHit, ch.hit);
+export const manaGain = (ch) => regain(ch, ch.level, Math.min(5, idiv(ch.level, 2)),
+  currInt(ch) * 2, currInt(ch), ch.maxMana, ch.mana);
+export const moveGain = (ch) => regain(ch, ch.level, Math.max(15, 2 * ch.level),
+  currDex(ch), idiv(currDex(ch), 2), ch.maxMove, ch.move);
+
 // ------------------------------------------------------------- the mobile ----
 
 /**
@@ -404,6 +451,7 @@ export function createMobile(proto, loadLevel, rng) {
     gold: proto.gold,
     equipment: new Array(MAX_WEAR).fill(null),
     inventory: [],
+    affected: [],
   };
   mob.maxHit = level * 8 + rng.range(idiv(level * level, 4), level * level);
   mob.hit = mob.maxHit;
@@ -429,6 +477,12 @@ export function createObject(proto, level) {
     wearLoc: WEAR.NONE,
     affects: proto.affects || [],
     timer: 0,
+    description: proto.long,
+    // Where it is: in a container (`contains` of another), or lying in a
+    // room at a point on the floor. Carried objects have neither.
+    contains: [],
+    inRoom: null,
+    at: null,
   };
 }
 
@@ -490,7 +544,6 @@ function unequipChar(ch, obj) {
 }
 
 const canWear = (obj, flag) => (obj.wearFlags & flag) !== 0;
-const objWeight = (obj) => obj.weight;
 const carriedWeight = (ch) => ch.inventory.reduce((sum, o) => sum + objWeight(o), 0);
 
 /**
@@ -498,6 +551,7 @@ const carriedWeight = (ch) => ch.inventory.reduce((sum, o) => sum + objWeight(o)
  * places lands where the mud would put it. Returns the mud's own reply.
  */
 function wearObj(ch, obj, replace = true) {
+  if (ch.level < obj.level) return { ok: false, text: `You must be level ${obj.level} to use this object.` };
   // equip_char's zap: gear that hates what you are drops out of your hands.
   if (((obj.extraFlags & 1024) && isEvil(ch))
     || ((obj.extraFlags & 512) && isGood(ch))
@@ -522,6 +576,7 @@ function wearObj(ch, obj, replace = true) {
     return slot(a, message);
   };
 
+  if (obj.itemType === ITEM.LIGHT) return slot(WEAR.LIGHT, `You light ${obj.name} and hold it.`);
   if (canWear(obj, W.FINGER)) return pair(WEAR.FINGER_L, WEAR.FINGER_R, `You wear ${obj.name} on your finger.`);
   if (canWear(obj, W.NECK)) return pair(WEAR.NECK_1, WEAR.NECK_2, `You wear ${obj.name} around your neck.`);
   if (canWear(obj, W.BODY)) return slot(WEAR.BODY, `You wear ${obj.name} on your body.`);
@@ -585,7 +640,10 @@ export function damVerb(dam) {
 
 const capitalise = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
-/** fight.c: dam_message, resolved for both audiences that exist here. */
+/**
+ * fight.c: dam_message, for all three audiences. A skill's dt is its name
+ * (skill_table's noun_damage: 'kick', 'backstab'), where Merc uses the gsn.
+ */
 function damMessage(ch, victim, dam, dt) {
   const [vs, vp] = damVerb(dam);
   const punct = dam <= 24 ? '.' : '!';
@@ -593,14 +651,19 @@ function damMessage(ch, victim, dam, dt) {
     return {
       toChar: `You ${vs} ${victim.name}${punct}`,
       toVict: `${capitalise(ch.name)} ${vp} you${punct}`,
+      toRoom: `${capitalise(ch.name)} ${vp} ${victim.name}${punct}`,
     };
   }
-  const attack = ATTACK_TABLE[dt - TYPE_HIT] || ATTACK_TABLE[0];
+  const attack = typeof dt === 'string' ? dt : (ATTACK_TABLE[dt - TYPE_HIT] || ATTACK_TABLE[0]);
   return {
     toChar: `Your ${attack} ${vp} ${victim.name}${punct}`,
     toVict: `${capitalise(ch.name)}'s ${attack} ${vp} you${punct}`,
+    toRoom: `${capitalise(ch.name)}'s ${attack} ${vp} ${victim.name}${punct}`,
   };
 }
+
+/** Which of act()'s three lines the player reads: they are ch, victim, or neither. */
+const heard = (ch, victim, m) => (!isNpc(ch) ? m.toChar : (!isNpc(victim) ? m.toVict : m.toRoom));
 
 /**
  * Who struck whom, with what, for whoever draws it. `from`/`to` are the
@@ -666,6 +729,7 @@ function oneHit(ch, victim, dt, ctx) {
     dam += idiv(dam * ch.learned.enhancedDamage, 100);
   }
   if (!isAwake(victim)) dam *= 2;
+  if (dt === 'backstab') dam *= 2 + idiv(ch.level, 8);
   if (dam <= 0) dam = 1;
 
   damage(ch, victim, dam, dt, ctx);
@@ -682,7 +746,7 @@ function checkParry(ch, victim, ctx) {
   }
   if (ctx.rng.percent() >= chance + victim.level - ch.level) return false;
   ctx.emit(isNpc(victim)
-    ? { kind: 'parry', text: `${capitalise(victim.name)} parries your attack.`, ...blow(ch, victim) }
+    ? { kind: 'parry', text: isNpc(ch) ? `${capitalise(victim.name)} parries ${ch.name}'s attack.` : `${capitalise(victim.name)} parries your attack.`, ...blow(ch, victim) }
     : { kind: 'parry', text: `You parry ${ch.name}'s attack.`, defended: true, ...blow(ch, victim) });
   return true;
 }
@@ -695,7 +759,7 @@ function checkDodge(ch, victim, ctx) {
     : idiv(victim.learned.dodge, 2);
   if (ctx.rng.percent() >= chance + victim.level - ch.level) return false;
   ctx.emit(isNpc(victim)
-    ? { kind: 'dodge', text: `${capitalise(victim.name)} dodges your attack.`, ...blow(ch, victim) }
+    ? { kind: 'dodge', text: isNpc(ch) ? `${capitalise(victim.name)} dodges ${ch.name}'s attack.` : `${capitalise(victim.name)} dodges your attack.`, ...blow(ch, victim) }
     : { kind: 'dodge', text: `You dodge ${ch.name}'s attack.`, defended: true, ...blow(ch, victim) });
   return true;
 }
@@ -728,7 +792,8 @@ function damage(ch, victim, dam, dt, ctx) {
     const message = damMessage(ch, victim, dam, dt);
     ctx.emit({
       kind: dam === 0 ? 'miss' : 'hit',
-      text: isNpc(ch) ? message.toVict : message.toChar,
+      text: heard(ch, victim, message),
+      skill: typeof dt === 'string' ? dt : undefined,
       dam,
       byPlayer: !isNpc(ch),
       target: victim.name,
@@ -787,7 +852,7 @@ function damage(ch, victim, dam, dt, ctx) {
 function multiHit(ch, victim, dt, ctx) {
   ctx.beat = 0;
   oneHit(ch, victim, dt, ctx);
-  if (ch.fighting !== victim) return;
+  if (ch.fighting !== victim || dt === 'backstab') return;
 
   let chance = isNpc(ch) ? ch.level : idiv(ch.learned.secondAttack, 2);
   if (ctx.rng.percent() < chance) {
@@ -854,6 +919,7 @@ export const MERC = {
   isNpc, isAwake, isGood, isEvil, currStr, currInt, currWis, currDex, currCon,
   getAc, getHitroll, getDamroll, canCarryN, canCarryW, updatePos, condition,
   createCharacter, advanceLevel, gainExp, expToLevel, createMobile, createObject, armourWord,
+  hitGain, manaGain, moveGain,
   applyAc, equipChar, unequipChar, wearObj, getCost, objWeight, carriedWeight,
   oneHit, multiHit, damage, damVerb, damMessage, xpCompute: xpComputeWith,
 };
@@ -1105,8 +1171,46 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   Object.defineProperty(state, 'carryMax', { get: () => canCarryW(state), enumerable: true });
 
   // -- ground ---------------------------------------------------------------
-  /** Corpses and anything dropped. Reset objects stay scenery: actors.js owns those meshes. */
+  /**
+   * Every object lying in a room: ROOM_INDEX_DATA's `contents`, flattened into
+   * one list, each object carrying `inRoom` (its vnum) and `at` (where on the
+   * floor). The reset table's objects are here too; the ones that cannot be
+   * picked up (a fountain, a desk) are drawn by actors.js as scenery, the rest
+   * by items.js, and corpses by the dead body itself.
+   */
   const ground = [];
+
+  /** handler.c: obj_to_room, with a point on the floor for the renderer. */
+  function objToRoom(obj, vnum, at) {
+    obj.inRoom = vnum;
+    obj.at = { x: at.x, y: at.y, z: at.z };
+    obj.carriedBy = null;
+    ground.push(obj);
+    return obj;
+  }
+
+  /** handler.c: obj_from_room. */
+  function objFromRoom(obj) {
+    const index = ground.indexOf(obj);
+    if (index >= 0) ground.splice(index, 1);
+    obj.inRoom = null;
+    obj.at = null;
+  }
+
+  /**
+   * Somewhere near your feet for a thing you let go of: a little ahead and to
+   * one side, never the same spot twice, so a pile of three is three things.
+   */
+  let dropCount = 0;
+  function dropSpot(from = position, ahead = facing) {
+    dropCount += 1;
+    const side = ((dropCount % 5) - 2) * 0.28;
+    return {
+      x: from.x + ahead.x * 0.9 - ahead.z * side,
+      y: (from === position ? position.y - 1.72 : from.y),
+      z: from.z + ahead.z * 0.9 + ahead.x * side,
+    };
+  }
 
   // -- gates ----------------------------------------------------------------
   /**
@@ -1186,10 +1290,10 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (!ch.equipment[WEAR.WIELD] && rng.bits(1) === 0) return;
       unequipChar(victim, obj);
       if (isNpc(victim)) victim.inventory.push(obj);
-      else {
-        ground.push(makePile(obj, position));
-        emit({ kind: 'state', text: `${capitalise(ch.name)} disarms you!` });
-      }
+      else objToRoom(obj, state.roomVnum, dropSpot());
+      const text = !isNpc(victim) ? `${capitalise(ch.name)} disarms you!`
+        : (!isNpc(ch) ? `You disarm ${victim.name}!` : `${capitalise(ch.name)} disarms ${victim.name}!`);
+      emit({ kind: 'disarm', text, item: obj.name, ...blow(ch, victim) });
     },
     /**
      * fight.c: do_flee, for a mobile: six tries at a random door, and out
@@ -1219,12 +1323,6 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     kill(ch, victim) { deathHandler(ch, victim); },
   };
 
-  function makePile(obj, at) {
-    return {
-      kind: 'item', name: obj.name, contents: [obj],
-      x: at.x, y: at.y, z: at.z, timer: 0, roomVnum: state.roomVnum,
-    };
-  }
 
   // -- death ----------------------------------------------------------------
   deathHandler = function onDeath(killer, victim) {
@@ -1232,29 +1330,31 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     return playerDied(killer);
   };
 
-  /** fight.c: make_corpse, plus create_money for the gold. */
+  /**
+   * fight.c: make_corpse, and limbo.are's #10 it is made from: "corpse of %s",
+   * a timer of two to four ticks, the gold as create_money inside it, and
+   * everything carried or worn except a shopkeeper's ITEM_INVENTORY stock.
+   */
   function makeCorpse(mob) {
-    const contents = [];
-    for (const obj of mob.equipment) if (obj) contents.push(obj);
-    for (const obj of mob.inventory) {
-      if (obj.extraFlags & X.INVENTORY) continue;   // shop stock is not real
-      contents.push(obj);
-    }
-    for (const obj of contents) obj.wearLoc = WEAR.NONE;
+    const contains = [];
     if (mob.gold > 0) {
-      contents.unshift({
-        proto: null, vnum: 3, name: `${mob.gold} gold coins`, keywords: 'gold coins',
-        itemType: ITEM.MONEY, extraFlags: 0, wearFlags: W.TAKE,
-        values: [mob.gold, 0, 0, 0], weight: 0, cost: 0, level: 0,
-        wearLoc: WEAR.NONE, affects: [], timer: 0,
-      });
+      contains.push(createMoney(mob.gold));
       mob.gold = 0;
     }
-    return {
-      kind: 'corpse', name: `the corpse of ${mob.name}`, contents,
-      x: mob.slot.pos.x, y: mob.slot.pos.y, z: mob.slot.pos.z,
-      timer: rng.range(2, 4), roomVnum: mob.slot.roomVnum, slot: mob.slot,
-    };
+    for (const obj of mob.inventory) {
+      if (obj.extraFlags & X.INVENTORY) continue;   // shop stock is not real
+      contains.push(obj);
+    }
+    for (const obj of mob.equipment) if (obj) contains.push(obj);
+    for (const obj of contains) obj.wearLoc = WEAR.NONE;
+    mob.inventory = [];
+    mob.equipment = new Array(MAX_WEAR).fill(null);
+    return makeObject({
+      vnum: OBJ_VNUM.CORPSE_NPC, name: `corpse of ${mob.name}`, keywords: 'corpse',
+      description: `The corpse of ${mob.name} is lying here.`,
+      itemType: ITEM.CORPSE_NPC, wearFlags: ITEM_TAKE, values: [0, 0, 0, 1], weight: 100,
+      timer: rng.range(2, 4), contains, slot: mob.slot,
+    });
   }
 
   function mobDied(killer, mob) {
@@ -1267,9 +1367,10 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     emit({ kind: 'death', text: capitalise(cry), name: mob.name, x: slot.pos.x, y: slot.pos.y, z: slot.pos.z });
 
     const corpse = makeCorpse(mob);
-    ground.push(corpse);
+    objToRoom(corpse, slot.roomVnum, slot.pos);
     slot.dead = true;
     slot.corpse = corpse;
+    slot.instance = null;
     layOut(slot);
 
     // fight.c: group_gain -- only a player killing an NPC scores.
@@ -1556,10 +1657,40 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       const mob = slot.instance;
       if (!mob || slot.dead || !mob.fighting) continue;
       if (!isAwake(mob)) { ctx.stopFighting(mob, false); continue; }
-      if (dist2(slot.pos, position) > BREAK * BREAK) { ctx.stopFighting(mob); continue; }
-      if (dist2(slot.pos, position) > MELEE * MELEE) continue;
-      if (invulnerable > 0) continue;
-      multiHit(mob, state, undefined, ctx);
+      // Whoever it is fighting: you, or -- a cityguard answering a scream -- another mobile.
+      const victim = mob.fighting;
+      const there = victim === state ? position : (victim.slot && !victim.slot.dead ? victim.slot.pos : null);
+      if (!there || victim.position === POS.DEAD) { ctx.stopFighting(mob, false); continue; }
+      if (dist2(slot.pos, there) > BREAK * BREAK) { ctx.stopFighting(mob); continue; }
+      if (dist2(slot.pos, there) > MELEE * MELEE) continue;
+      if (victim === state && invulnerable > 0) continue;
+      multiHit(mob, victim, undefined, ctx);
+      if (mob.fighting) assist(slot, mob, mob.fighting);
+    }
+  }
+
+  /**
+   * violence_update's "Fun for the whole family!": every idle, awake mobile in
+   * the room joins a fight on the side of one of its own kind, and one in eight
+   * joins whatever fight is going. DIVERGES the way aggr_update does: out of
+   * reach it takes the fight up and comes at the target, and the next round's
+   * pulse swings once it is there.
+   */
+  function assist(fromSlot, ch, victim) {
+    for (const slot of mobs) {
+      const rch = slot.instance;
+      if (!rch || slot === fromSlot || slot.dead || rch.fighting || !isAwake(rch)) continue;
+      if (slot.roomVnum !== fromSlot.roomVnum) continue;
+      if (rch.proto !== ch.proto && rng.bits(3) !== 0) continue;
+      if (!canSee(rch, victim)) continue;
+      if (victim === state && invulnerable > 0) continue;
+      const there = victim === state ? position : victim.slot.pos;
+      if (dist2(slot.pos, there) > MELEE * MELEE) {
+        ctx.setFighting(rch, victim);
+        if (!victim.fighting) ctx.setFighting(victim, rch);
+        continue;
+      }
+      multiHit(rch, victim, undefined, ctx);
     }
   }
 
@@ -1571,6 +1702,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (!mob || mob.fighting || !isAwake(mob)) continue;
       if (!(mob.act & ACT_AGGRESSIVE)) continue;
       if ((mob.act & ACT_WIMPY) && isAwake(state)) continue;
+      if (!canSee(mob, state)) continue;        // hidden: act_move.c's do_hide pays off here
       // DIVERGES: the mud's multi_hit here is from anywhere in the room, and
       // AGGRO stands in for the room at nine metres -- so the first round
       // used to land from across the street. Out of reach, the mobile only
@@ -1586,36 +1718,57 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     }
   }
 
-  /** update.c: hit_gain / mana_gain / move_gain, at one point-pulse. */
+  /**
+   * update.c: char_update, for the player -- regeneration by position (and
+   * halved by hunger and by thirst, quartered by poison), a worn light burning
+   * down, the three conditions ticking toward empty, and the slow death of
+   * someone left incapacitated -- and hit_gain for every woken mobile.
+   */
   function charUpdate() {
     if (state.position === POS.DEAD) return;
-    let hit = Math.min(5, state.level);
-    let mana = Math.min(5, idiv(state.level, 2));
-    let move = Math.max(15, 2 * state.level);
-    if (state.position === POS.SLEEPING) {
-      hit += currCon(state); mana += currInt(state) * 2; move += currDex(state);
-    } else if (state.position === POS.RESTING) {
-      hit += idiv(currCon(state), 2); mana += currInt(state); move += idiv(currDex(state), 2);
+    if (state.position >= POS.STUNNED) {
+      if (state.hit < state.maxHit) state.hit += hitGain(state);
+      if (state.mana < state.maxMana) state.mana += manaGain(state);
+      if (state.move < state.maxMove) state.move += moveGain(state);
     }
-    state.hit = Math.min(state.maxHit, state.hit + hit);
-    state.mana = Math.min(state.maxMana, state.mana + mana);
-    state.move = Math.min(state.maxMove, state.move + move);
+    if (state.position === POS.STUNNED) updatePos(state);
+
+    if (state.level < LEVEL_IMMORTAL) {
+      const light = state.equipment[WEAR.LIGHT];
+      if (light && light.itemType === ITEM.LIGHT && light.values[2] > 0) {
+        if (--light.values[2] === 0) {
+          emit({ kind: 'light-out', text: `${capitalise(light.name)} goes out.`, item: light.name });
+          unequipChar(state, light);
+        }
+      }
+      // DIVERGES: ch->timer, the idle clock that sends a player who has not
+      // typed for twelve ticks into the void and quits them at thirty, is not
+      // kept -- a browser tab left open is not a link that has gone dead.
+      gainCondition(state, COND.DRUNK, -1);
+      gainCondition(state, COND.FULL, -1);
+      gainCondition(state, COND.THIRST, -1);
+    }
+    if (rules.affectUpdate) rules.affectUpdate(state);
+
+    if (state.position === POS.INCAP) damage(state, state, 1, -1, ctx);
+    else if (state.position === POS.MORTAL) damage(state, state, 2, -1, ctx);
 
     for (const slot of mobs) {
       const mob = slot.instance;
       if (!mob || slot.dead) continue;
       if (!mob.fighting) mob.hit = Math.min(mob.maxHit, mob.hit + idiv(mob.level * 3, 2));
     }
+  }
 
-    for (let i = ground.length - 1; i >= 0; i--) {
-      const pile = ground[i];
-      if (pile.kind !== 'corpse') continue;
-      pile.timer -= 1;
-      if (pile.timer > 0) continue;
-      emit({ kind: 'note', text: `${capitalise(pile.name)} crumbles into dust.` });
-      if (pile.slot) removeBody(pile.slot);
-      ground.splice(i, 1);
-    }
+  /** update.c: gain_condition, with its three messages. */
+  function gainCondition(ch, iCond, value) {
+    if (value === 0 || isNpc(ch) || ch.level >= LEVEL_HERO) return;
+    const before = ch.condition[iCond];
+    ch.condition[iCond] = clamp(before + value, 0, 48);
+    if (ch.condition[iCond] !== 0) return;
+    if (iCond === COND.FULL) emit({ kind: 'condition', cond: 'hungry', text: 'You are hungry.' });
+    else if (iCond === COND.THIRST) emit({ kind: 'condition', cond: 'thirsty', text: 'You are thirsty.' });
+    else if (before !== 0) emit({ kind: 'condition', cond: 'sober', text: 'You are sober.' });
   }
 
   // -- mobile_update ------------------------------------------------------------
@@ -1670,6 +1823,9 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
    * finish: the mud's move is instant, so it never has to ask.
    */
   let mobileSpec = null;
+  const SPEC_FUNS = {};
+  // What rules/*.js install: area_update, obj_update, affect ticking.
+  const rules = {};
   function mobileUpdate() {
     const counts = new Map();
     for (const slot of mobs) if (!slot.dead) counts.set(slot.roomVnum, (counts.get(slot.roomVnum) || 0) + 1);
@@ -1681,27 +1837,26 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       const act = slot.proto.act;
       // "Examine call for special procedure": a spec_fun that acted ends this
       // mobile's turn, as in update.c. `game.mobileSpec` is where one plugs in.
-      if (mobileSpec && mob && mobileSpec(slot, mob)) continue;
+      const spec = SPEC_FUNS[slot.record.special];
+      if (mob && ((spec && spec(slot, mob)) || (mobileSpec && mobileSpec(slot, mob)))) continue;
       // "That's all for sleeping / busy monster": fighting is busy.
       if (mob && mob.position !== POS.STANDING) continue;
       const room = world.rooms.get(slot.roomVnum);
       if (!room) continue;
 
-      // Scavenge: the dearest thing lying loose in the room. Only what the
-      // player has dropped is loose here; the reset objects are scenery.
+      // Scavenge: the dearest thing lying loose in the room.
       if ((act & ACT_SCAVENGER) && wanderRng.bits(2) === 0) {
         let best = null;
         let max = 1;
-        for (const pile of ground) {
-          if (pile.kind !== 'item' || pile.roomVnum !== slot.roomVnum) continue;
-          const obj = pile.contents[0];
-          if (obj && canWear(obj, W.TAKE) && obj.cost > max) { best = pile; max = obj.cost; }
+        for (const obj of ground) {
+          if (obj.inRoom !== slot.roomVnum) continue;
+          if (canWear(obj, W.TAKE) && obj.cost > max) { best = obj; max = obj.cost; }
         }
         if (best) {
-          const obj = best.contents.shift();
-          ground.splice(ground.indexOf(best), 1);
-          wake(slot).inventory.push(obj);
-          if (slot.roomVnum === state.roomVnum) emit({ kind: 'note', text: `${capitalise(slot.proto.short)} gets ${obj.name}.` });
+          objFromRoom(best);
+          if (best.slot) removeBody(best.slot);    // a corpse is a thing to carry off, too
+          wake(slot).inventory.push(best);
+          toRoom(slot, `${capitalise(slot.proto.short)} gets ${best.name}.`, { kind: 'room', item: best.name });
         }
       }
 
@@ -1737,7 +1892,14 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   /**
    * comm.c/update.c: update_handler, one pulse.
    */
+  let pulseArea = 0;
+  let restAt = null;
   function pulse() {
+    if (state.wait > 0 && --state.wait === 0 && rules.onWaitOver) rules.onWaitOver();
+    if (--pulseArea <= 0) {
+      pulseArea = wanderRng.range(idiv(PULSE_AREA, 2), idiv(3 * PULSE_AREA, 2));
+      if (rules.areaUpdate) rules.areaUpdate();
+    }
     if (--pulseMobile <= 0) { pulseMobile = PULSE_MOBILE; mobileUpdate(); }
     if (--pulseViolence <= 0) { pulseViolence = PULSE_VIOLENCE; violenceUpdate(); }
     if (--pulsePoint <= 0) {
@@ -1748,6 +1910,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       const resting = state.position === POS.RESTING || state.position === POS.SLEEPING;
       pulsePoint = resting ? idiv(PULSE_TICK, 4) : PULSE_TICK;
       charUpdate();
+      if (rules.objUpdate) rules.objUpdate();
     }
     aggrUpdate();
   }
@@ -1820,13 +1983,68 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
           order(slot, { kind: 'chase', target, stop: target === playerFeet ? 2.0 : 1.5 });
           if (!figure) step(slot, target, MOB_SPEED, MELEE * 0.68, dt);
         }
+      } else if (slot.task) {
+        // A spec_fun's errand -- spec_janitor walking to the litter, spec_fido
+        // to a corpse, spec_thief sidling up to you -- is an order of its own.
+        const task = slot.task;
+        const next = order(slot, task.order);
+        if (!figure && next.kind === 'go') step(slot, next.to, 1.3, 0.3, dt);
+        else if (!figure && next.kind === 'chase') step(slot, next.target, 1.3, next.stop ?? 1.2, dt);
+        const goal = next.kind === 'go' ? next.to : next.target;
+        const d = goal ? Math.hypot(goal.x - slot.pos.x, goal.z - slot.pos.z) : 0;
+        task.age = (task.age || 0) + dt;
+        const reached = (next.done && task.reach === undefined)
+          || d <= (task.reach ?? (next.kind === 'go' ? 0.6 : (next.stop ?? 1.2) + 0.35));
+        // An errand that cannot be walked in twenty seconds is given up.
+        if (reached || next.failed || task.age > 20) {
+          slot.task = null;
+          if (reached && task.onArrive) task.onArrive();
+        }
       } else if (slot.record.shop) {
         order(slot, { kind: 'hold', at: slot.home || (slot.home = { ...slot.pos }) });
+      } else if (noticed(slot, dt)) {
+        order(slot, slot.notice.order);
       } else {
         order(slot, { kind: 'stroll', room: slot.roomVnum });
       }
       settleRoom(slot);
     }
+  }
+
+  /**
+   * Footsteps: someone who is not sneaking, coming up within a few metres of
+   * a mobile's back, is heard, and it turns round to see who it is -- which is
+   * what makes a backstab (fight.c's do_backstab, see rules/skills.js) a
+   * matter of sneaking up behind. DIVERGES: the mud has no facing, and sneak
+   * only ever hid your comings and goings from the room.
+   */
+  function noticed(slot, dt) {
+    const mob = slot.instance;
+    if (slot.notice) {
+      slot.notice.left -= dt;
+      if (slot.notice.left > 0) return true;
+      slot.notice = null;
+    }
+    if (!mob || !slot.figure || !isAwake(mob) || isAffected(state, AFF.SNEAK)) return false;
+    if (!canSee(mob, state) || dist2(slot.pos, playerFeet) > 3.4 * 3.4) return false;
+    if (facingAway(slot) < 0.2) return false;
+    slot.notice = { left: 3.5, order: { kind: 'hold', at: { ...slot.pos } } };
+    return true;
+  }
+
+  /**
+   * How far round the body is from you: 1 with its back square to you, -1
+   * looking straight at you. A figure faces +Z at yaw 0 (motion.js turns it
+   * with atan2(dx, dz)); headless there is no facing, and nobody has a back.
+   */
+  function facingAway(slot) {
+    const fig = slot.figure;
+    if (!fig || !fig.object) return 1;
+    const yaw = fig.object.rotation.y;
+    const dx = playerFeet.x - slot.pos.x;
+    const dz = playerFeet.z - slot.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    return -(Math.sin(yaw) * dx + Math.cos(yaw) * dz) / d;
   }
 
   /** Which room the body is standing in -- the half of a street nearer to it. */
@@ -1902,11 +2120,23 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
   /** fight.c: do_kill. One swing now, and the violence pulse takes it from there. */
   function attack() {
+    return attackSlot(facingTarget());
+  }
+
+  /**
+   * do_kill on a mobile named rather than looked at. Out of reach, the fight
+   * is on and it comes to you, as aggr_update's does (see there).
+   */
+  function attackSlot(slot) {
     if (state.position === POS.DEAD) return { ok: false, text: 'You are dead.' };
     if (state.position < POS.RESTING) return { ok: false, text: "You can't do that right now." };
-    const slot = facingTarget();
-    if (!slot) return { ok: false, text: 'They aren\'t here.' };
+    if (!slot || slot.dead) return { ok: false, text: 'They aren\'t here.' };
     const mob = wake(slot);
+    if (dist2(slot.pos, position) > MELEE * MELEE && state.fighting !== mob) {
+      ctx.setFighting(state, mob);
+      if (!mob.fighting) ctx.setFighting(mob, state);
+      return { ok: true, text: `You attack ${mob.name}.` };
+    }
     if (state.fighting === mob) return { ok: false, text: 'You do the best you can!' };
     state.position = POS.STANDING;
     ctx.round = { player: CLICK_WINDUP, npc: MOB_BEAT };
@@ -1914,30 +2144,50 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     return { ok: true, text: `You attack ${mob.name}.` };
   }
 
-  /** act_obj.c: get_obj, including the carry limits from str_app and dex. */
+  /**
+   * act_obj.c: get_obj -- from the floor, or from `container` -- including the
+   * carry limits from str_app and dex, and money going straight into the purse.
+   */
   function take(obj, container) {
     if (!canWear(obj, W.TAKE)) return { ok: false, text: "You can't take that." };
+    if (obj.itemType !== ITEM.MONEY) {
+      if (state.inventory.length + objNumber(obj) > canCarryN(state)) {
+        return { ok: false, text: `${capitalise(obj.keywords.split(' ')[0])}: you can't carry that many items.` };
+      }
+      if (carriedWeight(state) + objWeight(obj) > canCarryW(state)) {
+        return { ok: false, text: `${capitalise(obj.keywords.split(' ')[0])}: you can't carry that much weight.` };
+      }
+    }
+    const from = container ? ` from ${container.name}` : '';
+    if (container) container.contains.splice(container.contains.indexOf(obj), 1);
+    else {
+      objFromRoom(obj);
+      // A corpse picked up whole leaves nothing lying where it fell.
+      if (obj.slot) removeBody(obj.slot);
+    }
     if (obj.itemType === ITEM.MONEY) {
       state.gold += obj.values[0];
-      if (container) container.contents.splice(container.contents.indexOf(obj), 1);
-      emit({ kind: 'gold', amount: obj.values[0], text: `You get ${obj.values[0]} gold coins.` });
-      return { ok: true, text: `You get ${obj.values[0]} gold coins.` };
+      emit({ kind: 'gold', amount: obj.values[0], text: `You get ${obj.name}${from}.` });
+      return { ok: true, text: `You get ${obj.name}${from}.` };
     }
-    if (state.inventory.length + 1 > canCarryN(state)) {
-      return { ok: false, text: `${capitalise(obj.name)}: you can't carry that many items.` };
-    }
-    if (carriedWeight(state) + objWeight(obj) > canCarryW(state)) {
-      return { ok: false, text: `${capitalise(obj.name)}: you can't carry that much weight.` };
-    }
-    if (container) container.contents.splice(container.contents.indexOf(obj), 1);
     state.inventory.push(obj);
-    emit({ kind: 'pickup', text: `You get ${obj.name}${container ? ` from ${container.name}` : ''}.`, item: obj.name });
-    return { ok: true, text: `You get ${obj.name}.` };
+    emit({ kind: 'pickup', text: `You get ${obj.name}${from}.`, item: obj.name, obj });
+    return { ok: true, text: `You get ${obj.name}${from}.` };
   }
 
-  /** What is on the ground within arm's reach, as `look` would list it. */
-  function here() {
-    return ground.filter((pile) => dist2(pile, position) <= 16);
+  /**
+   * What lies within reach, nearest first -- the mud's `ch->in_room->contents`
+   * where a room is thirteen metres across and you are standing in one corner
+   * of it. Scenery (a fountain, a desk) is further across than a coin, so
+   * reach is measured to its edge rather than its middle.
+   */
+  function here(reach = 4) {
+    const feet = { x: position.x, y: position.y - 1.72, z: position.z };
+    return ground
+      .map((obj) => ({ obj, d: Math.hypot(obj.at.x - feet.x, obj.at.z - feet.z) - (obj.radius || 0) }))
+      .filter((e) => e.d <= reach && Math.abs(e.obj.at.y - feet.y) < 2.5)
+      .sort((a, b) => a.d - b.d)
+      .map((e) => e.obj);
   }
 
   function say(text, speaker) {
@@ -2075,6 +2325,18 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     const room = nearestRoom(position);
     if (room) state.roomVnum = room.vnum;
 
+    // Walking is the body's, not a typed command, so what a command would end
+    // ends when you walk: resting and sleeping (you get up) and hiding.
+    if (state.position === POS.RESTING || state.position === POS.SLEEPING) {
+      if (!restAt) restAt = { x: position.x, z: position.z };
+      else if (Math.hypot(position.x - restAt.x, position.z - restAt.z) > 0.6) {
+        state.position = POS.STANDING;
+        restAt = null;
+        emit({ kind: 'position', text: 'You stand up.', position: 'standing' });
+      }
+    } else restAt = null;
+    if (rules.moveUpdate) rules.moveUpdate();
+
     // You learn a gate is held by walking up to it and finding someone in it.
     // Nothing announces the list; it fills in as you cross the city.
     for (const gate of gates) {
@@ -2120,6 +2382,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
     update,
     attack,
+    attackSlot,
     nav: ways,
 
     /**
@@ -2178,12 +2441,15 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
     here,
     take,
-    /** Everything a corpse or a pile holds, in one go -- the mud's `get all corpse`. */
-    takeAll(pile) {
-      const results = [];
-      for (const obj of pile.contents.slice()) results.push(take(obj, pile));
-      if (pile.kind === 'item' && !pile.contents.length) ground.splice(ground.indexOf(pile), 1);
-      return results;
+    /**
+     * `get all <container>` for a corpse or an open container; `get <obj>` for
+     * anything else. Refuses a closed lid the way do_get does.
+     */
+    takeAll(obj) {
+      const holds = obj.itemType === ITEM.CONTAINER || obj.itemType === ITEM.CORPSE_NPC || obj.itemType === ITEM.CORPSE_PC;
+      if (!holds) return [take(obj, null)];
+      if (obj.values[1] & 4) return [{ ok: false, text: `The ${obj.keywords.split(' ')[0]} is closed.` }];
+      return obj.contains.slice().map((inner) => take(inner, obj));
     },
 
     wear(obj) {
@@ -2209,21 +2475,12 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (index < 0) return { ok: false, text: 'You do not have that item.' };
       if (obj.extraFlags & X.NODROP) return { ok: false, text: "You can't let go of it." };
       state.inventory.splice(index, 1);
-      ground.push(makePile(obj, position));
-      emit({ kind: 'drop', text: `You drop ${obj.name}.`, item: obj.name });
+      objToRoom(obj, state.roomVnum, dropSpot());
+      emit({ kind: 'drop', text: `You drop ${obj.name}.`, item: obj.name, obj });
       return { ok: true, text: `You drop ${obj.name}.` };
     },
 
     shopHere, buy, sell, practice, skills,
-
-    /** POS_RESTING and POS_SLEEPING, for the regeneration they buy. */
-    rest() {
-      if (state.fighting) return { ok: false, text: 'Not while you are fighting!' };
-      state.position = state.position === POS.RESTING ? POS.STANDING : POS.RESTING;
-      const text = state.position === POS.RESTING ? 'You rest.' : 'You stand up.';
-      emit({ kind: 'note', text });
-      return { ok: true, text };
-    },
 
     /** Where the sky is: shops keep the mud's opening hours. */
     setTimeOfDay(name) {
@@ -2243,7 +2500,42 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
     /** Seconds of grace after respawning, so nothing kills you as you land. */
     grace(seconds = 3) { invulnerable = seconds; },
+
+    /** comm.c's nanny, the class question: a new level 1 character of that class. */
+    setClass(classIndex) {
+      const fresh = createCharacter(classIndex, { rng });
+      for (const [key, value] of Object.entries(fresh)) state[key] = value;
+      state.name = 'you';
+    },
   };
+
+  /**
+   * act()'s TO_ROOM, as far as one player can overhear it: said in the room you
+   * are in, or near enough to you across a street to have been heard.
+   */
+  function toRoom(actor, text, extra = {}) {
+    const vnum = actor.roomVnum !== undefined ? actor.roomVnum : actor.inRoom;
+    const at = actor.pos || actor.at || actor;
+    const near = at && at.x !== undefined
+      && Math.hypot(at.x - position.x, at.z - position.z) < 14 && Math.abs(at.y - (position.y - 1.72)) < 4;
+    if (vnum !== state.roomVnum && !near) return false;
+    emit({ kind: 'room', ...extra, text });
+    return true;
+  }
+
+  Object.defineProperty(game, 'specFuns', { get: () => SPEC_FUNS, enumerable: true });
+
+  installRules({
+    world, layout, built, actors, ways, rng, wanderRng, state, position, facing, playerFeet,
+    mobs, ground, gates, protoInfo, emit, ctx, game, SPEC_FUNS, rules,
+    wake, order, moveMobile, mobsNear, nearestRoom, objToRoom, objFromRoom, dropSpot, removeBody,
+    toRoom, recall, breakOff, facingAway, weather: () => weather, dist2, updatePos,
+    damage: (ch, victim, dam, dt) => damage(ch, victim, dam, dt, ctx),
+    multiHit: (ch, victim, dt) => multiHit(ch, victim, dt, ctx),
+    gainCondition, unequipChar, equipChar, wearObj, getCost, canCarryN, canCarryW, carriedWeight,
+    grace: (s) => { invulnerable = s; },
+    invulnerable: () => invulnerable,
+  });
 
   state.hour = 12;
   game.grace(2);
