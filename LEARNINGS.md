@@ -52,6 +52,25 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### The rest of Merc (src/rules/, save.js, console.js, items.js)
+
+- **Anything that creates a mob or object at boot or reset shifts the fight
+  rolls** unless it draws on its own generator; `wake(slot, rng)` takes
+  one, and resets and the mayor use the wandering generator. Otherwise
+  magic-check's sanctuary check broke on an unrelated change.
+- **In first person a kick only enters the frame once the foot is above
+  waist height.**
+- **The library's flat materials carry a colour of their own**, so vertex
+  tints multiply down to near black.
+- **The right-hand column overflows at 720p**; the log gives way while the
+  target panel is up.
+- Merc's command table is kept in its original order because the
+  abbreviations resolve by order; the 90 socials are generated from
+  `interp.c` by `tools/gen-socials.mjs`, not transcribed.
+- A dead mob returns in its own body once its corpse is gone — the body is
+  the corpse — and walks in from a street.
+- 16 dropped items in view: +142 calls, +0.78 ms.
+
 ### Spells (src/magic.js, src/spellfx.js)
 
 - **Additive effects over sunlit ground only bleach towards white.** Give
