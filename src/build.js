@@ -88,7 +88,11 @@ const CANOPY_NOT = /\b(cave|underground|temple|hall|inside|web|tunnel)\b/i;
  * Tower" and "Standing before the throne", all of them genuinely indoors.
  */
 const CANOPY_OUTSIDE = /\boutside\b/i;
-const isCanopy = (room) => room.sector === SECTOR.FOREST && !isOutdoor(room)
+// Not the sewer. Twenty-six of its drains are sectored FOREST -- "The sewer
+// drain.", "The strange sewer" -- and every one carries ROOM_INDOORS, so the
+// canopy test took them for Haon Dor and planted firs seven metres under the
+// Dump.
+const isCanopy = (room) => room.sector === SECTOR.FOREST && !isOutdoor(room) && !isSewer(room)
   && (CANOPY_OUTSIDE.test(room.name) || !CANOPY_NOT.test(room.name));
 
 /** No walls, no ceiling, no roof -- whatever the mud says about the sky. */
@@ -221,6 +225,83 @@ const TURF_UV = 1 / 2.6;
  */
 const ROUND_DOOR = 2.2;
 
+// ------------------------------------------------------------- the sewer ----
+
+/**
+ * Midgaard's sewer, keyed by area like the Shire and for the same reason: it is
+ * a different kind of place, not a different kind of room. Its sector codes
+ * are noise -- the pipes are CITY, MOUNTAIN, FOREST, FIELD and HILLS in no
+ * order at all, and 26 of them would otherwise have grown a fir canopy.
+ *
+ * Inside the area the prose decides, three ways:
+ *
+ *  - `vault`: the works. "Enormous concrete pipes leading north, south, east
+ *    and west", "a huge junction of sewer pipes". A brick groin-vaulted
+ *    chamber per room and a barrel-vaulted tunnel with a channel down the
+ *    middle for every passage between them -- the `sewer_*` kit.
+ *  - `room`: somewhere with a door on it. The lairs, the treasury, the torture
+ *    room, the Realm of lost souls: brick-walled rooms in the ordinary walled
+ *    builder, because a door leaf wants a 3.2 m doorway and a tunnel mouth is
+ *    4.4 m of arch.
+ *  - `cave`: what the sewer breaks into further down -- the ledges round the
+ *    abyss, the stalagmite caves, the basilisk's cave. Bare rock.
+ *
+ * A room that says none of it takes whatever its neighbours mostly are, so
+ * "The hot room" in the middle of the stalagmite caves is a cave and "The
+ * small room" off a pipe junction is a vault.
+ */
+const isSewer = (room) => room.areaFile === 'sewer.are';
+const SEWER_WORKS = /\b(sewers?|pipes?|drains?|drainpipe|junction|well|shaft|pit)\b/i;
+const SEWER_CHAMBERED = /\b(lair|treasury|realm|torture ?room|corridor|t-crossing|firedeath)\b/i;
+const SEWER_CAVE = /\b(caves?|cavern|stalag\w*|ledge|abyss|fissure|edge of the water|mid-air|spongy|crawlway|crack|tunnel|pool)\b/i;
+const sewerStyles = new WeakMap();
+
+function classifySewer(world) {
+  const pending = [];
+  for (const room of world.rooms.values()) {
+    if (!isSewer(room)) continue;
+    let style = null;
+    if (SEWER_WORKS.test(room.name)) style = 'vault';
+    else if (room.exits.some((e) => e && (e.locks & EX_ISDOOR)) || SEWER_CHAMBERED.test(room.name)) style = 'room';
+    else if (SEWER_CAVE.test(room.name) || /\b(caves?|stalag\w*)\b/i.test(room.description)) style = 'cave';
+    if (style) sewerStyles.set(room, style);
+    else pending.push(room);
+  }
+  // Three sweeps is enough for the longest run of wordless rooms in the area.
+  for (let sweep = 0; sweep < 3 && pending.length; sweep++) {
+    for (const room of pending) {
+      const votes = { vault: 0, room: 0, cave: 0 };
+      for (const exit of room.exits) {
+        const next = exit && world.rooms.get(exit.to);
+        const style = next && sewerStyles.get(next);
+        if (style) votes[style]++;
+      }
+      const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
+      if (best[1] > 0) sewerStyles.set(room, best[0]);
+    }
+  }
+  for (const room of pending) if (!sewerStyles.has(room)) sewerStyles.set(room, 'vault');
+}
+const sewerStyle = (room) => (isSewer(room) ? (sewerStyles.get(room) || 'vault') : null);
+const isVault = (room) => sewerStyle(room) === 'vault';
+
+/** "You are standing in mud to your knees", "something like porridge". */
+const SEWER_MUD = /\b(mud|muddy|mudhole|sludge|porridge)\b/i;
+/** "The water you're in up to your hips", "you stand in water to your waist". */
+const SEWER_FLOOD = /\b(watery|under water|water to your|water you're in|in water|floor is completely covered with water|covered with yucky water)\b/i;
+const sewerMud = (room) => SEWER_MUD.test(`${room.name} ${room.description}`) && !SEWER_FLOOD.test(`${room.name} ${room.description}`);
+const sewerFlood = (room) => SEWER_FLOOD.test(`${room.name} ${room.description}`);
+
+// The kit's section, in the numbers tools/blender/sewer.py builds it to.
+const SW_A = 2.2;          // half the tunnel's clear width
+const SW_WALL = 0.3;       // how thick the colliders behind a tunnel wall are
+const SW_CH = 0.65;        // half the channel
+const SW_INVERT = -0.32;   // the channel's floor
+const SW_CA = 4.5;         // half a chamber's clear span
+const SW_CT = 0.4;         // a chamber wall
+const SW_MUD = 0.07;       // mud lies over the kerbs, which stand 0.025 proud
+const SW_FLOOD = 0.34;     // water over the walkway: wading, not swimming
+
 export function hash3(a, b, c, salt = 0) {
   let h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263) ^ Math.imul(c | 0, 2147483647) ^ Math.imul(salt, 1274126177);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -297,9 +378,10 @@ class Batcher {
     bucket.list.push(geo);
   }
 
-  finish(parent) {
+  /** `route(chunk)` may send a chunk to a parent other than `parent`. */
+  finish(parent, route = null) {
     let triangles = 0;
-    for (const { materialName, list } of this.groups.values()) {
+    for (const [key, { materialName, list }] of this.groups) {
       const merged = list.length === 1 ? list[0] : mergeGeometries(list, false);
       if (!merged) throw new Error(`build: could not merge ${materialName}`);
       merged.computeBoundingSphere();
@@ -307,7 +389,7 @@ class Batcher {
       const mesh = new THREE.Mesh(merged, this.materials[materialName]);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      parent.add(mesh);
+      (route ? route(key.slice(0, key.lastIndexOf('|'))) : parent).add(mesh);
       for (const geo of list) if (geo !== merged) geo.dispose();
     }
     return { meshes: this.groups.size, triangles };
@@ -400,6 +482,31 @@ const unionRect = (rects) => rects.reduce((a, b) => ({
   z0: Math.min(a.z0, b.z0), z1: Math.max(a.z1, b.z1),
 }));
 
+/**
+ * A rectangle less some holes, as rectangles: cut into strips at every hole
+ * edge along x, then each strip into the runs of z no hole covers.
+ */
+function rectsAround(outer, holes) {
+  const inside = holes.filter((h) => h.x1 > outer.x0 && h.x0 < outer.x1 && h.z1 > outer.z0 && h.z0 < outer.z1);
+  if (!inside.length) return [outer];
+  const xs = [...new Set([outer.x0, outer.x1, ...inside.flatMap((h) => [h.x0, h.x1])])]
+    .filter((x) => x >= outer.x0 && x <= outer.x1).sort((a, b) => a - b);
+  const out = [];
+  for (let i = 0; i < xs.length - 1; i++) {
+    const x0 = xs[i]; const x1 = xs[i + 1];
+    if (x1 - x0 < 1e-6) continue;
+    const cut = inside.filter((h) => h.x0 < x1 - 1e-6 && h.x1 > x0 + 1e-6)
+      .map((h) => [Math.max(outer.z0, h.z0), Math.min(outer.z1, h.z1)]).sort((a, b) => a[0] - b[0]);
+    let z = outer.z0;
+    for (const [c0, c1] of cut) {
+      if (c0 > z + 1e-6) out.push({ x0, x1, z0: z, z1: c0 });
+      z = Math.max(z, c1);
+    }
+    if (outer.z1 > z + 1e-6) out.push({ x0, x1, z0: z, z1: outer.z1 });
+  }
+  return out;
+}
+
 /** Which way you step to get from one cell to its neighbour. */
 function dirBetween(a, b) {
   for (let d = 0; d < 4; d++) {
@@ -447,6 +554,8 @@ function pickMaterials(room, area) {
     case SECTOR.AIR: floor = 'cloud'; break;
     default: break;
   }
+  // "The dump, where the people from the city drop their garbage." Not a lawn.
+  if (REFUSE.test(room.name)) floor = 'dirt';
   // After the switch, because the sector is the thing being overruled -- and
   // inside this function rather than at the call site the way the park does it,
   // because a passage routed between two bog rooms asks here for its surface
@@ -491,9 +600,21 @@ function pickMaterials(room, area) {
     if (/\b(pig ?pen|chicken coop|sty)\b/i.test(room.name)) floor = 'dirt';
   }
 
+  // The sewer overrules the sector here and not at the call site, for the same
+  // reason the bog does: the passage routed between two drains asks this
+  // function what it is built of. `cave` stays set on all three styles, which
+  // is what keeps them buried -- no windows, no roof, no masonry kit.
+  const style = sewerStyle(room);
+  if (style) {
+    cave = true;
+    if (style === 'cave') { floor = 'caverock'; wallIn = 'caverock'; wallOut = 'caverock'; ceil = 'caverock'; }
+    else { floor = 'sewerflag'; wallIn = 'brick'; wallOut = 'brick'; ceil = 'brick'; }
+    if (style !== 'vault' && sewerMud(room)) floor = 'sludge';
+  }
+
   if (!holy && !cave && !wood && hash3(room.vnum, 0, 0, 9) > 0.6) wallOut = 'timber';
   if (!holy && !burrow && hash3(room.vnum, 1, 0, 3) > 0.84) roof = 'thatch';
-  return { floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv };
+  return { floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv, sewer: style };
 }
 
 // ------------------------------------------------------------------ main ----
@@ -504,7 +625,8 @@ export function buildScene(world, layout, materials, assets = null) {
   const batcher = new Batcher(materials);
   // Modelled assets are optional everywhere: if the library is absent or a
   // particular model has not been made yet, the procedural geometry stands in.
-  const instances = assets ? new InstanceBatch(assets) : null;
+  // Two batches, split on the chunk's level: see `buildZones`.
+  const instances = assets ? zonedInstances(new InstanceBatch(assets), new InstanceBatch(assets)) : null;
   const model = (names, seed) => (assets ? assets.choose(names, seed) : null);
 
   const colliders = [];   // {x0,x1,z0,z1,y0,y1}
@@ -519,6 +641,11 @@ export function buildScene(world, layout, materials, assets = null) {
 
   const addCollider = (x0, x1, z0, z1, y0, y1) => colliders.push({ x0, x1, z0, z1, y0, y1 });
   const addPlatform = (x0, x1, z0, z1, top) => platforms.push({ x0, x1, z0, z1, top });
+
+  classifySewer(world);
+  // The whole kit or none of it: a chamber with no tunnel to leave by is worse
+  // than the plain walled room it falls back to.
+  const sewerKit = !!instances && SEWER_KIT.every((name) => assets.has(name));
 
   const worldOf = (cell) => ({ x: cell.x * CELL, y: cell.level * LEVEL_H, z: cell.z * CELL });
   const chunkOf = (cell) => `${cell.level}:${Math.floor(cell.x / 4)},${Math.floor(cell.z / 4)}`;
@@ -564,9 +691,25 @@ export function buildScene(world, layout, materials, assets = null) {
   const gz0 = (bounds.minZ - pad) * CELL; const gz1 = (bounds.maxZ + pad) * CELL;
   // What lies outside the walls is fields, not bare earth: dirt read as desert
   // once the fog thinned enough to see this far.
-  batcher.add(plane(gx1 - gx0, gz1 - gz0, 32), 'grass',
-    place((gx0 + gx1) / 2, groundY, (gz0 + gz1) / 2), { chunk: 'ground' });
-  addPlatform(gx0, gx1, gz0, gz1, groundY);
+  // With a hole in it wherever a stair goes down out of a street-level room.
+  // The ground plane runs under everything at -0.47, so a stair cut through a
+  // floor at level 0 came out on grass half a metre down -- the graveyard's
+  // tombs have been sealed that way since they were added: the opening read
+  // as a lawn with a handrail standing in it, and the ground's platform held
+  // the player up at -0.47 over a flight that goes down to -7.6.
+  const groundHoles = [];
+  for (const plan of stairPlans) {
+    if (plan.upper.level !== 0 || plan.lower.level >= 0) continue;
+    const rect = unionRect(holes.get(plan.upper.vnum).filter((h) => !h.ceiling));
+    const ux = plan.upper.x * CELL; const uz = plan.upper.z * CELL;
+    groundHoles.push({ x0: ux + rect.x0, x1: ux + rect.x1, z0: uz + rect.z0, z1: uz + rect.z1 });
+  }
+  for (const r of rectsAround({ x0: gx0, x1: gx1, z0: gz0, z1: gz1 }, groundHoles)) {
+    const w = r.x1 - r.x0; const d = r.z1 - r.z0;
+    const seg = Math.max(1, Math.min(32, Math.round(Math.max(w, d) / 60)));
+    batcher.add(plane(w, d, seg), 'grass', place((r.x0 + r.x1) / 2, groundY, (r.z0 + r.z1) / 2), { chunk: 'ground' });
+    addPlatform(r.x0, r.x1, r.z0, r.z1, groundY);
+  }
   // ...and something for it to end against, out where the fog is thick enough
   // to do the work.
   buildHorizon(group, bounds, groundY);
@@ -615,10 +758,36 @@ export function buildScene(world, layout, materials, assets = null) {
       continue;
     }
 
+    // Where you arrive is the room's centre -- unless a stair goes down through
+    // it, in which case the centre is over the opening and every arrival fell
+    // three metres onto the flight. It moves beside the opening instead, to
+    // the side with no door in it where there is one. Everything that places
+    // a player reads this -- a step, a portal, `goto` -- so it is the one fix.
+    const down = stairPlans.find((plan) => plan.upper === cell);
+    let arrive = { x: pos.x, z: pos.z };
+    if (down) {
+      const [ax, , az] = DIR_STEP[down.dir];
+      const beside = [(down.dir + 1) % 4, (down.dir + 3) % 4].sort((a, b) => (sides[a] ? 1 : 0) - (sides[b] ? 1 : 0))[0];
+      const [bx, , bz] = DIR_STEP[beside];
+      arrive = { x: pos.x + ax * HOLE_CENTRE + bx * 3.45, z: pos.z + az * HOLE_CENTRE + bz * 3.45 };
+    }
     rooms.set(room.vnum, {
-      room, cell, center: new THREE.Vector3(pos.x, pos.y, pos.z), outdoor,
+      room, cell, center: new THREE.Vector3(arrive.x, pos.y, arrive.z), outdoor,
       chunk, materials: mats, sides,
     });
+
+    // The sewer's works are assembled from the kit and own everything about
+    // themselves: floor, walls, vault, mouths, what stands in them.
+    if (sewerKit && isVault(room)) {
+      batcher.indoor = true;
+      buildSewerChamber({
+        batcher, instances, chunk, room, cell, pos, sides, layout,
+        floorHoles: roomHoles.filter((h) => !h.ceiling),
+        shaft: stairPlans.some((plan) => plan.lower === cell),
+        addCollider, addPlatform, lights, decor, portals,
+      });
+      continue;
+    }
 
     // A doorway has nothing under it, and underground you can see that: see
     // `isBuried`. Paving these rooms to their cell edge closes it.
@@ -634,7 +803,11 @@ export function buildScene(world, layout, materials, assets = null) {
     // Six of the marsh's rooms are sectored as open water and only two of them
     // are: "Gloomy Path Through the Marsh" is WATER_SWIM, and a path is not
     // thirteen metres of river. A bog takes pools instead.
-    if (isWater(room) && !bog) {
+    // Water in the sewer is the sewer's own, lying on the floor under a vault:
+    // the river shader mirrors the sky and the shore grows reeds.
+    if (isSewer(room) && (isWater(room) || sewerFlood(room))) {
+      batcher.add(plane(half * 2, half * 2, 4), 'sewage', place(pos.x, pos.y + SW_FLOOD, pos.z), { chunk });
+    } else if (isWater(room) && !bog) {
       // A little over the cell, so two neighbouring sheets overlap instead of
       // meeting on a seam: they are at the same height and the same shader, and
       // an abutting edge still shows as a line where the two planes' waves
@@ -685,7 +858,14 @@ export function buildScene(world, layout, materials, assets = null) {
       const side = sides[dir];
       const [dx, , dz] = DIR_STEP[dir];
       const rotY = (dir === 1 || dir === 3) ? Math.PI / 2 : 0;
-      const open = side && (side.kind === 'alley' || side.kind === 'portal');
+      // "A well in the middle of the floor leads down into darkness. Vile
+      // smells waft from the depths." Two of the guild rooms drop into the
+      // sewer somewhere the grid could not put directly underneath, so the way
+      // down is a portal -- and it is a well in the floor, not an archway
+      // glowing blue in the wall.
+      const wellDown = sewerKit && side && side.kind === 'portal' && side.link && side.link.dir === 5
+        && side.target && isSewer(side.target.room);
+      const open = side && (side.kind === 'alley' || side.kind === 'portal') && !wellDown;
       const distance = openAir ? HALF : ROOM / 2;
       const wx = pos.x + dx * distance;
       const wz = pos.z + dz * distance;
@@ -713,7 +893,16 @@ export function buildScene(world, layout, materials, assets = null) {
       // "In the air..." rooms sit three levels above the roofs. An archway
       // built for one hangs over the town with its signpost floating beside it,
       // which is exactly what it looks like. They are scenery; leave them bare.
-      if (side && (side.kind === 'portal' || side.kind === 'gate') && !airborne) {
+      if (wellDown) {
+        const wx2 = pos.x + dx * (distance - 2.1);
+        const wz2 = pos.z + dz * (distance - 2.1);
+        instances.add('town_well', { x: wx2, y: pos.y, z: wz2, rotY: FACE_ROT[dir] }, chunk);
+        addCollider(wx2 - 1.0, wx2 + 1.0, wz2 - 1.0, wz2 + 1.0, pos.y, pos.y + 0.62);
+        portals.push({
+          x: wx2, y: pos.y, z: wz2, radius: 1.55, target: side.target.vnum,
+          from: room.vnum, label: side.target.room.name, dir,
+        });
+      } else if (side && (side.kind === 'portal' || side.kind === 'gate') && !airborne) {
         const ax = pos.x + dx * (distance - 0.1);
         const az = pos.z + dz * (distance - 0.1);
         buildArch({ batcher, instances, model, chunk, x: ax, y: pos.y, z: az, rotY, sealed: side.kind === 'gate' });
@@ -821,7 +1010,8 @@ export function buildScene(world, layout, materials, assets = null) {
           w: SHELL * 2, d: SHELL * 2, h: CEIL + 1.1, seed: hash3(room.vnum, 2, 0, 11), doorSides: sides,
         });
       }
-      buildInteriorProps({ room, pos, sides, decor, mats });
+      if (isSewer(room)) buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider });
+      else buildInteriorProps({ room, pos, sides, decor, mats });
       if (isShop(room)) buildShopSign({ room, pos, sides, instances, model, chunk });
     } else {
       // Bog first: half the marsh's bog rooms are sectored FOREST or MOUNTAIN,
@@ -855,7 +1045,7 @@ export function buildScene(world, layout, materials, assets = null) {
       // The farmyard always dresses: an empty pig pen is a cobbled square with
       // pigs on it, and the trough is half of what makes it a pen.
       if (!bog && blank.length && wantsClutter(room)
-        && (farm || hash3(room.vnum, 13, 0, 6) > 0.28)) {
+        && (farm || REFUSE.test(room.name) || hash3(room.vnum, 13, 0, 6) > 0.28)) {
         decor.push({
           // Against the new facade, not inside it.
           kind: 'clutter', x: pos.x, y: pos.y, z: pos.z,
@@ -890,13 +1080,28 @@ export function buildScene(world, layout, materials, assets = null) {
     const fromInfo = rooms.get(link.from.vnum);
     const toInfo = rooms.get(link.to.vnum);
     if ((fromInfo && fromInfo.unbuilt) || (toInfo && toInfo.unbuilt)) continue;
+    // A tunnel wherever either end is the sewer's works. Where the other end is
+    // a walled room, the tunnel is closed off at that room's cell edge by a
+    // face with its doorway in it.
+    if (sewerKit && (isVault(link.from.room) || isVault(link.to.room))) {
+      buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor });
+      continue;
+    }
     buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt, cellKey });
   }
 
   for (const plan of stairPlans) {
+    const lowerMats = pickMaterials(plan.lower.room, plan.lower.room.area);
     buildStair({
       batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
-      materials: pickMaterials(plan.lower.room, plan.lower.room.area),
+      materials: lowerMats,
+      // Going down into the ground rather than up a storey: the opening wants
+      // a parapet round it, and a lining through the earth between the room
+      // below's ceiling and this floor -- unless the room below is a sewer
+      // shaft, whose walls already run the whole way up.
+      buried: isBuried(lowerMats, plan.lower),
+      shaftWalls: sewerKit && isVault(plan.lower.room),
+      kerb: isSewer(plan.upper.room) ? 'ashlar' : 'stonewall',
     });
   }
 
@@ -1015,15 +1220,92 @@ export function buildScene(world, layout, materials, assets = null) {
 
   const mist = buildMist(group, mistCells);
 
-  const stats = batcher.finish(group);
+  const zones = buildZones(group, groundY, groundHoles);
+  const stats = batcher.finish(zones.surface, zones.route);
   if (instances) {
     markIndoorAssets(assets);
-    const placed = instances.finish(group);
+    const placed = instances.finish(zones.surface, zones.deep);
     stats.meshes += placed.meshes;
     stats.triangles += placed.triangles;
     stats.instanced = placed.triangles;
   }
-  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, stats };
+  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, stats, zones };
+}
+
+// --------------------------------------------------------------- zones ----
+
+/** Chunks are `${level}:x,z`; anything on a level below zero is underground. */
+const isDeepChunk = (chunk) => typeof chunk === 'string' && chunk.startsWith('-');
+
+/**
+ * Underground, a chunk is four times the area. Every kit piece carries four
+ * or five materials, so each chunk costs a draw per piece per material, and a
+ * sewer chunk seldom has anything in it a tunnel wall is not already hiding:
+ * measured at #7045, 1,719 draw calls at 4x4 cells.
+ */
+const coarse = (chunk) => chunk.replace(/^(-?\d+):(-?\d+),(-?\d+)$/,
+  (m, l, x, z) => `${l}:${Math.floor(Number(x) / 2)},${Math.floor(Number(z) / 2)}`);
+
+/** One `InstanceBatch` per zone behind the one `add` every builder calls. */
+function zonedInstances(surface, deep) {
+  return {
+    library: surface.library,
+    add: (name, transform, chunk = '0') => (isDeepChunk(chunk)
+      ? deep.add(name, transform, coarse(chunk)) : surface.add(name, transform, chunk)),
+    finish(surfaceParent, deepParent) {
+      const a = surface.finish(surfaceParent);
+      const b = deep.finish(deepParent);
+      return { meshes: a.meshes + b.meshes, triangles: a.triangles + b.triangles };
+    },
+  };
+}
+
+/**
+ * What is underground and what is not, drawn only where it can be seen.
+ *
+ * Frustum culling does not know about the ground. From the Market Square the
+ * sewer's chunks are right there in the view frustum, a few metres below the
+ * paving, and with the sewer loaded every one of them was drawn: 723 draw
+ * calls became 1,708 for a view that shows not one pixel of it. The reverse
+ * holds down there, where the whole town is overhead and none of it visible.
+ *
+ * So the world splits in two, and each half is shown when the camera could
+ * see into it: the underground when the eye is below the ground plane, the
+ * surface when it is above -- and both near a stair that goes through the
+ * ground, where you can look up or down the shaft. The sensor is how the check
+ * gets the camera without the render loop having to know any of this: an
+ * empty mesh that is never culled, whose onBeforeRender sees the camera every
+ * frame. The decision lands a frame late, which is invisible, because the half
+ * being hidden is the half with a vault or a street between it and the eye.
+ */
+const ZONE_SHAFT_REACH = 10;
+
+function buildZones(group, groundY, openings) {
+  const surface = new THREE.Group();
+  surface.name = 'surface';
+  const deep = new THREE.Group();
+  deep.name = 'underground';
+  group.add(surface, deep);
+  const centres = openings.map((r) => ({ x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2 }));
+  const reach2 = ZONE_SHAFT_REACH * ZONE_SHAFT_REACH;
+  const update = (eye) => {
+    const below = eye.y < groundY - 0.25;
+    const shaft = centres.some((c) => (c.x - eye.x) ** 2 + (c.z - eye.z) ** 2 < reach2);
+    deep.visible = below || shaft;
+    surface.visible = !below || shaft;
+  };
+  const sensor = new THREE.Mesh(
+    new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)),
+    new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false }),
+  );
+  sensor.name = 'zone sensor';
+  sensor.frustumCulled = false;
+  sensor.onBeforeRender = (renderer, scene, camera) => update(camera.position);
+  group.add(sensor);
+  return {
+    surface, deep, update,
+    route: (chunk) => (isDeepChunk(chunk) ? deep : surface),
+  };
 }
 
 /**
@@ -1044,6 +1326,9 @@ export function buildScene(world, layout, materials, assets = null) {
 const INDOOR_ASSETS = [
   'wall_solid', 'wall_door', 'wall_corner', 'wall_roof',
   'temple_wall_solid', 'temple_wall_door', 'temple_corner', 'temple_roof', 'temple_column',
+  // Seven metres under the street there is no sunlit ground to bounce off.
+  'sewer_tunnel', 'sewer_arm', 'sewer_hub', 'sewer_hub_end', 'sewer_chamber', 'sewer_shaft',
+  'sewer_wall_open', 'sewer_wall_solid', 'sewer_shaft_open', 'sewer_shaft_solid', 'sewer_door_end',
 ];
 
 function markIndoorAssets(assets) {
@@ -2969,7 +3254,7 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
   // laid over the routed cell joins the two either side of it seamlessly.
   // ...unless both of them are bog, where the same sector code means standing
   // water in peat rather than a reach of river.
-  const midstream = isWater(link.from.room) && isWater(link.to.room)
+  const midstream = !isSewer(source) && isWater(link.from.room) && isWater(link.to.room)
     && !isBog(link.from.room) && !isBog(link.to.room);
   const level = link.from.level;
   const y = level * LEVEL_H;
@@ -2990,6 +3275,11 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
     // An enclosed corridor has no sky over it, so no verge belongs on it.
     if (groundAt && cellKey && !enclosed) groundAt.set(cellKey(level, c.x, c.z), mats.floor);
 
+    // Between two flooded rooms in the sewer the water lies on the floor of
+    // the passage too, in the sewer's own material, not the river's.
+    if (isSewer(source) && [link.from.room, link.to.room].every((r) => isWater(r) || sewerFlood(r))) {
+      batcher.add(plane(CELL, CELL, 4), 'sewage', place(pos.x, y + SW_FLOOD, pos.z), { chunk });
+    }
     // The floor underneath stays as it is; the plane covers it, at the same
     // height and size the rooms either side use.
     if (midstream) decor.push({ kind: 'water', x: pos.x, y: y + WATER_LIFT, z: pos.z, size: CELL + WATER_LAP });
@@ -3045,6 +3335,405 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
   batcher.indoor = false;
 }
 
+// ------------------------------------------------------- the sewer's kit ----
+
+/** Everything the sewer is assembled from; tools/blender/sewer.py makes them. */
+const SEWER_KIT = [
+  'sewer_tunnel', 'sewer_arm', 'sewer_hub', 'sewer_hub_end', 'sewer_chamber', 'sewer_shaft',
+  'sewer_wall_open', 'sewer_wall_solid', 'sewer_shaft_open', 'sewer_shaft_solid',
+  'sewer_grate', 'sewer_door_end', 'sewer_pit', 'sewer_ladder', 'town_well',
+];
+
+/**
+ * A point `along` metres out of `pos` towards `dir` and `across` metres to
+ * the right of that heading -- the frame every kit piece is authored in,
+ * facing north with +x on its right, and swung round with FACE_ROT.
+ */
+function sewerAt(pos, dir, along, across) {
+  const [fx, , fz] = DIR_STEP[dir];
+  const th = FACE_ROT[dir];
+  return { x: pos.x + fx * along + Math.cos(th) * across, z: pos.z + fz * along - Math.sin(th) * across };
+}
+
+function sewerRect(pos, dir, a0, a1, c0, c1) {
+  const p = sewerAt(pos, dir, a0, c0);
+  const q = sewerAt(pos, dir, a1, c1);
+  return { x0: Math.min(p.x, q.x), x1: Math.max(p.x, q.x), z0: Math.min(p.z, q.z), z1: Math.max(p.z, q.z) };
+}
+
+/**
+ * What a length of tunnel is to walk on and walk into: the two walkways, the
+ * channel sunk between them, and a wall down each side. The channel is a
+ * platform like any other -- the mud is explicit that you are standing *in*
+ * the sewer, and a step down into the water is what says so.
+ */
+function sewerRun({ pos, dir, from, to, y, addCollider, addPlatform }) {
+  const walk = (c0, c1, top) => {
+    const r = sewerRect(pos, dir, from, to, c0, c1);
+    addPlatform(r.x0, r.x1, r.z0, r.z1, top);
+  };
+  walk(-SW_A, -SW_CH, y);
+  walk(SW_CH, SW_A, y);
+  walk(-SW_CH, SW_CH, y + SW_INVERT);
+  for (const s of [-1, 1]) {
+    const r = sewerRect(pos, dir, from, to, s * SW_A, s * (SW_A + SW_WALL));
+    addCollider(r.x0, r.x1, r.z0, r.z1, y, y + 4.2);
+  }
+}
+
+/**
+ * Mud or water lying over a stretch of floor, wall to wall. It covers the
+ * channel and the kerbs, which is the point: in "the muddy sewer" there is
+ * no walkway any more, and in "the watery sewer" there is no channel.
+ */
+function sewerSheet({ batcher, chunk, pos, dir, from, to, y, flood }) {
+  const r = sewerRect(pos, dir, from, to, -SW_A, SW_A);
+  const w = r.x1 - r.x0; const d = r.z1 - r.z0;
+  batcher.add(plane(w, d, Math.max(2, Math.round(Math.max(w, d) / 2))), flood ? 'sewage' : 'sludge',
+    place((r.x0 + r.x1) / 2, y + (flood ? SW_FLOOD : SW_MUD), (r.z0 + r.z1) / 2), { chunk });
+}
+
+/** A tunnel mouth that nothing is routed through is stopped 0.3 m short of the cell edge. */
+function sewerCap({ instances, chunk, pos, dir, y, addCollider }) {
+  const cap = sewerAt(pos, dir, HALF - 0.3 - SW_A, 0);
+  instances.add('sewer_hub_end', { x: cap.x, y, z: cap.z, rotY: FACE_ROT[dir] }, chunk);
+  const r = sewerRect(pos, dir, HALF - 0.3, HALF, -SW_A, SW_A);
+  addCollider(r.x0, r.x1, r.z0, r.z1, y, y + 4.2);
+}
+
+/**
+ * How many torches the room's own words burn: "lit by a single torch set in
+ * the wall", "the room is lit by five torches", "on the wall is a torch
+ * sitting in its sconce". None where it does not say so -- the sewer is dark,
+ * and that it is dark is most of what the mud says about it.
+ */
+const TORCH_COUNT = { a: 1, an: 1, one: 1, single: 1, two: 2, three: 3, four: 4, five: 5, six: 6, some: 2, several: 3 };
+function sewerTorches(room) {
+  const text = `${room.name} ${room.description}`.toLowerCase();
+  const m = text.match(/\b(a|an|one|single|two|three|four|five|six|some|several)\s+(?:\w+\s+)?torch(es)?\b/);
+  if (m) return TORCH_COUNT[m[1]] || 1;
+  return /\btorch(es)?\b/.test(text) ? 1 : 0;
+}
+/**
+ * A light the mud gives no source for: "all lit up by an odd light", "walls
+ * that glitter like gold ... as if the glitter lights the whole room", "a
+ * strange light flowing from there". Cold, even and sourceless, hung under
+ * the crown -- which is exactly what it is described as.
+ */
+const SEWER_GLOW = /\b(odd light|lit up|glitter\w*|strange light|lot of light|filled with light|bright as daylight)\b/i;
+
+function buildSewerChamber({
+  batcher, instances, chunk, room, cell, pos, sides, layout, floorHoles, shaft,
+  addCollider, addPlatform, lights, decor, portals,
+}) {
+  const y = pos.y;
+  const mud = sewerMud(room);
+  const flood = sewerFlood(room);
+  // Out to the middle of the wall, so the floor's edge is under masonry.
+  buildFloor({
+    batcher, chunk, material: 'sewerflag', x: pos.x, y, z: pos.z,
+    half: SW_CA + SW_CT / 2, holes: floorHoles, addPlatform,
+  });
+  if ((mud || flood) && !floorHoles.length) {
+    sewerSheet({ batcher, chunk, pos, dir: 0, from: -SW_CA, to: SW_CA, y, flood });
+    // sewerSheet spans the tunnel's width; a chamber is wider than that.
+    for (const s of [-1, 1]) {
+      const r = { x0: pos.x + (s < 0 ? -SW_CA : SW_A), x1: pos.x + (s < 0 ? -SW_A : SW_CA), z0: pos.z - SW_CA, z1: pos.z + SW_CA };
+      batcher.add(plane(r.x1 - r.x0, r.z1 - r.z0, 3), flood ? 'sewage' : 'sludge',
+        place((r.x0 + r.x1) / 2, y + (flood ? SW_FLOOD : SW_MUD), pos.z), { chunk });
+    }
+  }
+  const top = y + (shaft ? 7.15 : 5.0);
+  const blind = [];
+
+  for (let dir = 0; dir < 4; dir++) {
+    const side = sides[dir];
+    const link = side && side.link;
+    // A way up or down that claimed this wall is a ladder or a pit against
+    // it, not a tunnel mouth: there is nowhere level for a tunnel to go.
+    const vertical = !!link && link.dir >= 4 && side.kind === 'portal';
+    const open = !!side && !vertical && ['alley', 'portal', 'gate'].includes(side.kind);
+    const rotY = FACE_ROT[dir];
+    const piece = shaft ? (open ? 'sewer_shaft_open' : 'sewer_shaft_solid')
+      : (open ? 'sewer_wall_open' : 'sewer_wall_solid');
+    instances.add(piece, { x: pos.x, y, z: pos.z, rotY }, chunk);
+
+    if (!open) {
+      const r = sewerRect(pos, dir, SW_CA, SW_CA + SW_CT, -SW_CA - SW_CT, SW_CA + SW_CT);
+      addCollider(r.x0, r.x1, r.z0, r.z1, y, top);
+      if (!side) blind.push(dir);
+    } else {
+      for (const s of [-1, 1]) {
+        const r = sewerRect(pos, dir, SW_CA, SW_CA + SW_CT, s * SW_A, s * (SW_CA + SW_CT));
+        addCollider(r.x0, r.x1, r.z0, r.z1, y, top);
+      }
+      sewerRun({ pos, dir, from: SW_CA, to: HALF, y, addCollider, addPlatform });
+      // The stub carries the room's mud or water out to the cell edge, where
+      // the passage beyond takes it up if the room at its other end has any.
+      if (mud || flood) sewerSheet({ batcher, chunk, pos, dir, from: SW_CA - 0.05, to: HALF, y, flood });
+    }
+
+    if (open && side.kind !== 'alley') {
+      // Nothing is routed through this mouth: a portal is somewhere the grid
+      // could not put next door, a gate is outside the loaded world. Stop the
+      // tunnel short and mark which it is, the way an archway would.
+      sewerCap({ instances, chunk, pos, dir, y, addCollider });
+      const at = sewerAt(pos, dir, SW_CA + 0.7, 0);
+      if (side.kind === 'portal') {
+        portals.push({
+          x: at.x, y, z: at.z, radius: 1.6, target: side.target.vnum,
+          from: room.vnum, label: side.target.room.name, dir,
+        });
+        lights.push({ x: at.x, y: y + 2.4, z: at.z, color: 0x7fd8ff, intensity: 5, radius: 10 });
+      } else {
+        // A grille across the mouth, bars cut to the arch.
+        for (let i = -5; i <= 5; i++) {
+          const across = i * 0.38;
+          const h = 1.9 + Math.sqrt(Math.max(0, SW_A * SW_A - across * across)) - 0.05;
+          const b = sewerAt(pos, dir, SW_CA + 0.2, across);
+          batcher.add(box(0.07, h, 0.07), 'rustiron', place(b.x, y + h / 2, b.z, rotY), { chunk });
+        }
+        for (const h of [1.1, 2.7]) {
+          const b = sewerAt(pos, dir, SW_CA + 0.2, 0);
+          batcher.add(box(h > 2 ? 3.9 : 4.3, 0.09, 0.09), 'rustiron', place(b.x, y + h, b.z, rotY), { chunk });
+        }
+        const r = sewerRect(pos, dir, SW_CA + 0.1, SW_CA + 0.3, -SW_A, SW_A);
+        addCollider(r.x0, r.x1, r.z0, r.z1, y, y + 4.2);
+        const sign = sewerAt(pos, dir, SW_CA - 0.4, 0);
+        decor.push({
+          kind: 'gateSign', x: sign.x, y: y + 2.7, z: sign.z, rotY: (dir === 1 || dir === 3) ? Math.PI / 2 : 0,
+          text: `${DIR_NAME[link.dir]} · #${side.exit ? side.exit.to : '?'} — outside the loaded world`,
+        });
+      }
+    }
+
+    if (vertical) {
+      // "There are bars set in the side of the pit wall functioning as a
+      // ladder." Down is a pit against the wall; up is iron rungs on it.
+      const down = link.dir === 5;
+      const at = sewerAt(pos, dir, down ? SW_CA - 1.55 : SW_CA, 0);
+      instances.add(down ? 'sewer_pit' : 'sewer_ladder', { x: at.x, y, z: at.z, rotY }, chunk);
+      if (down) addCollider(at.x - 1.0, at.x + 1.0, at.z - 1.0, at.z + 1.0, y, y + 0.62);
+      const trigger = down ? at : sewerAt(pos, dir, SW_CA - 0.7, 0);
+      portals.push({
+        x: trigger.x, y, z: trigger.z, radius: down ? 1.55 : 1.2, target: side.target.vnum,
+        from: room.vnum, label: side.target.room.name, dir,
+      });
+    }
+  }
+
+  instances.add(shaft ? 'sewer_shaft' : 'sewer_chamber', { x: pos.x, y, z: pos.z, rotY: 0 }, chunk);
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const cx = pos.x + sx * (SW_CA - 0.3); const cz = pos.z + sz * (SW_CA - 0.3);
+      addCollider(cx - 0.42, cx + 0.42, cz - 0.42, cz + 0.42, y, top);
+    }
+  }
+
+  // A drain in the floor, off the middle and clear of any stair.
+  if (!mud && !flood) {
+    const corner = Math.floor(hash3(room.vnum, 31, 0, 3) * 4);
+    for (let k = 0; k < 4; k++) {
+      const q = (corner + k) % 4;
+      const gx = (q & 1 ? 1 : -1) * 2.5; const gz = (q & 2 ? 1 : -1) * 2.5;
+      const clear = !floorHoles.some((h) => gx + 0.7 > h.x0 && gx - 0.7 < h.x1 && gz + 0.7 > h.z0 && gz - 0.7 < h.z1)
+        && !(shaft && (Math.abs(gx) < 2.4 || Math.abs(gz) < 2.4));
+      if (!clear) continue;
+      instances.add('sewer_grate', { x: pos.x + gx, y, z: pos.z + gz, rotY: 0 }, chunk);
+      break;
+    }
+  }
+
+  sewerDressing({
+    room, style: 'vault', pos, y, blind, sides, wall: SW_CA, ceil: 5.0,
+    instances, chunk, decor, lights, addCollider,
+  });
+}
+
+/**
+ * What the room's own words put in it, for every room in the sewer: the
+ * torches it says burn, the light it says glows, the bones and the rubble it
+ * says are lying about, and -- in a cave -- the rock itself.
+ *
+ * `wall` is how far the inner face of the walls is from the middle: 4.5 in a
+ * chamber, 5 in a walled room. `blind` is the walls with nothing in them.
+ */
+function sewerDressing({ room, style, pos, y, blind, sides, wall, ceil, instances, chunk, decor, lights, addCollider }) {
+  const text = `${room.name} ${room.description}`;
+  const rand = (k, salt) => hash3(room.vnum, k, 0, salt);
+  const put = (name, along, across, dir, spin, scale = 1) => {
+    const at = sewerAt(pos, dir, along, across);
+    instances.add(name, { x: at.x, y, z: at.z, rotY: FACE_ROT[dir] + spin, scale }, chunk);
+    return at;
+  };
+
+  // Light, only where the mud says there is some. Blind walls first, the
+  // middle of each and then either side of it; then the stretch of wall
+  // beside a way out, between it and the corner.
+  const spots = [];
+  for (const across of [0, 2.4, -2.4]) for (const d of blind) spots.push([d, across]);
+  for (let d = 0; d < 4; d++) {
+    if (blind.includes(d)) continue;
+    for (const across of [wall - 1.05, -(wall - 1.05)]) spots.push([d, across]);
+  }
+  const torches = Math.min(sewerTorches(room), spots.length);
+  const sconce = instances.library.get('torch_sconce');
+  for (let i = 0; i < torches; i++) {
+    const [dir, across] = spots[i];
+    const face = sewerAt(pos, dir, wall, across);
+    const cup = sewerAt(pos, dir, wall - 0.31, across);
+    const flameY = y + 2.75;
+    if (sconce) {
+      instances.add('torch_sconce', { x: face.x, y: flameY + 0.26 - sconce.bounds.max.y, z: face.z, rotY: FACE_ROT[dir] }, chunk);
+    }
+    decor.push({ kind: 'torch', bare: true, x: cup.x, y: flameY, z: cup.z });
+    const [dx, , dz] = DIR_STEP[dir];
+    lights.push({ x: cup.x - dx * 0.3, y: flameY + 0.4, z: cup.z - dz * 0.3, color: 0xffa347, intensity: 8, radius: 12, flicker: true });
+  }
+  if (SEWER_GLOW.test(room.description)) {
+    lights.push({
+      x: pos.x, y: y + Math.min(ceil - 0.8, 4.2), z: pos.z, radius: 13, intensity: 7,
+      color: /gold|glitter/i.test(room.description) ? 0xffd89a : 0xb8d4ff,
+    });
+  }
+
+  // Against the walls with nothing in them, never in the middle of the floor.
+  const against = blind.length ? blind : [0, 1, 2, 3].filter((d) => !sides[d] || sides[d].kind !== 'alley');
+  let slot = 0;
+  const nextWall = () => against[(slot++) % Math.max(1, against.length)];
+  if (/\b(bones?|skulls?|skeletons?|decay)\b/i.test(text) && against.length) {
+    const n = /\b(lot of|all kinds|scattered|spread)\b/i.test(text) ? 2 : 1;
+    for (let i = 0; i < n; i++) {
+      put('bone_pile', wall - 1.1, (rand(i, 41) - 0.5) * (wall - 1.5) * 2, nextWall(), rand(i, 43) * 6.28);
+    }
+  }
+  if (/\b(collapsed|cave-in|rubble|debris)\b/i.test(text) && against.length) {
+    const at = put('rubble', wall - 1.25, (rand(0, 45) - 0.5) * 3, nextWall(), rand(0, 47) * 6.28);
+    addCollider(at.x - 0.9, at.x + 0.9, at.z - 0.9, at.z + 0.9, y, y + 0.4);
+  }
+
+  if (style === 'cave') {
+    // A rock box is still a box. Boulders fallen into its corners and along
+    // its blank walls break the four straight lines where wall meets floor,
+    // which is where the eye finds the level editor.
+    const inset = wall - 1.15;
+    for (let k = 0; k < 4; k++) {
+      const sx = k & 1 ? 1 : -1; const sz = k & 2 ? 1 : -1;
+      const name = rand(k, 51) > 0.5 ? 'cave_rock_b' : 'cave_rock_a';
+      const scale = 0.75 + rand(k, 53) * 0.45;
+      const x = pos.x + sx * inset; const z = pos.z + sz * inset;
+      instances.add(name, { x, y: y - 0.05, z, rotY: rand(k, 55) * 6.28, scale }, chunk);
+      addCollider(x - scale, x + scale, z - scale, z + scale, y, y + 1.2 * scale);
+    }
+    for (const d of blind) {
+      const across = (rand(d, 57) - 0.5) * 4;
+      const scale = 0.6 + rand(d, 59) * 0.4;
+      const at = put(rand(d, 61) > 0.5 ? 'cave_rock_a' : 'cave_rock_b', wall - 0.7, across, d, rand(d, 63) * 6.28, scale);
+      addCollider(at.x - scale, at.x + scale, at.z - scale, at.z + scale, y, y + 1.2 * scale);
+    }
+    // Flowstone from the roof, and up from the floor where the name says so.
+    const hanging = 2 + Math.floor(rand(0, 65) * 2);
+    for (let i = 0; i < hanging; i++) {
+      const a = rand(i, 67) * Math.PI * 2; const r = 1.6 + rand(i, 69) * 1.8;
+      instances.add('stalactites', {
+        x: pos.x + Math.cos(a) * r, y: y + ceil, z: pos.z + Math.sin(a) * r, rotY: rand(i, 71) * 6.28,
+        scale: 0.7 + rand(i, 73) * 0.5,
+      }, chunk);
+    }
+    if (/\bstalag\w*/i.test(text) || rand(0, 75) > 0.55) {
+      const n = /\bstalagmite/i.test(text) ? 2 : 1;
+      for (let i = 0; i < n && against.length; i++) {
+        const at = put('stalagmites', wall - 1.5, (rand(i, 77) - 0.5) * 3.5, nextWall(), rand(i, 79) * 6.28,
+          0.8 + rand(i, 81) * 0.4);
+        addCollider(at.x - 0.9, at.x + 0.9, at.z - 0.9, at.z + 0.9, y, y + 2);
+      }
+    }
+  }
+
+  // "The Sewer Store Room": somewhere things are kept.
+  if (/\b(store|storage)\b/i.test(room.name) && blind.length) {
+    decor.push({
+      kind: 'clutter', x: pos.x, y, z: pos.z, half: wall + 0.35, walls: blind,
+      seed: hash3(room.vnum, 12, 0, 5), indoor: true,
+      props: ['barrel', 'crate', 'sack', 'stacked_crates', 'barrel_stack', 'rope_coil', 'bucket', 'planks_pile'],
+    });
+  }
+}
+
+/** The walled rooms and caves of the sewer, dressed from the same words. */
+function buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider }) {
+  if (!instances) return;
+  const blind = [0, 1, 2, 3].filter((d) => !sides[d]);
+  sewerDressing({
+    room, style: sewerStyle(room), pos, y: pos.y, blind, sides, wall: ROOM / 2, ceil: CEIL,
+    instances, chunk, decor, lights, addCollider,
+  });
+  // An altar or a hearth the text names, in the ordinary way: these rooms have
+  // the ordinary walls the fittings are measured from.
+  for (const f of readFittings(room, sides)) {
+    decor.push({ kind: 'fitting', fitting: f.kind, dir: f.dir, blocked: !!sides[f.dir], x: pos.x, y: pos.y, z: pos.z, seed: hash3(room.vnum, f.dir, 0, 71) });
+  }
+}
+
+/**
+ * A routed passage in the sewer, cell by cell: a whole straight tunnel where
+ * it runs straight through, otherwise a crossing with an arm out to every
+ * side it leaves by and a blind end on every side it does not.
+ */
+function buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor }) {
+  batcher.indoor = true;
+  const level = link.from.level;
+  const y = level * LEVEL_H;
+  const chain = [link.from, ...link.path, link.to];
+  // Mud and water run on between two rooms that both have them.
+  const mud = sewerMud(link.from.room) && sewerMud(link.to.room);
+  const flood = sewerFlood(link.from.room) && sewerFlood(link.to.room);
+
+  for (let i = 1; i < chain.length - 1; i++) {
+    const c = chain[i];
+    const cellRef = { x: c.x, z: c.z, level };
+    const chunk = chunkOf(cellRef);
+    const pos = worldOf(cellRef);
+    const open = [dirBetween(c, chain[i - 1]), dirBetween(c, chain[i + 1])];
+    const straight = (open[0] + 2) % 4 === open[1];
+    if (straight) {
+      instances.add('sewer_tunnel', { x: pos.x, y, z: pos.z, rotY: FACE_ROT[open[0] % 2] }, chunk);
+      sewerRun({ pos, dir: open[0], from: -HALF, to: HALF, y, addCollider, addPlatform });
+      if (mud || flood) sewerSheet({ batcher, chunk, pos, dir: open[0], from: -HALF, to: HALF, y, flood });
+      continue;
+    }
+    instances.add('sewer_hub', { x: pos.x, y, z: pos.z, rotY: 0 }, chunk);
+    addPlatform(pos.x - SW_A, pos.x + SW_A, pos.z - SW_A, pos.z + SW_A, y);
+    if (mud || flood) sewerSheet({ batcher, chunk, pos, dir: 0, from: -SW_A, to: SW_A, y, flood });
+    for (let dir = 0; dir < 4; dir++) {
+      if (open.includes(dir)) {
+        instances.add('sewer_arm', { x: pos.x, y, z: pos.z, rotY: FACE_ROT[dir] }, chunk);
+        sewerRun({ pos, dir, from: SW_A, to: HALF, y, addCollider, addPlatform });
+        if (mud || flood) sewerSheet({ batcher, chunk, pos, dir, from: SW_A, to: HALF, y, flood });
+      } else {
+        instances.add('sewer_hub_end', { x: pos.x, y, z: pos.z, rotY: FACE_ROT[dir] }, chunk);
+        const r = sewerRect(pos, dir, SW_A, SW_A + SW_WALL, -SW_A, SW_A);
+        addCollider(r.x0, r.x1, r.z0, r.z1, y, y + 4.2);
+      }
+    }
+  }
+
+  // Where the tunnel reaches a room that is not part of the works -- a lair
+  // with a door on it, a cave -- it ends in a face at that room's cell edge
+  // with the room's own doorway through it.
+  for (const [end, next] of [[link.from, chain[1]], [link.to, chain[chain.length - 2]]]) {
+    if (isVault(end.room)) continue;
+    const dir = dirBetween(end, next);
+    const pos = worldOf(end);
+    instances.add('sewer_door_end', { x: pos.x, y, z: pos.z, rotY: FACE_ROT[dir] }, chunkOf(end));
+    for (const s of [-1, 1]) {
+      const r = sewerRect(pos, dir, HALF - 0.05, HALF + 0.1, s * 1.6, s * SW_A);
+      addCollider(r.x0, r.x1, r.z0, r.z1, y, y + 4.2);
+    }
+  }
+  batcher.indoor = false;
+}
+
 /** A stone archway: portals you step through, gates that are sealed. */
 function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed }) {
   const arch = model(['stone_arch'], 0);
@@ -3075,7 +3764,7 @@ function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed }) 
 }
 
 /** Straight flight from the lower room up through the opening in its ceiling. */
-function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform, materials }) {
+function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform, materials, buried = false, shaftWalls = false, kerb = 'stonewall' }) {
   const lower = worldOf(plan.lower);
   const chunk = chunkOf(plan.lower);
   const [dx, , dz] = DIR_STEP[plan.dir];
@@ -3105,15 +3794,84 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
       const y = lower.y + rise * t + 0.95;
       const w = dx !== 0 ? STAIR_RUN / segments : 0.18;
       const d = dz !== 0 ? STAIR_RUN / segments : 0.18;
-      batcher.add(box(w, 0.18, d), 'iron', place(lower.x + dx * along + offX, y, lower.z + dz * along + offZ), { chunk });
-      batcher.add(box(0.13, 0.95, 0.13), 'iron', place(lower.x + dx * along + offX, y - 0.5, lower.z + dz * along + offZ), { chunk });
+      batcher.add(box(w, 0.18, d), buried ? 'rustiron' : 'iron', place(lower.x + dx * along + offX, y, lower.z + dz * along + offZ), { chunk });
+      batcher.add(box(0.13, 0.95, 0.13), buried ? 'rustiron' : 'iron', place(lower.x + dx * along + offX, y - 0.5, lower.z + dz * along + offZ), { chunk });
     }
-    const railW = dx !== 0 ? STAIR_RUN : 0.3;
-    const railD = dz !== 0 ? STAIR_RUN : 0.3;
-    const cx = lower.x + dx * (STAIR_START - STAIR_RUN / 2) + offX;
-    const cz = lower.z + dz * (STAIR_START - STAIR_RUN / 2) + offZ;
-    addCollider(cx - railW / 2, cx + railW / 2, cz - railD / 2, cz + railD / 2, lower.y, lower.y + rise);
+    // One collider per stretch of rail, spanning only the height the rail
+    // is at there. It was one box from the floor to the top of the flight,
+    // which sealed the room in two along the stair: in a sewer shaft the
+    // stair runs across the middle of a junction with tunnels on both sides
+    // of it, and the way between them is underneath the upper half.
+    for (let i = 0; i < segments; i++) {
+      const a0 = STAIR_START - STAIR_RUN * (i / segments);
+      const a1 = STAIR_START - STAIR_RUN * ((i + 1) / segments);
+      const x0 = lower.x + dx * a0 + offX; const x1 = lower.x + dx * a1 + offX;
+      const z0 = lower.z + dz * a0 + offZ; const z1 = lower.z + dz * a1 + offZ;
+      addCollider(Math.min(x0, x1) - 0.15, Math.max(x0, x1) + 0.15, Math.min(z0, z1) - 0.15, Math.max(z0, z1) + 0.15,
+        Math.max(lower.y, lower.y + rise * (i / segments) - 0.4), lower.y + rise * ((i + 1) / segments) + 1.1);
+    }
   }
+
+  if (!buried) return;
+  const upper = worldOf(plan.upper);
+  const upperChunk = chunkOf(plan.upper);
+  // The opening, in the upper room's frame: `along` runs the stair's way.
+  const a0 = HOLE_CENTRE - HOLE_RUN / 2; const a1 = HOLE_CENTRE + HOLE_RUN / 2;
+  const c0 = -HOLE_SPAN / 2; const c1 = HOLE_SPAN / 2;
+  const at = (along, across) => ({
+    x: upper.x + dx * along + (dz !== 0 ? across : 0),
+    z: upper.z + dz * along + (dx !== 0 ? across : 0),
+  });
+  const slab = (p, q, y0, y1, material) => {
+    const x0 = Math.min(p.x, q.x); const x1 = Math.max(p.x, q.x);
+    const z0 = Math.min(p.z, q.z); const z1 = Math.max(p.z, q.z);
+    batcher.add(box(x1 - x0, y1 - y0, z1 - z0), material,
+      place((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), { chunk: upperChunk, ao: wallAo(y0) });
+    return { x0, x1, z0, z1 };
+  };
+  // A parapet on the three sides the stair does not come out of -- "a well
+  // in the middle of the floor leads down into darkness" wants something to
+  // lean over, and a bare hole in a floor reads as a missing tile. The top of
+  // the flight is at a0, the far end from the wall it starts at.
+  const K = 0.34; const KH = 0.86;
+  const parts = [
+    [at(a1, c0 - K), at(a1 + K, c1 + K)],
+    [at(a0, c0 - K), at(a1, c0)],
+    [at(a0, c1), at(a1, c1 + K)],
+  ];
+  for (const [p, q] of parts) {
+    const r = slab(p, q, upper.y, upper.y + KH, kerb);
+    addCollider(r.x0, r.x1, r.z0, r.z1, upper.y, upper.y + KH);
+    slab({ x: r.x0 - 0.05, z: r.z0 - 0.05 }, { x: r.x1 + 0.05, z: r.z1 + 0.05 }, upper.y + KH, upper.y + KH + 0.1, kerb);
+  }
+  // The opening's own edges: the slab it is cut through is whatever the room
+  // above is floored with, and in the Dump that is turf, standing 0.45 m deep
+  // round the top of a brick shaft. Lined in the parapet's stone instead.
+  for (const [p, q] of [
+    [at(a0, c0 - 0.06), at(a1, c0)], [at(a0, c1), at(a1, c1 + 0.06)],
+    [at(a1, c0 - 0.06), at(a1 + 0.06, c1 + 0.06)],
+  ]) slab(p, q, upper.y - SLAB - 0.02, upper.y - 0.005, kerb);
+  if (shaftWalls) {
+    // A sewer shaft's walls run to the underside of the floor above, and
+    // round the opening that underside is the ceiling you look up at -- it
+    // was the grass of the Dump seen from below. Brick, like the rest.
+    const inner = SW_CA + SW_CT / 2;
+    const shaft = { x0: upper.x - inner, x1: upper.x + inner, z0: upper.z - inner, z1: upper.z + inner };
+    const p = at(a0, c0); const q = at(a1, c1);
+    const hole = { x0: Math.min(p.x, q.x), x1: Math.max(p.x, q.x), z0: Math.min(p.z, q.z), z1: Math.max(p.z, q.z) };
+    for (const r of rectsAround(shaft, [hole])) {
+      slab({ x: r.x0, z: r.z0 }, { x: r.x1, z: r.z1 }, upper.y - SLAB - 0.06, upper.y - SLAB - 0.01, 'brick');
+    }
+    return;
+  }
+  // And the lining: the room below stops at its ceiling, this floor starts a
+  // metre and a half higher, and between the two there was nothing at all.
+  const y0 = lower.y + CEIL + SLAB; const y1 = upper.y - SLAB;
+  if (y1 - y0 < 0.05) return;
+  for (const [p, q] of [
+    [at(a0, c0 - 0.25), at(a1, c0)], [at(a0, c1), at(a1, c1 + 0.25)],
+    [at(a0 - 0.25, c0 - 0.25), at(a0, c1 + 0.25)], [at(a1, c0 - 0.25), at(a1 + 0.25, c1 + 0.25)],
+  ]) slab(p, q, y0, y1, materials.wallIn);
 }
 
 /** Pitched roof over an indoor room, with a chimney now and then. */
@@ -3281,9 +4039,21 @@ const farmProps = (room) => (isShire(room) && FARM.test(room.name) ? FARM_PROPS 
  * `buildGraveyard` already put it in.
  */
 const PARK_PROPS = ['bench', 'bench', 'herb_pots', 'nettles'];
+/**
+ * A dump is refuse, and the mud names it by name: The Dump is FIELD, so the
+ * street clutter never reached it and it came out as a mown lawn round a
+ * sewer shaft. What people throw away is what they used: broken crates and
+ * barrels, sacks, planks, a cartwheel, a bucket with no bottom.
+ */
+const REFUSE = /\b(dump|midden|rubbish|refuse|garbage)\b/i;
+const REFUSE_PROPS = [
+  'sack', 'sack', 'crate', 'planks_pile', 'barrel', 'cartwheel', 'bucket', 'broom',
+  'firewood_pile', 'stacked_crates', 'nettles',
+];
 const wantsClutter = (room) => !GRAVEYARD.test(room.name)
-  && (room.sector === SECTOR.CITY || !!farmProps(room));
-const clutterProps = (room) => farmProps(room) || (isPark(room) ? PARK_PROPS : null);
+  && (room.sector === SECTOR.CITY || !!farmProps(room) || REFUSE.test(room.name));
+const clutterProps = (room) => farmProps(room) || (REFUSE.test(room.name) ? REFUSE_PROPS : null)
+  || (isPark(room) ? PARK_PROPS : null);
 
 function buildLooseProps({ room, pos, sides, decor, mats }) {
   const blank = [];

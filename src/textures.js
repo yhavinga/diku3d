@@ -522,6 +522,122 @@ const SURFACES = {
     s.rough = 0.97;
   },
 
+  /**
+   * Sewer brickwork: English bond, a course of stretchers and a course of
+   * headers, in a hard-burnt red gone brown and sooty with a century of damp.
+   *
+   * Worked in metres rather than in fractions of a cell, because the bond
+   * has two brick lengths and one joint width and those only stay equal if
+   * they are measured in the same units: the tile is 2.25 m, which is ten
+   * 225 mm stretchers or twenty headers across and thirty 75 mm courses up,
+   * so everything lands on the tile edge and it repeats without a seam. At
+   * 512 texels a joint of 10 mm is 2.3 of them.
+   *
+   * The pointing is paler than the brick, not darker -- the same lesson the
+   * stonewall recipe paid for: a dark joint is drawn twice, once here and
+   * once by the crevice in the normal map, and reads as a black net.
+   */
+  brick(u, v, s) {
+    const T = 2.25;
+    const x = u * T; const y = v * T;
+    const course = Math.floor(y / 0.075);
+    const header = course % 2 === 1;
+    const len = header ? 0.1125 : 0.225;
+    // Header courses sit a quarter-brick over, which is what makes the bond.
+    const bx = x + (header ? 0.05625 : 0);
+    const col = Math.floor(bx / len);
+    const fx = bx - col * len;
+    const fy = y - course * 0.075;
+    const j = 0.005;
+    const inBrick = fx > j && fx < len - j && fy > j && fy < 0.075 - j;
+    const cols = header ? 20 : 10;
+    const id = hash2(col % cols, course, 64, 401);
+    const edge = Math.min(fx - j, len - j - fx, fy - j, 0.075 - j - fy);
+    const arris = clamp01(edge / 0.006);
+    const grain = fbm(u * 70, v * 70, 70, 409, 3);
+    // Every brick its own burn: most a dull red-brown, the odd one over-fired
+    // near purple-black, the odd one pale where it came from the edge of the
+    // clamp.
+    let c = mix(rgb(0x6e3524), rgb(0x8a4c34), id);
+    const roll = (id * 9.17) % 1;
+    if (roll > 0.86) c = mix(c, rgb(0x3a2a2a), (roll - 0.86) * 5.5);
+    else if (roll < 0.1) c = mix(c, rgb(0x9a6a4e), (0.1 - roll) * 6);
+    // Soot and damp in big soft patches; lime weeping down out of the joints
+    // in streaks, which run down the wall and so down v.
+    const grime = fbm(u * 4, v * 4, 4, 419, 4);
+    const weep = clamp01(fbm(u * 26, v * 3, 26, 421, 3) * 2.2 - 1.25);
+    c = mix(c, rgb(0x2b2320), clamp01(grime * 1.1 - 0.35) * 0.55);
+    const mortar = mix(rgb(0x8a8171), rgb(0x9d9584), grain);
+    const face = mix(c, rgb(0x241a15), (1 - arris) * 0.12 + grain * 0.08);
+    const tone = inBrick ? face : mortar;
+    s.color = mix(tone, rgb(0xa9a595), weep * 0.35);
+    s.height = inBrick ? 0.6 + arris * 0.25 + grain * 0.1 : 0.18;
+    // Damp brick holds a dull sheen; dry mortar is chalk.
+    s.rough = inBrick ? 0.78 + grain * 0.12 + grime * 0.08 : 0.95;
+  },
+
+  /**
+   * Dressed limestone for the kerbs, the ribs, the voussoirs and the piers.
+   * No joints: every one of those is a separate block in the model, so the
+   * geometry already draws them, and a bond painted over the top would be a
+   * second one at a different pitch. What is left is the stone -- tooling,
+   * a little fossil speckle, and the damp tide it drinks from below.
+   */
+  ashlar(u, v, s) {
+    const body = fbm(u * 5, v * 5, 5, 431, 4);
+    const tool = fbm(u * 60, v * 18, 60, 433, 2);
+    const speck = clamp01(1 - cellular(u * 40, v * 40, 40, 439, 0.5)[0] * 5);
+    const damp = fbm(u * 3, v * 3, 3, 443, 3);
+    let c = mix(rgb(0x8c8575), rgb(0xa39b89), body);
+    c = mix(c, rgb(0x5d584c), clamp01(damp * 1.4 - 0.55) * 0.6);
+    c = mix(c, rgb(0x6f6a5e), speck * 0.25);
+    s.color = c;
+    s.height = 0.5 + body * 0.12 + tool * 0.06 - speck * 0.05;
+    s.rough = 0.78 + tool * 0.12 - clamp01(damp - 0.5) * 0.2;
+  },
+
+  /**
+   * What runs in the channel. Not the river: nothing here mirrors a sky, and
+   * the colour is what is suspended in it -- khaki-brown silt and a grey scum
+   * that gathers in slicks. Standing, so the relief is a slow swell with a
+   * fine skin on it rather than chop.
+   */
+  sewage(u, v, s) {
+    const swell = fbm(u * 4, v * 4, 4, 451, 3);
+    const skin = fbm(u * 30, v * 30, 30, 457, 2);
+    const slick = clamp01(fbm(u * 7 + 0.3, v * 7, 7, 461, 3) * 2.4 - 1.3);
+    const c = mix(rgb(0x3d3a26), rgb(0x57512f), swell);
+    s.color = mix(c, rgb(0x6d6a57), slick * 0.55);
+    s.height = swell * 0.5 + skin * 0.12;
+    // A slick is dull; open water between them is a mirror for the torches.
+    s.rough = 0.1 + slick * 0.4 + skin * 0.05;
+  },
+
+  /**
+   * Sewer mud: "something that reminds you very much of porridge". Grey-black
+   * silt with lumps standing out of a wet skin, the skin glossy and the lumps
+   * not -- that contrast is the whole of what separates mud from wet earth.
+   */
+  sludge(u, v, s) {
+    const lump = fbm(u * 9, v * 9, 9, 467, 4);
+    const fine = fbm(u * 48, v * 48, 48, 479, 2);
+    const pool = clamp01((0.46 - lump) * 4);
+    const c = mix(rgb(0x2a261e), rgb(0x4a4232), lump * 0.8 + fine * 0.2);
+    s.color = mix(c, rgb(0x221f18), pool * 0.6);
+    s.height = lump * 0.6 + fine * 0.1;
+    s.rough = 0.62 + (1 - pool) * 0.3 - pool * 0.4;
+  },
+
+  /** Old bone: ivory gone the colour of the floor it has lain on. */
+  bone(u, v, s) {
+    const stain = fbm(u * 6, v * 6, 6, 487, 4);
+    const pore = fbm(u * 50, v * 50, 50, 491, 2);
+    const c = mix(rgb(0xb9ab8a), rgb(0xd6cbb0), stain);
+    s.color = mix(c, rgb(0x6e6147), clamp01(stain * 1.4 - 0.75) * 0.8);
+    s.height = 0.5 + pore * 0.08 + stain * 0.05;
+    s.rough = 0.62 + pore * 0.2;
+  },
+
   water(u, v, s) {
     const w = fbm(u * 8, v * 8, 8, 191, 4);
     const w2 = fbm(u * 22 + w, v * 22, 22, 193, 3);
@@ -686,6 +802,19 @@ const RECIPES = {
   iron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1.4, wet: 0, detail: 0.3 },
   bark: { surface: 'bark', scale: 1.6, normalScale: 1.0, env: 0.65, wet: 0, detail: 0.5 },
   water: { surface: 'water', scale: 7, normalScale: 0.5, env: 1.6, wet: 0, detail: 0.2 },
+  // The sewer. `buried` hands their ambient, reflections and fog to the fixed
+  // underground terms above instead of the sky, so `env` means nothing here.
+  // The brick's tile is the bond's own 2.25 m, see the surface.
+  brick: { surface: 'brick', scale: 2.25, normalScale: 0.65, env: 1, wet: 0, detail: 0.5, buried: true },
+  ashlar: { surface: 'ashlar', scale: 3.0, normalScale: 0.6, env: 1, wet: 0, detail: 0.5, buried: true },
+  sewage: { surface: 'sewage', scale: 3.6, normalScale: 0.4, env: 1, wet: 0, detail: 0.1, buried: true },
+  sludge: { surface: 'sludge', scale: 3.0, normalScale: 0.7, env: 1, wet: 0, detail: 0.4, buried: true },
+  // The town's own flags, rock and iron, as they are below ground: the same
+  // surfaces, lit the way everything down there is lit.
+  sewerflag: { surface: 'flagstone', scale: 2.6, normalScale: 0.85, env: 1, wet: 0, detail: 0.5, buried: true },
+  caverock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 1, wet: 0, detail: 0.6, buried: true },
+  rustiron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1, wet: 0, detail: 0.3, buried: true },
+  bone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 1, wet: 0, detail: 0.3, buried: true },
 };
 
 // ------------------------------------------------------- surface detail ----
@@ -780,13 +909,60 @@ function bakeMacro(size = 128) {
 const indoorBounce = { value: 1 };
 
 const HEMI_LINE = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
+const POINT_LINE = 'getPointLightInfo( pointLight, geometryPosition, directLight );';
 const LIGHTS_FRAGMENT_INDOOR = THREE.ShaderChunk.lights_fragment_begin.replace(
   HEMI_LINE,
   'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal )'
   + ' * mix( 1.0, indoorBounce, vIndoor );',
+).replace(
+  POINT_LINE,
+  `${POINT_LINE}\n#ifdef DIKU_BURIED\n\t\tdirectLight.color *= dikuBuriedGain;\n#endif`,
 );
-if (LIGHTS_FRAGMENT_INDOOR === THREE.ShaderChunk.lights_fragment_begin) {
-  throw new Error('textures: three\'s hemisphere irradiance line moved; the indoor-bounce injection missed');
+if (!LIGHTS_FRAGMENT_INDOOR.includes('indoorBounce') || !LIGHTS_FRAGMENT_INDOOR.includes('dikuBuriedGain')) {
+  throw new Error('textures: three\'s light loop moved; the indoor-bounce or buried-gain injection missed');
+}
+
+/**
+ * Light underground, for the recipes marked `buried`.
+ *
+ * Everything else in the world is lit by the sky: the environment cube is the
+ * whole ambient term and the hemisphere is its floor, and both follow the hour.
+ * A brick vault seven metres under the Dump sees none of it -- and wearing it
+ * anyway, the sewer came out lit like a shopfront at noon, with its floors
+ * mirroring blue sky. Worse, the hour's exposure runs 0.165 at noon to 0.62 at
+ * night, so the same torch in the same tunnel was four times brighter at
+ * midnight than at midday, and a place with no sky in it changed with the time
+ * of day.
+ *
+ * So a buried surface takes its ambient and its reflections from here instead
+ * -- a fixed dim fill, a fixed near-black to reflect -- and its point lights
+ * and its murk are scaled by `REF / exposure`, which cancels the hour's
+ * exposure out of everything except the sun. The sun keeps its own term on
+ * purpose: where a stair comes down from the street, daylight falling down the
+ * shaft is the one thing that *should* tell the time.
+ */
+const BURIED_REF_EXPOSURE = 0.45;
+const buried = {
+  gain: { value: 1 },
+  irradiance: { value: new THREE.Color() },
+  radiance: { value: new THREE.Color() },
+  murk: { value: new THREE.Color() },
+  murkDensity: { value: 0.022 },
+};
+// Linear radiance at the reference exposure. Calibrated on the composited
+// frame -- see LEARNINGS for the numbers.
+const BURIED_FILL = new THREE.Color(0.56, 0.50, 0.43);
+const BURIED_SHEEN = new THREE.Color(0.085, 0.078, 0.066);
+const BURIED_MURK = new THREE.Color(0.0105, 0.0098, 0.0088);
+let buriedExposure = -1;
+function updateBuried(exposure) {
+  if (exposure === buriedExposure) return;
+  buriedExposure = exposure;
+  const k = BURIED_REF_EXPOSURE / Math.max(0.01, exposure);
+  buried.gain.value = k;
+  buried.irradiance.value.copy(BURIED_FILL).multiplyScalar(k);
+  buried.radiance.value.copy(BURIED_SHEEN).multiplyScalar(k);
+  buried.murk.value.copy(BURIED_MURK).multiplyScalar(k);
 }
 
 /**
@@ -819,6 +995,11 @@ function decorate(material, recipe, macro, grain) {
     material.userData.wetnessUniform = shader.uniforms.wetness;
     material.userData.wetBase = recipe.wet ?? 0;
     shader.uniforms.indoorBounce = indoorBounce;
+    shader.uniforms.dikuBuriedGain = buried.gain;
+    shader.uniforms.dikuBuriedIrradiance = buried.irradiance;
+    shader.uniforms.dikuBuriedRadiance = buried.radiance;
+    shader.uniforms.dikuMurk = buried.murk;
+    shader.uniforms.dikuMurkDensity = buried.murkDensity;
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSurfacePos;\nattribute float aIndoor;\nvarying float vIndoor;')
@@ -840,8 +1021,35 @@ function decorate(material, recipe, macro, grain) {
         uniform float detailStrength;
         uniform float wetness;
         uniform float indoorBounce;
+        uniform float dikuBuriedGain;
+        uniform vec3 dikuBuriedIrradiance;
+        uniform vec3 dikuBuriedRadiance;
+        uniform vec3 dikuMurk;
+        uniform float dikuMurkDensity;
       `)
       .replace('#include <lights_fragment_begin>', LIGHTS_FRAGMENT_INDOOR)
+      .replace('#include <lights_fragment_end>', /* glsl */`
+        #ifdef DIKU_BURIED
+          // No sky down here: a fixed fill for the ambient and a near-black
+          // for anything glossy to mirror, whatever the hour.
+          irradiance = dikuBuriedIrradiance;
+          iblIrradiance = dikuBuriedIrradiance;
+          radiance = dikuBuriedRadiance;
+        #endif
+        #include <lights_fragment_end>
+      `)
+      .replace('#include <fog_fragment>', /* glsl */`
+        #ifdef DIKU_BURIED
+          #ifdef USE_FOG
+            // The sewer's own murk, not the hour's haze: a night fog is blue
+            // and a noon one is sky-pale, and neither is the air in a drain.
+            float dikuMurkF = 1.0 - exp( - dikuMurkDensity * dikuMurkDensity * vFogDepth * vFogDepth );
+            gl_FragColor.rgb = mix( gl_FragColor.rgb, dikuMurk, dikuMurkF );
+          #endif
+        #else
+          #include <fog_fragment>
+        #endif
+      `)
       .replace('#include <map_fragment>', /* glsl */`
         #include <map_fragment>
         // A skewed projection rather than a true triplanar one: this is
@@ -918,10 +1126,16 @@ function decorate(material, recipe, macro, grain) {
       `);
   };
   if (recipe.wet) material.defines = { ...material.defines, DIKU_WET: 1 };
+  if (recipe.buried) {
+    material.defines = { ...material.defines, DIKU_BURIED: 1 };
+    // Read the hour's exposure where it is certain to be current: at draw
+    // time, from the renderer itself. One compare when nothing changed.
+    material.onBeforeRender = (renderer) => updateBuried(renderer.toneMappingExposure);
+  }
   // Our injected source differs from stock, so it needs a key of its own or
   // three will hand us a program compiled for an undecorated material.
   material.customProgramCacheKey = () => `diku|${material.defines?.DIKU_DETAIL ? 1 : 0}`
-    + `|${material.defines?.DIKU_WET ? 1 : 0}`;
+    + `|${material.defines?.DIKU_WET ? 1 : 0}|${material.defines?.DIKU_BURIED ? 1 : 0}`;
 }
 
 /**
