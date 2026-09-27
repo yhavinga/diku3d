@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SECTOR, ROOM_INDOORS, EX_ISDOOR, EX_CLOSED, EX_LOCKED, DIR_STEP, DIR_NAME } from './are.js';
-import { InstanceBatch } from './assets.js';
+import { InstanceBatch, StaticBatches } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
 
 export const CELL = 13;         // grid pitch; rooms sit two cells apart
@@ -435,21 +435,17 @@ class Batcher {
     bucket.list.push(geo);
   }
 
-  /** `route(chunk)` may send a chunk to a parent other than `parent`. */
-  finish(parent, route = null) {
+  /** Each chunk's merged geometry goes into `batches` under the chunk's region. */
+  finish(batches, regionOf) {
     let triangles = 0;
     for (const [key, { materialName, list }] of this.groups) {
       const merged = list.length === 1 ? list[0] : mergeGeometries(list, false);
       if (!merged) throw new Error(`build: could not merge ${materialName}`);
-      merged.computeBoundingSphere();
       triangles += merged.attributes.position.count / 3;
-      const mesh = new THREE.Mesh(merged, this.materials[materialName]);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      (route ? route(key.slice(0, key.lastIndexOf('|'))) : parent).add(mesh);
-      for (const geo of list) if (geo !== merged) geo.dispose();
+      batches.addStatic(regionOf(key.slice(0, key.lastIndexOf('|'))), this.materials[materialName], merged);
+      for (const geo of list) geo.dispose();
     }
-    return { meshes: this.groups.size, triangles };
+    return { triangles };
   }
 }
 
@@ -1384,7 +1380,7 @@ export function buildScene(world, layout, materials, assets = null) {
   // Modelled assets are optional everywhere: if the library is absent or a
   // particular model has not been made yet, the procedural geometry stands in.
   // Two batches, split on the chunk's level: see `buildZones`.
-  const instances = assets ? zonedInstances(new InstanceBatch(assets), new InstanceBatch(assets)) : null;
+  const instances = assets ? new InstanceBatch(assets) : null;
   const model = (names, seed) => (assets ? assets.choose(names, seed) : null);
 
   const colliders = [];   // {x0,x1,z0,z1,y0,y1}
@@ -2155,43 +2151,50 @@ export function buildScene(world, layout, materials, assets = null) {
   });
   buildDecals(zones.surface, decals, materials);
   if (skyHoles.length) zones.deep.add(buildSkyHoles(skyHoles));
-  const stats = batcher.finish(zones.surface, zones.route);
+  const batches = new StaticBatches();
+  const regionOf = regions(hoodBox);
+  const stats = batcher.finish(batches, regionOf);
   if (instances) {
     markIndoorAssets(assets);
-    const placed = instances.finish(zones.surface, zones.deep);
-    stats.meshes += placed.meshes;
+    const placed = instances.finish(group, batches, regionOf);
     stats.triangles += placed.triangles;
     stats.instanced = placed.triangles;
   }
-  zones.gather();
+  stats.meshes = batches.finish(zones.route);
   return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, stats, zones };
 }
 
 // --------------------------------------------------------------- zones ----
 
-/** Chunks are `${level}:x,z`; anything on a level below zero is underground. */
-const isDeepChunk = (chunk) => typeof chunk === 'string' && chunk.startsWith('-');
-
 /**
- * Underground, a chunk is four times the area. Every kit piece carries four
- * or five materials, so each chunk costs a draw per piece per material, and a
- * sewer chunk seldom has anything in it a tunnel wall is not already hiding:
- * measured at #7045, 1,719 draw calls at 4x4 cells.
+ * Which batch a chunk's contents are drawn in.
+ *
+ * A region is 64 cells a side, 832 m -- most of the town in one. That is not
+ * as coarse as it sounds: inside a region a chunk's built geometry and every
+ * odd prop are still culled one by one, and what repeats is instanced, which
+ * the GPU draws faster than it can be culled. Measured against 16 and 32
+ * cells, 64 was fastest in every heavy view (barn facing south 18.9 ms at 16,
+ * 14.9 at 32, 15.4 at 64 with fewer draws; Market Square facing south 16.9,
+ * 13.3, 12.1). Underground and the neighborhood keep regions of their own, so
+ * the zones below can still hide them whole. Region keys start with the zone:
+ * `d` underground, `h` the neighborhood, `s` the rest of the surface.
  */
-const coarse = (chunk) => chunk.replace(/^(-?\d+):(-?\d+),(-?\d+)$/,
-  (m, l, x, z) => `${l}:${Math.floor(Number(x) / 2)},${Math.floor(Number(z) / 2)}`);
+const REGION = 64;
 
-/** One `InstanceBatch` per zone behind the one `add` every builder calls. */
-function zonedInstances(surface, deep) {
-  return {
-    library: surface.library,
-    add: (name, transform, chunk = '0') => (isDeepChunk(chunk)
-      ? deep.add(name, transform, coarse(chunk)) : surface.add(name, transform, chunk)),
-    finish(surfaceParent, deepParent) {
-      const a = surface.finish(surfaceParent);
-      const b = deep.finish(deepParent);
-      return { meshes: a.meshes + b.meshes, triangles: a.triangles + b.triangles };
-    },
+function regions(hoodBox) {
+  const inHood = (x, z) => !!hoodBox && x >= hoodBox.x0 && x <= hoodBox.x1 && z >= hoodBox.z0 && z <= hoodBox.z1;
+  return (chunk) => {
+    const m = /^(-?\d+):(h?)(-?\d+),(-?\d+)$/.exec(chunk);
+    if (!m) return `s:${chunk}`;
+    const level = Number(m[1]);
+    const span = m[2] ? 8 : 4;
+    const x = Number(m[3]) * span; const z = Number(m[4]) * span;
+    const rx = Math.floor(x / REGION); const rz = Math.floor(z / REGION);
+    if (level < 0) return `d:${rx},${rz}`;
+    // Upper storeys over the neighborhood's streets are chunked like the
+    // town's; they belong with the district all the same.
+    if (m[2] || inHood(x + span / 2, z + span / 2)) return `h:${rx},${rz}`;
+    return `s:${rx},${rz}`;
   };
 }
 
@@ -2238,22 +2241,6 @@ function buildZones(group, groundY, openings, district = null) {
       hood.visible = dx * dx + dz * dz < DISTRICT_REACH * DISTRICT_REACH || eye.y > DISTRICT_ABOVE;
     }
   };
-  /**
-   * Everything built on the neighborhood's ground, moved under its own group
-   * once the batches are finished: what matters is where a mesh is, not who
-   * built it.
-   */
-  const gather = () => {
-    if (!district) return;
-    for (const mesh of [...surface.children]) {
-      if (!mesh.isMesh) continue;
-      const sphere = mesh.isInstancedMesh ? mesh.boundingSphere : mesh.geometry.boundingSphere;
-      if (!sphere || sphere.radius > 160) continue;
-      const { x, z } = sphere.center;
-      if (x < district.x0 || x > district.x1 || z < district.z0 || z > district.z1) continue;
-      hood.add(mesh);
-    }
-  };
   const sensor = new THREE.Mesh(
     new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)),
     new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false }),
@@ -2275,8 +2262,8 @@ function buildZones(group, groundY, openings, district = null) {
   group.children.unshift(sensor);
   sensor.parent = group;
   return {
-    surface, deep, update, gather,
-    route: (chunk) => (isDeepChunk(chunk) ? deep : surface),
+    surface, deep, update,
+    route: (region) => (region.startsWith('d:') ? deep : region.startsWith('h:') && district ? hood : surface),
   };
 }
 
