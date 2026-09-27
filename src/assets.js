@@ -350,6 +350,9 @@ export const ASSET_NAMES = [
   'cave_rock_a', 'cave_rock_b', 'stalagmites', 'stalactites', 'bone_pile', 'rubble',
   'cave_wall', 'cave_wall_door', 'cave_wall_long', 'cave_wall_long_door', 'cave_roof',
   'refuse_heap', 'sewer_sconce',
+  // the Great Eastern Desert: tools/blender/desert.py
+  'massif_a', 'massif_b', 'massif_mouth', 'dune_a', 'dune_b', 'palm_a', 'palm_b',
+  'tent_roof', 'tent_wall', 'tent_wall_door', 'rug', 'cushions', 'hitch_line', 'fungus_cluster',
   'townsperson',
   // Animals, rigged and animated. One base mesh per build of body; the
   // breeds and species are proportions and coats laid on in actors.js.

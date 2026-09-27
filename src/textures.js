@@ -392,8 +392,14 @@ const SURFACES = {
   sand(u, v, s) {
     const ripple = Math.sin((u * 26 + fbm(u * 4, v * 4, 4, 163, 3) * 6) * Math.PI) * 0.5 + 0.5;
     const grit = fbm(u * 90, v * 90, 90, 167, 2);
-    s.color = mix(rgb(0xb8a172), rgb(0xd8c79a), ripple * 0.6 + grit * 0.4);
-    s.height = ripple * 0.5 + grit * 0.2;
+    const drift = fbm(u * 3, v * 3, 3, 169, 3);
+    // The ripple is relief, not paint: a ridge and its trough are one sand,
+    // and painting them light and dark put a zebra across the desert that the
+    // normal map was already drawing. Warmer, too -- a desert is not a beach.
+    s.color = mix(mix(rgb(0xc59a64), rgb(0xdcb784), drift * 0.7 + grit * 0.3), rgb(0xe3c396), ripple * 0.12);
+    // Low: a ripple is a centimetre high on a ten-centimetre wavelength, and
+    // at half the height range a raking dusk sun drew it as a zebra.
+    s.height = ripple * 0.06 + drift * 0.22 + grit * 0.1;
     s.rough = 0.84 + grit * 0.14;
   },
 
@@ -705,6 +711,113 @@ const SURFACES = {
     s.rough = 0.7 + fine * 0.2 - calcite * 0.25;
   },
 
+  /**
+   * Desert sandstone: the mountains the river cuts through, seen from the
+   * sand. Cross-bedded and banded in the reds and buffs of a dry country, in
+   * courses a few centimetres to half a metre thick, with the dark streaks of
+   * desert varnish running down from ledges -- the thing that makes a cliff
+   * face in dry country read as dry.
+   */
+  sandstone(u, v, s) {
+    const warp = fbm(u * 3, v * 3, 3, 571, 3);
+    const beds = Math.sin((v * 9 + warp * 1.4) * Math.PI * 2) * 0.5 + 0.5;
+    const fine = Math.sin((v * 17 + warp * 3.1 + u * 1.3) * Math.PI * 2) * 0.5 + 0.5;
+    const body = fbm(u * 7, v * 7, 7, 577, 4);
+    const grit = fbm(u * 60, v * 60, 60, 587, 2);
+    const varnish = clamp01(fbm(u * 10, v * 1.4, 10, 593, 3) * 2.4 - 1.35);
+    // The beds are a shade apart, not a value apart: at full contrast a
+    // cliff of them read as a zebra.
+    let c = mix(rgb(0xae6d44), rgb(0xc38c5c), beds * 0.25 + body * 0.75);
+    c = mix(c, rgb(0xd6b089), clamp01(fine - 0.8) * 0.5);
+    c = mix(c, rgb(0x5a3a2a), varnish * 0.45);
+    const shade = 0.92 + grit * 0.16;
+    s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
+    s.height = beds * 0.15 + fine * 0.06 + body * 0.45 + grit * 0.1;
+    s.rough = 0.86 + grit * 0.12 - varnish * 0.2;
+  },
+
+  /**
+   * "A jet-black underground lake fed by dripping water and lime": still,
+   * dark, faintly milky where the lime sits. A mirror for the torches.
+   */
+  cavewater(u, v, s) {
+    const swell = fbm(u * 4, v * 4, 4, 599, 3);
+    const lime = clamp01(fbm(u * 6 + 0.3, v * 6, 6, 601, 3) * 2.2 - 1.2);
+    s.color = mix(mix(rgb(0x0f1a1c), rgb(0x1b2a2c), swell), rgb(0x55605a), lime * 0.35);
+    s.height = swell * 0.4;
+    s.rough = 0.06 + lime * 0.25;
+  },
+
+  /**
+   * Tent cloth: woven goat hair and wool in the natural colours of the flock
+   * -- black, brown, undyed cream -- in broad strips sewn edge to edge, the
+   * way a nomad tent is made, with a narrow dyed band down each seam. The
+   * strips run along v; a 4 m tile is five of them.
+   */
+  tentcloth(u, v, s) {
+    const strip = Math.floor(u * 5);
+    const f = u * 5 - strip;
+    const id = hash2(strip, 0, 5, 611);
+    const weave = fbm(u * 160, v * 40, 160, 613, 2);
+    const slub = fbm(u * 20, v * 6, 20, 617, 3);
+    let c = id < 0.4 ? rgb(0x2c2622) : id < 0.75 ? rgb(0x5a4632) : rgb(0xbfae8c);
+    c = mix(c, rgb(0x1e1a17), slub * 0.25);
+    const seam = f < 0.035 || f > 0.965;
+    const band = (f > 0.06 && f < 0.1) || (f > 0.9 && f < 0.94);
+    if (band) c = mix(c, rgb(0x8a2a20), 0.8);
+    if (seam) c = mix(c, rgb(0x191512), 0.5);
+    const shade = 0.9 + weave * 0.2;
+    s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
+    s.height = 0.5 + weave * 0.15 + slub * 0.1 - (seam ? 0.2 : 0);
+    s.rough = 0.95;
+  },
+
+  /**
+   * A kilim: stepped lozenges in madder red, indigo and a saffron ground,
+   * with borders. Flat-woven, so the weave is in the relief and nowhere else.
+   */
+  rug(u, v, s) {
+    const gx = u * 4; const gy = v * 3;
+    const fx = gx - Math.floor(gx) - 0.5; const fy = gy - Math.floor(gy) - 0.5;
+    const d = Math.abs(fx) + Math.abs(fy);
+    const step = Math.floor(d * 8) / 8;
+    const border = Math.min(u, 1 - u, v, 1 - v) < 0.04;
+    const weave = fbm(u * 200, v * 200, 200, 619, 2);
+    const wear = fbm(u * 5, v * 5, 5, 621, 3);
+    let c = rgb(0xb07a36);
+    if (step < 0.2) c = rgb(0x273a5e);
+    else if (step < 0.35) c = rgb(0x8c2a22);
+    else if (step < 0.45) c = rgb(0xd8c8a0);
+    if (border) c = rgb(0x5a1d18);
+    c = mix(c, rgb(0x9c8a70), clamp01(wear * 1.5 - 0.8) * 0.5);
+    const shade = 0.9 + weave * 0.2;
+    s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
+    s.height = 0.5 + weave * 0.2;
+    s.rough = 0.95;
+  },
+
+  /** Palm leaf: grey-green leaflets with pale midribs and brown dead tips. */
+  frond(u, v, s) {
+    const rib = clamp01(1 - Math.abs(Math.sin(u * Math.PI * 22)) * 6);
+    const leaf = fbm(u * 12, v * 30, 12, 623, 3);
+    const tip = clamp01(fbm(u * 4, v * 4, 4, 627, 3) * 2.2 - 1.3);
+    let c = mix(rgb(0x4d6440), rgb(0x7c8c5c), leaf);
+    c = mix(c, rgb(0xa9a77e), rib * 0.4);
+    c = mix(c, rgb(0x7a5e3a), tip * 0.6);
+    s.color = c;
+    s.height = 0.5 + rib * 0.2 + leaf * 0.1;
+    s.rough = 0.7 + leaf * 0.2;
+  },
+
+  /** Twisted fibre rope: the lay of the strands, in natural hemp. */
+  rope(u, v, s) {
+    const lay = Math.sin((u * 30 + v * 30) * Math.PI) * 0.5 + 0.5;
+    const fibre = fbm(u * 90, v * 90, 90, 631, 2);
+    s.color = mix(rgb(0x7a6444), rgb(0xa88e62), lay * 0.6 + fibre * 0.4);
+    s.height = lay * 0.6 + fibre * 0.1;
+    s.rough = 0.92;
+  },
+
   /** A cave floor: grit and pebbles, and the wet where the drips land. */
   cavefloor(u, v, s) {
     const [, edge, id] = cellular(u * 26, v * 26, 26, 541, 0.5);
@@ -734,6 +847,16 @@ const SURFACES = {
     s.height = 0.5 + scale * 0.2 + pit * 0.1;
     s.rough = 0.72 + pit * 0.2 - bare * 0.3;
     s.metal = bare * 0.55;
+  },
+
+  /** Cave fungus: a pale, faintly pink flesh, mottled, damp at the rim. */
+  fungus(u, v, s) {
+    const m = fbm(u * 8, v * 8, 8, 641, 4);
+    const spot = clamp01(1 - cellular(u * 14, v * 14, 14, 643, 0.5)[0] * 4);
+    const c = mix(rgb(0xc9b7a2), rgb(0xe2d2c0), m);
+    s.color = mix(mix(c, rgb(0xb88a86), clamp01(m - 0.55) * 0.6), rgb(0x8f7a64), spot * 0.3);
+    s.height = 0.5 + m * 0.2 - spot * 0.1;
+    s.rough = 0.55 + m * 0.25;
   },
 
   /** Old bone: ivory gone the colour of the floor it has lain on. */
@@ -898,7 +1021,7 @@ const RECIPES = {
   // made the trees read as toys.
   leaves: { surface: 'leaves', scale: 2.0, normalScale: 0.75, env: 0.4, wet: 0, detail: 0.5 },
   rock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0.25, detail: 0.6 },
-  sand: { surface: 'sand', scale: 6, normalScale: 0.6, env: 0.7, wet: 0, detail: 0.6 },
+  sand: { surface: 'sand', scale: 6, normalScale: 0.4, env: 0.55, wet: 0, detail: 0.6 },
   // Out of doors and loose, so it takes damp -- but a path drains, which is the
   // whole point of gravelling one, so well under the street's 0.5.
   gravel: { surface: 'gravel', scale: 2.4, normalScale: 0.7, env: 0.75, wet: 0.28, detail: 0.6 },
@@ -925,8 +1048,16 @@ const RECIPES = {
   rustiron: { surface: 'rust', scale: 1.2, normalScale: 0.5, env: 1, wet: 0, detail: 0.3, buried: true },
   // The same, above ground: the guild wells' rungs.
   rust: { surface: 'rust', scale: 1.2, normalScale: 0.5, env: 0.9, wet: 0, detail: 0.3 },
+  fungus: { surface: 'fungus', scale: 0.8, normalScale: 0.4, env: 1, wet: 0, detail: 0.3, buried: true },
   bone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 1, wet: 0, detail: 0.3, buried: true },
   sewerwood: { surface: 'bark', scale: 1.6, normalScale: 0.6, env: 1, wet: 0, detail: 0.4, buried: true },
+  // The eastern mountains, outside and in.
+  cliff: { surface: 'sandstone', scale: 9, normalScale: 0.35, env: 0.3, wet: 0, detail: 0.6 },
+  tentcloth: { surface: 'tentcloth', scale: 4, normalScale: 0.5, env: 0.4, wet: 0, detail: 0.4 },
+  rug: { surface: 'rug', scale: 3.4, normalScale: 0.3, env: 0.35, wet: 0, detail: 0.3 },
+  frond: { surface: 'frond', scale: 1.2, normalScale: 0.5, env: 0.5, wet: 0, detail: 0.3 },
+  rope: { surface: 'rope', scale: 0.3, normalScale: 0.6, env: 0.4, wet: 0, detail: 0.2 },
+  cavewater: { surface: 'cavewater', scale: 4, normalScale: 0.3, env: 1, wet: 0, detail: 0.1, buried: true },
   // The animals. A 0.4 m tile is a hand's-breadth clump pattern on a dog and
   // still reads as a coat on a horse. `moving` keeps the world-space effects
   // off them: a splash line fixed to the paving and a grain fixed to the world

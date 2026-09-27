@@ -42,14 +42,16 @@ const params = new URLSearchParams(location.search);
 // into it (the Dump's ladder and the guild wells), every anchor is vertical
 // and downward, so it lays out a level below the town and cannot shove
 // anything on the surface -- 460 rooms, 94% walkable, Midgaard still 93%.
-const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden,grave,sewer')
+// The Great Eastern Desert is the clean-branch shape again: one two-way
+// anchor, the river through the east wall at #3205 -- 507 rooms, 94%.
+const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden,grave,sewer,eastern')
   .split(',').filter(Boolean).map((f) => (f.endsWith('.are') ? f : `${f}.are`));
 const START_VNUM = Number(params.get('room') || 3001);
 // A live trap: the breadth-first placement stops mid-walk at the cap, and
 // whole areas silently get zero rooms while their exits degrade to gates.
-// The default set is 460 rooms; anything bigger must raise ?max= with it.
+// The default set is 507 rooms; anything bigger must raise ?max= with it.
 // tools/world-check.mjs guards this number for the shipping set.
-const MAX_ROOMS = Number(params.get('max') || 520);
+const MAX_ROOMS = Number(params.get('max') || 560);
 const AREA_URL = params.get('areaDir') || 'merc21/area';
 
 /**
@@ -1283,10 +1285,22 @@ async function boot() {
         'the sewer: brick vaults, tunnel mouths, a channel of standing sewage');
       // Where the street goes down into it: the room above a stair whose foot
       // is in the sewer, which is where the two worlds share a frame.
+      // A stair, not a well: the room below has to be directly underneath,
+      // so the frame has the parapet and the shaft in it.
+      const below = (r, e) => {
+        const a = built.rooms.get(r.vnum)?.cell; const b = built.rooms.get(e.to)?.cell;
+        return !!a && !!b && b.level < a.level && a.x === b.x && a.z === b.z;
+      };
       add('manhole', pick((r) => !sewer(r) && r.exits.some((e) => e && !e.offMap
-          && built.rooms.has(e.to) && sewer(world.rooms.get(e.to)) && level(world.rooms.get(e.to)) < level(r)),
+          && built.rooms.has(e.to) && sewer(world.rooms.get(e.to)) && below(r, e)),
         (r) => (built.rooms.get(r.vnum).outdoor ? 3 : 0) + ways(r)),
         'a way down from the street into the sewer: parapet, shaft, daylight falling in');
+      // The desert: sand to the horizon, dunes, the cliffs the river comes out
+      // of; and the oasis in it, palms over water and the nomads' tents.
+      add('desert', pick((r) => r.areaFile === 'eastern.are' && r.sector === 10,
+        (r) => ways(r) + stuff(r)), 'open desert: dunes, sandstone cliffs, a cave mouth');
+      add('oasis', pick((r) => r.areaFile === 'eastern.are' && /\b(oasis|camp|tent)\b/i.test(`${r.name} ${r.description}`),
+        (r) => (/oasis/i.test(r.description) ? 3 : 0) + ways(r)), 'the oasis: palms, a pool, the nomads\' tents');
       add('cavern', pick((r) => sewer(r) && /\b(cave|stalag\w*)\b/i.test(r.name),
         (r) => (/stalag/i.test(r.name) ? 3 : 0) + ways(r) + stuff(r)),
         'a cave the sewer breaks into: rock, flowstone, torchless dark');

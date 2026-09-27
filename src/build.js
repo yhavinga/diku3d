@@ -92,11 +92,14 @@ const CANOPY_OUTSIDE = /\boutside\b/i;
 // drain.", "The strange sewer" -- and every one carries ROOM_INDOORS, so the
 // canopy test took them for Haon Dor and planted firs seven metres under the
 // Dump.
-const isCanopy = (room) => room.sector === SECTOR.FOREST && !isOutdoor(room) && !isSewer(room)
+const isCanopy = (room) => room.sector === SECTOR.FOREST && !isOutdoor(room) && !isDeep(room)
   && (CANOPY_OUTSIDE.test(room.name) || !CANOPY_NOT.test(room.name));
 
 /** No walls, no ceiling, no roof -- whatever the mud says about the sky. */
-const isOpenAir = (room) => isOutdoor(room) || isCanopy(room);
+// "Strange Glowing Sand" is INDOORS by its flags and "a vast desert" by its
+// words; the words win, as they do for the canopy.
+const isOpenAir = (room) => isOutdoor(room) || isCanopy(room)
+  || (!!eastStyle(room) && eastStyle(room) !== 'cave');
 
 /**
  * An exit to room -1 is the stock files' way of writing "nothing": four of
@@ -154,7 +157,7 @@ const WATER_LAP = 0.7;
  * written here because the rule is about being underground, not about the
  * Shire, and the next buried area with a door should not have to find it again.
  */
-const isBuried = (mats, cell) => mats.cave && cell.level < 0;
+const isBuried = (mats, cell) => mats.cave && (cell.level < 0 || !!mats.inRock);
 
 /**
  * A bog, by what the room says it is rather than by its sector code.
@@ -293,8 +296,49 @@ function classifySewer(world) {
   }
   for (const room of pending) if (!sewerStyles.has(room)) sewerStyles.set(room, 'vault');
 }
-const sewerStyle = (room) => (isSewer(room) ? (sewerStyles.get(room) || 'vault') : null);
-const isVault = (room) => sewerStyle(room) === 'vault';
+const deepStyle = (room) => (isSewer(room) ? (sewerStyles.get(room) || 'vault')
+  : (eastStyle(room) === 'cave' ? 'cave' : null));
+const isVault = (room) => deepStyle(room) === 'vault';
+
+// ------------------------------------------------- the Great Eastern Desert ----
+
+/**
+ * East of the town the river goes into the mountains through a hole in the
+ * wall, and comes out -- past an underground lake, caves, a fungus temple --
+ * on the edge of a desert with a nomads' oasis in it. Keyed by area, and then
+ * by the rooms' own words, five ways:
+ *
+ *  - `cave`: everything the mud calls INDOORS that is not a tent. The river's
+ *    tunnels, the lake, the caverns: the sewer's cave treatment -- rock lining,
+ *    no sky in the lighting -- and, because these are at street level and not
+ *    under it, a mountain over them (`buildMassif`).
+ *  - `desert`: "A vast desert stretches for miles": sand, and dunes out past
+ *    the rooms (`buildSandSea`).
+ *  - `camp`: the oasis -- "this small group of desert nomads has stopped ...
+ *    beside this beautiful oasis" -- palms, water, the tents seen from outside.
+ *  - `tent`: "Inside a small tent", "The main tent": a room whose walls and
+ *    roof are cloth.
+ *  - `ledge`: "the wind-swept ledge ... this canyon is about a half a kilometer
+ *    deep": rock underfoot at the edge of a drop.
+ */
+const isEastern = (room) => room.areaFile === 'eastern.are';
+const EAST_TENT = /\btents?\b/i;
+const EAST_CAMP = /\b(camp|camels?|oasis)\b/i;
+const EAST_LEDGE = /\bledge\b/i;
+const eastStyle = (room) => {
+  if (!isEastern(room)) return null;
+  if (EAST_TENT.test(room.name)) return 'tent';
+  if (EAST_CAMP.test(room.name)) return 'camp';
+  if (EAST_LEDGE.test(room.name)) return 'ledge';
+  if (room.sector === SECTOR.DESERT || /\bsand\b/i.test(room.name)) return 'desert';
+  if (room.flags & ROOM_INDOORS) return 'cave';
+  return 'desert';
+};
+
+/** Anywhere that lights itself and dresses itself from its prose, with no sky in it. */
+const isDeep = (room) => isSewer(room) || eastStyle(room) === 'cave';
+/** What stands in the water of a deep room: the sewer's own, or a cave's lime-water. */
+const deepWater = (room) => (isSewer(room) ? 'sewage' : 'cavewater');
 
 /** "You are standing in mud to your knees", "something like porridge". */
 const SEWER_MUD = /\b(mud|muddy|mudhole|sludge|porridge)\b/i;
@@ -567,6 +611,11 @@ function pickMaterials(room, area) {
   }
   // "The dump, where the people from the city drop their garbage." Not a lawn.
   if (REFUSE.test(room.name)) floor = 'dirt';
+  // The desert and the oasis are sand whatever the sector says -- the camp is
+  // FIELD, which is grass -- and the ledge over the canyon is the canyon's rock.
+  const east = eastStyle(room);
+  if (east === 'desert' || east === 'camp' || east === 'tent') floor = 'sand';
+  else if (east === 'ledge') floor = 'cliff';
   // After the switch, because the sector is the thing being overruled -- and
   // inside this function rather than at the call site the way the park does it,
   // because a passage routed between two bog rooms asks here for its surface
@@ -615,17 +664,23 @@ function pickMaterials(room, area) {
   // reason the bog does: the passage routed between two drains asks this
   // function what it is built of. `cave` stays set on all three styles, which
   // is what keeps them buried -- no windows, no roof, no masonry kit.
-  const style = sewerStyle(room);
+  const style = deepStyle(room);
+  // Under a mountain rather than under the street: buried all the same.
+  const inRock = style === 'cave' && isEastern(room);
   if (style) {
     cave = true;
-    if (style === 'cave') { floor = 'cavefloor'; wallIn = 'caverock'; wallOut = 'caverock'; ceil = 'caverock'; }
+    if (style === 'cave') {
+      floor = 'cavefloor'; wallIn = 'caverock'; wallOut = 'caverock'; ceil = 'caverock';
+      // A cave at street level has an outside, and the sky lights it.
+      if (inRock) wallOut = 'cliff';
+    }
     else { floor = 'sewerflag'; wallIn = 'brick'; wallOut = 'brick'; ceil = 'brick'; }
     if (style !== 'vault' && sewerMud(room)) floor = 'sludge';
   }
 
   if (!holy && !cave && !wood && hash3(room.vnum, 0, 0, 9) > 0.6) wallOut = 'timber';
   if (!holy && !burrow && hash3(room.vnum, 1, 0, 3) > 0.84) roof = 'thatch';
-  return { floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv, sewer: style };
+  return { floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv, sewer: style, inRock };
 }
 
 // ------------------------------------------------------------------ main ----
@@ -737,7 +792,7 @@ export function buildScene(world, layout, materials, assets = null) {
     // ambience read it. What the geometry below asks is whether there are walls.
     const canopy = isCanopy(room);
     const bog = isBog(room);
-    const openAir = outdoor || canopy;
+    const openAir = isOpenAir(room);
     // Everything this cell adds is inside a building unless the cell is open to
     // the sky. Set here rather than threaded through buildFloor, buildIndoorWall,
     // buildCeiling and the props, all of which add on this room's behalf.
@@ -817,8 +872,8 @@ export function buildScene(world, layout, materials, assets = null) {
     // thirteen metres of river. A bog takes pools instead.
     // Water in the sewer is the sewer's own, lying on the floor under a vault:
     // the river shader mirrors the sky and the shore grows reeds.
-    if (isSewer(room) && (isWater(room) || sewerFlood(room))) {
-      batcher.add(plane(half * 2, half * 2, 4), 'sewage', place(pos.x, pos.y + SW_FLOOD, pos.z), { chunk });
+    if (isDeep(room) && (isWater(room) || sewerFlood(room))) {
+      batcher.add(plane(half * 2, half * 2, 4), deepWater(room), place(pos.x, pos.y + SW_FLOOD, pos.z), { chunk });
     } else if (isWater(room) && !bog) {
       // A little over the cell, so two neighbouring sheets overlap instead of
       // meeting on a seam: they are at the same height and the same shader, and
@@ -1001,7 +1056,7 @@ export function buildScene(world, layout, materials, assets = null) {
         batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + CEIL, z: pos.z,
         half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
       });
-      if (instances && sewerStyle(room) === 'cave') {
+      if (instances && deepStyle(room) === 'cave') {
         buildCaveLining({ instances, chunk, room, pos, sides, roofed: !roomHoles.some((h) => h.ceiling), addCollider });
       }
       // ...and a room with earth over it has no roof either. Same family as the
@@ -1026,7 +1081,7 @@ export function buildScene(world, layout, materials, assets = null) {
           w: SHELL * 2, d: SHELL * 2, h: CEIL + 1.1, seed: hash3(room.vnum, 2, 0, 11), doorSides: sides,
         });
       }
-      if (isSewer(room)) buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider });
+      if (isDeep(room)) buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider });
       else buildInteriorProps({ room, pos, sides, decor, mats });
       if (isShop(room)) buildShopSign({ room, pos, sides, instances, model, chunk });
     } else {
@@ -1048,6 +1103,7 @@ export function buildScene(world, layout, materials, assets = null) {
       // is still a field. Both read the room's own words.
       if (!bog) buildClearing({ batcher, chunk, room, pos, sides, addCollider });
       if (GRAVEYARD.test(room.name)) buildGraveyard({ instances, model, chunk, room, pos, sides });
+      if (eastStyle(room) && instances) buildEastRoom({ room, pos, sides, instances, chunk, decor, lights, addCollider });
       // "Through the garbage you can see a large junction of pipes": the
       // garbage first, heaped in the corners where nobody has to walk.
       if (REFUSE.test(room.name) && instances && model(['refuse_heap'])) {
@@ -1139,24 +1195,32 @@ export function buildScene(world, layout, materials, assets = null) {
       shaftWalls: sewerKit && isVault(plan.lower.room),
       // The kerb is built of what the room above is built of: marble in the
       // sanctum, not the street's rubble with the temple's blue light on it.
-      kerb: isSewer(plan.upper.room) ? 'ashlar'
+      kerb: isDeep(plan.upper.room) ? (deepStyle(plan.upper.room) === 'cave' ? 'caverock' : 'ashlar')
         : (isOpenAir(plan.upper.room) ? 'stonewall' : pickMaterials(plan.upper.room, plan.upper.room.area).wallIn),
     });
   }
 
+  // --- the eastern mountains ----------------------------------------------
+
+  // Before the frontage, because a cell the mountain takes is not a street's
+  // to build on.
+  const mountain = instances && assets.has('massif_a')
+    ? buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey }) : new Set();
+
   // --- build on every empty cell that fronts a street ----------------------
 
   const frontage = new Map(); // cell key -> sector to build from
-  const consider = (level, x, z, sector, bog, shire) => {
+  const consider = (level, x, z, sector, bog, shire, east = false) => {
     if (layout.at(level, x, z) !== undefined || layout.isPath(level, x, z)) return;
     const k = `${level}:${x},${z}`;
-    if (!frontage.has(k)) frontage.set(k, { level, x, z, sector, bog, shire });
+    if (!frontage.has(k)) frontage.set(k, { level, x, z, sector, bog, shire, east });
   };
   for (const cell of layout.order) {
     if (!isOpenAir(cell.room) || cell.room.sector === SECTOR.AIR) continue;
     for (let dir = 0; dir < 4; dir++) {
       const [dx, , dz] = DIR_STEP[dir];
-      consider(cell.level, cell.x + dx, cell.z + dz, cell.room.sector, isBog(cell.room), isShire(cell.room));
+      consider(cell.level, cell.x + dx, cell.z + dz, cell.room.sector, isBog(cell.room), isShire(cell.room),
+        !!eastStyle(cell.room));
     }
   }
   for (const link of layout.links) {
@@ -1167,11 +1231,12 @@ export function buildScene(world, layout, materials, assets = null) {
     for (const c of link.path) {
       for (let dir = 0; dir < 4; dir++) {
         const [dx, , dz] = DIR_STEP[dir];
-        consider(link.from.level, c.x + dx, c.z + dz, source.sector, isBog(source), isShire(source));
+        consider(link.from.level, c.x + dx, c.z + dz, source.sector, isBog(source), isShire(source), !!eastStyle(source));
       }
     }
   }
   for (const spot of frontage.values()) {
+    if (mountain.has(cellKey(spot.level, spot.x, spot.z))) continue;
     // Face the house at the street. Models are built fronting -Z, so the
     // rotation that turns that front towards direction d is FACE_ROT[d]. It
     // also keeps the jetties and hoist beams oversailing a road, not a
@@ -1185,12 +1250,12 @@ export function buildScene(world, layout, materials, assets = null) {
     spot.faces = faces; // the party walls below need to know which cells share a street
     const pos = { x: spot.x * CELL, y: spot.level * LEVEL_H, z: spot.z * CELL };
     if (spot.bog) mistCells.push(pos);
-    const paved = spot.bog ? 'peat' : FILLER_GROUND[spot.sector];
+    const paved = spot.bog ? 'peat' : (spot.east ? 'sand' : FILLER_GROUND[spot.sector]);
     if (paved) groundAt.set(cellKey(spot.level, spot.x, spot.z), paved);
     buildFiller({
       batcher, instances, model, faceRot: faces < 0 ? null : FACE_ROT[faces],
       chunk: `${spot.level}:${Math.floor(spot.x / 4)},${Math.floor(spot.z / 4)}`,
-      sector: spot.sector, bog: spot.bog, shire: spot.shire, x: pos.x, y: pos.y, z: pos.z,
+      sector: spot.east ? SECTOR.DESERT : spot.sector, bog: spot.bog, shire: spot.shire, x: pos.x, y: pos.y, z: pos.z,
       seed: hash3(spot.x, spot.z, spot.level, 17), addCollider, lights, decor,
     });
   }
@@ -1253,6 +1318,10 @@ export function buildScene(world, layout, materials, assets = null) {
         instances, model, chunk, x: cx * CELL, y, z: cz * CELL, dir, addCollider,
       });
     }
+  }
+
+  if (instances && assets.has('dune_a')) {
+    buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt, cellKey, chunkOf });
   }
 
   buildVerges({ batcher, instances, model, groundAt, chunkOf });
@@ -1511,7 +1580,7 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
   // The sewer lights itself from its prose (`sewerDressing`): a torch on
   // every wall of every INSIDE room put four of them in "Mid-air", a cave
   // with nothing in it but the fall.
-  if (room.sector !== SECTOR.INSIDE || isSewer(room)) return;
+  if (room.sector !== SECTOR.INSIDE || isDeep(room)) return;
   const px = x - dx * 0.7;
   const pz = z - dz * 0.7;
   const spots = gap ? [-(gap / 2 + 0.8), gap / 2 + 0.8] : [0];
@@ -3240,6 +3309,22 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
   // them is one boundary too many, and the two together read as a compound.
   if (GRAVEYARD.test(room.name)) return;
 
+  // Nobody builds a wall in the desert: the edge of a room is where the sand
+  // rises into the dune beyond it. A tent's edge is its own cloth.
+  const east = eastStyle(room);
+  if (east === 'tent') return;
+  if (east) {
+    const [ex, , ez] = DIR_STEP[dir];
+    const bank = mound(CELL + 3, 1.3, 3.4, 18);
+    batcher.add(bank, east === 'ledge' ? 'cliff' : 'sand',
+      place(pos.x + ex * HALF, pos.y - 0.05, pos.z + ez * HALF, ex ? Math.PI / 2 : 0), { chunk });
+    bank.dispose();
+    const along = dir === 1 || dir === 3;
+    const cx = pos.x + ex * (HALF - 0.4); const cz = pos.z + ez * (HALF - 0.4);
+    addCollider(cx - (along ? 0.4 : HALF), cx + (along ? 0.4 : HALF), cz - (along ? HALF : 0.4), cz + (along ? HALF : 0.4), pos.y, pos.y + 2.5);
+    return;
+  }
+
   const [dx, , dz] = DIR_STEP[dir];
   const bx = pos.x + dx * (HALF - 0.3);
   const bz = pos.z + dz * (HALF - 0.3);
@@ -3310,14 +3395,14 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
   // laid over the routed cell joins the two either side of it seamlessly.
   // ...unless both of them are bog, where the same sector code means standing
   // water in peat rather than a reach of river.
-  const midstream = !isSewer(source) && isWater(link.from.room) && isWater(link.to.room)
+  const midstream = !isDeep(source) && isWater(link.from.room) && isWater(link.to.room)
     && !isBog(link.from.room) && !isBog(link.to.room);
   const level = link.from.level;
   const y = level * LEVEL_H;
   const chain = [link.from, ...link.path, link.to];
   // Lined as a cave when it leaves one: the rock goes on until the brick of
   // whatever it reaches, and the room at the other end has its own wall.
-  const caveRun = enclosed && sewerStyle(source) === 'cave';
+  const caveRun = enclosed && deepStyle(source) === 'cave';
   if (enclosed) {
     for (const [end, next] of [[link.from, chain[1]], [link.to, chain[chain.length - 2]]]) {
       const endMats = pickMaterials(end.room, end.room.area);
@@ -3361,8 +3446,8 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
 
     // Between two flooded rooms in the sewer the water lies on the floor of
     // the passage too, in the sewer's own material, not the river's.
-    if (isSewer(source) && [link.from.room, link.to.room].every((r) => isWater(r) || sewerFlood(r))) {
-      batcher.add(plane(CELL, CELL, 4), 'sewage', place(pos.x, y + SW_FLOOD, pos.z), { chunk });
+    if (isDeep(source) && [link.from.room, link.to.room].every((r) => isWater(r) || sewerFlood(r))) {
+      batcher.add(plane(CELL, CELL, 4), deepWater(source), place(pos.x, y + SW_FLOOD, pos.z), { chunk });
     }
     // The floor underneath stays as it is; the plane covers it, at the same
     // height and size the rooms either side use.
@@ -3782,6 +3867,21 @@ function sewerDressing({ room, style, pos, y, blind, sides, wall, ceil, instance
     addCollider(at.x - 0.9, at.x + 0.9, at.z - 0.9, at.z + 0.9, y, y + 0.4);
   }
 
+  // "The fungus patch", "a giant mushroom ... decorated in the fashion of a
+  // temple": clumps of it against the walls, and the pale light the spores
+  // hang in -- the one cave down here that is not dark.
+  if (/\b(fung\w*|mushrooms?|spores?|myconoid)\b/i.test(text) && instances.library.get('fungus_cluster')) {
+    const walls = against.length ? against : [0, 1, 2, 3];
+    const n = /\btemple\b/i.test(text) ? 5 : 3;
+    for (let i = 0; i < n; i++) {
+      const d = walls[i % walls.length];
+      const at = put('fungus_cluster', wall - 1.3, (rand(i, 85) - 0.5) * (wall - 1.8) * 2, d, rand(i, 87) * 6.28,
+        0.8 + rand(i, 89) * 0.6);
+      addCollider(at.x - 0.7, at.x + 0.7, at.z - 0.7, at.z + 0.7, y, y + 1.2);
+    }
+    lights.push({ x: pos.x, y: y + 2.2, z: pos.z, color: 0xc8f0b0, intensity: 5, radius: 11 });
+  }
+
   if (style === 'cave') {
     // A rock box is still a box. Boulders fallen into its corners and along
     // its blank walls break the four straight lines where wall meets floor,
@@ -3870,7 +3970,7 @@ function buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk
   if (!instances) return;
   const blind = [0, 1, 2, 3].filter((d) => !sides[d] || deadExit(sides[d].exit));
   sewerDressing({
-    room, style: sewerStyle(room), pos, y: pos.y, blind, sides, wall: ROOM / 2, ceil: CEIL,
+    room, style: deepStyle(room), pos, y: pos.y, blind, sides, wall: ROOM / 2, ceil: CEIL,
     instances, chunk, decor, lights, addCollider,
   });
   // An altar or a hearth the text names, in the ordinary way: these rooms have
@@ -3982,6 +4082,261 @@ function closeDoorway({ batcher, pos, dir, chunk, material, addCollider }) {
   }
   add(HALF - T, HALF, -(DOOR_W / 2 + T), DOOR_W / 2 + T, y + DOOR_H, y + H);
   add(SHELL - 0.05, HALF - T, -DOOR_W / 2, DOOR_W / 2, y + DOOR_H, y + DOOR_H + 0.3);
+}
+
+/**
+ * The mountain the river cuts its tunnels through.
+ *
+ * The eastern caves are at street level -- the river runs straight in from
+ * the town -- so built as rooms they stood on the grass as rock boxes with
+ * flat tops, the corridors between them thirteen-metre sheds. Every empty cell
+ * within a cell of one of them now holds a block of mountain, and the caves
+ * and their corridors carry a craggy block on their ceilings, so the whole
+ * run is one massif with the tunnels inside it and the cave mouths opening
+ * out of its cliffs onto the desert.
+ *
+ * Returns the cells it took, so nothing else builds there.
+ */
+/**
+ * The open rooms of the Great Eastern Desert, dressed from their own words.
+ *
+ * A tent is built over its room: the pavilion roof, and a cloth wall on every
+ * side -- the side with a way out gets the wall with the doorway and its flap
+ * rolled up, and the others are closed, so the tent stands where the mud says
+ * it does and you walk in and out through the door it says it has. The camp is
+ * the oasis the prose promises: a pool under palms, reeds at its edge. Beside
+ * the camels there is the picket line they are hitched to.
+ */
+function buildEastRoom({ room, pos, sides, instances, chunk, decor, lights, addCollider }) {
+  const style = eastStyle(room);
+  const text = `${room.name} ${room.description}`;
+  const rand = (k, salt) => hash3(room.vnum, k, 0, salt);
+  const blank = [0, 1, 2, 3].filter((d) => !sides[d]);
+  const y = pos.y;
+
+  if (style === 'tent') {
+    instances.add('tent_roof', { x: pos.x, y, z: pos.z, rotY: 0 }, chunk);
+    for (let dir = 0; dir < 4; dir++) {
+      const open = !!sides[dir] && ['alley', 'portal', 'gate'].includes(sides[dir].kind);
+      instances.add(open ? 'tent_wall_door' : 'tent_wall', { x: pos.x, y, z: pos.z, rotY: FACE_ROT[dir] }, chunk);
+      const runs = open ? [[-TENT_H, -1.6], [1.6, TENT_H]] : [[-TENT_H, TENT_H]];
+      for (const [c0, c1] of runs) {
+        const r = sewerRect(pos, dir, TENT_H - 0.15, TENT_H + 0.1, c0, c1);
+        addCollider(r.x0, r.x1, r.z0, r.z1, y, y + 2.4);
+      }
+    }
+    // Poles: the two king poles either side of the middle, and the ring.
+    for (const sx of [-1.2, 1.2]) addCollider(pos.x + sx - 0.12, pos.x + sx + 0.12, pos.z - 0.12, pos.z + 0.12, y, y + 5);
+    // "A fancy carpet lies on the sand", "cushions"; every tent has somewhere
+    // to sit. Against a closed wall, never in the doorway or the middle.
+    const back = blank.length ? blank[0] : 0;
+    const rug = sewerAt(pos, back, 2.6, 0);
+    instances.add('rug', { x: rug.x, y, z: rug.z, rotY: FACE_ROT[back] }, chunk);
+    const seat = sewerAt(pos, back, 4.3, 0);
+    instances.add('cushions', { x: seat.x, y, z: seat.z, rotY: FACE_ROT[back] + Math.PI }, chunk);
+    if (/lavish|fancy|rich|tapestr/i.test(text)) {
+      // A brass lamp hung from the ridge beam, which is the only way a tent
+      // this rich is lit after dark. It hangs from something: the beam.
+      decor.push({ kind: 'torch', bare: true, x: pos.x, y: y + 3.6, z: pos.z + 0.01 });
+      lights.push({ x: pos.x, y: y + 3.4, z: pos.z, color: 0xffb566, intensity: 6, radius: 10, flicker: true });
+    }
+    return;
+  }
+
+  if (style === 'camp') {
+    if (/\boasis\b/i.test(text)) {
+      // The pool: off the middle, round, with a lip of wet sand and reeds.
+      const a = rand(0, 61) * Math.PI * 2;
+      const px = pos.x + Math.cos(a) * 2.6; const pz = pos.z + Math.sin(a) * 2.6;
+      decor.push({ kind: 'water', x: px, y: y + 0.04, z: pz, radius: 2.4, chop: 0.25, glint: 0.9, shallow: 0x3d7a6a, deep: 0x123a3a });
+      addCollider(px - 1.7, px + 1.7, pz - 1.7, pz + 1.7, y, y + 1);
+      for (let i = 0; i < 5; i++) {
+        const t = a + Math.PI * 0.6 + i * 0.55;
+        instances.add('reed_clump', {
+          x: px + Math.cos(t) * 2.5, y, z: pz + Math.sin(t) * 2.5, rotY: rand(i, 63) * 6.28, scale: 0.7 + rand(i, 65) * 0.4,
+        }, chunk);
+      }
+    }
+    // Palms round the camp's edge, in the corners, where nothing walks.
+    for (let k = 0; k < 4; k++) {
+      if (rand(k, 67) < 0.3) continue;
+      const sx = k & 1 ? 1 : -1; const sz = k & 2 ? 1 : -1;
+      const x = pos.x + sx * (4.6 + rand(k, 69) * 0.8); const z = pos.z + sz * (4.6 + rand(k, 71) * 0.8);
+      instances.add(rand(k, 73) > 0.5 ? 'palm_a' : 'palm_b', { x, y, z, rotY: rand(k, 75) * 6.28, scale: 0.85 + rand(k, 77) * 0.3 }, chunk);
+      addCollider(x - 0.35, x + 0.35, z - 0.35, z + 0.35, y, y + 6);
+    }
+    if (/\bcamels?\b/i.test(room.name) && blank.length) {
+      const d = blank[0];
+      const at = sewerAt(pos, d, 4.4, 0);
+      instances.add('hitch_line', { x: at.x, y, z: at.z, rotY: FACE_ROT[d] }, chunk);
+      const r = sewerRect(pos, d, 4.2, 4.6, -4.6, 4.6);
+      addCollider(r.x0, r.x1, r.z0, r.z1, y, y + 0.9);
+    }
+    return;
+  }
+
+  if (/\bglow/i.test(room.description)) {
+    // "This patch of desert looks different ... the sand glows."
+    lights.push({ x: pos.x, y: y + 0.6, z: pos.z, color: 0x9fe6c8, intensity: 9, radius: 14 });
+  }
+}
+
+/**
+ * "A vast desert stretches for miles." Nine rooms of it, laid out, is a patch
+ * of sand in a meadow: past the ring of dunes the frontage puts round them the
+ * world's own ground is grass, and it showed as a green band under the sky in
+ * every view out of the desert. So the sand goes on -- flat sand in every
+ * empty cell over a margin round the desert's rooms, a dune on most of them --
+ * out to where the fog takes over. Nothing out there is reachable, so none of
+ * it needs a collider; the frontage dunes already stop you.
+ */
+const SAND_MARGIN = 7;
+
+function buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt, cellKey, chunkOf }) {
+  let x0 = Infinity; let x1 = -Infinity; let z0 = Infinity; let z1 = -Infinity;
+  for (const cell of layout.order) {
+    const style = eastStyle(cell.room);
+    if (cell.level !== 0 || !style || style === 'cave') continue;
+    x0 = Math.min(x0, cell.x); x1 = Math.max(x1, cell.x);
+    z0 = Math.min(z0, cell.z); z1 = Math.max(z1, cell.z);
+  }
+  if (x0 > x1) return;
+  for (let x = x0 - SAND_MARGIN; x <= x1 + SAND_MARGIN; x++) {
+    for (let z = z0 - SAND_MARGIN; z <= z1 + SAND_MARGIN; z++) {
+      const k = cellKey(0, x, z);
+      if (layout.at(0, x, z) !== undefined || layout.isPath(0, x, z) || mountain.has(k) || frontage.has(k)) continue;
+      // Not over the town or anything else that is not the desert's: only
+      // cells nearer the desert than any other area's room.
+      if (nearestArea(layout, x, z) !== 'eastern.are') continue;
+      const chunk = chunkOf({ level: 0, x, z });
+      const px = x * CELL; const pz = z * CELL;
+      batcher.add(plane(CELL, CELL, 2), 'sand', place(px, 0, pz), { chunk });
+      groundAt.set(k, 'sand');
+      if (hash3(x, z, 0, 43) < 0.35) continue;
+      instances.add(hash3(x, z, 1, 43) > 0.5 ? 'dune_a' : 'dune_b', {
+        x: px, y: 0, z: pz, rotY: -Math.PI / 2 + (hash3(x, z, 2, 43) - 0.5) * 0.6,
+        scale: 0.9 + hash3(x, z, 3, 43) * 0.5, scaleY: 0.7 + hash3(x, z, 4, 43) * 0.7,
+      }, chunk);
+    }
+  }
+}
+
+/** Which area the nearest room on the ground belongs to, within six cells. */
+function nearestArea(layout, x, z) {
+  let best = Infinity; let area = null;
+  for (let r = 0; r <= 6 && r * r < best; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dz = -r; dz <= r; dz++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+        const v = layout.at(0, x + dx, z + dz);
+        if (v === undefined) continue;
+        const d = dx * dx + dz * dz;
+        if (d < best) { best = d; area = layout.cells.get(v).room.areaFile; }
+      }
+    }
+  }
+  return area;
+}
+
+/** Half the side of a tent: tools/blender/desert.py `TH`. */
+const TENT_H = 5.6;
+
+/** Half the width of the passage through `massif_mouth`, less its rough. */
+const MOUTH_W = 2.0;
+
+function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey }) {
+  const inside = [];            // {level, x, z} cells that are cave or cave corridor
+  for (const cell of layout.order) {
+    if (cell.level < 0 || eastStyle(cell.room) !== 'cave') continue;
+    inside.push({ level: cell.level, x: cell.x, z: cell.z });
+  }
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || !link.path || link.from.level < 0) continue;
+    if (eastStyle(link.from.room) !== 'cave' || eastStyle(link.to.room) !== 'cave') continue;
+    for (const c of link.path) inside.push({ level: link.from.level, x: c.x, z: c.z });
+  }
+  const taken = new Set();
+  const free = (x, z) => layout.at(0, x, z) === undefined && !layout.isPath(0, x, z)
+    && layout.at(1, x, z) === undefined && !layout.isPath(1, x, z);
+  const block = (x, z) => {
+    const k = cellKey(0, x, z);
+    if (taken.has(k)) return;
+    taken.add(k);
+    const cx = x * CELL; const cz = z * CELL;
+    const tall = hash3(x, z, 0, 211);
+    const name = tall > 0.5 ? 'massif_a' : 'massif_b';
+    const scaleY = 0.85 + hash3(x, z, 1, 211) * 0.45;
+    instances.add(name, {
+      x: cx, y: 0, z: cz, rotY: Math.floor(hash3(x, z, 2, 211) * 4) * Math.PI / 2, scaleY,
+    }, chunkOf({ level: 0, x, z }));
+    addCollider(cx - HALF, cx + HALF, cz - HALF, cz + HALF, 0, (name === 'massif_a' ? 12 : 9) * scaleY);
+  };
+  // The way out of a cave onto the open air goes through the cliff: the first
+  // cell of the path is a block with a passage driven through it, so the
+  // room's own walls stand behind rock and only its mouth shows.
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || !link.path || !link.path.length || link.from.level !== 0) continue;
+    const ends = [[link.from, link.to, link.path[0], link.path[1] || link.to],
+      [link.to, link.from, link.path[link.path.length - 1], link.path[link.path.length - 2] || link.from]];
+    for (const [cave, far, first, next] of ends) {
+      if (eastStyle(cave.room) !== 'cave' || !isOpenAir(far.room)) continue;
+      const inDir = dirBetween(first, cave);
+      if (inDir < 0 || dirBetween(first, next) !== (inDir + 2) % 4) continue;
+      const k = cellKey(0, first.x, first.z);
+      if (taken.has(k)) continue;
+      taken.add(k);
+      const cx = first.x * CELL; const cz = first.z * CELL;
+      instances.add('massif_mouth', { x: cx, y: 0, z: cz, rotY: inDir % 2 ? Math.PI / 2 : 0 }, chunkOf({ level: 0, x: first.x, z: first.z }));
+      for (const s of [-1, 1]) {
+        const r = sewerRect({ x: cx, z: cz }, inDir, -HALF, HALF, s * MOUTH_W, s * HALF);
+        addCollider(r.x0, r.x1, r.z0, r.z1, 0, 10);
+      }
+      // "The iron bars are broken, allowing passage through the hole in the
+      // wall." Where the open end's own words say so, a grille across the
+      // mouth with its middle bars gone and two bent aside.
+      const exit = [0, 1, 2, 3].map((d) => far.room.exits[d]).find((e) => e && e.to === cave.vnum);
+      if (exit && /\bbars?\b/i.test(`${exit.description || ''} ${far.room.description}`)) {
+        const at = sewerAt({ x: cx, z: cz }, inDir, -HALF + 0.6, 0);
+        const rot = inDir % 2 ? Math.PI / 2 : 0;
+        for (let i = -5; i <= 5; i++) {
+          if (Math.abs(i) <= 1) continue;
+          const across = i * 0.36;
+          const p = sewerAt({ x: at.x, z: at.z }, inDir, 0, across);
+          const bent = Math.abs(i) === 2;
+          batcher.add(box(0.06, bent ? 2.2 : 3.6, 0.06), 'rust',
+            place(p.x, bent ? 1.1 : 1.8, p.z, rot), { chunk: chunkOf({ level: 0, x: first.x, z: first.z }) });
+        }
+        for (const hy of [0.4, 3.4]) {
+          for (const s of [-1, 1]) {
+            const p = sewerAt({ x: at.x, z: at.z }, inDir, 0, s * 1.35);
+            batcher.add(box(1.25, 0.08, 0.08), 'rust', place(p.x, hy, p.z, rot), { chunk: chunkOf({ level: 0, x: first.x, z: first.z }) });
+          }
+        }
+      }
+      // At the back of the passage, the cave room's own outer wall: rock over
+      // it with the doorway in it, and the slot beside the door closed.
+      const out = (inDir + 2) % 4;
+      const room = { x: cave.x * CELL, y: 0, z: cave.z * CELL };
+      const [ox, , oz] = DIR_STEP[out];
+      instances.add('cave_wall_long_door', { x: room.x + ox * HALF, y: 0, z: room.z + oz * HALF, rotY: FACE_ROT[inDir] }, chunkOf(cave));
+      closeDoorway({ batcher, pos: room, dir: out, chunk: chunkOf(cave), material: 'caverock', addCollider });
+    }
+  }
+  for (const c of inside) {
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        if (c.level === 0 && free(c.x + dx, c.z + dz)) block(c.x + dx, c.z + dz);
+      }
+    }
+    // A cap on the room's own ceiling, unless another cave stands on it.
+    if (layout.at(c.level + 1, c.x, c.z) !== undefined) continue;
+    const y = c.level * LEVEL_H + CEIL;
+    instances.add(hash3(c.x, c.z, c.level, 213) > 0.5 ? 'massif_a' : 'massif_b', {
+      x: c.x * CELL, y, z: c.z * CELL, rotY: Math.floor(hash3(c.x, c.z, 3, 213) * 4) * Math.PI / 2,
+      scaleY: 0.45 + hash3(c.x, c.z, 4, 213) * 0.35,
+    }, chunkOf(c));
+  }
+  return taken;
 }
 
 /** A stone archway: portals you step through, gates that are sealed. */
@@ -4528,6 +4883,16 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
       break;
     }
     case SECTOR.DESERT: {
+      // A dune, where there is one to be had: the triangular prism that stood
+      // here is a roof lying in the sand. All of them face one wind, from the
+      // west off the mountains, with a little wander -- dunes on a field that
+      // face every way at once read as a scatter of props.
+      const dune = model(['dune_a', 'dune_b'], hash3(x, z, 0, 41));
+      if (dune && instances) {
+        instances.add(dune, { x, y, z, rotY: -Math.PI / 2 + (hash3(x, z, 1, 41) - 0.5) * 0.6, scaleY: 0.8 + hash3(x, z, 2, 41) * 0.5 }, chunk);
+        addCollider(x - HALF + 1.2, x + HALF - 1.2, z - HALF + 1.2, z + HALF - 1.2, y, y + 2.6);
+        break;
+      }
       batcher.add(triPrism(CELL, 2.6, CELL), 'sand', place(x, y, z, hash3(x, z, 0, 41) * Math.PI), { chunk });
       addCollider(x - HALF, x + HALF, z - HALF, z + HALF, y, y + 2.6);
       break;

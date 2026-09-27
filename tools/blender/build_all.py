@@ -32,6 +32,7 @@ MODULES = [
     "trees",
     "marsh",
     "sewer",
+    "desert",
     "townsperson",
     "beasts",
 ]
@@ -78,6 +79,14 @@ BUDGET = {
     "cave_wall_long_door": 1550, "cave_roof": 1850,
     # Four of them in the whole world, all in the Dump.
     "refuse_heap": 1000, "sewer_sconce": 400,
+    # The Great Eastern Desert. A massif block is a whole 13 m cell of cliff,
+    # displaced at 0.7 m a face so the bedding ledges cast real shadow; there
+    # are a few dozen of them. Dunes are placed by the hundred in the sand sea
+    # past the rooms, so they are held under a thousand.
+    "massif_a": 3800, "massif_b": 3000, "massif_mouth": 3300,
+    "dune_a": 1000, "dune_b": 1000, "palm_a": 2500, "palm_b": 2500,
+    "tent_roof": 2600, "tent_wall": 1000, "tent_wall_door": 900,
+    "rug": 200, "cushions": 600, "hitch_line": 450, "fungus_cluster": 1300,
     # The animals. One skinned mesh each, two materials (fur or feathers, and
     # horn), and far fewer of them than of people: Midgaard has 13, the
     # Shire's farm 19. The big ones get the most because they are the ones
