@@ -61,6 +61,11 @@ on the beat with the swing's contact frame landing on the blow.
 
     node tools/people-check.mjs [--all]   # who every mobile is dressed as
 
+The default world is eight areas and 507 rooms: Midgaard, Haon Dor, the Shire,
+the marsh, the troll den, the graveyard, the sewer under the town (down
+through the Dump or the guild wells) and the Great Eastern Desert (out
+through the river gate in the east wall).
+
 ## Controls
 
 | | |
@@ -83,7 +88,7 @@ on the beat with the swing's contact frame landing on the blow.
 
 | | |
 |---|---|
-| `?areas=midgaard,school` | which `.are` files to load (default `midgaard`) |
+| `?areas=midgaard,school` | which `.are` files to load (default the eight listed above) |
 | `?room=3001` | where to start, and what the layout is built around |
 | `?max=400` | stop placing after this many rooms |
 | `?time=dusk` | `dawn`, `noon`, `dusk`, `night` |
