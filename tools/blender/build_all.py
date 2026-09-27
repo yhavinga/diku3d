@@ -76,7 +76,7 @@ BUDGET = {
     "cave_wall": 1400, "cave_wall_door": 1200, "cave_wall_long": 1750,
     "cave_wall_long_door": 1550, "cave_roof": 1850,
     # Four of them in the whole world, all in the Dump.
-    "refuse_heap": 1000,
+    "refuse_heap": 1000, "sewer_sconce": 400,
 }
 PROP_BUDGET = 800
 TREE_BUDGET = 1500

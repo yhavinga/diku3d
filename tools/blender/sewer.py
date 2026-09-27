@@ -1052,6 +1052,25 @@ def build_refuse_heap():
                           name="sherd", width=0.004))
     return deliver(p, "refuse_heap")
 
+
+def build_sconce():
+    """The town's torch sconce, in the materials of underground: the town's
+    one is iron and oak lit by the sky, and a metal plate lit by a blue noon
+    sky seven metres under the street is a blue plate. Same geometry as
+    props.build_torch_sconce, so the flame build.js puts on it sits where it
+    always has: wall at y = 0, reaching into -Y, origin on the floor."""
+    lib.reset()
+    p = []
+    z = 2.35
+    p.append(kit.timber((0.24, 0.09, 0.42), (0, 0.01, z), (0, 0, 0), IRON, 0.015, "plate"))
+    p.append(kit.timber((0.06, 0.34, 0.06), (0, -0.16, z + 0.1), (0, 0, 0), IRON, 0.015, "arm"))
+    p.append(kit.timber((0.05, 0.26, 0.05), (0, -0.12, z - 0.06),
+                        (math.radians(42), 0, 0), IRON, 0.012, "stay"))
+    p.append(lib.cone(0.13, 0.09, 0.24, (0, -0.31, z + 0.24), verts=10, name="cup", mat=IRON))
+    p.append(lib.cylinder(0.045, 0.62, (0, -0.31, z + 0.58), verts=8, name="haft", mat="sewerwood"))
+    p.append(lib.cone(0.11, 0.05, 0.26, (0, -0.31, z + 0.96), verts=10, name="head", mat="sludge"))
+    return deliver(p, "sewer_sconce")
+
 # --- delivery -------------------------------------------------------------
 
 def deliver(parts, name):
@@ -1103,6 +1122,7 @@ def build():
         build_cave_wall("cave_wall_long_door", hole=CAVE_HOLE, seed=72013, width=13.2),
         build_cave_roof(),
         build_refuse_heap(),
+        build_sconce(),
         build_wall(True, "sewer_wall_open"),
         build_wall(False, "sewer_wall_solid"),
         build_wall(True, "sewer_shaft_open", tall=True),

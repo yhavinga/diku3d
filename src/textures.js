@@ -860,6 +860,7 @@ const RECIPES = {
   cavefloor: { surface: 'cavefloor', scale: 3.2, normalScale: 0.8, env: 1, wet: 0, detail: 0.6, buried: true },
   rustiron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1, wet: 0, detail: 0.3, buried: true },
   bone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 1, wet: 0, detail: 0.3, buried: true },
+  sewerwood: { surface: 'bark', scale: 1.6, normalScale: 0.6, env: 1, wet: 0, detail: 0.4, buried: true },
 };
 
 // ------------------------------------------------------- surface detail ----

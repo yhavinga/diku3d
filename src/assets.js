@@ -342,6 +342,6 @@ export const ASSET_NAMES = [
   'sewer_grate', 'sewer_door_end', 'sewer_pit', 'sewer_ladder', 'town_well',
   'cave_rock_a', 'cave_rock_b', 'stalagmites', 'stalactites', 'bone_pile', 'rubble',
   'cave_wall', 'cave_wall_door', 'cave_wall_long', 'cave_wall_long_door', 'cave_roof',
-  'refuse_heap',
+  'refuse_heap', 'sewer_sconce',
   'townsperson',
 ];
