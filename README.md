@@ -58,7 +58,10 @@ dogs, wolves, horses, cattle and swans, and into spiders, scorpions, a sand
 worm, the dracolich and a Will-O-Wisp that carries its own light over the bog. They wander the way Merc's
 `mobile_update` has them wander, through a random open exit every so often,
 and walk the routed street to get there; fights are Merc's `fight.c`, played
-on the beat with the swing's contact frame landing on the blow. The casters
+on the beat with the swing's contact frame landing on the blow. Nothing is
+named unless you look at it; a foe you cannot see gets a marker telling you
+which way to turn. People sit at tables, talk in pairs, stand at the bar and
+climb the stairs rather than vanishing at the foot of them. The casters
 cast: `spec_cast_mage`, `_cleric`, `_undead`, `_adept` and the dragons' breath
 run on the mobile pulse, with 57 spells out of `magic.c` — each family drawn
 as its own effect, with affects like sanctuary worn as an aura while they last. The rest of Merc is there
