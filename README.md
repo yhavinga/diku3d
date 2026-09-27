@@ -53,21 +53,27 @@ The people in it are the mud's mobiles, dressed by what the area file says
 they are: `src/people.js` reads keywords, flags and shops and picks one of
 seventeen archetypes — cityguard, knight, priest, mage, merchant, beggar,
 troll, zombie and so on — with a weapon from the mobile's own resets. Animals
-are fifteen modelled bodies, bred into dogs, wolves, foxes, horses, cattle,
-swans and a green dragon by coat and proportion. They wander the way Merc's
+and monsters are thirty modelled bodies, bred by coat and proportion into
+dogs, wolves, horses, cattle and swans, and into spiders, scorpions, a sand
+worm, the dracolich and a Will-O-Wisp that carries its own light over the bog. They wander the way Merc's
 `mobile_update` has them wander, through a random open exit every so often,
 and walk the routed street to get there; fights are Merc's `fight.c`, played
 on the beat with the swing's contact frame landing on the blow. The casters
 cast: `spec_cast_mage`, `_cleric`, `_undead`, `_adept` and the dragons' breath
 run on the mobile pulse, with 57 spells out of `magic.c` — each family drawn
-as its own effect, with affects like sanctuary worn as an aura while they last.
+as its own effect, with affects like sanctuary worn as an aura while they last. The rest of Merc is there
+too, in `src/rules/`: area resets, hunger and thirst, corpses that rot and
+can be searched, containers, keys and locks, kick, backstab, disarm, rescue
+and steal, the janitor, the fido, the thief and the mayor walking his route
+opening the gates, and a character saved to the browser to continue from.
 
     node tools/people-check.mjs [--all]   # who every mobile is dressed as
 
-The default world is eight areas and 507 rooms: Midgaard, Haon Dor, the Shire,
+The default world is nine areas and 579 rooms: Midgaard, Haon Dor, the Shire,
 the marsh, the troll den, the graveyard, the sewer under the town (down
-through the Dump or the guild wells) and the Great Eastern Desert (out
-through the river gate in the east wall).
+through the Dump or the guild wells), the Great Eastern Desert (out through
+the river gate in the east wall) and Raff's Dangerous Neighborhood with its
+No Man's Land (south from inside the East Gate, down Wall Road).
 
 ## Controls
 
@@ -76,7 +82,7 @@ through the river gate in the east wall).
 | `W A S D` | walk, `shift` to run, `space` to jump |
 | arrow keys | take the exit north, east, south or west, and turn to face that way — the mud's own navigation, so north is north whichever way you were looking. Your pace carries over: step east while walking and you keep the same speed, now heading east |
 | `page up` / `page down` | take the exit up or down, leaving you looking where you were |
-| mouse | look, `E` to examine what you're looking at or open a door; `E` again closes it |
+| mouse | look, `E` to examine, open, unlock (with the key you carry), drink, search a body or pick up; `E` again closes it |
 | `1` – `4` | dawn, noon, dusk, night |
 | `P` | cycle quality: low, medium, high, max |
 | `F` | frame rate, draw calls, triangles, GPU milliseconds |
@@ -86,13 +92,15 @@ through the river gate in the east wall).
 | left mouse | attack what you are facing |
 | `I` `B` `K` `R` `T` `Q` | inventory, trade, skills, rest, take, recall |
 | `Z` `X` / wheel, `C` / right mouse | mage and cleric: choose a spell, cast it |
+| `Z` `X` `C` `H` `J` `L` `N` | warrior and thief: the skill bar — kick, backstab, disarm, sneak, hide, steal, pick |
+| `enter` | the mud's own command line: Merc's command table, abbreviations and all 90 socials; `enter` on an empty line closes it |
 | `esc` | release the mouse |
 
 ## URL parameters
 
 | | |
 |---|---|
-| `?areas=midgaard,school` | which `.are` files to load (default the eight listed above) |
+| `?areas=midgaard,school` | which `.are` files to load (default the nine listed above) |
 | `?room=3001` | where to start, and what the layout is built around |
 | `?max=400` | stop placing after this many rooms |
 | `?time=dusk` | `dawn`, `noon`, `dusk`, `night` |

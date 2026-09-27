@@ -13,13 +13,18 @@ the measurement that settled each finding; add to it at the end of a round.
 There is no build step, no bundler, no test framework and no linter. So
 "run the project's checks before calling it done" means, in order:
 
-    node --check src/*.js               # nothing else will catch a syntax slip
+    node --check src/*.js src/rules/*.js # nothing else will catch a syntax slip
+    node tools/import-check.mjs         # every module actually loads
     node tools/parse-check.mjs          # the .are reader, over all 45 areas
     node tools/layout-check.mjs         # layout quality per area
+    node tools/world-check.mjs          # structural faults across stages
+    node tools/game-check.mjs; node tools/magic-check.mjs; node tools/rules-check.mjs
 
 `layout-check` prints a walkable percentage per area. That number is the
 project's main quality metric — if a change drops it, the change is wrong.
 Midgaard should read 93%, and the mean across the 43 areas 94%.
+Two areas that leave town on the same side fight over the same cells; hood
+is laid whole (`LAID_WHOLE` in `layout.js`) so it cannot land in the desert.
 
 Anything touching `build.js`, `textures.js` or `actors.js` has to be looked at
 in a browser. Screenshots are how nearly every real defect here was found, and

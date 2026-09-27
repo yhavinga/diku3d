@@ -17,6 +17,7 @@
  */
 
 import { WEAR_NAME, MERC, armourWord } from './game.js';
+import { createConsole } from './console.js';
 
 const CSS = `
 #game-ui { position: fixed; inset: 0; pointer-events: none; z-index: 12;
@@ -127,6 +128,7 @@ const CSS = `
   opacity: 0; visibility: hidden; pointer-events: none;
   transition: opacity 170ms ease, transform 170ms ease; }
 #g-sheet.on { opacity: 1; visibility: visible; pointer-events: auto; transform: translate(-50%, -50%); }
+#g-sheet.narrow { width: min(470px, 82vw); }
 #g-sheet h2 { margin: 0 0 3px; font-size: 24px; color: var(--gold); font-weight: 400; }
 #g-sheet .lede { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.13em;
   text-transform: uppercase; color: var(--dim); margin-bottom: 18px; }
@@ -148,7 +150,7 @@ const CSS = `
 #g-sheet .stats b { color: var(--ink); font-weight: 400; }
 
 /* ------------------------------------------------------------ prompts -- */
-#g-hint { position: absolute; left: 50%; bottom: 62px; transform: translateX(-50%);
+#g-hint { position: absolute; left: 50%; bottom: 70px; transform: translateX(-50%);
   font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--gold); opacity: 0; transition: opacity 150ms ease;
   text-shadow: 0 0 1px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.85),
@@ -207,6 +209,70 @@ const CSS = `
 #g-ending .num { font-size: clamp(34px, 5vw, 58px); color: #f7ecd4; letter-spacing: 0.1em; }
 #g-ending .word { font-family: var(--mono); font-size: 11px; letter-spacing: 0.34em;
   text-transform: uppercase; color: var(--gold); margin-top: 10px; }
+
+/* ------------------------------------------------------------ status -- */
+/* What your body is doing to you, as the mud's score would put it: a row of
+   quiet words under the prompt, coloured only when they cost you something. */
+#g-chips { display: flex; flex-wrap: wrap; gap: 5px 7px; margin-top: 7px; min-height: 0; }
+#g-chips:empty { display: none; }
+#g-chips span { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 2px 6px 1px; border-radius: 2px; color: var(--dim); background: rgba(224,189,119,0.07);
+  border: 1px solid rgba(224,189,119,0.14); }
+#g-chips span.bad { color: #e0a08e; border-color: rgba(200,110,90,0.35); background: rgba(160,60,40,0.12); }
+#g-chips span.good { color: var(--gold); border-color: rgba(224,189,119,0.32); }
+
+/* ---------------------------------------------------------- skill bar -- */
+/* The class's skills, as a row at the foot of the vitals: what you can do
+   sits with what you have left to do it with, and the middle of the screen
+   stays the world's. */
+#g-skills { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 4px;
+  margin-top: 9px; pointer-events: auto; }
+#g-skills:empty { display: none; }
+#g-skills .slot { position: relative; height: 36px; padding: 4px 5px 4px; overflow: hidden; cursor: pointer;
+  display: flex; flex-direction: column; justify-content: space-between; border-radius: 2px;
+  background: rgba(224,189,119,0.05); border: 1px solid rgba(224,189,119,0.16);
+  transition: border-color 160ms ease, background 160ms ease; }
+#g-skills .slot:hover { border-color: rgba(224,189,119,0.4); }
+#g-skills .slot .k { font-family: var(--mono); font-size: 9px; color: var(--gold); opacity: 0.85; line-height: 1; }
+#g-skills .slot .n { font-size: 11.5px; line-height: 1.05; letter-spacing: -0.01em; color: var(--ink); white-space: nowrap; transition: color 160ms ease; }
+#g-skills .slot .p { position: absolute; right: 5px; top: 4px; font-family: var(--mono); font-size: 8.5px;
+  letter-spacing: 0.04em; color: var(--dim); opacity: 0.7; line-height: 1; }
+/* Nothing to use it on right now: the words go quiet, the plate stays. */
+#g-skills .slot.idle .n { color: var(--dim); }
+#g-skills .slot.idle .k { opacity: 0.45; }
+#g-skills .slot.unknown .n, #g-skills .slot.unknown .k { color: var(--dim); opacity: 0.4; }
+#g-skills .slot.on { border-color: rgba(224,189,119,0.6); background: rgba(224,189,119,0.12); }
+#g-skills .slot .cd { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--gold); opacity: 0.75; }
+#g-skills .slot.fired { animation: g-fire 380ms ease; }
+@keyframes g-fire { 0% { background: rgba(224,189,119,0.34); } 100% { background: rgba(224,189,119,0.05); } }
+
+/* ----------------------------------------------------------- speech -- */
+/* What a mobile says hangs over its head for a few seconds, in the log's
+   type -- the mayor's round is something you see go by, not read about. */
+#g-bubbles { position: absolute; inset: 0; }
+#g-bubbles div { position: absolute; left: 0; top: 0; max-width: 300px; transform: translate(-50%, -100%);
+  padding: 6px 11px 7px; font-size: 14px; line-height: 1.35; color: #f1e5ca; text-align: center;
+  background: rgba(16, 13, 9, 0.66); border: 1px solid rgba(224,189,119,0.2); border-radius: 3px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8); transition: opacity 260ms ease; will-change: transform; }
+#g-bubbles div.emote { font-style: italic; color: #d9cdb4; }
+#g-bubbles div.shout { color: #f3d9a0; border-color: rgba(224,160,90,0.45); }
+#g-bubbles div::after { content: ''; position: absolute; left: 50%; bottom: -6px; width: 9px; height: 9px;
+  transform: translateX(-50%) rotate(45deg); background: rgba(16, 13, 9, 0.66);
+  border-right: 1px solid rgba(224,189,119,0.2); border-bottom: 1px solid rgba(224,189,119,0.2); }
+
+/* ------------------------------------------------------------ asleep -- */
+#g-sleep { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 50%, rgba(3,4,8,0.55) 0%, rgba(3,4,8,0.92) 100%);
+  opacity: 0; transition: opacity 1400ms ease; pointer-events: none; }
+#g-sleep.on { opacity: 1; }
+#g-sleep.rest { opacity: 0.35; }
+
+/* -------------------------------------------------------------- loot -- */
+#g-sheet .shut { font-style: italic; color: var(--dim); margin: 6px 0 16px; }
+#g-sheet .verbs { display: flex; gap: 12px; }
+#g-sheet .verbs a { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--dim); cursor: pointer; padding-top: 4px; white-space: nowrap; }
+#g-sheet .verbs a:hover { color: var(--gold); }
+#g-sheet .reply { margin-top: 12px; min-height: 1.4em; font-style: italic; color: var(--dim); font-size: 14px; }
 `;
 
 const el = (tag, className, html) => {
@@ -258,6 +324,12 @@ export function createGameUi(game) {
   const xpFill = el('i');
   xpTrack.appendChild(xpFill);
   vitals.appendChild(xpTrack);
+  const chips = el('div');
+  chips.id = 'g-chips';
+  vitals.appendChild(chips);
+  const skillBar = el('div');
+  skillBar.id = 'g-skills';
+  vitals.appendChild(skillBar);
   root.appendChild(vitals);
 
   // -- target ---------------------------------------------------------------
@@ -316,6 +388,13 @@ export function createGameUi(game) {
   ending.id = 'g-ending';
   root.append(hint, levelUp, ending);
 
+  // -- speech, sleep --------------------------------------------------------
+  const bubbles = el('div');
+  bubbles.id = 'g-bubbles';
+  const sleepVeil = el('div');
+  sleepVeil.id = 'g-sleep';
+  root.prepend(sleepVeil);
+  root.append(bubbles);
   // -- spells ---------------------------------------------------------------
   const spellBar = el('div', 'panel');
   spellBar.id = 'g-spells';
@@ -326,6 +405,28 @@ export function createGameUi(game) {
 
   document.body.appendChild(root);
 
+  // -- the command line -----------------------------------------------------
+  const descBlock = document.getElementById('desc-block');
+  const hooks = { onConsole: null };
+  const console_ = createConsole({
+    root,
+    game,
+    onOpen: () => {
+      root.classList.add('typing');
+      if (descBlock) descBlock.style.visibility = 'hidden';
+      log.style.visibility = 'hidden';
+      lift(true);
+      if (hooks.onConsole) hooks.onConsole(true);
+    },
+    onClose: () => {
+      root.classList.remove('typing');
+      if (descBlock) descBlock.style.visibility = '';
+      log.style.visibility = '';
+      if (!sheetMode) lift(false);
+      if (hooks.onConsole) hooks.onConsole(false);
+    },
+  });
+
   // -- log ------------------------------------------------------------------
   // Seven, not fourteen: at fourteen the log grew over the compass and all
   // three vitals bars and sat there for the rest of the session ("You have
@@ -335,7 +436,9 @@ export function createGameUi(game) {
   const LINE_TTL = 11000;
   function say(text, cls = '') {
     if (!text) return;
-    const line = el('p', cls, text);
+    console_.print(text, cls);
+    const line = el('p', cls);
+    line.textContent = text.replace(/\s*\n\s*/g, ' ');
     log.appendChild(line);
     setTimeout(() => {
       if (!line.parentNode) return;
@@ -409,6 +512,7 @@ export function createGameUi(game) {
     if (!sheetMode) return;
     const s = game.state;
     sheet.textContent = '';
+    sheet.classList.remove('narrow');
 
     if (sheetMode === 'gear') {
       sheet.append(el('h2', null, `${s.className} of the ${s.level}th level`));
@@ -465,22 +569,74 @@ export function createGameUi(game) {
           }));
           continue;
         }
-        bagList.append(row(obj.name, `${obj.weight} lb · ${verb ? 'hold' : 'wear'}`, { onClick: () => game.wear(obj) }));
+        bagList.append(verbRow(obj, 'carried', `${obj.weight} lb`));
       }
       if (reading) bagList.append(row('never mind', '', { cls: 'dim', onClick: () => { reading = null; } }));
       right.append(bagList);
 
       const pile = game.here();
       if (pile.length) {
-        right.append(el('h4', null, 'on the ground'));
+        right.append(el('h4', null, 'within reach'));
         const groundList = el('ul');
-        for (const heap of pile) {
-          groundList.append(row(heap.name, `${heap.contents.length} · take all`, { onClick: () => game.takeAll(heap) }));
+        for (const obj of pile) {
+          if (game.isContainer(obj)) groundList.append(row(obj.name, 'e — look inside', { onClick: () => openLoot(obj) }));
+          else if (obj.wearFlags & 1) groundList.append(verbRow(obj, 'ground'));
         }
         right.append(groundList);
       }
       cols.append(left, right);
-      sheet.append(cols, el('div', 'foot', 'i — close · t — take everything here'));
+      sheet.append(cols, reply, el('div', 'foot', 'i — close · t — take everything within reach'));
+      return;
+    }
+
+    if (sheetMode === 'loot') {
+      const obj = lootTarget;
+      if (!obj || (obj.inRoom === null && !s.inventory.includes(obj))) { closeSheet(); return; }
+      const inside = game.lookIn(obj);
+      sheet.append(el('h2', null, capital(obj.name)));
+      sheet.append(el('div', 'lede', obj.itemType === 23 ? 'a corpse · everything it carried'
+        : `a container · holds ${obj.values[0]} lb`));
+      const cols = el('div', 'cols');
+      const left = el('div');
+      left.append(el('h4', null, 'inside'));
+      const list = el('ul');
+      if (inside.closed) {
+        left.append(el('div', 'shut', 'It is closed.'));
+        const verbs = el('div', 'verbs');
+        const act = (label, fn) => { const a = el('a', null, label); a.addEventListener('click', () => { answer(fn()); drawSheet(); }); verbs.append(a); };
+        act('open', () => game.openObj(obj));
+        if (obj.values[1] & 8) {
+          act(game.hasKey(obj.values[2]) ? 'unlock (you have the key)' : 'unlock', () => game.unlockObj(obj));
+          if ((s.learned.pickLock || 0) > 0) act('pick the lock', () => game.pickObj(obj));
+        }
+        left.append(verbs);
+      } else {
+        if (!obj.contains.length) list.append(row('nothing', '', { cls: 'dim' }));
+        for (const inner of obj.contains.slice()) list.append(verbRow(inner, obj));
+        left.append(list);
+        if (obj.contains.length > 1) {
+          const verbs = el('div', 'verbs');
+          const a = el('a', null, `take all · t`);
+          a.addEventListener('click', () => { for (const r of game.takeAll(obj)) if (!r.ok) answer(r); drawSheet(); });
+          verbs.append(a);
+          left.append(verbs);
+        }
+      }
+      const right = el('div');
+      if (obj.itemType === 15 && !inside.closed) {
+        right.append(el('h4', null, 'put in from your pack'));
+        const bag = el('ul');
+        if (!s.inventory.length) bag.append(row('your hands are empty', '', { cls: 'dim' }));
+        for (const item of s.inventory.slice()) {
+          if (item === obj) continue;
+          bag.append(row(item.name, 'put in', { onClick: () => answer(game.put(item, obj)) }));
+        }
+        right.append(bag);
+      }
+      cols.append(left, right);
+      // A corpse has no pack side to it: one column, not a half-empty pair.
+      if (!right.children.length) { cols.style.gridTemplateColumns = '1fr'; sheet.classList.add('narrow'); }
+      sheet.append(cols, reply, el('div', 'foot', 'e — close'));
       return;
     }
 
@@ -533,8 +689,47 @@ export function createGameUi(game) {
           skill.available ? (skill.learned >= skill.adept ? 'adept' : 'practice') : `level ${skill.level}`,
           { cls: skill.available ? '' : 'dim', onClick: can ? () => game.practice(skill.key) : null }));
       }
-      sheet.append(list, el('div', 'foot', 'k — close'));
+      sheet.append(list);
+      // act_move.c: do_train, at a trainer -- the sailor, in Midgaard.
+      const train = game.trainable();
+      const trainer = train[0] && train[0].trainer;
+      sheet.append(el('h4', null, trainer ? 'train with the trainer here' : 'training (find a trainer)'));
+      const stats = el('ul');
+      for (const t of train) {
+        const can = trainer && t.value < 18 && s2.practice >= t.cost;
+        stats.append(row(`${t.word} — ${t.value}`, t.value >= 18 ? 'at maximum' : `${t.cost} practices`,
+          { cls: can ? '' : 'dim', onClick: can ? () => answer(game.train(t.key)) : null }));
+      }
+      sheet.append(stats, reply, el('div', 'foot', 'k — close'));
     }
+  }
+
+  /** A row for an object, with what can be done to it as links. */
+  function verbRow(obj, where, note = '') {
+    const li = el('li');
+    li.append(el('span', null, obj.name));
+    const verbs = el('span', 'verbs');
+    if (note) verbs.append(el('span', 'k', note));
+    for (const v of game.itemVerbs(obj, where)) {
+      const a = el('a', null, v.verb);
+      a.addEventListener('click', () => { answer(v.run()); drawSheet(); });
+      verbs.append(a);
+    }
+    li.append(verbs);
+    return li;
+  }
+
+  /** The line under a sheet that says what the last click did -- or why it did not. */
+  const reply = el('div', 'reply');
+  function answer(r) { if (r && r.text) reply.textContent = r.text; }
+  const capital = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
+
+  let lootTarget = null;
+  function openLoot(obj) {
+    lootTarget = obj;
+    reply.textContent = '';
+    if (sheetMode === 'loot') { drawSheet(); return; }
+    openSheet('loot');
   }
 
   // -- the moments ----------------------------------------------------------
@@ -606,9 +801,12 @@ export function createGameUi(game) {
     {
       switch (event.kind) {
         case 'hit':
-          say(event.text, event.byPlayer ? 'you' : 'them');
+          say(event.text, event.byPlayer ? 'you' : (event.to ? 'faint' : 'them'));
           if (event.byPlayer) {
             float(String(event.dam), damColour(event.dam), { size: 20 + Math.min(20, event.dam / 2), at: headOf(event.to, 0.05) });
+          } else if (event.to) {
+            // One mobile on another -- a guard on a thief: seen, not felt.
+            float(String(event.dam), 'rgba(226,214,190,0.7)', { size: 16, at: headOf(event.to, 0.05) });
           } else {
             float(`-${event.dam}`, '#e0705a', { fromLeft: true, size: 22 });
             flashHurt(Math.min(0.6, event.dam / Math.max(1, game.state.maxHit)));
@@ -664,6 +862,35 @@ export function createGameUi(game) {
           break;
         case 'recall':
           say(event.text, 'gate');
+          break;
+        case 'out':
+          // A command's own reply belongs to the command line that asked.
+          console_.print(event.text, '');
+          break;
+        case 'mobsay': case 'emote':
+          if (event.heard) say(event.text, 'speech');
+          if (event.slot) bubble(event.slot, event.said ? `\u2018${event.said}\u2019` : event.text, event);
+          break;
+        case 'locked':
+          say(event.text, 'gate');
+          break;
+        case 'condition':
+          say(event.text, 'them');
+          break;
+        case 'stolen':
+          float(`-${event.amount} gold`, '#d8a070', { fromLeft: true, size: 18 });
+          break;
+        case 'caught':
+          say(event.text, 'gate');
+          if (event.slot) bubble(event.slot, 'caught with a hand in your purse', { kind: 'emote' });
+          break;
+        case 'eat': case 'drink': case 'fill': case 'put': case 'give': case 'sacrifice':
+        case 'container': case 'pick': case 'door': case 'light-out': case 'disarm': case 'position':
+          say(event.text, event.kind === 'disarm' ? 'them' : 'gain');
+          if (sheetMode) drawSheet();
+          break;
+        case 'kick': case 'backstab': case 'respawn': case 'reset': case 'door-sound':
+          if (event.text) say(event.text, 'faint');
           break;
         default:
           say(event.text, 'faint');
@@ -815,17 +1042,123 @@ export function createGameUi(game) {
     KeyI: () => openSheet('gear'),
     KeyB: () => openSheet('shop'),
     KeyK: () => openSheet('skills'),
-    KeyR: () => game.rest(),
+    KeyR: () => note(game.rest()),
     KeyQ: () => game.recall(),
-    KeyT: () => { const pile = game.here()[0]; if (pile) game.takeAll(pile); },
+    KeyT: () => takeEverything(),
+    Enter: () => console_.show(),
   };
+  /** A refusal said out loud, when a key did nothing: the mud never stays silent. */
+  const note = (r) => { if (r && !r.ok && r.text) say(r.text, 'faint'); };
+
+  /** T: loot every corpse and pick up everything loose within reach. */
+  function takeEverything() {
+    let any = false;
+    for (const obj of game.here()) {
+      if (obj.itemType === 23 || obj.itemType === 24) { any = true; for (const r of game.takeAll(obj)) note(r); } else if (obj.wearFlags & 1) { any = true; note(game.take(obj, null)); }
+    }
+    if (!any) say('There is nothing here to take.', 'faint');
+  }
+
   function onKey(event) {
     if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (console_.open) return;
     if (event.code === 'Escape' && sheetMode) { closeSheet(); return; }
+    const skill = barState.find((a) => a.code === event.code);
+    if (skill) { fire(skill); return; }
     const action = KEYS[event.code];
-    if (action) action();
+    if (action) { if (event.code === 'Enter') event.preventDefault(); action(); }
   }
   document.addEventListener('keydown', onKey);
+
+  // -- the skill bar --------------------------------------------------------
+  let barState = [];
+  let barKey = '';
+  const slotEls = new Map();
+  function fire(action) {
+    const r = game.useAction(action.id);
+    note(r);
+    const node = slotEls.get(action.id);
+    if (node) { node.classList.remove('fired'); void node.offsetWidth; node.classList.add('fired'); }
+  }
+  function drawBar() {
+    barState = game.actions();
+    const key = barState.map((a) => `${a.id}:${a.known}`).join(',');
+    if (key !== barKey) {
+      barKey = key;
+      skillBar.textContent = '';
+      slotEls.clear();
+      for (const a of barState) {
+        const slot = el('div', 'slot');
+        slot.title = a.known ? `${a.label} — ${a.learned}% learned` : `${a.label} — from level ${MERC.SKILLS.find((x) => x.key === a.id)?.level[game.state.class] ?? '?'}`;
+        slot.append(el('span', 'k', a.keyLabel), el('span', 'n', a.label), el('span', 'p', a.known ? `${a.learned}%` : `lv ${MERC.SKILLS.find((x) => x.key === a.id)?.level[game.state.class] ?? ''}`), el('i', 'cd'));
+        slot.addEventListener('click', () => fire(a));
+        skillBar.append(slot);
+        slotEls.set(a.id, slot);
+      }
+    }
+    const wait = game.state.wait || 0;
+    for (const a of barState) {
+      const node = slotEls.get(a.id);
+      if (!node) continue;
+      node.classList.toggle('unknown', !a.known);
+      node.classList.toggle('idle', a.known && !a.ready && wait === 0);
+      node.classList.toggle('on', !!a.on);
+      node.querySelector('.cd').style.width = `${Math.min(100, (wait / 24) * 100)}%`;
+      node.querySelector('.p').textContent = a.known ? `${a.learned}%` : node.querySelector('.p').textContent;
+    }
+  }
+
+  // -- speech over heads ----------------------------------------------------
+  const spoken = [];
+  function bubble(slot, text, event = {}) {
+    for (const b of spoken) if (b.slot === slot) { b.node.remove(); b.dead = true; }
+    const node = el('div', event.shout ? 'shout' : (event.kind === 'emote' ? 'emote' : ''));
+    node.textContent = text;
+    bubbles.append(node);
+    spoken.push({ slot, node, until: performance.now() + Math.min(7000, 2600 + text.length * 55) });
+    while (spoken.filter((b) => !b.dead).length > 4) { const old = spoken.find((b) => !b.dead); old.node.remove(); old.dead = true; }
+  }
+  function placeBubbles() {
+    const now = performance.now();
+    for (let i = spoken.length - 1; i >= 0; i--) {
+      const b = spoken[i];
+      if (b.dead || now > b.until + 300) { b.node.remove(); spoken.splice(i, 1); continue; }
+      // Above the name label, which sits 0.42 m over the head.
+      const head = headOf(b.slot, 1.02);
+      const fig = b.slot.figure;
+      const far = fig && fig.at && project ? Math.hypot(fig.at.x - (camera().x ?? 0), fig.at.z - (camera().z ?? 0)) : 0;
+      const visible = head && far < 34;
+      b.node.style.opacity = visible && now < b.until ? '1' : '0';
+      if (head) b.node.style.transform = `translate(${head.x.toFixed(1)}px, ${head.y.toFixed(1)}px) translate(-50%, -100%)`;
+    }
+  }
+  let cameraAt = () => ({});
+  const camera = () => cameraAt();
+
+  // -- status ---------------------------------------------------------------
+  let chipKey = '';
+  function drawChips() {
+    const s = game.state;
+    const list = [];
+    if (s.condition) {
+      if (s.condition[1] === 0) list.push(['hungry', 'bad']);
+      if (s.condition[2] === 0) list.push(['thirsty', 'bad']);
+      if (s.condition[0] > 10) list.push(['drunk', 'bad']);
+    }
+    if (s.affectedBy & 4096) list.push(['poisoned', 'bad']);
+    if (s.affectedBy & 32768) list.push(['sneaking', 'good']);
+    if (s.affectedBy & 65536) list.push(['hidden', 'good']);
+    if (s.position === MERC.POS.RESTING) list.push(['resting', '']);
+    if (s.position === MERC.POS.SLEEPING) list.push(['asleep', '']);
+    if (s.equipment[0] && s.equipment[0].itemType === 1 && s.equipment[0].values[2] !== 0) list.push([`${s.equipment[0].name.replace(/^(a|an|the) /, '')} · ${s.equipment[0].values[2] < 0 ? 'lit' : `${s.equipment[0].values[2]}h`}`, '']);
+    const key = list.map((c) => c.join(':')).join('|');
+    if (key === chipKey) return;
+    chipKey = key;
+    chips.textContent = '';
+    for (const [text, cls] of list) chips.append(el('span', cls, text));
+    sleepVeil.classList.toggle('on', s.position === MERC.POS.SLEEPING);
+    sleepVeil.classList.toggle('rest', s.position === MERC.POS.RESTING);
+  }
 
   // -- the frame ------------------------------------------------------------
   let lastLevel = game.state.level;
@@ -856,6 +1189,11 @@ export function createGameUi(game) {
     else lastTarget = null;
     const percent = t ? Math.max(0, Math.min(100, Math.round(100 * (t.hit + unshown(t.slot)) / Math.max(1, t.maxHit)))) : 0;
     target.classList.toggle('on', !!t);
+    // The log shares the right rail with this panel: while it is up, the log
+    // keeps to the room under it rather than running up over it.
+    // On a short screen that can be no room at all: the lines are still in
+    // the command line's scrollback (Enter), and the numbers still fly.
+    log.style.maxHeight = t ? `${Math.max(0, window.innerHeight - (vitals.offsetHeight + 52) - (446 + target.offsetHeight + 12))}px` : '';
     if (t) {
       tName.textContent = t.name;
       tSub.textContent = `level ${t.level}${t.aggressive ? ' · aggressive' : ''}${t.fighting ? ' · fighting you' : ''}`;
@@ -876,17 +1214,23 @@ export function createGameUi(game) {
     }
 
     // The one bit of instruction, and only while it applies.
-    const pile = game.here()[0];
+    const pile = game.here().find((o) => (o.wearFlags & 1) || (o.itemType === 23 && o.contains.length));
     const shop = !sheetMode && game.shopHere();
     const prompts = [];
     if (t && !t.fighting) prompts.push('click — attack');
     if (pile) prompts.push('t — take everything');
     if (shop) prompts.push('b — trade');
     hint.textContent = prompts.join('   ·   ');
-    hint.classList.toggle('on', prompts.length > 0 && !sheetMode);
+    hint.classList.toggle('on', prompts.length > 0 && !sheetMode && !console_.open);
 
-    // These two change under you as you walk about; the skills sheet does not.
-    if ((sheetMode === 'shop' || sheetMode === 'gear') && (tick = (tick + 1) % 20) === 0) drawSheet();
+    // These change under you as you walk about; the skills sheet does not.
+    if ((sheetMode === 'shop' || sheetMode === 'gear' || sheetMode === 'loot') && (tick = (tick + 1) % 20) === 0) drawSheet();
+
+    drawBar();
+    drawChips();
+    placeBubbles();
+    // The vitals grow with the skill row and the status words; the log rides above them.
+    log.style.bottom = `${vitals.offsetHeight + 52}px`;
   }
 
   drawGates();
@@ -898,8 +1242,16 @@ export function createGameUi(game) {
     openInventory: () => openSheet('gear'),
     openShop: () => openSheet('shop'),
     openSkills: () => openSheet('skills'),
+    openLoot,
+    /** Which sheet is up ('gear', 'shop', 'skills', 'loot') or null. */
+    get sheet() { return sheetMode; },
     close: closeSheet,
     log: say,
+    console: console_,
+    /** fn(open): the command line opened or closed -- main.js lets go of held keys. */
+    set onConsole(fn) { hooks.onConsole = fn; },
+    /** fn() -> {x, z}: where the eye is, so speech from across the town stays unread. */
+    setCamera(fn) { cameraAt = fn; },
     destroy() {
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('wheel', onWheel);

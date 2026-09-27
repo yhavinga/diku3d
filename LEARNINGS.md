@@ -52,6 +52,60 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### No Man's Land (hood.are, tools/blender/hood.py)
+
+- **Two areas anchored off the same side of town fight over the same cells
+  in a breadth-first layout.** Hood and the desert both leave eastward: 38
+  of hood's 72 rooms had a desert room within two cells, and the desert's
+  river caves ran through the district. Count other-area rooms within two
+  cells of each area's rooms; `LAID_WHOLE` in layout.js lays such an area
+  on its own and sets it down whole on free ground along its anchor. Wall
+  Road becomes a 250 m street, which its prose supports.
+- **A dark albedo must be checked after dusk.** Soot at 0.10 went to pure
+  black in shade; find what is black by raycasting the pixels that read 0.
+- **Distance culling needs an A/B by hiding and diffing pixels.** Hood
+  cost 2,116 draw calls in the Market Square with nothing on screen; drawn
+  within 180 m in 8×8-cell chunks it changes 0 pixels there.
+- Gang territory comes from the prose, not the resets: the prose puts the
+  Trolls north of No Man's Land and the resets put the ogres there.
+
+### Monsters (tools/blender/monsters.py)
+
+- **A leg that splays sideways must be rolled so its local X is the normal
+  of the leg's own plane**, and the IK must build its frames the same way.
+  The quadruped convention (X on world X) twists a spider's leg about
+  itself as it swings.
+- **A sideways yaw on a steep neck bone is a lean, not a turn** — that
+  rotation applies before the pitch. Curl a neck by pitching it.
+- **A coat's darkest mask has to stay above about 0x30**, or occlusion
+  rounds a black coat to RGB 0: 1% of a morkoth frame was pure black,
+  0.04% after.
+- A light-pool candidate may carry getters for x/y/z, so a moving creature
+  (the Will-O-Wisp) carries a real light; the pool buckets it by its load
+  position.
+- Vocabulary over all 45 areas: 105 → 158 creature matches, every earlier
+  match unchanged. `wererat` came off the reject list because its own
+  description says it looks like a rat "except that it is standing".
+
+### The rest of Merc (src/rules/, save.js, console.js, items.js)
+
+- **Anything that creates a mob or object at boot or reset shifts the fight
+  rolls** unless it draws on its own generator; `wake(slot, rng)` takes
+  one, and resets and the mayor use the wandering generator. Otherwise
+  magic-check's sanctuary check broke on an unrelated change.
+- **In first person a kick only enters the frame once the foot is above
+  waist height.**
+- **The library's flat materials carry a colour of their own**, so vertex
+  tints multiply down to near black.
+- **The right-hand column overflows at 720p**; the log gives way while the
+  target panel is up.
+- Merc's command table is kept in its original order because the
+  abbreviations resolve by order; the 90 socials are generated from
+  `interp.c` by `tools/gen-socials.mjs`, not transcribed.
+- A dead mob returns in its own body once its corpse is gone — the body is
+  the corpse — and walks in from a street.
+- 16 dropped items in view: +142 calls, +0.78 ms.
+
 ### Spells (src/magic.js, src/spellfx.js)
 
 - **Additive effects over sunlit ground only bleach towards white.** Give

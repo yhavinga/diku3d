@@ -111,6 +111,7 @@ export class AssetLibrary {
    */
   materialFor(tag) {
     if (this.materials[tag]) return this.materials[tag];
+    if (tag === 'glow') return this.glow();
     const alias = TAG_ALIASES[tag];
     if (alias && this.materials[alias]) return this.materials[alias];
     if (this.extra.has(tag)) return this.extra.get(tag);
@@ -136,6 +137,22 @@ export class AssetLibrary {
     }
     this.unknownTags.add(tag);
     return this.materials.stonewall;
+  }
+
+  /**
+   * What burns on a creature: a basilisk's eyes, the sockets of a dracolich,
+   * the ball of a will-o-wisp. Unlit, because a light source is not lit by
+   * anything, and above 1 so the bloom picks it up -- the colour is the
+   * vertices', which the viewer paints per mobile.
+   */
+  glow() {
+    if (!this.extra.has('glow')) {
+      const material = new THREE.MeshBasicMaterial({ vertexColors: true, color: new THREE.Color(2.6, 2.6, 2.6) });
+      material.name = 'glow';
+      material.userData.uvScale = 1;
+      this.extra.set('glow', material);
+    }
+    return this.extra.get('glow');
   }
 
   /**
@@ -386,6 +403,11 @@ export const ASSET_NAMES = [
   // the Great Eastern Desert: tools/blender/desert.py
   'massif_a', 'massif_b', 'massif_mouth', 'dune_a', 'dune_b', 'palm_a', 'palm_b',
   'tent_roof', 'tent_wall', 'tent_wall_door', 'rug', 'cushions', 'hitch_line', 'fungus_cluster', 'lantern',
+  // the Dangerous Neighborhood: tools/blender/hood.py
+  'house_derelict', 'house_gutted', 'ruin_wall_solid', 'ruin_wall_door', 'ruin_wall_breach', 'ruin_corner',
+  'rubble_heap', 'charred_beams', 'barricade', 'barricade_stakes', 'burnt_cart', 'brazier', 'crow',
+  'dracolich_idol', 'training_pell', 'khan_memorial', 'bramble', 'tall_weeds', 'collapsed_shed', 'dead_planter',
+  'broken_stair', 'crystal_stump', 'boarded_window', 'boarded_door', 'barred_window', 'shoring', 'debris', 'city_wall',
   'townsperson', 'person_male', 'person_female', 'troll',
   'weapon_sword', 'weapon_dagger', 'weapon_axe', 'weapon_mace', 'weapon_spear',
   'weapon_staff', 'shield_round', 'shield_kite',
@@ -394,4 +416,8 @@ export const ASSET_NAMES = [
   'beast_canine', 'beast_feline', 'beast_rodent', 'beast_bear', 'beast_equine', 'beast_cervid',
   'beast_bovine', 'beast_pig', 'beast_duck', 'beast_swan', 'beast_hen', 'beast_songbird',
   'beast_snake', 'beast_worm', 'beast_dragon',
+  // The monsters: tools/blender/monsters.py.
+  'beast_spider', 'beast_beetle', 'beast_scorpion', 'beast_drider', 'beast_bat', 'beast_mud',
+  'beast_myconoid', 'beast_ratman', 'beast_imp', 'beast_naga', 'beast_sandworm', 'beast_basilisk',
+  'beast_dustdigger', 'beast_camel', 'beast_dracolich',
 ];

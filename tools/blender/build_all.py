@@ -33,10 +33,12 @@ MODULES = [
     "marsh",
     "sewer",
     "desert",
+    "hood",
     "townsperson",
     "weapons",
     "people",
     "beasts",
+    "monsters",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a
@@ -89,6 +91,16 @@ BUDGET = {
     "dune_a": 1000, "dune_b": 1000, "palm_a": 2500, "palm_b": 2500,
     "tent_roof": 2600, "tent_wall": 1000, "tent_wall_door": 900,
     "rug": 200, "cushions": 600, "hitch_line": 450, "fungus_cluster": 1300, "lantern": 400,
+    # The Dangerous Neighborhood. The two houses are fillers like the town's
+    # own and are held to the same cap; the ruin panels are room-kit pieces.
+    # The heaps and wrecks are single props seen close in No Man's Land, a
+    # dozen or two of each in the whole district; the bramble is scattered
+    # over the overgrown lot and the park and is the one to watch.
+    "house_derelict": 7000, "house_gutted": 7000,
+    "ruin_wall_solid": 2000, "ruin_wall_door": 2000, "ruin_wall_breach": 2100, "ruin_corner": 600,
+    "rubble_heap": 1800, "barricade": 1800, "burnt_cart": 1900, "khan_memorial": 2500,
+    "dracolich_idol": 1800, "bramble": 1700, "collapsed_shed": 1100, "broken_stair": 900,
+    "debris": 800, "city_wall": 1500,
     # Carried, so paid for once per armed mobile and once more in first person.
     "weapon_sword": 600, "weapon_dagger": 400, "weapon_axe": 500, "weapon_mace": 600,
     "weapon_spear": 400, "weapon_staff": 500, "shield_round": 1100, "shield_kite": 1000,
@@ -101,7 +113,15 @@ BUDGET = {
     "beast_duck": 3800, "beast_swan": 4500, "beast_hen": 4000, "beast_songbird": 2600,
     "beast_snake": 3600, "beast_worm": 2600,
     # One of it in the default world, and it is nine metres long.
-    "beast_dragon": 8000,
+    "beast_dragon": 8200,
+    # monsters.py. The legged ones pay for their legs: eight of them, each a
+    # separate little surface, is where a spider's triangles go.
+    "beast_spider": 5000, "beast_beetle": 4600, "beast_scorpion": 4800, "beast_drider": 7200,
+    "beast_bat": 3400, "beast_mud": 5600, "beast_myconoid": 4400, "beast_ratman": 4600,
+    "beast_imp": 4600, "beast_naga": 5600, "beast_sandworm": 5000, "beast_basilisk": 6600,
+    "beast_dustdigger": 3000, "beast_camel": 4600,
+    # Bones are all edges: a rib cage and a spine of knuckles do not decimate.
+    "beast_dracolich": 9600,
 }
 PROP_BUDGET = 800
 # people.py: an archetype is a whole dressed person, one skinned draw per
