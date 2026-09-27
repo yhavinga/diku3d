@@ -446,13 +446,21 @@ const DECAL_FRAG = `
 
 /** A ball of fire: fbm moving through it, hottest where you look straight in. */
 const FIRE_VERT = `
+  uniform float uTime;
+  uniform float uSeed;
+  uniform float uBillow;    // how far the surface heaves, as a share of the radius
   varying vec3 vP;
   varying vec3 vN;
   varying vec3 vV;
   varying float vDist;
+  ${NOISE_GLSL}
   void main() {
     vP = position;
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    // Billows: the surface pushed out by slow noise rolling up through it,
+    // so the ball is a heap of lobes and never a smooth dome.
+    float b = fbm(position * 1.7 + vec3(uSeed, uSeed * 0.3 - uTime * 1.6, 0.0));
+    vec3 pos = position * (1.0 + (b - 0.45) * uBillow * 2.2);
+    vec4 mv = modelViewMatrix * vec4(pos, 1.0);
     vN = normalize(normalMatrix * normal);
     vV = normalize(-mv.xyz);
     vDist = -mv.z;
@@ -473,11 +481,14 @@ const FIRE_FRAG = `
   ${FOG_GLSL}
   void main() {
     float facing = abs(dot(normalize(vN), normalize(vV)));
-    float n = fbm(vP * 2.6 + vec3(uSeed, -uTime * 3.2, uSeed * 0.7));
-    float t = clamp(pow(facing, 1.3) * 0.6 + n * 0.95 - (1.0 - uHeat) * 0.85 - 0.12, 0.0, 1.0);
-    vec3 col = mix(vec3(0.22, 0.02, 0.0), vec3(1.25, 0.34, 0.04), smoothstep(0.08, 0.45, t));
-    col = mix(col, vec3(2.6, 1.3, 0.3), smoothstep(0.45, 0.8, t));
-    col = mix(col, vec3(9.0, 6.5, 3.0), smoothstep(0.86, 1.0, t) * uHeat);
+    float n = fbm(vP * 2.2 + vec3(uSeed, -uTime * 3.2, uSeed * 0.7));
+    n = clamp((n - 0.5) * 2.4 + 0.5, 0.0, 1.0);   // fbm is mostly mid-grey: stretch it into seams and lobes
+    float t = clamp(pow(facing, 1.3) * 0.42 + n * 0.9 - (1.0 - uHeat) * 0.85 - 0.02, 0.0, 1.0);
+    // Soot red at the cool edges, orange through the body, yellow only in
+    // the hottest seams -- too much of the top end and it reads as peach.
+    vec3 col = mix(vec3(0.16, 0.02, 0.0), vec3(1.1, 0.26, 0.02), smoothstep(0.08, 0.45, t));
+    col = mix(col, vec3(1.9, 0.75, 0.12), smoothstep(0.5, 0.82, t));
+    col = mix(col, vec3(6.0, 3.6, 1.2), smoothstep(0.9, 1.0, t) * uHeat);
     // The silhouette is torn by the same noise, so the ball has no hard rim.
     float a = smoothstep(0.06, 0.3, t) * smoothstep(0.02, 0.45, facing * (0.6 + n)) * uAlpha * fogT(vDist);
     // Premultiplied, with a share of cover: the ball has a body.
@@ -531,7 +542,7 @@ const AURA_FRAG = `
     // and fades to nothing at it, so there is no drawn edge -- a shell's
     // outline is a hard line at arm's length however it is lit -- and gentler
     // still up close.
-    float soft = pow(rim, 1.7) * smoothstep(1.0, 0.7, rim) * 1.7 * (0.55 + 0.45 * smoothstep(0.8, 3.5, vDist));
+    float soft = pow(rim, 2.6) * smoothstep(1.0, 0.72, rim) * 1.8 * (0.5 + 0.5 * smoothstep(0.8, 4.0, vDist));
     f = mix(f, soft, uSoft);
     float n = vnoise(vW * 3.2 + vec3(0.0, -uTime * 1.3, 0.0));
     // A slow shimmer rising through it.
@@ -806,7 +817,11 @@ class Ribbons {
       this._side.set(p.x - this._eye.x, p.y - this._eye.y, p.z - this._eye.z).cross(this._dir);
       const len = this._side.length() || 1;
       const u = k / (n - 1);
-      const w = (typeof width === 'function' ? width(u) : width) / 2 / len;
+      // Never wider than a few degrees of the view: a bolt leaving your own
+      // hand is a metre-wide glow half a metre from the lens otherwise, and
+      // reads as a flat strip pasted over the frame.
+      const eyeDist = Math.hypot(p.x - this._eye.x, p.y - this._eye.y, p.z - this._eye.z);
+      const w = Math.min(typeof width === 'function' ? width(u) : width, eyeDist * (sharp > 0.5 ? MAX_CORE_ANGLE : MAX_RIBBON_ANGLE)) / 2 / len;
       const c = typeof color === 'function' ? color(u) : color;
       const al = typeof alpha === 'function' ? alpha(u) : alpha;
       for (const s of [-1, 1]) {
@@ -840,6 +855,10 @@ class Ribbons {
     this.mesh.visible = this.i > 0;
   }
 }
+
+/** The widest a ribbon may look, in radians of the view (see Ribbons.strip). */
+const MAX_RIBBON_ANGLE = 0.05;
+const MAX_CORE_ANGLE = 0.01;
 
 const P3 = (n) => Array.from({ length: n }, () => ({ x: 0, y: 0, z: 0 }));
 
@@ -1220,6 +1239,20 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
    * over `cool` seconds and fades out over the last third of `life`.
    */
   function mark(p, r, mode, color, life = 7, cool = 1.6) {
+    // A scorch still glowing lights the ground round it for a while -- the
+    // light that stays after the flash. (Borrowed from the pool, so a new
+    // spell takes it back.)
+    // Taken once the blast's own light has had its moment.
+    if (mode === 3 && cool > 1) {
+      const at = new THREE.Vector3(p.x, p.y + 0.35, p.z);
+      const t0 = clock;
+      const hold = cool - 0.7;
+      effects.push({ kind: 'custom', update() {
+        if (clock - t0 < 0.7) return true;
+        takeLight(0xff6a24, (t) => (t < hold ? { p: at, intensity: 7 * r * (1 - t / hold) * (0.85 + 0.15 * Math.sin(t * 23) * Math.sin(t * 7)), distance: 3 + r * 2 } : null));
+        return false;
+      } });
+    }
     return decal(p, r, mode, color, life, (d, u, t) => {
       u.uAlpha.value = Math.min(1, t / 0.06) * (1 - smooth((t - life * 0.66) / (life * 0.34)));
       u.uHeat.value = Math.max(0, 1 - t / cool);
@@ -1232,7 +1265,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     vertexShader: FIRE_VERT,
     fragmentShader: FIRE_FRAG,
     uniforms: {
-      uTime: { value: 0 }, uHeat: { value: 1 }, uAlpha: { value: 1 }, uSeed: { value: 0 },
+      uTime: { value: 0 }, uHeat: { value: 1 }, uAlpha: { value: 1 }, uSeed: { value: 0 }, uBillow: { value: 0.12 },
       uGain: shared.uGain, uFogDensity: shared.uFogDensity,
     },
     transparent: true,
@@ -1281,11 +1314,11 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     const usable = lights.slice(0, budget.lights);
     let slot = usable.find((l) => !l.busy);
     if (!slot) {
-      // Everything is lit already: take the one closest to finishing.
-      slot = usable.reduce((a, b) => ((a.remaining ?? 0) < (b.remaining ?? 0) ? a : b), usable[0]);
+      // Everything is lit already: take the one that has been lit longest.
+      slot = usable.reduce((a, b) => ((a.t ?? 0) >= (b.t ?? 0) ? a : b), usable[0]);
       if (!slot) return;
     }
-    slot.busy = true; slot.t = 0; slot.fn = fn; slot.light.color.setHex(color); slot.remaining = 1;
+    slot.busy = true; slot.t = 0; slot.fn = fn; slot.light.color.setHex(color);
   }
 
   // -- heat -----------------------------------------------------------------
@@ -1818,6 +1851,9 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
             glowAt(light, head, PAL.missile.glow, 1.0, 0.18, 1, 0, 0.3);
             glowAt(light, head, PAL.missile.core, 0.35, 0.07, 1, 1);
             S.pop(head, 1.4);
+            // Each bolt jolts the body as it arrives: a volley reads as a volley.
+            const fig = figureOf(fx.to.slot);
+            if (fig && actors.motion && !fx.to.player) actors.motion.react(fig, 'hit', 0.5);
           }
         }
         break;
@@ -1830,7 +1866,10 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         pos.lerpVectors(src, end, u);
         pos.y += Math.sin(Math.PI * u) * Math.min(1.2, dist * 0.08);
         const ball = fx.data.ball;
-        const r = (fx.from.player ? 0.2 : 0.26) * (0.6 + 0.4 * Math.min(1, tf / 0.12));
+        // Out of your own hand it starts small and swells as it leaves, or
+        // the first frames are a ball of fire filling the view.
+        const near = fx.from.player ? clamp(distToCamera(pos) / 3, 0.3, 1) : 1;
+        const r = (fx.from.player ? 0.2 : 0.26) * (0.6 + 0.4 * Math.min(1, tf / 0.12)) * near;
         if (ball) {
           ball.mesh.position.copy(pos);
           ball.mesh.scale.setScalar(r);
@@ -1838,15 +1877,15 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
           ball.mesh.material.uniforms.uHeat.value = 1;
           ball.mesh.material.uniforms.uAlpha.value = 1;
         }
-        glowAt(light, pos, PAL.fire.glow, r * 5.5, 0.04, 0.9);
-        glowAt(light, pos, PAL.fire.core, r * 1.6, 0.04, 0.9, 1);
+        glowAt(light, pos, PAL.fire.glow, r * 3.4, 0.04, 0.55);
+        glowAt(light, pos, PAL.fire.core, r * 1.2, 0.04, 0.8, 1);
         // Flame shed behind it, embers, and smoke that lingers where it passed.
         const dir = _v.subVectors(aim, src).normalize();
         for (let k = 0; k < n(5); k++) {
           light.spawn({
             x: pos.x + rand(-0.08, 0.08), y: pos.y + rand(-0.08, 0.08), z: pos.z + rand(-0.08, 0.08),
             vx: -dir.x * rand(0.5, 2) + rand(-0.4, 0.4), vy: rand(0.2, 0.9), vz: -dir.z * rand(0.5, 2) + rand(-0.4, 0.4),
-            life: rand(0.22, 0.42), size: rand(0.16, 0.3), grow: 1.8, color: PAL.fire.glow.clone().multiplyScalar(1.4), color2: PAL.fire.dark,
+            life: rand(0.22, 0.42), size: rand(0.16, 0.3) * near, grow: 1.8, color: PAL.fire.glow.clone().multiplyScalar(1.4), color2: PAL.fire.dark,
             shape: 4, drag: 2.5, gravity: -1.5, fadeIn: 0.05,
           });
         }
@@ -2086,8 +2125,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
 
     switch (f) {
       case 'missile': {
-        glowAt(light, aim, PAL.missile.glow, 1.1 * scale, 0.25, 1);
-        if (hitAny) hurtFigure(target, 0.4);
+        glowAt(light, aim, PAL.missile.glow, 1.1 * scale, 0.25, 1, 0, 0.3);
         if (onYou) flashScreen('radial-gradient(ellipse at 50% 60%, rgba(170,140,255,0.55) 0%, rgba(90,60,200,0) 70%)', 0.7, 360);
         break;
       }
@@ -2097,7 +2135,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         // readable: the wash at the edges says the rest.
         if (onYou) { camera.getWorldDirection(_v); aim.copy(camera.position).addScaledVector(_v, 2.6); aim.y -= 0.35; }
         explode(aim, feet, onYou ? 0.35 : (fx.saved ? 0.8 : 1));
-        if (hitAny) hurtFigure(target, 1);
+        if (hitAny) hurtFigure(target, 1.4);
         if (onYou) flashScreen('radial-gradient(ellipse at 50% 50%, rgba(255,170,80,0) 25%, rgba(255,120,30,0.6) 72%, rgba(140,30,0,0.8) 100%)', 0.85, 700);
         break;
       }
@@ -2131,7 +2169,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
           }
           burst(light, p, 26, { speed: [2, 7], life: [0.1, 0.3], size: [0.015, 0.035], color: PAL.lightning.core, color2: PAL.lightning.glow, drag: 3, shape: 1 });
           glowAt(light, p, PAL.lightning.glow, 1.4 * scale, 0.22, 1);
-          hurtFigure(s.w, 0.7);
+          hurtFigure(s.w, 1.1);
           if (s.w.player) flashScreen('radial-gradient(ellipse at 50% 50%, rgba(220,235,255,0.95) 0%, rgba(140,170,255,0.5) 100%)', 0.85, 300);
         }
         if (f === 'storm') {
@@ -2186,7 +2224,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       case 'ward': case 'bless': case 'sanctuary': case 'sight': {
         const w = target || fx.from;
         const strong = f === 'sanctuary';
-        auraPulse(w, palette.glow, strong ? 1.4 : 1.2, strong ? 2.2 : 1.3, strong ? 1 : 0);
+        auraPulse(w, palette.glow, strong ? 0.45 : 1.2, strong ? 2.2 : 1.3, strong ? 1 : 0);
         if (f === 'bless') {
           // Gold falling on them from above.
           const top = new THREE.Vector3(feet.x, feet.y + heightOf(w) + 1.4, feet.z);
@@ -2322,21 +2360,26 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       const t0 = clock;
       const fx = { update() {
         const t = clock - t0;
-        const u = t / 0.42;
-        if (u >= 1) { freeSphere(s); return false; }
+        const u = t / 0.5;
+        if (u >= 1) { freeSphere(s); s.mesh.material.uniforms.uBillow.value = 0.12; return false; }
         s.mesh.position.copy(p);
         s.mesh.scale.setScalar(R * (0.25 + 0.75 * (1 - Math.pow(1 - Math.min(1, t / 0.18), 3))));
         const m = s.mesh.material.uniforms;
-        m.uTime.value = clock; m.uHeat.value = 1 - u; m.uAlpha.value = 1 - u * u;
+        m.uTime.value = clock; m.uHeat.value = 1 - u; m.uAlpha.value = 1 - u * u; m.uBillow.value = 0.16 + 0.14 * u;
         return true;
       } };
       effects.push({ kind: 'custom', ...fx });
     }
-    glowAt(light, p, PAL.fire.core, R * 0.8, 0.1, 1, 1);
-    glowAt(light, p, PAL.fire.glow, R * 3.2, 0.3, 0.8, 0);
+    // The flash: white-hot and gone in a tenth of a second -- the
+    // anticipation's payoff -- then the body of it.
+    // No broad soft glow over it: one smooth gradient laid over the ball
+    // is exactly what turned it into a peach-coloured egg. The light does
+    // the lighting.
+    glowAt(light, p, WHITE_HOT, R * 0.7, 0.08, 1, 1);
+    glowAt(light, p, PAL.fire.glow, R * 1.1, 0.12, 0.35, 0);
     // Hot at the heart, going orange and then a dull red as each tongue cools.
-    burst(light, p, 34, { speed: [3, 7], life: [0.3, 0.6], size: [0.16, 0.3].map((x) => x * size), grow: 2.4, color: C(3.2, 1.6, 0.45), color2: PAL.fire.glow, drag: 4.5, gravity: -1.2, shape: 4, fadeIn: 0.02 });
-    burst(light, p, 40, { speed: [1.5, 5], life: [0.55, 1.05], size: [0.25, 0.5].map((x) => x * size), grow: 2.2, color: PAL.fire.glow.clone().multiplyScalar(1.5), color2: PAL.fire.dark, drag: 3.2, gravity: -1.8, shape: 4, fadeIn: 0.06 });
+    burst(light, p, 34, { speed: [3, 7], life: [0.3, 0.6], size: [0.16, 0.3].map((x) => x * size), grow: 2.4, color: C(2.2, 0.85, 0.14), color2: PAL.fire.glow, drag: 4.5, gravity: -1.2, shape: 4, fadeIn: 0.02, occ: 0.6 });
+    burst(light, p, 40, { speed: [1.5, 5], life: [0.55, 1.05], size: [0.25, 0.5].map((x) => x * size), grow: 2.2, color: C(1.6, 0.45, 0.06), color2: PAL.fire.dark, drag: 3.2, gravity: -1.8, shape: 4, fadeIn: 0.06, occ: 0.6 });
     burst(light, p, 60, { speed: [4, 11], life: [0.5, 1.2], size: [0.02, 0.04], color: PAL.fire.ember, color2: PAL.fire.dark, drag: 1.1, gravity: 7, shape: 1, floor: ground.y + 0.02 });
     burst(matter, p, 24, { speed: [0.5, 2.0], up: 0.5, life: [1.8, 3.2], size: [0.5, 0.95].map((x) => x * size), grow: 2.4, color: C(0.11, 0.1, 0.09), color2: C(0.26, 0.25, 0.24), alpha: 0.6, drag: 1.8, gravity: -0.6, shape: 3, fadeIn: 0.35 });
     if (p.y - ground.y < 2.5) mark(ground, 2.1 * size, 3, PAL.fire.glow, 10, 3);
@@ -2381,7 +2424,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   const auras = new Map();   // figure -> { meshes, material, pulse }
   const AURA_KIND = [
     // flag or affect type, colour, intensity, thickness, flicker
-    { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.5, thick: 0.07, flicker: 0.1, soft: 1 },
+    { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.16, thick: 0.06, flicker: 0.1, soft: 1 },
     { test: (ch) => ch.affectedBy & AFF.FAERIE_FIRE, color: PAL.faerie.glow, intensity: 0.9, thick: 0.025, flicker: 0.6 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'shield' || a.type === 'stone skin'), color: PAL.ward.glow, intensity: 0.55, thick: 0.03, flicker: 0 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'armor' || a.type === 'protection'), color: PAL.ward.glow, intensity: 0.35, thick: 0.025, flicker: 0 },
@@ -2476,7 +2519,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
           const k = Math.sin(Math.PI * Math.min(1, pu * 2.5)) * (1 - pu * 0.3);
           if (!kind || a.pulse.intensity * k > intensity) {
             u.uColor.value.copy(a.pulse.color);
-            u.uThick.value = a.pulse.soft ? 0.07 : 0.03;
+            u.uThick.value = a.pulse.soft ? 0.06 : 0.03;
             u.uFlicker.value = 0.1;
             u.uSoft.value = a.pulse.soft;
             intensity = a.pulse.intensity * k;
@@ -2496,8 +2539,13 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       const rate = dt * budget.density;
       const px = fig.at.x; const py = fig.at.y; const pz = fig.at.z; const h = fig.height;
       if (ch.affectedBy & AFF.SANCTUARY) {
-        // The light it stands in: one soft sprite a frame, faint, body-sized.
-        light.spawn({ x: px, y: py + h * 0.55, z: pz, life: 0.04, size: h * 1.25, color: PAL.sanctuary.glow, alpha: 0.1, shape: 0, drag: 0, fadeIn: 0, occ: 0 });
+        // The light it stands in: soft sprites up the body, breathing out of
+        // step with each other -- the aura is this, not the shell, which
+        // only ever reads as an outline (and at arm's length as glass).
+        for (let k = 0; k < 3; k++) {
+          const br = 0.8 + 0.2 * Math.sin(time * 2.3 + k * 2.1 + px);
+          light.spawn({ x: px, y: py + h * (0.28 + k * 0.27), z: pz, life: 0.04, size: h * (0.95 - k * 0.12), color: PAL.sanctuary.glow, alpha: 0.075 * br, shape: 0, drag: 0, fadeIn: 0, occ: 0 });
+        }
       }
       if ((ch.affectedBy & AFF.SANCTUARY) && Math.random() < 6 * rate) {
         const a2 = rand(0, TAU);

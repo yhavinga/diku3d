@@ -493,8 +493,10 @@ const POSES = {
 
 /** The casting gesture, for the right hand whatever it holds. */
 const CAST = {
-  gather: { p: [0.2, -0.17, -0.4], blade: [-0.35, 0.85, -0.4], elbow: [0.35, -0.85, 0.4] },
-  release: { p: [0.1, -0.13, -0.68], blade: [-0.2, 0.55, -0.81], elbow: [0.25, -0.35, 0.9] },
+  // Both kept right of the crosshair, so the arm never stands between you
+  // and what you are casting at.
+  gather: { p: [0.24, -0.21, -0.44], blade: [-0.88, 0.4, -0.25], elbow: [0.35, -0.72, 0.6] },
+  release: { p: [0.2, -0.17, -0.62], blade: [-0.95, 0.25, -0.18], elbow: [0.45, -0.5, 0.74] },
 };
 
 const _q1 = new THREE.Quaternion();
