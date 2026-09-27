@@ -15,7 +15,9 @@ import math
 import os
 import random
 
-ROOT = "/Users/yeb/Developer/yhavinga/diku3d"
+# From this file rather than a fixed path, so a second checkout (a worktree)
+# writes into its own assets/ and not into the main one.
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ASSETS = os.path.join(ROOT, "assets")
 
 # Viewport colours only -- the real materials live in src/textures.js.
