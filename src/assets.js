@@ -39,13 +39,20 @@ const _scale = new THREE.Vector3();
 // crown in the world -- confirmed by a judge with matching material uuids at
 // 50 m and 3.7 m. It is a real recipe now, so materialFor finds it first and
 // this table no longer needs an entry for it.
-const TAG_ALIASES = {};
+// Snake scales are the feather surface: rows of overlapping scallops is what
+// both of them are, and at the size either is seen the two read the same.
+const TAG_ALIASES = { scales: 'feather' };
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
   skin: { color: 0xc79b76, roughness: 0.72, metalness: 0 },
   oak: { color: 0x5a4330, roughness: 0.78, metalness: 0 },
   leather: { color: 0x4a3524, roughness: 0.62, metalness: 0 },
   hair: { color: 0x3a2a1c, roughness: 0.86, metalness: 0 },
+  // Keratin and wet tissue on the animals: eyes, noses, hooves, claws, beaks,
+  // horns and the inside of a mouth. White, because every part carries its
+  // own colour in the vertex colours; glossy, because that is the difference
+  // between an eye and a painted dot.
+  horn: { color: 0xffffff, roughness: 0.34, metalness: 0 },
   glass: {
     color: 0xd8c48a, roughness: 0.12, metalness: 0,
     transparent: true, opacity: 0.55, emissive: 0x000000,
@@ -344,4 +351,9 @@ export const ASSET_NAMES = [
   'cave_wall', 'cave_wall_door', 'cave_wall_long', 'cave_wall_long_door', 'cave_roof',
   'refuse_heap', 'sewer_sconce',
   'townsperson',
+  // Animals, rigged and animated. One base mesh per build of body; the
+  // breeds and species are proportions and coats laid on in actors.js.
+  'beast_canine', 'beast_feline', 'beast_rodent', 'beast_bear', 'beast_equine', 'beast_cervid',
+  'beast_bovine', 'beast_pig', 'beast_duck', 'beast_swan', 'beast_hen', 'beast_songbird',
+  'beast_snake', 'beast_worm', 'beast_dragon',
 ];
