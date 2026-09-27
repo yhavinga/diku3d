@@ -72,16 +72,17 @@ const TROLL_KINDS = [
  * wizard is a wizard.
  */
 const TRADES = [
+  ['nomad', W('nomads?|dervish(es)?|bedouins?')],
   ['knight', W('knights?|paladins?|templars?|crusaders?|cavaliers?|champions?')],
   ['guard', W('guards?|guardsman|guardsmen|cityguards?|soldiers?|watchman|watchmen|sentry|sentries|sentinels?|captains?|sergeants?|warriors?|mercenar(y|ies)|legionnaires?|militia|patrol|trainees?|battle ?masters?|swordsman|swordsmen|fighters?|gladiators?|shiriffs?|sheriffs?|constables?|bodyguards?|adventurers?|veterans?|recruits?|squires?|archers?|bowman|lancers?|infantry|troopers?|wardens?|gatekeepers?')],
   ['mage', W('wizards?|mages?|magicians?|sorcerer|sorceress|sorcerers|warlocks?|witch|witches|enchanter|enchantress|necromancers?|conjurers?|illusionists?|magus|magi|alchemists?|sages?|seers?|mystics?|diviners?|astrologers?|oracles?')],
   ['priest', W('priests?|priestess|clerics?|monks?|acolytes?|nuns?|abbots?|abbess|bishops?|healers?|druids?|chaplains?|friars?|sextons?|shamans?|hermits?|pilgrims?|curates?|deacons?|vicars?|prophets?|templekeeper')],
-  ['rogue', W('thief|thieves|rogues?|assassins?|cutpurses?|pickpockets?|bandits?|brigands?|robbers?|highwaym[ae]n|spies|spy|burglars?|smugglers?|dealers?|ruffians?|thugs?|cutthroats?|outlaws?|poachers?|rangers?|hunters?|scouts?|executioners?|headsm[ae]n')],
-  ['beggar', W('beggars?|vagabonds?|tramps?|drunks?|drunkards?|bums?|hobos?|paupers?|urchins?|lepers?|filthy|wretch(es)?|madm[ae]n|lunatics?|vagrants?|idiots?|fools?')],
+  ['rogue', W('wanderers?|thief|thieves|rogues?|assassins?|cutpurses?|pickpockets?|bandits?|brigands?|robbers?|highwaym[ae]n|spies|spy|burglars?|smugglers?|dealers?|ruffians?|thugs?|cutthroats?|outlaws?|poachers?|rangers?|hunters?|scouts?|executioners?|headsm[ae]n')],
+  ['beggar', W('slaves?|beggars?|vagabonds?|tramps?|drunks?|drunkards?|bums?|hobos?|paupers?|urchins?|lepers?|filthy|wretch(es)?|madm[ae]n|lunatics?|vagrants?|idiots?|fools?')],
   ['smith', W('smiths?|blacksmiths?|weaponsmiths?|armourers?|armorers?|farriers?|tanners?|leather ?workers?|cobblers?|coopers?|masons?|miners?')],
   ['noble', W('kings?|queens?|princes?|princess(es)?|dukes?|duchess(es)?|lords?|lady|ladies|barons?|baroness(es)?|counts?|countess(es)?|earls?|mayors?|nobles?|nobleman|noblemen|noblewoman|thains?|guildmasters?|chancellors?|magistrates?|judges?|urbanites?|aristocrats?|courtiers?|criers?|diplomats?|ambassadors?|keepers?|masters?|governors?|regents?|emperors?|empress|elders?|chieftains?|chiefs?|heralds?|gods?|goddess(es)?|zeus|odin|hera|apollo|ares|hermes|poseidon|prometheus|hierophant|leaders?|commanders?|generals?|foremen|foreman')],
   ['merchant', W('shopkeepers?|shopkeeps?|merchants?|grocers?|bakers?|butchers?|jewell?ers?|traders?|pedlars?|peddlers?|vendors?|tailors?|innkeepers?|barkeeps?|bartenders?|barmen|barman|waiters?|cooks?|chefs?|brewers?|vintners?|apothecar(y|ies)|herbalists?|clerks?|secretar(y|ies)|receptionists?|bankers?|moneychangers?|changers?|storekeepers?|hostelers?|landlords?|tavernkeepers?|fishmongers?|florists?|cartographers?|scribes?|librarians?|teachers?|tutors?|stewards?|butlers?|servants?')],
-  ['peasant', W('peasants?|farmers?|labou?rers?|farmhands?|shepherds?|herdsm[ae]n|stablehands?|stableboys?|grooms?|fishermen|fisherman|sailors?|seam[ae]n|gardeners?|bumpkins?|serfs?|slaves?|porters?|janitors?|sweepers?|lumberjacks?|woodcutters?|woodsm[ae]n|millers?|millworkers?|workers?|carpenters?|gravediggers?|diggers?|boatm[ae]n|ferrym[ae]n|drovers?|carters?|travell?ers?|citizens?|townsm[ae]n|townsfolk|villagers?|locals?|commoners?|youths?|boys?|lads?|m[ae]n|persons?|people|humans?|elves|elf|elven|hobbits?|halflings?|gamgees?|residents?|farmer|peasantry')],
+  ['peasant', W('peasants?|farmers?|labou?rers?|farmhands?|shepherds?|herdsm[ae]n|stablehands?|stableboys?|grooms?|fishermen|fisherman|sailors?|seam[ae]n|gardeners?|bumpkins?|serfs?|porters?|janitors?|sweepers?|lumberjacks?|woodcutters?|woodsm[ae]n|millers?|millworkers?|workers?|carpenters?|gravediggers?|diggers?|boatm[ae]n|ferrym[ae]n|drovers?|carters?|travell?ers?|citizens?|townsm[ae]n|townsfolk|villagers?|locals?|commoners?|youths?|boys?|lads?|m[ae]n|persons?|people|humans?|elves|elf|elven|hobbits?|halflings?|gamgees?|residents?|farmer|peasantry')],
 ];
 
 /** Women, when the mud says so. Keywords and short first; see `female()`. */
@@ -173,7 +174,7 @@ function weaponOf(item) {
  * behind his counter reads as a joke. So the civil trades keep their own
  * things and only the fighting ones take what the mud hands them.
  */
-const ARMED = new Set(['guard', 'knight', 'rogue', 'smith', 'troll', 'skeleton', 'zombie']);
+const ARMED = new Set(['guard', 'knight', 'rogue', 'smith', 'troll', 'skeleton', 'zombie', 'nomad']);
 
 /**
  * Everything the viewer needs to dress one mobile.
@@ -195,10 +196,28 @@ const ARMED = new Set(['guard', 'knight', 'rogue', 'smith', 'troll', 'skeleton',
 const CREATURE = W('beasts?|worms?|snakes?|serpents?|dragons?|drakes?|wyrms?|wyverns?|foxe?s?|deer|stags?|does|wargs?|wolf|wolves|will-o-wisp|wisps?|mounds?|slimes?|oozes?|jell(y|ies)|spiders?|scorpions?|beetles?|ants?|bats?|lizards?|toads?|frogs?|leeches?|eels?|fish|sharks?|crabs?|squids?|octopus|elementals?|golems?|hydras?|basilisks?|cockatrices?|griffons?|gryphons?|manticores?|chimaeras?|unicorns?|pegasus|centipedes?|slugs?|crocodiles?|alligators?|boars?|cows?|bulls?|horses?|pigs?|chickens?|hens?|roosters?|geese|goose|ducks?|ducklings?|swans?|sparrows?|birds?|crows?|ravens?|hawks?|eagles?|owls?|cats?|kittens?|dogs?|puppy|puppies|fido|beagles?|rottweilers?|bears?|rats?|mice|mouse|sheep|goats?|mules?|donkeys?|oxen|ox|calf|calves|lions?|tigers?|panthers?|apes?|monkeys?|gorillas?|' +
   'rabbits?|bunn(y|ies)|chimeras?|rocs?|griffins?|minotaurs?|centaurs?|treants?|trees?|willows?|plants?|weeds|puddings?|blobs?|monsters?|creatures?|snails?|camels?|antelopes?|ewes?|beholders?|mimics?|mists?|mistlings?|horrors?|nightgaunts?|mi-go|fungi|myconoids?|lemures?|maggots?|morkoths?|mudmonsters?|homonculus|effreetis?|efreets?|djinn|does?|wasps?|harp(y|ies)|nagas?|ki-rin|mermaids?|stars?|nebulas?|comets?|supergiants?|flames?|hurricanes?|magneto|dolls?|brooms?|dancing|hands|eyes|quasits?|imps?|yochlols?|driders?|lamias?|dustdiggers?|puff|newts?|shadows?|dervish|daemons?|demons?|devils?|mindflayers?|dustdigger|chreffn|draco|pleiades|polaris|aries|taurus|gemini|cancer|leo|virgo|libra|scorpio|sagittarius|capricon|aquarius|it');
 
+/**
+ * People the creature words would take for beasts, or monsters with a face
+ * of their own: a wererat is a man with a rat's head under a hood, a mind
+ * flayer a robed man with a tentacled one, an ettin a giant with two, a
+ * dervish a man and not a whirlwind.
+ */
+const SPECIALS = [
+  [W('wererats?'), 'wererat'],
+  [W('mind ?flayers?|illithids?'), 'mindflayer'],
+  [W('ettins?'), 'ettin'],
+  [W('homonculus|homunculus|homunculi'), 'homonculus'],
+  [W('dervish(es)?'), 'dervish'],
+  [W('duergar'), 'duergar'],
+];
+
 export function personOf(proto, ITEM, instance = 0) {
   const w = words(proto);
+  // A dracolich is a dragon, whatever it has of a lich.
+  if (/\bdracolich/i.test(w)) return null;
+  const special = (SPECIALS.find(([re]) => re.test(w)) || [])[1];
   // A lizard man is a man; a "lizard" is a lizard.
-  if (CREATURE.test(w) && !/\b(m[ae]n|wom[ae]n|folk)\b/i.test(w)) return null;
+  if (!special && CREATURE.test(w) && !/\b(m[ae]n|wom[ae]n|folk)\b/i.test(w)) return null;
   const seed = strHash(proto.keywords, proto.vnum);
   // The trade and the livery come from the prototype; the hair, the beard and
   // the colour of a tunic also from which one of them this is, so the twenty
@@ -211,6 +230,19 @@ export function personOf(proto, ITEM, instance = 0) {
   };
   const old = OLD.test(w);
   const hair = old ? pick(HAIR_OLD, seed2) : pick(HAIR, seed2);
+
+  if (special && special !== 'dervish' && special !== 'duergar') {
+    const S = {
+      wererat: { arch: 'rogue', face: 'face_wererat', pieces: ['hood'], tint: { skin: 0x7a6a5a, cloth: pick(DRAB, seed), cloth2: pick(DRAB, seed3), leather: 0x3a2e22, hair: 0x4a3f36 } },
+      mindflayer: { arch: 'mage', face: 'face_illithid', pieces: [], tint: { skin: 0x8c7a94, cloth: pick([0x2a1a33, 0x1f1a2e, 0x331a2a], seed), cloth2: 0x4a3a58 } },
+      homonculus: { arch: 'beggar', face: 'face_male', pieces: [], scale: 0.42, headScale: 1.3, tint: { skin: 0x7f8a6a, cloth: pick(DRAB, seed), cloth2: pick(DRAB, seed3), linen: 0x6a6050 } },
+      ettin: { file: 'troll', arch: 'troll', face: 'face_ettin', pieces: [], scale: 1.55, kind: 'troll', tint: { skin: 0xa08468, leather: 0x4a3a2a, linen: 0x8a7a5a, hair: 0x2a2418 }, weapon: 'weapon_mace' },
+    }[special];
+    Object.assign(out, { file: 'person_male', kind: special }, S);
+    if (/\bmaster\b/i.test(w)) out.scale = (out.scale || 1) * 1.05;
+    applyEquipment(out, proto, ITEM, seed);
+    return out;
+  }
 
   // Monsters.
   for (const [kind, re] of MONSTERS) {
@@ -257,6 +289,8 @@ export function personOf(proto, ITEM, instance = 0) {
   if (arch === 'smith' && DWARF.test(w) && !/\bsmith|armou?rer\b/i.test(w)) arch = 'guard';
   if (/\b(lumberjacks?|woodcutters?|woodsm[ae]n)\b/i.test(w)) out.weapon = 'weapon_axe';
   if (/\b(executioners?|headsm[ae]n)\b/i.test(w)) arch = 'smith';
+  // The dark dwarves are soldiers of the deep.
+  if (special === 'duergar') arch = 'guard';
 
   // Age. The mud says so for a few; for the rest a trade that takes years
   // to rise in is more often grey, so a crowd has its elders in it and not
@@ -272,25 +306,54 @@ export function personOf(proto, ITEM, instance = 0) {
     out.file = 'person_female';
     out.sex = 'female';
     out.face = aged ? 'face_female_old' : 'face_female';
-    arch = arch === 'merchant' || /\b(maids?|nursemaids?|nurses?|barmaids?|waitress|servants?|cooks?|milkmaids?)\b/i.test(w)
-      ? 'maid'
-      : (/\b(hags?|crones?|witch(es)?|granny|beggars?)\b/i.test(w) || (old && arch !== 'noble')) ? 'crone' : 'woman';
+    // A woman is dressed for her trade as a man is -- a guardswoman in
+    // mail and tabard, not a gown; a priestess robed with her symbol -- and
+    // the gown is for those whose trade is the house or the court.
+    const trade = arch;
+    if (trade === 'guard' || trade === 'knight') arch = 'guard';
+    else if (trade === 'priest' || /\b(priestess|nuns?|abbess)\b/i.test(w)) arch = 'priest';
+    else if (trade === 'mage' || /\b(sorceress|enchantress)\b/i.test(w)) arch = 'mage';
+    else if (trade === 'rogue') arch = 'rogue';
+    else if (trade === 'noble' || /\b(lady|ladies|queens?|princess(es)?|duchess(es)?|countess(es)?|baroness(es)?|empress|noblewoman)\b/i.test(w)) arch = 'lady';
+    else if (trade === 'merchant' || /\b(maids?|nursemaids?|nurses?|barmaids?|waitress|servants?|cooks?|milkmaids?)\b/i.test(w)) arch = 'maid';
+    else if (/\b(hags?|crones?|witch(es)?|granny|beggars?)\b/i.test(w) || (old && trade !== 'noble')) arch = 'crone';
+    else arch = 'woman';
     out.arch = arch;
     if (arch === 'crone') { out.face = 'face_female_old'; out.tint.hair = pick(HAIR_OLD, seed2); }
     out.tint.cloth = arch === 'crone' ? pick(DRAB, seed) : pick(DRESSES, seed);
     out.tint.cloth2 = pick(EARTH, seed3);
     out.tint.linen = 0xd8cfbc;
-    out.pieces = arch === 'maid' ? [pick(['coif', 'hair_bun', 'coif'], seed2)]
-      : arch === 'crone' ? [pick(['scarf', 'hood', 'hair_bun'], seed2)]
-        : [pick(['hair_long', 'hair_bun', 'scarf', 'hair_long'], seed2)];
-    if (/\b(sorceress|witch|enchantress|priestess|nuns?|abbess)\b/i.test(w)) {
-      out.pieces = ['hood'];
-      out.tint.cloth = pick(/\b(priestess|nuns?|abbess)\b/i.test(w) ? ROBES.priest : ROBES.mage, seed);
-      if (/\b(sorceress|witch|enchantress)\b/i.test(w)) out.weapon = 'weapon_staff';
-    }
-    if (/\b(lady|queen|princess|duchess|countess|baroness|empress|beauty)\b/i.test(w)) {
-      out.tint.cloth = pick(RICH, seed);
-      out.pieces = ['hair_long'];
+    const hairdo = (list) => pick(list, seed2);
+    switch (arch) {
+      case 'maid': out.pieces = [hairdo(['coif', 'hair_bun', 'coif', 'hair_braid'])]; break;
+      case 'crone': out.pieces = [hairdo(['scarf', 'hood', 'hair_bun'])]; break;
+      case 'guard':
+        out.tint = { ...out.tint, cloth: pick(LIVERY.default, 0), cloth2: pick(DARK, seed3), leather: 0x3a2a1c };
+        out.pieces = seed2 < 0.5 ? ['hair_braid', 'helm_nasal'] : ['hair_tail'];
+        if (!out.weapon) out.weapon = seed < 0.55 ? 'weapon_spear' : 'weapon_sword';
+        if (out.weapon === 'weapon_sword' && seed3 < 0.7) out.shield = 'shield_round';
+        break;
+      case 'priest':
+        out.tint = { ...out.tint, cloth: pick(ROBES.priest, seed), linen: 0xc8bca0 };
+        out.pieces = [hairdo(['hood', 'scarf', 'hair_bun'])];
+        if (seed < 0.7) out.weapon = out.weapon || 'weapon_staff';
+        break;
+      case 'mage':
+        out.tint = { ...out.tint, cloth: pick(ROBES.mage, seed), cloth2: pick(RICH, seed3) };
+        out.pieces = [hairdo(['hood', 'hair_long', 'hat_wizard', 'hair_braid'])];
+        out.weapon = out.weapon || 'weapon_staff';
+        break;
+      case 'rogue':
+        out.tint = { ...out.tint, cloth: pick(DARK, seed), cloth2: pick(DARK, seed3), leather: 0x2e241a };
+        out.pieces = seed2 < 0.6 ? ['hood'] : [hairdo(['hair_tail', 'hair_braid'])];
+        out.weapon = out.weapon || 'weapon_dagger';
+        break;
+      case 'lady':
+        out.tint = { ...out.tint, velvet: pick(RICH, seed), cloth2: pick(RICH, seed3) };
+        out.pieces = [hairdo(['hair_long', 'hair_braid', 'hair_bun'])];
+        break;
+      default:
+        out.pieces = [hairdo(['hair_long', 'hair_bun', 'scarf', 'hair_braid', 'hair_tail', 'hair_long'])];
     }
   } else {
     out.arch = arch;
@@ -313,6 +376,19 @@ export function personOf(proto, ITEM, instance = 0) {
         if (/\b(trainees?|recruits?|squires?)\b/i.test(w)) { P[0] = hairs(['hair_short', 'hair_crop']); out.shield = null; }
         if (/\b(shiriffs?|sheriffs?)\b/i.test(w)) { P[0] = 'hat_cap'; out.tint.cloth = 0x3f5a2f; }
         break;
+      case 'nomad': {
+        // The desert's: a long robe and a sash, a turban, bearded; the
+        // warriors armed and shielded, the leaders in dyed cloth and gold.
+        const leader = /\b(leaders?|commanders?|chiefs?|sheikhs?)\b/i.test(w);
+        out.tint = { ...out.tint, cloth: leader ? pick(RICH, seed) : pick([0xd8d0bc, 0xcbbd9c, 0xb8a98a, 0x2f3a5a, 0x6a5a44], seed),
+          cloth2: pick([0x7a2a22, 0x2a3a6a, 0x6a5a2a, 0x3a3a3a], seed3), linen: pick([0xe4ddcc, 0x2a2e3a, 0xcfc3a8], seed2), leather: 0x5a4028 };
+        out.tint.skin = pick([0xb07c58, 0x9a6a48, 0x8a5a38, 0xc08a64], strHash(proto.keywords, 7));
+        P.push('turban');
+        if (/\bdervish/i.test(w)) { P.push('beard_short'); out.weapon = out.weapon || 'weapon_sword'; }
+        else { P.push(seed3 < 0.5 ? 'beard_full' : 'beard_short'); }
+        if (/\bwarriors?\b/i.test(w)) { out.weapon = out.weapon || pick(['weapon_sword', 'weapon_spear'], seed); if (out.weapon === 'weapon_sword') out.shield = 'shield_round'; }
+        break;
+      }
       case 'knight':
         out.tint = { ...out.tint, cloth: /\btemplars?\b/i.test(w) ? 0xd8d2c0 : pick(RICH, seed), cloth2: pick(DARK, seed3) };
         P.push(/\btemplars?\b/i.test(w) || seed < 0.5 ? 'helm_great' : 'helm_nasal');
@@ -380,7 +456,14 @@ export function personOf(proto, ITEM, instance = 0) {
         { const b = beard(); if (b) P.push(b); }
     }
     out.pieces = P;
+    if (special === 'duergar') {
+      // Grey-skinned, bald under a helm, and bearded.
+      out.tint = { ...out.tint, skin: 0x7c7f84, hair: 0x3a3a3c, cloth: pick(DARK, seed), cloth2: pick(DARK, seed3), leather: 0x2a2622 };
+      out.pieces = ['helm_nasal', 'beard_full'];
+      out.face = 'face_male_old';
+    }
   }
+  if (/\bsea hags?\b/i.test(w)) { out.tint.skin = 0x8a9a7c; out.tint.hair = 0x5a6a4a; }
 
   // Size. A word for how old someone is is a word for how tall they are.
   const prose = `${w} ${proto.long || ''} ${proto.description || ''}`;
@@ -403,11 +486,17 @@ export function personOf(proto, ITEM, instance = 0) {
 }
 
 function applyEquipment(out, proto, ITEM, seed) {
+  out.weaponFromResets = false;
+  out.shieldFromResets = false;
   for (const item of proto.equipment || []) {
     if (ITEM && item.proto.itemType === ITEM.WEAPON && ARMED.has(out.arch)) {
-      out.weapon = weaponOf(item.proto) || out.weapon;
+      const w = weaponOf(item.proto);
+      if (w) { out.weapon = w; out.weaponFromResets = true; }
     }
-    if (item.wearLoc === 11) out.shield = out.arch === 'knight' ? 'shield_kite' : (out.shield || 'shield_round');
+    if (item.wearLoc === 11) {
+      out.shield = out.arch === 'knight' ? 'shield_kite' : (out.shield || 'shield_round');
+      out.shieldFromResets = true;
+    }
   }
   // A staff or a spear is held in both hands' worth of arm; nobody carries a
   // shield with a staff.

@@ -139,15 +139,23 @@ if (ENVMAP_BY_SLOT === THREE.ShaderChunk.envmap_physical_pars_fragment) {
   throw new Error('dress: three\'s environment chunk moved; the per-surface sky injection missed');
 }
 
-function inject(shader, set, tints) {
+function inject(shader, set, tints, show) {
+  shader.uniforms.heldShow = { value: show };
   shader.uniforms.slotAlbedo = { value: set.albedo };
   shader.uniforms.slotNormal = { value: set.normal };
   shader.uniforms.slotOrm = { value: set.orm };
   shader.uniforms.slotParams = { value: set.params };
   shader.uniforms.slotTint = { value: tints };
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nattribute float aSlot;\nvarying float vSlot;')
-    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvSlot = aSlot;');
+    .replace('#include <common>', '#include <common>\nattribute float aSlot;\nattribute float aHeld;'
+      + '\nuniform vec2 heldShow;\nvarying float vSlot;')
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+      vSlot = aSlot;
+      // What is held can be let go of -- a mobile disarmed, a corpse looted
+      // (items.js) -- without a second mesh: its vertices fold to a point.
+      if ( ( aHeld > 0.5 && aHeld < 1.5 && heldShow.x < 0.5 ) || ( aHeld > 1.5 && heldShow.y < 0.5 ) ) {
+        transformed = vec3( 0.0 );
+      }`);
   const frag = shader.fragmentShader
     .replace('#include <common>', `#include <common>
       varying float vSlot;
@@ -182,7 +190,7 @@ function inject(shader, set, tints) {
  * One person's material: their colours per surface, `tint` by tag, over the
  * surfaces' own base colour. A ghost is see-through and lit from inside.
  */
-export function personMaterial(library, tint, ghost) {
+export function personMaterial(library, tint, ghost, show = new THREE.Vector2(1, 1)) {
   const set = surfaces(library);
   const tints = new Float32Array(MAX_SLOTS * 3);
   const c = new THREE.Color();
@@ -199,8 +207,8 @@ export function personMaterial(library, tint, ghost) {
   // Captured, not kept on userData: a material clone (motion.js fades the
   // dying with one) deep-copies userData through JSON, which would turn the
   // array into an object; the closure goes with the function.
-  m.onBeforeCompile = (shader) => inject(shader, set, tints);
-  m.customProgramCacheKey = () => 'diku-person-1';
+  m.onBeforeCompile = (shader) => inject(shader, set, tints, show);
+  m.customProgramCacheKey = () => 'diku-person-2';
   if (ghost) {
     m.transparent = true;
     m.opacity = 0.34;
@@ -268,7 +276,8 @@ export function dressedGeometry(asset, names, held, key) {
     // bone's bind-pose world matrix is the inverse of its bone inverse.
     const matrix = bindInverse.clone().multiply(skeleton.boneInverses[index].clone().invert());
     for (const p of model.primitives) {
-      parts.push({ geometry: p.geometry, slot: slotOf(p.materialName, model.name), matrix, bone: index });
+      parts.push({ geometry: p.geometry, slot: slotOf(p.materialName, model.name), matrix, bone: index,
+        held: bone === 'shieldL' ? 2 : 1 });
     }
   }
 
@@ -285,6 +294,7 @@ export function dressedGeometry(asset, names, held, key) {
   const skinIndex = new Uint16Array(vertices * 4);
   const skinWeight = new Float32Array(vertices * 4);
   const slot = new Float32Array(vertices);
+  const heldBy = new Float32Array(vertices);
   const index = vertices > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
   let v0 = 0;
   let i0 = 0;
@@ -325,6 +335,7 @@ export function dressedGeometry(asset, names, held, key) {
         }
       }
       slot[o] = p.slot;
+      heldBy[o] = p.held || 0;
     }
     if (g.index) {
       for (let k = 0; k < g.index.count; k++) index[i0 + k] = g.index.getX(k) + v0;
@@ -343,6 +354,7 @@ export function dressedGeometry(asset, names, held, key) {
   out.setAttribute('skinIndex', new THREE.BufferAttribute(skinIndex, 4));
   out.setAttribute('skinWeight', new THREE.BufferAttribute(skinWeight, 4));
   out.setAttribute('aSlot', new THREE.BufferAttribute(slot, 1));
+  out.setAttribute('aHeld', new THREE.BufferAttribute(heldBy, 1));
   out.setIndex(new THREE.BufferAttribute(index, 1));
   out.computeBoundingBox();
   out.computeBoundingSphere();

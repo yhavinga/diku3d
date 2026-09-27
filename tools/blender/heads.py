@@ -194,28 +194,67 @@ TROLL = dict(
                      fk=[(0.1, 0.82), (0.05, 0.86), (0.02, 0.98), (-0.03, 1.02), (-0.07, 1.10), (-0.10, 1.12), (-0.12, 1.15)],
                      bk=[(0.1, 0.95), (-0.12, 1.05)],
                      nk=[(0.1, 1.05), (-0.12, 1.05)]),
-    brow=2.6,
+    dome=((0.0, 0.020, 0.048), (0.064, 0.084, 0.058)),
+    brow=2.0,
     cheek=((0.056, -0.056, -0.020), (0.020, 0.016, 0.013)),
     chin=((0.0, -0.094, -0.104), (0.026, 0.014, 0.016)),
     mouth_z=-0.068, mouth_y=-0.0980,
     neck_r=0.066,
-    eye=(0.0310, -0.063, 0.002), eye_r=0.0100,
-    fissure=(0.0110, 0.0030, 0.0028),
+    eye=(0.0315, -0.074, 0.004), eye_r=0.0110,
+    fissure=(0.0132, 0.0052, 0.0046), iris=(0.10, 0.06, 0.01), sclera=(0.45, 0.42, 0.25),
     tilt=-0.0012,
     nose=2.0, nose_w=1.7, nose_len=1.45,
     lips=1.1, lip_w=1.2,
-    fold=1.0, age=0.6, stubble=0.0,
+    # No age: its hollows are cut for a man's cheek and went straight
+    # through a troll's into the mouth.
+    fold=1.0, age=0.0, stubble=0.0,
 )
 
-SPECS = {s["name"]: s for s in (MALE, FEMALE, OLD_MALE, OLD_FEMALE, TROLL)}
+# A wererat: the man's head drawn out into a muzzle, the nose at the end of
+# it, small black eyes set to the side, big round ears high on the skull.
+RAT = dict(
+    MALE, name="wererat",
+    loft=_loft_scale(LOFT_MALE,
+                     wk=[(0.1, 0.98), (0.02, 0.96), (-0.02, 0.86), (-0.06, 0.74), (-0.10, 0.70), (-0.12, 0.8)],
+                     fk=[(0.1, 0.98), (0.03, 1.0), (0.0, 1.18), (-0.03, 1.55), (-0.055, 1.62), (-0.08, 1.30), (-0.10, 1.0), (-0.12, 0.85)],
+                     nk=[(0.1, 1.0), (0.02, 0.8), (-0.03, 0.46), (-0.06, 0.46), (-0.12, 0.7)]),
+    brow=0.3, cheek=((0.040, -0.060, -0.016), (0.008, 0.008, 0.006)), nose_fwd=0.036,
+    chin=((0.0, -0.080, -0.098), (0.008, 0.008, 0.008)),
+    mouth_z=-0.070, mouth_y=-0.118,
+    eye=(0.0360, -0.058, 0.010), eye_r=0.0100, fissure=(0.0095, 0.0048, 0.0046), tilt=0.0,
+    nose=1.1, nose_w=1.25, nose_len=0.95, nose_top=0.004,
+    lips=0.5, lip_w=0.6, fold=0.0, stubble=0.0,
+    iris=(0.010, 0.008, 0.007), sclera=(0.02, 0.018, 0.016), limbus=(0.01, 0.01, 0.01),
+    ear_scale=(1.3, 1.7, 1.55), ear_at=(0.002, 0.012, 0.040), ear_turn=34, brows=False,
+)
+
+# A mind flayer: a bulging, earless, noseless cranium, blank white eyes,
+# and four tentacles where the mouth should be.
+ILLITHID = dict(
+    MALE, name="illithid",
+    loft=_loft_scale(LOFT_MALE, wk=[(0.1, 1.06), (0.03, 1.02), (-0.03, 0.94), (-0.12, 0.82)],
+                     fk=[(0.1, 1.0), (0.0, 0.98), (-0.06, 0.96), (-0.12, 0.9)],
+                     bk=[(0.1, 1.12), (0.0, 1.08), (-0.12, 1.0)]),
+    dome=((0.0, 0.028, 0.066), (0.078, 0.108, 0.068)),
+    brow=0.6, no_features=True, ears=False, brows=False, tentacles=True,
+    cheek=((0.050, -0.056, -0.014), (0.010, 0.010, 0.008)),
+    eye=(0.0335, -0.064, 0.006), eye_r=0.0132, fissure=(0.0160, 0.0062, 0.0056), tilt=0.0025,
+    iris=(0.55, 0.55, 0.60), pupil=(0.40, 0.40, 0.46), sclera=(0.68, 0.68, 0.72), limbus=(0.5, 0.5, 0.55),
+    fold=0.0, stubble=0.0,
+)
+
+ETTIN = dict(TROLL, name="ettin", double=True)
+
+SPECS = {s["name"]: s for s in (MALE, FEMALE, OLD_MALE, OLD_FEMALE, TROLL, RAT, ILLITHID, ETTIN)}
 
 # Which faces each body carries, by file: the young and the old of each sex.
 # Every face of one body shares its eyes, its skull and its ears, so hair and
 # hats and the eye bones fit all of them.
 FACES = {
-    "male": [("face_male", MALE), ("face_male_old", OLD_MALE)],
+    "male": [("face_male", MALE), ("face_male_old", OLD_MALE), ("face_wererat", RAT),
+             ("face_illithid", ILLITHID)],
     "female": [("face_female", FEMALE), ("face_female_old", OLD_FEMALE)],
-    "troll": [("face_troll", TROLL)],
+    "troll": [("face_troll", TROLL), ("face_ettin", ETTIN)],
 }
 
 # Where the per-person bones pivot, canonical: the jaw from the middle of
@@ -318,10 +357,19 @@ def loft_field(table):
         D = np.where(front, F, B)
         nn = np.where(front, n, 2.0)
         t = ((x / W) ** nn + (np.abs(y) / D) ** nn) ** (1.0 / nn)
-        d = (t - 1.0) * np.minimum(W, D) * 0.9
+        # Inside, the scaled section is a fair distance; outside it is not --
+        # under the chin, where a section is a few millimetres across, it
+        # called a point six centimetres off the face a millimetre away, and
+        # anything offset from the head (a beard, a head of hair) came out as
+        # a wedge. Outside, the distance along the ray from the axis instead.
+        r = np.sqrt(x * x + y * y)
+        d = np.where(t > 1.0, r * (1.0 - 1.0 / np.maximum(t, 1e-6)) * 0.95,
+                     (t - 1.0) * np.minimum(W, D) * 0.9)
         # Capped top and bottom: the dome and the neck do the rest.
-        d = np.maximum(d, p[:, 2] - zhi - 0.004)
-        d = np.maximum(d, zlo - p[:, 2])
+        over = p[:, 2] - zhi - 0.004
+        under = zlo - p[:, 2]
+        cap = np.maximum(over, under)
+        d = np.where(cap > 0, np.sqrt(np.maximum(d, 0.0) ** 2 + cap * cap), d)
         return d
     return f
 
@@ -407,9 +455,12 @@ def field(S):
         # Old eyes: bags under them.
         if age > 0:
             d = smin(d, ell(q, (ex + 0.002, ey - 0.009, ez - fl - 0.006), (0.012, 0.0045, 0.0040)), 0.004 * age)
+        if S.get("no_features"):
+            return d
         # The nose: bridge, tip and wings, and the two nostrils under them.
-        top = np.array([0.0, -0.086, S["nose_top"]])
-        tip = np.array([0.0, -0.084 - 0.025 * nk, 0.012 - 0.044 * nl + S["nose_up"]])
+        fwd = S.get("nose_fwd", 0.0)
+        top = np.array([0.0, -0.086 - fwd * 0.4, S["nose_top"]])
+        tip = np.array([0.0, -0.084 - 0.025 * nk - fwd, 0.012 - 0.044 * nl + S["nose_up"]])
         d = smin(d, seg(p, top, tip + np.array([0.0, 0.003, 0.004]), 0.0046 * nw, 0.0066 * nw), 0.007)
         d = smin(d, ell(p, tip, np.array([0.0084 * nw, 0.0080, 0.0076]) * max(1.0, nk ** 0.4)), 0.005)
         wing = np.array([0.0110 * nw, tip[1] + 0.012, tip[2] - 0.002])
@@ -653,13 +704,15 @@ def ear(S, P, side, name="ear"):
     co = np.array([v.co[:] for v in obj.data.vertices])
     n = grad(f, co)
     ao = occlusion(f, co, n, reach=0.006)
+    co = co * np.array(S.get("ear_scale", (1.0, 1.0, 1.0)))
     # Set against the head: out from it by a little, swept back at the top,
     # and turned away from the skull behind.
     import mathutils
-    R = (mathutils.Matrix.Rotation(side * math.radians(18), 3, "Z") @
+    R = (mathutils.Matrix.Rotation(side * math.radians(S.get("ear_turn", 18)), 3, "Z") @
          mathutils.Matrix.Rotation(math.radians(-12), 3, "X"))
     ex, ey, ez = S["eye"]
-    base = np.array([side * 0.0735, 0.006, -0.010 + ez * 0.0])
+    base = np.array([side * 0.0735, 0.006, -0.010]) + np.array(S.get("ear_at", (0.0, 0.0, 0.0))) * \
+        np.array([side, 1.0, 1.0])
     if S["name"] == "troll":
         base = np.array([side * 0.0715, 0.010, -0.004])
     M = np.array(R)
@@ -734,14 +787,16 @@ def eyes(S, P, name="eyes"):
                 # iris darker at its rim, the limbus ring, and a sclera that is
                 # off-white and pinker towards the corners -- a full white one
                 # at this size is a doll's stare.
+                iris = S.get("iris", (0.075, 0.042, 0.020))
+                sclera = S.get("sclera", (0.60, 0.55, 0.50))
                 if a <= 7.0:
-                    cols.append((0.008, 0.007, 0.006))             # pupil
+                    cols.append(S.get("pupil", (0.008, 0.007, 0.006)))
                 elif a <= 19.0:
-                    cols.append((0.075, 0.042, 0.020) if a < 16 else (0.050, 0.030, 0.016))
+                    cols.append(iris if a < 16 else tuple(c * 0.66 for c in iris))
                 elif a <= 24.0:
-                    cols.append((0.018, 0.014, 0.011))             # limbus
+                    cols.append(S.get("limbus", (0.018, 0.014, 0.011)))
                 else:
-                    cols.append((0.60, 0.55, 0.50) if a < 70 else (0.50, 0.38, 0.34))
+                    cols.append(sclera if a < 70 else tuple(c * 0.8 for c in sclera))
         back = len(verts)
         verts.append(c + np.array([0, r, 0]))
         cols.append((0.5, 0.38, 0.34))
@@ -863,20 +918,139 @@ def skull(P, name="skull"):
     return obj
 
 
+def tentacles(S, P, f, name="tentacles"):
+    """A mind flayer's face-tentacles: four tapering, drooping tubes from
+    round the mouth, curling at the ends, in the same skin."""
+    import people
+    lz = S["mouth_z"]
+    parts = []
+    for k, (x, spread, length) in enumerate(((-0.026, -1.0, 0.12), (-0.009, -0.3, 0.15), (0.009, 0.3, 0.15),
+                                             (0.026, 1.0, 0.12))):
+        root = project(f, np.array([x, 0.0, lz + 0.012]), np.array([[0.0, -1.0, 0.0]]), far=0.15)[0]
+        pts = [root + np.array([0.0, 0.006, 0.0])]
+        d = np.array([spread * 0.25, -0.55, -1.0])
+        d /= np.linalg.norm(d)
+        n = 12
+        for i in range(n):
+            t = (i + 1) / n
+            # Down, then curling forward and out at the end, each its own way.
+            bend = np.array([spread * 0.25 * t + 0.1 * math.sin(t * 7 + k), -0.2 + 1.4 * t * t,
+                             -1.0 + 0.9 * t ** 3])
+            step = d * 0.6 + bend * 0.4
+            step /= np.linalg.norm(step)
+            pts.append(pts[-1] + step * length / n)
+        rings = []
+        verts, faces, cols = [], [], []
+        sides = 8
+        for i, c in enumerate(pts):
+            t = i / (len(pts) - 1)
+            T = (pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)])
+            T /= np.linalg.norm(T)
+            u = np.cross(T, [1.0, 0.0, 0.0])
+            if np.linalg.norm(u) < 1e-3:
+                u = np.cross(T, [0.0, 1.0, 0.0])
+            u /= np.linalg.norm(u)
+            v = np.cross(T, u)
+            r = 0.0068 * (1.0 - 0.8 * t) + 0.0010
+            for k in range(sides):
+                a = 2 * math.pi * k / sides
+                verts.append(c + (u * math.cos(a) + v * math.sin(a)) * r)
+                # Paler underneath, where the suckers would be.
+                cols.append((0.9, 0.85, 0.9) if math.sin(a) < -0.3 else (0.75, 0.7, 0.75))
+        for i in range(len(pts) - 1):
+            for k in range(sides):
+                a0 = i * sides + k
+                a1 = i * sides + (k + 1) % sides
+                faces.append((a0, a1, a1 + sides, a0 + sides))
+        tip = len(verts)
+        verts.append(pts[-1] + (pts[-1] - pts[-2]) * 0.4)
+        cols.append((0.7, 0.65, 0.7))
+        last = (len(pts) - 1) * sides
+        for k in range(sides):
+            faces.append((last + k, last + (k + 1) % sides, tip))
+        w, _ = to_world(P, np.array(verts))
+        me = bpy.data.meshes.new(name)
+        me.from_pydata([tuple(q) for q in w], [], faces)
+        me.validate()
+        o = bpy.data.objects.new(name, me)
+        bpy.context.collection.objects.link(o)
+        lib.assign(o, "skin")
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(me)
+        bm.free()
+        for pl in me.polygons:
+            pl.use_smooth = True
+        set_colors(o, cols)
+        parts.append(o)
+    return parts
+
+
 def face(S, P, name):
     """Everything of a face as one object: the skin with the ears, the eyes
     on their bones, the brows. Rigged by vertex group, parented by the caller."""
     import people
-    head, f, _ = build(S, P, name)
+    head, f, _ = build(S, P, name, ears=S.get("ears", True))
     rig_weights(head, P)
     parts = [head]
     for e in eyes(S, P):
         rig_weights(e, P, eye_side=e["side"])
         parts.append(e)
-    for b in brows(S, P, f):
-        rig_weights(b, P)
-        parts.append(b)
+    if S.get("brows", True):
+        for b in brows(S, P, f):
+            rig_weights(b, P)
+            parts.append(b)
+    if S.get("tentacles"):
+        for t in tentacles(S, P, f):
+            t_ = t
+            import rig
+            rig.set_rigid(t_, "jaw")
+            parts.append(t_)
     out = people.join(parts, name)
+    out.data.name = name
+    if S.get("double"):
+        out = _two_headed(out, P, name)
+    return out
+
+
+def _two_headed(one, P, name):
+    """An ettin: the face twice, side by side on the one neck, each turned a
+    little away from the other. Only the first keeps its eyes' bones; the
+    second's are fixed in its head, and neither takes the per-person jaw."""
+    import people
+    import rig
+    import mathutils
+    other = one.copy()
+    other.data = one.data.copy()
+    bpy.context.collection.objects.link(other)
+    c = V(canon_to_world(P, (0.0, 0.0, -0.10)))
+    for obj, side in ((one, 1), (other, -1)):
+        M = (mathutils.Matrix.Translation(c + V((side * 0.125, 0.012, -0.030))) @
+             mathutils.Matrix.Rotation(side * math.radians(20), 4, "Z") @
+             mathutils.Matrix.Rotation(side * math.radians(-6), 4, "Y") @
+             mathutils.Matrix.Translation(-c))
+        obj.data.transform(M)
+        if side < 0:
+            rig.set_rigid(obj, "head")
+        else:
+            for g_ in ("jaw", "nose"):
+                vg = obj.vertex_groups.get(g_)
+                if vg:
+                    idx = [v.index for v in obj.data.vertices]
+                    obj.vertex_groups["head"].add(idx, 0.0, "ADD")
+            for v in obj.data.vertices:
+                w = 0.0
+                for gr in v.groups:
+                    if obj.vertex_groups[gr.group].name in ("jaw", "nose"):
+                        w += gr.weight
+                if w > 0:
+                    obj.vertex_groups["head"].add([v.index], w, "ADD")
+            for g_ in ("jaw", "nose"):
+                vg = obj.vertex_groups.get(g_)
+                if vg:
+                    obj.vertex_groups.remove(vg)
+    out = people.join([one, other], name)
     out.data.name = name
     return out
 

@@ -57,7 +57,8 @@ function takeColour(geometry) {
 // the cloth recipe under another name and take their own tint. Snake scales
 // are the feather surface: rows of overlapping scallops is what both of them
 // are, and at the size either is seen the two read the same.
-const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', scales: 'feather' };
+// Wool is the cloth recipe under its own tint; plate is worked steel.
+const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', wool: 'cloth', plate: 'steel', scales: 'feather' };
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
   skin: { color: 0xc79b76, roughness: 0.72, metalness: 0 },
@@ -73,6 +74,9 @@ const TAG_MATERIALS = {
   // enough to hold a highlight.
   eyewhite: { color: 0xffffff, roughness: 0.14, metalness: 0 },
   bone: { color: 0xcfc4a6, roughness: 0.78, metalness: 0 },
+  // A noblewoman's gown: dyed to whatever she is, and with the soft sheen
+  // along the folds that tells velvet from the wool beside it.
+  velvet: { color: 0xffffff, roughness: 0.52, metalness: 0 },
   // Gilt: a cleric's holy symbol. Bright on purpose -- it has to read at
   // twenty metres against a robe.
   gold: { color: 0xd4a64a, roughness: 0.32, metalness: 0.9 },
@@ -87,7 +91,7 @@ const TAG_MATERIALS = {
   },
 };
 /** Tags whose flat material wants the shared grain, at this strength. */
-const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6, bone: 0.5 };
+const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6, bone: 0.5, velvet: 0.3 };
 
 export class AssetLibrary {
   constructor(materials, baseUrl = 'assets') {

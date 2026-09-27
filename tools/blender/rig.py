@@ -187,6 +187,15 @@ def bind_heat(arm, mesh):
     missing = [v.index for v in mesh.data.vertices if not v.groups]
     if missing:
         raise RuntimeError("bone heat left %d vertices of %s unweighted" % (len(missing), mesh.name))
+    # Heat hands a joint over from one bone to the next in a band a couple of
+    # centimetres wide. At the shoulder that is a crease: swinging the A-pose
+    # arm down to the side tore the top of the arm away from the torso in a
+    # lip, and every tunic cut from it wore the lip as a padded shoulder.
+    # Relaxed, the hand-over spreads and the joint bends as flesh does.
+    select_only([mesh], mesh)
+    bpy.ops.object.mode_set(mode="WEIGHT_PAINT")
+    bpy.ops.object.vertex_group_smooth(group_select_mode="ALL", factor=0.5, repeat=6, expand=0.2)
+    bpy.ops.object.mode_set(mode="OBJECT")
     return mesh
 
 
@@ -1094,13 +1103,39 @@ def anim_cast(arm):
         (19, release, ((0, -0.02, -0.012), -3, 0, 0), "rest"),
         (25, HANG, ((0, 0, -0.004), 0, 0, 0), "rest"),
     ]
-    return "cast", (1, _clip(arm, "cast", k)), (15 - 1) / 24.0
+    end = _clip(arm, "cast", k)
+    _stand_up(arm, "hand.R", release["hand.R"], (15, 19))
+    return "cast", (1, end), (15 - 1) / 24.0
+
+
+def _stand_up(arm, bone, rot, frames):
+    """Pitch a hand until what it holds (the grip bone's Y) stands straight
+    up on the given frames: a staff thrust at the sky, not leaning out at
+    thirty degrees as the written key left it on every rig."""
+    p = arm.pose.bones
+    scene = bpy.context.scene
+    x0, y0, z0 = rot
+    best = None
+    for dx in range(-80, 81, 4):
+        for f in frames:
+            fk(p[bone], f, x=x0 + dx, y=y0, z=z0)
+        scene.frame_set(frames[-1])
+        bpy.context.view_layer.update()
+        up = (arm.pose.bones["grip.R"].matrix.to_3x3() @ V((0, 1, 0))).normalized().z
+        if best is None or up > best[0]:
+            best = (up, dx)
+    for f in frames:
+        fk(p[bone], f, x=x0 + best[1], y=y0, z=z0)
+    return best
 
 
 def anim_carry(arm, name):
     new_action(arm, name)
     pose(arm, 1, CARRY[name])
     pose(arm, 2, CARRY[name])
+    if name == "carry_pole":
+        # A pole carried is carried upright, on whatever rig.
+        _stand_up(arm, "hand.R", CARRY[name]["hand.R"], (1, 2))
     return name, (1, 2)
 
 

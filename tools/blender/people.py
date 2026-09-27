@@ -303,7 +303,7 @@ MALE = dict(
     # joints
     hip=(0.092, 0.0, 0.955), knee=(0.100, -0.012, 0.515), ankle=(0.106, 0.012, 0.090),
     shoulder=(0.182, 0.012, 1.445), neck_base=1.470, head_joint=1.600, crown=1.752,
-    arm_a=40.0, upper=0.292, fore=0.252, hand=0.185,
+    arm_a=22.0, arm_drop=0.030, upper=0.292, fore=0.252, hand=0.185,
     # girths (half-widths / half-depths, m)
     hips=(0.168, 0.100, 0.118), waist=(0.142, 0.094, 0.090), chest=(0.158, 0.112, 0.100),
     lats=0.163, neck=0.060, thigh=0.086, calf=0.060, knee_r=0.050, ankle_r=0.034,
@@ -315,7 +315,7 @@ FEMALE = dict(
     MALE, name="female",
     hip=(0.090, 0.0, 0.905), knee=(0.094, -0.010, 0.488), ankle=(0.098, 0.012, 0.085),
     shoulder=(0.160, 0.012, 1.358), neck_base=1.382, head_joint=1.508, crown=1.650,
-    upper=0.272, fore=0.232, hand=0.170,
+    arm_drop=0.026, upper=0.272, fore=0.232, hand=0.170,
     hips=(0.176, 0.100, 0.125), waist=(0.122, 0.082, 0.080), chest=(0.146, 0.104, 0.090),
     lats=0.140, neck=0.047, thigh=0.086, calf=0.055, knee_r=0.045, ankle_r=0.030,
     upper_r=0.043, elbow_r=0.033, wrist_r=0.025, delt=0.050,
@@ -332,7 +332,7 @@ TROLL = dict(
     MALE, name="troll",
     hip=(0.125, 0.0, 0.860), knee=(0.135, -0.022, 0.470), ankle=(0.145, 0.012, 0.095),
     shoulder=(0.245, 0.020, 1.500), neck_base=1.535, head_joint=1.650, crown=1.860,
-    arm_a=40.0, upper=0.400, fore=0.380, hand=0.270,
+    arm_a=26.0, arm_drop=0.036, upper=0.400, fore=0.380, hand=0.270,
     hips=(0.205, 0.140, 0.150), waist=(0.215, 0.165, 0.125), chest=(0.232, 0.160, 0.160),
     lats=0.252, neck=0.090, thigh=0.122, calf=0.092, knee_r=0.072, ankle_r=0.050,
     upper_r=0.076, elbow_r=0.058, wrist_r=0.046, delt=0.100,
@@ -348,6 +348,10 @@ def arm_axis(P, side):
     d = V((side * math.sin(a), 0.0, -math.cos(a)))
     s = V(P["shoulder"])
     s.x *= side
+    # The joint sits a hand's breadth of deltoid below the top of the
+    # shoulder: at the shoulder line itself, the cap stood five centimetres
+    # proud of the base of the neck and every man shrugged.
+    s.z -= P["arm_drop"]
     e = s + d * P["upper"]
     w = e + d * P["fore"]
     return s, e, w, d
@@ -429,8 +433,8 @@ def shoulders(P):
         r = P["delt"]
         # A rounded cap over the joint, long along the arm: a loft ended in a
         # flat disc here and stood up off the shoulder like a wing.
-        at = s + d * 0.075 + V((-sx * 0.006, 0.0, 0.0))
-        cap = ellipsoid(tuple(at), (r * 0.84, 0.095, r * 0.86), name="deltoid", seg=20, rings=14)
+        at = s + d * 0.055 + V((-sx * 0.010, 0.0, 0.0))
+        cap = ellipsoid(tuple(at), (r * 0.92, 0.090, r * 0.94), name="deltoid", seg=20, rings=14)
         _orient(cap, at, d)
         out.append(cap)
     return out
@@ -439,7 +443,14 @@ def shoulders(P):
 def arm(P, sx):
     s, e, w, d = arm_axis(P, sx)
     ur, er, wr = P["upper_r"], P["elbow_r"], P["wrist_r"]
+    # The top of the arm closes in a dome that runs up under the deltoid and
+    # into the slope of the shoulder. It used to end in a flat cap at the
+    # joint, and the rim of that cap stood out of the fused skin as a lip --
+    # the square, padded shoulder every tunic cut from this body wore.
     up = ring_loft(s, d, [
+        (-0.050, ur * 0.25, ur * 0.25, ur * 0.25),
+        (-0.040, ur * 0.62, ur * 0.60, ur * 0.60),
+        (-0.024, ur * 0.88, ur * 0.85, ur * 0.85),
         (0.00, ur * 1.05, ur, ur),
         (0.08, ur * 1.02, ur * 1.05, ur * 0.98),     # biceps in front
         (0.16, ur * 0.95, ur * 1.02, ur * 0.95),
@@ -629,8 +640,12 @@ def base(P, target=2700):
         rig.bind_groups(arm, f)
     rig.arms_down(arm, [body] + fs, P)
     if P["name"] == "troll":
+        # The hunch has to read from the front too, where a bent back does
+        # not show: so the shoulders come up and forward round the head,
+        # which sinks between them.
         rig.repose(arm, [body] + fs, {"hips": (6, 0, 0), "spine": (18, 0, 0), "chest": (24, 0, 0),
-                                      "neck": (-20, 0, 0), "head": (-24, 0, 0),
+                                      "neck": (-14, 0, 0), "head": (-30, 0, 0),
+                                      "shoulder.L": (10, 0, 9), "shoulder.R": (10, 0, -9),
                                       "upperarm.L": (-12, 0, -8), "upperarm.R": (-12, 0, 8),
                                       "forearm.L": (-16, 0, 0), "forearm.R": (-16, 0, 0)})
     return body, arm, fs
@@ -672,8 +687,8 @@ def render(path, objs=None, azims=(0, 35, 90, 180), dist=3.2, cz=0.95, lens=50,
 # Which archetypes are built on which body, and so into which file.
 FILES = {
     "person_male": (MALE, ["peasant", "guard", "merchant", "smith", "priest", "mage", "rogue",
-                           "beggar", "noble", "knight", "zombie", "ghost", "skeleton"]),
-    "person_female": (FEMALE, ["woman", "maid", "crone"]),
+                           "beggar", "noble", "knight", "zombie", "ghost", "skeleton", "nomad"]),
+    "person_female": (FEMALE, ["woman", "maid", "crone", "lady", "guard", "priest", "mage", "rogue"]),
     "troll": (TROLL, ["troll"]),
 }
 
@@ -731,6 +746,7 @@ def build_file(fname):
         # primitive_extract.py compares a colour's name against its glTF
         # slot). assets.js hands `_col` back to three as `color`.
         o.data.color_attributes["Col"].name = "_col"
+    meshes += [lod(o) for o in meshes]
     lib.export(fname, [arm] + meshes,
                export_vertex_color="NONE",
                export_attributes=True,
@@ -741,6 +757,29 @@ def build_file(fname):
                export_bake_animation=True,
                export_optimize_animation_size=False)
     return report, info
+
+
+def lod(o, share=0.28, floor=160):
+    """A far copy of a mesh, `lod_<name>`: decimated to about a quarter,
+    weights and colours carried through the collapse. Past fifteen metres a
+    person is a figure of forty pixels, and a face's three and a half
+    thousand triangles are spent on nothing the eye can find there."""
+    c = o.copy()
+    c.data = o.data.copy()
+    c.name = c.data.name = "lod_" + o.name
+    bpy.context.collection.objects.link(c)
+    c.data.calc_loop_triangles()
+    n = len(c.data.loop_triangles)
+    dm = c.modifiers.new("lod", "DECIMATE")
+    dm.ratio = min(1.0, max(floor / max(1, n), share))
+    dm.use_collapse_triangulate = True
+    select_mesh(c)
+    bpy.ops.object.modifier_move_to_index(modifier="lod", index=0)
+    bpy.ops.object.modifier_apply(modifier="lod")
+    c.data.validate()
+    bpy.ops.object.vertex_group_limit_total(group_select_mode="ALL", limit=4)
+    bpy.ops.object.vertex_group_normalize_all(group_select_mode="ALL", lock_active=False)
+    return c
 
 
 def box_uv(obj):

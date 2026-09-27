@@ -485,9 +485,10 @@ const EYE_RANGE = 9;          // metres inside which someone meets your eye
  * at rest do. Wrapped round the mixer's own update so every caller of it gets
  * it for nothing; the camera is picked up by whichever face draws first.
  */
-function lookWithEyes(body, mixer, group) {
+const LOD_FROM = 15;           // metres past which a person wears their far copy
+
+function lookWithEyes(body, mixer, group, mesh, nearGeometry, farGeometry) {
   const eyes = ['eyeL', 'eyeR'].map((n) => body.getObjectByName(n)).filter(Boolean);
-  if (!eyes.length) return;
   const rest = eyes.map((e) => e.quaternion.clone());
   const forward = eyes.map((e) => new THREE.Vector3(0, 1, 0).applyQuaternion(e.quaternion));
   let drift = 0;
@@ -498,10 +499,15 @@ function lookWithEyes(body, mixer, group) {
   const update = mixer.update.bind(mixer);
   mixer.update = (dt) => {
     update(dt);
-    const head = eyes[0].parent;
-    if (!viewer || !head) return mixer;
+    if (!viewer) return mixer;
     group.getWorldPosition(_eyeTarget);
-    const far = _eyeTarget.distanceToSquared(viewer.position) > EYE_RANGE * EYE_RANGE;
+    const d2 = _eyeTarget.distanceToSquared(viewer.position);
+    const want = d2 > LOD_FROM * LOD_FROM ? farGeometry : nearGeometry;
+    if (mesh.geometry !== want) mesh.geometry = want;
+    const head = eyes.length ? eyes[0].parent : null;
+    if (!head) return mixer;
+    const far = d2 > EYE_RANGE * EYE_RANGE;
+    if (far) return mixer;
     drift -= dt;
     if (drift <= 0) {
       drift = 0.8 + Math.random() * 1.6;
@@ -561,9 +567,14 @@ function buildPerson(library, who, proto, instance) {
   const names = [`arch_${who.arch}`, ...(who.face ? [who.face] : []), ...who.pieces];
   const key = `${who.file}|${names.join(',')}|${weaponAsset ? who.weapon : ''}|${shieldAsset ? who.shield : ''}`;
   const dressed = dressedGeometry(asset, names, held, key);
+  // The far copy, if the file carries one: each piece's `lod_` twin.
+  const lodNames = names.map((n) => `lod_${n}`);
+  const far = lodNames.every((n) => asset.scene.getObjectByName(n))
+    ? dressedGeometry(asset, lodNames, held, `lod|${key}`) : dressed;
   const mesh = body.getObjectByName('person');
   mesh.geometry = dressed.geometry;
-  mesh.material = dressMaterial(library, who.tint, ghost);
+  const show = new THREE.Vector2(1, 1);
+  mesh.material = dressMaterial(library, who.tint, ghost, show);
   // Figures stay out of the sun's shadow map: a skinned mesh there is a
   // second skinning pass for a shadow the hand-placed contact patch already
   // draws.
@@ -580,16 +591,25 @@ function buildPerson(library, who, proto, instance) {
   }
   const group = new THREE.Group();
   group.add(body);
-  // The figure contract has always handed back what is held; they are in the
-  // mesh now, so these are markers on the holding bones, named for the model.
-  const marker = (name, bone) => {
+  // The figure contract has always handed back what is held, and items.js
+  // lets go of it by `.visible`. They are in the mesh now, so these are
+  // markers on the holding bones, named for the model, whose visibility is
+  // the shader's (dress.js folds the hidden one's vertices away).
+  // `userData.fromResets` says whether the mud put it in their hands or the
+  // archetype did: a looted corpse gives up only the first kind.
+  const marker = (name, bone, axis, fromResets) => {
     const o = new THREE.Object3D();
     o.name = name;
+    o.userData.fromResets = fromResets;
+    Object.defineProperty(o, 'visible', {
+      get: () => show[axis] > 0.5,
+      set: (v) => { show[axis] = v ? 1 : 0; },
+    });
     body.getObjectByName(bone).add(o);
     return o;
   };
-  const weapon = weaponAsset ? marker(who.weapon, 'gripR') : null;
-  const shield = shieldAsset ? marker(who.shield, 'shieldL') : null;
+  const weapon = weaponAsset ? marker(who.weapon, 'gripR', 'x', !!who.weaponFromResets) : null;
+  const shield = shieldAsset ? marker(who.shield, 'shieldL', 'y', !!who.shieldFromResets) : null;
 
   // Where a spell leaves from: the knot of a staff, or else the right fist.
   // weapons.py puts the staff's top at 0.855 m up its own axis.
@@ -633,7 +653,7 @@ function buildPerson(library, who, proto, instance) {
   // skeleton is in its bind pose, and `state.benchmark` stops the loop before
   // the actors are updated.
   mixer.update(0);
-  lookWithEyes(body, mixer, group);
+  lookWithEyes(body, mixer, group, mesh, dressed.geometry, far.geometry);
   const facts = CLIP_FACTS[who.file];
   return {
     group, headGroup: null, height: heightOf(asset, who.file, who.arch) * scale, scale, mixer, actions, clips,
