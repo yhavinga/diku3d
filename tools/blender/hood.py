@@ -141,7 +141,7 @@ def chunk_stone(rng, loc, size, mat="sootwall", name="stone"):
                                       rng.uniform(0, math.pi)), mat=mat, name=name, width=min(a, b, c) * 0.18)
 
 
-def heap(rng, w, d, h, sides=12, mat="ash", name="heap"):
+def heap(rng, w, d, h, sides=16, mat="ash", name="heap"):
     """A low mound of debris: a hull pressed flat, a little lopsided."""
     rings = []
     for k in range(5):
@@ -150,6 +150,7 @@ def heap(rng, w, d, h, sides=12, mat="ash", name="heap"):
         rings.append((h * t, max(0.03, prof * 0.5), rng.uniform(-0.04, 0.04), rng.uniform(-0.04, 0.04)))
     obj = trees.hull(rings, sides, [rng.uniform(-0.16, 0.16) for _ in range(sides)], mat=mat, name=name)
     obj.scale = (w, d, 1.0)
+    lib.shade_smooth(obj, 50)
     return obj
 
 
@@ -424,8 +425,11 @@ def ruin_panel(name, seed, door=False, breach=False):
             p.append(kit.timber((2.25, RT + 0.06, 0.28), (s * 1.02, 0, 3.24 - 0.05), (0, s * math.radians(4), 0),
                                 "charred", 0.03, "lintel"))
     if breach:
-        for sy in (-1, 1):
-            p += rubble_spill(rng, rng.uniform(-0.6, 0.6), sy * 1.1, 4.4, 1.9, 0.75, stones=10, timber=1)
+        # The stones of it lie either side of the gap, not in it: build.js
+        # keeps the middle 3.2 m walkable, as it does for any doorway.
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                p += rubble_spill(rng, sx * rng.uniform(2.5, 2.9), sy * 1.0, 1.7, 1.5, 0.7, stones=4, timber=int(sx > 0 and sy > 0))
     # Soot-blackened jambs are the material's job; what geometry adds is a
     # few stones fallen at the foot of the wall on each side.
     for sy in (-1, 1):
@@ -452,7 +456,7 @@ def build_rubble_heap():
     metre high, so it narrows a lane rather than closing it."""
     lib.reset()
     rng = rng_for(92101)
-    p = rubble_spill(rng, 0, 0, 3.4, 2.8, 1.05, stones=18, timber=2)
+    p = rubble_spill(rng, 0, 0, 3.4, 2.8, 1.15, stones=26, timber=2)
     for i in range(8):
         p.append(kit.slab((0.3, 0.2, 0.025), (rng.uniform(-1.4, 1.4), rng.uniform(-1.1, 1.1), 0.05),
                           (rng.uniform(-0.3, 0.3), rng.uniform(-0.3, 0.3), rng.uniform(0, 3)), mat="rooftile",
@@ -679,56 +683,68 @@ def dragon_skull(z, scale=1.0):
 
 def build_dracolich_idol():
     """The Dragon gang's idol, raised on the plaza they renamed for it: a
-    dragon's skull on a gallows of burnt timber, bone wings of lashed poles
-    hung with rags, bones hung from the arms, a ring of stones at its foot.
-    Crude on purpose -- built by the gang, not by a mason."""
+    dragon's skull the size of a man mounted on a post of burnt timber,
+    staring down the plaza, with bone wings of lashed spars and rag spread
+    from the ends of the crossbar behind it, bones hung from the arm, and a
+    ring of stones at its foot. Crude on purpose -- built by the gang, not by
+    a mason."""
     lib.reset()
     rng = rng_for(92201)
     p = []
-    H = 4.4
-    p.append(kit.timber((0.34, 0.34, H), (0, 0, H / 2), (0, 0, 0), "charred", 0.05, "post"))
-    p.append(kit.timber((3.2, 0.22, 0.24), (0, 0, H - 1.0), (0, 0, 0), "charred", 0.04, "arm"))
+    H = 4.0
+    arm_z = H - 0.9
+    p.append(kit.timber((0.36, 0.36, H), (0, 0, H / 2), (0, 0, 0), "charred", 0.05, "post"))
+    p.append(kit.timber((3.4, 0.24, 0.26), (0, 0.08, arm_z), (0, 0, 0), "charred", 0.04, "arm"))
     for sx in (-1, 1):
-        p.append(kit.timber((0.14, 0.14, 1.5), (sx * 0.5, 0, H - 1.6), (0, sx * math.radians(38), 0), "charred",
+        p.append(kit.timber((0.14, 0.14, 1.5), (sx * 0.5, 0.08, arm_z - 0.6), (0, sx * math.radians(38), 0), "charred",
                             0.02, "brace"))
-    p += dragon_skull(H + 0.15, 1.1)
-    # The wings: two fans of poles, a rag stretched between each pair.
+    # The skull sits on the post head, facing down the plaza and a little down.
+    skull = dragon_skull(0.0, 1.7)
+    kit.place(skull, (0, -0.35, H + 0.28), (math.radians(-12), 0, 0))
+    p += skull
+    # The wings: a fan of spars from each end of the arm, a rag between each
+    # pair of spars, torn short of the tips.
     for sx in (-1, 1):
-        base = (sx * 0.2, 0.05, H - 0.4)
+        base = mathutils.Vector((sx * 1.55, 0.2, arm_z + 0.05))
         tips = []
         for i in range(4):
-            a = math.radians(18 + i * 22)
-            L = 2.2 - i * 0.25
-            tip = (base[0] + sx * math.cos(a) * L, base[1] + 0.1, base[2] + math.sin(a) * L * 0.8 - 0.4)
+            a = math.radians(8 + i * 21)
+            L = 1.9 - i * 0.22
+            tip = base + mathutils.Vector((sx * math.cos(a) * L, 0.12 * i, math.sin(a) * L))
             tips.append(tip)
-            mid = tuple((base[k] + tip[k]) / 2 for k in range(3))
-            vec = mathutils.Vector(tip) - mathutils.Vector(base)
+            vec = tip - base
             rot = vec.to_track_quat("Z", "Y").to_euler()
-            p.append(kit.timber((0.06, 0.06, vec.length), mid, tuple(rot), "oldbone", 0.015, "wingbone"))
+            p.append(kit.timber((0.07, 0.07, vec.length), tuple((base + tip) / 2), tuple(rot), "oldbone", 0.015,
+                                "spar"))
         for i in range(3):
             a, b = tips[i], tips[i + 1]
-            verts = [base, a, b]
+            # Torn: the rag reaches only part way out along the spars.
+            fa, fb = rng.uniform(0.6, 0.95), rng.uniform(0.55, 0.9)
+            ea = base + (a - base) * fa
+            eb = base + (b - base) * fb
             me = bpy.data.meshes.new("rag")
-            me.from_pydata([(v[0], v[1] + 0.02, v[2] - 0.05) for v in verts], [], [(0, 1, 2), (0, 2, 1)])
+            me.from_pydata([tuple(base + mathutils.Vector((0, 0.03, 0))), tuple(ea + mathutils.Vector((0, 0.03, 0))),
+                            tuple(eb + mathutils.Vector((0, 0.03, 0)))], [], [(0, 1, 2)])
             me.update()
             rag = bpy.data.objects.new("rag", me)
             bpy.context.collection.objects.link(rag)
             lib.assign(rag, "cloth")
-            lib.solidify(rag, 0.01)
+            lib.solidify(rag, 0.012)
             p.append(rag)
     # Bones hung on cords from the arm.
-    for i, x in enumerate((-1.4, -0.95, 0.9, 1.35)):
-        L = rng.uniform(0.5, 0.9)
-        p.append(lib.cylinder(0.006, 0.5, (x, 0, H - 1.25), verts=4, name="cord", mat="rope"))
-        p.append(kit.timber((0.06, 0.06, L), (x, 0, H - 1.5 - L / 2), (rng.uniform(-0.2, 0.2), 0, 0), "oldbone",
+    for x in (-1.25, -0.8, 0.75, 1.2):
+        L = rng.uniform(0.5, 0.8)
+        p.append(lib.cylinder(0.008, 0.45, (x, 0.08, arm_z - 0.35), verts=4, name="cord", mat="rope"))
+        p.append(kit.timber((0.07, 0.07, L), (x, 0.08, arm_z - 0.6 - L / 2), (rng.uniform(-0.2, 0.2), 0, 0), "oldbone",
                             0.02, "bone"))
-    # The ring of stones and a litter of offerings.
+    # The ring of stones, a litter of offerings, and the black of old fires.
     for i in range(11):
         a = 2 * math.pi * i / 11 + rng.uniform(-0.1, 0.1)
-        p.append(chunk_stone(rng, (math.cos(a) * 1.15, math.sin(a) * 1.15, 0.15), (0.42, 0.3, 0.28), mat="stonewall"))
-    for i in range(4):
-        p.append(kit.timber((0.05, 0.05, rng.uniform(0.4, 0.7)), (rng.uniform(-0.8, 0.8), rng.uniform(-0.8, 0.8), 0.03),
+        p.append(chunk_stone(rng, (math.cos(a) * 1.25, math.sin(a) * 1.25, 0.15), (0.42, 0.3, 0.28), mat="stonewall"))
+    for i in range(5):
+        p.append(kit.timber((0.05, 0.05, rng.uniform(0.4, 0.7)), (rng.uniform(-0.8, 0.8), rng.uniform(-0.9, -0.3), 0.03),
                             (math.pi / 2, 0, rng.uniform(0, 3)), "oldbone", 0.015, "bone"))
+    p.append(heap(rng, 1.6, 1.4, 0.06, mat="ash"))
     return deliver(p, "dracolich_idol")
 
 
@@ -796,30 +812,36 @@ def build_khan_memorial():
 # --- the lot, the park, the courtyards -----------------------------------------
 
 def build_bramble():
-    """A bramble patch: long arching canes bent back to the ground, with dark
-    leaf in clumps along them. About two metres across and a metre high."""
+    """A bramble patch: a spreading, lumpy mound of dark leaf a couple of
+    metres across and under a metre high, and the bare arching canes that
+    stand up out of it and bow back down into it -- which is the thing that
+    says bramble rather than bush."""
     lib.reset()
     rng = rng_for(92301)
     p = []
     for i in range(9):
         a = rng.uniform(0, 2 * math.pi)
-        L = rng.uniform(1.0, 1.7)
-        pts = []
-        for k in range(6):
-            t = k / 5
-            pts.append((math.cos(a) * L * t, math.sin(a) * L * t, math.sin(t * math.pi) * rng.uniform(0.7, 1.1)))
-        for k in range(5):
-            v0, v1 = mathutils.Vector(pts[k]), mathutils.Vector(pts[k + 1])
-            vec = v1 - v0
+        r = rng.uniform(0.0, 0.8) if i else 0.0
+        w = rng.uniform(0.7, 1.2) * (1.4 if i == 0 else 1.0)
+        h = rng.uniform(0.45, 0.75) * (1.2 if i == 0 else 1.0)
+        mass = lib.sphere(0.5, (math.cos(a) * r * 1.2, math.sin(a) * r * 0.9, h * 0.2), segments=9, rings=6,
+                          name="mass", mat="leaves")
+        mass.scale = (w, w * rng.uniform(0.75, 1.0), h)
+        mass.rotation_euler = (0, 0, rng.uniform(0, 3))
+        p.append(mass)
+    for i in range(7):
+        a = rng.uniform(0, 2 * math.pi)
+        c = mathutils.Vector((math.cos(a) * rng.uniform(0.2, 0.6), math.sin(a) * rng.uniform(0.2, 0.5), 0))
+        d = mathutils.Vector((math.cos(a + 1.2), math.sin(a + 1.2), 0))
+        span = rng.uniform(1.3, 1.9)
+        rise = rng.uniform(0.45, 0.7)
+        pts = [c - d * span / 2 + mathutils.Vector((0, 0, 0.2 + rise * math.sin(t * math.pi) + 0.1 * (t - 0.5)))
+               + d * span * t for t in (0, 0.25, 0.5, 0.75, 1.0)]
+        for k in range(4):
+            vec = pts[k + 1] - pts[k]
             rot = vec.to_track_quat("Z", "Y").to_euler()
-            p.append(kit.timber((0.025, 0.025, vec.length + 0.02), tuple((v0 + v1) / 2), tuple(rot), "bark", 0.005,
-                                "cane"))
-        for k in (2, 3, 4):
-            c = pts[k]
-            leaf = lib.sphere(rng.uniform(0.18, 0.28), (c[0], c[1], c[2] + 0.05), segments=7, rings=5, name="leaf",
-                              mat="leaves")
-            leaf.scale = (1.2, 1.0, 0.6)
-            p.append(leaf)
+            p.append(kit.timber((0.022, 0.022, vec.length + 0.02), tuple((pts[k] + pts[k + 1]) / 2), tuple(rot),
+                                "bark", 0.005, "cane"))
     return deliver(p, "bramble")
 
 
@@ -839,8 +861,9 @@ def build_tall_weeds():
         p.append(lib.cylinder(0.012, h, (x, y, h / 2), lean, verts=4, name="stalk", mat="thatch"))
         tip = mathutils.Vector((0, 0, h / 2))
         tip.rotate(mathutils.Euler(lean))
-        head = lib.cone(0.05, 0.01, 0.28, (x + tip.x, y + tip.y, h / 2 + tip.z), lean, verts=5, name="seed",
-                        mat="thatch")
+        head = lib.sphere(0.05, (x + tip.x, y + tip.y, h / 2 + tip.z + 0.08), segments=5, rings=4, name="seed",
+                          mat="thatch")
+        head.scale = (0.8, 0.8, 2.6)
         p.append(head)
     for i in range(5):
         a = rng.uniform(0, 2 * math.pi)
@@ -905,35 +928,50 @@ def build_dead_planter():
 
 def build_broken_stair():
     """"A set of stairs used to extend up to a suite of rooms but the set is
-    missing stairs 3-15": two treads at the foot, the strings broken off
-    after them, a gap, and the landing still up there against the wall."""
+    missing stairs 3-15": an outside stair up the courtyard wall to a landing
+    and a door. Treads one and two are still there, and the top one; the
+    strings are snapped off after the second and start again under the
+    fifteenth, and the fallen treads lie in a heap under the gap. The wall
+    is at +Y; the flight climbs along +X."""
     lib.reset()
-    p = []
-    rise, going, Wd = 0.2, 0.28, 1.2
-    wall_y = 0.0
-    for i in (0, 1):
-        p.append(kit.slab((Wd, going + 0.04, 0.05), (0, -3.2 + i * going, rise * (i + 1)), mat="planks", name="tread",
-                          width=0.01))
-    for i in (15, 16):
-        p.append(kit.slab((Wd, going + 0.04, 0.05), (0, -3.2 + i * going * 0.2 + 1.2, rise * (i + 1)), mat="planks",
-                          name="tread", width=0.01))
-    for sx in (-1, 1):
-        p.append(kit.timber((0.07, 1.0, 0.24), (sx * Wd / 2, -2.85, 0.45), (math.radians(35), 0, 0), "oak", 0.015,
-                            "string"))
-        p.append(kit.timber((0.07, 0.9, 0.24), (sx * Wd / 2, -0.35, 3.1), (math.radians(35), 0, 0), "oak", 0.015,
-                            "string"))
-    p.append(kit.slab((Wd + 0.4, 1.2, 0.12), (0, -0.5, 3.45), mat="planks", name="landing", width=0.02))
-    for sx in (-1, 1):
-        p.append(kit.timber((0.14, 0.14, 3.45), (sx * (Wd / 2 + 0.15), -1.0, 3.45 / 2), (0, 0, 0), "oak", 0.02,
-                            "post"))
-    # The treads that fell, in a heap at the foot.
     rng = rng_for(92341)
-    for i in range(6):
-        p.append(kit.timber((Wd * rng.uniform(0.6, 1.0), 0.28, 0.05), (rng.uniform(-0.5, 0.8), rng.uniform(-2.6, -1.4),
-                                                                        0.03 + i * 0.04),
+    p = []
+    rise, going, Wd = 0.2, 0.26, 1.1
+    x0, y = -3.2, -Wd / 2 + 0.25
+    for i in (1, 2, 16):
+        p.append(kit.slab((going + 0.05, Wd, 0.06), (x0 + i * going, y, i * rise), mat="planks", name="tread",
+                          width=0.01))
+    # String stubs: under the foot, and hanging from the landing.
+    L = math.hypot(going, rise)
+    ang = math.atan2(rise, going)
+    for sy in (-1, 1):
+        for (i0, i1) in ((0, 2.7), (14.3, 17)):
+            n = i1 - i0
+            cx = x0 + (i0 + i1) / 2 * going
+            cz = (i0 + i1) / 2 * rise - 0.1
+            p.append(kit.timber((L * n, 0.07, 0.26), (cx, y + sy * (Wd / 2 + 0.03), cz), (0, -ang, 0), "oak", 0.015,
+                                "string"))
+    top = 17 * rise
+    lx = x0 + 17 * going + 0.6
+    p.append(kit.slab((1.3, Wd + 0.2, 0.12), (lx, y, top), mat="planks", name="landing", width=0.02))
+    for sx in (-1, 1):
+        p.append(kit.timber((0.14, 0.14, top), (lx + sx * 0.55, y - Wd / 2 + 0.05, top / 2), (0, 0, 0), "oak", 0.02,
+                            "post"))
+    p.append(kit.timber((0.1, 0.1, top - 0.3), (lx, y - Wd / 2 + 0.05, (top - 0.3) / 2), (0, math.radians(30), 0),
+                        "oak", 0.015, "brace"))
+    # The door the stair was for, up in the wall.
+    for sx in (-1, 1):
+        p.append(kit.timber((0.16, 0.16, 2.2), (lx + sx * 0.6, 0.3, top + 1.1), (0, 0, 0), "oak", 0.02, "jamb"))
+    p.append(kit.timber((1.4, 0.18, 0.2), (lx, 0.3, top + 2.25), (0, 0, 0), "oak", 0.02, "head"))
+    p += board_up(lx, top + 0.1, 1.05, 2.05, 0.2, rng, n=5)
+    # A rail post and a length of handrail, still on at the top.
+    p.append(kit.timber((0.08, 0.08, 1.0), (lx - 0.6, y - Wd / 2 - 0.02, top + 0.5), (0, 0, 0), "oak", 0.01, "baluster"))
+    p.append(kit.timber((1.4, 0.07, 0.07), (lx - 1.1, y - Wd / 2 - 0.02, top + 0.85), (0, ang, 0), "oak", 0.01, "rail"))
+    for i in range(7):
+        p.append(kit.timber((Wd * rng.uniform(0.6, 1.0), 0.26, 0.05),
+                            (x0 + rng.uniform(4, 11) * going, y + rng.uniform(-0.4, 0.4), 0.03 + i * 0.045),
                             (rng.uniform(-0.2, 0.2), rng.uniform(-0.2, 0.2), rng.uniform(0, 3)), "planks", 0.008,
                             "fallen"))
-    del wall_y
     return deliver(p, "broken_stair")
 
 
@@ -1168,7 +1206,7 @@ PREVIEW = {
 }
 
 
-def preview(names, path="/tmp/hood-preview.png", cols=4, pitch=14.0, elev=22.0, azim=-30.0, dist=None, res=1400):
+def preview(names, path="/tmp/hood-preview.png", cols=4, pitch=14.0, elev=30.0, azim=-20.0, dist=None, res=1400):
     """Import the exported files -- what the viewer loads, not the scene that
     made them -- lay them out in a grid, rake a low sun across them and render."""
     import os
@@ -1186,7 +1224,7 @@ def preview(names, path="/tmp/hood-preview.png", cols=4, pitch=14.0, elev=22.0, 
                 obj.location.y += dy
             placed.append(obj)
     for mat in bpy.data.materials:
-        key = mat.name.replace("MAT:", "")
+        key = mat.name.replace("MAT:", "").split(".")[0]
         if mat.node_tree:
             bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
             if bsdf:
@@ -1201,5 +1239,5 @@ def preview(names, path="/tmp/hood-preview.png", cols=4, pitch=14.0, elev=22.0, 
     top = max((max((o.matrix_world @ mathutils.Vector(c)).z for c in o.bound_box) for o in placed
                if o.type == "MESH"), default=3.0)
     span = max(cols, rows * 1.2) * pitch
-    return kit.shot(path, center=(0, cy, top * 0.35), dist=dist or (span * 0.95 + top * 1.2), azim=azim, elev=elev,
-                    res=res)
+    return kit.shot(path, center=(0, cy, top * 0.3), dist=dist or (span * 0.75 + top * 1.0), azim=azim, elev=elev,
+                    res=res, lens=40.0)

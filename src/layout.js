@@ -223,69 +223,69 @@ export function layoutWorld(world, options = {}) {
   };
 
   for (;;) {
-  while (queue.length && cells.size < maxRooms) {
-    const room = queue.shift();
-    const here = cells.get(room.vnum);
+    while (queue.length && cells.size < maxRooms) {
+      const room = queue.shift();
+      const here = cells.get(room.vnum);
 
-    for (let dir = 0; dir < 6; dir++) {
-      const exit = room.exits[dir];
-      if (!exit || exit.offMap) continue;
-      const target = world.rooms.get(exit.to);
-      if (!target || cells.has(target.vnum) || !includeVnum(target.vnum)) continue;
-      if (cells.size >= maxRooms) break;
+      for (let dir = 0; dir < 6; dir++) {
+        const exit = room.exits[dir];
+        if (!exit || exit.offMap) continue;
+        const target = world.rooms.get(exit.to);
+        if (!target || cells.has(target.vnum) || !includeVnum(target.vnum)) continue;
+        if (cells.size >= maxRooms) break;
 
-      const [dx, dl, dz] = DIR_STEP[dir];
-      // A room hung directly over a street turns that street into a tunnel.
-      // Anything reached by going up from open ground -- Midgaard's "In the
-      // air..." rooms above all -- is pushed clear of the roofs instead.
-      const airborne = dl > 0 && openToSky(room);
-      const level = here.level + (airborne ? Math.max(dl, 3) : dl);
-      const wantX = here.x + dx;
-      const wantZ = here.z + dz;
+        const [dx, dl, dz] = DIR_STEP[dir];
+        // A room hung directly over a street turns that street into a tunnel.
+        // Anything reached by going up from open ground -- Midgaard's "In the
+        // air..." rooms above all -- is pushed clear of the roofs instead.
+        const airborne = dl > 0 && openToSky(room);
+        const level = here.level + (airborne ? Math.max(dl, 3) : dl);
+        const wantX = here.x + dx;
+        const wantZ = here.z + dz;
 
-      const shadesStreet = (l, x, z) => {
-        const below = occupied.get(key(l - 1, x, z));
-        return below !== undefined && openToSky(world.rooms.get(below));
-      };
+        const shadesStreet = (l, x, z) => {
+          const below = occupied.get(key(l - 1, x, z));
+          return below !== undefined && openToSky(world.rooms.get(below));
+        };
 
-      /**
-       * How many of this room's own exits would land on a real neighbour if it
-       * stood here. Placing for the best score rather than for the first free
-       * cell is what keeps streets joined up instead of scattering archways.
-       */
-      const fit = (x, z) => {
-        let satisfied = (x === wantX && z === wantZ) ? 1 : 0;
-        for (let d = 0; d < 4; d++) {
-          const other = target.exits[d];
-          if (!other || other.offMap) continue;
-          const placed = cells.get(other.to);
-          if (!placed || placed.level !== level) continue;
-          const [ox, , oz] = DIR_STEP[d];
-          if (placed.x === x + ox && placed.z === z + oz) satisfied++;
+        /**
+         * How many of this room's own exits would land on a real neighbour if it
+         * stood here. Placing for the best score rather than for the first free
+         * cell is what keeps streets joined up instead of scattering archways.
+         */
+        const fit = (x, z) => {
+          let satisfied = (x === wantX && z === wantZ) ? 1 : 0;
+          for (let d = 0; d < 4; d++) {
+            const other = target.exits[d];
+            if (!other || other.offMap) continue;
+            const placed = cells.get(other.to);
+            if (!placed || placed.level !== level) continue;
+            const [ox, , oz] = DIR_STEP[d];
+            if (placed.x === x + ox && placed.z === z + oz) satisfied++;
+          }
+          return satisfied;
+        };
+
+        if (layWhole(room, target, dir, here)) continue;
+        let best = null;
+        let bestScore = -Infinity;
+        const candidates = [[0, 0], ...SPIRAL];
+        for (const [ox, oz] of candidates) {
+          const drift = Math.hypot(ox, oz);
+          if (drift > 3.2) break;
+          const x = wantX + ox;
+          const z = wantZ + oz;
+          if (occupied.has(key(level, x, z))) continue;
+          if (airborne && shadesStreet(level, x, z)) continue;
+          const backwards = (ox * dx + oz * dz) < 0 ? 0.6 : 0;
+          const score = fit(x, z) * 2 - drift * 0.45 - backwards;
+          if (score > bestScore) { bestScore = score; best = [x, z]; }
         }
-        return satisfied;
-      };
-
-      if (layWhole(room, target, dir, here)) continue;
-      let best = null;
-      let bestScore = -Infinity;
-      const candidates = [[0, 0], ...SPIRAL];
-      for (const [ox, oz] of candidates) {
-        const drift = Math.hypot(ox, oz);
-        if (drift > 3.2) break;
-        const x = wantX + ox;
-        const z = wantZ + oz;
-        if (occupied.has(key(level, x, z))) continue;
-        if (airborne && shadesStreet(level, x, z)) continue;
-        const backwards = (ox * dx + oz * dz) < 0 ? 0.6 : 0;
-        const score = fit(x, z) * 2 - drift * 0.45 - backwards;
-        if (score > bestScore) { bestScore = score; best = [x, z]; }
+        if (!best) continue; // nowhere within reach; the room stays unplaced
+        place(target, level, best[0], best[1]);
+        queue.push(target);
       }
-      if (!best) continue; // nowhere within reach; the room stays unplaced
-      place(target, level, best[0], best[1]);
-      queue.push(target);
     }
-  }
     if (rest || !waiting.length) break;
     rest = true;
     queue.push(...waiting);

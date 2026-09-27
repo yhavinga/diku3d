@@ -1076,6 +1076,22 @@ const SURFACES = {
   },
 
   /**
+   * Cut crystal, as a statue is carved from it: pale, cold, and smooth enough
+   * that what you see of it is mostly the sky -- with the fractures of a
+   * smashing through it as bright planes. Opaque, because the town has no
+   * refraction to give it; the environment does the work.
+   */
+  crystal(u, v, s) {
+    const [, edge] = cellular(u * 5, v * 5, 5, 801, 0.5);
+    const frac = clamp01(1 - edge * 12);
+    const cloud = fbm(u * 4, v * 4, 4, 803, 3);
+    s.color = mix(mix(rgb(0x9fb4bf), rgb(0xc9d9e0), cloud), rgb(0xeef4f6), frac * 0.7);
+    s.height = 0.5 + cloud * 0.1 - frac * 0.2;
+    s.rough = 0.06 + frac * 0.2 + cloud * 0.05;
+    s.metal = 0.15;
+  },
+
+  /**
    * The floor of a burnt-out room: fine grey ash over whatever the floor was,
    * with charcoal lumps, and here and there a brick or a tile that came down
    * with the roof. Dry and matt all through.
@@ -1269,6 +1285,8 @@ const RECIPES = {
   brokencobble: { surface: 'brokencobble', scale: 2.2, normalScale: 1.0, env: 1.05, wet: 0.55, detail: 0.5 },
   ash: { surface: 'ash', scale: 3.0, normalScale: 0.6, env: 0.6, wet: 0, detail: 0.6 },
   oldbone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 0.7, wet: 0, detail: 0.3 },
+  // Ice Dragon Way's smashed crystal statues: nearly all reflection.
+  crystal: { surface: 'crystal', scale: 0.8, normalScale: 0.35, env: 1.7, wet: 0, detail: 0.1 },
   // The animals. A 0.4 m tile is a hand's-breadth clump pattern on a dog and
   // still reads as a coat on a horse. `moving` keeps the world-space effects
   // off them: a splash line fixed to the paving and a grain fixed to the world
