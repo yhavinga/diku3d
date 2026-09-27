@@ -38,9 +38,6 @@ const smooth = (u) => u * u * (3 - 2 * u);
 
 /** A person's walking pace: 1.2-1.5 m/s is how people cross a town (Bohannon 1997). */
 const WALK = 1.28;
-const RUN = 3.3;
-/** Above this a figure is running rather than walking. */
-const RUN_FROM = 2.1;
 const ACCEL = 1.7;
 const DECEL = 2.4;
 /** A turn larger than this (radians) is made standing, before setting off. */
@@ -207,8 +204,19 @@ export function createMotion({ figures, nav }) {
     prepareRig(fig);
     const seed = fig.seed || 1;
     fig.rand = mulberry(seed);
-    // Somewhere between an amble and a purposeful stride, per person.
-    fig.pace = WALK * (0.86 + fig.rand() * 0.3);
+    // The pace the rig was made to walk at -- its stride over its cycle, so
+    // the clip plays near its own speed -- and then per person somewhere
+    // between an amble and a purposeful stride. A human rig comes out near
+    // WALK anyway; a duck's 0.17 m stride at a human 1.28 m/s would have
+    // needed its cycle at 7x.
+    const natural = (name, fallback) => (fig.stride && fig.stride[name] && fig.clips && fig.clips[name]
+      ? fig.stride[name] / fig.clips[name] : fallback);
+    const walkNatural = natural('walk', WALK);
+    fig.pace = walkNatural * (0.86 + fig.rand() * 0.3);
+    fig.runPace = natural('run', Math.max(walkNatural * 2.4, fig.pace * 1.6));
+    // Above this a figure is running rather than walking: halfway between the
+    // brisk end of its walk and its run.
+    fig.runFrom = (fig.pace * 1.25 + fig.runPace) / 2;
     fig.at = { x: fig.object.position.x, y: fig.object.position.y, z: fig.object.position.z };
     fig.level = nav.levelOf(fig.at.y);
     // The reset ring puts people 2-3.6 m from the centre whatever is standing
@@ -378,7 +386,7 @@ export function createMotion({ figures, nav }) {
         m.want = 0;
         return;
       case 'travel': {
-        m.want = order.run ? RUN : fig.pace * 1.04;
+        m.want = order.run ? fig.runPace : fig.pace * 1.04;
         if (m.stage === 'wait') {
           order.wait -= dt;
           m.want = 0;
@@ -397,7 +405,7 @@ export function createMotion({ figures, nav }) {
         m.fighting = d < 4.5;
         m.faceYaw = Math.atan2(dx, dz);
         if (order.kind === 'face' || d <= (order.stop ?? CLOSE) + 0.15) { m.path = null; m.want = 0; return; }
-        m.want = d > 4 ? RUN : fig.pace * 1.25;
+        m.want = d > 4 ? fig.runPace : fig.pace * 1.25;
         m.repath -= dt;
         if (m.repath <= 0 || !m.path) {
           m.repath = 0.35;
@@ -413,7 +421,7 @@ export function createMotion({ figures, nav }) {
         return;
       }
       case 'go': {
-        m.want = order.run ? RUN : fig.pace * 1.1;
+        m.want = order.run ? fig.runPace : fig.pace * 1.1;
         const d = Math.hypot(order.to.x - fig.at.x, order.to.z - fig.at.z);
         if (d < 0.5) { m.path = null; m.want = 0; order.done = true; return; }
         if (!m.path) {
@@ -540,7 +548,7 @@ export function createMotion({ figures, nav }) {
       return;
     }
     m.turning = 0;
-    const rate = TURN_WALKING * (m.speed > RUN_FROM ? 0.75 : 1);
+    const rate = TURN_WALKING * (m.speed > fig.runFrom ? 0.75 : 1);
     yaw += clamp(err, -rate * dt, rate * dt);
     fig.object.rotation.y = yaw;
 
@@ -548,7 +556,7 @@ export function createMotion({ figures, nav }) {
     const bendFactor = clamp(Math.cos(err), 0.15, 1);
     const stopping = Math.sqrt(2 * DECEL * Math.max(0, remaining - 0.1));
     const target = Math.min(m.want * bendFactor * brake, stopping);
-    if (m.speed < target) m.speed = Math.min(target, m.speed + ACCEL * (m.want > RUN_FROM ? 1.8 : 1) * dt);
+    if (m.speed < target) m.speed = Math.min(target, m.speed + ACCEL * (m.want > fig.runFrom ? 1.8 : 1) * dt);
     else m.speed = Math.max(target, m.speed - DECEL * 1.4 * dt);
     moveAlong(fig, yaw, dt, player);
   }
@@ -677,7 +685,7 @@ export function createMotion({ figures, nav }) {
     let wWalk = 0; let wRun = 0; let wFight = 0; let wIdle = 0;
     const moving = clamp(speed / 0.35, 0, 1);
     if (a.run) {
-      const r = clamp((speed - RUN_FROM + 0.35) / 0.7, 0, 1);
+      const r = clamp((speed - fig.runFrom + 0.35) / 0.7, 0, 1);
       wRun = moving * r;
       wWalk = moving * (1 - r);
     } else wWalk = moving;
@@ -815,6 +823,14 @@ export function createMotion({ figures, nav }) {
    * it; if there is not time to play the wind-up at its own speed, it plays
    * faster, and a figure without an attack clip lunges instead.
    */
+  /** Seconds until the swing now playing connects, or -1 if none is on its way. */
+  function swingContactIn(fig) {
+    const o = fig.m.overlay;
+    if (!o || (o.name !== 'attack' && o.name !== 'attack2')) return -1;
+    const hit = ((fig.hitFrame && fig.hitFrame[o.name]) ?? 0.4) * o.duration;
+    return o.t < hit ? (hit - o.t) / Math.max(0.05, o.action.timeScale) : -1;
+  }
+
   function strike(fig, name = 'attack', contactIn = 0.35) {
     if (!fig || fig.m.dead) return;
     const clip = fig.actions && (fig.actions[name] ? name : (fig.actions.attack ? 'attack' : null));
@@ -822,13 +838,22 @@ export function createMotion({ figures, nav }) {
       const dur = fig.clips[clip];
       const hit = (fig.hitFrame && fig.hitFrame[clip]) ?? 0.4;
       const windup = hit * dur;
-      if (contactIn >= windup) {
-        fig.m.pending = { name: clip, at: contactIn - windup };
-      } else {
-        const speed = clamp(windup / Math.max(0.05, contactIn), 1, 2.2);
-        const from = Math.max(0, windup - contactIn * speed);
-        playOnce(fig, clip, { timeScale: speed, from });
+      // A swing already on its way keeps its contact: this one may not start
+      // before that one has landed. Blows a beat apart overlap otherwise --
+      // the second wind-up cut the first off short of its hit frame.
+      const busy = swingContactIn(fig);
+      let start = contactIn - windup;
+      let speed = 1;
+      if (busy >= 0 && start < busy + 0.03) start = busy + 0.03;
+      if (start < 0) start = 0;
+      const available = contactIn - start;
+      if (available < windup) {
+        if (available < 0.08) return; // no time to be seen swinging at all
+        speed = clamp(windup / available, 1, 2.4);
       }
+      const from = Math.max(0, windup - available * speed);
+      if (start > 0) fig.m.pending = { name: clip, at: start, speed, from };
+      else playOnce(fig, clip, { timeScale: speed, from });
       return;
     }
     fig.m.lunge = { t: 0, dur: Math.max(0.5, contactIn + 0.35), contact: clamp(contactIn / Math.max(0.5, contactIn + 0.35), 0.3, 0.8), reach: fig.legs ? 1 : 0.8 };
@@ -837,6 +862,13 @@ export function createMotion({ figures, nav }) {
   /** Taking a blow, catching one on the blade, or stepping out of its way. */
   function react(fig, kind, strength = 0.5) {
     if (!fig || fig.m.dead) return;
+    // Mid-swing, the swing wins: a flinch clip laid over it would cancel the
+    // blow the game is about to land. The body still gives a little.
+    if (swingContactIn(fig) >= 0 || (fig.m.overlay && /^attack/.test(fig.m.overlay.name) && fig.m.overlay.t < fig.m.overlay.duration * 0.7)) {
+      if (kind === 'dodge') fig.m.sway = { t: 0, side: fig.rand() < 0.5 ? -1 : 1 };
+      else fig.m.recoil = { t: 0, amount: kind === 'hit' ? clamp(0.35 + strength * 0.5, 0.35, 0.9) : 0.3 };
+      return;
+    }
     if (kind === 'hit') {
       if (!playOnce(fig, 'hit', { gain: clamp(0.55 + strength, 0.6, 1) })) fig.m.recoil = { t: 0, amount: clamp(0.5 + strength, 0.5, 1.2) };
       else fig.m.recoil = { t: 0, amount: 0.35 };
@@ -898,7 +930,10 @@ export function createMotion({ figures, nav }) {
 
       if (m.pending) {
         m.pending.at -= dt;
-        if (m.pending.at <= 0) { playOnce(fig, m.pending.name); m.pending = null; }
+        if (m.pending.at <= 0) {
+        playOnce(fig, m.pending.name, { timeScale: m.pending.speed || 1, from: m.pending.from || 0 });
+        m.pending = null;
+      }
       }
 
       if (far) {

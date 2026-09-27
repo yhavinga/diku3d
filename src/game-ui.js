@@ -680,7 +680,7 @@ export function createGameUi(game) {
     }
 
     // The foe plate, over the head of whoever you are actually fighting.
-    const head = t && t.fighting ? headOf(t.slot, 0.32) : null;
+    const head = t && t.fighting ? headOf(t.slot, 0.12) : null;
     foe.classList.toggle('on', !!head);
     if (head) {
       foe.style.transform = `translate(${head.x.toFixed(1)}px, ${head.y.toFixed(1)}px) translate(-50%, -100%)`;
