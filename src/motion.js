@@ -584,7 +584,17 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     }
     if (s.phase === 'hold') {
       fig.object.rotation.y += wrap(spot.yaw - fig.object.rotation.y) * Math.min(1, dt * 4);
-      if (s.t > s.until) standUp(fig);
+      // Company at the table: now and then a look at whoever else is settled
+      // close by, then back to the room.
+      s.glance = (s.glance ?? 1 + fig.rand() * 3) - dt;
+      if (s.glance <= 0) {
+        s.glance = 3 + fig.rand() * 5;
+        neighbours(fig, near);
+        const company = near.filter((o) => o.m.settle && o.m.settle.phase === 'hold'
+          && (o.at.x - fig.at.x) ** 2 + (o.at.z - fig.at.z) ** 2 < 2.4 * 2.4);
+        m.lookAt = company.length && fig.rand() < 0.7 ? company[Math.floor(fig.rand() * company.length)] : null;
+      }
+      if (s.t > s.until) { m.lookAt = null; standUp(fig); }
       return true;
     }
     return false;

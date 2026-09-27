@@ -518,7 +518,7 @@ export function createGameUi(game) {
       if (crit) cls = 'crit';
     } else {
       text = event.kind === 'miss' ? 'miss' : (onYou ? event.kind : (event.kind === 'parry' ? 'parried' : 'dodged'));
-      colour = event.kind === 'miss' ? '#d9d2c2' : '#b9d2f4';
+      colour = event.kind === 'miss' ? '#e4ddcd' : '#cfe3ff';
       size = 23;
       cls = 'word';
     }

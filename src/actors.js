@@ -163,11 +163,17 @@ function gateBoard(dirName) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
-  const board = new THREE.Mesh(
-    new THREE.BoxGeometry(2.2, 0.55, 0.06),
-    [0, 1, 2, 3, 4, 5].map((i) => new THREE.MeshStandardMaterial(i === 4
-      ? { map: texture, roughness: 0.85 } : { color: 0x3e2a18, roughness: 0.9 })),
-  );
+  // One material, so one draw: the edges and the back take their colour
+  // from the painted frame in the canvas's corner.
+  const geometry = new THREE.BoxGeometry(2.2, 0.55, 0.06);
+  const uv = geometry.attributes.uv;
+  const front = geometry.groups[4];
+  for (let i = 0; i < uv.count; i++) {
+    if (i >= front.start / 1.5 && i < (front.start + front.count) / 1.5) continue;
+    uv.setXY(i, 0.004, 0.98);
+  }
+  geometry.clearGroups();
+  const board = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: texture, roughness: 0.85 }));
   board.castShadow = false;
   return board;
 }
