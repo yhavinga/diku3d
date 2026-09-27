@@ -66,11 +66,15 @@ BUDGET = {
     # whole 13 m cell of barrel vault with its floor, and is cheap because it
     # is one sweep.
     "sewer_tunnel": 600, "sewer_arm": 700, "sewer_hub": 1200, "sewer_hub_end": 300,
-    "sewer_chamber": 2700, "sewer_shaft": 400, "sewer_grate": 400, "sewer_door_end": 300,
+    "sewer_chamber": 2700, "sewer_chamber_air": 2900, "sewer_shaft": 400, "sewer_grate": 400, "sewer_door_end": 300,
     "sewer_wall_open": 1000, "sewer_wall_solid": 400, "sewer_shaft_open": 1100,
     "sewer_shaft_solid": 500, "sewer_pit": 750, "town_well": 750, "sewer_ladder": 900,
     "stalagmites": 750, "stalactites": 850, "bone_pile": 900, "rubble": 550,
     "cave_rock_a": 200, "cave_rock_b": 200,
+    # Rock lining over a whole wall or ceiling, at 0.3 m a face: the relief has
+    # to hold up at arm's length under a torch, which a coarser grid did not.
+    "cave_wall": 1400, "cave_wall_door": 1200, "cave_wall_long": 1750,
+    "cave_wall_long_door": 1550, "cave_roof": 1850,
 }
 PROP_BUDGET = 800
 TREE_BUDGET = 1500

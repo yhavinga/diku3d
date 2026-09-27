@@ -156,11 +156,11 @@ for (const area of areas) {
 // cross-area exits only resolve when both ends are loaded). So the default
 // set gets its own pass, with the viewer's own start room and cap.
 const DEFAULT_WORLD = ['midgaard.are', 'haon.are', 'shire.are', 'marsh.are',
-  'trollden.are', 'grave.are'];
+  'trollden.are', 'grave.are', 'sewer.are'];
 // Mirrors MAX_ROOMS in src/main.js. Not imported: main.js is a browser module
 // that reads `location` at import time, and the point of this tool is that it
 // runs in node. If that number moves, move this one.
-const MAX_ROOMS = 400;
+const MAX_ROOMS = 520;
 const defaultSet = areas.filter((a) => DEFAULT_WORLD.includes(a.file));
 if (defaultSet.length === DEFAULT_WORLD.length) {
   const world = buildWorld(defaultSet);

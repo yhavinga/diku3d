@@ -279,7 +279,7 @@ def build_arm():
     return deliver(p, "sewer_arm")
 
 
-def groin(a, h, steps=12, rings=10, name="vault", mat="brick"):
+def groin(a, h, steps=12, rings=10, name="vault", mat="brick", hole=0.0):
     """A groin vault over a square of half-side `a`: the union of two barrels,
     so the ceiling is max(h(x), h(y)) and the groins are the diagonals. Built
     as four sectors, each a piece of one barrel, so the creases are real edges.
@@ -316,7 +316,13 @@ def groin(a, h, steps=12, rings=10, name="vault", mat="brick"):
             for i in range(steps):
                 v00, v01 = idx[(j, i)], idx[(j, i + 1)]
                 v10, v11 = idx[(j + 1, i)], idx[(j + 1, i + 1)]
-                faces.append((v00, v11, v10) if j == 0 else (v00, v01, v11, v10))
+                f = (v00, v11, v10) if j == 0 else (v00, v01, v11, v10)
+                if hole:
+                    cx = sum(verts[k][0] for k in f) / len(f)
+                    cy = sum(verts[k][1] for k in f) / len(f)
+                    if cx * cx + cy * cy < hole * hole:
+                        continue
+                faces.append(f)
         parts.append(mesh("%s_%d" % (name, k), verts, faces, uvs, mat,
                           toward=lambda cc: (0.0, 0.0, 0.0), smooth=True))
     return parts
@@ -472,6 +478,48 @@ def build_chamber():
         p.append(rib_along(pts, 0.34, 0.16, "ch_rib"))
     p += piers(C_SPRING, "pier")
     return deliver(p, "sewer_chamber")
+
+
+AIR_R = 0.62
+AIR_TOP = 6.4
+
+
+def build_chamber_air():
+    """The chamber again, with a round shaft out of its crown: "right under
+    what you'd think was an air shaft ... it look quite impossible to force
+    your way up." A brick tube 1.5 m up to where build.js hangs the sky, an
+    iron grating across its foot, and a stone collar hiding the ragged edge
+    the hole leaves in the vault's grid."""
+    lib.reset()
+    h = chamber_h()
+    p = groin(CA, h, steps=16, rings=14, name="ch_vault", hole=AIR_R + 0.06)
+    for sgn in (1, -1):
+        lim = CA - 0.3
+        pts = [(t, sgn * t, h(t)) for t in [-lim + 2 * lim * i / 24 for i in range(25)] if abs(t) > 0.62]
+        # Two half-ribs each side, stopping at the collar.
+        p.append(rib_along([q for q in pts if q[0] < 0], 0.34, 0.16, "ch_rib"))
+        p.append(rib_along([q for q in pts if q[0] > 0], 0.34, 0.16, "ch_rib"))
+    p += piers(C_SPRING, "pier")
+    crown = h(0.0)
+    n = 18
+    verts, faces, uvs = [], [], []
+    for i in range(n):
+        t = 2 * math.pi * i / n
+        for z in (crown - 0.25, AIR_TOP):
+            verts.append((AIR_R * math.cos(t), AIR_R * math.sin(t), z))
+            uvs.append((AIR_R * t, z))
+    for i in range(n):
+        j = (i + 1) % n
+        faces.append((2 * i, 2 * j, 2 * j + 1, 2 * i + 1))
+    p.append(mesh("air_tube", verts, faces, uvs, "brick", toward=lambda c: (0.0, 0.0, c[2]), smooth=True))
+    p.append(lib.torus(AIR_R + 0.16, 0.16, (0, 0, crown - 0.12), major_seg=22, minor_seg=6,
+                       name="air_collar", mat="ashlar"))
+    for i in range(5):
+        x = -AIR_R + 2 * AIR_R * (i + 0.5) / 5
+        L = 2 * math.sqrt(max(0.0, AIR_R * AIR_R - x * x))
+        p.append(kit.timber((0.04, L, 0.05), (x, 0, crown + 0.05), (0, 0, 0), IRON, 0.008, "air_bar"))
+    p.append(kit.timber((2 * AIR_R, 0.04, 0.05), (0, 0, crown + 0.02), (0, 0, 0), IRON, 0.008, "air_bar"))
+    return deliver(p, "sewer_chamber_air")
 
 
 def build_shaft():
@@ -836,6 +884,130 @@ def build_rubble():
             p[-1].location = (x, y, z - r * 0.5)
     return deliver(p, "rubble")
 
+
+# --- caves ----------------------------------------------------------------
+
+def _hashn(ix, iy, seed):
+    h = (ix * 374761393 + iy * 668265263 + seed * 1274126177) & 0xffffffff
+    h = ((h ^ (h >> 13)) * 1274126177) & 0xffffffff
+    return ((h ^ (h >> 16)) & 0xffffffff) / 4294967295.0
+
+
+def _vnoise(x, y, seed):
+    ix, iy = math.floor(x), math.floor(y)
+    fx, fy = x - ix, y - iy
+    fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    a, b = _hashn(ix, iy, seed), _hashn(ix + 1, iy, seed)
+    c, d = _hashn(ix, iy + 1, seed), _hashn(ix + 1, iy + 1, seed)
+    return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
+
+
+def _fbm(x, y, seed, octaves=4):
+    tot, amp, norm, f = 0.0, 1.0, 0.0, 1.0
+    for o in range(octaves):
+        tot += amp * _vnoise(x * f, y * f, seed + o * 101)
+        norm += amp
+        amp *= 0.5
+        f *= 2.0
+    return tot / norm
+
+
+def rock_face(w, h, cols, rows, depth, seed, hole=None, name="face"):
+    """A sheet of rock standing in front of a wall at y = 0, bulging towards
+    -Y by up to `depth`. Its edges stay a fixed 0.3 m off the wall so two
+    panels meeting in a corner, or a panel and a ceiling, run into each other
+    rather than leaving a slot.
+
+    Three scales of relief, because one reads as a blob: metre-scale bulges,
+    a ridged octave that makes ledges and hollows, and a fine one at a few
+    decimetres that breaks the silhouette of every edge the torch rakes.
+
+    `hole` is (half_width, height): an opening narrower than the doorway of
+    the room behind it, so the rock overlaps the door's square reveal and the
+    rectangle never shows. Its outline is straight-sided with a rounded head
+    and wanders by a decimetre; the grid's own vertices are snapped onto that
+    outline, because cutting whole faces out of a 0.3 m grid left a
+    crenellated edge like a castle wall."""
+    def outline(x, z):
+        """Inside the opening?  And where its edge is along x or z."""
+        hw, hh = hole
+        shoulder = hh - 1.1
+        wob_x = hw + (_fbm(z * 1.7, 5.5, seed + 31, 2) - 0.5) * 0.24
+        if z <= shoulder:
+            return abs(x) < wob_x, ("x", math.copysign(wob_x, x))
+        head = shoulder + 1.1 * math.sqrt(max(0.0, 1.0 - (x / wob_x) ** 2)) if abs(x) < wob_x else shoulder
+        head += (_fbm(x * 1.7, 9.5, seed + 37, 2) - 0.5) * 0.2
+        return (abs(x) < wob_x and z < head), ("z", head)
+
+    verts, faces, idx, inside = [], [], {}, {}
+    for j in range(rows + 1):
+        z = -0.15 + (h + 0.3) * j / rows
+        for i in range(cols + 1):
+            x = -w / 2 + w * i / cols
+            n = _fbm(x * 0.5 + 7.1, z * 0.5, seed)
+            ridge = 1 - abs(_fbm(x * 0.9, z * 1.4 + 3.3, seed + 7) * 2 - 1)
+            fine = _fbm(x * 2.6, z * 2.6, seed + 13, 3)
+            d = 0.3 + (depth - 0.3) * (0.55 * n + 0.45 * ridge ** 2) + (fine - 0.5) * 0.28
+            # Held back only at the sides and the foot. The head of a wall runs
+            # up into the roof, and holding it to one depth there drew the
+            # wall-roof junction as a level line all the way round the cave.
+            edge = min(abs(x + w / 2), abs(w / 2 - x), abs(z + 0.15))
+            d = 0.3 + (d - 0.3) * min(1.0, edge / 1.0)
+            if hole:
+                hw, hh = hole
+                gap = max(abs(x) - hw, z - hh)
+                if gap < 1.0:
+                    d = 0.06 + (d - 0.06) * max(0.0, gap / 1.0) ** 0.7
+                ins, _ = outline(x, z)
+                inside[(i, j)] = ins
+            idx[(i, j)] = len(verts)
+            verts.append([x, -d, z])
+    for j in range(rows):
+        for i in range(cols):
+            corners = [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]
+            if hole and all(inside[c] for c in corners):
+                continue
+            if hole:
+                # A face straddling the outline: pull its inside corners onto it.
+                for c in corners:
+                    if not inside[c]:
+                        continue
+                    v = verts[idx[c]]
+                    _, (axis, at) = outline(v[0], v[2])
+                    if axis == "x":
+                        v[0] = at
+                    else:
+                        v[2] = at
+            faces.append(tuple(idx[c] for c in corners))
+    verts = [tuple(v) for v in verts]
+    return mesh(name, verts, faces, None, "caverock", toward=lambda c: (c[0], c[1] - 1.0, c[2]), smooth=True)
+
+
+CAVE_W = 10.6
+CAVE_HOLE = (1.42, 2.92)     # inside the 3.2 x 3.1 doorway it stands in front of
+
+
+def build_cave_wall(name, hole=None, seed=72001, width=CAVE_W):
+    """One side of a cave: a rock face over the whole wall of a walled room,
+    in front of it, so the box the room is built as stops being visible. The
+    13.2 m variants line a corridor's walls and the ends where it meets a
+    room, which a stretched 10.6 m panel did badly -- its opening went wider
+    than the door with it."""
+    lib.reset()
+    cols = int(round(width / 0.3))
+    return deliver([rock_face(width, 5.35, cols, 19, 0.9, seed, hole, "wall")], name)
+
+
+def build_cave_roof():
+    """The roof over a cave, hung under the room's flat ceiling at y = 0 and
+    sagging up to a metre into the room."""
+    lib.reset()
+    obj = rock_face(CAVE_W + 0.4, CAVE_W + 0.4, 30, 30, 1.1, 72009, None, "roof")
+    # The sheet is authored upright; lay it down, bulges hanging.
+    obj.rotation_euler = (math.pi / 2, 0, 0)
+    obj.location = (0, (CAVE_W + 0.4) / 2 - 0.15, 0)
+    return deliver([obj], "cave_roof")
+
 # --- delivery -------------------------------------------------------------
 
 def deliver(parts, name):
@@ -866,6 +1038,7 @@ def build():
         build_hub(),
         build_hub_end(),
         build_chamber(),
+        build_chamber_air(),
         build_shaft(),
         build_grate(),
         build_door_end(),
@@ -880,6 +1053,11 @@ def build():
         build_stalactites(),
         build_bone_pile(),
         build_rubble(),
+        build_cave_wall("cave_wall"),
+        build_cave_wall("cave_wall_door", hole=CAVE_HOLE, seed=72005),
+        build_cave_wall("cave_wall_long", seed=72011, width=13.2),
+        build_cave_wall("cave_wall_long_door", hole=CAVE_HOLE, seed=72013, width=13.2),
+        build_cave_roof(),
         build_wall(True, "sewer_wall_open"),
         build_wall(False, "sewer_wall_solid"),
         build_wall(True, "sewer_shaft_open", tall=True),

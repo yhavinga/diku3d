@@ -37,14 +37,18 @@ const params = new URLSearchParams(location.search);
 // and its 13 tombs hang below on DOWN exits, so nothing gets shoved skyward.
 // It also *raises* Midgaard's own number to 93.5%: the dead gate at #3129
 // south becomes a walk.
-const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden,grave')
+// The sewer is the one that goes *under*: five of Midgaard's own rooms drop
+// into it (the Dump's ladder and the guild wells), every anchor is vertical
+// and downward, so it lays out a level below the town and cannot shove
+// anything on the surface -- 460 rooms, 94% walkable, Midgaard still 93%.
+const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden,grave,sewer')
   .split(',').filter(Boolean).map((f) => (f.endsWith('.are') ? f : `${f}.are`));
 const START_VNUM = Number(params.get('room') || 3001);
 // A live trap: the breadth-first placement stops mid-walk at the cap, and
 // whole areas silently get zero rooms while their exits degrade to gates.
-// The default set is 285 rooms; anything bigger must raise ?max= with it.
+// The default set is 460 rooms; anything bigger must raise ?max= with it.
 // tools/world-check.mjs guards this number for the shipping set.
-const MAX_ROOMS = Number(params.get('max') || 400);
+const MAX_ROOMS = Number(params.get('max') || 520);
 const AREA_URL = params.get('areaDir') || 'merc21/area';
 
 /**
@@ -1241,6 +1245,23 @@ async function boot() {
         (r) => (/gate/i.test(r.name) ? 3 : 0) + ways(r) + stuff(r)),
         'a sealed gate out of the world');
       add('crowd', pick((r) => r.mobs.length >= 2), 'several mobiles together');
+      // Under the town. The works are the sewer's brick-vaulted pipe rooms on
+      // the first level down; the more ways out, the more tunnel mouths there
+      // are to look down, and a room the mud says is lit has its own light.
+      const sewer = (r) => r.areaFile === 'sewer.are';
+      const level = (r) => built.rooms.get(r.vnum).cell.level;
+      add('sewer', pick((r) => sewer(r) && level(r) === -1 && /\b(junction|sewer|pipe)\b/i.test(r.name),
+        (r) => ways(r) * 2 + (/\b(torch|lit|light)/i.test(r.description) ? 4 : 0) + stuff(r)),
+        'the sewer: brick vaults, tunnel mouths, a channel of standing sewage');
+      // Where the street goes down into it: the room above a stair whose foot
+      // is in the sewer, which is where the two worlds share a frame.
+      add('manhole', pick((r) => !sewer(r) && r.exits.some((e) => e && !e.offMap
+          && built.rooms.has(e.to) && sewer(world.rooms.get(e.to)) && level(world.rooms.get(e.to)) < level(r)),
+        (r) => (built.rooms.get(r.vnum).outdoor ? 3 : 0) + ways(r)),
+        'a way down from the street into the sewer: parapet, shaft, daylight falling in');
+      add('cavern', pick((r) => sewer(r) && /\b(cave|stalag\w*)\b/i.test(r.name),
+        (r) => (/stalag/i.test(r.name) ? 3 : 0) + ways(r) + stuff(r)),
+        'a cave the sewer breaks into: rock, flowstone, torchless dark');
       return out;
     },
 
@@ -1271,6 +1292,7 @@ async function boot() {
         if (room.sector === 6 || room.sector === 7) { score += 3; why.push('water'); }
         if (room.sector === 3 || room.sector === 2) { score += 1; why.push(SECTOR_NAME[room.sector]); }
         if (info.cell.level > 0) { score += 2; why.push(`level ${info.cell.level}`); }
+        if (info.cell.level < 0) { score += 2; why.push('underground'); }
         if (/fountain|statue|altar|fire|forge|tree|pool|bridge|stair|gate/i.test(
           `${room.name} ${room.description}`)) { score += 2; why.push('something named in the prose'); }
         if (score <= 1) continue;

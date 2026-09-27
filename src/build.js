@@ -607,7 +607,7 @@ function pickMaterials(room, area) {
   const style = sewerStyle(room);
   if (style) {
     cave = true;
-    if (style === 'cave') { floor = 'caverock'; wallIn = 'caverock'; wallOut = 'caverock'; ceil = 'caverock'; }
+    if (style === 'cave') { floor = 'cavefloor'; wallIn = 'caverock'; wallOut = 'caverock'; ceil = 'caverock'; }
     else { floor = 'sewerflag'; wallIn = 'brick'; wallOut = 'brick'; ceil = 'brick'; }
     if (style !== 'vault' && sewerMud(room)) floor = 'sludge';
   }
@@ -637,6 +637,7 @@ export function buildScene(world, layout, materials, assets = null) {
   const rooms = new Map();// vnum -> {room, cell, center, outdoor, materials, sides}
   const decor = [];       // handed to actors.js
   const mistCells = [];   // cell centres the ground mist lies over
+  const skyHoles = [];    // the tops of the sewer's air shafts
   const cabins = [];      // world rects a cabin shell stands on: keep them clear
 
   const addCollider = (x0, x1, z0, z1, y0, y1) => colliders.push({ x0, x1, z0, z1, y0, y1 });
@@ -784,7 +785,7 @@ export function buildScene(world, layout, materials, assets = null) {
         batcher, instances, chunk, room, cell, pos, sides, layout,
         floorHoles: roomHoles.filter((h) => !h.ceiling),
         shaft: stairPlans.some((plan) => plan.lower === cell),
-        addCollider, addPlatform, lights, decor, portals,
+        addCollider, addPlatform, lights, decor, portals, skyHoles,
       });
       continue;
     }
@@ -988,6 +989,9 @@ export function buildScene(world, layout, materials, assets = null) {
         batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + CEIL, z: pos.z,
         half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
       });
+      if (instances && sewerStyle(room) === 'cave') {
+        buildCaveLining({ instances, chunk, room, pos, sides, roofed: !roomHoles.some((h) => h.ceiling) });
+      }
       // ...and a room with earth over it has no roof either. Same family as the
       // windows below, and it was visible: a tomb sits 5.65 m under the
       // graveyard and `buildRoof` puts its ridge at CEIL + SLAB + span/2 above
@@ -1087,7 +1091,7 @@ export function buildScene(world, layout, materials, assets = null) {
       buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor });
       continue;
     }
-    buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt, cellKey });
+    buildAlley({ batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt, cellKey });
   }
 
   for (const plan of stairPlans) {
@@ -1221,6 +1225,7 @@ export function buildScene(world, layout, materials, assets = null) {
   const mist = buildMist(group, mistCells);
 
   const zones = buildZones(group, groundY, groundHoles);
+  if (skyHoles.length) zones.deep.add(buildSkyHoles(skyHoles));
   const stats = batcher.finish(zones.surface, zones.route);
   if (instances) {
     markIndoorAssets(assets);
@@ -1327,8 +1332,9 @@ const INDOOR_ASSETS = [
   'wall_solid', 'wall_door', 'wall_corner', 'wall_roof',
   'temple_wall_solid', 'temple_wall_door', 'temple_corner', 'temple_roof', 'temple_column',
   // Seven metres under the street there is no sunlit ground to bounce off.
-  'sewer_tunnel', 'sewer_arm', 'sewer_hub', 'sewer_hub_end', 'sewer_chamber', 'sewer_shaft',
+  'sewer_tunnel', 'sewer_arm', 'sewer_hub', 'sewer_hub_end', 'sewer_chamber', 'sewer_chamber_air', 'sewer_shaft',
   'sewer_wall_open', 'sewer_wall_solid', 'sewer_shaft_open', 'sewer_shaft_solid', 'sewer_door_end',
+  'cave_wall', 'cave_wall_door', 'cave_wall_long', 'cave_wall_long_door', 'cave_roof',
 ];
 
 function markIndoorAssets(assets) {
@@ -3241,7 +3247,7 @@ function buildRailFence({ batcher, chunk, pos, dir, addCollider }) {
  * buildings that fill the cells beside it become the street frontage; between
  * two indoor rooms it gets walls and a ceiling and becomes a corridor.
  */
-function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null }) {
+function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null }) {
   const enclosed = alleyEnclosed(link);
   batcher.indoor = enclosed;
   const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
@@ -3259,6 +3265,20 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
   const level = link.from.level;
   const y = level * LEVEL_H;
   const chain = [link.from, ...link.path, link.to];
+  const caveRun = enclosed && sewerStyle(link.from.room) === 'cave' && sewerStyle(link.to.room) === 'cave';
+  if (instances && caveRun) {
+    // Each end, where the corridor meets a cave room's outer wall: a face of
+    // rock with the doorway in it, looking down the corridor.
+    for (const [end, next] of [[link.from, chain[1]], [link.to, chain[chain.length - 2]]]) {
+      const d = dirBetween(end, next);
+      const [dx, , dz] = DIR_STEP[d];
+      const at = worldOf(end);
+      const face = ROOM / 2 + WALL_IN + WALL_OUT;
+      instances.add('cave_wall_long_door', {
+        x: at.x + dx * face, y, z: at.z + dz * face, rotY: FACE_ROT[(d + 2) % 4],
+      }, chunkOf(end));
+    }
+  }
 
   for (let i = 1; i < chain.length - 1; i++) {
     const c = chain[i];
@@ -3321,7 +3341,24 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
         wz - (along ? CELL : t) / 2, wz + (along ? CELL : t) / 2, y, y + CEIL);
     }
     batcher.add(box(CELL, SLAB, CELL), mats.ceil, place(pos.x, y + CEIL + SLAB / 2, pos.z), { chunk, ao: () => 0.6 });
-    if (hash3(c.x, c.z, level, 14) > 0.45) {
+    // A passage between two caves is a cave too: the same rock lining the
+    // rooms get, stretched to the corridor's thirteen metres.
+    if (instances && caveRun) {
+      for (let dir = 0; dir < 4; dir++) {
+        if (openDirs.has(dir)) continue;
+        const [dx, , dz] = DIR_STEP[dir];
+        instances.add('cave_wall_long', {
+          x: pos.x + dx * (HALF - 0.5), y, z: pos.z + dz * (HALF - 0.5), rotY: FACE_ROT[dir],
+        }, chunk);
+      }
+      instances.add('cave_roof', {
+        x: pos.x, y: y + CEIL, z: pos.z, rotY: Math.floor(hash3(c.x, c.z, level, 15) * 4) * Math.PI / 2,
+        scaleX: CAVE_STRETCH, scaleZ: CAVE_STRETCH,
+      }, chunk);
+    }
+    // Not in a cave: nobody keeps torches burning in the basilisk's tunnels,
+    // and a sconce would stand inside the rock lining.
+    if (!caveRun && hash3(c.x, c.z, level, 14) > 0.45) {
       const wallDir = [0, 1, 2, 3].find((d) => !openDirs.has(d));
       if (wallDir !== undefined) {
         const [dx, , dz] = DIR_STEP[wallDir];
@@ -3339,7 +3376,7 @@ function buildAlley({ batcher, link, worldOf, chunkOf, addCollider, addPlatform,
 
 /** Everything the sewer is assembled from; tools/blender/sewer.py makes them. */
 const SEWER_KIT = [
-  'sewer_tunnel', 'sewer_arm', 'sewer_hub', 'sewer_hub_end', 'sewer_chamber', 'sewer_shaft',
+  'sewer_tunnel', 'sewer_arm', 'sewer_hub', 'sewer_hub_end', 'sewer_chamber', 'sewer_chamber_air', 'sewer_shaft',
   'sewer_wall_open', 'sewer_wall_solid', 'sewer_shaft_open', 'sewer_shaft_solid',
   'sewer_grate', 'sewer_door_end', 'sewer_pit', 'sewer_ladder', 'town_well',
 ];
@@ -3401,6 +3438,38 @@ function sewerCap({ instances, chunk, pos, dir, y, addCollider }) {
   addCollider(r.x0, r.x1, r.z0, r.z1, y, y + 4.2);
 }
 
+/** The prose of a junction with a shaft to the open air over it. */
+const SEWER_AIR = /\bair ?shaft\b|\bshaft leading up\b|\bup into sunlight\b/i;
+/** Where the shaft in `sewer_chamber_air` stops: see tools/blender/sewer.py. */
+const AIR_TOP = 6.4;
+
+/**
+ * The sky at the top of an air shaft: a disc that shows the hour's own
+ * horizon colour, read off the scene's fog at draw time -- the same colour the
+ * town's haze is -- and divided by the exposure so it stands at a sky's
+ * brightness whatever the hour. Pale by day, deep blue at night. It is the
+ * only thing underground that tells the time without a stair to climb.
+ */
+function buildSkyHoles(spots) {
+  const material = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+  const tint = new THREE.Color();
+  const geometry = new THREE.CircleGeometry(0.62, 20);
+  geometry.rotateX(Math.PI / 2);
+  const group = new THREE.Group();
+  group.name = 'air shafts';
+  for (const s of spots) {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(s.x, s.y, s.z);
+    mesh.onBeforeRender = (renderer, scene) => {
+      if (!scene.fog) return;
+      tint.copy(scene.fog.color).multiplyScalar(0.85 / Math.max(0.05, renderer.toneMappingExposure));
+      material.color.copy(tint);
+    };
+    group.add(mesh);
+  }
+  return group;
+}
+
 /**
  * How many torches the room's own words burn: "lit by a single torch set in
  * the wall", "the room is lit by five torches", "on the wall is a torch
@@ -3420,11 +3489,11 @@ function sewerTorches(room) {
  * strange light flowing from there". Cold, even and sourceless, hung under
  * the crown -- which is exactly what it is described as.
  */
-const SEWER_GLOW = /\b(odd light|lit up|glitter\w*|strange light|lot of light|filled with light|bright as daylight)\b/i;
+const SEWER_GLOW = /\b(odd light|lit up|glitter\w*|glow\w*|strange light|some light|lot of light|filled with light|bright as daylight|all bright)\b/i;
 
 function buildSewerChamber({
   batcher, instances, chunk, room, cell, pos, sides, layout, floorHoles, shaft,
-  addCollider, addPlatform, lights, decor, portals,
+  addCollider, addPlatform, lights, decor, portals, skyHoles,
 }) {
   const y = pos.y;
   const mud = sewerMud(room);
@@ -3522,7 +3591,12 @@ function buildSewerChamber({
     }
   }
 
-  instances.add(shaft ? 'sewer_shaft' : 'sewer_chamber', { x: pos.x, y, z: pos.z, rotY: 0 }, chunk);
+  // "Right under what you'd think was an air shaft", "above you an air shaft
+  // leads up into sunlight": a round hole in the crown with the hour's sky at
+  // the top of it.
+  const air = !shaft && SEWER_AIR.test(room.description);
+  instances.add(shaft ? 'sewer_shaft' : (air ? 'sewer_chamber_air' : 'sewer_chamber'), { x: pos.x, y, z: pos.z, rotY: 0 }, chunk);
+  if (air) skyHoles.push({ x: pos.x, y: y + AIR_TOP, z: pos.z });
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       const cx = pos.x + sx * (SW_CA - 0.3); const cz = pos.z + sz * (SW_CA - 0.3);
@@ -3547,6 +3621,11 @@ function buildSewerChamber({
   sewerDressing({
     room, style: 'vault', pos, y, blind, sides, wall: SW_CA, ceil: 5.0,
     instances, chunk, decor, lights, addCollider,
+    // Somebody works down here -- there is a store room, a guard room, a
+    // ladder "left here so that you can climb up" -- so a junction the mud
+    // says nothing about keeps a torch about half the time. Not by the DARK
+    // flag: 170 of the area's 177 rooms carry it, so it says nothing.
+    kept: SEWER_GLOW.test(room.description) || hash3(room.vnum, 91, 0, 7) < 0.45 ? 0 : 1,
   });
 }
 
@@ -3558,7 +3637,7 @@ function buildSewerChamber({
  * `wall` is how far the inner face of the walls is from the middle: 4.5 in a
  * chamber, 5 in a walled room. `blind` is the walls with nothing in them.
  */
-function sewerDressing({ room, style, pos, y, blind, sides, wall, ceil, instances, chunk, decor, lights, addCollider }) {
+function sewerDressing({ room, style, pos, y, blind, sides, wall, ceil, instances, chunk, decor, lights, addCollider, kept = 0 }) {
   const text = `${room.name} ${room.description}`;
   const rand = (k, salt) => hash3(room.vnum, k, 0, salt);
   const put = (name, along, across, dir, spin, scale = 1) => {
@@ -3576,7 +3655,7 @@ function sewerDressing({ room, style, pos, y, blind, sides, wall, ceil, instance
     if (blind.includes(d)) continue;
     for (const across of [wall - 1.05, -(wall - 1.05)]) spots.push([d, across]);
   }
-  const torches = Math.min(sewerTorches(room), spots.length);
+  const torches = Math.min(Math.max(sewerTorches(room), kept), spots.length);
   const sconce = instances.library.get('torch_sconce');
   for (let i = 0; i < torches; i++) {
     const [dir, across] = spots[i];
@@ -3660,6 +3739,31 @@ function sewerDressing({ room, style, pos, y, blind, sides, wall, ceil, instance
   }
 }
 
+/** The cave roof is authored for a room; a corridor cell is 13 m square. */
+const CAVE_STRETCH = 13 / 10.6;
+
+/**
+ * Rock over the four walls and under the ceiling of a cave room, so the box
+ * it is built as stops showing: its straight corners and its flat walls were
+ * what read as a level editor's room with a rock texture on it. A wall with a
+ * way through it gets the panel with the opening in it.
+ */
+function buildCaveLining({ instances, chunk, room, pos, sides, roofed }) {
+  for (let dir = 0; dir < 4; dir++) {
+    const side = sides[dir];
+    const open = !!side && ['alley', 'portal', 'gate'].includes(side.kind);
+    const [dx, , dz] = DIR_STEP[dir];
+    instances.add(open ? 'cave_wall_door' : 'cave_wall', {
+      x: pos.x + dx * ROOM / 2, y: pos.y, z: pos.z + dz * ROOM / 2, rotY: FACE_ROT[dir],
+    }, chunk);
+  }
+  if (roofed) {
+    instances.add('cave_roof', {
+      x: pos.x, y: pos.y + CEIL, z: pos.z, rotY: Math.floor(hash3(room.vnum, 83, 0, 2) * 4) * Math.PI / 2,
+    }, chunk);
+  }
+}
+
 /** The walled rooms and caves of the sewer, dressed from the same words. */
 function buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider }) {
   if (!instances) return;
@@ -3688,6 +3792,7 @@ function buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addColl
   // Mud and water run on between two rooms that both have them.
   const mud = sewerMud(link.from.room) && sewerMud(link.to.room);
   const flood = sewerFlood(link.from.room) && sewerFlood(link.to.room);
+  const sconce = !mud && !flood ? instances.library.get('torch_sconce') : null;
 
   for (let i = 1; i < chain.length - 1; i++) {
     const c = chain[i];
@@ -3700,6 +3805,18 @@ function buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addColl
       instances.add('sewer_tunnel', { x: pos.x, y, z: pos.z, rotY: FACE_ROT[open[0] % 2] }, chunk);
       sewerRun({ pos, dir: open[0], from: -HALF, to: HALF, y, addCollider, addPlatform });
       if (mud || flood) sewerSheet({ batcher, chunk, pos, dir: open[0], from: -HALF, to: HALF, y, flood });
+      // Now and then a torch on the tunnel wall, low enough to sit on the
+      // upright part of it rather than on the turn of the vault.
+      if (sconce && hash3(c.x, c.z, level, 19) > 0.74) {
+        const side = (open[0] + (hash3(c.x, c.z, level, 23) > 0.5 ? 1 : 3)) % 4;
+        const face = sewerAt(pos, side, SW_A - 0.02, 0);
+        const cup = sewerAt(pos, side, SW_A - 0.33, 0);
+        const flameY = y + 2.15;
+        instances.add('torch_sconce', { x: face.x, y: flameY + 0.26 - sconce.bounds.max.y, z: face.z, rotY: FACE_ROT[side] }, chunk);
+        decor.push({ kind: 'torch', bare: true, x: cup.x, y: flameY, z: cup.z });
+        const [dx, , dz] = DIR_STEP[side];
+        lights.push({ x: cup.x - dx * 0.3, y: flameY + 0.4, z: cup.z - dz * 0.3, color: 0xffa347, intensity: 7, radius: 11, flicker: true });
+      }
       continue;
     }
     instances.add('sewer_hub', { x: pos.x, y, z: pos.z, rotY: 0 }, chunk);

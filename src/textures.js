@@ -553,7 +553,10 @@ const SURFACES = {
     const cols = header ? 20 : 10;
     const id = hash2(col % cols, course, 64, 401);
     const edge = Math.min(fx - j, len - j - fx, fy - j, 0.075 - j - fy);
-    const arris = clamp01(edge / 0.006);
+    // A worn arris, 12 mm: a sharp one is a two-texel cliff in the height
+    // field, and under a raking torch the vault drew every joint as a bright
+    // hairline, which at a distance crawled like moire.
+    const arris = clamp01(edge / 0.012);
     const grain = fbm(u * 70, v * 70, 70, 409, 3);
     // Every brick its own burn: most a dull red-brown, the odd one over-fired
     // near purple-black, the odd one pale where it came from the edge of the
@@ -571,7 +574,7 @@ const SURFACES = {
     const face = mix(c, rgb(0x241a15), (1 - arris) * 0.12 + grain * 0.08);
     const tone = inBrick ? face : mortar;
     s.color = mix(tone, rgb(0xa9a595), weep * 0.35);
-    s.height = inBrick ? 0.6 + arris * 0.25 + grain * 0.1 : 0.18;
+    s.height = inBrick ? 0.45 + arris * 0.25 + grain * 0.1 : 0.3;
     // Damp brick holds a dull sheen; dry mortar is chalk.
     s.rough = inBrick ? 0.78 + grain * 0.12 + grime * 0.08 : 0.95;
   },
@@ -626,6 +629,47 @@ const SURFACES = {
     s.color = mix(c, rgb(0x221f18), pool * 0.6);
     s.height = lump * 0.6 + fine * 0.1;
     s.rough = 0.62 + (1 - pool) * 0.3 - pool * 0.4;
+  },
+
+  /**
+   * Cave rock. Not the cellular `rock`: that is a pavement of angular cells
+   * with a dark crack round every one, which on a wall reads as crazy paving
+   * -- tiles, not a cave. Limestone in a wet cave is banded and fractured and
+   * stained, so: soft strata running across (v is height on a wall), a few
+   * long fractures rather than a net of them, and mineral colour -- ochre
+   * iron, pale calcite -- weeping down.
+   */
+  caverock(u, v, s) {
+    const warp = fbm(u * 4, v * 4, 4, 497, 3);
+    // Beds a few centimetres to a couple of decimetres thick, gently warped.
+    const strata = Math.sin((v * 11 + warp * 2.2 + fbm(u * 9, v * 9, 9, 501, 2) * 0.8) * Math.PI * 2) * 0.5 + 0.5;
+    const body = fbm(u * 6, v * 6, 6, 499, 4);
+    const pits = fbm(u * 24, v * 24, 24, 503, 3);
+    const fine = fbm(u * 70, v * 70, 70, 505, 2);
+    const crack = clamp01(1 - Math.abs(fbm(u * 4 + 0.7, v * 3, 4, 509, 3) - 0.5) * 26);
+    const ochre = clamp01(fbm(u * 3, v * 1.2, 3, 521, 3) * 2.3 - 1.3);
+    const calcite = clamp01(fbm(u * 8, v * 2, 8, 523, 3) * 2.5 - 1.5);
+    let c = mix(rgb(0x4a453d), rgb(0x736b5e), body * 0.65 + pits * 0.27 + strata * 0.08);
+    c = mix(c, rgb(0x7d5c38), ochre * 0.5);
+    c = mix(c, rgb(0xa39d8f), calcite * 0.45);
+    c = mix(c, rgb(0x2c2823), crack * 0.32);
+    const shade = 0.9 + fine * 0.2;
+    s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
+    s.height = body * 0.3 + pits * 0.3 + strata * 0.05 + fine * 0.1 - crack * 0.22;
+    s.rough = 0.7 + fine * 0.2 - calcite * 0.25;
+  },
+
+  /** A cave floor: grit and pebbles, and the wet where the drips land. */
+  cavefloor(u, v, s) {
+    const [, edge, id] = cellular(u * 26, v * 26, 26, 541, 0.5);
+    const pebble = clamp01(edge * 9);
+    const grit = fbm(u * 60, v * 60, 60, 547, 2);
+    const damp = clamp01(fbm(u * 3, v * 3, 3, 557, 4) * 2 - 0.7);
+    let c = mix(rgb(0x4a443a), rgb(0x6d665a), grit * 0.6 + id * 0.4);
+    c = mix(mix(rgb(0x3a352e), rgb(0x5a544a), grit), c, pebble);
+    s.color = mix(c, rgb(0x2c2823), damp * 0.5);
+    s.height = pebble * (0.4 + id * 0.3) + grit * 0.15;
+    s.rough = 0.9 - damp * 0.55;
   },
 
   /** Old bone: ivory gone the colour of the floor it has lain on. */
@@ -805,14 +849,15 @@ const RECIPES = {
   // The sewer. `buried` hands their ambient, reflections and fog to the fixed
   // underground terms above instead of the sky, so `env` means nothing here.
   // The brick's tile is the bond's own 2.25 m, see the surface.
-  brick: { surface: 'brick', scale: 2.25, normalScale: 0.65, env: 1, wet: 0, detail: 0.5, buried: true },
+  brick: { surface: 'brick', scale: 2.25, normalScale: 0.5, env: 1, wet: 0, detail: 0.5, buried: true },
   ashlar: { surface: 'ashlar', scale: 3.0, normalScale: 0.6, env: 1, wet: 0, detail: 0.5, buried: true },
   sewage: { surface: 'sewage', scale: 3.6, normalScale: 0.4, env: 1, wet: 0, detail: 0.1, buried: true },
   sludge: { surface: 'sludge', scale: 3.0, normalScale: 0.7, env: 1, wet: 0, detail: 0.4, buried: true },
   // The town's own flags, rock and iron, as they are below ground: the same
   // surfaces, lit the way everything down there is lit.
   sewerflag: { surface: 'flagstone', scale: 2.6, normalScale: 0.85, env: 1, wet: 0, detail: 0.5, buried: true },
-  caverock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 1, wet: 0, detail: 0.6, buried: true },
+  caverock: { surface: 'caverock', scale: 4.4, normalScale: 1.0, env: 1, wet: 0, detail: 0.6, buried: true },
+  cavefloor: { surface: 'cavefloor', scale: 3.2, normalScale: 0.8, env: 1, wet: 0, detail: 0.6, buried: true },
   rustiron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1, wet: 0, detail: 0.3, buried: true },
   bone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 1, wet: 0, detail: 0.3, buried: true },
 };
@@ -1032,8 +1077,12 @@ function decorate(material, recipe, macro, grain) {
         #ifdef DIKU_BURIED
           // No sky down here: a fixed fill for the ambient and a near-black
           // for anything glossy to mirror, whatever the hour.
-          irradiance = dikuBuriedIrradiance;
-          iblIrradiance = dikuBuriedIrradiance;
+          // A little more from above than from below, the way a room lit by
+          // torches on its walls is: a fill with no direction at all modelled
+          // nothing, and a vault read as flat as the floor under it.
+          float dikuUpFill = 0.8 + 0.2 * dot( geometryNormal, viewMatrix[ 1 ].xyz );
+          irradiance = dikuBuriedIrradiance * dikuUpFill;
+          iblIrradiance = irradiance;
           radiance = dikuBuriedRadiance;
         #endif
         #include <lights_fragment_end>
