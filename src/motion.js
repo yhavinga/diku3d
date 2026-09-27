@@ -722,6 +722,11 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
         // A flight waits for the blow that caused it to be seen landing.
         m.stage = order.wait > 0 ? 'wait' : 'walk';
         if (m.stage === 'walk') { m.path = order.route.points.slice(); m.pi = 0; }
+      } else {
+        // A journey interrupted half-way into an archway is over: 'out' is
+        // the stage that skips steering, and a skeleton caught in it fought
+        // a whole fight without once turning to face its opponent.
+        m.stage = null;
       }
     }
     m.fighting = false;
@@ -1572,6 +1577,12 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       }
       fig.object.visible = true;
 
+      // Turning is this frame's news or none: steer (or the climb) sets it
+      // when a body really is coming round. Left standing from the last
+      // frame it steered, it held a 0.35 walk under figures that were
+      // sitting, fading through an arch, or just standing -- feet treading
+      // the spot.
+      m.turning = 0;
       if (!m.dead) {
         if (m.climb) tickClimb(fig, dt);
         else {
