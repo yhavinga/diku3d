@@ -2181,6 +2181,12 @@ export function buildScene(world, layout, materials, assets = null) {
  */
 const REGION = 64;
 
+/**
+ * Underground regions are smaller, because from the street only the one
+ * under a stair can be seen: see `ZONE_SHAFT_VIEW`.
+ */
+const DEEP_REGION = 16;
+
 function regions(hoodBox) {
   const inHood = (x, z) => !!hoodBox && x >= hoodBox.x0 && x <= hoodBox.x1 && z >= hoodBox.z0 && z <= hoodBox.z1;
   return (chunk) => {
@@ -2189,8 +2195,8 @@ function regions(hoodBox) {
     const level = Number(m[1]);
     const span = m[2] ? 8 : 4;
     const x = Number(m[3]) * span; const z = Number(m[4]) * span;
+    if (level < 0) return `d:${Math.floor(x / DEEP_REGION)},${Math.floor(z / DEEP_REGION)}`;
     const rx = Math.floor(x / REGION); const rz = Math.floor(z / REGION);
-    if (level < 0) return `d:${rx},${rz}`;
     // Upper storeys over the neighborhood's streets are chunked like the
     // town's; they belong with the district all the same.
     if (m[2] || inHood(x + span / 2, z + span / 2)) return `h:${rx},${rz}`;
@@ -2217,6 +2223,8 @@ function regions(hoodBox) {
  * being hidden is the half with a vault or a street between it and the eye.
  */
 const ZONE_SHAFT_REACH = 10;
+/** How far from the eye an underground region must reach to be drawn through a shaft. */
+const ZONE_SHAFT_VIEW = 40;
 
 function buildZones(group, groundY, openings, district = null) {
   const surface = new THREE.Group();
@@ -2230,11 +2238,38 @@ function buildZones(group, groundY, openings, district = null) {
   surface.add(hood);
   const centres = openings.map((r) => ({ x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2 }));
   const reach2 = ZONE_SHAFT_REACH * ZONE_SHAFT_REACH;
+  // The underground by region, each with the ground it lies under.
+  const deepRegions = [];
+  const deepRegion = (key) => {
+    let entry = deepRegions.find((r) => r.key === key);
+    if (!entry) {
+      const [rx, rz] = key.slice(2).split(',').map(Number);
+      const span = DEEP_REGION * CELL;
+      const group = new THREE.Group();
+      group.name = `underground ${key.slice(2)}`;
+      deep.add(group);
+      entry = {
+        key, group,
+        x0: rx * span - HALF, x1: (rx + 1) * span - HALF, z0: rz * span - HALF, z1: (rz + 1) * span - HALF,
+      };
+      deepRegions.push(entry);
+    }
+    return entry.group;
+  };
+  const view2 = ZONE_SHAFT_VIEW * ZONE_SHAFT_VIEW;
   const update = (eye) => {
     const below = eye.y < groundY - 0.25;
     const shaft = centres.some((c) => (c.x - eye.x) ** 2 + (c.z - eye.z) ** 2 < reach2);
     deep.visible = below || shaft;
     surface.visible = !below || shaft;
+    // Down a stair from the street you see the stair and the room at its
+    // foot, not the sewer a hundred metres off that frustum culling would
+    // draw anyway: 176 draw calls of it from the graveyard's tomb path.
+    for (const r of deepRegions) {
+      const dx = Math.max(r.x0 - eye.x, 0, eye.x - r.x1);
+      const dz = Math.max(r.z0 - eye.z, 0, eye.z - r.z1);
+      r.group.visible = below || dx * dx + dz * dz < view2;
+    }
     if (district) {
       const dx = Math.max(district.x0 - eye.x, 0, eye.x - district.x1);
       const dz = Math.max(district.z0 - eye.z, 0, eye.z - district.z1);
@@ -2258,12 +2293,15 @@ function buildZones(group, groundY, openings, district = null) {
   // child, so showing both here, before it reaches them, is enough; the main
   // pass puts the eye's own answer back.
   sensor.castShadow = true;
-  sensor.onBeforeShadow = () => { surface.visible = true; deep.visible = true; hood.visible = true; };
+  sensor.onBeforeShadow = () => {
+    surface.visible = true; deep.visible = true; hood.visible = true;
+    for (const r of deepRegions) r.group.visible = true;
+  };
   group.children.unshift(sensor);
   sensor.parent = group;
   return {
     surface, deep, update,
-    route: (region) => (region.startsWith('d:') ? deep : region.startsWith('h:') && district ? hood : surface),
+    route: (region) => (region.startsWith('d:') ? deepRegion(region) : region.startsWith('h:') && district ? hood : surface),
   };
 }
 
