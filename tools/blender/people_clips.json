@@ -46,6 +46,11 @@
    "frames": 90,
    "head_gap": 0.0288
   },
+  "lean": {
+   "duration": 4.0,
+   "frames": 96,
+   "head_gap": 0.1929
+  },
   "run": {
    "duration": 0.6666666666666666,
    "frames": 16,
@@ -54,6 +59,15 @@
    "slip_baked": 0.0033940263178553476,
    "stance": 0.36,
    "stride": 2.4641723335477552
+  },
+  "sit": {
+   "duration": 5.0,
+   "frames": 120
+  },
+  "talk": {
+   "duration": 3.0,
+   "frames": 72,
+   "head_gap": 0.2634
   },
   "walk": {
    "duration": 1.0833333333333333,
@@ -112,6 +126,11 @@
    "frames": 90,
    "head_gap": 0.033
   },
+  "lean": {
+   "duration": 4.0,
+   "frames": 96,
+   "head_gap": 0.2077
+  },
   "run": {
    "duration": 0.6666666666666666,
    "frames": 16,
@@ -120,6 +139,15 @@
    "slip_baked": 0.0016680703117721851,
    "stance": 0.36,
    "stride": 2.5998669394719958
+  },
+  "sit": {
+   "duration": 5.0,
+   "frames": 120
+  },
+  "talk": {
+   "duration": 3.0,
+   "frames": 72,
+   "head_gap": 0.2882
   },
   "walk": {
    "duration": 1.0833333333333333,
@@ -178,6 +206,11 @@
    "frames": 90,
    "head_gap": 0.0158
   },
+  "lean": {
+   "duration": 4.0,
+   "frames": 96,
+   "head_gap": 0.2985
+  },
   "run": {
    "duration": 0.6666666666666666,
    "frames": 16,
@@ -186,6 +219,15 @@
    "slip_baked": 0.003492684161621795,
    "stance": 0.36,
    "stride": 2.304029182528789
+  },
+  "sit": {
+   "duration": 5.0,
+   "frames": 120
+  },
+  "talk": {
+   "duration": 3.0,
+   "frames": 72,
+   "head_gap": 0.4618
   },
   "walk": {
    "duration": 1.0833333333333333,

@@ -762,6 +762,10 @@ STANCES = {
     # Left foot leading, right foot back and turned out: a swordsman's stance.
     "guard": {"L": ((0.030, -0.200), 16.0, 0.0), "R": ((-0.040, 0.210), -38.0, 0.0)},
     "lunge": {"L": ((0.030, -0.330), 12.0, 0.0), "R": ((-0.040, 0.210), -38.0, 0.0)},
+    # Seated: both feet a pace forward of the hips, a little apart.
+    "sit": {"L": ((0.020, -0.340), 8.0, 0.0), "R": ((-0.020, -0.340), -8.0, 0.0)},
+    # Leaning on a wall: the left foot crossed in front of the right.
+    "lean": {"L": ((-0.080, -0.110), -10.0, 0.0), "R": ((0.010, 0.020), -8.0, 0.0)},
 }
 
 
@@ -1129,6 +1133,72 @@ def _stand_up(arm, bone, rot, frames):
     return best
 
 
+def anim_sit(arm):
+    """Five seconds seated on a bench: the hips down on a seat 0.46 m high
+    (at scale 1, a man's rig), feet planted a pace forward, hands on the
+    thighs, breathing -- and halfway through the right hand comes up to the
+    mouth with a cup and goes back down."""
+    rest = merge(HANG, {"spine": (6, 0, 0), "chest": (4, 0, 0), "neck": (-2, 0, 0), "head": (-4, 0, 0),
+                        "upperarm.L": (-34, 0, -8), "upperarm.R": (-34, 0, 8),
+                        "forearm.L": (-44, 0, 0), "forearm.R": (-44, 0, 0),
+                        "hand.L": (14, 0, 0), "hand.R": (14, 0, 0)})
+    sip = merge(rest, {"upperarm.R": (-44, 0, 18), "forearm.R": (-128, 0, 0), "hand.R": (-24, 0, 0),
+                       "head": (-12, 0, 0), "neck": (-4, 0, 0), "chest": (1, 0, 0)})
+    breathe = merge(rest, {"chest": (2, 0, 0), "spine": (5, 0, 0), "head": (-2, 5, 0)})
+    ls = _leg_scale(arm)
+    drop = arm.data.bones["hips"].head_local.z - (SEAT * ls + 0.05 * ls)
+    STANCES["sit"] = {"L": ((0.020, -0.340 * ls), 8.0, 0.0), "R": ((-0.020, -0.340 * ls), -8.0, 0.0)}
+    hips = ((0.0, 0.10 * ls, -drop), -4.0, 0.0, 0.0)
+    k = [(1, rest, hips, "sit"), (22, breathe, hips, "sit"), (44, rest, hips, "sit"),
+         (58, merge(rest, {"head": (-4, -6, 0)}), hips, "sit"),
+         (70, sip, hips, "sit"), (84, sip, hips, "sit"), (96, rest, hips, "sit"),
+         (108, breathe, hips, "sit"), (121, rest, hips, "sit")]
+    return "sit", (1, _clip(arm, "sit", k))
+
+
+# The seat the sit is written for, in metres at scale 1 for a man's legs
+# (scaled by leg length for the others): the hip joint sits 0.05 m above it.
+SEAT = 0.46
+
+# Arms folded across the chest, found by search against each hand's target
+# on the far side of the chest and the forearms' clearance of it.
+FOLDED = {"upperarm.R": (-30, -60, 30), "forearm.R": (-100, 0, 0), "hand.R": (10, 0, 0),
+          "upperarm.L": (-50, 60, -50), "forearm.L": (-100, 0, 0), "hand.L": (10, 0, 0)}
+
+
+def anim_lean(arm):
+    """Four seconds leaning back against a wall: the shoulders on it, the
+    hips a hand's breadth off it, arms folded, the left foot crossed over in
+    front, the head turning now and then to watch the street."""
+    base = merge(HANG, FOLDED, {"spine": (-5, 0, 0), "chest": (-4, 0, 0), "neck": (4, 0, 0), "head": (2, 0, 0)})
+    hips = ((0.0, 0.05, -0.012), -4.0, 0.0, 1.5)
+    k = [(1, base, hips, "lean"),
+         (30, merge(base, {"head": (4, 16, 0), "neck": (4, 8, 0), "chest": (-3, 0, 0)}), hips, "lean"),
+         (55, merge(base, {"head": (1, 12, 0), "neck": (3, 6, 0)}), hips, "lean"),
+         (75, merge(base, {"head": (0, -8, 0), "neck": (2, -4, 0), "chest": (-5, 0, 0)}), hips, "lean"),
+         (97, base, hips, "lean")]
+    return "lean", (1, _clip(arm, "lean", k))
+
+
+def anim_talk(arm):
+    """Three seconds of talking: the right hand opening out and back with
+    the phrase, the left joining it once, the head nodding and turning a
+    little, the weight shifting under it."""
+    base = merge(HANG, {"forearm.R": (-58, 0, 0), "upperarm.R": (-14, 0, 6), "hand.R": (-10, 0, 0)})
+    a = merge(base, {"upperarm.R": (-26, 0, 16), "forearm.R": (-78, 0, 0), "hand.R": (-30, 0, 0),
+                     "head": (4, 4, 0), "neck": (2, 2, 0)})
+    b = merge(base, {"upperarm.R": (-20, 0, 24), "forearm.R": (-66, 0, 0), "hand.R": (-44, 0, 0),
+                     "upperarm.L": (-16, 0, -18), "forearm.L": (-64, 0, 0), "hand.L": (-30, 0, 0),
+                     "head": (-3, -3, 0), "chest": (2, -4, 0)})
+    c = merge(base, {"upperarm.R": (-18, 0, 10), "forearm.R": (-70, 0, 0), "hand.R": (-20, 0, 0),
+                     "head": (6, 2, 0), "neck": (3, 0, 0)})
+    hips = ((0.0, 0.0, -0.004), 0.0, 0.0, 0.0)
+    k = [(1, base, hips, "rest"), (12, a, ((0.006, 0, -0.004), 0, 2, -1), "rest"), (24, c, hips, "rest"),
+         (38, b, ((-0.006, 0, -0.004), 0, -2, 1), "rest"), (52, a, hips, "rest"), (62, c, hips, "rest"),
+         (73, base, hips, "rest")]
+    return "talk", (1, _clip(arm, "talk", k))
+
+
 def anim_carry(arm, name):
     new_action(arm, name)
     pose(arm, 1, CARRY[name])
@@ -1140,7 +1210,7 @@ def anim_carry(arm, name):
 
 
 CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "block", "death",
-         "cast")
+         "cast", "sit", "lean", "talk")
 
 
 def make_all(arm, measure=True, P=None):
@@ -1154,7 +1224,7 @@ def make_all(arm, measure=True, P=None):
     baked = {}
     info = {}
     fns = [anim_idle, anim_idle2, anim_walk, anim_run, anim_fight, anim_attack, anim_attack2,
-           anim_hit, anim_block, anim_death, anim_cast]
+           anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk]
     for fn in fns:
         r = fn(arm)
         name, frames = r[0], r[1]
@@ -1179,7 +1249,7 @@ def make_all(arm, measure=True, P=None):
     for name, (samples, frames) in baked.items():
         commit(arm, name, samples)
     if measure and P is not None:
-        for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2"):
+        for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2", "lean", "talk"):
             arm.animation_data.action = bpy.data.actions[name]
             gap, f, limb = head_clearance(arm, P, (0, info[name]["frames"]))
             info[name]["head_gap"] = round(gap, 4)
