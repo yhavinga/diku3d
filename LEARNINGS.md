@@ -52,6 +52,23 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### No Man's Land (hood.are, tools/blender/hood.py)
+
+- **Two areas anchored off the same side of town fight over the same cells
+  in a breadth-first layout.** Hood and the desert both leave eastward: 38
+  of hood's 72 rooms had a desert room within two cells, and the desert's
+  river caves ran through the district. Count other-area rooms within two
+  cells of each area's rooms; `LAID_WHOLE` in layout.js lays such an area
+  on its own and sets it down whole on free ground along its anchor. Wall
+  Road becomes a 250 m street, which its prose supports.
+- **A dark albedo must be checked after dusk.** Soot at 0.10 went to pure
+  black in shade; find what is black by raycasting the pixels that read 0.
+- **Distance culling needs an A/B by hiding and diffing pixels.** Hood
+  cost 2,116 draw calls in the Market Square with nothing on screen; drawn
+  within 180 m in 8×8-cell chunks it changes 0 pixels there.
+- Gang territory comes from the prose, not the resets: the prose puts the
+  Trolls north of No Man's Land and the resets put the ogres there.
+
 ### Monsters (tools/blender/monsters.py)
 
 - **A leg that splays sideways must be rolled so its local X is the normal

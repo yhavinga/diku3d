@@ -1008,6 +1008,180 @@ const SURFACES = {
     // the sun as a disc, which is the glitter a stagnant pool has none of.
     s.rough = 0.22 + weed * 0.46 + scum * 0.16;
   },
+
+  // ----------------------------------------- the Dangerous Neighborhood ----
+
+  /**
+   * The town's coursed rubble after a fire has been at it. Soot does not lie
+   * evenly: it is laid down by smoke rising up a face, so it comes in tall
+   * tongues and not in round blotches -- the noise is stretched six to one
+   * up the wall. Where it is thickest the stone is a charcoal grey and dead
+   * matt; between the tongues the wall is grimed, never clean.
+   */
+  sootwall(u, v, s) {
+    SURFACES.stonewall(u, v, s);
+    // Blotches for where the fire was, streaked six to one up the wall for
+    // how the smoke climbed it. Periods chosen so the tile still wraps.
+    const blotch = fbm(u * 4, v * 4, 4, 701, 4);
+    const streak = fbm(u * 24, v * 4, 4, 703, 3);
+    const fleck = fbm(u * 40, v * 40, 40, 709, 2);
+    const soot = clamp01((blotch * 0.62 + streak * 0.38 - 0.37) * 3.2) * (0.82 + fleck * 0.3);
+    // The whole face is grimed first -- a fire does not leave clean stone
+    // anywhere near it -- and the tongues go darker again over that. Clean
+    // stone with black blotches on it read as a dalmatian, not as a fire.
+    const grime = fbm(u * 8, v * 8, 8, 707, 3);
+    // Measured, not guessed: at 0.10 mean albedo the district's walls went to
+    // RGB 0 in their own shade after dusk (0.76% of a night street, 3.3% of a
+    // ruin at dusk, against 0.01% anywhere in Midgaard). 0.16 keeps the soot
+    // and loses the holes.
+    const greyed = mix(s.color, rgb(0x3a3632), 0.72 + grime * 0.15);
+    // Floor at 0x221e1b: nothing under a sky reads zero, and burnt stone is a
+    // warm charcoal, not ink.
+    s.color = mix(greyed, rgb(0x2c2825), clamp01(soot * 0.7));
+    s.rough = Math.min(1, s.rough + soot * 0.12);
+  },
+
+  /**
+   * Charred timber: the surface of a burnt beam breaks into the blocky
+   * "alligator" checks that tell a fire investigator how long it burned --
+   * longer along the grain than across it, with the cracks deep and black and
+   * the tops of the blocks a dull, faintly silvered charcoal, ash still lying
+   * on the odd one. Height does the reading: at any distance a beam is a
+   * black shape, and up close the checks are what say it was wood.
+   */
+  charred(u, v, s) {
+    // Small checks, irregular, and all within a shade of each other: at any
+    // distance a charred beam is one black shape, and up close the checks
+    // are relief, not pattern. Rows of rectangles read as brickwork and big
+    // cells as crazy paving; both were tried.
+    const [, edge, id] = cellular(u * 26, v * 26, 26, 721, 0.48);
+    const crack = clamp01((edge - 0.015) * 16);
+    const grain = fbm(u * 2, v * 40, 2, 727, 3);
+    const ash = clamp01((((id * 5.3) % 1) - 0.9) * 8) * 0.4;
+    // As dark as it can be and still hold a value under the moon: at 0.07
+    // mean albedo the burnt cart and the stakes' points went to RGB 0 in No
+    // Man's Land at night.
+    const block = mix(rgb(0x2e2925), rgb(0x39332d), grain * 0.6 + id * 0.4);
+    s.color = mix(mix(rgb(0x241f1b), block, crack * 0.7 + 0.3), rgb(0x4d4843), ash * crack);
+    s.height = crack * (0.5 + id * 0.3) + grain * 0.1;
+    s.rough = 0.88 - crack * 0.1 + ash * 0.1;
+  },
+
+  /**
+   * Boards nailed over a window or a door: rough-sawn deal gone silver in the
+   * weather, which is the colour that says nobody has been here for years.
+   * Upright, a hand and a half wide, with a dark gap between each and a rust
+   * streak run down from every nail.
+   */
+  boards(u, v, s) {
+    const n = 11;
+    const gx = u * n;
+    const board = Math.floor(gx);
+    const fx = gx - board;
+    const id = hash2(board, 0, n, 739);
+    const grain = fbm(u * n * 22 + id * 9, v * 4, n * 22, 743, 3);
+    const gap = clamp01(Math.min(fx, 1 - fx) * 30);
+    const weather = fbm(u * 6, v * 6, 6, 751, 3);
+    let c = mix(rgb(0x4b453d), rgb(0x6e675c), id * 0.5 + grain * 0.35 + weather * 0.15);
+    // Two nails a board, at each rail, and the rust that has run from them.
+    const nail = Math.min(Math.abs(fx - 0.5), 0.5) < 0.09 ? 1 : 0;
+    const rail = Math.min(Math.abs((v * 2) % 1 - 0.18), Math.abs((v * 2) % 1 - 0.68));
+    const head = nail && rail < 0.012 ? 1 : 0;
+    const streak = nail * clamp01(1 - Math.abs(fx - 0.5) * 22)
+      * clamp01(1 - (((v * 2 + 0.82) % 1) * 3.2)) * 0.55;
+    c = mix(c, rgb(0x6a4128), streak);
+    c = mix(c, rgb(0x2a2420), head * 0.9);
+    s.color = mix(rgb(0x1f1b17), c, gap);
+    s.height = 0.25 + gap * 0.5 + grain * 0.12 - head * 0.2;
+    s.rough = 0.9 + grain * 0.08;
+  },
+
+  /**
+   * A street nobody mends. The town's setts, but a fifth of them gone --
+   * prised up for throwing, or sunk -- and what shows in the hole is packed
+   * dirt; weeds have taken the wider joints, and there is ash lying in drifts
+   * from the fires. The stones that are left sit at odd heights, which is
+   * what a raking light finds first.
+   */
+  brokencobble(u, v, s) {
+    SURFACES.cobble(u, v, s);
+    const [d1, edge, id] = cellular(u * 18, v * 18, 18, 11, 0.38);
+    const lost = ((id * 13.7) % 1) > 0.74;
+    const dirt = fbm(u * 30, v * 30, 30, 761, 2);
+    const weedy = clamp01(fbm(u * 9, v * 9, 9, 769, 2) * 2.2 - 1.0);
+    const ash = clamp01(fbm(u * 4, v * 4, 4, 773, 3) * 2.4 - 1.25);
+    if (lost) {
+      const earth = mix(rgb(0x3e3327), rgb(0x5d4b37), dirt);
+      s.color = mix(earth, rgb(0x495a2a), weedy * clamp01(1 - d1 * 2.4) * 0.8);
+      s.height = 0.12 + dirt * 0.1;
+      s.rough = 0.95;
+    } else {
+      const grout = clamp01((edge - 0.012) * 26);
+      // Weeds in the joints, not on the stones.
+      s.color = mix(s.color, rgb(0x46552a), weedy * (1 - grout) * 0.9);
+      s.height += (((id * 3.1) % 1) - 0.5) * 0.14;
+    }
+    s.color = mix(s.color, rgb(0x6e6a64), ash * 0.55);
+  },
+
+  /**
+   * Waste ground: an over-grown lot, a plaza never finished. Packed dry earth
+   * with gravel in it, dead grass in drifts and weeds coming through in
+   * clumps -- darker and duller than the `dirt` of a farm track, which under
+   * a noon sun came out as beach sand.
+   */
+  wasteground(u, v, s) {
+    const lumps = fbm(u * 12, v * 12, 12, 811, 3);
+    const grass = clamp01(fbm(u * 6, v * 6, 6, 813, 3) * 2.2 - 0.85);
+    const weed = clamp01(fbm(u * 18, v * 18, 18, 817, 3) * 2.6 - 1.45);
+    const [, edge, id] = cellular(u * 30, v * 30, 30, 819, 0.5);
+    const stone = clamp01((edge - 0.02) * 10) * (((id * 7.1) % 1) > 0.93 ? 1 : 0);
+    const blade = fbm(u * 90, v * 90, 90, 823, 2);
+    let c = mix(rgb(0x3d3326), rgb(0x564838), lumps);
+    c = mix(c, mix(rgb(0x5b5236), rgb(0x7a6d48), blade), grass * 0.85);
+    c = mix(c, rgb(0x3c4a24), weed * 0.8);
+    c = mix(c, rgb(0x5e5850), stone * 0.5);
+    s.color = c;
+    s.height = lumps * 0.4 + grass * blade * 0.25 + stone * 0.3 + weed * 0.15;
+    s.rough = 0.93 - stone * 0.1;
+  },
+
+  /**
+   * Cut crystal, as a statue is carved from it: pale, cold, and smooth enough
+   * that what you see of it is mostly the sky -- with the fractures of a
+   * smashing through it as bright planes. Opaque, because the town has no
+   * refraction to give it; the environment does the work.
+   */
+  crystal(u, v, s) {
+    const [, edge] = cellular(u * 5, v * 5, 5, 801, 0.5);
+    const frac = clamp01(1 - edge * 12);
+    const cloud = fbm(u * 4, v * 4, 4, 803, 3);
+    s.color = mix(mix(rgb(0x9fb4bf), rgb(0xc9d9e0), cloud), rgb(0xeef4f6), frac * 0.7);
+    s.height = 0.5 + cloud * 0.1 - frac * 0.2;
+    s.rough = 0.06 + frac * 0.2 + cloud * 0.05;
+    s.metal = 0.15;
+  },
+
+  /**
+   * The floor of a burnt-out room: fine grey ash over whatever the floor was,
+   * with charcoal lumps, and here and there a brick or a tile that came down
+   * with the roof. Dry and matt all through.
+   */
+  ash(u, v, s) {
+    const drift = fbm(u * 6, v * 6, 6, 781, 4);
+    const fine = fbm(u * 55, v * 55, 55, 787, 2);
+    const [, edge, id] = cellular(u * 30, v * 30, 30, 797, 0.5);
+    const lump = clamp01((edge - 0.05) * 8) * (((id * 7.7) % 1) > 0.8 ? 1 : 0);
+    const brick = ((id * 3.3) % 1) > 0.93 ? 1 : 0;
+    // Ash is pale where it lies fresh, but a floor of it has been rained on,
+    // walked through and mixed with the char: at the old 0x8a857c it read as
+    // snow.
+    let c = mix(rgb(0x34312d), rgb(0x57534c), drift * 0.8 + fine * 0.2);
+    c = mix(c, brick ? rgb(0x5e3a2a) : rgb(0x1c1916), lump);
+    s.color = c;
+    s.height = drift * 0.3 + fine * 0.1 + lump * 0.4;
+    s.rough = 0.96 - lump * 0.1;
+  },
 };
 
 // -------------------------------------------------------------- baking ----
@@ -1175,6 +1349,19 @@ const RECIPES = {
   frond: { surface: 'frond', scale: 1.2, normalScale: 0.5, env: 0.5, wet: 0, detail: 0.3 },
   rope: { surface: 'rope', scale: 0.3, normalScale: 0.6, env: 0.4, wet: 0, detail: 0.2 },
   cavewater: { surface: 'cavewater', scale: 4, normalScale: 0.3, env: 1, wet: 0, detail: 0.1, buried: true },
+  // The Dangerous Neighborhood. `brokencobble` keeps the street's damp -- the
+  // holes are where the water stands -- and `ash` has none, being indoors
+  // under no roof and dry as the fire left it. `oldbone` is the sewer's bone
+  // out in the daylight, for the gang's idol.
+  sootwall: { surface: 'sootwall', scale: 3.6, normalScale: 1.0, env: 0.6, wet: 0, detail: 0.55 },
+  charred: { surface: 'charred', scale: 1.4, normalScale: 0.55, env: 0.5, wet: 0, detail: 0.5 },
+  boards: { surface: 'boards', scale: 2.0, normalScale: 0.7, env: 0.7, wet: 0, detail: 0.45 },
+  brokencobble: { surface: 'brokencobble', scale: 2.2, normalScale: 1.0, env: 1.05, wet: 0.55, detail: 0.5 },
+  ash: { surface: 'ash', scale: 3.0, normalScale: 0.6, env: 0.6, wet: 0, detail: 0.6 },
+  wasteground: { surface: 'wasteground', scale: 4.0, normalScale: 0.7, env: 0.45, wet: 0, detail: 0.6 },
+  oldbone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 0.7, wet: 0, detail: 0.3 },
+  // Ice Dragon Way's smashed crystal statues: nearly all reflection.
+  crystal: { surface: 'crystal', scale: 0.8, normalScale: 0.35, env: 1.7, wet: 0, detail: 0.1 },
   // The animals. A 0.4 m tile is a hand's-breadth clump pattern on a dog and
   // still reads as a coat on a horse. `moving` keeps the world-space effects
   // off them: a splash line fixed to the paving and a grain fixed to the world
@@ -1187,6 +1374,176 @@ const RECIPES = {
   ooze: { surface: 'ooze', scale: 0.6, normalScale: 0.5, env: 1.1, wet: 0, detail: 0, moving: true },
   hide: { surface: 'hide', scale: 0.25, normalScale: 0.4, env: 0.5, wet: 0, detail: 0, moving: true },
 };
+
+// --------------------------------------------------------------- decals ----
+
+/**
+ * Paint on a wall and blood on the ground, for the Dangerous Neighborhood.
+ * These are not tiling surfaces: each is one mark on a transparent square,
+ * laid on a quad with its own 0..1 UVs by build.js, so they are baked here as
+ * RGBA with the shape in the alpha and cut out with `alphaTest`.
+ *
+ * The mud's own words are "spray-painted" and "graffiti", which is 1993 and
+ * not the town this is. What a gang in a medieval town paints is a mark: the
+ * two here are read off the prose. North of No Man's Land the Trolls are the
+ * Dragon gang, whose idol is the Dracolich, so theirs is a horned dragon's
+ * skull in limewash; south of it the Ogres, and theirs is a hand in red ochre
+ * -- the oldest mark there is, and a big one. Where the two meet, one gang's
+ * mark gets struck through in the other's colour.
+ *
+ * Coordinates are (x, y) in [-1, 1] with y *up*: a DataTexture is not flipped,
+ * so row 0 is the bottom of the quad.
+ */
+const segDist = (px, py, ax, ay, bx, by) => {
+  const vx = bx - ax; const vy = by - ay;
+  const t = clamp01(((px - ax) * vx + (py - ay) * vy) / (vx * vx + vy * vy));
+  return Math.hypot(px - ax - vx * t, py - ay - vy * t);
+};
+const inEllipse = (x, y, cx, cy, rx, ry) => ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 < 1;
+
+const DECAL_SHAPES = {
+  /** The Dragon gang: a horned dragon's skull, front on. */
+  troll(x, y) {
+    const ax = Math.abs(x);
+    let ink = inEllipse(x, y, 0, 0.18, 0.44, 0.36);
+    // The snout narrows to the nose.
+    if (y < 0 && y > -0.78) ink = ink || ax < 0.31 - (-y / 0.78) * 0.15;
+    // The brow ridge flares a little past the cranium.
+    ink = ink || inEllipse(x, y, 0, 0.3, 0.52, 0.1);
+    // Horns: swept up and out from the temples, tapering to a point.
+    for (let i = 0; i < 12 && !ink; i++) {
+      const t0 = i / 12; const t1 = (i + 1) / 12;
+      const hx = (t) => 0.3 + t * 0.34 + t * t * 0.14;
+      const hy = (t) => 0.38 + t * 0.42 + t * t * 0.1;
+      const r = 0.085 * (1 - t0 * 0.85);
+      if (segDist(ax, y, hx(t0), hy(t0), hx(t1), hy(t1)) < r) ink = true;
+    }
+    if (!ink) return 0;
+    // Eye sockets, slanted, and the nostrils: bare wall inside the mark.
+    const ex = ax - 0.18; const ey = y - 0.1;
+    if ((ex * 0.94 + ey * 0.34) ** 2 / 0.0144 + (ey * 0.94 - ex * 0.34) ** 2 / 0.0049 < 1) return 0;
+    if (inEllipse(ax, y, 0.07, -0.63, 0.035, 0.05)) return 0;
+    // Teeth: notches up into the jaw line.
+    if (y < -0.5 && y > -0.74 && ax > 0.08 && ax < 0.26 && ((ax * 18) % 1) < 0.35 && y < -0.62 + ((ax * 18) % 1) * 0.2) return 0;
+    return 1;
+  },
+  /** The Ogres: an open hand. */
+  ogre(x, y) {
+    // The palm, a rounded box.
+    const qx = Math.max(Math.abs(x + 0.02) - 0.26, 0); const qy = Math.max(Math.abs(y + 0.3) - 0.22, 0);
+    if (Math.hypot(qx, qy) < 0.13) return 1;
+    const fingers = [[-0.27, 0.62, -0.12], [-0.09, 0.8, -0.03], [0.09, 0.76, 0.04], [0.26, 0.56, 0.12]];
+    for (const [fx, top, lean] of fingers) {
+      if (segDist(x, y, fx, 0.0, fx + lean, top) < 0.088) return 1;
+    }
+    if (segDist(x, y, -0.34, -0.3, -0.74, 0.02) < 0.095) return 1;
+    return 0;
+  },
+  /** A mark struck through: two dragged strokes. */
+  strike(x, y) {
+    if (segDist(x, y, -0.8, -0.72, 0.78, 0.8) < 0.1 - x * 0.02) return 1;
+    if (segDist(x, y, -0.76, 0.7, 0.8, -0.66) < 0.09 + x * 0.02) return 1;
+    return 0;
+  },
+  /** Blood dried into the dirt: a pool and what was thrown off it. */
+  blood(x, y) {
+    const r = Math.hypot(x, y);
+    const lobe = fbm(Math.atan2(y, x) * 1.3 + 4, r * 2, 8, 811, 3);
+    if (r < 0.26 + lobe * 0.34) return 1;
+    for (let i = 0; i < 14; i++) {
+      const a = hash2(i, 0, 99, 821) * Math.PI * 2;
+      const d = 0.45 + hash2(i, 1, 99, 823) * 0.45;
+      const size = 0.02 + hash2(i, 2, 99, 827) * 0.05;
+      const cx = Math.cos(a) * d; const cy = Math.sin(a) * d;
+      // Thrown drops are elongated along the way they flew.
+      const along = ((x - cx) * Math.cos(a) + (y - cy) * Math.sin(a)) / 2.2;
+      const across = -(x - cx) * Math.sin(a) + (y - cy) * Math.cos(a);
+      if (Math.hypot(along, across) < size) return 1;
+    }
+    return 0;
+  },
+};
+
+const DECAL_PAINT = {
+  troll: { base: 0xd8d2c0, dark: 0xb3ad9c, drips: true },
+  ogre: { base: 0x8e2f1f, dark: 0x6a2016, drips: true },
+  strike: { base: 0x8a2e1e, dark: 0x642015, drips: true, dragged: true },
+  blood: { base: 0x3a0f0b, dark: 0x220706, drips: false },
+};
+
+function bakeDecal(name, size = 256) {
+  const shape = DECAL_SHAPES[name];
+  const paint = DECAL_PAINT[name];
+  const data = new Uint8ClampedArray(size * size * 4);
+  const lift = (c) => 255 * Math.pow(Math.max(0, Math.min(1, c / 255)), 0.62);
+  // Paint runs: a column here and there carries a drip down from the lowest
+  // painted point above it, as far as the paint had to run before it dried.
+  const cols = 48;
+  const dripLen = new Float32Array(cols);
+  for (let c = 0; c < cols; c++) {
+    const roll = hash2(c, 0, cols, 831);
+    dripLen[c] = paint.drips && roll > 0.72 ? 0.08 + (roll - 0.72) * 1.6 : 0;
+  }
+  for (let py = 0; py < size; py++) {
+    for (let px = 0; px < size; px++) {
+      const u = (px + 0.5) / size; const v = (py + 0.5) / size;
+      // A brush edge is never a clean line: jitter the lookup a little.
+      const jx = (fbm(u * 18, v * 18, 18, 841, 2) - 0.5) * 0.05;
+      const jy = (fbm(u * 18 + 5, v * 18, 18, 853, 2) - 0.5) * 0.05;
+      const x = u * 2 - 1 + jx; const y = v * 2 - 1 + jy;
+      let ink = shape(x, y);
+      if (!ink && paint.drips) {
+        const c = Math.min(cols - 1, Math.floor(u * cols));
+        const centre = (c + 0.5) / cols * 2 - 1;
+        const len = dripLen[c];
+        if (len && Math.abs(u * 2 - 1 - centre) < 0.012 + len * 0.02) {
+          for (let d = 0.02; d <= len; d += 0.03) {
+            if (shape(centre, y + d)) { ink = 1 - d / (len + 0.05) > 0.2 ? 1 : 0; break; }
+          }
+        }
+      }
+      // Weathered: the wall shows through where the paint has flaked, more of
+      // it towards the edges and along the strokes if it was dragged on.
+      const flake = fbm(u * 26, v * (paint.dragged ? 6 : 26), 26, 861, 3);
+      if (ink && flake < 0.25) ink = 0;
+      const i = (py * size + px) * 4;
+      const tone = fbm(u * 9, v * 9, 9, 871, 3);
+      const c = mix(rgb(paint.base), rgb(paint.dark), tone * 0.8);
+      data[i] = lift(c[0]); data[i + 1] = lift(c[1]); data[i + 2] = lift(c[2]);
+      data[i + 3] = ink ? 255 : 0;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.anisotropy = 4;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/** The decal materials, keyed `decal_<name>`, in the same table as everything else. */
+function createDecals(materials) {
+  for (const name of Object.keys(DECAL_SHAPES)) {
+    const material = new THREE.MeshStandardMaterial({
+      map: bakeDecal(name),
+      alphaTest: 0.5,
+      roughness: name === 'blood' ? 0.55 : 0.88,
+      metalness: 0,
+      envMapIntensity: 0.6,
+      // Laid a centimetre off the surface and pulled forward in depth as well:
+      // at thirty metres a centimetre is below depth precision.
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    material.name = `decal_${name}`;
+    material.userData.uvScale = 1;
+    material.defaultAttributeValues = { aIndoor: [0] };
+    materials[material.name] = material;
+  }
+}
 
 // ------------------------------------------------------- surface detail ----
 
@@ -1536,9 +1893,13 @@ export function createMaterials(size = 512, onProgress = () => {}) {
   const grain = bakeGrain();
   const names = Object.keys(RECIPES);
   const surfaced = [];
+  // Several recipes share a surface -- the sewer's flags, rust and bark, the
+  // neighborhood's bone -- and differ only in how they are lit. One bake each.
+  const bakes = new Map();
   names.forEach((name, index) => {
     const recipe = RECIPES[name];
-    const baked = bake(recipe.surface, size);
+    if (!bakes.has(recipe.surface)) bakes.set(recipe.surface, bake(recipe.surface, size));
+    const baked = bakes.get(recipe.surface);
     const material = new THREE.MeshStandardMaterial({
       map: toTexture(baked.albedo, size, THREE.SRGBColorSpace),
       normalMap: toTexture(baked.normal, size, THREE.NoColorSpace),
@@ -1596,6 +1957,8 @@ export function createMaterials(size = 512, onProgress = () => {}) {
       material.needsUpdate = true;
     }
   };
+
+  createDecals(materials);
 
   // Not baked: the floor of an "In the air..." room, which has to read as
   // something you could stand on without becoming a lid over the street below.

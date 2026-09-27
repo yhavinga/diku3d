@@ -23,6 +23,8 @@ There is no build step, no bundler, no test framework and no linter. So
 `layout-check` prints a walkable percentage per area. That number is the
 project's main quality metric — if a change drops it, the change is wrong.
 Midgaard should read 93%, and the mean across the 43 areas 94%.
+Two areas that leave town on the same side fight over the same cells; hood
+is laid whole (`LAID_WHOLE` in `layout.js`) so it cannot land in the desert.
 
 Anything touching `build.js`, `textures.js` or `actors.js` has to be looked at
 in a browser. Screenshots are how nearly every real defect here was found, and

@@ -382,6 +382,11 @@ export const ASSET_NAMES = [
   // the Great Eastern Desert: tools/blender/desert.py
   'massif_a', 'massif_b', 'massif_mouth', 'dune_a', 'dune_b', 'palm_a', 'palm_b',
   'tent_roof', 'tent_wall', 'tent_wall_door', 'rug', 'cushions', 'hitch_line', 'fungus_cluster', 'lantern',
+  // the Dangerous Neighborhood: tools/blender/hood.py
+  'house_derelict', 'house_gutted', 'ruin_wall_solid', 'ruin_wall_door', 'ruin_wall_breach', 'ruin_corner',
+  'rubble_heap', 'charred_beams', 'barricade', 'barricade_stakes', 'burnt_cart', 'brazier', 'crow',
+  'dracolich_idol', 'training_pell', 'khan_memorial', 'bramble', 'tall_weeds', 'collapsed_shed', 'dead_planter',
+  'broken_stair', 'crystal_stump', 'boarded_window', 'boarded_door', 'barred_window', 'shoring', 'debris', 'city_wall',
   'townsperson', 'person_male', 'person_female', 'troll',
   'weapon_sword', 'weapon_dagger', 'weapon_axe', 'weapon_mace', 'weapon_spear',
   'weapon_staff', 'shield_round', 'shield_kite',
