@@ -1036,6 +1036,26 @@ export function buildScene(world, layout, materials, assets = null) {
       // is still a field. Both read the room's own words.
       if (!bog) buildClearing({ batcher, chunk, room, pos, sides, addCollider });
       if (GRAVEYARD.test(room.name)) buildGraveyard({ instances, model, chunk, room, pos, sides });
+      // "Through the garbage you can see a large junction of pipes": the
+      // garbage first, heaped in the corners where nobody has to walk.
+      if (REFUSE.test(room.name) && instances && model(['refuse_heap'])) {
+        const heaps = [];
+        for (let k = 0; k < 4; k++) heaps.push([k & 1 ? 1 : -1, k & 2 ? 1 : -1]);
+        // ...and against the middle of any side with no way out of it.
+        for (let d = 0; d < 4; d++) {
+          if (sides[d]) continue;
+          const [dx, , dz] = DIR_STEP[d];
+          heaps.push([dx + (hash3(room.vnum, d, 5, 97) - 0.5) * 0.6 * (dz !== 0), dz + (hash3(room.vnum, d, 6, 97) - 0.5) * 0.6 * (dx !== 0)]);
+        }
+        heaps.forEach(([sx, sz], k) => {
+          const x = pos.x + sx * (4.3 + hash3(room.vnum, k, 1, 97) * 0.6);
+          const z = pos.z + sz * (4.3 + hash3(room.vnum, k, 2, 97) * 0.6);
+          instances.add('refuse_heap', {
+            x, y: pos.y, z, rotY: hash3(room.vnum, k, 3, 97) * 6.28, scale: 0.9 + hash3(room.vnum, k, 4, 97) * 0.4,
+          }, chunk);
+          addCollider(x - 1.1, x + 1.1, z - 0.9, z + 0.9, pos.y, pos.y + 0.6);
+        });
+      }
       if (STATUE.test(room.description)) buildStatue({ batcher, chunk, room, pos, sides, addCollider });
       // Out of doors the same thing, against the sides with no way out of
       // them, so a square reads as somewhere people keep their things rather
@@ -3919,7 +3939,13 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
     // which sealed the room in two along the stair: in a sewer shaft the
     // stair runs across the middle of a junction with tunnels on both sides
     // of it, and the way between them is underneath the upper half.
-    for (let i = 0; i < segments; i++) {
+    //
+    // And none on the lowest stretch. The flight starts at the wall, so
+    // coming down it you arrive facing brick with a rail on either hand, and
+    // the only way off a stair that ends in a wall is sideways: with the rail
+    // collided the whole way down, the foot of every stair was a pen -- a walk
+    // down into the sewer stopped on the fourth tread and could not leave it.
+    for (let i = 1; i < segments; i++) {
       const a0 = STAIR_START - STAIR_RUN * (i / segments);
       const a1 = STAIR_START - STAIR_RUN * ((i + 1) / segments);
       const x0 = lower.x + dx * a0 + offX; const x1 = lower.x + dx * a1 + offX;

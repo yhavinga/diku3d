@@ -1008,6 +1008,50 @@ def build_cave_roof():
     obj.location = (0, (CAVE_W + 0.4) / 2 - 0.15, 0)
     return deliver([obj], "cave_roof")
 
+
+# --- the Dump, above ------------------------------------------------------
+
+def build_refuse_heap():
+    """"The dump, where the people from the city drop their garbage." A heap
+    of it: trodden earth mounded up, broken boards, a stove-in barrel, a
+    split sack, potsherds. Out under the sky, so everything here wears the
+    town's own materials and is lit like the street -- not the sewer's."""
+    lib.reset()
+    rng = random.Random(73001)
+    # Rotting refuse, not the ground it is dumped on: in the ground's own
+    # material the mound disappeared into it and only the boards showed.
+    p = [trees.hull(rock_rings(rng, 0.62, 1.25, 5, 0.12, 0.06), 12,
+                    [rng.uniform(-0.18, 0.18) for _ in range(12)], mat="peat", name="heap")]
+    p[0].scale = (1.25, 0.95, 1.0)
+    # Boards thrown on it, at every angle, some half buried.
+    for i in range(6):
+        a = rng.uniform(0, math.pi)
+        L = rng.uniform(0.9, 1.7)
+        x, y = rng.uniform(-0.9, 0.9), rng.uniform(-0.6, 0.6)
+        z = 0.5 * (1 - (x * x / 1.8 + y * y / 0.9)) + 0.04
+        p.append(kit.timber((L, 0.16, 0.03), (x, y, max(0.05, z)),
+                            (rng.uniform(-0.35, 0.35), rng.uniform(-0.3, 0.3), a), "planks", 0.008, "board"))
+    # A barrel with its side stove in: staves round most of a ring, one hoop.
+    bx, by = 0.95, -0.35
+    for i in range(10):
+        if i in (3, 4):
+            continue
+        t = 2 * math.pi * i / 12
+        p.append(kit.timber((0.085, 0.025, 0.72), (bx + 0.28 * math.cos(t), by + 0.28 * math.sin(t), 0.36),
+                            (0, 0, t + math.pi / 2), "oak", 0.006, "stave"))
+    p.append(lib.torus(0.3, 0.018, (bx, by, 0.55), major_seg=14, minor_seg=3, name="hoop", mat="iron"))
+    # A split sack, slumped.
+    sack = lib.sphere(0.3, (-0.85, 0.45, 0.2), segments=10, rings=6, name="sack", mat="cloth")
+    sack.scale = (1.2, 0.9, 0.55)
+    p.append(sack)
+    # Potsherds.
+    for i in range(7):
+        x, y = rng.uniform(-1.3, 1.3), rng.uniform(-1.0, 1.0)
+        p.append(kit.slab((rng.uniform(0.08, 0.16), rng.uniform(0.06, 0.12), 0.018), (x, y, 0.03),
+                          (rng.uniform(-0.3, 0.3), rng.uniform(-0.3, 0.3), rng.uniform(0, 3)), mat="rooftile",
+                          name="sherd", width=0.004))
+    return deliver(p, "refuse_heap")
+
 # --- delivery -------------------------------------------------------------
 
 def deliver(parts, name):
@@ -1058,6 +1102,7 @@ def build():
         build_cave_wall("cave_wall_long", seed=72011, width=13.2),
         build_cave_wall("cave_wall_long_door", hole=CAVE_HOLE, seed=72013, width=13.2),
         build_cave_roof(),
+        build_refuse_heap(),
         build_wall(True, "sewer_wall_open"),
         build_wall(False, "sewer_wall_solid"),
         build_wall(True, "sewer_shaft_open", tall=True),
