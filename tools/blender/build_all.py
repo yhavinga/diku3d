@@ -102,7 +102,15 @@ BUDGET = {
     "beast_duck": 3800, "beast_swan": 4500, "beast_hen": 4000, "beast_songbird": 2600,
     "beast_snake": 3600, "beast_worm": 2600,
     # One of it in the default world, and it is nine metres long.
-    "beast_dragon": 8000,
+    "beast_dragon": 8200,
+    # monsters.py. The legged ones pay for their legs: eight of them, each a
+    # separate little surface, is where a spider's triangles go.
+    "beast_spider": 5000, "beast_beetle": 4600, "beast_scorpion": 4800, "beast_drider": 7200,
+    "beast_bat": 3400, "beast_mud": 5600, "beast_myconoid": 4400, "beast_ratman": 4600,
+    "beast_imp": 4600, "beast_naga": 5600, "beast_sandworm": 5000, "beast_basilisk": 6600,
+    "beast_dustdigger": 3000, "beast_camel": 4600,
+    # Bones are all edges: a rib cage and a spine of knuckles do not decimate.
+    "beast_dracolich": 9600,
 }
 PROP_BUDGET = 800
 # people.py: an archetype is a whole dressed person, one skinned draw per

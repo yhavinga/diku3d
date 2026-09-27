@@ -391,5 +391,7 @@ export const ASSET_NAMES = [
   'beast_bovine', 'beast_pig', 'beast_duck', 'beast_swan', 'beast_hen', 'beast_songbird',
   'beast_snake', 'beast_worm', 'beast_dragon',
   // The monsters: tools/blender/monsters.py.
-  'beast_spider',
+  'beast_spider', 'beast_beetle', 'beast_scorpion', 'beast_drider', 'beast_bat', 'beast_mud',
+  'beast_myconoid', 'beast_ratman', 'beast_imp', 'beast_naga', 'beast_sandworm', 'beast_basilisk',
+  'beast_dustdigger', 'beast_camel', 'beast_dracolich',
 ];

@@ -712,7 +712,7 @@ def scorpion():
                 bones=arthro_bones(root, extra, legs), legs=arthro_legs(legs), root="body",
                 clips=arthro_clips,
                 gait=dict(walk_stride=0.11, walk_frames=12, walk_duty=0.6, lift=0.025,
-                          run_stride=0.22, run_frames=8, run_duty=0.5, rear=0.2, rear_pitch=6,
+                          run_stride=0.18, run_frames=8, run_duty=0.5, rear=0.2, rear_pitch=6,
                           phases=tetrapod(0.06), fk=fk))
 
 
@@ -932,7 +932,7 @@ def bat():
 
     return dict(name="beast_bat", archetype="bat", bones=bones, body=body, masks=masks, parts=parts,
                 patch=lambda co: np.zeros(len(co)), h=0.0014, tris=1200, mat="fur",
-                clips=bat_clips, hover=1.6, extras={"hover": 1.6},
+                clips=bat_clips, hover=1.2, extras={"hover": 1.2},
                 gait=dict(flap=8, walk_stride=0.64, run_stride=0.8, run_frames=6))
 
 
@@ -1553,6 +1553,707 @@ def imp():
                 gait=dict(walk_stride=0.2, walk_frames=20, lift=0.025, run_stride=0.4, run_frames=12, hunch=8.0, fly_frames=8))
 
 
+# ============================================================ naga, sand worm
+
+
+def naga():
+    """The guardian naga: five metres of snake, green-gold, a row of silver
+    triangles down the back, carrying the front of her body reared up a man's
+    height off the floor under a head that is more a woman's than a snake's
+    -- a rounded brow, a straight nose, a small chin, a hood of scales
+    framing it. The body is beasts.serpent's; `rear` holds it up."""
+    Ln = 5.0
+    girth = lambda u: 0.06 + 0.13 * math.sin(math.pi * min(1.0, (u + 0.1) / 1.0)) ** 0.7 * (1 - u) ** 0.4
+    spec = B.serpent("beast_naga", "naga", Ln, girth, 18, 0.3, 0.009, 3600,
+                     dict(stride=1.3, frames=44, amp=0.18, lift=0.0, rear=1.55, rear_n=7),
+                     mask=B.spots(0.12, seed=97))
+    front = spec["joints"][0]
+    r = girth(0)
+    z0 = r * 0.82
+    # A head of a woman's proportions instead of the snake's wedge.
+    spec["body"] = spec["body"][:-2] + [
+        ell(P(0, front + 0.12, z0 + 0.06), (0.1, 0.12, 0.12), "head", blend=0.05),
+        ell(P(0, front + 0.2, z0 + 0.02), (0.075, 0.07, 0.08), "head", blend=0.04),
+        ell(P(0, front + 0.255, z0 + 0.06), (0.06, 0.025, 0.02), "head", blend=0.02),
+        cone(P(0, front + 0.265, z0 + 0.05), P(0, front + 0.29, z0 - 0.0), 0.014, 0.017, "head", blend=0.015),
+        ell(P(0, front + 0.24, z0 - 0.07), (0.035, 0.03, 0.03), "head", blend=0.03),
+    ]
+    snake_parts = spec["parts"]
+
+    def parts(body_solids):
+        out = snake_parts(body_solids)
+        # The hood: two fans of scale either side of the neck, behind the head.
+        hood = [ell(P(0, front - 0.22, z0 + 0.03), (0.26, 0.3, 0.035), ("grad", "body1", "body2", P(0, front - 0.05, 0), P(0, front - 0.45, 0)), blend=0.05)]
+        out.append(B.sdf_part(hood, 0.007, 700, "hood", "hide", smooth=1,
+                              mask_fn=lambda co, n, p, d: (np.clip((-n[:, 2] - 0.2) / 0.4, 0, 1), d)))
+        # Silver triangles down the spine.
+        ridge = []
+        joints = spec["joints"]
+        for i in range(1, len(joints) - 3):
+            f = joints[i]
+            u = i / (len(joints) - 1)
+            top = girth(u) * 0.82 + girth(u) * 0.95
+            ridge.append(cone(P(0, f + 0.06, top - 0.02), P(0, f - 0.04, top + girth(u) * 0.5), girth(u) * 0.35, 0.004,
+                              "body%d" % (i + 1), blend=0.004, squash=(0.35, 1, 1), group="r%d" % i))
+        out.append(B.solid_part(ridge, 0.006, 40 * len(ridge), "ridge", "horn", (0.72, 0.74, 0.76), smooth=0))
+        return out
+    spec["parts"] = parts
+    spec["mat"] = "hide"
+    return spec
+
+
+def chain_basis(arm, rest, names, pts, extra=None):
+    """Bases that lay a chain of bones along the joint positions `pts`
+    (Blender space), root first; `extra` {bone: (pitch, yaw, roll)} adds FK
+    children (a head, a jaw) off the chain. Bones keep their lengths: the
+    chain goes where the directions of `pts` send it from the root."""
+    basis = {}
+    M = {}
+    for i, nm in enumerate(names):
+        y = (pts[i + 1] - pts[i]).normalized()
+        x = V((1, 0, 0)) - y * y.x
+        if x.length < 1e-5:
+            x = V((0, 0, 1)).cross(y)
+        x.normalize()
+        z = x.cross(y)
+        want = mathutils.Matrix((x, y, z)).transposed().to_4x4()
+        b = arm.data.bones[nm]
+        if b.parent is None:
+            want.translation = pts[0]
+            bm = rest[nm].inverted() @ want
+            basis[nm] = (bm.to_quaternion(), bm.to_translation())
+        else:
+            chain = M[b.parent.name] @ rest[b.parent.name].inverted() @ rest[nm]
+            want.translation = chain.translation
+            basis[nm] = ((chain.inverted() @ want).to_quaternion(), None)
+        M[nm] = want
+    for nm, ang in (extra or {}).items():
+        parent = arm.data.bones[nm].parent.name
+        chain = M[parent] @ rest[parent].inverted() @ rest[nm]
+        q = B.fk_quat(ang)
+        basis[nm] = (q, None)
+        M[nm] = chain @ q.to_matrix().to_4x4()
+    return basis
+
+
+def sandworm():
+    """The giant purple sand worm: nine metres of ringed body as thick as a
+    barrel, no eyes, the front end nothing but a round mouth ringed with
+    teeth. It lives under the sand and is only ever seen coming up out of it
+    -- its idle holds three metres of it reared out of the ground, the rest
+    running down below the surface; its walk is a dive and a surfacing, one
+    arc per cycle."""
+    Lw, n = 9.0, 14
+    girth = lambda u: 0.42 * (1 - 0.5 * u ** 2)
+    joints = [Lw * 0.5 - Lw * i / n for i in range(n + 1)]
+    ground = lambda u: girth(u)
+    names = ["body%d" % (i + 1) for i in range(n)]
+    bones = []
+    par = None
+    for i, nm in enumerate(names):
+        bones.append((nm, P(0, joints[i], ground(i / n)), P(0, joints[i + 1], ground((i + 1) / n)), par))
+        par = nm
+    front = joints[0]
+    bones.append(("head", P(0, front, girth(0)), P(0, front + 0.5, girth(0)), "body1"))
+    body = []
+    for i, nm in enumerate(names):
+        u0, u1 = i / n, (i + 1) / n
+        body.append(cone(P(0, joints[i], ground(u0)), P(0, joints[i + 1], ground(u1)), girth(u0), girth(u1), nm,
+                         blend=0.15, group="tube"))
+    # Rings: a ridge every half metre.
+    for k in range(int(Lw / 0.45)):
+        f = front - 0.2 - k * 0.45
+        u = (front - f) / Lw
+        if u > 0.98:
+            break
+        i = min(n - 1, int(u * n))
+        body.append(ell(P(0, f, ground(u)), (girth(u) * 1.07, 0.09, girth(u) * 1.07), names[i], blend=0.08))
+    # The mouth end: a flared lip round a hole.
+    body.append(ell(P(0, front + 0.22, girth(0)), (girth(0) * 1.15, 0.2, girth(0) * 1.15), "head", blend=0.1))
+    body.append(ell(P(0, front + 0.45, girth(0)), (girth(0) * 0.72, 0.3, girth(0) * 0.72), "head", blend=0.08, neg=True))
+
+    def masks(co, nrm, pale, dark):
+        belly = np.clip((-nrm[:, 2] - 0.2) / 0.5, 0, 1)
+        return np.maximum(pale, belly * 0.7), dark
+
+    def parts(body_solids):
+        out = []
+        # Rows of teeth inside the mouth, pointing in.
+        teeth = []
+        c = V((0, front + 0.3, girth(0)))
+        for row, (dep, rr, count) in enumerate(((0.12, 0.3, 12), (0.28, 0.22, 10))):
+            for k in range(count):
+                a = 2 * math.pi * (k + 0.5 * row) / count
+                base = V((math.cos(a) * rr, c.y - dep, c.z + math.sin(a) * rr))
+                tip = V((math.cos(a) * rr * 0.45, c.y - dep - 0.1, c.z + math.sin(a) * rr * 0.45))
+                teeth.append(cone(P(*base), P(*tip), 0.04, 0.005, "head", blend=0.004, group="t%d_%d" % (row, k)))
+        out.append(B.solid_part(teeth, 0.012, 1100, "teeth", "horn", (0.78, 0.72, 0.58), smooth=0))
+        throat = [ell(P(0, front + 0.02, girth(0)), (girth(0) * 0.7, 0.12, girth(0) * 0.7), "head", blend=0.02)]
+        out.append(B.solid_part(throat, 0.02, 100, "throat", "horn", (0.25, 0.05, 0.08)))
+        return out
+
+    return dict(name="beast_sandworm", archetype="sandworm", bones=bones, body=body, masks=masks, parts=parts,
+                patch=B.spots(0.3, seed=101), h=0.04, tris=3600, mat="hide", clips=sandworm_clips,
+                names=names, joints=joints, girth=girth,
+                gait=dict(stride=4.0, frames=60))
+
+
+def sandworm_clips(arm, spec):
+    poser = B.Poser(arm, {})
+    rest = poser.rest
+    names = spec["names"]
+    joints = spec["joints"]
+    n = len(names)
+    seg = (joints[0] - joints[-1]) / n
+    girth = spec["girth"]
+    report = {}
+
+    def reared(height, lean=0.0, sway=0.0, t=0.0, dive=0.0):
+        """Joints for a worm with `height` of it standing out of the sand,
+        bent over forward by `lean` at the top, the rest going straight down
+        under the surface behind the point it comes out of."""
+        pts = []
+        # Arc length along the body from the mouth; the part above ground is
+        # a curve up from the hole, the rest drops away below it.
+        for i in range(n + 1):
+            s = i * seg
+            if s < height:
+                k = s / max(height, 1e-6)
+                # From the top (k=0) down to the hole (k=1): bent over at the top.
+                z = height * (1 - k) - dive
+                f = lean * height * (1 - k) ** 2 + sway * 0.0
+                x = sway * height * (1 - k) ** 1.5 * math.sin(2 * math.pi * t + k * 2)
+                pts.append(V((x, -f, z)))
+            else:
+                pts.append(V((0, (s - height) * 0.3, -(s - height) * 0.95 - dive)))
+        return pts
+
+    def head(pitch):
+        return {"head": (pitch, 0, 0)}
+
+    def idle(t):
+        pts = reared(3.2 + 0.15 * wave(t), lean=0.5 + 0.08 * wave(t, 0.3), sway=0.08, t=t)
+        return chain_basis(arm, rest, names, pts, head(10 * wave(t, 0.2)))
+    keyed(poser, arm, "idle", 90, idle, step=2, report=report)
+
+    # Walk: the worm travels along an arc through the sand. The body follows
+    # its own track, a sine in the vertical plane, sliding one wavelength per
+    # cycle while the world moves one wavelength back -- so every point that
+    # is under the surface stays under it.
+    lam = spec["gait"]["stride"]
+    amp = 1.1
+
+    def track_pt(s):
+        # s: distance along the travel direction from the current mouth.
+        return V((0, s, amp * math.sin(2 * math.pi * s / lam) + 0.2))
+
+    def walk(t):
+        pts = []
+        for i in range(n + 1):
+            s = -i * seg * 0.9 + t * lam
+            p = track_pt(s)
+            pts.append(V((0.12 * math.sin(2 * math.pi * (s / lam + 0.25)), -(p.y - t * lam), p.z)))
+        return chain_basis(arm, rest, names, pts, head(-20 * math.cos(2 * math.pi * t)))
+    keyed(poser, arm, "walk", spec["gait"]["frames"], walk, report=report)
+    keyed(poser, arm, "run", 36, walk, report=report)
+
+    def attack(t):
+        cock = ease(t / 0.4) * (1 - ease((t - 0.42) / 0.1))
+        strike = ease((t - 0.4) / 0.12) * (1 - ease((t - 0.7) / 0.3))
+        pts = reared(3.2 + 0.6 * cock - 0.8 * strike, lean=0.3 - 0.25 * cock + 1.3 * strike)
+        return chain_basis(arm, rest, names, pts, head(-25 * cock + 30 * strike))
+    keyed(poser, arm, "attack", 30, attack, report=report)
+
+    def hit(t):
+        k = math.sin(math.pi * min(1.0, t / 0.3)) if t < 0.3 else (1 - ease((t - 0.3) / 0.7)) * 0.8
+        pts = reared(3.2 - 0.3 * k, lean=0.5 - 0.6 * k, sway=0.15 * k, t=t)
+        return chain_basis(arm, rest, names, pts, head(-30 * k))
+    keyed(poser, arm, "hit", 14, hit, report=report)
+
+    def death(t):
+        # It topples over onto the sand, the part still buried staying put.
+        k = ease(t / 0.7)
+        h = 3.2 * (1 - k) + 0.1
+        pts = reared(h, lean=0.5 + 1.5 * k)
+        # What came down lies along the ground in front of the hole.
+        fallen = 3.2 - h
+        for i in range(n + 1):
+            s = i * seg
+            if s < fallen:
+                pts[i] = V((0.2 * math.sin(s), -(fallen - s) * 0.95, girth(i / n) * 0.8))
+        return chain_basis(arm, rest, names, pts, head(20 * k))
+    keyed(poser, arm, "death", 45, death, report=report)
+    return {"clips": report, "stride": {"walk": spec["gait"]["stride"], "run": spec["gait"]["stride"]}, "hit": 0.52}
+
+
+# ============================================================ basilisk
+
+
+def basilisk():
+    """The basilisk: a heavy lizard two and a half metres long on eight
+    sprawling legs, a blunt head with a row of teeth along strong jaws, a
+    crest of bony spikes down the back and eyes that glow a pale green. It
+    walks the way a lizard does, the body swinging side to side."""
+    legs = {}
+    table = [((0.15, 0.45), 58, 0.5, "chest"), ((0.17, 0.22), 82, 0.5, "chest"),
+             ((0.17, -0.02), 102, 0.5, "body"), ((0.15, -0.26), 124, 0.55, "pelvis")]
+    for i, (hip, ang, reach, par) in enumerate(table):
+        legs[str(i + 1)] = (splay_leg(hip, ang, reach, 0.37, 0.1, 0.03, 0.27, frac=(0.42, 0.76, 0.9)), par)
+    tail = [(0, -0.4, 0.3), (0, -0.7, 0.26), (0, -1.0, 0.2), (0, -1.3, 0.14), (0, -1.58, 0.09), (0, -1.85, 0.06)]
+    tn = ["tail%d" % (i + 1) for i in range(len(tail) - 1)]
+    root = ("body", (0, -0.1, 0.32), (0, 0.2, 0.33))
+    extra = [("chest", (0, 0.2, 0.33), (0, 0.55, 0.34), "body"), ("neck", (0, 0.55, 0.34), (0, 0.75, 0.38), "chest"),
+             ("head", (0, 0.75, 0.38), (0, 1.07, 0.32), "neck"), ("jaw", (0, 0.78, 0.31), (0, 1.03, 0.27), "head"),
+             ("pelvis", (0, -0.1, 0.32), (0, -0.4, 0.3), "body")]
+    par = "pelvis"
+    for i, nm in enumerate(tn):
+        extra.append((nm, tail[i], tail[i + 1], par))
+        par = nm
+    body = [
+        ell(P(0, 0.05, 0.3), (0.22, 0.42, 0.16), ("grad", "body", "chest", P(0, 0, 0.3), P(0, 0.4, 0.3)), blend=0.08),
+        ell(P(0, 0.45, 0.31), (0.17, 0.2, 0.14), "chest", blend=0.07),
+        ell(P(0, -0.3, 0.29), (0.18, 0.2, 0.14), ("grad", "body", "pelvis", P(0, -0.1, 0.3), P(0, -0.4, 0.3)), blend=0.07),
+        cone(P(0, 0.55, 0.33), P(0, 0.78, 0.37), 0.13, 0.1, ("grad", "chest", "neck", P(0, 0.55, 0.33), P(0, 0.75, 0.37)), blend=0.05),
+        # A broad, flat-topped head, the jaw muscles bulging behind the eyes.
+        ell(P(0, 0.84, 0.38), (0.13, 0.12, 0.08), "head", blend=0.04),
+        cone(P(0, 0.88, 0.37), P(0, 1.06, 0.33), 0.1, 0.055, "head", blend=0.04, squash=(1, 1, 0.7)),
+        ell(P(0.08, 0.8, 0.35), (0.06, 0.08, 0.06), "head", blend=0.03),
+        ell(P(-0.08, 0.8, 0.35), (0.06, 0.08, 0.06), "head", blend=0.03),
+        ell(P(0.07, 0.9, 0.41), (0.035, 0.05, 0.022), "head", blend=0.02),
+        ell(P(-0.07, 0.9, 0.41), (0.035, 0.05, 0.022), "head", blend=0.02),
+    ]
+    for i, nm in enumerate(tn):
+        r0 = 0.14 * (1 - i / len(tn)) + 0.015
+        r1 = 0.14 * (1 - (i + 1) / len(tn)) + 0.015
+        body.append(cone(P(*tail[i]), P(*tail[i + 1]), r0, r1, nm, blend=0.05, group="tail", squash=(1, 1, 0.85)))
+
+    def masks(co, n, pale, dark):
+        belly = np.clip((-n[:, 2] - 0.1) / 0.4, 0, 1)
+        top = np.clip((n[:, 2] - 0.6) / 0.3, 0, 1)
+        return np.maximum(pale, belly), np.maximum(dark, top * 0.35)
+
+    def parts(body_solids):
+        out = []
+        for base, (pts, _) in legs.items():
+            for side in (1, -1):
+                out.append(leg_part(pts, base, side, [0.055, 0.042, 0.033, 0.028, 0.018], 0.007, 210, "hide", mask_low=0.3))
+        for base, (pts, _) in legs.items():
+            for side, tag in ((1, ".L"), (-1, ".R")):
+                q = [V(B.apply_side(p, side)) for p in pts]
+                tip, base_ = q[4], q[3]
+                d = (tip - base_)
+                d.z = 0
+                d.normalize()
+                cl = []
+                for k in (-1, 0, 1):
+                    a = math.radians(25 * k)
+                    dd = V((d.x * math.cos(a) - d.y * math.sin(a), d.x * math.sin(a) + d.y * math.cos(a), 0))
+                    cl.append(cone(P(*(tip - d * 0.02 + V((0, 0, 0.012)))), P(*(tip + dd * 0.05 + V((0, 0, 0.0)))),
+                                   0.01, 0.002, "tarsus%s%s" % (base, tag), blend=0.002, group="c%d" % k))
+                out.append(B.solid_part(cl, 0.0025, 90, "claws", "horn", (0.14, 0.12, 0.1), smooth=0))
+        jaw = [cone(P(0, 0.8, 0.32), P(0, 1.02, 0.28), 0.085, 0.045, "jaw", blend=0.02, squash=(1, 1, 0.55))]
+        out.append(B.sdf_part(jaw, 0.006, 260, "jaw", "hide", smooth=1, mask_fn=lambda co, n, p, d: (np.maximum(p, 0.7), d)))
+        mouth = [ell(P(0, 0.93, 0.33), (0.07, 0.11, 0.02), {"head": 0.5, "jaw": 0.5}, blend=0.01)]
+        out.append(B.solid_part(mouth, 0.006, 100, "mouth", "horn", (0.3, 0.08, 0.06)))
+        teeth = []
+        for i in range(7):
+            f = 0.86 + i * 0.027
+            for x in (1, -1):
+                w = 0.07 * (1 - i * 0.07)
+                teeth.append(cone(P(x * w, f, 0.335), P(x * w, f + 0.004, 0.305), 0.009, 0.002, "head", blend=0.002,
+                                  group="t%d%d" % (i, x > 0)))
+        out.append(B.solid_part(teeth, 0.002, 300, "teeth", "horn", (0.8, 0.76, 0.6), smooth=0))
+        for side in (1, -1):
+            at = B.surface_point(body_solids, P(side * 0.2, 0.9, 0.4), P(-side, 0, -0.1), sink=0.008)
+            out.append(B.solid_part([ell(tuple(at), (0.022, 0.026, 0.016), "head", blend=0.003)], 0.003, 70,
+                                    "eye", "glow", (1.0, 1.0, 1.0), smooth=0))
+        # The crest: bony spikes from the back of the skull down the tail.
+        crest = []
+        chain = [((0, 0.72, 0.4), "neck"), ((0, 0.55, 0.4), "chest"), ((0, 0.38, 0.42), "chest"), ((0, 0.2, 0.44), "body"),
+                 ((0, 0.02, 0.44), "body"), ((0, -0.16, 0.43), "pelvis"), ((0, -0.34, 0.42), "pelvis")]
+        chain += [(tail[i], tn[i]) for i in range(len(tn) - 1)]
+        for k, (p, bone) in enumerate(chain):
+            top = B.surface_point(body_solids, P(0, p[1], p[2] + 0.6), P(0, 0, -1), sink=0.02)
+            size = 0.1 * (1.0 if p[1] > -0.5 else max(0.35, 1 + (p[1] + 0.5) / 1.6))
+            crest.append(cone(tuple(top), tuple(top + V((0, 0.04, size))), size * 0.35, 0.004, bone, blend=0.004, group="k%d" % k))
+        out.append(B.solid_part(crest, 0.005, 36 * len(crest), "crest", "horn", (0.36, 0.3, 0.2), smooth=0))
+        return out
+
+    def fk(t, mode, k):
+        out = {}
+        if mode in ("walk", "run"):
+            amp = 9 if mode == "walk" else 13
+            # The lizard's S: chest and pelvis swing opposite ways, the tail
+            # follows a beat behind.
+            out["chest"] = (0, amp * wave(t), 0)
+            out["pelvis"] = (0, -amp * wave(t), 0)
+            out["neck"] = (0, -amp * 0.6 * wave(t), 0)
+            out["head"] = (0, -amp * 0.3 * wave(t), 0)
+            for i, nm in enumerate(tn):
+                out[nm] = (2, amp * 0.8 * wave(t, -0.12 * (i + 1)), 0)
+        elif mode == "idle":
+            out["neck"] = (0, 14 * wave(t, 0.1), 0)
+            out["head"] = (-3 + 3 * wave(2 * t), 8 * wave(t, 0.3), 0)
+            out["jaw"] = (-4 * max(0.0, wave(t, 0.6)), 0, 0)
+            for i, nm in enumerate(tn):
+                out[nm] = (2, 6 * wave(t, -0.1 * i), 0)
+        elif mode == "attack":
+            gape = ease((t - 0.2) / 0.2) * (1 - ease((t - 0.48) / 0.06))
+            out["jaw"] = (-45 * gape, 0, 0)
+            out["neck"] = (-10 * gape + 12 * k, 0, 0)
+            out["head"] = (-15 * gape + 15 * k, 0, 0)
+            for i, nm in enumerate(tn):
+                out[nm] = (-4, 10 * wave(t, -0.1 * i), 0)
+        elif mode == "death":
+            out["neck"] = (15 * k, 30 * k, 0)
+            out["head"] = (10 * k, 20 * k, 0)
+            out["jaw"] = (-15 * k, 0, 0)
+            for i, nm in enumerate(tn):
+                out[nm] = (4 * k, 12 * k, 0)
+        return out
+
+    return dict(name="beast_basilisk", archetype="basilisk", body=body, masks=masks, parts=parts,
+                patch=B.spots(0.08, seed=103), h=0.012, tris=2800, mat="hide",
+                bones=arthro_bones(root, extra, legs), legs=arthro_legs(legs), root="body",
+                clips=arthro_clips,
+                gait=dict(walk_stride=0.5, walk_frames=28, walk_duty=0.62, lift=0.08,
+                          run_stride=0.9, run_frames=18, run_duty=0.5, rear=0.3, rear_pitch=8,
+                          phases=tetrapod(0.05), fk=fk, idle_frames=120))
+
+
+# ============================================================ dustdigger
+
+
+def dustdigger():
+    """A dustdigger lies buried in the sand with only its top showing: a
+    starfish four metres across, five arms round a hollow that holds a film
+    of water -- the 'small oasis' that invites you to dive in. When
+    something does, the arms fold up and shut over it. Sandy above, pale
+    under the arms, and the pool is glossy horn coloured like water."""
+    n_arm, R0 = 5, 0.55
+    bones = [("core", P(0, -0.2, 0.08), P(0, 0.2, 0.08), None)]
+    segs = [(R0, 1.05), (1.05, 1.55), (1.55, 2.0)]
+    body = [ell(P(0, 0, 0.06), (0.75, 0.75, 0.16), "core", blend=0.12)]
+    for i in range(n_arm):
+        a = 2 * math.pi * i / n_arm
+        d = V((math.sin(a), math.cos(a), 0))
+        xa = tuple(d.cross(V((0, 0, 1))))
+        par = "core"
+        for k, (r0, r1) in enumerate(segs):
+            nm = "arm%d_%d" % (i, k)
+            h0, h1 = d * r0 + V((0, 0, 0.08)), d * r1 + V((0, 0, 0.08 - 0.02 * (k + 1)))
+            bones.append((nm, P(h0.x, h0.y, h0.z), P(h1.x, h1.y, h1.z), par, xa))
+            par = nm
+        pts = [d * r for r in (0.2, R0, 1.05, 1.55, 2.05)]
+        radii = [0.4, 0.36, 0.28, 0.18, 0.06]
+        names = ["core", "arm%d_0" % i, "arm%d_1" % i, "arm%d_2" % i]
+        for k in range(4):
+            a_, b_ = pts[k] + V((0, 0, 0.05)), pts[k + 1] + V((0, 0, 0.04 - 0.012 * k))
+            body.append(cone(P(a_.x, a_.y, a_.z), P(b_.x, b_.y, b_.z), radii[k], radii[k + 1], names[k], blend=0.1,
+                             squash=(1, 1, 0.38), group="a%d" % i))
+    # The hollow in the middle.
+    body.append(ell(P(0, 0, 0.2), (0.5, 0.5, 0.12), "core", blend=0.1, neg=True))
+    # Knobbed skin: a sprinkle of tubercles along each arm.
+    rng = np.random.default_rng(107)
+    for i in range(n_arm):
+        a = 2 * math.pi * i / n_arm
+        for k in range(6):
+            r = rng.uniform(0.6, 1.8)
+            off = rng.uniform(-0.12, 0.12)
+            c = V((math.sin(a) * r + math.cos(a) * off, math.cos(a) * r - math.sin(a) * off, 0.12 - 0.03 * r))
+            seg = 0 if r < 1.05 else 1 if r < 1.55 else 2
+            body.append(ell(P(c.x, c.y, c.z), (0.05, 0.05, 0.04), "arm%d_%d" % (i, seg), blend=0.05))
+    def masks(co, n, pale, dark):
+        under = np.clip((-n[:, 2] - 0.1) / 0.4, 0, 1)
+        return np.maximum(pale, under), dark
+
+    def parts(body_solids):
+        pool = [ell(P(0, 0, 0.1), (0.46, 0.46, 0.04), "core", blend=0.02)]
+        return [B.solid_part(pool, 0.015, 300, "pool", "horn", (0.1, 0.22, 0.24))]
+
+    return dict(name="beast_dustdigger", archetype="dustdigger", bones=bones, body=body, masks=masks, parts=parts,
+                patch=B.spots(0.2, seed=109), h=0.03, tris=2400, mat="hide", clips=dustdigger_clips,
+                n_arm=n_arm, gait=dict(walk_stride=0.35, walk_frames=60, run_stride=0.5, run_frames=40))
+
+
+def dustdigger_clips(arm, spec):
+    """All FK: pitch lifts an arm segment (each is rolled so its local X is
+    horizontal across the arm)."""
+    poser = B.Poser(arm, {})
+    clip = B.Clip(poser)
+    n = spec["n_arm"]
+    g = spec["gait"]
+
+    def arms(fn):
+        fk = {}
+        for i in range(n):
+            for k in range(3):
+                fk["arm%d_%d" % (i, k)] = fn(i, k)
+        return fk
+
+    def idle(t):
+        fk = arms(lambda i, k: (-1.5 * wave(t, i / n + k * 0.1) - 0.5, 0, 0))
+        return dict(fk=fk, loc=V((0, 0, -0.1 + 0.01 * wave(2 * t))))
+    clip.run("idle", 120, idle, step=2)
+
+    def crawl(t):
+        # A wave of lift runs round the arms: each rises, reaches, sets down.
+        fk = arms(lambda i, k: (6 * max(0.0, wave(t, i / n)) * (1 + k * 0.3), 4 * wave(t, i / n + 0.25), 0))
+        return dict(fk=fk, loc=V((0, 0, -0.08)), rot=mathutils.Quaternion(V((0, 0, 1)), math.radians(4 * wave(t))))
+    clip.run("walk", g["walk_frames"], crawl)
+    clip.run("run", g["run_frames"], crawl)
+
+    def attack(t):
+        shut = ease(t / 0.45) * (1 - ease((t - 0.65) / 0.35))
+        fk = arms(lambda i, k: (-(40, 45, 50)[k] * shut, 0, 0))
+        return dict(fk=fk, loc=V((0, 0, -0.1 + 0.25 * shut)))
+    clip.run("attack", 30, attack)
+
+    def hit(t):
+        k_ = math.sin(math.pi * min(1.0, t / 0.3)) if t < 0.3 else (1 - ease((t - 0.3) / 0.7)) * 0.8
+        fk = arms(lambda i, k: (-12 * k_ * (1 + (i % 2)), 0, 0))
+        return dict(fk=fk, loc=V((0, 0, -0.1 + 0.06 * k_)))
+    clip.run("hit", 14, hit)
+
+    def death(t):
+        c = ease(t / 0.7)
+        fk = arms(lambda i, k: (-(15, 30, 45)[k] * c * (0.6 + 0.4 * ((i * 7) % 3) / 2), 0, 0))
+        return dict(fk=fk, loc=V((0, 0, -0.1 + 0.08 * c)))
+    clip.run("death", 40, death)
+    return {"clips": clip.report, "stride": {"walk": g["walk_stride"], "run": g["run_stride"]}, "hit": 0.45}
+
+
+# ============================================================ camel
+
+
+def camel():
+    """A dromedary, 1.9 m at the shoulder and 2.2 m over the hump: long thin
+    legs with calloused knees, splayed pad feet, a deep chest, one hump, a
+    neck that dips before it rises, a long face with a split, drooping lip,
+    heavy-lidded eyes and small ears. It walks a pace, both legs of a side
+    together -- which is what makes a camel roll."""
+    L = dict(
+        spine=[(0, -0.72, 1.72), (0, -0.25, 1.8), (0, 0.2, 1.82), (0, 0.55, 1.78)],
+        neck=[(0, 0.62, 1.62), (0, 0.98, 1.3), (0, 1.28, 1.58), (0, 1.36, 1.98)],
+        nose=(0, 1.82, 1.86),
+        jaw=[(0, 1.42, 1.9), (0, 1.78, 1.8)],
+        tail=[(0, -0.84, 1.66), (0, -0.92, 1.4), (0, -0.95, 1.1)],
+        hind=[(0.22, -0.62, 1.5), (0.26, -0.45, 1.05), (0.2, -0.74, 0.6), (0.18, -0.66, 0.1), (0.18, -0.52, 0.0)],
+        fore=[(0.22, 0.52, 1.36), (0.22, 0.46, 1.0), (0.2, 0.5, 0.55), (0.18, 0.5, 0.1), (0.18, 0.64, 0.0)],
+        scapula=(0.16, 0.38, 1.82),
+        extra={"ear*": ((0.08, 1.38, 2.06), (0.11, 1.35, 2.14), "head")},
+    )
+    body = [
+        ell(P(0, -0.05, 1.52), (0.36, 0.72, 0.36), ("grad", "spine", "chest", P(0, -0.3, 1.5), P(0, 0.4, 1.5)), blend=0.14),
+        ell(P(0, 0.45, 1.42), (0.3, 0.3, 0.4), "chest", blend=0.12),
+        ell(P(0, -0.62, 1.55), (0.3, 0.26, 0.28), ("grad", "pelvis", "spine", P(0, -0.7, 1.5), P(0, -0.2, 1.5)), blend=0.12),
+        # The hump.
+        ell(P(0, -0.08, 1.92), (0.24, 0.42, 0.34), ("grad", "spine", "chest", P(0, -0.3, 1.9), P(0, 0.2, 1.9)), blend=0.14),
+        # Chest pad, the callus a camel kneels on.
+        ell(P(0, 0.5, 1.06), (0.12, 0.14, 0.08), "chest", blend=0.08, mask=(0, 0.5)),
+        # Head: a long face, a broad muzzle, the lip hanging.
+        ell(P(0, 1.42, 2.0), (0.11, 0.14, 0.12), "head", blend=0.05),
+        cone(P(0, 1.48, 1.98), P(0, 1.78, 1.86), 0.095, 0.075, "head", blend=0.05, squash=(0.9, 1, 1)),
+        ell(P(0, 1.8, 1.83), (0.08, 0.07, 0.07), "head", blend=0.04, mask=(0.5, 0)),
+        ell(P(0.07, 1.44, 2.07), (0.04, 0.05, 0.03), "head", blend=0.03),
+        ell(P(-0.07, 1.44, 2.07), (0.04, 0.05, 0.03), "head", blend=0.03),
+    ]
+    neck = L["neck"]
+    nr = (0.2, 0.15, 0.13, 0.11)
+    for i in range(len(neck) - 1):
+        nm = "neck" if i == 0 else "neck%d" % (i + 1)
+        body.append(cone(P(*neck[i]), P(*neck[i + 1]), nr[i], nr[i + 1], nm, blend=0.1, group="neck", squash=(0.75, 1, 1)))
+    tail = L["tail"]
+    for i in range(len(tail) - 1):
+        body.append(cone(P(*tail[i]), P(*tail[i + 1]), 0.04 - i * 0.01, 0.03 - i * 0.01, "tail%d" % (i + 1), blend=0.03, group="tail"))
+    for side in (1, -1):
+        t = ".L" if side > 0 else ".R"
+        body += B.leg_solids(L, "hind", [0.12, 0.07, 0.05, 0.045, 0.0], 0.08, side)
+        body += B.leg_solids(L, "fore", [0.1, 0.065, 0.05, 0.045, 0.0], 0.07, side)
+        body.append(ell(P(side * 0.2, -0.64, 1.3), (0.12, 0.24, 0.3), "thigh" + t, blend=0.1))
+        body.append(ell(P(side * 0.22, 0.48, 1.2), (0.1, 0.16, 0.22), "upperarm" + t, blend=0.1))
+        # Knee and hock callosities.
+        body.append(ell(P(side * 0.2, 0.5, 0.56), (0.06, 0.07, 0.07), "forearm" + t, blend=0.04, mask=(0, 0.4)))
+        body.append(ell(P(side * 0.2, -0.72, 0.62), (0.06, 0.07, 0.07), "shin" + t, blend=0.04, mask=(0, 0.4)))
+        # Pads: broad and flat, two toes with a cleft.
+        for kind, bone in (("hind", "htoe"), ("fore", "ftoe")):
+            tip = V(B.apply_side(L[kind][4], side))
+            base = V(B.apply_side(L[kind][3], side))
+            c = base.lerp(tip, 0.55)
+            body.append(ell(P(c.x, c.y, 0.045), (0.09, 0.13, 0.045), bone + t, blend=0.04, mask=(0, 0.3)))
+
+    def masks(co, n, pale, dark):
+        under = np.clip((-n[:, 2] - 0.2) / 0.5, 0, 1) * (co[:, 2] > 1.0)
+        return np.maximum(pale, under * 0.5), dark
+
+    def parts(body_solids):
+        out = []
+        jaw = [cone(P(0, 1.44, 1.9), P(0, 1.76, 1.78), 0.07, 0.05, "jaw", blend=0.02, squash=(0.85, 1, 0.8))]
+        out.append(B.sdf_part(jaw, 0.008, 200, "jaw", "fur", smooth=1, mask_fn=lambda co, n, p, d: (np.maximum(p, 0.5), d)))
+        out += B.eye_pair(body_solids, (0.25, 1.46, 2.06), (-0.9, -0.2, 0.05), 0.024, colour=(0.03, 0.02, 0.018),
+                          sink=0.012, squash=(1.0, 1.0, 0.65), h=0.005)
+        for side in (1, -1):
+            at = B.surface_point(body_solids, P(side * 0.04, 2.1, 1.88), P(0, -1, 0), sink=0.008)
+            out.append(B.solid_part([ell(tuple(at), (0.012, 0.01, 0.022), "head", blend=0.004)], 0.004, 50,
+                                    "nostril", "horn", (0.05, 0.035, 0.03)))
+        out += B.leaf_pair(L, "ear", 0.035, 0.015, (1.0, 0.45, 1.0), 0.005, tris=100, mask=(0, 0.2))
+        return out
+
+    return dict(name="beast_camel", archetype="camel", L=L, bones=B.quad_bones(L), body=body, masks=masks, parts=parts,
+                h=0.02, tris=3600, mat="fur", clips=B.quad_clips,
+                gait=dict(walk_stride=1.3, walk_frames=34, walk_duty=0.64, lift=0.14,
+                          run_stride=3.2, run_frames=22, run_duty=0.38, run_lift=0.24,
+                          gallop="rotary", wag=4.0, idle_wag=1, tail_pitch=0.0, lie=0.5, arch=3.0, pant=4.0,
+                          flex={"hind": dict(lean=8, push=15, fold=35, curl=35),
+                                "fore": dict(lean=8, push=20, fold=80, curl=45, scap=10)}))
+
+
+# ============================================================ dracolich
+
+
+def dracolich():
+    """The dracolich: the dragon of beasts.py with the dragon taken off it.
+    Its own skeleton, on the same bones -- a skull with empty orbits and a
+    light in each, a jaw of teeth, vertebrae down the neck, back and tail
+    with their spines, a basket of ribs, the girdles, the long bones of the
+    legs with knuckled joints, and the wings as bare finger-bones hung with
+    a few rags of membrane. `bone` is painted in its vertices; the rags and
+    the scraps of flesh are the coat."""
+    D = B.dragon()
+    L = D["L"]
+    spine, neck, tail = L["spine"], L["neck"], L["tail"]
+    bone_c = (0.0, 0.0)
+    body = []
+    # Vertebrae: a knuckle per joint along neck, back and tail, and a spine
+    # standing up from each.
+    # From the skull back: each entry is a joint and the bone of the segment
+    # that runs from it to the next.
+    col = [(neck[3], "neck3"), (neck[2], "neck2"), (neck[1], "neck"), (neck[0], "chest"),
+           (spine[3], "chest"), (spine[2], "spine"), (spine[1], "pelvis"), (spine[0], "pelvis")]
+    col += [(tail[i], "tail%d" % (i + 1)) for i in range(len(tail) - 1)] + [(tail[-1], "tail%d" % (len(tail) - 1))]
+    pts = [V(p) for p, _ in col]
+    for i in range(len(col) - 1):
+        a, b = pts[i], pts[i + 1]
+        nm = col[i][1]
+        r = 0.09 if a.y > -1.2 else max(0.03, 0.09 * (1 + (a.y + 1.2) / 4.5))
+        body.append(cone(P(*a), P(*b), r * 0.55, r * 0.5, nm, blend=0.02, group="col"))
+        for k in range(3):
+            c = a.lerp(b, (k + 0.5) / 3)
+            body.append(ell(P(*c), (r * 1.05, r * 0.55, r * 0.95), nm, blend=0.03))
+            if a.y > -3.5:
+                body.append(cone(P(c.x, c.y, c.z + r * 0.6), P(c.x, c.y - 0.06, c.z + r * 2.4), r * 0.3, r * 0.08, nm, blend=0.02))
+    # Ribs: pairs of arcs hung from the back, closing on a keel of sternum.
+    for k in range(8):
+        f = 0.75 - k * 0.2
+        top = 1.62 - abs(f - 0.2) * 0.04
+        bone_ = "chest" if f > 0.3 else "spine" if f > -0.3 else "pelvis"
+        depth = 0.95 - abs(k - 3) * 0.08
+        for side in (1, -1):
+            arc = [(side * 0.08, f, top), (side * 0.42, f - 0.04, top - 0.2), (side * 0.52, f - 0.1, top - depth * 0.55),
+                   (side * 0.36, f - 0.16, top - depth * 0.95), (side * 0.06, f - 0.18, top - depth * 1.05)]
+            for j in range(len(arc) - 1):
+                body.append(cone(P(*arc[j]), P(*arc[j + 1]), 0.035, 0.03, bone_, blend=0.01, group="rib%d%d" % (k, side)))
+    body.append(cone(P(0, 0.72, 0.62), P(0, -0.3, 0.68), 0.05, 0.035, ("grad", "chest", "spine", P(0, 0.7, 0), P(0, -0.3, 0)), blend=0.03))
+    # Pelvis and shoulder blades.
+    body.append(ell(P(0, -0.8, 1.45), (0.36, 0.3, 0.1), "pelvis", blend=0.05, rot=(20, 0, 0)))
+    for side in (1, -1):
+        body.append(ell(P(side * 0.34, 0.5, 1.55), (0.06, 0.3, 0.2), "scapula" + (".L" if side > 0 else ".R"), blend=0.04, rot=(30, 0, 0)))
+    # The skull: a long case of bone with the orbits and nasal holes cut out.
+    body += [ell(P(0, 2.4, 2.72), (0.19, 0.28, 0.16), "head", blend=0.05),
+             cone(P(0, 2.5, 2.66), P(0, 2.92, 2.5), 0.13, 0.07, "head", blend=0.05, squash=(1.0, 1.0, 0.7)),
+             ell(P(0.12, 2.52, 2.78), (0.075, 0.08, 0.06), "head", blend=0.02, neg=True),
+             ell(P(-0.12, 2.52, 2.78), (0.075, 0.08, 0.06), "head", blend=0.02, neg=True),
+             ell(P(0, 2.9, 2.55), (0.05, 0.04, 0.03), "head", blend=0.01, neg=True),
+             ell(P(0.15, 2.3, 2.68), (0.07, 0.1, 0.06), "head", blend=0.02, neg=True),
+             ell(P(-0.15, 2.3, 2.68), (0.07, 0.1, 0.06), "head", blend=0.02, neg=True)]
+    for s in body:
+        s.mask = bone_c
+
+    def masks(co, n, pale, dark):
+        return pale * 0, dark * 0
+
+    def leg_bones():
+        out = []
+        for kind in ("hind", "fore"):
+            for side in (1, -1):
+                t = ".L" if side > 0 else ".R"
+                q = [B.apply_side(p, side) for p in L[kind]]
+                names = [nm + t for nm in B.LEG_BONES[kind]]
+                radii = (0.08, 0.06, 0.05, 0.04)
+                s = []
+                for i in range(3):
+                    a, b = V(q[i]), V(q[i + 1])
+                    s.append(cone(P(*a), P(*b), radii[i], radii[i] * 0.8, names[i], blend=0.02, group="l"))
+                    s.append(ell(P(*a), (radii[i] * 1.6,) * 3, names[i], blend=0.04))
+                s.append(ell(P(*q[3]), (0.09, 0.09, 0.06), names[3], blend=0.03))
+                s.append(cone(P(*q[3]), P(*q[4]), 0.05, 0.035, names[3], blend=0.02))
+                out.append(B.sdf_part(s, 0.018, 260, "legbone", "bone", smooth=1))
+        return out
+
+    def parts(body_solids):
+        out = leg_bones()
+        jaw = [cone(P(0, 2.32, 2.54), P(0, 2.86, 2.38), 0.1, 0.05, "jaw", blend=0.04, squash=(0.9, 1, 0.45)),
+               ell(P(0, 2.55, 2.5), (0.07, 0.2, 0.05), "jaw", blend=0.02, neg=True)]
+        out.append(B.sdf_part(jaw, 0.012, 300, "jaw", "bone", smooth=1))
+        teeth = []
+        for i in range(7):
+            f = 2.42 + i * 0.07
+            for x in (0.075, -0.075):
+                w = x * (1 - i * 0.07)
+                teeth.append(cone(P(w, f, 2.52), P(w, f + 0.012, 2.43), 0.02, 0.004, "head", blend=0.004, group="t%d%d" % (i, x > 0)))
+                teeth.append(cone(P(w * 0.9, f - 0.02, 2.44), P(w * 0.9, f - 0.01, 2.51), 0.016, 0.004, "jaw", blend=0.004, group="b%d%d" % (i, x > 0)))
+        out.append(B.solid_part(teeth, 0.008, 300, "teeth", "horn", (0.62, 0.58, 0.46), smooth=0))
+        # A light where each eye was.
+        for side in (1, -1):
+            out.append(B.solid_part([ell(P(side * 0.11, 2.53, 2.76), (0.035, 0.035, 0.03), "head", blend=0.004)], 0.006, 60,
+                                    "eye", "glow", (1.0, 1.0, 1.0), smooth=0))
+        for side in (1, -1):
+            t = ".L" if side > 0 else ".R"
+            h0, h1, _ = L["extra"]["horn*"]
+            a, b = B.apply_side(h0, side), B.apply_side(h1, side)
+            mid = V(a).lerp(V(b), 0.5) + V((0, 0, -0.06))
+            horn = [cone(P(*a), P(*mid), 0.07, 0.05, "horn" + t, blend=0.02, group="h"),
+                    cone(P(*mid), P(*b), 0.05, 0.01, "horn" + t, blend=0.02, group="h")]
+            out.append(B.solid_part(horn, 0.012, 160, "horn", "horn", (0.3, 0.27, 0.22)))
+        out += B.claws(L, "fore", 3, 0.16, 0.035, 0.008, colour=(0.2, 0.18, 0.14))
+        out += B.claws(L, "hind", 3, 0.14, 0.035, 0.008, colour=(0.2, 0.18, 0.14))
+        # Wings: arm and finger bones, the membrane in rags between them.
+        for side in (1, -1):
+            t = ".L" if side > 0 else ".R"
+            sh = V(B.apply_side(L["extra"]["wing1*"][0], side))
+            wr = V(B.apply_side(L["extra"]["wing1*"][1], side))
+            tip = V(B.apply_side(L["extra"]["wing2*"][1], side))
+            wing = [cone(P(*sh), P(*wr), 0.06, 0.04, "wing1" + t, blend=0.02, group="arm"),
+                    cone(P(*wr), P(*tip), 0.04, 0.012, "wing2" + t, blend=0.02, group="arm")]
+            for (df, dz) in ((-0.4, -0.8), (-0.9, -0.6)):
+                ft = V((tip.x, wr.y + df, wr.z + dz))
+                wing.append(cone(P(*wr), P(*ft), 0.03, 0.01, "wing2" + t, blend=0.02, group="f%d" % int(df * 10)))
+            out.append(B.sdf_part(wing, 0.014, 320, "wingbone", "bone", smooth=1))
+            tilt = 16 * side
+            cen = sh * 0.25 + wr * 0.35 + tip * 0.4 + V((0, 0, -0.25))
+            rag = [ell(P(cen.x, cen.y, cen.z), (0.018, 0.95, 0.45), ("grad", "wing1" + t, "wing2" + t, P(*sh), P(*tip)),
+                       blend=0.03, rot=(0, -tilt, 0))]
+            rng = np.random.default_rng(113 + side)
+            for k in range(9):
+                c = cen + V((0, rng.uniform(-0.9, 0.9), rng.uniform(-0.5, 0.35)))
+                rag.append(ell(P(c.x, c.y, c.z), (0.1, rng.uniform(0.08, 0.22), rng.uniform(0.1, 0.25)), "wing2" + t,
+                               blend=0.03, neg=True))
+            out.append(B.sdf_part(rag, 0.012, 340, "rags", "hide", smooth=1, patch_fn=lambda co: np.zeros(len(co))))
+        # Scraps of dried flesh still clinging: on the neck, the flank, the hip.
+        flesh = [ell(P(0.3, 0.2, 1.3), (0.12, 0.35, 0.3), "spine", blend=0.05),
+                 ell(P(-0.25, -0.5, 1.4), (0.14, 0.3, 0.25), "pelvis", blend=0.05),
+                 ell(P(0, 1.5, 2.1), (0.14, 0.2, 0.16), "neck2", blend=0.05)]
+        out.append(B.sdf_part(flesh, 0.014, 400, "flesh", "hide", smooth=1, patch_fn=lambda co: np.zeros(len(co))))
+        return out
+
+    spec = dict(D)
+    spec.update(name="beast_dracolich", archetype="dracolich", body=body, masks=masks, parts=parts,
+                patch=lambda co: np.zeros(len(co)), h=0.02, tris=3900, mat="bone")
+    spec["bones"] = B.quad_bones(L)
+    spec["clips"] = B.quad_clips
+    return spec
+
+
 # ============================================================ previews and build
 
 
@@ -1630,7 +2331,7 @@ def preview(spec_fn, path, target=None, dist=None, azim=35.0, elev=14.0, clip=No
     return tris, rep
 
 
-SPECS = [spider, beetle, scorpion, drider, bat, mudmonster, myconoid, ratman, imp]
+SPECS = [spider, beetle, scorpion, drider, bat, mudmonster, myconoid, ratman, imp, naga, sandworm, basilisk, dustdigger, camel, dracolich]
 
 
 def build(only=None):

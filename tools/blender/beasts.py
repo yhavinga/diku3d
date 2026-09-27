@@ -2442,7 +2442,9 @@ def serpent_clips(arm, spec):
             head_p, tail_p = pts[i], pts[i + 1]
             y = (tail_p - head_p).normalized()
             up = V((0, 0, 1))
-            x = y.cross(up).normalized()
+            x = y.cross(up)
+            # A reared neck can stand straight up, where "sideways" is lost.
+            x = x.normalized() if x.length > 1e-3 else V((-1, 0, 0))
             z = x.cross(y)
             if roll:
                 q = mathutils.Quaternion(y, math.radians(roll))
@@ -2701,7 +2703,7 @@ def dragon():
                 gait=dict(walk_stride=2.1, walk_frames=46, walk_duty=0.66, lift=0.22,
                           run_stride=3.4, run_frames=26, run_duty=0.4, run_lift=0.35,
                           gallop="transverse", wag=5.0, idle_wag=1, tail_pitch=-4.0, lie=0.5, arch=4.0,
-                          attack_frames=24,
+                          attack_frames=24, lair=True,
                           flex={"hind": dict(lean=6, push=15, fold=35, curl=30),
                                 "fore": dict(lean=6, push=18, fold=60, curl=35, scap=10)}))
 
@@ -3018,6 +3020,38 @@ def quad_clips(arm, spec):
         ik = {leg: planted(rest, leg, fwd=0, meta=-10 * buckle) for leg in rest}
         return dict(fk=fk, loc=loc, rot=rot, ik=ik, limp=ease((t - 0.18) / 0.3))
     clip.run("death", g.get("death_frames", 45), death)
+
+    # -- lair: lying curled on its hoard, the tail wrapped round and the head
+    # down on the forelegs, breathing. The viewer plays it as the idle of a
+    # dragon that is at home, which is also how a nine-metre one fits a room.
+    if g.get("lair"):
+        def lair(t):
+            breath = wave(t)
+            loc = V((0.0, 0.0, -(root_h - lie * 1.6) + 0.012 * breath))
+            fk = {"pelvis": (0, 0, 0), "spine": (-1.5 * breath, 0, 0), "chest": (2 + breath, 0, 0)}
+            # Pitch alone: a yaw on a neck this steep is a lean, not a turn.
+            for i, n in enumerate(necks):
+                fk[n] = ((38, 12, -18)[min(i, 2)], 0, 0)
+            fk["head"] = (6 + 2 * wave(t, 0.3), 4 * wave(t, 0.1), 0)
+            if "jaw" in bones:
+                fk["jaw"] = (-2 * max(0.0, breath), 0, 0)
+            for i, n in enumerate(tails):
+                fk[n] = (3, -24 - 2 * wave(t, 0.1 * i), 0)
+            with_wings(fk, lift=0.0)
+            for leg, info in poser.legs.items():
+                up, lo, meta, toe = info["chain"]
+                if info["kind"] == "hind":
+                    fk[up] = (-50, 0, 0)
+                    fk[lo] = (125, 0, 0)
+                    fk[meta] = (-85, 0, 0)
+                    fk[toe] = (5, 0, 0)
+                else:
+                    fk[up] = (25, 0, 0)
+                    fk[lo] = (-95, 0, 0)
+                    fk[meta] = (-5, 0, 0)
+                    fk[toe] = (5, 0, 0)
+            return dict(fk=fk, loc=loc, ik={leg: planted(rest, leg) for leg in rest}, limp=1.0)
+        clip.run("lair", 120, lair, step=2)
 
     report["clips"] = clip.report
     report["stride"] = {"walk": S, "run": S2}
