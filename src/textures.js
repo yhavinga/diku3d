@@ -503,6 +503,52 @@ const SURFACES = {
     s.rough = 0.60 + blotch * 0.12 + pore * 0.05;
   },
 
+  /**
+   * Fur and hide, for the animals. Near-neutral, like cloth, because every
+   * beast carries its coat, its pale belly and its dark points in vertex colour
+   * and the map must not fight them. What the map does carry is the one thing
+   * that tells a pelt from a painted shell at a few metres: the coat lies in
+   * clumps that each catch the light a little differently, and the gaps
+   * between them are shadowed. Isotropic on purpose -- the UVs are cube
+   * projected, so a strand direction would change at every projection seam.
+   */
+  fur(u, v, s) {
+    const [d1, edge, id] = cellular(u * 16, v * 16, 16, 401, 0.5);
+    const fine = fbm(u * 64, v * 64, 64, 409, 2);
+    const tone = fbm(u * 4, v * 4, 4, 419, 3);
+    const clump = clamp01(edge * 3.2);
+    const base = mix(rgb(0x9e9e9e), rgb(0xb4b4b4), tone);
+    // Kept low: at 0.16 of tone and 0.07 of relief a horse's short coat read
+    // as a fleece at two metres.
+    const shade = (0.95 + id * 0.08) * (0.95 + clump * 0.05) * (0.95 + fine * 0.08);
+    s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
+    s.height = 0.5 + clump * 0.035 + fine * 0.025 - d1 * 0.01;
+    s.rough = 0.86 + fine * 0.1;
+  },
+
+  /**
+   * Feathers: rows of overlapping vanes, each a shallow scallop whose lower
+   * edge stands proud of the next. Kept faint -- at the size a swan is seen
+   * from, plumage is a soft sheen with a little structure in it, not scales.
+   */
+  feather(u, v, s) {
+    const rows = 14;
+    const cols = 9;
+    const r = v * rows;
+    const ri = Math.floor(r);
+    const x = u * cols + (ri % 2) * 0.5;
+    const cx = x - Math.floor(x) - 0.5;
+    const cy = r - ri;
+    const vane = clamp01(1 - Math.hypot(cx * 1.2, (cy - 0.15) * 0.8) * 1.5);
+    const barb = fbm(u * 70, v * 22, 70, 431, 2);
+    const tone = fbm(u * 3, v * 3, 3, 433, 3);
+    const base = mix(rgb(0xa6a6a6), rgb(0xbababa), tone);
+    const shade = (0.93 + vane * 0.09) * (0.95 + barb * 0.08);
+    s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
+    s.height = 0.5 + vane * 0.06 + barb * 0.02;
+    s.rough = 0.74 + barb * 0.12 - vane * 0.06;
+  },
+
   iron(u, v, s) {
     const brush = fbm(u * 8, v * 120, 8, 173, 3);
     const rust = clamp01(fbm(u * 9, v * 9, 9, 179, 4) * 1.7 - 0.8);
@@ -747,6 +793,12 @@ const RECIPES = {
   paint: { surface: 'paint', scale: 0.8, normalScale: 0.5, env: 0.6, wet: 0, detail: 0.4 },
   bark: { surface: 'bark', scale: 1.6, normalScale: 1.0, env: 0.65, wet: 0, detail: 0.5 },
   water: { surface: 'water', scale: 7, normalScale: 0.5, env: 1.6, wet: 0, detail: 0.2 },
+  // The animals. A 0.4 m tile is a hand's-breadth clump pattern on a dog and
+  // still reads as a coat on a horse. `moving` keeps the world-space effects
+  // off them: a splash line fixed to the paving and a grain fixed to the world
+  // both slide over anything that walks through them.
+  fur: { surface: 'fur', scale: 0.4, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, moving: true },
+  feather: { surface: 'feather', scale: 0.3, normalScale: 0.3, env: 0.5, wet: 0, detail: 0, moving: true },
 };
 
 // ------------------------------------------------------- surface detail ----
@@ -926,8 +978,10 @@ function decorate(material, recipe, macro, grain) {
         float dikuStorey = mod( vSurfacePos.y, 7.6 );
         float dikuSplash = ( 1.0 - smoothstep( 0.0, 0.85, dikuStorey ) ) * dikuVertical;
         float dikuSheltered = smoothstep( 5.6, 6.6, dikuStorey ) * dikuVertical;
+        #ifndef DIKU_MOVING
         diffuseColor.rgb *= 1.0 - dikuSplash * 0.24 * ( 0.6 + dikuMacro.r * 0.7 );
         diffuseColor.rgb *= 1.0 + dikuSheltered * 0.06;
+        #endif
       `)
       .replace('#include <roughnessmap_fragment>', /* glsl */`
         #include <roughnessmap_fragment>
@@ -979,10 +1033,11 @@ function decorate(material, recipe, macro, grain) {
       `);
   };
   if (recipe.wet) material.defines = { ...material.defines, DIKU_WET: 1 };
+  if (recipe.moving) material.defines = { ...material.defines, DIKU_MOVING: 1 };
   // Our injected source differs from stock, so it needs a key of its own or
   // three will hand us a program compiled for an undecorated material.
   material.customProgramCacheKey = () => `diku|${material.defines?.DIKU_DETAIL ? 1 : 0}`
-    + `|${material.defines?.DIKU_WET ? 1 : 0}`;
+    + `|${material.defines?.DIKU_WET ? 1 : 0}|${material.defines?.DIKU_MOVING ? 1 : 0}`;
 }
 
 /**

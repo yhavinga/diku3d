@@ -41,8 +41,10 @@ const _scale = new THREE.Vector3();
 // this table no longer needs an entry for it.
 // cloth2 and linen are a second and a third garment on one person -- hose
 // under a tunic, an apron over it -- in the same woven surface, so they are
-// the cloth recipe under another name and take their own tint.
-const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth' };
+// the cloth recipe under another name and take their own tint. Snake scales
+// are the feather surface: rows of overlapping scallops is what both of them
+// are, and at the size either is seen the two read the same.
+const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', scales: 'feather' };
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
   skin: { color: 0xc79b76, roughness: 0.72, metalness: 0 },
@@ -58,6 +60,11 @@ const TAG_MATERIALS = {
   // Gilt: a cleric's holy symbol. Bright on purpose -- it has to read at
   // twenty metres against a robe.
   gold: { color: 0xd4a64a, roughness: 0.32, metalness: 0.9 },
+  // Keratin and wet tissue on the animals: eyes, noses, hooves, claws, beaks,
+  // horns and the inside of a mouth. White, because every part carries its
+  // own colour in the vertex colours; glossy, because that is the difference
+  // between an eye and a painted dot.
+  horn: { color: 0xffffff, roughness: 0.34, metalness: 0 },
   glass: {
     color: 0xd8c48a, roughness: 0.12, metalness: 0,
     transparent: true, opacity: 0.55, emissive: 0x000000,
@@ -351,4 +358,9 @@ export const ASSET_NAMES = [
   'townsperson', 'person_male', 'person_female', 'troll',
   'weapon_sword', 'weapon_dagger', 'weapon_axe', 'weapon_mace', 'weapon_spear',
   'weapon_staff', 'shield_round', 'shield_kite',
+  // Animals, rigged and animated. One base mesh per build of body; the
+  // breeds and species are proportions and coats laid on in actors.js.
+  'beast_canine', 'beast_feline', 'beast_rodent', 'beast_bear', 'beast_equine', 'beast_cervid',
+  'beast_bovine', 'beast_pig', 'beast_duck', 'beast_swan', 'beast_hen', 'beast_songbird',
+  'beast_snake', 'beast_worm', 'beast_dragon',
 ];

@@ -34,6 +34,7 @@ MODULES = [
     "townsperson",
     "weapons",
     "people",
+    "beasts",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a
@@ -64,6 +65,16 @@ BUDGET = {
     # Carried, so paid for once per armed mobile and once more in first person.
     "weapon_sword": 600, "weapon_dagger": 400, "weapon_axe": 500, "weapon_mace": 600,
     "weapon_spear": 400, "weapon_staff": 500, "shield_round": 1100, "shield_kite": 1000,
+    # The animals. One skinned mesh each, two materials (fur or feathers, and
+    # horn), and far fewer of them than of people: Midgaard has 13, the
+    # Shire's farm 19. The big ones get the most because they are the ones
+    # seen close and whole -- a horse fills the frame a sparrow never does.
+    "beast_canine": 4600, "beast_feline": 3800, "beast_rodent": 2600, "beast_bear": 5600,
+    "beast_equine": 6000, "beast_cervid": 5200, "beast_bovine": 6000, "beast_pig": 4800,
+    "beast_duck": 3800, "beast_swan": 4500, "beast_hen": 4000, "beast_songbird": 2600,
+    "beast_snake": 3600, "beast_worm": 2600,
+    # One of it in the default world, and it is nine metres long.
+    "beast_dragon": 8000,
 }
 PROP_BUDGET = 800
 # people.py: an archetype is a whole dressed person, one skinned draw per
