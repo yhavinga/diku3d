@@ -21,13 +21,18 @@
  * plain node, which is what `tools/game-check.mjs` does.
  */
 
-import { ACT_SENTINEL, ACT_AGGRESSIVE, ACT_PRACTICE, ITEM } from './are.js';
+import {
+  ACT_SENTINEL, ACT_AGGRESSIVE, ACT_PRACTICE, ACT_SCAVENGER, ITEM,
+  ROOM_NO_MOB, ROOM_PRIVATE, ROOM_SOLITARY,
+} from './are.js';
+import { createNav } from './nav.js';
 
 // --------------------------------------------------------------- merc.h ----
 
 const PULSE_PER_SECOND = 4;
 const PULSE_VIOLENCE = 3 * PULSE_PER_SECOND;
 const PULSE_TICK = 30 * PULSE_PER_SECOND;
+const PULSE_MOBILE = 4 * PULSE_PER_SECOND;
 
 const MAX_LEVEL = 40;
 const LEVEL_HERO = MAX_LEVEL - 4;
@@ -68,6 +73,7 @@ const W = {
 const X = { NODROP: 128, NOREMOVE: 4096, INVENTORY: 8192 };
 
 const ACT_WIMPY = 128;
+const ACT_STAY_AREA = 64;
 
 const APPLY = {
   NONE: 0, STR: 1, DEX: 2, INT: 3, WIS: 4, CON: 5, MANA: 12, HIT: 13,
@@ -597,11 +603,28 @@ function damMessage(ch, victim, dam, dt) {
 }
 
 /**
+ * Who struck whom, with what, for whoever draws it. `from`/`to` are the
+ * mobile's slot in the real-time game, or null for the player; `metal` is
+ * whether the blow lands on worn armour (a spark and a clank) or on cloth and
+ * skin (a thud); `attack` is attack_table's word for the weapon.
+ */
+function blow(ch, victim) {
+  const wield = ch.equipment[WEAR.WIELD];
+  const attack = wield && wield.itemType === ITEM.WEAPON ? (ATTACK_TABLE[wield.values[3]] || 'hit') : 'hit';
+  const metal = victim.equipment.some((obj) => obj && obj.itemType === ITEM.ARMOR
+    && [WEAR.BODY, WEAR.HEAD, WEAR.SHIELD, WEAR.ARMS, WEAR.LEGS].includes(obj.wearLoc));
+  return { from: ch.slot || null, to: victim.slot || null, attack, armed: !!wield, metal };
+}
+
+/**
  * fight.c: one_hit. `ctx` carries the rng and the event sink so that the two
  * halves -- the arithmetic and the telling -- stay separable for the harness.
  */
 function oneHit(ch, victim, dt, ctx) {
   if (victim.position === POS.DEAD) return;
+  // When this blow is *shown* -- the rules resolve a whole round on one pulse,
+  // and a round of four blows all landing on the same frame reads as one.
+  if (ctx.round) ctx.now = (isNpc(ch) ? ctx.round.npc : ctx.round.player) + (ctx.beat || 0) * SWING_GAP;
 
   const wield = ch.equipment[WEAR.WIELD];
   if (dt === undefined || dt === null) {
@@ -659,8 +682,8 @@ function checkParry(ch, victim, ctx) {
   }
   if (ctx.rng.percent() >= chance + victim.level - ch.level) return false;
   ctx.emit(isNpc(victim)
-    ? { kind: 'parry', text: `${capitalise(victim.name)} parries your attack.` }
-    : { kind: 'parry', text: `You parry ${ch.name}'s attack.`, defended: true });
+    ? { kind: 'parry', text: `${capitalise(victim.name)} parries your attack.`, ...blow(ch, victim) }
+    : { kind: 'parry', text: `You parry ${ch.name}'s attack.`, defended: true, ...blow(ch, victim) });
   return true;
 }
 
@@ -672,8 +695,8 @@ function checkDodge(ch, victim, ctx) {
     : idiv(victim.learned.dodge, 2);
   if (ctx.rng.percent() >= chance + victim.level - ch.level) return false;
   ctx.emit(isNpc(victim)
-    ? { kind: 'dodge', text: `${capitalise(victim.name)} dodges your attack.` }
-    : { kind: 'dodge', text: `You dodge ${ch.name}'s attack.`, defended: true });
+    ? { kind: 'dodge', text: `${capitalise(victim.name)} dodges your attack.`, ...blow(ch, victim) }
+    : { kind: 'dodge', text: `You dodge ${ch.name}'s attack.`, defended: true, ...blow(ch, victim) });
   return true;
 }
 
@@ -709,6 +732,9 @@ function damage(ch, victim, dam, dt, ctx) {
       dam,
       byPlayer: !isNpc(ch),
       target: victim.name,
+      ...blow(ch, victim),
+      hp: Math.max(0, victim.hit - dam),
+      maxHp: victim.maxHit,
     });
   }
 
@@ -759,23 +785,26 @@ function damage(ch, victim, dam, dt, ctx) {
 
 /** fight.c: multi_hit. A mobile's extra swings come off its level, a player's off skills. */
 function multiHit(ch, victim, dt, ctx) {
+  ctx.beat = 0;
   oneHit(ch, victim, dt, ctx);
   if (ch.fighting !== victim) return;
 
   let chance = isNpc(ch) ? ch.level : idiv(ch.learned.secondAttack, 2);
   if (ctx.rng.percent() < chance) {
+    ctx.beat += 1;
     oneHit(ch, victim, dt, ctx);
     if (ch.fighting !== victim) return;
   }
 
   chance = isNpc(ch) ? ch.level : idiv(ch.learned.thirdAttack, 4);
   if (ctx.rng.percent() < chance) {
+    ctx.beat += 1;
     oneHit(ch, victim, dt, ctx);
     if (ch.fighting !== victim) return;
   }
 
   chance = isNpc(ch) ? idiv(ch.level, 2) : 0;
-  if (ctx.rng.percent() < chance) oneHit(ch, victim, dt, ctx);
+  if (ctx.rng.percent() < chance) { ctx.beat += 1; oneHit(ch, victim, dt, ctx); }
 }
 
 /**
@@ -841,6 +870,18 @@ const BREAK = 14;       // out this far the fight is over -- this is do_flee
 const MOB_SPEED = 2.6;  // metres a second, closing
 const LEASH = 26;       // how far a mobile will chase before going home
 
+/**
+ * Presentation beats, in seconds after the pulse that resolved them. Every
+ * combat event carries its `delay`, and whatever draws or sounds it waits that
+ * long, so the text, the number, the flinch and the clang all land on the
+ * frame the swing connects. The rules are untouched: the round is still
+ * resolved on the pulse, all at once.
+ */
+export const SWING_GAP = 0.62;   // between one blow of a round and the next
+export const MOB_BEAT = 0.31;    // a mobile's blows fall between yours
+export const CLICK_WINDUP = 0.24;  // a click swings now; the blow lands this much later
+export const AMBUSH_WINDUP = 0.5;  // an aggressive mobile's first swing is seen coming
+
 /** A gate is only *held* if something that could stop a novice stands at it. */
 const WARDEN_MIN_LEVEL = 5;
 
@@ -856,10 +897,21 @@ const dist2 = (a, b) => {
  *   optional: without it the game runs headless, which is how the harness and
  *   any future test drives it.
  */
-export function createGame({ world, layout, built, actors = null, seed, classIndex = 3 } = {}) {
+export function createGame({ world, layout, built, actors = null, seed, classIndex = 3, nav = null } = {}) {
   const rng = new Rng(seed);
   const events = [];
-  const emit = (event) => { events.push(event); if (events.length > 400) events.shift(); };
+  const listeners = [];
+  const emit = (event) => {
+    // Stamped with the beat of the blow being resolved, if one is.
+    if (event.delay === undefined && ctx.now !== undefined) event.delay = ctx.now;
+    if (ctx.round && event.beat === undefined) event.beat = ctx.beat || 0;
+    events.push(event);
+    if (events.length > 400) events.shift();
+    for (const fn of listeners) fn(event);
+  };
+  // The walkable grid and the routes between rooms. actors.js builds it over
+  // the real geometry; headless, it is the layout alone.
+  const ways = nav || (actors && actors.nav) || createNav({ layout, built, world });
 
   // -- kill_table -----------------------------------------------------------
   // db.c counts every mobile prototype into kill_table at boot, after fuzzing
@@ -934,7 +986,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     // centre, and never on each other, or `attack` cannot tell them apart.
     const angle = (entry.index / entry.of) * Math.PI * 2;
     const home = figure
-      ? { x: figure.home.x, y: figure.home.y, z: figure.home.z }
+      ? { x: figure.at ? figure.at.x : figure.home.x, y: figure.home.y, z: figure.at ? figure.at.z : figure.home.z }
       : {
         x: info.center.x + Math.cos(angle) * 2.6,
         y: info.center.y,
@@ -950,15 +1002,29 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       instance: null,
       dead: false,
       corpse: null,
+      // What the body is doing, as an order actors.js carries out (see
+      // motion.js); `travel` is a walk to the next room that mobile_update
+      // started and has not finished yet.
+      order: null,
+      travel: null,
+      bucket: null,
     });
   });
 
+  // Mobiles walk now, so the buckets are kept up as they go.
   const mobBucket = new Map();
-  for (const slot of mobs) {
+  function rebucket(slot) {
     const key = bucketKey(slot.pos.x, slot.pos.z);
+    if (key === slot.bucket) return;
+    if (slot.bucket !== null) {
+      const old = mobBucket.get(slot.bucket);
+      if (old) old.splice(old.indexOf(slot), 1);
+    }
     if (!mobBucket.has(key)) mobBucket.set(key, []);
     mobBucket.get(key).push(slot);
+    slot.bucket = key;
   }
+  for (const slot of mobs) rebucket(slot);
   function mobsNear(p, radius) {
     const out = [];
     const span = Math.ceil(radius / 26) + 1;
@@ -1253,17 +1319,18 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     return `${CLASS_TABLE[ch.class].name} of the ${ch.level}th level`;
   }
 
-  /** The body drops where it stood. actors.js drives position off `home`, so moving that moves it. */
+  /**
+   * The body drops where it stood -- on the beat of the blow that killed it,
+   * which is `ctx.now` while the round is being resolved.
+   */
   function layOut(slot) {
-    if (!slot.figure) return;
-    slot.figure.home.y -= 0.95;
-    slot.figure.object.rotation.x = Math.PI / 2;
-    slot.figure.sentinel = true;                     // stop it drifting about
-    if (slot.figure.label && slot.figure.label.parent) slot.figure.label.parent.remove(slot.figure.label);
+    slot.travel = null;
+    order(slot, { kind: 'dead', delay: (ctx.now ?? 0) + 0.08 });
   }
 
+  /** The corpse crumbling to dust: the body sinks and goes. */
   function removeBody(slot) {
-    if (slot.figure) slot.figure.object.visible = false;
+    order(slot, { kind: 'gone' });
   }
 
   // -- recall ---------------------------------------------------------------
@@ -1452,10 +1519,16 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   let pulseAccum = 0;
   let pulseViolence = PULSE_VIOLENCE;
   let pulsePoint = PULSE_TICK;
+  let pulseMobile = PULSE_MOBILE;
   let invulnerable = 0;
 
   /** fight.c: violence_update, with metres where the mud asks about rooms. */
   function violenceUpdate() {
+    ctx.round = { player: 0, npc: MOB_BEAT };
+    try { violenceRound(); } finally { ctx.round = null; ctx.now = undefined; }
+  }
+
+  function violenceRound() {
     if (state.fighting) {
       const mob = state.fighting;
       // Below zero hitpoints you are stunned, and the mud stops your swings
@@ -1483,7 +1556,8 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (!mob || mob.fighting || !isAwake(mob)) continue;
       if (!(mob.act & ACT_AGGRESSIVE)) continue;
       if ((mob.act & ACT_WIMPY) && isAwake(state)) continue;
-      multiHit(mob, state, undefined, ctx);
+      ctx.round = { player: 0, npc: AMBUSH_WINDUP };
+      try { multiHit(mob, state, undefined, ctx); } finally { ctx.round = null; ctx.now = undefined; }
     }
   }
 
@@ -1519,14 +1593,123 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     }
   }
 
+  // -- mobile_update ------------------------------------------------------------
+  /**
+   * Its own generator, for the weather's reason: how often a beggar crosses the
+   * street should not move a single combat roll. Merc draws both from the one
+   * stream.
+   */
+  const wanderRng = new Rng(seed === undefined ? undefined : (seed ^ 0x51ed270b) >>> 0);
+  const wanderRand = () => wanderRng.raw() / 0x80000000;
+
+  /** db.c: room_is_private, with the people counted from where the bodies are. */
+  function roomIsPrivate(vnum, counts) {
+    const room = world.rooms.get(vnum);
+    if (!room) return true;
+    const count = counts.get(vnum) || 0;
+    if ((room.flags & ROOM_PRIVATE) && count >= 2) return true;
+    if ((room.flags & ROOM_SOLITARY) && count >= 1) return true;
+    return false;
+  }
+
+  /**
+   * act_move.c: move_char, for a mobile, as far as the viewer can carry it out.
+   * The mud moves a character between rooms in one step; here the body walks
+   * the street the layout routed for that exit, or goes through the archway,
+   * and it is in the new room when it gets there. Refusals are move_char's:
+   * no exit, a closed door, a private room. What cannot be walked at all -- an
+   * exit into an area that was not loaded, a room that was never built -- is
+   * one more refusal, which the mud never needed.
+   */
+  function moveMobile(slot, door, run = false) {
+    const room = world.rooms.get(slot.roomVnum);
+    const exit = room && room.exits[door];
+    if (!exit || exit.offMap) return false;
+    const to = exit.to;
+    if (!built.rooms.has(to) || built.rooms.get(to).unbuilt) return false;
+    if (!ways.doorOpen(slot.roomVnum, door, to, actors ? actors.doors : null)) return false;
+    const route = ways.route(slot.roomVnum, door, to, slot.pos, wanderRand);
+    if (!route) return false;
+    slot.travel = { from: slot.roomVnum, to, door, route, run };
+    order(slot, { kind: 'travel', route, run });
+    return true;
+  }
+
+  /**
+   * update.c: mobile_update -- scavenging, wandering and the wounded slipping
+   * away -- every PULSE_MOBILE, over every mobile in the world.
+   *
+   * DIVERGES: spec_funs are not ported (a guard's spec_guard, a janitor's
+   * spec_janitor), so the `continue` that follows a spec_fun that acted never
+   * fires. And a mobile already walking between two rooms is left to finish:
+   * the mud's move is instant, so it never has to ask.
+   */
+  function mobileUpdate() {
+    const counts = new Map();
+    for (const slot of mobs) if (!slot.dead) counts.set(slot.roomVnum, (counts.get(slot.roomVnum) || 0) + 1);
+    if (state.roomVnum !== undefined) counts.set(state.roomVnum, (counts.get(state.roomVnum) || 0) + 1);
+
+    for (const slot of mobs) {
+      if (slot.dead || slot.travel || slot.fleeing > 0) continue;
+      const mob = slot.instance;
+      const act = slot.proto.act;
+      // "That's all for sleeping / busy monster": fighting is busy.
+      if (mob && mob.position !== POS.STANDING) continue;
+      const room = world.rooms.get(slot.roomVnum);
+      if (!room) continue;
+
+      // Scavenge: the dearest thing lying loose in the room. Only what the
+      // player has dropped is loose here; the reset objects are scenery.
+      if ((act & ACT_SCAVENGER) && wanderRng.bits(2) === 0) {
+        let best = null;
+        let max = 1;
+        for (const pile of ground) {
+          if (pile.kind !== 'item' || pile.roomVnum !== slot.roomVnum) continue;
+          const obj = pile.contents[0];
+          if (obj && canWear(obj, W.TAKE) && obj.cost > max) { best = pile; max = obj.cost; }
+        }
+        if (best) {
+          const obj = best.contents.shift();
+          ground.splice(ground.indexOf(best), 1);
+          wake(slot).inventory.push(obj);
+          if (slot.roomVnum === state.roomVnum) emit({ kind: 'note', text: `${capitalise(slot.proto.short)} gets ${obj.name}.` });
+        }
+      }
+
+      // Wander. Shopkeepers stay behind their counters whatever their flags
+      // say: a shop the keeper has walked out of cannot be traded with.
+      let door;
+      if (!(act & ACT_SENTINEL) && !slot.record.shop
+        && (door = wanderRng.bits(5)) <= 5) {
+        const exit = room.exits[door];
+        const to = exit && !exit.offMap ? world.rooms.get(exit.to) : null;
+        if (to && !(to.flags & ROOM_NO_MOB)
+          && (!(act & ACT_STAY_AREA) || to.area === room.area)
+          && !roomIsPrivate(to.vnum, counts)
+          && moveMobile(slot, door)) {
+          counts.set(slot.roomVnum, counts.get(slot.roomVnum) - 1);
+          counts.set(to.vnum, (counts.get(to.vnum) || 0) + 1);
+          continue;
+        }
+      }
+
+      // Flee: hurt, and somewhere nobody is.
+      if (mob && mob.hit < idiv(mob.maxHit, 2) && (door = wanderRng.bits(3)) <= 5) {
+        const exit = room.exits[door];
+        const to = exit && !exit.offMap ? world.rooms.get(exit.to) : null;
+        if (to && !(to.flags & ROOM_NO_MOB) && !roomIsPrivate(to.vnum, counts)
+          && state.roomVnum !== to.vnum) {
+          moveMobile(slot, door, true);
+        }
+      }
+    }
+  }
+
   /**
    * comm.c/update.c: update_handler, one pulse.
-   *
-   * Merc's fourth timer, PULSE_MOBILE, drives `mobile_update` -- wandering,
-   * random emotes and the spec_funs. None of that is ported: the mobiles here
-   * stand where the reset table dropped them until something starts a fight.
    */
   function pulse() {
+    if (--pulseMobile <= 0) { pulseMobile = PULSE_MOBILE; mobileUpdate(); }
     if (--pulseViolence <= 0) { pulseViolence = PULSE_VIOLENCE; violenceUpdate(); }
     if (--pulsePoint <= 0) {
       // DIVERGES: the mud's point-pulse is 30 seconds because you would go and
@@ -1541,28 +1724,112 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   }
 
   // -- movement -------------------------------------------------------------
+
+  /** Hand a figure its order, keeping the same object while nothing changes. */
+  function order(slot, next) {
+    const current = slot.order;
+    if (current && current.kind === next.kind && next.kind !== 'travel' && next.kind !== 'dead'
+      && current.target === next.target && current.room === next.room && current.to === next.to
+      && current.run === next.run) return current;
+    slot.order = next;
+    if (slot.figure) slot.figure.order = next;
+    return next;
+  }
+
+  /** The player as a target: feet on the ground, not the eye. */
+  const playerFeet = { x: 0, y: 0, z: 0 };
+
+  /**
+   * What every mobile's body should be doing this frame. The body itself --
+   * the path, the pace, stepping round people -- is actors.js's (motion.js);
+   * headless, `stepHeadless` stands in for it in straight lines.
+   */
   function moveMobs(dt) {
+    playerFeet.x = position.x; playerFeet.z = position.z; playerFeet.y = position.y - 1.72;
     for (const slot of mobs) {
+      if (slot.dead) continue;
       const mob = slot.instance;
-      if (!mob || slot.dead) continue;
+      const figure = slot.figure;
+      // The body is the truth about where a mobile is; the game follows it.
+      if (figure && figure.at) {
+        slot.pos.x = figure.at.x; slot.pos.y = figure.at.y; slot.pos.z = figure.at.z;
+      }
+
+      if (slot.travel) {
+        const o = slot.order;
+        if (o && (o.done || o.failed)) {
+          slot.travel = null;
+          slot.anchor = { ...slot.pos };
+        } else if (mob && mob.fighting) {
+          slot.travel = null;          // caught on the way: stand and fight
+        } else {
+          if (!figure) stepHeadless(slot, dt);
+          settleRoom(slot);
+          continue;
+        }
+      }
+
       if (slot.fleeing > 0) {
         slot.fleeing -= dt;
-        step(slot, slot.anchor, MOB_SPEED * 1.4, 0.4, dt);
-        continue;
+        order(slot, { kind: 'go', to: slot.anchor, run: true });
+        if (!figure) step(slot, slot.anchor, MOB_SPEED * 1.4, 0.4, dt);
+      } else if (mob && mob.fighting) {
+        const target = mob.fighting === state ? playerFeet : (mob.fighting.slot ? mob.fighting.slot.pos : playerFeet);
+        // ACT_SENTINEL never leaves its room in the mud; here it never leaves
+        // the spot it was reset on, and you have to come to it.
+        if (mob.act & ACT_SENTINEL) order(slot, { kind: 'face', target });
+        else if (dist2(slot.pos, slot.anchor) > LEASH * LEASH) {
+          order(slot, { kind: 'go', to: slot.anchor });
+          if (!figure) step(slot, slot.anchor, MOB_SPEED, 0.4, dt);
+        } else {
+          // Close enough to cross blades with another mobile; with you, a
+          // little further, or a figure 1.5 m from your eye fills the frame.
+          order(slot, { kind: 'chase', target, stop: target === playerFeet ? 2.0 : 1.5 });
+          if (!figure) step(slot, target, MOB_SPEED, MELEE * 0.68, dt);
+        }
+      } else if (slot.record.shop) {
+        order(slot, { kind: 'hold', at: slot.home || (slot.home = { ...slot.pos }) });
+      } else {
+        order(slot, { kind: 'stroll', room: slot.roomVnum });
       }
-      if (!mob.fighting) {
-        if (dist2(slot.pos, slot.anchor) > 0.35) step(slot, slot.anchor, MOB_SPEED * 0.6, 0.3, dt);
-        continue;
-      }
-      // ACT_SENTINEL never leaves its room in the mud; here it never leaves
-      // the spot it was reset on, and you have to come to it.
-      if (mob.act & ACT_SENTINEL) continue;
-      if (dist2(slot.pos, slot.anchor) > LEASH * LEASH) { step(slot, slot.anchor, MOB_SPEED, 0.4, dt); continue; }
-      step(slot, position, MOB_SPEED, MELEE * 0.68, dt);
+      settleRoom(slot);
     }
   }
 
-  /** actors.js writes every figure's position from `home` each frame, so `home` is the handle. */
+  /** Which room the body is standing in -- the half of a street nearer to it. */
+  function settleRoom(slot) {
+    const vnum = ways.roomAt(slot.pos.x, slot.pos.y, slot.pos.z);
+    if (vnum !== undefined && vnum !== slot.roomVnum && built.rooms.has(vnum)) slot.roomVnum = vnum;
+    rebucket(slot);
+  }
+
+  /** A route walked with no body to walk it: straight legs at a walking pace. */
+  function stepHeadless(slot, dt) {
+    const t = slot.travel;
+    if (!t.leg) { t.leg = t.route.points.slice(); t.stage = 'walk'; }
+    let budget = (t.run ? MOB_SPEED * 1.4 : 1.3) * dt;
+    while (budget > 0) {
+      const next = t.leg[0];
+      if (!next) {
+        if (t.stage === 'walk' && t.route.portal) {
+          const p = t.route.portal;
+          slot.pos.x = p.arrive.x; slot.pos.y = p.arrive.y; slot.pos.z = p.arrive.z;
+          t.leg = (p.after || []).slice();
+          t.stage = 'after';
+          continue;
+        }
+        slot.order.done = true;
+        return;
+      }
+      const dx = next.x - slot.pos.x; const dz = next.z - slot.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d <= budget) { slot.pos.x = next.x; slot.pos.z = next.z; budget -= d; t.leg.shift(); } else {
+        slot.pos.x += (dx / d) * budget; slot.pos.z += (dz / d) * budget; budget = 0;
+      }
+    }
+  }
+
+  /** Headless only: with a body, motion.js walks it. */
   function step(slot, target, speed, stopAt, dt) {
     const dx = target.x - slot.pos.x;
     const dz = target.z - slot.pos.z;
@@ -1571,10 +1838,6 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     const travel = Math.min(speed * dt, d - stopAt);
     slot.pos.x += (dx / d) * travel;
     slot.pos.z += (dz / d) * travel;
-    if (slot.figure) {
-      slot.figure.home.x = slot.pos.x;
-      slot.figure.home.z = slot.pos.z;
-    }
   }
 
   // -- targeting ------------------------------------------------------------
@@ -1613,7 +1876,8 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     const mob = wake(slot);
     if (state.fighting === mob) return { ok: false, text: 'You do the best you can!' };
     state.position = POS.STANDING;
-    multiHit(state, mob, undefined, ctx);
+    ctx.round = { player: CLICK_WINDUP, npc: MOB_BEAT };
+    try { multiHit(state, mob, undefined, ctx); } finally { ctx.round = null; ctx.now = undefined; }
     return { ok: true, text: `You attack ${mob.name}.` };
   }
 
@@ -1823,6 +2087,37 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
     update,
     attack,
+    nav: ways,
+
+    /**
+     * Hear every event as it is emitted, alongside the `drain()` queue. Combat
+     * events carry `delay` (seconds after now that the blow should be seen to
+     * land), `from`/`to` (a mobile's slot, or null for the player), `metal`
+     * and `attack`. Returns an unsubscribe.
+     */
+    listen(fn) {
+      listeners.push(fn);
+      return () => listeners.splice(listeners.indexOf(fn), 1);
+    },
+
+    /** Seconds until the next violence pulse resolves a round. */
+    violenceIn() {
+      return ((pulseViolence - 1) + (1 - pulseAccum)) / PULSE_PER_SECOND;
+    },
+
+    /** Would this mobile swing at you on the next round, as things stand? */
+    willSwing(slot) {
+      const mob = slot.instance;
+      return !!(mob && !slot.dead && mob.fighting === state && isAwake(mob)
+        && invulnerable <= 0 && dist2(slot.pos, position) <= MELEE * MELEE);
+    },
+
+    /** Would you swing on the next round? */
+    playerWillSwing() {
+      const mob = state.fighting;
+      return !!(mob && isAwake(state) && !mob.slot.dead && dist2(mob.slot.pos, position) <= MELEE * MELEE);
+    },
+
     recall: () => recall(false),
     breakOff: () => breakOff(false),
 
@@ -1837,6 +2132,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
         fighting: state.fighting === mob,
         aggressive: !!(mob.act & ACT_AGGRESSIVE),
         warden: gates.find((g) => !g.open && g.warden === mob.slot.record) || null,
+        slot: mob.slot,
       };
     },
 

@@ -75,6 +75,12 @@ export class Player {
     this._right = new THREE.Vector3();
     this._fade = 0;
     this._glide = null;
+    // A blow landing on you: `trauma` rises with each hit and bleeds off, and
+    // the shake goes as its square so a scratch barely moves the view while a
+    // mauling rocks it (the usual trauma model).
+    this.trauma = 0;
+    this._shakeTime = 0;
+    this._shakeRoll = 0;
 
     const down = (event) => {
       if (event.repeat) return;
@@ -92,6 +98,7 @@ export class Player {
     this.velocity.set(0, 0, 0);
     this.camera.position.copy(this.position);
     this.camera.rotation.set(0, yaw, 0);
+    this._shakeRoll = 0; // the tilt that was on is gone with the old rotation
     this.camera.updateMatrixWorld(true);
   }
 
@@ -235,7 +242,41 @@ export class Player {
     return best;
   }
 
+  /** Knock the view about: 0.2 is a scratch, 1 is a mauling. */
+  shake(amount) {
+    this.trauma = Math.min(1, this.trauma + amount);
+  }
+
   update(dt) {
+    this.step(dt);
+    this.applyShake(dt);
+  }
+
+  /**
+   * Applied on top of wherever `step` put the camera this frame. The roll is
+   * taken back off before the next one is put on, because a glide never
+   * resets rotation.z and would otherwise keep every frame's tilt.
+   */
+  applyShake(dt) {
+    this.camera.rotation.z -= this._shakeRoll;
+    this._shakeRoll = 0;
+    if (this.trauma <= 0) return;
+    this._shakeTime += dt;
+    const k = this.trauma * this.trauma;
+    const t = this._shakeTime;
+    // Summed incommensurate sines: smooth, never repeating within a shake.
+    const n = (a, b, c) => Math.sin(t * a) * 0.55 + Math.sin(t * b + 1.3) * 0.3 + Math.sin(t * c + 2.1) * 0.15;
+    this._right.set(Math.cos(this.camera.rotation.y), 0, -Math.sin(this.camera.rotation.y));
+    const side = n(41, 67, 97) * 0.035 * k;
+    this.camera.position.x += this._right.x * side;
+    this.camera.position.z += this._right.z * side;
+    this.camera.position.y += n(53, 79, 113) * 0.03 * k;
+    this._shakeRoll = n(37, 59, 89) * 0.028 * k;
+    this.camera.rotation.z += this._shakeRoll;
+    this.trauma = Math.max(0, this.trauma - dt * 1.9);
+  }
+
+  step(dt) {
     if (this._glide) { this.updateGlide(dt); return; }
     const object = this.camera;
     const sprint = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');

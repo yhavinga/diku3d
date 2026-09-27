@@ -20,6 +20,7 @@ import { createOptions } from './options.js';
 import { AssetLibrary, ASSET_NAMES } from './assets.js';
 import { createGame, SKY } from './game.js';
 import { createGameUi } from './game-ui.js';
+import { createFx } from './fx.js';
 import { createRain } from './rain.js';
 
 const params = new URLSearchParams(location.search);
@@ -501,6 +502,20 @@ async function boot() {
   });
   const game = createGame({ world, layout, built, actors });
   const gameUi = createGameUi(game);
+  const fx = createFx({
+    scene, camera, composer, actors, game, audio, player, library: assets, sun, hemi, built,
+  });
+  {
+    // Screen position of a world point, for the foe plate and damage numbers.
+    const p = new THREE.Vector3();
+    gameUi.setProjector((x, y, z) => {
+      p.set(x, y, z).applyMatrix4(camera.matrixWorldInverse);
+      if (p.z > -0.2) return null;
+      p.set(x, y, z).project(camera);
+      if (Math.abs(p.x) > 1.1 || Math.abs(p.y) > 1.1) return null;
+      return { x: (p.x + 1) / 2 * window.innerWidth, y: (1 - p.y) / 2 * window.innerHeight };
+    });
+  }
   game.onTeleport = (x, y, z) => player.spawn(x, y, z, camera.rotation.y);
   game.setTimeOfDay(state.time);
 
@@ -674,6 +689,7 @@ async function boot() {
     // inside a room they are black rectangles at head height.
     const daylight = THREE.MathUtils.clamp(preset.elevation / 22, 0, 1) * 0.75;
     actors.setDaylight(preset.haze, daylight);
+    fx.setAmbient(daylight / 0.75);
     // Whether it is day, for things that are lit *because* it is dark. Fully
     // out above twelve degrees of sun, fully lit below two, so the lamps are a
     // faint glow at golden hour, gone at noon, and the whole light of the town
@@ -736,7 +752,11 @@ async function boot() {
   // ---------------------------------------------------------- interaction --
 
   const interactGrid = new Map();
+  // Mobiles walk about, so they are looked up live rather than filed by where
+  // they stood at boot.
+  const walkers = actors.interactables.filter((item) => item.figure);
   for (const item of actors.interactables) {
+    if (item.figure) continue;
     const key = `${Math.floor(item.position.x / 16)},${Math.floor(item.position.z / 16)}`;
     if (!interactGrid.has(key)) interactGrid.set(key, []);
     interactGrid.get(key).push(item);
@@ -754,19 +774,26 @@ async function boot() {
       for (let dz = -1; dz <= 1; dz++) {
         const bucket = interactGrid.get(`${cx + dx},${cz + dz}`);
         if (!bucket) continue;
-        for (const item of bucket) {
-          toTarget.copy(item.position).sub(camera.position);
-          const distance = toTarget.length();
-          if (distance > 7) continue;
-          toTarget.divideScalar(distance);
-          const facing = toTarget.dot(forward);
-          if (facing < 0.72) continue;
-          const score = facing * 2 - distance * 0.12;
-          if (score > bestScore) { bestScore = score; best = item; }
-        }
+        for (const item of bucket) consider(item);
       }
     }
+    for (const item of walkers) {
+      if (!item.figure.object.visible || item.figure.m.dead) continue;
+      if (Math.abs(item.position.x - camera.position.x) > 7 || Math.abs(item.position.z - camera.position.z) > 7) continue;
+      consider(item);
+    }
     return best;
+
+    function consider(item) {
+      toTarget.copy(item.position).sub(camera.position);
+      const distance = toTarget.length();
+      if (distance > 7) return;
+      toTarget.divideScalar(distance);
+      const facing = toTarget.dot(forward);
+      if (facing < 0.72) return;
+      const score = facing * 2 - distance * 0.12;
+      if (score > bestScore) { bestScore = score; best = item; }
+    }
   }
 
   let lookTarget = null;
@@ -1070,6 +1097,7 @@ async function boot() {
 
     lightPool.update(camera.position, elapsed);
     actors.update(dt, elapsed, camera);
+    fx.update(dt);
     audio.update(built.rooms.get(state.roomVnum)?.room.sector === 1);
 
     if (!state.paused) {
@@ -1104,7 +1132,7 @@ async function boot() {
 
   // Handy from the console, and how the screenshots for this were framed.
   window.diku = {
-    scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi, options,
+    scene, camera, renderer, composer, bloom, sun, hemi, lightPool, quality, game, gameUi, options, fx,
     // `wetness` is exposed because it is a slow-moving number nothing on screen
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.

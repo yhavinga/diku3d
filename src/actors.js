@@ -15,6 +15,8 @@ import { hash3, ROOM, CEIL } from './build.js';
 import { InstanceBatch } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
+import { createNav } from './nav.js';
+import { createMotion } from './motion.js';
 
 const SKIN = [0xe8c39e, 0xd9a877, 0xb5834f, 0x8a5a33, 0x6d4526, 0xc9b7a0];
 const CLOTH = [
@@ -843,11 +845,11 @@ export function populate(world, layout, built, options = {}) {
       const proto = { ...mob.proto, equipment: mob.equipment };
       const beast = beastKind(mob.proto);
       const person = beast ? null : model(['townsperson']);
-      const built = beast ? buildBeastFigure(beast, proto)
+      const made = beast ? buildBeastFigure(beast, proto)
         : (person && assets.get(person).animations.length
           ? buildModelledFigure(assets.get(person), proto, assets)
           : buildFigure(proto));
-      const { group: fig, headGroup, height } = built;
+      const { group: fig, headGroup, height } = made;
       // Never at the centre of the room: that is where you arrive.
       const angle = (index / count) * Math.PI * 2 + strHash(mob.proto.keywords, 1) * 2;
       const radius = 2.1 + strHash(mob.proto.short, 2) * 1.5;
@@ -865,26 +867,36 @@ export function populate(world, layout, built, options = {}) {
       fig.add(label);
 
       const aggressive = !!(mob.proto.act & ACT_AGGRESSIVE);
-      figures.push({
+      // The figure contract: whatever the builder handed back, plus where this
+      // one stands and who it is. motion.js reads the clips, stride and hit
+      // frames off it and fills in what an older rig does not carry.
+      const record = {
+        ...made,
         object: fig, head: headGroup, label, home: fig.position.clone(), height,
-        mixer: built.mixer || null, actions: built.actions || null, legs: built.legs || null,
-        last: fig.position.clone(), speed: 0,
-        phase: strHash(mob.proto.short, 5) * 6.28, aggressive, walking: false,
+        mixer: made.mixer || null, actions: made.actions || null, legs: made.legs || null,
+        aggressive, walking: false,
         sentinel: !!(mob.proto.act & ACT_SENTINEL),
-        drift: 0.35 + strHash(mob.proto.keywords, 9) * 0.5,
-        // How briskly this one paces, and how far from a circle its round is.
-        pace: 0.8 + strHash(mob.proto.short, 21) * 0.55,
-        oval: 0.55 + strHash(mob.proto.keywords, 27) * 0.8,
-      });
+        shop: !!mob.shop,
+        room: vnum,
+        homeSpot: { x: fig.position.x, z: fig.position.z },
+        seed: Math.floor(strHash(`${mob.proto.short}#${vnum}#${index}`, 17) * 1e9) + 1,
+        // Birds may cross water; nobody else strolls into it.
+        swims: !!(beast && beast[3] === 'bird'),
+      };
+      figures.push(record);
 
-      interactables.push({
+      record.interactable = {
         position: fig.position.clone().setY(fig.position.y + height * 0.6),
         radius: 2.6,
+        // Mobiles walk about, so their examine point moves with them: main.js
+        // looks these up by distance each frame instead of from its fixed grid.
+        figure: record,
         title: mob.proto.short,
         subtitle: `level ${mob.proto.level}${mob.shop ? ' · shopkeeper' : ''}${aggressive ? ' · aggressive' : ''}`,
         body: mob.proto.description.trim() || mob.proto.long,
         kind: 'mob',
-      });
+      };
+      interactables.push(record.interactable);
 
       if (mob.shop) {
         const sign = makeLabel(shopSign(mob.proto.short), 0.6, { colour: '#f0d9a8' });
@@ -1872,114 +1884,31 @@ export function populate(world, layout, built, options = {}) {
   }
 
   const _look = new THREE.Vector3();
-  // Beyond this a person is a few pixels tall and not worth a skinning pass.
-  const FIGURE_RANGE = 46;
   function update(dt, time, camera) {
     if (flameSystem) flameSystem.material.uniforms.time.value = time;
     for (const material of waterMaterials) material.uniforms.time.value = time;
 
+    // Where everyone walks, and what their bodies do: motion.js. Beyond 46 m
+    // a person is a few pixels tall and not worth a skinning pass, so there
+    // it only moves the position along.
+    motion.update(dt, camera);
     for (const fig of figures) {
-      const far = fig.object.position.distanceToSquared(camera.position) > FIGURE_RANGE * FIGURE_RANGE;
-      fig.object.visible = !far;
-      if (far) continue;
-      if (fig.mixer) fig.mixer.update(dt);
-      const bob = fig.actions ? 0 : Math.sin(time * 1.7 + fig.phase) * 0.035;
-      fig.object.position.y = fig.home.y + bob;
-      if (!fig.sentinel) {
-        // One frequency for both axes, so the path is an ellipse walked at a
-        // steady pace. It was 0.6 on x against 0.45 on z: a Lissajous figure,
-        // and a Lissajous figure has cusps. At each cusp the speed collapses,
-        // the walk blend drops out, the heading stops being updated -- and the
-        // figure keeps moving across a body still pointing the old way. That
-        // is what read as people stepping sideways.
-        const w = 0.52 * fig.pace;
-        fig.object.position.x = fig.home.x + Math.sin(w * time + fig.phase) * fig.drift;
-        fig.object.position.z = fig.home.z + Math.cos(w * time + fig.phase) * fig.drift * fig.oval;
-      }
-      // Drifting about while playing a standing animation is what reads as
-      // floating. Measure how fast the figure is actually travelling, blend to
-      // the walk clip, turn the feet over at the speed they are moving, and
-      // face the way they are going.
-      if (fig.actions && fig.actions.walk) {
-        const moved = Math.hypot(
-          fig.object.position.x - fig.last.x, fig.object.position.z - fig.last.z,
-        );
-        fig.speed += (moved / Math.max(dt, 1e-4) - fig.speed) * Math.min(1, dt * 6);
-        // Fighting wins over walking wins over standing. Anything may set
-        // `fighting` on a figure -- the game does, when it joins combat.
-        const fighting = !!fig.fighting && !!fig.actions.fight;
-        const walking = !fighting && fig.speed > 0.16;
-        fig.walking = walking;
-        const blend = Math.min(1, dt * 5);
-        const towards = (action, want) => {
-          if (!action) return;
-          const w = action.getEffectiveWeight();
-          action.setEffectiveWeight(w + (want - w) * blend);
-        };
-        towards(fig.actions.fight, fighting ? 1 : 0);
-        towards(fig.actions.walk, walking ? 1 : 0);
-        towards(fig.actions.idle, (fighting || walking) ? 0 : 1);
-        // One cycle covers about 1.2 m; match it so the feet don't skate.
-        fig.actions.walk.timeScale = walking
-          ? THREE.MathUtils.clamp(fig.speed * fig.actions.walkCycle / 1.2, 0.4, 2.2) : 1;
-        // Face the way you are going whenever you are going anywhere. Gating
-        // this on the walk blend was the other half of the sideways problem:
-        // below 0.16 m/s the body stopped turning altogether while the feet
-        // kept carrying it somewhere else. The threshold here only has to be
-        // above the noise floor of a single frame's movement.
-        if (fig.speed > 0.04) {
-          const heading = Math.atan2(
-            fig.object.position.x - fig.last.x, fig.object.position.z - fig.last.z,
-          );
-          let turn = ((heading - fig.object.rotation.y + Math.PI) % (Math.PI * 2)) - Math.PI;
-          if (turn < -Math.PI) turn += Math.PI * 2;
-          fig.object.rotation.y += turn * Math.min(1, dt * 5);
-        }
-        fig.last.copy(fig.object.position);
-      }
-
-      // Beasts have no rig, so their legs swing from the same measured speed.
-      if (fig.legs) {
-        const moved = Math.hypot(
-          fig.object.position.x - fig.last.x, fig.object.position.z - fig.last.z,
-        );
-        fig.speed += (moved / Math.max(dt, 1e-4) - fig.speed) * Math.min(1, dt * 6);
-        fig.gait = (fig.gait || 0) + fig.speed * dt * 5;
-        const swing = Math.min(0.7, fig.speed * 1.6);
-        fig.legs.forEach((leg, i) => {
-          leg.rotation.x = Math.sin(fig.gait + (i % 2 ? Math.PI : 0) + (i > 1 ? Math.PI : 0)) * swing;
-        });
-        if (fig.speed > 0.14) {
-          const heading = Math.atan2(
-            fig.object.position.x - fig.last.x, fig.object.position.z - fig.last.z,
-          );
-          let turn = ((heading - fig.object.rotation.y + Math.PI) % (Math.PI * 2)) - Math.PI;
-          if (turn < -Math.PI) turn += Math.PI * 2;
-          fig.object.rotation.y += turn * Math.min(1, dt * 4);
-        }
-        fig.last.copy(fig.object.position);
-      }
-
+      if (!fig.object.visible) continue;
       const dx = camera.position.x - fig.object.position.x;
       const dz = camera.position.z - fig.object.position.z;
       const distSq = dx * dx + dz * dz;
-      const near = distSq < 400;
-      fig.label.visible = distSq < 110;
+      // In a fight the foe plate (game-ui.js) takes the label's place.
+      fig.label.visible = distSq < 110 && !fig.m.dead && !fig.m.fighting && fig.m.fade > 0.99;
       if (fig.label.visible) clampLabel(fig, camera, Math.sqrt(distSq));
-      if (near) {
+      if (fig.interactable) {
+        fig.interactable.position.set(fig.at.x, fig.at.y + fig.height * 0.6, fig.at.z);
+      }
+      if (fig.head && distSq < 400) {
         _look.set(dx, 0, dz).normalize();
         const want = Math.atan2(_look.x, _look.z);
-        const current = fig.object.rotation.y;
-        let delta = ((want - current + Math.PI) % (Math.PI * 2)) - Math.PI;
+        let delta = ((want - fig.object.rotation.y + Math.PI) % (Math.PI * 2)) - Math.PI;
         if (delta < -Math.PI) delta += Math.PI * 2;
-        if (fig.head) fig.head.rotation.y = THREE.MathUtils.clamp(delta, -0.9, 0.9);
-        // Squaring up to you only while standing still. Turning to face the
-        // camera at the same time as turning to face the way you are walking
-        // settles the body between the two, which is a third way to end up
-        // stepping sideways.
-        if (fig.aggressive && !fig.walking) {
-          fig.object.rotation.y += delta * Math.min(1, dt * 1.5);
-        }
+        fig.head.rotation.y = THREE.MathUtils.clamp(delta, -0.9, 0.9);
       }
     }
 
@@ -2007,8 +1936,14 @@ export function populate(world, layout, built, options = {}) {
 
   if (instances) instances.finish(group);
 
+  // The walkable grid, once every prop is placed: modelled clutter has no
+  // collider for the player but a mobile still walks round it.
+  const nav = createNav({ layout, built, world });
+  if (assets) nav.addInstances([built.group, group], assets, THREE);
+  const motion = createMotion({ figures, nav });
+
   return {
-    group, interactables, update, doors, figures,
+    group, interactables, update, doors, figures, nav, motion,
     setSun, setDaylight, setSky, lights: windowLights,
   };
 }
