@@ -533,6 +533,29 @@ const SURFACES = {
   },
 
   /**
+   * Riveted mail: rows of rings, each row laid half a ring over from the one
+   * above. At street distance it is the glitter and the dark between the
+   * rings that says mail rather than a grey jumper, so the gaps go deep in
+   * the relief and nearly black in the albedo -- but not black, because it
+   * is the ring edges catching the sky that carry it.
+   */
+  mail(u, v, s) {
+    const n = 36;
+    const row = Math.floor(v * n);
+    const x = u * n + (row % 2) * 0.5;
+    const fx = x - Math.floor(x) - 0.5;
+    const fy = v * n - row - 0.5;
+    const d = Math.sqrt(fx * fx + fy * fy * 1.3);
+    const ring = Math.exp(-(((d - 0.36) / 0.12) ** 2));
+    const grime = fbm(u * 6, v * 6, 6, 347, 3);
+    const c = mix(rgb(0x2a2b2c), mix(rgb(0x7b8086), rgb(0xa2a7ab), grime), ring);
+    s.color = c;
+    s.height = ring;
+    s.rough = 0.75 - ring * 0.4;
+    s.metal = 0.25 + ring * 0.7;
+  },
+
+  /**
    * Paint on boards: a shield's face. Near-neutral, because every shield is
    * tinted to whoever carries it, with the brush marks in the relief and the
    * paint chipped back to wood where the edges and the hits land.
@@ -720,6 +743,7 @@ const RECIPES = {
   // Arms and armour. Tile sizes are the size of the things: a blade is 5 cm
   // across and a shield 70.
   steel: { surface: 'steel', scale: 0.6, normalScale: 0.35, env: 1.5, wet: 0, detail: 0.25 },
+  mail: { surface: 'mail', scale: 0.3, normalScale: 0.6, env: 1.3, wet: 0, detail: 0.2 },
   paint: { surface: 'paint', scale: 0.8, normalScale: 0.5, env: 0.6, wet: 0, detail: 0.4 },
   bark: { surface: 'bark', scale: 1.6, normalScale: 1.0, env: 0.65, wet: 0, detail: 0.5 },
   water: { surface: 'water', scale: 7, normalScale: 0.5, env: 1.6, wet: 0, detail: 0.2 },

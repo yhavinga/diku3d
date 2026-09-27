@@ -39,20 +39,29 @@ const _scale = new THREE.Vector3();
 // crown in the world -- confirmed by a judge with matching material uuids at
 // 50 m and 3.7 m. It is a real recipe now, so materialFor finds it first and
 // this table no longer needs an entry for it.
-const TAG_ALIASES = {};
+// cloth2 and linen are a second and a third garment on one person -- hose
+// under a tunic, an apron over it -- in the same woven surface, so they are
+// the cloth recipe under another name and take their own tint.
+const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth' };
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
   skin: { color: 0xc79b76, roughness: 0.72, metalness: 0 },
   oak: { color: 0x5a4330, roughness: 0.78, metalness: 0 },
   leather: { color: 0x4a3524, roughness: 0.62, metalness: 0 },
   hair: { color: 0x3a2a1c, roughness: 0.86, metalness: 0 },
+  // An iris is small, dark and wet: the glint off it is what reads as a
+  // person looking at you. Not black -- nothing lit is.
+  eye: { color: 0x1a1410, roughness: 0.22, metalness: 0 },
+  // Off-white and not bright: a full white sclera at four pixels is a doll's.
+  eyewhite: { color: 0xb9ae9c, roughness: 0.4, metalness: 0 },
+  bone: { color: 0xcfc4a6, roughness: 0.78, metalness: 0 },
   glass: {
     color: 0xd8c48a, roughness: 0.12, metalness: 0,
     transparent: true, opacity: 0.55, emissive: 0x000000,
   },
 };
 /** Tags whose flat material wants the shared grain, at this strength. */
-const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6 };
+const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6, bone: 0.5 };
 
 export class AssetLibrary {
   constructor(materials, baseUrl = 'assets') {
@@ -336,7 +345,7 @@ export const ASSET_NAMES = [
   'tree_fir', 'tree_snag', 'fern', 'salal_bush', 'moss_rock',
   'reed_clump', 'tussock', 'dead_log',
   'headstone', 'grave_slab', 'iron_fence',
-  'townsperson',
+  'townsperson', 'person_male', 'person_female', 'troll',
   'weapon_sword', 'weapon_dagger', 'weapon_axe', 'weapon_mace', 'weapon_spear',
   'weapon_staff', 'shield_round', 'shield_kite',
 ];

@@ -1,0 +1,164 @@
+{
+ "person_female": {
+  "attack": {
+   "duration": 0.7916666666666666,
+   "frames": 19,
+   "hit": 0.5263157894736842
+  },
+  "attack2": {
+   "duration": 0.875,
+   "frames": 21,
+   "hit": 0.5238095238095238
+  },
+  "block": {
+   "duration": 0.5,
+   "frames": 12
+  },
+  "death": {
+   "duration": 1.4583333333333333,
+   "frames": 35
+  },
+  "fight": {
+   "duration": 1.3333333333333333,
+   "frames": 32
+  },
+  "hit": {
+   "duration": 0.4166666666666667,
+   "frames": 10
+  },
+  "idle": {
+   "duration": 2.0,
+   "frames": 48
+  },
+  "idle2": {
+   "duration": 3.75,
+   "frames": 90
+  },
+  "run": {
+   "duration": 0.6666666666666666,
+   "frames": 16,
+   "sink": -7.1821268647909164e-06,
+   "slip": 0.0017597619487150773,
+   "slip_baked": 0.0033940263178553476,
+   "stance": 0.36,
+   "stride": 2.4641723335477552
+  },
+  "walk": {
+   "duration": 1.0833333333333333,
+   "frames": 26,
+   "sink": -1.3988465070724487e-05,
+   "slip": 4.8868277395808235e-06,
+   "slip_baked": 4.895506626967361e-06,
+   "stance": 0.62,
+   "stride": 1.1373103077912716
+  }
+ },
+ "person_male": {
+  "attack": {
+   "duration": 0.7916666666666666,
+   "frames": 19,
+   "hit": 0.5263157894736842
+  },
+  "attack2": {
+   "duration": 0.875,
+   "frames": 21,
+   "hit": 0.5238095238095238
+  },
+  "block": {
+   "duration": 0.5,
+   "frames": 12
+  },
+  "death": {
+   "duration": 1.4583333333333333,
+   "frames": 35
+  },
+  "fight": {
+   "duration": 1.3333333333333333,
+   "frames": 32
+  },
+  "hit": {
+   "duration": 0.4166666666666667,
+   "frames": 10
+  },
+  "idle": {
+   "duration": 2.0,
+   "frames": 48
+  },
+  "idle2": {
+   "duration": 3.75,
+   "frames": 90
+  },
+  "run": {
+   "duration": 0.6666666666666666,
+   "frames": 16,
+   "sink": -4.075467586517334e-06,
+   "slip": 0.0032885537652715957,
+   "slip_baked": 0.0016680703117721851,
+   "stance": 0.36,
+   "stride": 2.5998669394719958
+  },
+  "walk": {
+   "duration": 1.0833333333333333,
+   "frames": 26,
+   "sink": -2.731475979089737e-05,
+   "slip": 7.412856655397704e-06,
+   "slip_baked": 7.389573591087828e-06,
+   "stance": 0.62,
+   "stride": 1.1999385874486135
+  }
+ },
+ "troll": {
+  "attack": {
+   "duration": 0.7916666666666666,
+   "frames": 19,
+   "hit": 0.5263157894736842
+  },
+  "attack2": {
+   "duration": 0.875,
+   "frames": 21,
+   "hit": 0.5238095238095238
+  },
+  "block": {
+   "duration": 0.5,
+   "frames": 12
+  },
+  "death": {
+   "duration": 1.4583333333333333,
+   "frames": 35
+  },
+  "fight": {
+   "duration": 1.3333333333333333,
+   "frames": 32
+  },
+  "hit": {
+   "duration": 0.4166666666666667,
+   "frames": 10
+  },
+  "idle": {
+   "duration": 2.0,
+   "frames": 48
+  },
+  "idle2": {
+   "duration": 3.75,
+   "frames": 90
+  },
+  "run": {
+   "duration": 0.6666666666666666,
+   "frames": 16,
+   "sink": -1.2385658919811249e-05,
+   "slip": 0.0021054475260662286,
+   "slip_baked": 0.002104885007231161,
+   "stance": 0.36,
+   "stride": 2.3040292720045836
+  },
+  "walk": {
+   "duration": 1.0833333333333333,
+   "frames": 26,
+   "sink": -2.5000423192977905e-05,
+   "slip": 1.1052226200680693e-05,
+   "slip_baked": 1.2457414437005987e-05,
+   "stance": 0.62,
+   "stride": 1.0633981255405769
+  }
+ }
+}
