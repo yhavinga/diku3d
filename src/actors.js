@@ -1841,9 +1841,13 @@ export function populate(world, layout, built, options = {}) {
       // Feet leaving the ground shrink and lighten it, which is the whole
       // point: it is the cue that says how far up the figure is.
       const shrink = Math.max(0.45, 1 - lift * 1.6);
-      const px = hidden ? 0 : fig.object.position.x;
-      const pz = hidden ? 0 : fig.object.position.z;
+      let px = hidden ? 0 : fig.object.position.x;
+      let pz = hidden ? 0 : fig.object.position.z;
       const y = hidden ? -1000 : fig.home.y + 0.02;
+      // Someone lying down is lying along the ground: the patch goes under the
+      // length of the body (which fell back from its feet), not round the feet.
+      const down = !hidden && fig.m && fig.m.dead ? Math.min(1, fig.m.dead.t / 0.75) : 0;
+      const fade = !hidden && fig.m ? fig.m.fade : 1;
 
       // The contact: a dense patch under the feet, which does not know where
       // the sun is and does not stretch. This is the one that says the figure
@@ -1852,16 +1856,28 @@ export function populate(world, layout, built, options = {}) {
       // behind the body from any eye-level view, and a judge metering the
       // ground beside a pair of feet read 1.006x the surrounding paving:
       // present in the buffers, invisible in the frame.
-      if (hidden) _shadowScale.copy(HIDDEN.scale);
-      else _shadowScale.set(width * 1.32 * shrink, 1, width * 1.45 * shrink);
+      if (down > 0) {
+        const yaw = fig.object.rotation.y;
+        const back = fig.legs ? 0 : height * 0.45 * down;
+        px -= Math.sin(yaw) * back;
+        pz -= Math.cos(yaw) * back;
+      }
+      if (hidden || fade < 0.02) _shadowScale.copy(HIDDEN.scale);
+      else {
+        const along = width * 1.45 * shrink + (fig.legs ? 0 : height * 0.75 * down);
+        _shadowScale.set(width * 1.32 * shrink * fade, 1, along * fade);
+      }
       _shadowPos.set(px, y, pz);
-      _shadowQuat.identity();
+      if (down > 0) _shadowQuat.setFromAxisAngle(_shadowAxis, fig.object.rotation.y);
+      else _shadowQuat.identity();
       contactShadows.setMatrixAt(i, _shadowMatrix.compose(_shadowPos, _shadowQuat, _shadowScale));
 
       // The cast shadow: long, faint, pointing away from the light.
       const length = width + (height / tan) * sun.lift;
-      if (hidden || sun.lift <= 0.001) _shadowScale.copy(HIDDEN.scale);
-      else _shadowScale.set(width * shrink, 1, length * shrink);
+      // Nothing standing, nothing to cast a long shadow: the dead lie in their
+      // own contact patch.
+      if (hidden || sun.lift <= 0.001 || down > 0 || fade < 0.02) _shadowScale.copy(HIDDEN.scale);
+      else _shadowScale.set(width * shrink * fade, 1, length * shrink * fade);
       _shadowPos.set(
         px + dirX * (length / 2 - width * 0.35),
         y,

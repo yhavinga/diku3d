@@ -83,7 +83,7 @@ const WALK_ROUND = new Set([
   'stacked_crates', 'barrel_stack', 'firewood_pile', 'water_butt', 'bucket',
   'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel',
   'market_stall', 'well', 'fountain', 'signpost', 'bush', 'salal_bush', 'moss_rock',
-  'dead_log', 'headstone', 'grave_slab', 'iron_fence', 'reed_clump',
+  'dead_log', 'headstone', 'grave_slab', 'iron_fence',
 ]);
 
 const cellKey = (level, cx, cz) => `${level}:${cx},${cz}`;
@@ -166,7 +166,17 @@ export function createNav({ layout, built, world }) {
         let value = ground && !raised ? OPEN : BLOCKED;
         if (value) {
           for (const c of boxes) {
-            if (x > c.x0 - RADIUS && x < c.x1 + RADIUS && z > c.z0 - RADIUS && z < c.z1 + RADIUS) { value = BLOCKED; break; }
+            if (x <= c.x0 - RADIUS || x >= c.x1 + RADIUS || z <= c.z0 - RADIUS || z >= c.z1 + RADIUS) continue;
+            if (c.obb) {
+              // A prop turned on the spot: test its own footprint, not the
+              // axis-aligned box round it.
+              const dx = x - c.obb.x; const dz = z - c.obb.z;
+              const u = dx * c.obb.ux + dz * c.obb.uz;
+              const v = -dx * c.obb.uz + dz * c.obb.ux;
+              if (Math.abs(u) >= c.obb.hx + RADIUS || Math.abs(v) >= c.obb.hz + RADIUS) continue;
+            }
+            value = BLOCKED;
+            break;
           }
         }
         if (value) {
@@ -341,8 +351,14 @@ export function createNav({ layout, built, world }) {
    * A* over the half-metre grid, confined to `cells` (layout cells on one
    * level), then pulled taut so a person walks lines and not staircases.
    * Returns world points after the start, or null when there is no way.
+   *
+   * `near` > 0 accepts ending short: when the goal cannot be reached, the path
+   * goes to the reachable sample closest to it, if that is within `near`
+   * metres. A stair's foot sits in a pocket the rails close at a person's
+   * clearance, and someone about to fade through an archway only has to get
+   * to it, not into it.
    */
-  function findPath(level, from, to, cells) {
+  function findPath(level, from, to, cells, near = 0) {
     const allowed = new Set(cells.map((c) => cellKey(level, c.x, c.z)));
     const start = nearestOpen(level, from.x, from.z, 1.5, allowed);
     const goal = nearestOpen(level, to.x, to.z, 2.5, allowed);
@@ -363,7 +379,7 @@ export function createNav({ layout, built, world }) {
       for (let j = 0; j < PER; j++) for (let i = 0; i < PER; i++) open[(bz + j) * w + bx + i] = grid[j * PER + i];
     }
     const s = (start[1] - minZ) * w + (start[0] - minX);
-    const e = (goal[1] - minZ) * w + (goal[0] - minX);
+    let e = (goal[1] - minZ) * w + (goal[0] - minX);
     const gx = goal[0] - minX; const gz = goal[1] - minZ;
     const heur = (i) => {
       const dx = Math.abs((i % w) - gx); const dz = Math.abs(Math.floor(i / w) - gz);
@@ -403,11 +419,17 @@ export function createNav({ layout, built, world }) {
     push(s, heur(s));
     const NB = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, 1.41421], [1, -1, 1.41421], [-1, 1, 1.41421], [-1, -1, 1.41421]];
     let found = false;
+    let closest = s;
+    let closestH = heur(s);
     while (heap.length) {
       const i = pop();
       if (closed[i]) continue;
       if (i === e) { found = true; break; }
       closed[i] = 1;
+      if (near > 0) {
+        const hh = heur(i);
+        if (hh < closestH) { closestH = hh; closest = i; }
+      }
       const ix = i % w; const iz = Math.floor(i / w);
       for (const [dx, dz, cost] of NB) {
         const nx = ix + dx; const nz = iz + dz;
@@ -421,7 +443,11 @@ export function createNav({ layout, built, world }) {
         if (tentative < g[n]) { g[n] = tentative; parent[n] = i; push(n, tentative + heur(n)); }
       }
     }
-    if (!found) return null;
+    if (!found) {
+      if (!(near > 0) || closestH * NAV_RES > near || closest === s) return null;
+      e = closest;
+      to = { x: centreOf((e % w) + minX), z: centreOf(Math.floor(e / w) + minZ) };
+    }
     const raw = [];
     for (let i = e; i !== -1; i = parent[i]) {
       raw.push({ x: centreOf((i % w) + minX), z: centreOf(Math.floor(i / w) + minZ) });
@@ -450,10 +476,10 @@ export function createNav({ layout, built, world }) {
   }
 
   /** A walk inside one room's own ground. */
-  function pathInRoom(vnum, from, to) {
+  function pathInRoom(vnum, from, to, near = 0) {
     const t = territory(vnum);
     if (!t) return null;
-    return findPath(t.cell.level, from, to, t.cells);
+    return findPath(t.cell.level, from, to, t.cells, near);
   }
 
   // -- journeys between rooms ---------------------------------------------------
@@ -489,16 +515,29 @@ export function createNav({ layout, built, world }) {
     if (alley && alley.path) {
       const path = alley.from.vnum === from ? alley.path : [...alley.path].reverse();
       const cells = [{ x: a.x, z: a.z }, ...path.map((c) => ({ x: c.x, z: c.z })), { x: b.x, z: b.z }];
-      const goal = randomSpot(to, rand) || { x: b.x * CELL + 2.4, y: b.level * LEVEL_H, z: b.z * CELL };
-      const points = findPath(a.level, start, goal, cells);
-      return points ? { points, level: a.level, portal: null, to } : null;
+      // A few destinations, not one: a forest room can have a pocket the
+      // trees close off, and a spot in it is no reason to stay home.
+      for (let tries = 0; tries < 3; tries++) {
+        const goal = randomSpot(to, rand) || { x: b.x * CELL + 2.4, y: b.level * LEVEL_H, z: b.z * CELL };
+        const points = findPath(a.level, start, goal, cells);
+        if (points) return { points, level: a.level, portal: null, to };
+      }
+      return null;
     }
 
-    // An archway: walk into it and come out of the matching one, if there is one.
-    const arch = (built.portals || []).find((p) => p.from === from && p.target === to);
+    // An archway: walk into it and come out of the matching one, if there is
+    // one. A portal link gets its arch only in the room it was placed from;
+    // from the other end the player's compass step simply cuts, so a mobile
+    // walks toward that side of the room and fades the same way.
+    const link = layout.links.find((l) => l.kind === 'portal' && l.to
+      && ((l.from.vnum === from && l.to.vnum === to) || (l.from.vnum === to && l.to.vnum === from)));
+    const arch = (built.portals || []).find((p) => p.from === from && p.target === to)
+      || (link && dir < 4 ? {
+        x: a.x * CELL + DIR_STEP[dir][0] * (ROOM / 2 - 1), z: a.z * CELL + DIR_STEP[dir][2] * (ROOM / 2 - 1),
+      } : null);
     if (arch) {
       const into = { x: arch.x, z: arch.z };
-      const points = pathInRoom(from, start, into);
+      const points = pathInRoom(from, start, into, 3);
       if (!points) return null;
       const back = (built.portals || []).find((p) => p.from === to && p.target === from);
       const arrive = back ? { x: back.x, y: b.level * LEVEL_H, z: back.z } : randomSpot(to, rand);
@@ -521,7 +560,7 @@ export function createNav({ layout, built, world }) {
       const head = { x: upper.x * CELL + dx * (STAIR_END - 1.4), z: upper.z * CELL + dz * (STAIR_END - 1.4) };
       const leave = up ? foot : head;
       const land = up ? head : foot;
-      const points = pathInRoom(from, start, leave);
+      const points = pathInRoom(from, start, leave, 3);
       if (!points) return null;
       const open = nearestOpen(b.level, land.x, land.z, 3);
       if (!open) return null;
@@ -565,6 +604,8 @@ export function createNav({ layout, built, world }) {
     }
     const box = new THREE.Box3();
     const m = new THREE.Matrix4();
+    const centre = new THREE.Vector3();
+    const axis = new THREE.Vector3();
     let added = 0;
     const seen = new Set();
     for (const group of groups) {
@@ -577,11 +618,24 @@ export function createNav({ layout, built, world }) {
           const key = `${name}:${m.elements[12].toFixed(2)},${m.elements[13].toFixed(2)},${m.elements[14].toFixed(2)}`;
           if (seen.has(key)) continue; // one prop is several primitives
           seen.add(key);
-          box.copy(node.geometry.boundingBox).applyMatrix4(m);
-          // An axis-aligned box round a rotated bench claims its corners too;
-          // pull it in a little so a diagonal prop does not seal a lane.
-          const sx = (box.max.x - box.min.x) * 0.1; const sz = (box.max.z - box.min.z) * 0.1;
-          solids.add({ x0: box.min.x + sx, x1: box.max.x - sx, z0: box.min.z + sz, z1: box.max.z - sz, y0: box.min.y, y1: box.max.y });
+          const local = node.geometry.boundingBox;
+          box.copy(local).applyMatrix4(m);
+          // The oriented footprint: InstanceBatch only ever turns a prop about
+          // Y, so its local X axis and its scale are all that is needed. An
+          // axis-aligned box round a fallen log at 45 degrees claimed twice
+          // the ground it lies on and sealed forest trails shut.
+          local.getCenter(centre).applyMatrix4(m);
+          axis.setFromMatrixColumn(m, 0);
+          const sx = axis.length();
+          axis.divideScalar(sx || 1);
+          const sz = new THREE.Vector3().setFromMatrixColumn(m, 2).length();
+          solids.add({
+            x0: box.min.x, x1: box.max.x, z0: box.min.z, z1: box.max.z, y0: box.min.y, y1: box.max.y,
+            obb: {
+              x: centre.x, z: centre.z, ux: axis.x, uz: axis.z,
+              hx: ((local.max.x - local.min.x) / 2) * sx * 0.9, hz: ((local.max.z - local.min.z) / 2) * sz * 0.9,
+            },
+          });
           added++;
         }
       });
