@@ -169,12 +169,12 @@ FEMALE = dict(
     mouth_y=-0.0875,
     neck_r=0.042,
     eye=(0.0315, -0.067, 0.005), eye_r=0.0120,
-    fissure=(0.0156, 0.0053, 0.0046),
+    fissure=(0.0156, 0.0047, 0.0045), nose_k=0.0045,
     tilt=0.0016,
-    nose=0.72, nose_w=0.82, nose_len=0.84, nose_top=0.010, nose_up=0.0015,
+    nose=0.62, nose_w=0.80, nose_len=0.78, nose_top=0.010, nose_up=0.0018,
     apple=((0.036, -0.066, -0.026), (0.014, 0.008, 0.011)), fold_z=0.0018,
     lid=0.0014,
-    lips=1.3, lip_w=0.97,
+    lips=1.4, lip_w=0.97,
     fold=0.15,
     stubble=0.0,
 )
@@ -461,7 +461,7 @@ def field(S):
         fwd = S.get("nose_fwd", 0.0)
         top = np.array([0.0, -0.086 - fwd * 0.4, S["nose_top"]])
         tip = np.array([0.0, -0.084 - 0.025 * nk - fwd, 0.012 - 0.044 * nl + S["nose_up"]])
-        d = smin(d, seg(p, top, tip + np.array([0.0, 0.003, 0.004]), 0.0046 * nw, 0.0066 * nw), 0.007)
+        d = smin(d, seg(p, top, tip + np.array([0.0, 0.003, 0.004]), 0.0046 * nw, 0.0066 * nw), S.get("nose_k", 0.007))
         d = smin(d, ell(p, tip, np.array([0.0084 * nw, 0.0080, 0.0076]) * max(1.0, nk ** 0.4)), 0.005)
         wing = np.array([0.0110 * nw, tip[1] + 0.012, tip[2] - 0.002])
         d = smin(d, ell(q, wing, (0.0062 * nw, 0.0078, 0.0060)), 0.005)
@@ -642,7 +642,9 @@ def skin_colour(S, p, n, ao):
     # The line of the mouth itself, dark where the lips meet.
     lz = S["mouth_z"]
     mouth = g((z - lz) / 0.0011, 1.0) * np.clip(1.0 - ld / 0.001, 0, 1)
-    c *= 1.0 - lips[:, None] * np.array([0.05, 0.22, 0.19]) * (0.7 + 0.3 * (S["sex"] == "f"))
+    # A woman's lips a deeper rose than a man's: the one colour on a face
+    # that says which it is from across a square.
+    c *= 1.0 - lips[:, None] * (np.array([0.06, 0.34, 0.28]) if S["sex"] == "f" else np.array([0.04, 0.16, 0.14]))
     c *= 1.0 - mouth[:, None] * 0.45
     # A flush on the cheeks, the nose and the ears.
     flush = (g(x - 0.042, 0.016) * g(z + 0.030, 0.016) + g(x / 0.012, 1.0) * g(z + 0.030, 0.014) * 0.7
@@ -659,7 +661,8 @@ def skin_colour(S, p, n, ao):
     lash = np.clip(lash * (_len(np.stack([u, y - ey, w], 1)) < S["eye_r"] + S["lid"] + 0.003), 0, 1)
     low = g((w + fl * k ** 0.75) / 0.0012, 1.0) * (k > 0.02)
     low = np.clip(low * (_len(np.stack([u, y - ey, w], 1)) < S["eye_r"] + S["lid"] + 0.002), 0, 1)
-    c *= 1.0 - (lash * 0.72 + low * 0.30)[:, None]
+    fem = S["sex"] == "f"
+    c *= 1.0 - (lash * (0.85 if fem else 0.65) + low * (0.45 if fem else 0.28))[:, None]
     # A man's beard shadow on the jaw and the upper lip.
     if S["stubble"]:
         beard = np.clip((-0.036 - z) / 0.012, 0, 1) * np.clip((0.070 - x) / 0.02, 0, 1) * (1 - lips)

@@ -125,6 +125,10 @@ function surfaces(library) {
 
 // --- the material -------------------------------------------------------------
 
+/** Whose colour a surface takes when a person names none for it: a cloak in
+ * wool is the second cloth's colour, a shield's paint the first's. */
+const TINT_FROM = { wool: ['wool', 'cloth2', 'cloth'], velvet: ['velvet', 'cloth'], paint: ['cloth'] };
+
 const dummy = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
 dummy.needsUpdate = true;
 const dummyColour = dummy.clone();
@@ -195,7 +199,8 @@ export function personMaterial(library, tint, ghost, show = new THREE.Vector2(1,
   const tints = new Float32Array(MAX_SLOTS * 3);
   const c = new THREE.Color();
   SLOTS.forEach((tag, i) => {
-    const hex = tag === 'paint' ? tint.cloth : tint[tag];
+    const from = TINT_FROM[tag] || [tag];
+    const hex = from.map((k) => tint[k]).find((h) => h !== undefined && h !== null);
     if (hex !== undefined && hex !== null) c.setHex(hex); else c.copy(set.base[i]);
     tints[i * 3] = c.r; tints[i * 3 + 1] = c.g; tints[i * 3 + 2] = c.b;
   });

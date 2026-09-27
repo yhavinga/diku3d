@@ -491,7 +491,9 @@ def hand(P, sx, w, d):
         base = knuckles + across * (off * k)
         # Curl: each finger bends towards the palm a little more than the one
         # before it, as a hand at rest does.
-        curl = math.radians(18 + i * 6)
+        # Half closed, as a hand at rest is -- and round enough that a
+        # hilt in it looks held, which a flat hand never did.
+        curl = math.radians(34 + i * 7)
         seg = []
         p = base
         dirn = along.copy()
@@ -689,7 +691,7 @@ FILES = {
     "person_male": (MALE, ["peasant", "guard", "merchant", "smith", "priest", "mage", "rogue",
                            "beggar", "noble", "knight", "zombie", "ghost", "skeleton", "nomad"]),
     "person_female": (FEMALE, ["woman", "maid", "crone", "lady", "guard", "priest", "mage", "rogue"]),
-    "troll": (TROLL, ["troll"]),
+    "troll": (TROLL, ["troll", "brute"]),
 }
 
 

@@ -138,7 +138,7 @@ FACE_BUDGET = 3800
 # Hair in locks: the sculpted mass and, for long hair, the fall. A woman's
 # hair to her shoulders is most of what reads of her at twenty metres, so it
 # is paid for; everything else on a head stays under the old cap.
-HAIR_BUDGET = {"hair_long": 8000, "turban": 1000, "face_ettin": 7200, "hair_braid": 3000, "hair_bun": 3000, "hair_tail": 3500,
+HAIR_BUDGET = {"hair_long": 8000, "turban": 1200, "face_ettin": 7200, "hair_braid": 3000, "hair_bun": 3000, "hair_tail": 3500,
                "hair_short": 2600, "hair_crop": 1600, "hair_fringe": 1400, "beard_full": 1800,
                "beard_short": 1200, "moustache": 400}
 TREE_BUDGET = 1500

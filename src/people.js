@@ -76,7 +76,7 @@ const TRADES = [
   ['knight', W('knights?|paladins?|templars?|crusaders?|cavaliers?|champions?')],
   ['guard', W('guards?|guardsman|guardsmen|cityguards?|soldiers?|watchman|watchmen|sentry|sentries|sentinels?|captains?|sergeants?|warriors?|mercenar(y|ies)|legionnaires?|militia|patrol|trainees?|battle ?masters?|swordsman|swordsmen|fighters?|gladiators?|shiriffs?|sheriffs?|constables?|bodyguards?|adventurers?|veterans?|recruits?|squires?|archers?|bowman|lancers?|infantry|troopers?|wardens?|gatekeepers?')],
   ['mage', W('wizards?|mages?|magicians?|sorcerer|sorceress|sorcerers|warlocks?|witch|witches|enchanter|enchantress|necromancers?|conjurers?|illusionists?|magus|magi|alchemists?|sages?|seers?|mystics?|diviners?|astrologers?|oracles?')],
-  ['priest', W('priests?|priestess|clerics?|monks?|acolytes?|nuns?|abbots?|abbess|bishops?|healers?|druids?|chaplains?|friars?|sextons?|shamans?|hermits?|pilgrims?|curates?|deacons?|vicars?|prophets?|templekeeper')],
+  ['priest', W('priests?|priestess|druidess(es)?|clerics?|monks?|acolytes?|nuns?|abbots?|abbess|bishops?|healers?|druids?|chaplains?|friars?|sextons?|shamans?|hermits?|pilgrims?|curates?|deacons?|vicars?|prophets?|templekeeper')],
   ['rogue', W('wanderers?|thief|thieves|rogues?|assassins?|cutpurses?|pickpockets?|bandits?|brigands?|robbers?|highwaym[ae]n|spies|spy|burglars?|smugglers?|dealers?|ruffians?|thugs?|cutthroats?|outlaws?|poachers?|rangers?|hunters?|scouts?|executioners?|headsm[ae]n')],
   ['beggar', W('slaves?|beggars?|vagabonds?|tramps?|drunks?|drunkards?|bums?|hobos?|paupers?|urchins?|lepers?|filthy|wretch(es)?|madm[ae]n|lunatics?|vagrants?|idiots?|fools?')],
   ['smith', W('smiths?|blacksmiths?|weaponsmiths?|armourers?|armorers?|farriers?|tanners?|leather ?workers?|cobblers?|coopers?|masons?|miners?')],
@@ -112,7 +112,10 @@ const WEAPON_WORDS = [
 
 // --- palettes ---------------------------------------------------------------
 
-const SKIN = [0xd4a482, 0xc8946c, 0xb98460, 0xa87650, 0x8a5a38, 0x6d4526, 0xdcb090, 0xb07c58];
+// Multipliers over the skin surface. Less saturated than they were: at
+// 0xd4a482 and below every face in the square came out the orange-brown of a
+// painted mannequin under the noon sun.
+const SKIN = [0xe2bca4, 0xd8ae92, 0xcc9f84, 0xc09076, 0xb08064, 0x98694e, 0x7c5440, 0xdcb49a];
 const HAIR = [0x2a1d14, 0x3b2a1c, 0x4f3622, 0x6b4a2a, 0x8f6d3e, 0x1c1714, 0x7a3a1e, 0x5a4a3a];
 const HAIR_OLD = [0x9a968c, 0xb8b4aa, 0x7e7a72, 0xcfcac0];
 const EARTH = [0x6b4f3a, 0x5a5a44, 0x4d5a3c, 0x6e5f44, 0x7a6048, 0x55493c, 0x646a58, 0x7c6a52,
@@ -215,7 +218,9 @@ export function personOf(proto, ITEM, instance = 0) {
   const w = words(proto);
   // A dracolich is a dragon, whatever it has of a lich.
   if (/\bdracolich/i.test(w)) return null;
-  const special = (SPECIALS.find(([re]) => re.test(w)) || [])[1];
+  // No Man's Land's "doll" is a woman in her finery; a doll anywhere else
+  // is a doll, and has more words to its name than that.
+  const special = /^\s*doll\s*$/i.test(proto.keywords) ? 'doll' : (SPECIALS.find(([re]) => re.test(w)) || [])[1];
   // A lizard man is a man; a "lizard" is a lizard.
   if (!special && CREATURE.test(w) && !/\b(m[ae]n|wom[ae]n|folk)\b/i.test(w)) return null;
   const seed = strHash(proto.keywords, proto.vnum);
@@ -231,7 +236,7 @@ export function personOf(proto, ITEM, instance = 0) {
   const old = OLD.test(w);
   const hair = old ? pick(HAIR_OLD, seed2) : pick(HAIR, seed2);
 
-  if (special && special !== 'dervish' && special !== 'duergar') {
+  if (special && !['dervish', 'duergar', 'doll'].includes(special)) {
     const S = {
       wererat: { arch: 'rogue', face: 'face_wererat', pieces: ['hood'], tint: { skin: 0x7a6a5a, cloth: pick(DRAB, seed), cloth2: pick(DRAB, seed3), leather: 0x3a2e22, hair: 0x4a3f36 } },
       mindflayer: { arch: 'mage', face: 'face_illithid', pieces: [], tint: { skin: 0x8c7a94, cloth: pick([0x2a1a33, 0x1f1a2e, 0x331a2a], seed), cloth2: 0x4a3a58 } },
@@ -258,6 +263,9 @@ export function personOf(proto, ITEM, instance = 0) {
       out.tint = { skin: spec.skin, leather: 0x4a3a2a, linen: 0x8a7a5a, hair: 0x2a2418 };
       if (/\b(ogres?|giants?|ettins?|gnolls?|orcs?|hobgoblins?|bugbears?)\b/i.test(w)) out.weapon = 'weapon_mace';
       if (/\b(orcs?|hobgoblins?|goblins?|kobolds?)\b/i.test(w)) out.weapon = pick(['weapon_axe', 'weapon_spear', 'weapon_mace'], seed);
+      // A gang's ogres and trolls wear what they took: a crude leather
+      // jacket over the hide -- every ogre, half the trolls.
+      if (/\bgang\b/i.test(w) && (/\bogres?\b/i.test(w) || seed2 < 0.5)) out.arch = 'brute';
     } else {
       out.arch = kind;
       if (kind === 'skeleton') {
@@ -280,7 +288,7 @@ export function personOf(proto, ITEM, instance = 0) {
   }
 
   // People.
-  const isFemale = female(proto);
+  const isFemale = special === 'doll' || female(proto);
   let arch = null;
   for (const [a, re] of TRADES) if (re.test(w)) { arch = a; break; }
   if (!arch && proto.shop) arch = 'merchant';
@@ -289,6 +297,11 @@ export function personOf(proto, ITEM, instance = 0) {
   if (arch === 'smith' && DWARF.test(w) && !/\bsmith|armou?rer\b/i.test(w)) arch = 'guard';
   if (/\b(lumberjacks?|woodcutters?|woodsm[ae]n)\b/i.test(w)) out.weapon = 'weapon_axe';
   if (/\b(executioners?|headsm[ae]n)\b/i.test(w)) arch = 'smith';
+  // The neighbourhood's: a gang leader is a knife, a bruiser a brawler with
+  // a chain and a battered lid for a shield, a vandal a ragged youth.
+  if (/\bgang\b/i.test(w)) { arch = 'rogue'; out.weapon = 'weapon_dagger'; }
+  if (/\bbruisers?\b/i.test(w)) { arch = 'peasant'; out.weapon = 'weapon_mace'; out.shield = 'shield_round'; out.scale = 1.08; }
+  if (/\bvandals?\b/i.test(w)) { arch = 'beggar'; out.scale = 0.92; }
   // The dark dwarves are soldiers of the deep.
   if (special === 'duergar') arch = 'guard';
 
@@ -314,7 +327,7 @@ export function personOf(proto, ITEM, instance = 0) {
     else if (trade === 'priest' || /\b(priestess|nuns?|abbess)\b/i.test(w)) arch = 'priest';
     else if (trade === 'mage' || /\b(sorceress|enchantress)\b/i.test(w)) arch = 'mage';
     else if (trade === 'rogue') arch = 'rogue';
-    else if (trade === 'noble' || /\b(lady|ladies|queens?|princess(es)?|duchess(es)?|countess(es)?|baroness(es)?|empress|noblewoman)\b/i.test(w)) arch = 'lady';
+    else if (special === 'doll' || trade === 'noble' || /\b(lady|ladies|queens?|princess(es)?|duchess(es)?|countess(es)?|baroness(es)?|empress|noblewoman)\b/i.test(w)) arch = 'lady';
     else if (trade === 'merchant' || /\b(maids?|nursemaids?|nurses?|barmaids?|waitress|servants?|cooks?|milkmaids?)\b/i.test(w)) arch = 'maid';
     else if (/\b(hags?|crones?|witch(es)?|granny|beggars?)\b/i.test(w) || (old && trade !== 'noble')) arch = 'crone';
     else arch = 'woman';
@@ -350,10 +363,10 @@ export function personOf(proto, ITEM, instance = 0) {
         break;
       case 'lady':
         out.tint = { ...out.tint, velvet: pick(RICH, seed), cloth2: pick(RICH, seed3) };
-        out.pieces = [hairdo(['hair_long', 'hair_braid', 'hair_bun'])];
+        out.pieces = [hairdo(['hair_long', 'hair_long', 'hair_braid'])];
         break;
       default:
-        out.pieces = [hairdo(['hair_long', 'hair_bun', 'scarf', 'hair_braid', 'hair_tail', 'hair_long'])];
+        out.pieces = [hairdo(['hair_long', 'hair_bun', 'hair_long', 'scarf', 'hair_braid', 'hair_long'])];
     }
   } else {
     out.arch = arch;
@@ -470,6 +483,7 @@ export function personOf(proto, ITEM, instance = 0) {
   if (TODDLER.test(w)) { out.scale = 0.50; out.headScale = 1.32; }
   else if (CHILD.test(w) && !/\b(youths?)\b/i.test(w)) { out.scale = 0.66; out.headScale = 1.18; }
   else if (/\b(youths?)\b/i.test(w)) { out.scale = 0.88; out.headScale = 1.05; }
+  if (/\bvandals?\b/i.test(w)) { out.pieces = out.pieces.filter((p) => !p.startsWith('beard')); out.weapon = null; out.face = 'face_male'; }
   // Nobody that small is old, whatever their trade.
   if (out.scale < 0.9 && out.face && out.face.endsWith('_old')) { out.face = out.face.replace('_old', ''); out.tint.hair = hair; }
   if (/\b(brownies?|pixies?|sprites?|leprechauns?|gnomes?)\b/i.test(w)) { out.scale = 0.5; out.headScale = 1.2; }

@@ -263,7 +263,9 @@ def loft_skirt(body, name, top, hem, flare=1.35, mat="cloth", sides=24, rings=8,
             r = ((loc - V((0.0, cy, z))).xy.length if loc is not None else 0.0) + ease
             reach[i] = max(reach[i], r)
             rr = reach[i] * k
-            fold = 1.0 + hem_wave * t * t * math.sin(a * 9 + 0.7)
+            # Folds that fall from the waist and deepen to the hem, not a
+            # fluted column: two sets out of step, so no two are alike.
+            fold = 1.0 + hem_wave * t * t * (0.65 * math.sin(a * 7 + 0.7) + 0.35 * math.sin(a * 13 + 2.1))
             zz = z
             if ri == rings:
                 zz += ragged * (0.5 + 0.5 * math.sin(a * 13.0) * math.sin(a * 5.0 + 1.0))
@@ -720,7 +722,7 @@ def peasant(body, arm, C):
     """A labourer: a short belted tunic over hose, and boots."""
     top = tunic_body(body, arm, C, sleeve=0.55, hem=C.z(0.93))
     skirt = loft_skirt(body, "tunic_skirt", C.z(1.00), C.zl(0.70), flare=1.12, mat="cloth",
-                       hem_wave=0.035, under=[top])
+                       hem_wave=0.06, under=[top])
     hang(skirt, arm, body, C, C.z(0.99), C.zl(0.70), follow=0.55)
     rim(skirt, 0.006)
     legs = hose(body, arm, C)
@@ -861,7 +863,7 @@ def robe(body, arm, C, mat="cloth", hem=0.06, flare=1.45, sleeve=0.92, name="rob
     top = tunic_body(body, arm, C, sleeve=sleeve, hem=C.z(0.93), mat=mat, offset=0.012,
                      neck_drop=0.02, name=name)
     skirt = loft_skirt(body, name + "_skirt", C.z(1.00), C.zl(hem), flare=flare, mat=mat,
-                       hem_wave=0.05, under=[top], rings=14)
+                       hem_wave=0.08, under=[top], rings=14)
     hang(skirt, arm, body, C, C.z(1.00), C.zl(hem), follow=0.42)
     rim(skirt, 0.006)
     out = [top, skirt]
@@ -886,7 +888,7 @@ def merchant(body, arm, C):
     """A shopkeeper: a knee-length tunic, hose, shoes, and an apron over it."""
     top = tunic_body(body, arm, C, sleeve=0.7, hem=C.z(0.93))
     skirt = loft_skirt(body, "tunic_skirt", C.z(1.00), C.zl(0.50), flare=1.16, mat="cloth",
-                       hem_wave=0.04, under=[top], rings=12)
+                       hem_wave=0.06, under=[top], rings=12)
     hang(skirt, arm, body, C, C.z(1.00), C.zl(0.50), follow=0.5)
     rim(skirt, 0.006)
     legs = hose(body, arm, C)
@@ -980,7 +982,7 @@ def rogue(body, arm, C):
     bt = belt(body, C.z(1.03), under=[top, skirt])
     for b in bt:
         hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
-    ck = cloak(body, arm, C, C.zl(0.45), mat="cloth", under=[top, skirt] + bt)
+    ck = cloak(body, arm, C, C.zl(0.45), mat="wool", under=[top, skirt] + bt)
     return [top, skirt, legs, feet, ck] + bt
 
 
@@ -1003,7 +1005,7 @@ def noble(body, arm, C):
     good belt and boots."""
     top = tunic_body(body, arm, C, sleeve=0.9, hem=C.z(0.93), mat="cloth")
     skirt = loft_skirt(body, "gown_skirt", C.z(1.00), C.zl(0.34), flare=1.25, mat="cloth",
-                       hem_wave=0.04, under=[top], rings=12)
+                       hem_wave=0.06, under=[top], rings=12)
     hang(skirt, arm, body, C, C.z(1.00), C.zl(0.34), follow=0.5)
     rim(skirt, 0.006)
     legs = hose(body, arm, C)
@@ -1011,7 +1013,7 @@ def noble(body, arm, C):
     bt = belt(body, C.z(1.04), under=[top, skirt], buckle="iron")
     for b in bt:
         hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
-    cape = cloak(body, arm, C, C.z(1.02), mat="cloth2", under=[top] + bt, name="cape")
+    cape = cloak(body, arm, C, C.z(1.02), mat="wool", under=[top] + bt, name="cape")
     return [top, skirt, legs, feet, cape] + bt
 
 
@@ -1076,7 +1078,7 @@ def woman(body, arm, C, hem=0.03, ragged=0.0, apron_on=False, shawl=False):
     the ankle gathered at the waist, a sash, and shoes."""
     top = tunic_body(body, arm, C, sleeve=0.8, hem=C.z(0.99), neck_drop=0.05, mat="cloth")
     skirt = loft_skirt(body, "skirt", C.z(1.06), C.zl(hem), flare=1.55, mat="cloth",
-                       hem_wave=0.06, ragged=ragged, under=[top], rings=10)
+                       hem_wave=0.08, ragged=ragged, under=[top], rings=10)
     hang(skirt, arm, body, C, C.z(1.06), C.zl(hem), follow=0.4)
     rim(skirt, 0.005)
     feet = boots(body, arm, C, top=0.9)
@@ -1090,7 +1092,7 @@ def woman(body, arm, C, hem=0.03, ragged=0.0, apron_on=False, shawl=False):
         hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
     out += sash
     if shawl:
-        out.append(cloak(body, arm, C, C.z(1.05), mat="cloth2", under=out, name="shawl",
+        out.append(cloak(body, arm, C, C.z(1.05), mat="wool", under=out, name="shawl",
                          ragged=0.03))
     return out
 
@@ -1116,7 +1118,7 @@ def lady(body, arm, C):
     girdle = belt(body, C.z(1.00), under=[top, skirt], width=0.022, buckle="gold", mat="gold", ease=0.012)
     for b in girdle:
         hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
-    mantle = cloak(body, arm, C, C.zl(0.10), mat="cloth2", under=[top, skirt] + girdle, name="mantle")
+    mantle = cloak(body, arm, C, C.zl(0.10), mat="wool", under=[top, skirt] + girdle, name="mantle")
     return [top, skirt, feet, mantle] + girdle
 
 
@@ -1244,7 +1246,22 @@ def skeleton(body, arm, C):
     return out
 
 
-DRESS = {"lady": lady, "nomad": nomad, "skeleton": skeleton, "troll": troll, "woman": woman, "maid": maid, "crone": crone, "peasant": peasant, "guard": guard, "merchant": merchant, "smith": smith,
+def brute(body, arm, C):
+    """A gang's troll or ogre: a sleeveless leather jerkin, too small, laced
+    over the hide, the loincloth under it and a rope for a belt."""
+    top = tunic_body(body, arm, C, sleeve=-0.9, hem=C.z(0.95), mat="leather", offset=0.012, neck_drop=0.05,
+                     name="jerkin")
+    skirt = loft_skirt(body, "loincloth", C.z(1.02), C.zl(0.60), flare=1.12, mat="leather",
+                       hem_wave=0.06, ragged=0.08, rings=6, under=[top])
+    hang(skirt, arm, body, C, C.z(1.02), C.zl(0.60), follow=0.6)
+    rim(skirt, 0.006)
+    rope = belt(body, C.z(1.03), under=[top, skirt], width=0.02, buckle=None, mat="linen")
+    for b in rope:
+        hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
+    return [top, skirt] + rope
+
+
+DRESS = {"brute": brute, "lady": lady, "nomad": nomad, "skeleton": skeleton, "troll": troll, "woman": woman, "maid": maid, "crone": crone, "peasant": peasant, "guard": guard, "merchant": merchant, "smith": smith,
          "priest": priest, "mage": mage, "rogue": rogue, "beggar": beggar, "noble": noble,
          "knight": knight, "zombie": zombie, "ghost": ghost}
 

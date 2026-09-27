@@ -59,6 +59,7 @@ function takeColour(geometry) {
 // are, and at the size either is seen the two read the same.
 // Wool is the cloth recipe under its own tint; plate is worked steel.
 const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', wool: 'cloth', plate: 'steel', scales: 'feather' };
+// (linen and wool have recipes of their own now; the aliases are the fallback.)
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
   skin: { color: 0xc79b76, roughness: 0.72, metalness: 0 },
