@@ -52,6 +52,31 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Sewer and desert (tools/blender/sewer.py, desert.py)
+
+- **`visible = false` also hides a group from the shadow pass.** With the
+  town hidden, the noon sun lit a lair three levels down (luminance 111
+  against 30). The world is split above/below ground and each half drawn
+  only when the camera could see it — the sewer cost 985 draw calls in the
+  Market Square without a visible pixel — but every half is shown for the
+  shadow pass.
+- **The night sun is the moon at -8°, a light from below the world.**
+  Underground it drew blue lines down every corner; buried surfaces ignore
+  any sun below the horizon.
+- **Metal underground is RGB 0.** A metal only reflects its surroundings and
+  there is nothing bright down there. Rust, not iron.
+- **The gap between a room's wall and its cell edge beside every doorway**
+  faces a neighbour in town and showed the sky underground; buried rooms
+  close it.
+- **The area flags lie.** 170 of 177 sewer rooms are DARK, 26 drains are
+  sectored FOREST (and were planted with firs), exits to room -1 mean no
+  exit, and "Strange Glowing Sand" is INDOORS but open desert.
+- **Sand ripples as colour or strong relief read as zebra stripes** under a
+  low dusk sun.
+- 507 rooms (was 285), MAX_ROOMS 560; world build 146 → 255 ms; Market
+  Square 748 → 863 calls before the split's remaining cost (the sewer's
+  mobiles, still drawn under the street).
+
 ### People (tools/blender/people.py, src/people.js)
 
 - **The exporter writes a key at frame f to time f/fps.** Clips keyed from

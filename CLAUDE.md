@@ -309,6 +309,12 @@ choose.
   at ROOM/2 = 5 m, routed passages start at HALF = 6.5 m) and pitched roofs
   breaking up through the graveyard turf. Anything built per-room must be
   checked against buried rooms explicitly.
+- **Underground has no sky, and three things forget it.** Hiding the town
+  with `visible = false` also hides it from the shadow pass, so the noon sun
+  shone into a lair three levels down; the night "sun" is the moon at -8°,
+  a light from *below* that draws lines up buried corners; and a metal
+  underground reflects nothing bright and renders at RGB 0. Anything built
+  per-room has to be checked in the sewer as well as in the town.
 - **Test a prose vocabulary over all 45 areas before shipping it.** `pond`
   took Midgaard's park pond into the bog set, `chapel` matched a street in
   hood.are, `den` as a substring matches "Gamgee Resi**den**ce". The
