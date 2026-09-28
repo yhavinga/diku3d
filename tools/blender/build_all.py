@@ -68,6 +68,9 @@ BUDGET = {
     # to PROP_BUDGET's 800. A headstone gets scattered by the dozen and a fence
     # by the segment, so the loose cap would not have caught a regression here.
     "headstone": 250, "grave_slab": 120, "iron_fence": 450,
+    # Clipped hedge: leaf cards over a rounded box, one knot at a Shire lane
+    # corner and two along a hedgebank -- a tree's worth of foliage each.
+    "hedge_clump": 2200, "hedge_row": 2200,
     # The sewer kit. Like the room kit these are pieces of a building, one per
     # cell side, so read them against a wall panel's 2000 rather than a prop's
     # 800: a chamber is a groin vault, four piers and two ribs; a tunnel is a

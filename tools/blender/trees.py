@@ -230,7 +230,7 @@ def build_hedge(name, L, D, H, seed):
                                 verts=4, name="branch"))
     centre = mathutils.Vector((0, 0, hz))
     area = 2 * (L * D + L * H + D * H)
-    count = int(area * 10)
+    count = int(area * 7.5)
     placed = 0
     tries = 0
     while placed < count and tries < count * 4:
@@ -261,7 +261,7 @@ def build_hedge(name, L, D, H, seed):
         cards.card(base, u, v, length, width, 0.2, n + mathutils.Vector((0, 0, 0.35)))
         placed += 1
     # A second, inner layer, so the gaps in the first show leaf and not sky.
-    for k in range(int(count * 0.25)):
+    for k in range(int(count * 0.18)):
         d = mathutils.Vector((rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1)))
         q, n = surface(d)
         p = centre + (q) * 0.7

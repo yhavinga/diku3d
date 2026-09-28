@@ -25,10 +25,14 @@ import math
 import importlib
 import random
 
+import mathutils
+
 import lib
 import kit
+import trees
 importlib.reload(lib)
 importlib.reload(kit)
+importlib.reload(trees)
 
 
 # --- shared shapes --------------------------------------------------------
@@ -761,9 +765,15 @@ def build_planks_pile():
 
 def build_herb_pots():
     """Three pots on the ground with something growing out of them. Not one pot:
-    a single object on a pavement reads as placed, three read as kept."""
+    a single object on a pavement reads as placed, three read as kept.
+
+    What grows is sprays of small grey-green leaves -- sage, thyme -- fanning
+    out of the soil as cut-out cards; it was five green sticks a pot in the
+    generic `leaves` texture, the last of the programmer's plants."""
     lib.reset()
+    rng = random.Random(4712)
     p = []
+    cards = trees.Cards("herbleaf", tile=0.4)
     for (cx, cy, r, h) in ((-0.28, 0.06, 0.15, 0.26), (0.10, -0.14, 0.19, 0.32),
                            (0.34, 0.16, 0.13, 0.22)):
         p.append(lib.loft([(0.0, r * 0.68, r * 0.68, cx, cy),
@@ -774,14 +784,18 @@ def build_herb_pots():
         p.append(lib.loft([(h - 0.05, r * 0.92, r * 0.92, cx, cy),
                            (h - 0.03, r * 0.92, r * 0.92, cx, cy)],
                           sides=8, name="soil", mat="bark"))
-        for i in range(5):
-            a = 2 * math.pi * i / 5 + cx
-            p.append(kit.timber((0.045, 0.045, 0.3 + 0.06 * (i % 3)),
-                                (cx + r * 0.45 * math.cos(a), cy + r * 0.45 * math.sin(a),
-                                 h + 0.13),
-                                (math.radians(20) * math.sin(a), math.radians(20) * math.cos(a), 0),
-                                "leaves", 0.012, "stem"))
-    return kit.deliver(p, "herb_pots")
+        centre = mathutils.Vector((cx, cy, h + 0.08))
+        n = 9
+        for i in range(n):
+            a = 2 * math.pi * (i + rng.uniform(0, 0.6)) / n
+            e = rng.uniform(0.55, 1.2)
+            u = mathutils.Vector((math.cos(a) * math.cos(e), math.sin(a) * math.cos(e), math.sin(e)))
+            side = u.cross(mathutils.Vector((0, 0, 1))).normalized()
+            base = centre - mathutils.Vector((0, 0, 0.06)) + u * 0.02
+            length = rng.uniform(0.22, 0.34) * (r / 0.16)
+            cards.card(base, u, side, length, length * 0.8, 0.3,
+                       trees.outward(base + u * length * 0.5, centre, 0.5))
+    return trees.deliver_conifer(p, cards.mesh("leaves"), "herb_pots")
 
 
 def build_broom():
@@ -830,30 +844,33 @@ def build_cartwheel():
 
 
 def build_nettles():
-    """A clump of weeds for the foot of a wall. Every one of these is a flat
-    blade with a bend in it -- a wall that meets the ground on a clean line is
-    the tell that nothing has ever grown there."""
+    """A clump of nettles for the foot of a wall: square stems up to knee
+    height and a little over, each carrying opposite pairs of toothed leaves
+    as cut-out sprays, the tops nodding. It was thirteen bent flat blades in
+    the generic `leaves` texture -- programmer's weeds. A wall that meets the
+    ground on a clean line is the tell that nothing has ever grown there."""
     lib.reset()
-    random.seed(4711)
+    rng = random.Random(4711)
     p = []
-    for i in range(13):
-        a = 2 * math.pi * i / 13 + 0.3
-        d = 0.09 + 0.16 * random.random()
-        h = 0.26 + 0.34 * random.random()
-        p.append(kit.timber((0.075, 0.02, h),
-                            (d * math.cos(a), -abs(d * math.sin(a)) * 0.7, h / 2),
-                            (math.radians(26) * random.uniform(-1, 1),
-                             math.radians(30) * random.uniform(-1, 1), a),
-                            "leaves", 0.008, "blade"))
-    for i in range(4):
-        a = 1.1 * i
-        p.append(kit.timber((0.03, 0.03, 0.5 + 0.1 * i),
-                            (0.05 * math.cos(a), -0.05 * abs(math.sin(a)), 0.25 + 0.05 * i),
-                            (0, math.radians(8) * (i - 1.5), 0), "grass", 0.008, "stem"))
-    return kit.deliver(p, "nettles")
+    cards = trees.Cards("nettleleaf", tile=0.5)
+    centre = mathutils.Vector((0, -0.06, 0.3))
+    for i in range(9):
+        a = 2 * math.pi * i / 9 + rng.uniform(-0.3, 0.3)
+        d = rng.uniform(0.04, 0.22)
+        root = mathutils.Vector((d * math.cos(a), -abs(d * math.sin(a)) * 0.7, 0.0))
+        h = rng.uniform(0.38, 0.85)
+        lean = mathutils.Vector((math.cos(a) * 0.25, -abs(math.sin(a)) * 0.2, 1.0)).normalized()
+        p.append(trees.segment(tuple(root), tuple(lean), h, 0.008, 0.005, verts=4, mat="grass", name="stem"))
+        # Two cards crossed along the stem, each the height of the stem: the
+        # spray's own opposite pairs are the leaves.
+        for k in range(2):
+            b = a + k * math.pi / 2 + rng.uniform(-0.3, 0.3)
+            v = mathutils.Vector((math.cos(b), math.sin(b), 0.0))
+            v = (v - lean * v.dot(lean)).normalized()
+            out = trees.outward(root + lean * h * 0.5, centre, 0.5)
+            cards.card(root + lean * 0.05, lean, v, h * 1.05, rng.uniform(0.3, 0.4), 0.25, out)
+    return trees.deliver_conifer(p, cards.mesh("leaves"), "nettles")
 
-
-# --- the wet coast: a round door and a log cabin --------------------------
 
 def chord_board(x0, x1, cx, cz, R, y0, y1, mat="planks", name="board"):
     """One vertical board of a round leaf, its top and bottom cut to the circle.

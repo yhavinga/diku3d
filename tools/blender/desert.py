@@ -279,7 +279,7 @@ def build_dune(name, seed, height, horns):
     lib.reset()
     size = CELL + 0.6
     R = size / 2
-    nx, nw, nl = 26, 16, 8
+    nx, nw, nl = 22, 14, 7
 
     def crest_y(x):
         # The crescent: the crest bows back downwind towards the horns.
