@@ -3478,6 +3478,72 @@ export function populate(world, layout, built, options = {}) {
     return mesh;
   };
 
+  /**
+   * A door the room's words say is not boards (build.js `doorLeaf`): "a large
+   * black stone door" is one slab with a raised margin round a sunk field,
+   * iron is a plate with rows of studs, the great tree's door is its own wood
+   * with the carving standing proud. Same hinge frame as `door_leaf`.
+   */
+  const slabMaterials = new Map();
+  const slabMaterial = (leaf) => {
+    const key = `${leaf.material}|${leaf.tint ? leaf.tint.map((c) => c.toFixed(3)).join(',') : ''}`;
+    if (slabMaterials.has(key)) return slabMaterials.get(key);
+    const base = options.materials && options.materials[leaf.material];
+    if (!base) throw new Error(`actors: door leaf material ${leaf.material} is missing`);
+    const m = base.clone();
+    // A clone keeps the maps but not the shader hooks that light it like the wall.
+    m.onBeforeCompile = base.onBeforeCompile;
+    m.customProgramCacheKey = base.customProgramCacheKey;
+    m.onBeforeRender = base.onBeforeRender;
+    if (leaf.tint) m.color.setRGB(leaf.tint[0], leaf.tint[1], leaf.tint[2]);
+    slabMaterials.set(key, m);
+    return m;
+  };
+  const makeSlab = (leafWidth, height, leaf) => {
+    const parts = [];
+    const w = leafWidth - 0.03; const h = height - 0.05; const T = 0.12;
+    pushPart(parts, G.box(w, h, T), 0xffffff, at(w / 2, h / 2, 0));
+    // The margin, proud of the field on both faces.
+    const m = leaf.carved ? 0.16 : 0.12;
+    for (const face of [-1, 1]) {
+      const z = face * (T / 2 + 0.015);
+      pushPart(parts, G.box(w, m, 0.03), 0xffffff, at(w / 2, h - m / 2, z));
+      pushPart(parts, G.box(w, m, 0.03), 0xffffff, at(w / 2, m / 2, z));
+      pushPart(parts, G.box(m, h, 0.03), 0xffffff, at(m / 2, h / 2, z));
+      pushPart(parts, G.box(m, h, 0.03), 0xffffff, at(w - m / 2, h / 2, z));
+      pushPart(parts, G.box(w - 2 * m, m * 0.7, 0.03), 0xffffff, at(w / 2, h * 0.52, z));
+      if (leaf.studs) {
+        for (let y = 0.35; y < h - 0.2; y += 0.42) {
+          for (const x of [m * 0.5, w - m * 0.5]) pushPart(parts, G.sphere(0.035, 6), 0xffffff, at(x, y, z + face * 0.015));
+        }
+      }
+      if (leaf.carved) {
+        // A knot of leaves in each field: rings of lobes, proud of the wood.
+        for (const cy of [h * 0.27, h * 0.77]) {
+          for (let k = 0; k < 7; k++) {
+            const a = (k / 7) * Math.PI * 2;
+            pushPart(parts, G.sphere(0.07, 8), 0xffffff, at(w / 2 + Math.cos(a) * 0.17, cy + Math.sin(a) * 0.17, z, 0, 0, a, 1.5, 0.7, 0.35));
+          }
+          pushPart(parts, G.sphere(0.06, 8), 0xffffff, at(w / 2, cy, z, 0, 0, 0, 1, 1, 0.4));
+        }
+      }
+    }
+    pushPart(parts, G.cylinder(0.06, 0.06, 0.06, 12), 0x9a9a9a, at(w - m - 0.12, h * 0.5, -(T / 2 + 0.05), Math.PI / 2, 0, 0));
+    const material = slabMaterial(leaf);
+    const geo = projectUv(mergeGeometries(parts, false), material);
+    // One stone, not courses of it: the whole leaf reads from inside a single
+    // block of the tile, clear of its joints (a 3 m tile of 1.5 x 0.6 m slabs).
+    if (!leaf.carved && !leaf.studs) {
+      const uv = geo.attributes.uv; const sc = material.userData.uvScale ?? 1;
+      for (let i = 0; i < uv.count; i++) {
+        uv.setXY(i, 0.04 + ((uv.getX(i) / sc) / Math.max(w, 0.1) % 1) * 0.42, 0.025 + ((uv.getY(i) / sc) / h % 1) * 0.15);
+      }
+    }
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.castShadow = true;
+    return mesh;
+  };
+
   for (const spec of built.doors) {
     const [ux, uz] = [Math.cos(spec.rotY), -Math.sin(spec.rotY)];
     // `single` is a one-leaf opening: the log cabin's doorway is 1.00 m of
@@ -3493,7 +3559,7 @@ export function populate(world, layout, built, options = {}) {
       pivot.rotation.y = spec.rotY;
       const leaf = spec.round
         ? makeRoundLeaf(Math.min(spec.width, spec.height))
-        : makeLeaf(leafWidth, spec.height, spec.grate);
+        : (spec.leaf && !spec.grate ? makeSlab(leafWidth, spec.height, spec.leaf) : makeLeaf(leafWidth, spec.height, spec.grate));
       // The right-hand leaf is the left one mirrored, so its boards run back
       // toward the middle and its straps still face the street. A negative
       // scale flips the winding; three flips the front face with it.
