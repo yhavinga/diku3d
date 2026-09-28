@@ -95,7 +95,7 @@ const TAG_MATERIALS = {
   // mirrors, and the pale lantern glass laid on a facade read by day as a
   // cream panel and by night as a flat lit one.
   windowpane: {
-    color: 0x151a21, roughness: 0.08, metalness: 0.25, envMapIntensity: 1.1,
+    color: 0x1c222a, roughness: 0.08, metalness: 0.25, envMapIntensity: 1.3,
     emissive: 0x000000,
   },
 };

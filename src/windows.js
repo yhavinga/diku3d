@@ -173,7 +173,7 @@ const INTERIOR = /* glsl */`
 
     // Some rooms have nobody home: a glimmer from a banked fire, no more.
     float dark = allowDark * step( h2 * 0.7 + h4 * 0.3, 0.3 );
-    return col * mix( 1.0, 0.06, dark );
+    return col * mix( 1.0, 0.16, dark );
   }`;
 
 /**

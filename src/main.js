@@ -169,8 +169,8 @@ const TIMES = {
     // cube the shade was lit by pure sky, and a cast shadow on #2159's cobble
     // metered B/R 1.41 (46,55,65) where a skylit fill holds 1.05-1.15. This
     // takes that share of the sky's hue out of the diffuse term outdoors
-    // (reflections keep their blue): 1.41 -> 1.13, sunlit paving 0.90 -> 0.87.
-    skyBleach: 0.45, skyBleachTint: 0xfff5e3,
+    // (reflections keep their blue).
+    skyBleach: 0.55, skyBleachTint: 0xfff5e3,
     env: 0.42, bounce: 0x77694f, haze: 0xbcd2e6,
     bloom: 0.14, bloomThreshold: 28, stars: 0, turbidity: 3.0, rayleigh: 1.3,
     shafts: 0, shaftTint: 0xffffff,
@@ -207,7 +207,7 @@ const TIMES = {
     // eye, not because skylight is sapphire; at the old 1.2 of 0x2b3a5c the
     // shade on grass came out RGB 3,8,15, which is black with a tint.
     moon: [34, 330],
-    sun: 0x8ea6d6, sunIntensity: 2.6, sky: 0x2b3a5c, ground: 0x171a22, ambient: 6,
+    sun: 0x8ea6d6, sunIntensity: 2.0, sky: 0x2b3a5c, ground: 0x171a22, ambient: 6,
     // Indoors keeps the old 1.2 of it: there is no open sky inside a room.
     hemiSky: 0x4a5468, hemiIndoor: 0.2, skyBleach: 0.5, skyBleachTint: 0xe4ecff,
     env: 1.0, bounce: 0x1a1e28, haze: 0x2c3c62, shadeLift: 3.5,
@@ -802,10 +802,14 @@ async function boot() {
     // The panes on the modelled buildings are one material for the whole town,
     // so they cannot be lit house by house. They still light: sky by day, and
     // after dark the hearth behind them, or no window in Midgaard is ever on.
-    setPaneDaylight(Math.min(1, daylight / 0.3));
+    // Lamps are lit by golden hour, so the rooms behind the model glass go
+    // from daylit to lamplit over the same span the street lamps do; at dusk
+    // the old switch at 0.05 left every pane a dark, unlit room.
+    const paneDay = THREE.MathUtils.smoothstep(daylight, 0.2, 0.6);
+    setPaneDaylight(paneDay);
     if (assets) {
-      assets.setWindowLight(daylight > 0.05 ? preset.haze : 0xff9c46,
-        daylight > 0.05 ? daylight : 0.85);
+      assets.setWindowLight(new THREE.Color(0xff9c46).lerp(new THREE.Color(preset.haze), paneDay).getHex(),
+        0.85 * (1 - paneDay) + daylight * 1.6 * paneDay);
     }
 
     // Rebake the environment from the sky we just set up. This is the whole
