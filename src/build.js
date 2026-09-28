@@ -5502,7 +5502,8 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
       const endMats = pickMaterials(end.room, end.room.area);
       if (!isBuried(endMats, end)) {
         closeCorners({
-          batcher, pos: worldOf(end), dir: dirBetween(end, next), chunk: chunkOf(end),
+          // At the corridor's own height, which a mound lifts with its rooms.
+          batcher, pos: { ...worldOf(end), y }, dir: dirBetween(end, next), chunk: chunkOf(end),
           material: mats.wallIn, floor: mats.floor, ceiling: mats.ceil, addCollider,
         });
         continue;
