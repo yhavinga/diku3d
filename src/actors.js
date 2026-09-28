@@ -1248,24 +1248,34 @@ function beastLook(spec, proto, seed = 0) {
 }
 
 /**
- * A short, groomed coat -- a horse's -- takes a sheen the shaggy ones do not:
- * the highlight sliding down a flank is what draws the shape of a dark horse
- * in a dim barn, where the plain fur left a bay as a brown blob.
+ * A short, groomed coat -- a horse's, a pig's -- is the same hair as the
+ * shaggy ones, only short. The fur maps are drawn at three times the density,
+ * so a lock is half a centimetre across and not two: at that size the light
+ * guard-hair tips stop reading as the grain of carved wood (which is what
+ * they were at the shaggy size) and read as the hair lying down the body.
+ * Their relief runs across the lie, so the highlight they make is a streak
+ * along it. A little smoother than a wolf's, and no smoother: at roughness
+ * 0.7 with no map a bay in the barn came out as varnished timber, and with
+ * no sheen at all as a brown blob.
  */
 const sleekCache = new WeakMap();
 function sleekFur(library) {
   let m = sleekCache.get(library);
   if (!m) {
-    m = library.materialFor('fur').clone();
+    const base = library.materialFor('fur');
+    m = base.clone();
     m.name = 'fur-sleek';
-    m.roughness = 0.7;
-    m.envMapIntensity = 1.0;
-    // A groomed coat lies flat: the locks are there in the relief, faintly,
-    // and not in the colour at all -- their light and dark tips, on a horse,
-    // read as the grain of carved wood. The map's mean stands in for it.
-    m.normalScale = new THREE.Vector2(0.1, 0.1);
-    m.map = null;
-    m.color.setScalar(0.4);
+    for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap']) {
+      if (!base[k]) continue;
+      const t = base[k].clone();
+      t.repeat.set(3, 3);
+      // A clone starts at version 0, which three takes for "nothing to upload".
+      t.needsUpdate = true;
+      m[k] = t;
+    }
+    m.roughness = 0.82;
+    m.envMapIntensity = 0.6;
+    m.normalScale = new THREE.Vector2(0.3, 0.3);
     sleekCache.set(library, m);
   }
   return m;

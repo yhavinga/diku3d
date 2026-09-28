@@ -129,6 +129,34 @@ class Solid:
             return {b: np.ones(len(q))}
         if isinstance(b, dict):
             return {k: np.full(len(q), v) for k, v in b.items()}
+        if b[0] == "chain":
+            # ("chain", [(bone, point), ...]): each bone whole at its point,
+            # handing over to the next by the next point, measured along the
+            # line from the first point to the last. A neck that bends over
+            # three joints has to be weighted over three joints -- graded
+            # straight from the chest to the upper neck, it folds at the one
+            # it skipped.
+            pts = np.array([p for (_, p) in b[1]], dtype=np.float64)
+            axis = pts[-1] - pts[0]
+            s = ((q - pts[0]) @ axis) / float(axis @ axis)
+            at = ((pts - pts[0]) @ axis) / float(axis @ axis)
+            out = {}
+            for i, (bone, _) in enumerate(b[1]):
+                w = np.zeros(len(q))
+                if i == 0:
+                    w[s <= at[0]] = 1.0
+                if i == len(at) - 1:
+                    w[s >= at[-1]] = 1.0
+                if i > 0:
+                    m = (s > at[i - 1]) & (s < at[i])
+                    u = (s[m] - at[i - 1]) / (at[i] - at[i - 1])
+                    w[m] = u * u * (3 - 2 * u)
+                if i < len(at) - 1:
+                    m = (s >= at[i]) & (s < at[i + 1])
+                    u = (s[m] - at[i]) / (at[i + 1] - at[i])
+                    w[m] = 1 - u * u * (3 - 2 * u)
+                out[bone] = out.get(bone, 0) + w
+            return out
         # ("grad", boneA, boneB, pointA, pointB): A at pointA, B at pointB.
         _, ba, bb, pa, pb = b
         pa, pb = np.array(pa), np.array(pb)
@@ -1446,7 +1474,10 @@ def equine():
     the dark-points mask, so a bay has black ones and a chestnut does not."""
     L = dict(
         spine=[(0, -0.62, 1.36), (0, -0.2, 1.42), (0, 0.2, 1.44), (0, 0.5, 1.46)],
-        neck=[(0, 0.62, 1.36), (0, 0.9, 1.7), (0, 1.1, 1.9)],
+        # The neck's bones run low in it, from the root of the neck in front
+        # of the shoulder, where a horse lowers its head from -- not from the
+        # withers, where the crest begins.
+        neck=[(0, 0.66, 1.2), (0, 0.95, 1.58), (0, 1.1, 1.9)],
         nose=(0, 1.42, 1.42),
         jaw=[(0, 1.16, 1.7), (0, 1.38, 1.4)],
         tail=[(0, -0.8, 1.42), (0, -0.9, 1.32), (0, -0.95, 1.14), (0, -0.97, 0.94), (0, -0.97, 0.72)],
@@ -1466,7 +1497,9 @@ def equine():
         ell(P(0, -0.52, 1.22), (0.28, 0.33, 0.31), ("grad", "pelvis", "spine", P(0, -0.6, 1.2), P(0, -0.1, 1.2)), blend=0.12),
         ell(P(0, -0.72, 1.12), (0.21, 0.13, 0.23), "pelvis", blend=0.1),
         # The neck is deep and flat-sided, with the crest arching over it.
-        cone(P(0, 0.6, 1.24), P(0, 1.06, 1.8), 0.3, 0.16, ("grad", "chest", "neck2", P(0, 0.6, 1.3), P(0, 1.05, 1.85)), blend=0.12, squash=(0.6, 1, 1)),
+        cone(P(0, 0.6, 1.24), P(0, 1.06, 1.8), 0.3, 0.16, ("chain", [("chest", P(0, 0.515, 1.01)), ("neck", P(0, 0.805, 1.39)),
+                                                                     ("neck2", P(0, 1.025, 1.74)), ("head", P(0, 1.175, 2.06))]),
+             blend=0.12, squash=(0.6, 1, 1)),
         ell(P(0, 0.84, 1.66), (0.08, 0.3, 0.1), ("grad", "neck", "neck2", P(0, 0.7, 1.55), P(0, 1.0, 1.8)), blend=0.08, rot=(-50, 0, 0)),
         # A long head: the round jowl, the flat face, the soft muzzle.
         ell(P(0, 1.15, 1.76), (0.115, 0.15, 0.15), "head", blend=0.06),
@@ -1503,7 +1536,8 @@ def equine():
         for i in range(15):
             t = i / 14.0
             c = crest[0].lerp(crest[1], t * 2) if t < 0.5 else crest[1].lerp(crest[2], (t - 0.5) * 2)
-            bone = ("grad", "neck", "neck2", P(0, 0.6, 1.6), P(0, 1.0, 1.9))
+            bone = ("chain", [("chest", P(0, 0.5, 1.5)), ("neck", P(0, 0.78, 1.72)), ("neck2", P(0, 1.0, 1.9)),
+                              ("head", P(0, 1.15, 2.02))])
             L_ = 0.2 + 0.12 * math.sin(math.pi * t) + rng.uniform(-0.04, 0.04)
             end = c + V((-0.13 - 0.05 * rng.random(), -0.05 - 0.04 * rng.random(), -L_))
             mid = c.lerp(end, 0.45) + V((-0.06, 0.0, 0.02))
@@ -1547,6 +1581,7 @@ def equine():
                 gait=dict(walk_stride=1.6, walk_frames=34, walk_duty=0.62, lift=0.14,
                           run_stride=2.6, run_frames=18, run_duty=0.36, run_lift=0.22,
                           gallop="transverse", wag=4.0, idle_wag=1, tail_pitch=0.0, lie=0.34, arch=4.0,
+                          graze=dict(pitch=3.0, face=70.0, ground=0.02),
                           flex={"hind": dict(lean=8, push=15, fold=35, curl=45),
                                 "fore": dict(lean=8, push=20, fold=80, curl=50, scap=10)}))
 
@@ -1563,7 +1598,7 @@ def cervid():
     viewer collapses them for a doe."""
     L = dict(
         spine=[(0, -0.34, 0.8), (0, -0.11, 0.81), (0, 0.11, 0.81), (0, 0.28, 0.81)],
-        neck=[(0, 0.33, 0.77), (0, 0.45, 0.93), (0, 0.53, 1.05)],
+        neck=[(0, 0.36, 0.68), (0, 0.46, 0.88), (0, 0.53, 1.05)],
         nose=(0, 0.72, 0.92),
         jaw=[(0, 0.56, 0.98), (0, 0.7, 0.905)],
         tail=[(0, -0.43, 0.8), (0, -0.49, 0.76), (0, -0.52, 0.69)],
@@ -1582,7 +1617,9 @@ def cervid():
         ell(P(0, 0.26, 0.62), (0.12, 0.14, 0.16), "chest", blend=0.05),
         ell(P(0, 0.22, 0.78), (0.08, 0.14, 0.06), "chest", blend=0.05),
         ell(P(0, -0.3, 0.67), (0.14, 0.17, 0.16), ("grad", "pelvis", "spine", P(0, -0.35, 0.67), P(0, -0.05, 0.67)), blend=0.06),
-        cone(P(0, 0.3, 0.7), P(0, 0.52, 1.02), 0.12, 0.068, ("grad", "chest", "neck2", P(0, 0.3, 0.72), P(0, 0.5, 1.0)), blend=0.06, squash=(0.75, 1, 1)),
+        cone(P(0, 0.3, 0.7), P(0, 0.52, 1.02), 0.12, 0.068, ("chain", [("chest", P(0, 0.31, 0.58)), ("neck", P(0, 0.41, 0.78)),
+                                                                     ("neck2", P(0, 0.495, 0.965)), ("head", P(0, 0.565, 1.135))]),
+             blend=0.06, squash=(0.75, 1, 1)),
         ell(P(0, 0.56, 1.03), (0.064, 0.08, 0.068), "head", blend=0.035),
         cone(P(0, 0.58, 1.02), P(0, 0.7, 0.93), 0.052, 0.03, "head", blend=0.03, squash=(0.85, 1, 1)),
         ell(P(0, 0.7, 0.925), (0.034, 0.04, 0.034), "head", blend=0.02),
@@ -1641,6 +1678,7 @@ def cervid():
                 gait=dict(walk_stride=0.85, walk_frames=30, walk_duty=0.62, lift=0.09,
                           run_stride=2.0, run_frames=16, run_duty=0.34, run_lift=0.16,
                           gallop="transverse", wag=6.0, idle_wag=2, tail_pitch=10.0, lie=0.17, arch=6.0,
+                          graze=dict(pitch=4.0, face=75.0, ground=0.05, most=130.0),
                           flex={"hind": dict(lean=8, push=15, fold=40, curl=40),
                                 "fore": dict(lean=8, push=20, fold=85, curl=45, scap=10)}))
 
@@ -1652,7 +1690,9 @@ def bovine():
     udder are optional parts -- a bull keeps the one and not the other."""
     L = dict(
         spine=[(0, -0.7, 1.32), (0, -0.25, 1.33), (0, 0.2, 1.35), (0, 0.55, 1.34)],
-        neck=[(0, 0.62, 1.24), (0, 0.92, 1.26)],
+        # Two neck bones from the root of the neck low in front of the
+        # shoulder: one, from the withers, cannot put the muzzle on the grass.
+        neck=[(0, 0.64, 1.02), (0, 0.79, 1.15), (0, 0.92, 1.26)],
         nose=(0, 1.36, 0.95),
         jaw=[(0, 1.02, 1.04), (0, 1.3, 0.9)],
         tail=[(0, -0.86, 1.36), (0, -0.93, 1.16), (0, -0.94, 0.92), (0, -0.94, 0.66)],
@@ -1676,7 +1716,9 @@ def bovine():
         ell(P(-0.24, -0.5, 1.24), (0.08, 0.1, 0.07), "pelvis", blend=0.12),
         ell(P(0.11, -0.82, 1.24), (0.06, 0.07, 0.06), "pelvis", blend=0.1),
         ell(P(-0.11, -0.82, 1.24), (0.06, 0.07, 0.06), "pelvis", blend=0.1),
-        cone(P(0, 0.6, 1.08), P(0, 0.95, 1.18), 0.31, 0.2, ("grad", "chest", "neck", P(0, 0.6, 1.1), P(0, 0.9, 1.18)), blend=0.1, squash=(0.72, 1, 1)),
+        cone(P(0, 0.6, 1.08), P(0, 0.95, 1.18), 0.31, 0.2, ("chain", [("chest", P(0, 0.565, 0.955)), ("neck", P(0, 0.715, 1.085)),
+                                                                    ("neck2", P(0, 0.855, 1.205)), ("head", P(0, 0.985, 1.315))]),
+             blend=0.1, squash=(0.72, 1, 1)),
         # The dewlap: the loose fold of skin under the throat and brisket.
         ell(P(0, 0.74, 0.84), (0.08, 0.26, 0.2), ("grad", "chest", "neck", P(0, 0.6, 0.9), P(0, 0.9, 0.9)), blend=0.08),
         ell(P(0, 1.0, 1.2), (0.14, 0.13, 0.14), "head", blend=0.06),
@@ -1735,6 +1777,7 @@ def bovine():
                 gait=dict(walk_stride=1.25, walk_frames=38, walk_duty=0.64, lift=0.1,
                           run_stride=1.9, run_frames=20, run_duty=0.38, run_lift=0.14,
                           gallop="transverse", wag=5.0, idle_wag=1, tail_pitch=0.0, lie=0.36, arch=4.0,
+                          graze=dict(pitch=3.0, face=65.0, ground=0.05),
                           flex={"hind": dict(lean=8, push=14, fold=30, curl=35),
                                 "fore": dict(lean=8, push=18, fold=70, curl=40, scap=10)}))
 
@@ -1745,7 +1788,9 @@ def pig():
     curl of a tail. A boar is this in a dark bristled coat with tusks."""
     L = dict(
         spine=[(0, -0.42, 0.66), (0, -0.14, 0.69), (0, 0.14, 0.69), (0, 0.36, 0.65)],
-        neck=[(0, 0.4, 0.6), (0, 0.53, 0.58)],
+        # The neck's root low in the chest, where the head goes down from to
+        # root; at the top of the shoulder it could only fold into it.
+        neck=[(0, 0.38, 0.47), (0, 0.53, 0.58)],
         nose=(0, 0.87, 0.44),
         jaw=[(0, 0.58, 0.46), (0, 0.8, 0.405)],
         tail=[(0, -0.55, 0.63), (0.015, -0.6, 0.66), (0.04, -0.625, 0.62), (0.02, -0.61, 0.575)],
@@ -1763,7 +1808,8 @@ def pig():
         ell(P(0, 0.0, 0.47), (0.26, 0.5, 0.26), ("grad", "spine", "chest", P(0, -0.2, 0.47), P(0, 0.25, 0.47)), blend=0.1),
         ell(P(0, 0.3, 0.46), (0.22, 0.2, 0.23), "chest", blend=0.08),
         ell(P(0, -0.34, 0.5), (0.24, 0.2, 0.24), "pelvis", blend=0.08),
-        cone(P(0, 0.36, 0.5), P(0, 0.54, 0.52), 0.22, 0.17, ("grad", "chest", "neck", P(0, 0.36, 0.5), P(0, 0.52, 0.52)), blend=0.08),
+        cone(P(0, 0.36, 0.5), P(0, 0.54, 0.52), 0.22, 0.17, ("chain", [("chest", P(0, 0.3, 0.42)), ("neck", P(0, 0.455, 0.525)),
+                                                                     ("head", P(0, 0.61, 0.635))]), blend=0.08),
         ell(P(0, 0.58, 0.52), (0.15, 0.14, 0.14), "head", blend=0.06),
         cone(P(0, 0.62, 0.5), P(0, 0.84, 0.44), 0.1, 0.058, "head", blend=0.05, squash=(0.95, 1, 1)),
     ]
@@ -1811,6 +1857,7 @@ def pig():
                 gait=dict(walk_stride=0.55, walk_frames=24, walk_duty=0.64, lift=0.05,
                           run_stride=1.2, run_frames=14, run_duty=0.38, run_lift=0.08,
                           gallop="transverse", wag=8.0, idle_wag=2, tail_pitch=0.0, lie=0.24, arch=4.0,
+                          graze=dict(pitch=4.0, face=60.0, ground=0.01, chew=4.0, tug=3.0, most=120.0),
                           flex={"hind": dict(lean=8, push=15, fold=35, curl=35),
                                 "fore": dict(lean=8, push=18, fold=70, curl=40, scap=8)}))
 
@@ -2825,8 +2872,31 @@ class Clip:
         for i in list(range(0, frames, step)) + [frames]:
             t = i / frames
             pose = fn(t)
-            basis = poser.solve(pose.get("fk", {}), pose.get("loc", V((0, 0, 0))),
-                                pose.get("rot"), pose.get("ik"))
+            loc0 = V(pose.get("loc", V((0, 0, 0))))
+            before = poser.overreach
+            poser.overreach = 0.0
+            basis = poser.solve(pose.get("fk", {}), loc0, pose.get("rot"), pose.get("ik"))
+            # A planted foot the leg cannot reach is dragged: the solver
+            # clamps the ankle and the toe tip leaves its mark on the ground.
+            # The body comes down to the foot instead -- a few millimetres
+            # of dip at full stretch, where a real body sinks anyway.
+            # A splayed leg short of reach sideways can want the body up.
+            best = (poser.overreach, loc0)
+            for sign in (-1.0, 1.0):
+                for _ in range(10):
+                    if best[0] < 1e-5:
+                        break
+                    trial = best[1] + V((0, 0, sign * best[0] * 1.2))
+                    poser.overreach = 0.0
+                    poser.solve(pose.get("fk", {}), trial, pose.get("rot"), pose.get("ik"))
+                    if poser.overreach >= best[0]:
+                        break
+                    best = (poser.overreach, trial)
+            if best[1] != loc0:
+                pose["loc"] = best[1]
+            poser.overreach = 0.0
+            basis = poser.solve(pose.get("fk", {}), best[1], pose.get("rot"), pose.get("ik"))
+            poser.overreach = max(before, poser.overreach)
             limp = pose.get("limp", 0.0)
             if limp > 0.0 and pose.get("ik"):
                 loose = poser.solve(pose.get("fk", {}), pose.get("loc", V((0, 0, 0))), pose.get("rot"), None)
@@ -2989,6 +3059,43 @@ def quad_clips(arm, spec):
         return dict(fk=fk, loc=loc, ik=ik)
     clip.run("idle", g.get("idle_frames", 120), idle, step=2)
 
+    # -- graze: head down in the grass, cropping and chewing, with the ears
+    # and the tail keeping the flies off. The viewer crossfades into it from
+    # the idle, so it is a loop that starts and ends head-down; the feet stay
+    # exactly where the idle has them, so the crossfade cannot slide them.
+    gz = g.get("graze")
+    if gz:
+        down = graze_reach(poser, rest, arm, necks, gz)
+        report["graze"] = down["report"]
+        tug_at = (0.16, 0.5, 0.78)
+
+        def graze(t):
+            # A crop: the muzzle closes on the grass and tugs it up and back.
+            tug = sum(math.exp(-((t - c) * 16) ** 2) for c in tug_at)
+            sweep = wave(t, 0.1)
+            fk = {"chest": (0.6 * wave(3 * t), 0, 0), "spine": (-0.3 * wave(3 * t), 0, 0)}
+            for n in necks:
+                a = down["neck"][n]
+                fk[n] = (a + down["up"] * tug * down["share"][n], 4.0 * sweep * down["share"][n], 0)
+            fk["head"] = (down["head"] + down["up"] * tug * 0.6, 5.0 * wave(t, 0.35), 0)
+            if "jaw" in bones:
+                # Chewing between crops, a grind from side to side; shut on
+                # the tug itself.
+                chew = (0.5 + 0.5 * wave(9 * t)) * (1 - min(1.0, tug))
+                fk["jaw"] = (-gz.get("chew", 7.0) * chew, 2.5 * wave(9 * t, 0.25) * (1 - min(1.0, tug)), 0)
+            flick = lambda c: math.exp(-((t - c) * 30) ** 2)
+            for e in ears:
+                s = 1 if e.endswith(".L") else -1
+                c = (0.3, 0.9) if s > 0 else (0.62, 0.9)
+                k = max(flick(c[0]), flick(c[1]))
+                fk[e] = (-16 * k + 6, 0, s * 12 * k)
+            swish = max(math.exp(-((t - 0.42) * 7) ** 2), math.exp(-((t - 0.88) * 9) ** 2))
+            fk.update(tail_wave(tails, t, wag * 0.4 + 26 * swish, freq=2, pitch=tail_pitch))
+            with_wings(fk, lift=0.08)
+            ik = {leg: planted(rest, leg) for leg in rest}
+            return dict(fk=fk, loc=V((0, 0, down["drop"])), rot=down["rot"], ik=ik)
+        clip.run("graze", 180, graze, step=2)
+
     # -- walk: four-beat lateral sequence.
     S, N, duty, lift = g["walk_stride"], g["walk_frames"], g["walk_duty"], g["lift"]
 
@@ -3148,6 +3255,72 @@ def quad_clips(arm, spec):
     report["stride"] = {"walk": S, "run": S2}
     report["overreach"] = clip.reach
     return report
+
+
+def graze_reach(poser, rest, arm, necks, gz):
+    """The neck and head angles that put the muzzle on the grass.
+
+    Solved on the mesh, not the bones: the lowest vertex riding on the head
+    has to come down to `ground` above the hooves, with the face at `face`
+    degrees below horizontal. The body tips forward by `pitch` degrees
+    about the hips first -- the forelegs, planted by IK, give at the knee --
+    and the neck bends over its bones in `share` proportions, up to `most`
+    degrees in all. The head's angle for the face follows exactly from the
+    neck's, and the neck's is bisected for the height. Which sign lowers is
+    measured, not assumed.""" 
+    head_pts = []
+    for o in arm.children:
+        if o.type != "MESH":
+            continue
+        names = {vg.index: vg.name for vg in o.vertex_groups}
+        for v in o.data.vertices:
+            w = sum(e.weight for e in v.groups if names.get(e.group) in ("head", "jaw"))
+            if w > 0.6:
+                head_pts.append(tuple(o.matrix_world @ v.co))
+    pts = np.array(head_pts)
+    # Most of it at the root of the neck, as in the animal: the lowest joints
+    # carry the flexion, and a neck bent evenly along its length is a swan's.
+    shares = gz.get("share") or {1: [1.0], 2: [0.8, 0.2], 3: [0.6, 0.25, 0.15]}[len(necks)]
+    share = dict(zip(necks, shares))
+    # The animal faces -Y, so a positive turn about X tips its front down.
+    rot = mathutils.Quaternion(V((1, 0, 0)), math.radians(gz.get("pitch", 0.0)))
+    drop = -gz.get("drop", 0.0)
+    ik = {leg: planted(rest, leg) for leg in rest}
+
+    def solve(a, h):
+        fk = {n: (a * share[n], 0, 0) for n in necks}
+        fk["head"] = (h, 0, 0)
+        poser.solve(fk, V((0, 0, drop)), rot, ik)
+        D = poser.M["head"] @ poser.rest["head"].inverted()
+        R = np.array(D.to_3x3())
+        low = float((pts @ R.T + np.array(D.translation))[:, 2].min())
+        y = poser.M["head"].col[1].xyz.normalized()
+        # Signed in the body's own plane, so a face carried past the vertical
+        # keeps going down instead of coming back up.
+        return low, math.degrees(math.atan2(y.z, -y.y))
+
+    sa = 1.0 if solve(20, 0)[0] < solve(0, 0)[0] else -1.0
+    sh = 1.0 if solve(0, 20)[1] < solve(0, 0)[1] else -1.0
+
+    def head_for(a):
+        # The head pitches about world X, so the face turns exactly with it.
+        f = solve(sa * a, 0.0)[1] + gz.get("face", 70.0)
+        return sh * ((f + 180.0) % 360.0 - 180.0)
+
+    lo, hi = 0.0, gz.get("most", 150.0)
+    for _ in range(24):
+        mid = (lo + hi) * 0.5
+        if solve(sa * mid, head_for(mid))[0] > gz.get("ground", 0.02):
+            lo = mid
+        else:
+            hi = mid
+    a = sa * hi
+    h = head_for(hi)
+    low, face = solve(a, h)
+    poser.overreach = 0.0
+    return dict(neck={n: a * share[n] for n in necks}, head=h, share=share, rot=rot, drop=drop,
+                up=-sa * gz.get("tug", 4.0),
+                report=dict(neck=round(a, 1), head=round(h, 1), low=round(low, 3), face=round(face, 1)))
 
 
 def foot_slip(tracks, stride, frames, duty, offsets):

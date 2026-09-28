@@ -52,7 +52,7 @@ const YOU = 0.9;
 /** How close an opponent closes for melee, centre to centre. */
 export const CLOSE = 1.55;
 
-const LOOP = ['idle', 'idle2', 'walk', 'run', 'fight', 'talk'];
+const LOOP = ['idle', 'idle2', 'walk', 'run', 'fight', 'talk', 'graze'];
 /**
  * people.py's sit, in seconds: the first REST_LOOP of it is at rest and
  * breathing and comes back to its first frame, and SIP is the stretch where
@@ -1682,13 +1682,16 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     // eased, and a walk faded in behind it is a planted foot sliding by the
     // part of the speed it does not carry. What the body does standing
     // (idle, idle2, guard, talk) crossfades as shares of the rest.
-    const rate = Math.min(1, dt * 7);
-    const want = { idle: 0, idle2: 0, fight: 0, talk: 0 };
+    const want = { idle: 0, idle2: 0, fight: 0, talk: 0, graze: 0 };
     if (wFight > 0) want.fight = 1; else if (wTalk > 0) want.talk = 1;
+    else if (a.graze && m.graze && m.graze.want) want.graze = 1;
     else want[m.idle === 'idle2' && a.idle2 ? 'idle2' : 'idle'] = 1;
     const base = m.base || (m.base = { idle: 1 });
+    // A head goes down to the grass and comes up again over a second or so,
+    // not in the snap that suits a change of stance.
+    const rate = Math.min(1, dt * (a.graze && (want.graze || base.graze > 0.01) ? 1.6 : 7));
     let shares = 0;
-    for (const name of ['idle', 'idle2', 'fight', 'talk']) {
+    for (const name of ['idle', 'idle2', 'fight', 'talk', 'graze']) {
       if (!a[name]) { base[name] = 0; continue; }
       const w = base[name] || 0;
       base[name] = w + (want[name] - w) * rate;
@@ -2415,9 +2418,9 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
    * 1.02 m to 0.84 -- so on cattle this reads as a head lowered; a pig's
    * snout and a dog's nose reach the ground. A bird's `attack` is a peck.
    */
-  // Not the horse, the deer or the camel: bent at the neck, the equine
-  // frame folds its neck back into its chest instead of reaching down -- it
-  // needs a graze clip of its own (beasts.py).
+  // A rig with a `graze` clip of its own (beasts.py: the horse, the deer, the
+  // cow, the pig, the camel) plays that instead, head on the grass, chewing;
+  // the bend here is for the rest.
   const GRAZERS = /^(bovine|pig)$/;
   const SNIFFERS = /^(canine|rodent|bear)$/;
   const PECKERS = /^(fowl|songbird|waterfowl)$/;
@@ -2458,10 +2461,19 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       }
       return;
     }
-    const grazer = GRAZERS.test(kind); const sniffer = SNIFFERS.test(kind);
+    const clip = fig.actions && fig.actions.graze;
+    const grazer = !!clip || GRAZERS.test(kind); const sniffer = !clip && SNIFFERS.test(kind);
     if (!grazer && !sniffer) return;
-    if (fig.graze === undefined) fig.graze = measureGraze(fig, grazer);
-    if (!fig.graze) return;
+    if (clip && !clip.isRunning()) {
+      // Loaded as a one-shot like any clip the viewer does not know; it is a
+      // loop, weighted in by animate() as a share of standing still.
+      clip.setLoop(THREE.LoopRepeat, Infinity);
+      clip.setEffectiveWeight(0);
+      clip.time = fig.rand() * clip.getClip().duration;
+      clip.play();
+    }
+    if (fig.graze === undefined) fig.graze = clip ? null : measureGraze(fig, grazer);
+    if (!fig.graze && !clip) return;
     const g = m.graze || (m.graze = { w: 0, want: 0, next: fig.rand() * 3 });
     g.next -= dt;
     if (!still) g.want = 0;

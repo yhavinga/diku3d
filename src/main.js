@@ -552,7 +552,8 @@ async function boot() {
   game.listen((event) => rulesSound(event));
   // A mobile that says something is seen to say it (motion.js `speak`).
   game.listen((event) => {
-    if (event.kind === 'mobsay' && event.slot && event.slot.figure) actors.motion.speak(event.slot.figure, event.said || '');
+    // ...and so does a shopkeeper's reply, which comes as a `say` or a command's `out` with the keeper's slot.
+    if (event.slot && event.slot.figure && (event.kind === 'mobsay' || event.said)) actors.motion.speak(event.slot.figure, event.said || '');
   });
   // A light you hold lights the way: one more candidate for the light pool,
   // moved with you, so it costs a pooled light rather than a new one.

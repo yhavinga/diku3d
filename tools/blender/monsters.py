@@ -714,8 +714,10 @@ def scorpion():
                 patch=B.spots(0.04, seed=53), h=0.0025, tris=1600, mat="chitin",
                 bones=arthro_bones(root, extra, legs), legs=arthro_legs(legs), root="body",
                 clips=arthro_clips,
+                # The run is a quicker scurry, not a longer one: at 0.18 m a
+                # stride the front legs could not reach their marks and slid.
                 gait=dict(walk_stride=0.11, walk_frames=12, walk_duty=0.6, lift=0.025,
-                          run_stride=0.18, run_frames=8, run_duty=0.5, rear=0.2, rear_pitch=6,
+                          run_stride=0.14, run_frames=6, run_duty=0.5, rear=0.2, rear_pitch=6,
                           phases=tetrapod(0.06), fk=fk))
 
 
@@ -2449,6 +2451,7 @@ def camel():
                 gait=dict(walk_stride=1.3, walk_frames=34, walk_duty=0.64, lift=0.14,
                           run_stride=3.2, run_frames=22, run_duty=0.38, run_lift=0.24,
                           gallop="rotary", wag=4.0, idle_wag=1, tail_pitch=0.0, lie=0.5, arch=3.0, pant=4.0,
+                          graze=dict(pitch=3.0, face=60.0, ground=0.04),
                           flex={"hind": dict(lean=8, push=15, fold=35, curl=35),
                                 "fore": dict(lean=8, push=20, fold=80, curl=45, scap=10)}))
 

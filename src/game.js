@@ -2334,8 +2334,9 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       .map((e) => e.obj);
   }
 
-  function say(text, speaker) {
-    emit({ kind: 'say', speaker, text: `${capitalise(speaker)} tells you '${text}'` });
+  // The keeper's slot rides along so the body can say it too (motion.speak).
+  function say(text, speaker, slot) {
+    emit({ kind: 'say', speaker, slot, said: text, text: `${capitalise(speaker)} tells you '${text}'` });
   }
 
   /** act_obj.c: find_keeper -- shop hours included, since the sky already has a clock. */
@@ -2355,6 +2356,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     const open = state.hour >= shop.openHour && state.hour <= shop.closeHour;
     return {
       keeper: slot.proto.vnum,
+      slot,
       name: slot.proto.short,
       open,
       hours: [shop.openHour, shop.closeHour],
@@ -2378,14 +2380,14 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     if (!slot) return { ok: false, text: "You can't do that here." };
     const shop = slot.record.shop;
     const keeper = wake(slot);
-    if (state.hour < shop.openHour) { say('Sorry, come back later.', keeper.name); return { ok: false, text: 'closed' }; }
-    if (state.hour > shop.closeHour) { say('Sorry, come back tomorrow.', keeper.name); return { ok: false, text: 'closed' }; }
+    if (state.hour < shop.openHour) { say('Sorry, come back later.', keeper.name, slot); return { ok: false, text: 'closed' }; }
+    if (state.hour > shop.closeHour) { say('Sorry, come back tomorrow.', keeper.name, slot); return { ok: false, text: 'closed' }; }
 
     const obj = keeper.inventory.find((o) => o.vnum === objVnum);
     const cost = getCost(shop, obj, true);
-    if (!obj || cost <= 0) { say("I don't sell that -- try 'list'.", keeper.name); return { ok: false, text: 'not sold' }; }
-    if (state.gold < cost) { say(`You can't afford to buy ${obj.name}.`, keeper.name); return { ok: false, text: 'too dear' }; }
-    if (obj.level > state.level) { say(`You can't use ${obj.name} yet.`, keeper.name); return { ok: false, text: 'too high' }; }
+    if (!obj || cost <= 0) { say("I don't sell that -- try 'list'.", keeper.name, slot); return { ok: false, text: 'not sold' }; }
+    if (state.gold < cost) { say(`You can't afford to buy ${obj.name}.`, keeper.name, slot); return { ok: false, text: 'too dear' }; }
+    if (obj.level > state.level) { say(`You can't use ${obj.name} yet.`, keeper.name, slot); return { ok: false, text: 'too high' }; }
     if (state.inventory.length + 1 > canCarryN(state)) return { ok: false, text: "You can't carry that many items." };
     if (carriedWeight(state) + objWeight(obj) > canCarryW(state)) return { ok: false, text: "You can't carry that much weight." };
 
@@ -2407,7 +2409,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     if (!slot) return { ok: false, text: "You can't do that here." };
     const shop = slot.record.shop;
     const keeper = wake(slot);
-    if (state.inventory.indexOf(obj) < 0) { say("You don't have that item.", keeper.name); return { ok: false, text: 'not carried' }; }
+    if (state.inventory.indexOf(obj) < 0) { say("You don't have that item.", keeper.name, slot); return { ok: false, text: 'not carried' }; }
     if (obj.extraFlags & X.NODROP) return { ok: false, text: "You can't let go of it." };
 
     let cost = getCost(shop, obj, false);

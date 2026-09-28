@@ -220,12 +220,13 @@ export function installObjects(k) {
     if (!shop) return out(false, "You can't do that here.");
     const refusal = game.keeperRefuses ? game.keeperRefuses(shop) : null;
     if (refusal) return out(false, refusal);
-    if (!carried().includes(obj)) return out(false, `${capitalise(shop.name)} tells you 'You don't have that item'.`);
+    if (!carried().includes(obj)) return { ...out(false, `${capitalise(shop.name)} tells you 'You don't have that item'.`), slot: shop.slot, said: "You don't have that item." };
     if (!canDrop(obj)) return out(false, "You can't let go of it.");
     const keeperSlot = k.mobs.find((s) => s.proto.vnum === shop.keeper && !s.dead);
     const cost = MERC.getCost(keeperSlot.record.shop, obj, false);
     if (cost <= 0) return out(false, `${capitalise(shop.name)} looks uninterested in ${obj.name}.`);
-    return out(true, `${capitalise(shop.name)} tells you 'I'll give you ${cost} gold coins for ${obj.name}'.`);
+    const said = `I'll give you ${cost} gold coins for ${obj.name}.`;
+    return { ...out(true, `${capitalise(shop.name)} tells you 'I'll give you ${cost} gold coins for ${obj.name}'.`), slot: keeperSlot, said };
   }
 
   // ----------------------------------------------------------- all forms --

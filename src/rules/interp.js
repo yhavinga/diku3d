@@ -63,7 +63,8 @@ export function installInterp(k) {
   const { MERC } = game;
   const { POS } = MERC;
 
-  const send = (text) => { if (text) emit({ kind: 'out', text }); };
+  // `extra` carries a speaker's slot and words, so a keeper's reply is also said aloud.
+  const send = (text, extra) => { if (text) emit({ kind: 'out', text, ...extra }); };
 
   // ------------------------------------------------------------ finding --
 
@@ -97,9 +98,9 @@ export function installInterp(k) {
   const allName = (arg) => (arg.startsWith('all.') ? arg.slice(4) : null);
 
   /** Speak a { ok, text } reply, unless the command already said something. */
-  const reply = (r) => { if (r && r.text && !r.ok) send(r.text); else if (r && r.text && r.quiet !== false) quietReply(r.text); };
+  const reply = (r) => { if (r && r.text && !r.ok) send(r.text, r.said ? { slot: r.slot, said: r.said } : undefined); else if (r && r.text && r.quiet !== false) quietReply(r.text, r.said ? { slot: r.slot, said: r.said } : undefined); };
   let spoke = false;
-  const quietReply = (text) => { if (!spoke) send(text); };
+  const quietReply = (text, extra) => { if (!spoke) send(text, extra); };
 
   // --------------------------------------------------------------- look --
 
@@ -496,11 +497,13 @@ export function installInterp(k) {
     const shop = game.shopHere();
     if (!shop) { send("You can't do that here."); return null; }
     if (state.act & (PLR.KILLER | PLR.THIEF)) {
-      send(`${capitalise(shop.name)} says '${state.act & PLR.KILLER ? 'Killers' : 'Thieves'} are not welcome!'`);
+      const said = `${state.act & PLR.KILLER ? 'Killers' : 'Thieves'} are not welcome!`;
+      send(`${capitalise(shop.name)} says '${said}'`, { slot: shop.slot, said });
       return null;
     }
     if (!shop.open) {
-      send(`${capitalise(shop.name)} says '${state.hour < shop.hours[0] ? 'Sorry, come back later.' : 'Sorry, come back tomorrow.'}'`);
+      const said = state.hour < shop.hours[0] ? 'Sorry, come back later.' : 'Sorry, come back tomorrow.';
+      send(`${capitalise(shop.name)} says '${said}'`, { slot: shop.slot, said });
       return null;
     }
     return shop;
@@ -528,7 +531,7 @@ export function installInterp(k) {
     const [want] = oneArgument(arg);
     if (!want) return send('Buy what?');
     const entry = findNamed(shop.stock, want, (e) => e.obj.keywords);
-    if (!entry) return send(`${capitalise(shop.name)} tells you 'I don't sell that -- try 'list'.'`);
+    if (!entry) return send(`${capitalise(shop.name)} tells you 'I don't sell that -- try 'list'.'`, { slot: shop.slot, said: "I don't sell that -- try 'list'." });
     reply(game.buy(shop.keeper, entry.obj.vnum));
   }
 
@@ -538,7 +541,7 @@ export function installInterp(k) {
     const [want] = oneArgument(arg);
     if (!want) return send('Sell what?');
     const obj = getObjCarry(want);
-    if (!obj) return send(`${capitalise(shop.name)} tells you 'You don't have that item'.`);
+    if (!obj) return send(`${capitalise(shop.name)} tells you 'You don't have that item'.`, { slot: shop.slot, said: "You don't have that item." });
     reply(game.sell(shop.keeper, obj));
   }
 
