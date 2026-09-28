@@ -366,8 +366,9 @@ export function buildGrass({ groups, instances, colliders, layout, rooms, materi
         const up = ny / len;
         const tri = [ax, ay, az, bx, by, bz, cx, cy, cz];
         if (isGrass) {
-          // Slopes to fifty degrees: a hill's flank, not a turf wall.
-          if (up < 0.64 || (indoor && indoor[i / 3] > 0.5) || ay < -2) continue;
+          // Slopes to sixty degrees: a hill's flank, not a turf wall. Fifty
+          // left the Shire's banks bald from the shoulder down.
+          if (up < 0.5 || (indoor && indoor[i / 3] > 0.5) || ay < -2) continue;
           sown.push({ tri, area: len / 2 });
         } else if (Math.abs(up) > 0.3) {
           cover.add(tri, Math.min(ax, bx, cx), Math.max(ax, bx, cx), Math.min(az, bz, cz), Math.max(az, bz, cz));

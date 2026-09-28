@@ -741,7 +741,7 @@ export const ASSET_NAMES = [
   'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',
   'tree_oak', 'tree_pine', 'bush', 'grass_tuft',
   'tree_fir', 'tree_cedar', 'tree_snag', 'fern', 'salal_bush', 'moss_rock',
-  'reed_clump', 'tussock', 'dead_log',
+  'reed_clump', 'tussock', 'dead_log', 'hedge_clump', 'hedge_row',
   'headstone', 'grave_slab', 'iron_fence',
   // the sewer: tools/blender/sewer.py
   'sewer_tunnel', 'sewer_arm', 'sewer_hub', 'sewer_hub_end', 'sewer_chamber', 'sewer_chamber_air', 'sewer_shaft',
