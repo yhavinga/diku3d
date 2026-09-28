@@ -820,7 +820,7 @@ const BEASTS = [
   { test: /\b(cow|cows|cattle|heifer)\b/, asset: 'beast_bovine', scale: 1.0, coats: 'cow', grow: { horn: 0.7 }, box: [1.4, 2.15, 'quad', 0x6d5a4a] },
   // --- pigs.
   { test: /\b(boar|boars|warthog)\b/, asset: 'beast_pig', scale: 1.0, coat: 0x3a3029, pale: 0x4a3e34, points: 0x1f1a16, grow: { tusk: 1.2 }, box: [0.62, 1.0, 'quad', 0x3a3029] },
-  { test: /\b(pig|pigs|hog|hogs|sow|swine|piglet)\b/, asset: 'beast_pig', scale: 1.0, coat: 0xd6a494, pale: 0xe8c4b6, points: 0xd6a494, hide: ['tusk'], box: [0.62, 1.0, 'quad', 0x9a7a6c] },
+  { test: /\b(pig|pigs|hog|hogs|sow|swine|piglet)\b/, asset: 'beast_pig', scale: 1.0, sleek: true, coat: 0xd6a494, pale: 0xe8c4b6, points: 0xd6a494, hide: ['tusk'], box: [0.62, 1.0, 'quad', 0x9a7a6c] },
   // --- bears. The marsh's "huge hairy beast" is twenty feet of green-furred
   // claws, and a bear is the nearest thing the library has to one.
   // Its small kin, which 'cringes in terror': the same green-furred thing

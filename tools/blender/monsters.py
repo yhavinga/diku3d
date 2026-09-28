@@ -91,7 +91,10 @@ def build_body(spec):
                       smooth=spec.get("smooth", 2), mask_fn=spec.get("masks"), patch_fn=spec.get("patch"))
     parts = [body] + spec["parts"](spec["body"])
     arm = make_rig(spec["name"], spec["bones"])
-    meshes = B.bind(arm, parts, spec["name"])
+    # The lie of the hair: along the body above the knees of anything on
+    # four legs, straight down everything that stands up.
+    legtop = spec["L"]["hind"][1][2] if "L" in spec and "hind" in spec["L"] else spec.get("legtop", 99.0)
+    meshes = B.bind(arm, parts, spec["name"], legtop=legtop)
     return arm, meshes, lib.stats(meshes)
 
 
@@ -986,7 +989,8 @@ def bat():
                      ((0.02, -0.04), (0.1, -0.075), 0.022, 0.018, ("grad", "body", "wing1" + tag, P(side * 0.01, 0, H), P(side * 0.07, 0, H)))]
             mem = [cone(P(side * a_[0], a_[1], H + 0.003), P(side * b_[0], b_[1], H + 0.003), ra, rb, bone,
                         blend=0.004, squash=sq) for (a_, b_, ra, rb, bone) in lobes]
-            out.append(B.sdf_part(arm + mem, 0.0012, 700, "wing", "fur", smooth=1,
+            # Membrane is skin, not pelt: the reptile hide's fine pebbling.
+            out.append(B.sdf_part(arm + mem, 0.0012, 700, "wing", "hide", smooth=1,
                                   patch_fn=lambda co: np.zeros(len(co)),
                                   mask_fn=lambda co, n, p, d: (p * 0, np.maximum(d, 0.75))))
             # Ears: tall leaves.
@@ -1480,7 +1484,9 @@ def myconoid():
         def cap_mask(co, n, p, d):
             under = np.clip((-n[:, 2] - 0.2) / 0.4, 0, 1)
             return p * 0, under
-        out.append(B.sdf_part(cap, 0.018, 1400, "cap", "fur", smooth=1, mask_fn=cap_mask, patch_fn=B.spots(0.1, seed=79)))
+        # Fungus flesh is damp and has no hair: the fur's locks on a cap
+        # read as a pelt. The living-mud surface's lumps and sheen are its.
+        out.append(B.sdf_part(cap, 0.018, 1400, "cap", "ooze", smooth=1, mask_fn=cap_mask, patch_fn=B.spots(0.1, seed=79)))
         # A face in the stalk under the cap: two pits and a slit, dark.
         face = []
         for side in (1, -1):
@@ -1492,7 +1498,7 @@ def myconoid():
         return out
 
     return dict(name="beast_myconoid", archetype="myconoid", bones=biped_bones(L), body=body, masks=masks,
-                parts=parts, patch=lambda co: np.zeros(len(co)), h=0.02, tris=2600, mat="fur", clips=biped_clips,
+                parts=parts, patch=lambda co: np.zeros(len(co)), h=0.02, tris=2600, mat="ooze", clips=biped_clips,
                 gait=dict(walk_stride=0.62, walk_frames=40, lift=0.07, run_stride=1.0, run_frames=26, lie=0.3))
 
 
