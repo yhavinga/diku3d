@@ -78,12 +78,18 @@ def deliver(parts, name, smooth=True):
     return "%-20s %5d tris" % (name, tris)
 
 
-def displaced_block(w, d, h, cuts, seed, amp, name, mat, crag=0.0, bottom=False):
+def displaced_block(w, d, h, cuts, seed, amp, name, mat, crag=0.0, bottom=False, talus=0.0, erode=0.0):
     """A w x d x h box, base at z = 0, subdivided `cuts` times per metre-ish
     and pushed out along its own vertex normals by a 3D noise. The noise is a
     function of the undisplaced position, so it is the same on every face
     that shares a vertex and the block stays closed. `crag` roughens the top
-    harder than the sides: a skyline wants a broken edge."""
+    harder than the sides: a skyline wants a broken edge.
+
+    `talus` is how far in (metres) the cliff stands from the block's foot:
+    the lowest quarter of every side is a scree apron rising to the cliff,
+    not a wall standing on the sand. `erode` is the share of the height a
+    column can lose, by a slow noise over the plan, so a row of blocks is a
+    broken skyline of buttes and notches rather than one flat top."""
     # Built face by face as grids with coincident border vertices, then
     # welded: a subdivided cube left its lower faces as single polygons.
     import bmesh
@@ -151,6 +157,19 @@ def displaced_block(w, d, h, cuts, seed, amp, name, mat, crag=0.0, bottom=False)
         else:
             disp += (fbm3((p.x * 0.3, p.y * 0.3, 0.0), seed + 31) - 0.35) * crag
         v.co = p + n * disp * foot
+        if talus > 0 and side:
+            # A scree apron: steep at the cliff, lying back at its toe.
+            zt = h * 0.26
+            k = min(1.0, p.z / zt)
+            inset = talus * (1.0 - (1.0 - k) ** 2)
+            v.co -= mathutils.Vector((n.x, n.y, 0.0)).normalized() * inset
+    if erode > 0:
+        for v in bm.verts:
+            e = fbm3((v.co.x * 0.07 + 3.1, v.co.y * 0.07, 0.0), seed + 71, 3)
+            drop = min(1.0, max(0.0, (e - 0.42) * 2.4))
+            # Stepped rather than smooth: caprock breaks off in ledges.
+            drop = math.floor(drop * 3.0 + 0.5) / 3.0 * 0.6 + drop * 0.4
+            v.co.z *= 1.0 - erode * drop * min(1.0, v.co.z / h) ** 1.5
     bm.to_mesh(me)
     bm.free()
     me.update()
@@ -161,7 +180,8 @@ def build_massif(name, seed, height):
     """One cell of mountain, 13.6 m square and `height` tall."""
     lib.reset()
     w = CELL + 0.6
-    block = displaced_block(w, w, height, 19, seed, 2.4, name, "cliff", crag=3.8)
+    block = displaced_block(w, w, height, 19, seed, 2.4, name, "cliff", crag=3.8,
+                            talus=2.3, erode=0.42)
     return deliver([block], name)
 
 
@@ -248,32 +268,62 @@ def build_dune(name, seed, height, horns):
     """A barchan: a crescent of sand with a long gentle windward back and a
     short steep slip face in the lee, its horns trailing downwind. 13.6 m
     across and `height` tall, the wind from -Y. The rim sinks to nothing so
-    it grows out of the flat sand round it."""
+    it grows out of the flat sand round it.
+
+    The first cut was a heightfield on a square grid with a rounded top --
+    the windward rise was flat at the crest -- and smooth-shaded, so the
+    brink came out a soft hump: dough. A dune's one hard line is its brink,
+    where a back at 10-15 degrees breaks over into a face at the angle of
+    repose. So the rows here follow the crest line exactly, the back rises
+    straight to it, and the brink is left a hard edge in the shading."""
     lib.reset()
     size = CELL + 0.6
     R = size / 2
+    nx, nw, nl = 22, 14, 7
 
-    def h(x, y):
-        # Distance from the crest line, which bends into a crescent.
-        bend = horns * (x / R) ** 2
-        u = (y - 0.8 + bend * R * 0.5) / R          # along the wind
+    def crest_y(x):
+        # The crescent: the crest bows back downwind towards the horns.
+        return -0.2 * R + horns * (x / R) ** 2 * R * 0.45
+
+    def crest_h(x):
         across = 1.0 - (x / R) ** 2
-        if across <= 0:
-            return 0.0
-        crest = height * across ** 1.4
-        if u < 0:
-            # Windward: a long convex rise.
-            z = crest * max(0.0, 1.0 - (-u / 1.35) ** 2)
-        else:
-            # Lee: the slip face at the angle of repose, 32 degrees-ish.
-            z = crest - u * R * 0.62
-            z = max(0.0, z)
-        wob = fbm3((x * 0.25, y * 0.25, 0.5), seed, 3) - 0.5
-        z += wob * 0.35 * (z > 0.05)
-        # Fade to the edge of the cell whatever the shape did.
-        edge = min(1.0, (R - max(abs(x), abs(y))) / 1.6)
-        return max(0.0, z) * max(0.0, edge)
-    return deliver([heightfield(size, 22, h, name, "sand")], name)
+        return height * max(0.0, across) ** 1.3
+
+    verts, faces = [], []
+    cols = nw + nl + 1
+    for i in range(nx + 1):
+        x = -R + size * i / nx
+        yc = crest_y(x)
+        hc = crest_h(x)
+        ys = [-R + (yc + R) * j / nw for j in range(nw)] + [yc + (R - yc) * j / nl for j in range(nl + 1)]
+        for y in ys:
+            if y <= yc:
+                # Windward: straight up the back, eased in at the toe only.
+                t = (y + R) / (yc + R)
+                z = hc * (t * t * (1.6 - 0.6 * t))
+            else:
+                # Lee: the slip face at about 32 degrees, down to the sand.
+                z = max(0.0, hc - (y - yc) * 0.62)
+            wob = fbm3((x * 0.3, y * 0.3, 0.5), seed, 3) - 0.5
+            z += wob * 0.18 * min(1.0, z)
+            edge = min(1.0, (R - max(abs(x), abs(y))) / 1.4)
+            verts.append((x, y, max(0.0, z) * max(0.0, edge) if abs(x) < R and abs(y) < R else 0.0))
+    for i in range(nx):
+        for j in range(cols - 1):
+            a = i * cols + j
+            faces.append((a, a + cols, a + cols + 1, a + 1))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    me.update()
+    obj = bpy.data.objects.new(name, me)
+    bpy.context.collection.objects.link(obj)
+    lib.assign(obj, "sand")
+    # Face orientation from the winding, checked against up.
+    if sum(p.normal.z for p in me.polygons) < 0:
+        for p in me.polygons:
+            p.flip()
+    lib.shade_smooth(obj, 30)
+    return deliver([obj], name, smooth=False)
 
 
 # --- the oasis ------------------------------------------------------------
