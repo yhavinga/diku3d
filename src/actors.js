@@ -1285,6 +1285,30 @@ function sleekFur(library) {
   return m;
 }
 
+/**
+ * The same surface lit as the sewer's own are (textures.js `DIKU_BURIED`): a
+ * fixed fill and the torches, whatever the hour. A creature underground wore
+ * the sky's light, which under the street at dusk and at night is none --
+ * the guardian naga was 88% under luma 8 at night against a tunnel wall
+ * lit at luma 14. One twin per material, shared.
+ */
+const buriedTwins = new WeakMap();
+function buriedTwin(base) {
+  if (!base.onBeforeCompile || base.defines?.DIKU_BURIED) return base;
+  let twin = buriedTwins.get(base);
+  if (!twin) {
+    twin = base.clone();
+    twin.name = `${base.name}-buried`;
+    twin.defines = { ...base.defines, DIKU_BURIED: 1 };
+    twin.defaultAttributeValues = base.defaultAttributeValues;
+    twin.onBeforeCompile = base.onBeforeCompile;
+    const key = base.customProgramCacheKey.bind(base);
+    twin.customProgramCacheKey = () => `${key()}|buried`;
+    buriedTwins.set(base, twin);
+  }
+  return twin;
+}
+
 function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const info = prepareBeast(asset);
   const look = beastLook(spec, proto, options.seed || 0);
@@ -1298,6 +1322,7 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     node.castShadow = false;
     const tag = node.material && node.material.name ? node.material.name.replace(/^MAT:/, '') : '';
     node.material = tag === 'fur' && spec.sleek ? sleekFur(library) : library.materialFor(tag);
+    if (options.buried) node.material = buriedTwin(node.material);
     node.geometry = paintedGeometry(asset, node, tag, look);
   });
   const scale = (spec.scale || 1) * (0.94 + strHash(proto.short, 3) * 0.12);
@@ -2161,6 +2186,7 @@ export function populate(world, layout, built, options = {}) {
       const made = beast ? buildBeastFigure(beast, proto, assets, {
         seed: strHash(`${vnum}|${mob.proto.vnum}`, index),
         afloat: room.sector === SECTOR.WATER_SWIM || room.sector === SECTOR.WATER_NOSWIM,
+        buried: info.cell.level < 0 || !!(info.materials && info.materials.inRock),
       })
         : (who && assets && assets.has(who.file) ? buildPerson(assets, who, proto, vnum * 31 + index)
           : (person && assets.get(person).animations.length
