@@ -52,6 +52,27 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Figures that read indoors (dress.js, motion.js)
+
+- **A recipe's `env` scales the diffuse sky light as well as reflections**
+  (three's `envMapIntensity` does both). Wool at 0.22 against the wall's
+  0.72 gave a coat a third of the wall's light — indoors nearly all the
+  light there is. People now take 0.75 of the sky like the walls; `env`
+  only affects shine.
+- **A colour multiplied over a texture averaging 0.56 comes out at half the
+  albedo it was given.** Garments now average to the colour they're given.
+- **A material without the indoor/underground treatment is lit by the sky
+  wherever it stands** — underground at night, black. Figures share the
+  walls' treatment through `SHARED_LIGHT`.
+- **Separation pushes read as sliding.** Spend them on the body that is
+  walking, never push backwards, stop a step before overlap. Barn: backward
+  speed 0.6 → ≤0.08 m/s, turn rate capped at 150°/s.
+- **An upward ray does not reliably find the roof it is under**: 525 of
+  2,800 went through a sewer vault. Cap anything placed from one.
+- Secretary torso vs wall 19/34 → 46/28; torsos under luma 8 at dusk
+  54–99% → 0–10%. The "black band across the eyes" was a dark fringe
+  hairstyle level all round at eye height.
+
 ### Props from the prose (src/clutter.js, tools/blender/clutter.py)
 
 - **A doorway wall has no collider beyond its jambs**, so measuring outward

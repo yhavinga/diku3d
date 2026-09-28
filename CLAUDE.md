@@ -344,6 +344,10 @@ choose.
   ring's winding. Fixed, but the shape of the bug generalises: after any
   permutation-based placement, verify face orientation by sampling normals,
   not by eye; backface culling hides the error from every front-on look.
+- **`env` in a recipe is not only shine.** It scales the diffuse sky light
+  too, so a low-`env` cloth is a dark cloth indoors. Figures take the same
+  sky share and indoor treatment as the walls (`SHARED_LIGHT`); check a
+  figure's torso against the wall behind it after any material change.
 - Figures are kept out of the sun's shadow map, so their contact shadows are
   placed by hand in `actors.js` and have to be told where the sun is:
   `applyTime()` calls `actors.setSun()`. Miss that and every person in the town
