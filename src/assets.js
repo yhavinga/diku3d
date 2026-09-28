@@ -387,9 +387,36 @@ function tagOf(material) {
  * AO prepass and again in the shadow pass. Measured at the Shire barn facing
  * south, 1,252 of the 2,111 main-pass draws were these.
  */
+/**
+ * The same model, flagged as standing indoors: the `aIndoor` room kits and
+ * furniture carry, which takes the ground bounce and the sky's hue out of its
+ * light (textures.js). A glTF model has no such attribute, so a torch sconce
+ * on a tavern wall was lit -- and above all *mirrored* -- as if it stood in
+ * the street: its iron came out striped with blue sky. Shares every buffer
+ * with the original but the flag.
+ */
+const indoorVariants = new WeakMap();
+function indoorGeometry(source) {
+  if (source.getAttribute('aIndoor')) return source;
+  let geometry = indoorVariants.get(source);
+  if (!geometry) {
+    geometry = new THREE.BufferGeometry();
+    for (const [name, attribute] of Object.entries(source.attributes)) geometry.setAttribute(name, attribute);
+    geometry.setIndex(source.index);
+    geometry.boundingBox = source.boundingBox;
+    geometry.boundingSphere = source.boundingSphere;
+    const count = source.getAttribute('position').count;
+    geometry.setAttribute('aIndoor', new THREE.BufferAttribute(new Float32Array(count).fill(1), 1));
+    indoorVariants.set(source, geometry);
+  }
+  return geometry;
+}
+
 export class InstanceBatch {
-  constructor(library) {
+  /** `indoorAt(x, y, z)`, if given, says whether a placement stands indoors. */
+  constructor(library, { indoorAt = null } = {}) {
     this.library = library;
+    this.indoorAt = indoorAt;
     this.buckets = new Map();
   }
 
@@ -403,9 +430,10 @@ export class InstanceBatch {
   add(name, transform, chunk = '0', swap = null) {
     const asset = this.library.get(name);
     if (!asset) return false;
-    const key = swap ? `${chunk}|${name}|${JSON.stringify(swap)}` : `${chunk}|${name}`;
+    const indoor = !!this.indoorAt?.(transform.x, transform.y, transform.z);
+    const key = `${chunk}|${name}${swap ? `|${JSON.stringify(swap)}` : ''}${indoor ? '|in' : ''}`;
     let bucket = this.buckets.get(key);
-    if (!bucket) { bucket = { asset, chunk, swap, transforms: [] }; this.buckets.set(key, bucket); }
+    if (!bucket) { bucket = { asset, chunk, swap, indoor, transforms: [] }; this.buckets.set(key, bucket); }
     bucket.transforms.push(transform);
     return true;
   }
@@ -429,7 +457,7 @@ export class InstanceBatch {
     placements.updateMatrixWorld = () => {};
     let triangles = 0;
     const placed = new Map(); // asset -> every matrix it was placed with
-    for (const { asset, chunk, swap, transforms } of this.buckets.values()) {
+    for (const { asset, chunk, swap, indoor, transforms } of this.buckets.values()) {
       const byRegion = new Map();
       const matrices = transforms.map((t) => {
         _position.set(t.x, t.y, t.z);
@@ -445,7 +473,9 @@ export class InstanceBatch {
       const wear = (primitive) => (swap && swap[primitive.materialName]
         ? this.library.materialFor(swap[primitive.materialName]) : primitive.material);
       for (const [region, list] of byRegion) {
-        for (const primitive of asset.primitives) target.add(region, wear(primitive), primitive.geometry, list);
+        for (const primitive of asset.primitives) {
+          target.add(region, wear(primitive), indoor ? indoorGeometry(primitive.geometry) : primitive.geometry, list);
+        }
       }
       for (const primitive of asset.primitives) {
         triangles += (primitive.geometry.attributes.position.count / 3) * matrices.length;

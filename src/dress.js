@@ -267,8 +267,11 @@ const LIGHTS_END = `
     float dikuIblL = dot( iblIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
     iblIrradiance = mix( iblIrradiance, dikuIblL * mix( dikuSkyBleachTint, vec3( 1.06, 1.0, 0.90 ), dikuIndoor ),
       max( dikuIndoor * 0.8, dikuSkyBleach ) );
+    // ...and so has what it mirrors (textures.js: a rough lobe outdoors
+    // takes the hour's bleach, indoors none of the sky's hue is in view).
     float dikuRadL = dot( radiance, vec3( 0.2126, 0.7152, 0.0722 ) );
-    radiance = mix( radiance, dikuRadL * vec3( 1.03, 1.0, 0.95 ), dikuIndoor * 0.5 );
+    radiance = mix( radiance, dikuRadL * vec3( 1.03, 1.0, 0.95 ),
+      max( dikuIndoor, dikuSkyBleach * smoothstep( 0.25, 0.7, material.roughness ) ) );
     // The fill: view space, so +z is towards the camera and +y up.
     float dikuAmbient = dot( iblIrradiance + irradiance + 0.5 * dikuTorch, vec3( 0.2126, 0.7152, 0.0722 ) );
     float dikuWrap = clamp( ( dot( geometryNormal, normalize( vec3( 0.25, 0.45, 1.0 ) ) ) + 0.3 ) / 1.3, 0.0, 1.0 );

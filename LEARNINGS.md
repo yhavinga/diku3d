@@ -8,6 +8,46 @@ is an opinion.
 
 ## 2026-09-28 — wave 7: below and inside
 
+### Every named noun (wave7-nouns)
+
+- Noun coverage in the nine areas 346/386 → 369/386 (`tools/noun-check.mjs`
+  with a placement dump from `tools/noun-probe.js`). The temple altar has
+  its seated Odin, the firedeath its bed of fire, the entrance its faces.
+- **A statue face needs its own ~5 mm grid**; at 14–16 mm, surface-following
+  cuts narrower than a cell turn a face into a mask.
+- **Carved strips must be laid on everything under them**; a beard strand
+  extended past the beard found no surface and hung off the chest.
+- **White marble against the temple's white walls vanishes at the far end
+  of the hall**; the statue needed a dark cloth behind it.
+- **The flame shader reads one scale per flame** — hearth fires have been
+  1.9× high, not the 1.15× asked for.
+- **The room lookup covers the whole 13 m cell**, forest outside the great
+  tree included; an indoor camera spot must be within 4.2 m of the room's
+  middle and visible from it.
+- Furniture switches off past 32 m, so a focal piece seen down an axis is
+  placed with the walls (`put(…, { far: true })`).
+
+### Metals, bark and stone (wave7-materials)
+
+- **three r185 overwrites `envMapIntensity` with `scene.environmentIntensity`
+  on every draw for any material without its own envMap.** Every recipe's
+  `env` has had no effect on world materials; only dress.js, which reads it
+  into its own uniform, honours it. (Correcting the earlier line in this
+  log.) Making it work would relight the whole world — a decision, not a fix.
+- **A glTF model has no `aIndoor` flag**, so a sconce on a tavern wall
+  reflected the open sky. Indoor placements get a copy of the geometry with
+  the flag; "indoor" comes from the walls (`openAir`), not the mud's INDOORS
+  flag, which covers ~44 Haon Dor forest rooms. Indoors, reflections lose
+  the sky's hue entirely — a metal has no diffuse to hide it.
+- **A height step of ~0.005 per texel already tilts a normal 45°.** The
+  pumice walls and blue joint lines were the normal map (confirm with
+  normal strength 0). Still steep: rooftile 77°, thatch 73°, mail 85°, rope
+  75°, dirt/gravel 66°.
+- **A creature's coat multiplies its recipe texture**; ooze averaged 0.37,
+  so the Mudmonster came out at 3% albedo. Make such textures near-white.
+- Bark tiles halved, normals halved, oak ridges 3 × 27 cm, plate ends
+  staggered so trunks don't read as thatch.
+
 ### Spell source, stalled melee, the fountain (wave7-combat)
 
 - **`game.js`'s player position is the eye; a mobile's is its feet.** Any
@@ -263,7 +303,7 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 
 ### Figures that read indoors (dress.js, motion.js)
 
-- **A recipe's `env` scales the diffuse sky light as well as reflections**
+- **(Wrong on world materials under r185 — see wave 7.) A recipe's `env` scales the diffuse sky light as well as reflections**
   (three's `envMapIntensity` does both). Wool at 0.22 against the wall's
   0.72 gave a coat a third of the wall's light — indoors nearly all the
   light there is. People now take 0.75 of the sky like the walls; `env`
