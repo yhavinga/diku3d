@@ -11,8 +11,9 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ITEM, SECTOR, ACT_AGGRESSIVE, ACT_SENTINEL } from './are.js';
-import { hash3, ROOM, CEIL, PIECES } from './build.js';
-import { InstanceBatch, StaticBatches, FURNITURE_NAMES } from './assets.js';
+import { hash3, ROOM, CEIL, PIECES, CELL as GRID, LEVEL_H } from './build.js';
+import { InstanceBatch, StaticBatches, FURNITURE_NAMES, BURIED_MARK } from './assets.js';
+import { buriedTwin } from './textures.js';
 import { OVERLAY_LAYER } from './render.js';
 import { interiorGlass, markPanes } from './windows.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
@@ -977,7 +978,7 @@ function buildPerson(library, who, proto, instance) {
     // A leg scaled by legK carries the foot legK as far each stride.
     stride: { walk: facts.walk * scale * legK, run: facts.run * scale * legK },
     hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
-    indoor: mesh.material.dikuIndoor,
+    indoor: mesh.material.dikuIndoor, buried: mesh.material.dikuBuried,
   };
 }
 
@@ -1352,30 +1353,6 @@ function sleekFur(library) {
   return m;
 }
 
-/**
- * The same surface lit as the sewer's own are (textures.js `DIKU_BURIED`): a
- * fixed fill and the torches, whatever the hour. A creature underground wore
- * the sky's light, which under the street at dusk and at night is none --
- * the guardian naga was 88% under luma 8 at night against a tunnel wall
- * lit at luma 14. One twin per material, shared.
- */
-const buriedTwins = new WeakMap();
-function buriedTwin(base) {
-  if (!base.onBeforeCompile || base.defines?.DIKU_BURIED) return base;
-  let twin = buriedTwins.get(base);
-  if (!twin) {
-    twin = base.clone();
-    twin.name = `${base.name}-buried`;
-    twin.defines = { ...base.defines, DIKU_BURIED: 1 };
-    twin.defaultAttributeValues = base.defaultAttributeValues;
-    twin.onBeforeCompile = base.onBeforeCompile;
-    const key = base.customProgramCacheKey.bind(base);
-    twin.customProgramCacheKey = () => `${key()}|buried`;
-    buriedTwins.set(base, twin);
-  }
-  return twin;
-}
-
 function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const info = prepareBeast(asset);
   const look = beastLook(spec, proto, options.seed || 0);
@@ -1389,7 +1366,12 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     node.castShadow = false;
     const tag = node.material && node.material.name ? node.material.name.replace(/^MAT:/, '') : '';
     node.material = tag === 'fur' && spec.sleek ? sleekFur(library) : library.materialFor(tag);
-    if (options.buried) node.material = buriedTwin(node.material);
+    // Lit as the sewer's own surfaces are (textures.js `buriedTwin`): a
+    // creature underground wore the sky's light, which under the street at
+    // night is none -- the guardian naga was 88% under luma 8 at night
+    // against a tunnel wall lit at luma 14. Sunless, because a skinned body
+    // takes no shadow and the noon sun reached it through the rock.
+    if (options.buried) node.material = buriedTwin(node.material, { sunless: true });
     node.geometry = paintedGeometry(asset, node, tag, look);
   });
   const scale = (spec.scale || 1) * (0.94 + strHash(proto.short, 3) * 0.12);
@@ -2200,8 +2182,8 @@ function instanceDoorLeaves(doors, group) {
         const primitive = mesh.userData.doorPrimitive;
         if (!primitive) return;
         const mirrored = mesh.matrixWorld.determinant() < 0;
-        const key = `${primitive.geometry.uuid}|${primitive.material.uuid}|${mirrored}`;
-        if (!kinds.has(key)) kinds.set(key, { primitive, mirrored, sources: [] });
+        const key = `${primitive.geometry.uuid}|${primitive.material.uuid}|${mirrored}|${door.buried}`;
+        if (!kinds.has(key)) kinds.set(key, { primitive, mirrored, buried: door.buried, sources: [] });
         const kind = kinds.get(key);
         if (!slots.has(door)) slots.set(door, []);
         slots.get(door).push({ source: mesh, kind, index: kind.sources.length });
@@ -2218,7 +2200,9 @@ function instanceDoorLeaves(doors, group) {
     slot.kind.mesh.instanceMatrix.needsUpdate = true;
   };
   for (const kind of kinds.values()) {
-    const mesh = new THREE.InstancedMesh(kind.primitive.geometry, kind.primitive.material, kind.sources.length);
+    // A leaf takes no shadow, so underground it must not take the sun either.
+    const material = kind.buried ? buriedTwin(kind.primitive.material, { sunless: true }) : kind.primitive.material;
+    const mesh = new THREE.InstancedMesh(kind.primitive.geometry, material, kind.sources.length);
     mesh.name = 'door leaves';
     // As the leaves they stand for: casting, not receiving.
     mesh.castShadow = true;
@@ -2443,6 +2427,9 @@ function mistTexture() {
  */
 const FURNITURE_REACH = 32;
 
+/** Below ground or dug into rock: lit by the fixed fill, not the sky. */
+const isBuriedRoom = (info) => !!info && (info.cell.level < 0 || !!(info.materials && info.materials.inRock));
+
 export function populate(world, layout, built, options = {}) {
   const group = new THREE.Group();
   group.name = 'actors';
@@ -2457,6 +2444,24 @@ export function populate(world, layout, built, options = {}) {
   const model = (names, seed = 0) => (assets ? assets.choose(names, seed) : null);
   const interactables = [];
   const updaters = [];
+  // Whether a point is in a buried room -- one lit as the sewer is and not by
+  // the sky (textures.js `buriedTwin`) -- by the room's own cell or the nearer
+  // end of a passage, as nav.roomAt decides. What is placed there is filed
+  // under a chunk that says so, and StaticBatches dresses it accordingly.
+  const buriedAt = (x, y, z) => {
+    const level = Math.round(y / LEVEL_H); const cx = Math.round(x / GRID); const cz = Math.round(z / GRID);
+    let vnum = layout.at(level, cx, cz);
+    if (vnum === undefined) {
+      const passage = layout.passageAt(level, cx, cz);
+      if (passage) {
+        const da = (passage.from.x * GRID - x) ** 2 + (passage.from.z * GRID - z) ** 2;
+        const db = (passage.to.x * GRID - x) ** 2 + (passage.to.z * GRID - z) ** 2;
+        vnum = da <= db ? passage.from.vnum : passage.to.vnum;
+      }
+    }
+    return isBuriedRoom(built.rooms.get(vnum));
+  };
+  const chunkAt = (chunk, x, y, z) => (buriedAt(x, y, z) ? `${chunk}${BURIED_MARK}` : chunk);
 
   const trees = [];
   const windows = [];
@@ -2499,7 +2504,7 @@ export function populate(world, layout, built, options = {}) {
       const made = beast ? buildBeastFigure(beast, proto, assets, {
         seed: strHash(`${vnum}|${mob.proto.vnum}`, index),
         afloat: room.sector === SECTOR.WATER_SWIM || room.sector === SECTOR.WATER_NOSWIM,
-        buried: info.cell.level < 0 || !!(info.materials && info.materials.inRock),
+        buried: isBuriedRoom(info),
       })
         : (who && assets && assets.has(who.file) ? buildPerson(assets, who, proto, vnum * 31 + index)
           : (person && assets.get(person).animations.length
@@ -2593,7 +2598,8 @@ export function populate(world, layout, built, options = {}) {
       );
       mesh.rotation.y = strHash(item.proto.short, 11) * Math.PI * 2;
       if (modelled && instances) {
-        instances.add(modelled, { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z, rotY: mesh.rotation.y }, 'props');
+        instances.add(modelled, { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z, rotY: mesh.rotation.y },
+          chunkAt('props', mesh.position.x, mesh.position.y, mesh.position.z));
       } else {
         group.add(mesh);
       }
@@ -2669,7 +2675,7 @@ export function populate(world, layout, built, options = {}) {
       // What the prose puts in a room above ground (src/clutter.js): drawn
       // with the furniture, so it is switched off past FURNITURE_REACH
       // instead of drawing behind the walls from the street.
-      case 'prop': if (furnishing) furnishing.add(item.name, item, 'furniture'); break;
+      case 'prop': if (furnishing) furnishing.add(item.name, item, chunkAt('furniture', item.x, item.y, item.z)); break;
       // A sealed gate gets no placard. "The way up lies beyond the map" is
       // the interface talking, and painted on planks it read as a prop the
       // mud never had; the ways-out panel says it, when you look that way.
@@ -2686,7 +2692,7 @@ export function populate(world, layout, built, options = {}) {
     const furn = (names, seed = 0) => (instances ? model(names, seed) : null);
     const place = (name, x, y, z, rotY, scale = null) => furnishing.add(name, {
       x, y, z, rotY, ...(scale && { scaleX: scale[0], scaleY: scale[1], scaleZ: scale[2] }),
-    }, 'furniture');
+    }, chunkAt('furniture', x, y, z));
     const WALL_VEC = [[0, -1], [1, 0], [0, 1], [-1, 0]];
     /**
      * How far along the axis (wx, wz) from (x, z) the nearest standing face
@@ -2756,7 +2762,7 @@ export function populate(world, layout, built, options = {}) {
           // same way: furniture.py builds it to props.py's bench's seat.
           const settle = prop === 'bench' && item.indoor ? furn(['furn_settle']) : null;
           if (settle) place(settle, px, item.y, pz, spin);
-          else instances.add(prop, { x: px, y: item.y, z: pz, rotY: spin }, 'props');
+          else instances.add(prop, { x: px, y: item.y, z: pz, rotY: spin }, chunkAt('props', px, item.y, pz));
           // props.py's bench: 1.85 m long, seat at 0.45, its back to local -Z.
           if (prop === 'bench') {
             // props.py: seat 1.85 x 0.42 x 0.07 centred 0.45 up, back rails and
@@ -3172,7 +3178,7 @@ export function populate(world, layout, built, options = {}) {
         }
         instances.add(lampModel, {
           x: f.x, y: f.y + dy, z: f.z, rotY: f.rotY || 0,
-        }, 'props');
+        }, chunkAt('props', f.x, f.y, f.z));
         continue;
       }
       if (f.lamp) {
@@ -3740,6 +3746,7 @@ export function populate(world, layout, built, options = {}) {
     }
     const door = {
       spec, pivots, open: !spec.closed, target: spec.closed ? 0 : 1, t: spec.closed ? 0 : 1,
+      buried: buriedAt(spec.x, spec.y, spec.z),
     };
     // Stand the leaves where `t` says they are. The updater only writes on a
     // change of t, so without this a door that starts open drew shut.
@@ -3978,10 +3985,16 @@ export function populate(world, layout, built, options = {}) {
       const p = fig.object.position;
       const info = built.rooms.get(nav.roomAt(p.x, p.y, p.z));
       fig.indoorWant = info && !info.outdoor ? 1 : 0;
+      fig.buriedWant = isBuriedRoom(info) ? 1 : 0;
     }
-    if (dt === Infinity) { fig.indoor.value = fig.indoorWant; return; }
+    if (dt === Infinity) {
+      fig.indoor.value = fig.indoorWant;
+      if (fig.buried) fig.buried.value = fig.buriedWant;
+      return;
+    }
     const u = fig.indoor;
     u.value += THREE.MathUtils.clamp(fig.indoorWant - u.value, -dt * 2, dt * 2);
+    if (fig.buried) fig.buried.value += THREE.MathUtils.clamp(fig.buriedWant - fig.buried.value, -dt * 2, dt * 2);
   }
 
   function update(dt, time, camera) {
@@ -4086,7 +4099,7 @@ export function populate(world, layout, built, options = {}) {
     // multi-draw batches each piece is culled on its own, and a batch with
     // nothing in view issues no draw at all.
     const batches = new StaticBatches(Infinity);
-    furnishing.finish(group, batches, () => 'furniture');
+    furnishing.finish(group, batches, (chunk) => chunk);
     batches.finish(() => group);
     // Frustum culling is not occlusion culling: from the Market Square every
     // shop to the north is in view, walls and all, and its furniture was

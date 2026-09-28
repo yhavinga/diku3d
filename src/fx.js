@@ -24,6 +24,7 @@ import * as THREE from 'three';
 import { Pass } from 'three/addons/postprocessing/Pass.js';
 import { OVERLAY_LAYER } from './render.js';
 import { MOB_BEAT, WEAR } from './game.js';
+import { personMaterial, SLOTS } from './dress.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const ease = (u) => u * u * (3 - 2 * u);
@@ -530,6 +531,11 @@ function setHand(obj, a, b, u, mirror = false) {
   obj.quaternion.slerpQuaternions(_q1, _q2, u);
 }
 
+/** What the view model's lamps give the metals of what they would give a wall. */
+const LAMP_SHARE = 0.4;
+/** The hands' fill, against a figure's `FIGURE_FILL` of 2.4 (dress.js). */
+const VIEW_FILL = 4.8;
+
 class ViewModel {
   constructor(camera, library, materials) {
     this.camera = camera;
@@ -545,14 +551,33 @@ class ViewModel {
     this.sun = new THREE.DirectionalLight(0xffffff, 1);
     this.fill = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
     this.scene.add(this.sun, this.sun.target, this.fill);
-    // The two strongest practicals the pool has bound this frame -- the lamp
-    // on the kerb, the torch on the wall -- so a blade at night catches the
-    // fire it is held beside. A fixed two, so the program never changes.
-    this.lamps = [0, 1].map(() => {
+    // The strongest practicals the pool has bound this frame -- the lamp on
+    // the kerb, the torches on the walls -- so a blade at night catches the
+    // fire it is held beside. A fixed four, so the program never changes: with
+    // two, the temple's hall at night lit the hands with a fraction of the
+    // torches that lit its walls (hands 15 of luma against walls at 60).
+    this.lamps = [0, 1, 2, 3].map(() => {
       const l = new THREE.PointLight(0xffffff, 0, 16, 2);
       this.scene.add(l);
       return l;
     });
+    // What the hands and sleeves are made of wears the person material, so
+    // they stand in the light a figure beside you would: the indoor bleach,
+    // the fill, the underground terms (dress.js). As flat PBR lit by the sun,
+    // the sky and two lamps they were a black blob over 12% of a night frame
+    // -- 1.2 of luma in the Haon Dor forest and the sealed Lair, 3 in the
+    // temple. Metals keep their own materials: they only mirror.
+    //
+    // Two things differ from a figure. The lamps here are dimmed for the
+    // metals' sake (see `light`), and the person parts take that back. And
+    // the fill is stronger: this is the one subject that is always half a
+    // metre from the lens, and a film lights the actor's hands too.
+    this.wornLight = { fill: { value: VIEW_FILL }, torch: { value: 1 / LAMP_SHARE } };
+    this.worn = library && library.materialFor
+      ? personMaterial(library, { leather: 0x4a3524, cloth: 0x4b4136 }, false, undefined, this.wornLight) : null;
+    this.slotOf = new Map([[materials.leather, 'leather'], [materials.cloth, 'cloth'],
+      [materials.wood, 'oak'], [materials.skin, 'skin']]);
+    this.wornGeometry = new Map();
     this.kind = undefined;
     this.shield = undefined;
     this.swing = null;
@@ -617,6 +642,27 @@ class ViewModel {
       this.off.add(f);
     }
     this.style = STYLE[kind || 'fist'] || 'cut';
+    if (this.worn) for (const g of [this.hand, this.off]) g.traverse((n) => this.wear(n));
+  }
+
+  /** A mesh of the view model in the person material, if it is cloth, hide or wood. */
+  wear(node) {
+    if (!node.isMesh || !node.geometry.attributes.uv) return;
+    const m = node.material;
+    const tag = this.slotOf.get(m) || (m.metalness <= 0.5 && SLOTS.includes(m.name) ? m.name : null);
+    if (!tag) return;
+    const key = `${node.geometry.uuid}|${tag}`;
+    let geometry = this.wornGeometry.get(key);
+    if (!geometry) {
+      geometry = node.geometry.clone();
+      const count = geometry.attributes.position.count;
+      geometry.setAttribute('aSlot', new THREE.BufferAttribute(new Float32Array(count).fill(SLOTS.indexOf(tag)), 1));
+      geometry.setAttribute('aHeld', new THREE.BufferAttribute(new Float32Array(count), 1));
+      geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3));
+      this.wornGeometry.set(key, geometry);
+    }
+    node.geometry = geometry;
+    node.material = this.worn;
   }
 
   proceduralShield() {
@@ -813,7 +859,11 @@ class ViewModel {
     if (swing) swing.reached = Math.max(swing.reached || 0, extra);
   }
 
-  light(sun, hemi, scene, indoor, pool) {
+  light(sun, hemi, scene, indoor, pool, buried = false) {
+    if (this.worn) {
+      this.worn.dikuIndoor.value = indoor ? 1 : 0;
+      this.worn.dikuBuried.value = buried ? 1 : 0;
+    }
     this.lamps.forEach((lamp, i) => {
       const src = pool && pool.lights[i];
       if (!src || !src.visible) { lamp.intensity = 0; return; }
@@ -823,10 +873,12 @@ class ViewModel {
       lamp.decay = src.decay;
       // Less than the wall beside it gets: a point light on a curved mirror
       // at arm's length is the brightest pixel in a night frame.
-      lamp.intensity = src.intensity * 0.4;
+      lamp.intensity = src.intensity * LAMP_SHARE;
     });
     this.sun.color.copy(sun.color);
-    this.sun.intensity = sun.intensity * (indoor ? 0.08 : 1);
+    // Nothing in this scene takes a shadow: underground the sun would come
+    // straight through the rock.
+    this.sun.intensity = buried ? 0 : sun.intensity * (indoor ? 0.08 : 1);
     this.sun.position.copy(this.camera.position).add(_v.copy(sun.position).sub(sun.target.position).normalize());
     this.sun.target.position.copy(this.camera.position);
     this.fill.color.copy(hemi.color);
@@ -834,6 +886,12 @@ class ViewModel {
     this.fill.intensity = hemi.intensity * (indoor ? 0.7 : 1);
     this.scene.environment = scene.environment;
     this.scene.environmentIntensity = (scene.environmentIntensity ?? 1) * (indoor ? 0.4 : 1);
+    // The metals' indoor cut is a scene-wide number; the person parts carry
+    // the sky themselves, at the world's own strength, as a figure does.
+    if (this.worn) {
+      if (this.worn.envMap !== scene.environment) { this.worn.envMap = scene.environment; this.worn.needsUpdate = true; }
+      this.worn.envMapIntensity = scene.environmentIntensity ?? 1;
+    }
   }
 }
 
@@ -1224,7 +1282,8 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     const shield = s.equipment[WEAR.SHIELD];
     vm.equip(weaponKind(wield), shield ? (/kite|tower|heater/i.test(shield.name) ? 'kite' : 'round') : null);
     const room = built.rooms.get(s.roomVnum);
-    vm.light(sun, hemi, scene, room ? !room.outdoor : false, lightPool);
+    vm.light(sun, hemi, scene, room ? !room.outdoor : false, lightPool,
+      !!room && (room.cell.level < 0 || !!(room.materials && room.materials.inRock)));
 
     // The foe in camera space, for a blow to reach -- only one in front of
     // you and within a long step.
