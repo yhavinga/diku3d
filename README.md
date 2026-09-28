@@ -64,7 +64,8 @@ which way to turn. People sit at tables, talk in pairs, stand at the bar and
 climb the stairs rather than vanishing at the foot of them. The casters
 cast: `spec_cast_mage`, `_cleric`, `_undead`, `_adept` and the dragons' breath
 run on the mobile pulse, with 57 spells out of `magic.c` — each family drawn
-as its own effect, with affects like sanctuary worn as an aura while they last. The rest of Merc is there
+as its own effect, with affects like sanctuary worn as an aura while they last; your own hand gestures when
+you cast, and spells leave scorch, frost, acid and cracks on the ground. The rest of Merc is there
 too, in `src/rules/`: area resets, hunger and thirst, corpses that rot and
 can be searched, containers, keys and locks, kick, backstab, disarm, rescue
 and steal, the janitor, the fido, the thief and the mayor walking his route
