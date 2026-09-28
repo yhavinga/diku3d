@@ -2095,6 +2095,72 @@ const WATER_FRAG = `
     gl_FragColor = vec4(colour + spec * glint, 0.88);
   }`;
 
+// ------------------------------------------------------------------ doors ----
+
+/**
+ * Every modelled door leaf in the world, drawn as one instanced mesh per
+ * primitive rather than three meshes a leaf. From the marsh looking east, 93
+ * leaves in the frustum were 279 draws a pass, twice over with the AO
+ * prepass: a fifth of the frame's calls for doors, nearly all of them behind
+ * a facade two hundred metres off. The pivots stay in the scene graph --
+ * they are what the game swings -- and their leaves stop drawing; each
+ * swing rewrites that door's instances.
+ *
+ * The right-hand leaf is the left one mirrored, and three picks the winding
+ * from the object's matrix, not the instance's: mirrored leaves get meshes of
+ * their own, flipped as a whole, with the flip taken back out of every
+ * instance.
+ */
+const MIRROR = new THREE.Matrix4().makeScale(-1, 1, 1);
+
+function instanceDoorLeaves(doors, group) {
+  group.updateMatrixWorld(true);
+  const kinds = new Map(); // primitive + handedness -> { mesh, slots }
+  const slots = new Map(); // door -> [{ source, kind, index }]
+  for (const door of doors) {
+    for (const pivot of door.pivots) {
+      pivot.node.traverse((mesh) => {
+        const primitive = mesh.userData.doorPrimitive;
+        if (!primitive) return;
+        const mirrored = mesh.matrixWorld.determinant() < 0;
+        const key = `${primitive.geometry.uuid}|${primitive.material.uuid}|${mirrored}`;
+        if (!kinds.has(key)) kinds.set(key, { primitive, mirrored, sources: [] });
+        const kind = kinds.get(key);
+        if (!slots.has(door)) slots.set(door, []);
+        slots.get(door).push({ source: mesh, kind, index: kind.sources.length });
+        kind.sources.push(mesh);
+        mesh.visible = false;
+      });
+    }
+  }
+  const m = new THREE.Matrix4();
+  const write = (slot) => {
+    m.copy(slot.source.matrixWorld);
+    if (slot.kind.mirrored) m.premultiply(MIRROR);
+    slot.kind.mesh.setMatrixAt(slot.index, m);
+    slot.kind.mesh.instanceMatrix.needsUpdate = true;
+  };
+  for (const kind of kinds.values()) {
+    const mesh = new THREE.InstancedMesh(kind.primitive.geometry, kind.primitive.material, kind.sources.length);
+    mesh.name = 'door leaves';
+    // As the leaves they stand for: casting, not receiving.
+    mesh.castShadow = true;
+    if (kind.mirrored) mesh.scale.x = -1;
+    kind.mesh = mesh;
+    group.add(mesh);
+  }
+  for (const list of slots.values()) for (const slot of list) write(slot);
+  for (const kind of kinds.values()) kind.mesh.computeBoundingSphere();
+  return {
+    update(door) {
+      const list = slots.get(door);
+      if (!list) return;
+      for (const p of door.pivots) p.node.updateMatrixWorld(true);
+      for (const slot of list) write(slot);
+    },
+  };
+}
+
 // --------------------------------------------------------------- fountain ----
 
 /**
@@ -2221,6 +2287,7 @@ function makeFountainWater(w) {
     alphaMap: streaks, depthWrite: false,
   });
   fallMaterial.name = 'fountainfall';
+  const falls = [];
   for (const d of spouts) {
     const points = [];
     for (let k = 0; k <= 12; k++) {
@@ -2230,11 +2297,13 @@ function makeFountainWater(w) {
     }
     const curve = new THREE.CatmullRomCurve3(points);
     // Thicker where it leaves the spout than where it has thinned in falling.
-    const tube = new THREE.TubeGeometry(curve, 24, 0.028, 8, false);
-    const mesh = new THREE.Mesh(tube, fallMaterial);
-    mesh.castShadow = false;
-    group.add(mesh);
+    falls.push(new THREE.TubeGeometry(curve, 24, 0.028, 8, false));
   }
+  // One draw for the four of them.
+  const fallMesh = new THREE.Mesh(mergeGeometries(falls, false), fallMaterial);
+  for (const tube of falls) tube.dispose();
+  fallMesh.castShadow = false;
+  group.add(fallMesh);
   return {
     group,
     update(t) {
@@ -3307,6 +3376,7 @@ export function populate(world, layout, built, options = {}) {
     for (const primitive of asset.primitives) {
       const mesh = new THREE.Mesh(primitive.geometry, primitive.material);
       mesh.castShadow = true;
+      mesh.userData.doorPrimitive = primitive;
       leaf.add(mesh);
     }
     return leaf;
@@ -3423,6 +3493,8 @@ export function populate(world, layout, built, options = {}) {
       y0: spec.y, y1: spec.y + spec.height, door,
     });
   }
+
+  const doorLeaves = instanceDoorLeaves(doors, group);
 
   // --- per-frame ----------------------------------------------------------
 
@@ -3668,6 +3740,7 @@ export function populate(world, layout, built, options = {}) {
       if (Math.abs(door.t - want) > 0.001) {
         door.t += Math.sign(want - door.t) * Math.min(Math.abs(want - door.t), dt * 2.2);
         for (const p of door.pivots) p.node.rotation.y = p.base + p.sign * door.t * (Math.PI / 2) * 0.95;
+        doorLeaves.update(door);
       }
     }
 

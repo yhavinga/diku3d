@@ -523,7 +523,9 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
    * walls, not in a doorway, and in plain sight of the centre?
    */
   function eyeInside(cell, p) {
-    if (!cell.done || cell.open || !cell.inside.containsPoint(p)) return false;
+    // Open ground is not skipped: a street's walls are its houses, and what
+    // stands behind them is seen only over the eaves or down the street.
+    if (!cell.done || !cell.inside.containsPoint(p)) return false;
     for (const box of cell.apertures) if (box && box.containsPoint(p)) return false;
     const cx = cell.x * CELL; const cy = cell.base + 1.72; const cz = cell.z * CELL;
     _v.set(p.x - cx, p.y - cy, p.z - cz);
