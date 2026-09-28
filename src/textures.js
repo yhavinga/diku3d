@@ -876,7 +876,9 @@ const SURFACES = {
     // Within a slab the grain was swinging 0.45 of the way to near-black too,
     // which is a different stone every 15 cm rather than one flag.
     s.color = inSlab ? mix(slab, rgb(0x4b4842), grain * 0.25) : rgb(0x726c5f);
-    s.height = inSlab ? 0.72 + grain * 0.12 : clamp01(edge / gap) * 0.6;
+    // Heights in what the bake makes of them (see stonewall): at 0.12 the
+    // grain cratered every flag into pumice.
+    s.height = inSlab ? 0.72 + grain * 0.02 : 0.64 + clamp01(edge / gap) * 0.06;
     s.rough = inSlab ? 0.78 + grain * 0.15 : 0.95;
   },
 
@@ -951,8 +953,13 @@ const SURFACES = {
     // rather than as a limestone town. Finer and weaker, and the block colours
     // pulled together and warmed: real coursed rubble varies stone to stone by
     // a shade, not by a value.
-    const grain = fbm(u * 62 + id * 7, v * 62, 62, 23, 3);
-    const block = mix(rgb(0x8d8474), rgb(0x9c9384), id);
+    const grain = fbm(u * 62 + id * 7, v * 62, 62, 23, 2);
+    // A dressed face is not flat: each stone is dished a little by the
+    // tooling and weathered unevenly, over a hand's breadth, not a pore's.
+    const dish = fbm(u * 12 + id * 5, v * 12, 12, 29, 2);
+    // A shade apart stone to stone: with the pumice gone this is most of
+    // what tells a wall of stones from a wall of render at street distance.
+    const block = mix(rgb(0x877e6e), rgb(0xa0978a), id);
     // Two things a judge counted on one wall. It read sRGB 12 to 125 inside a
     // single block, 44% of full scale; on the map itself that is 137 to 181,
     // and most of the spread is the arris, which was darkening the albedo as
@@ -967,10 +974,19 @@ const SURFACES = {
     // not the pointing. The joint sits a shade above the block face now --
     // measured on the baked map, 191 against 170 -- and the recess, height
     // 0.12 against 0.62, goes on doing the work it was already doing.
+    //
+    // And the relief was cut for a bake it did not have: the normal bake
+    // tips a normal to 45 degrees at a height step of 0.005 a texel, and
+    // the grain stepped 0.04 a texel -- every pore a crater, the face read
+    // as pumice under a raking sun -- while the arris and the joint stood
+    // 0.3 and 0.5 proud, so the lip of every bed joint faced straight up
+    // and caught the sky in a blue line. Heights now in what the bake
+    // makes of them: a 45-degree arris, pores that only break the sheen,
+    // and a joint recessed a finger's depth.
     s.color = inBlock
-      ? mix(block, rgb(0x736a5c), grain * 0.11 + (1 - bevel) * 0.06)
+      ? mix(block, rgb(0x7a7162), grain * 0.05 + dish * 0.13 + (1 - bevel) * 0.05)
       : mix(rgb(0x9e9585), rgb(0xada595), grain);
-    s.height = inBlock ? 0.62 + bevel * 0.3 + grain * 0.08 : 0.12;
+    s.height = inBlock ? 0.62 + bevel * 0.012 + grain * 0.004 + dish * 0.02 : 0.6;
     // Dressed face against raw mortar: two different surfaces, and holding them
     // both between 0.86 and 0.96 threw that away.
     s.rough = inBlock ? 0.68 + grain * 0.22 : 0.93 + grain * 0.06;
@@ -1710,7 +1726,7 @@ const SURFACES = {
     const face = mix(mix(rgb(0x6e4630), top, THREE.MathUtils.smoothstep(R.h, 0.75, 1)), rgb(0x8a8c7a), lichen * 0.55);
     const furrow = mix(rgb(0x160e0a), rgb(0x6a3a24), clamp01(R.h * 2.2));
     s.color = mix(furrow, face, R.top).map((c) => c * (0.84 + cork * 0.2 + fibre * 0.08));
-    s.height = R.h * (0.88 + cork * 0.12);
+    s.height = R.h * (0.88 + cork * 0.04);
     s.rough = 0.97;
   },
 
@@ -1744,7 +1760,7 @@ const SURFACES = {
     const moss = clamp01(fbmA(u * 3, v * 2, 3, 2, 191, 3) * 2.2 - 1.3) * R.top;
     const top = mix(rgb(0x4e4840), rgb(0x7a7166), R.id * 0.4 + grain * 0.6);
     s.color = mix(mix(rgb(0x221c16), rgb(0x3f352b), R.h), mix(top, rgb(0x4d5a2e), moss * 0.6), R.top);
-    s.height = R.h * 0.7 + grain * 0.15;
+    s.height = R.h * 0.7 + grain * 0.04;
     s.rough = 0.96;
   },
 
@@ -1821,7 +1837,9 @@ const SURFACES = {
     c = mix(c, rgb(0x5d584c), clamp01(damp * 1.4 - 0.55) * 0.6);
     c = mix(c, rgb(0x6f6a5e), speck * 0.25);
     s.color = c;
-    s.height = 0.5 + body * 0.12 + tool * 0.06 - speck * 0.05;
+    // Heights in what the bake makes of them (see stonewall): at -0.05 every
+    // speck was a crater and a window surround read as a golf ball.
+    s.height = 0.5 + body * 0.06 + tool * 0.01 - speck * 0.006;
     s.rough = 0.78 + tool * 0.12 - clamp01(damp - 0.5) * 0.2;
   },
 
@@ -4212,11 +4230,13 @@ function decorate(material, recipe, macro, grain) {
           float dikuNear = detailStrength * ( 1.0 - smoothstep( 1.5, 9.0, length( vViewPosition ) ) );
           if ( dikuNear > 0.0 ) {
             // World-space so the grain does not inherit the base tile's scale,
-            // and skewed the same way as the macro so it varies on all axes.
-            vec2 dikuDetailUv = vec2(
-              vSurfacePos.x * 0.92 + vSurfacePos.z * 0.31,
-              vSurfacePos.z * 0.86 - vSurfacePos.y * 0.74
-            ) * detailScale;
+            // projected along whichever axis the surface faces. It was the
+            // macro's skewed projection, which on a wall facing east or west
+            // runs 0.31 of a unit across for 0.86 up it: the grain stretched
+            // threefold into diagonal scratches over every such wall.
+            vec3 dikuDA = abs( ( vec4( vNormal, 0.0 ) * viewMatrix ).xyz );
+            vec2 dikuDetailUv = ( dikuDA.x > dikuDA.y && dikuDA.x > dikuDA.z ? vSurfacePos.zy
+              : dikuDA.z > dikuDA.y ? vSurfacePos.xy : vSurfacePos.xz ) * detailScale;
             vec3 dikuN = texture2D( detailMap, dikuDetailUv ).xyz * 2.0 - 1.0;
             normal = normalize( normal + ( tbn[ 0 ] * dikuN.x + tbn[ 1 ] * dikuN.y ) * dikuNear );
           }
