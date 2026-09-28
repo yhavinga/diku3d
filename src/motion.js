@@ -2429,6 +2429,11 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       }
       if (m.speech > 0) m.speech -= dt;
       fig.walking = m.speed > 0.16;
+      // Up and down a temple's mound with the ground under it (nav.moundY).
+      if (nav.moundY) {
+        const g = nav.moundY(fig.at.x, fig.at.z, fig.level);
+        if (g !== null) { fig.at.y = g; m.onMound = true; } else if (m.onMound) { fig.at.y = fig.level * nav.LEVEL_H; m.onMound = false; }
+      }
       placeObject(fig);
       if (fig.bones) finishPose(fig, dt, dx * dx + dz * dz < 36 * 36);
     }

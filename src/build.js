@@ -850,7 +850,7 @@ function doorLeaf(door, deep) {
     case 'stone': return { material: deep ? 'polisheddeep' : 'polished', tint: shellTint(door.colour || 'grey') };
     case 'obsidian': return { material: deep ? 'polisheddeep' : 'polished', tint: shellTint('jet-black') };
     case 'marble': return { material: deep ? 'polisheddeep' : 'marble', tint: deep ? shellTint('white') : null };
-    case 'iron': return { material: deep ? 'rustiron' : 'iron', tint: door.colour ? shellTint(door.colour, 0.5) : null, studs: true };
+    case 'iron': return { material: deep ? 'rustiron' : 'iron', tint: door.colour ? shellTint(door.colour, 0.5) : [0.62, 0.62, 0.64], studs: true };
     case 'silver': return { material: 'steel', tint: null, studs: true };
     case 'living wood': return { material: 'livingwood', tint: null, carved: true };
     default: return null;
@@ -960,7 +960,7 @@ function surfaceRecipe(key, said, current, under, rocky) {
       if (smooth || hue) return pick(under ? 'polisheddeep' : 'polished', tint || shellTint('grey'));
       if (rocky) return colour ? pick(current, tint) : null;
       return key === 'floor' ? pick(under ? 'sewerflag' : 'flagstone', tint) : pick(under ? 'ashlar' : 'stonewall', tint);
-    case 'obsidian': return pick(under ? 'polisheddeep' : 'polished', shellTint('jet-black'));
+    case 'obsidian': return under ? pick('polisheddeep', shellTint('jet-black')) : pick('obsidian');
     case 'marble': return under ? pick('polisheddeep', shellTint(colour || 'white')) : pick('marble', hue ? shellTint(colour, 0.7) : null);
     case 'granite': case 'basalt': case 'slate':
       return pick(under ? 'ashlar' : 'stonewall', shellTint(material === 'granite' ? 'pale' : 'dark'));
@@ -1683,6 +1683,10 @@ export function buildScene(world, layout, materials, assets = null) {
 
   classifySewer(world);
   classifyShells(world, (room) => room.sector !== SECTOR.AIR && !isOpenAir(room));
+  const lifts = mounds(world, layout);
+  // Ground raised under a building, which nav.js and motion.js stand
+  // people on (`platform.base`): see `mounds`.
+  const raised = [];
   const turfAt = hoodTurf(layout);
   // The whole kit or none of it: a chamber with no tunnel to leave by is worse
   // than the plain walled room it falls back to.
@@ -1769,6 +1773,13 @@ export function buildScene(world, layout, materials, assets = null) {
   for (const cell of layout.order) {
     const room = cell.room;
     const pos = worldOf(cell);
+    // "The huge mound upon which the temple is built": everything in the
+    // room stands on it.
+    const lift = lifts.get(room.vnum) || 0;
+    if (lift) {
+      pos.y += lift;
+      buildPodium({ batcher, chunk: chunkOf(cell), x: pos.x, y: pos.y - lift, z: pos.z, lift, addCollider, addPlatform, raised, steps: true, sides: layout.sides.get(cell.vnum) });
+    }
     const chunk = chunkOf(cell);
     const outdoor = isOutdoor(room);
     // What the room record carries is the mud's answer, because rain and
@@ -2291,10 +2302,25 @@ export function buildScene(world, layout, materials, assets = null) {
       buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor });
       continue;
     }
+    const liftFrom = lifts.get(link.from.vnum) || 0; const liftTo = lifts.get(link.to.vnum) || 0;
     buildAlley({
       batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt,
-      cellKey, streetCells: openStreet,
+      cellKey, streetCells: openStreet, lift: Math.min(liftFrom, liftTo),
     });
+    if (liftFrom && liftTo) {
+      for (const c of link.path) {
+        const at = worldOf({ ...c, level: link.from.level });
+        buildPodium({ batcher, chunk: chunkOf({ ...c, level: link.from.level }), x: at.x, y: at.y, z: at.z, lift: liftFrom, addCollider, addPlatform, raised, steps: false });
+      }
+    } else if ((liftFrom || liftTo) && link.path.length && link.kind === 'alley') {
+      // "Huge marble steps lead up to the temple gate."
+      const top = liftFrom ? link.from : link.to;
+      const first = liftFrom ? link.path[0] : link.path[link.path.length - 1];
+      buildMoundStair({
+        batcher, chunk: chunkOf({ ...first, level: top.level }), at: worldOf({ ...first, level: top.level }),
+        dir: dirBetween(first, top), lift: liftFrom || liftTo, addCollider, addPlatform, raised,
+      });
+    }
     // The neighborhood's anchor is Wall Road, and its passages into No Man's
     // Land are barricaded.
     const fromHood = hoodStyle(link.from.room);
@@ -2582,7 +2608,8 @@ export function buildScene(world, layout, materials, assets = null) {
   // What each room's own words put in it (src/clutter.js), once everything
   // it has to find a clear place among is standing.
   const clutter = placeClutter({
-    world, rooms, decor, colliders, addCollider, instances, lights, worldOf, openAir: isOpenAir, ROOM, HALF,
+    world, rooms, decor, colliders, addCollider, instances, lights, openAir: isOpenAir, ROOM, HALF,
+    worldOf: (cell) => { const w = worldOf(cell); w.y += lifts.get(cell.vnum) || 0; return w; },
     BufferAttribute: THREE.BufferAttribute,
   });
 
@@ -2631,6 +2658,15 @@ export function buildScene(world, layout, materials, assets = null) {
   }
   stats.meshes = batches.finish(zones.route);
   stats.clutter = clutter;
+  // Everything standing on a mound belongs to the level it rises from.
+  for (const p of platforms) {
+    for (const r of raised) {
+      if (p.x0 >= r.x0 - 0.01 && p.x1 <= r.x1 + 0.01 && p.z0 >= r.z0 - 0.01 && p.z1 <= r.z1 + 0.01 && p.top > r.y + 0.05 && p.top <= r.y + r.lift + 0.05) {
+        p.base = r.y;
+        break;
+      }
+    }
+  }
   return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones, grass };
 }
 
@@ -5194,7 +5230,7 @@ function buildRailFence({ batcher, chunk, pos, dir, addCollider }) {
  * buildings that fill the cells beside it become the street frontage; between
  * two indoor rooms it gets walls and a ceiling and becomes a corridor.
  */
-function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null, streetCells = null }) {
+function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null, streetCells = null, lift = 0 }) {
   const enclosed = alleyEnclosed(link);
   batcher.indoor = enclosed;
   const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
@@ -5210,7 +5246,8 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
   const midstream = !isDeep(source) && isWater(link.from.room) && isWater(link.to.room)
     && !isBog(link.from.room) && !isBog(link.to.room);
   const level = link.from.level;
-  const y = level * LEVEL_H;
+  // Between two rooms on the same mound, the corridor is up on it too.
+  const y = level * LEVEL_H + lift;
   const chain = [link.from, ...link.path, link.to];
   // Lined as a cave when it leaves one: the rock goes on until the brick of
   // whatever it reaches, and the room at the other end has its own wall.
@@ -5340,6 +5377,111 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
     }
   }
   batcher.indoor = false;
+}
+
+// ---------------------------------------------------------------- the mound ----
+
+/**
+ * "Large steps lead down through the grand temple gate, descending the huge
+ * mound upon which the temple is built and ends on the temple square below";
+ * from the square, "huge marble steps lead up to the temple gate". The room
+ * that says so, and the rooms of the same temple joined to it, are built
+ * MOUND_LIFT up, on a stepped marble podium, and the passage down to open
+ * ground is a flight of steps. Only where nothing stands on the level above.
+ */
+const MOUND_LIFT = 1.2;
+const MOUND_RISE = 0.15;
+function mounds(world, layout) {
+  const lifts = new Map();
+  for (const room of world.rooms.values()) {
+    const said = isOpenAir(room) ? null : shellAttrs(room);
+    if (!said || !said.mound) continue;
+    const cell = layout.cells.get(room.vnum);
+    if (!cell) continue;
+    const temple = /\btemple\b/i;
+    const queue = [room];
+    while (queue.length) {
+      const r = queue.shift();
+      const c = layout.cells.get(r.vnum);
+      if (!c || lifts.has(r.vnum) || c.level !== cell.level || layout.at(c.level + 1, c.x, c.z) !== undefined) continue;
+      lifts.set(r.vnum, MOUND_LIFT);
+      for (const e of r.exits.slice(0, 4)) {
+        const next = e && world.rooms.get(e.to);
+        if (next && !isOpenAir(next) && temple.test(next.name) && !lifts.has(next.vnum)) queue.push(next);
+      }
+    }
+  }
+  return lifts;
+}
+
+/** Marble under a raised cell, stepped back twice outside the walls like a temple's base. */
+function buildPodium({ batcher, chunk, x, y, z, lift, addCollider, addPlatform, raised, steps, sides = null }) {
+  const courses = steps ? [[0, lift / 3, 6.45], [lift / 3, (2 * lift) / 3, 6.05], [(2 * lift) / 3, lift - 0.01, 5.72]]
+    : [[0, lift - 0.01, 6.5]];
+  for (const [y0, y1, h] of courses) {
+    batcher.add(box(h * 2, y1 - y0, h * 2, 3, 1, 3), 'marble', place(x, y + (y0 + y1) / 2, z), { chunk, ao: () => 0.9 });
+    addCollider(x - h, x + h, z - h, z + h, y, y + y1);
+    addPlatform(x - h, x + h, z - h, z + h, y + y1 + 0.01);
+  }
+  const h = courses[courses.length - 1][2];
+  // Out of every doorway the mound runs level to the cell edge, where the
+  // corridor or the steps take over; the stepped courses stop either side.
+  for (let d = 0; d < 4 && sides; d++) {
+    if (!openSide(sides[d])) continue;
+    const [dx, , dz] = DIR_STEP[d];
+    const mid = (ROOM / 2 + HALF) / 2; const len = HALF - ROOM / 2; const w = DOOR_W + 0.8;
+    const cx = x + dx * mid; const cz = z + dz * mid;
+    const sx = dx ? len : w; const sz = dz ? len : w;
+    batcher.add(box(sx, 0.4, sz), 'marble', place(cx, y + lift - 0.2, cz), { chunk, ao: () => 0.9 });
+    addPlatform(cx - sx / 2, cx + sx / 2, cz - sz / 2, cz + sz / 2, y + lift);
+  }
+  raised.push({ x0: x - 6.5, x1: x + 6.5, z0: z - 6.5, z1: z + 6.5, y, lift });
+  // The top, out to the cell edge wherever the walls leave it open.
+  addPlatform(x - h, x + h, z - h, z + h, y + lift);
+}
+
+/**
+ * The flight from open ground up to the mound, in the passage cell next to
+ * the raised room: a landing at the top against the cell edge, then treads
+ * down away from it, wide as a temple's steps are, between marble cheeks.
+ */
+function buildMoundStair({ batcher, chunk, at, dir, lift, addCollider, addPlatform, raised }) {
+  const n = Math.round(lift / MOUND_RISE);
+  const going = 0.48; const W = 8.6; const landing = 1.8;
+  const [dx, , dz] = DIR_STEP[dir];
+  const along = (d) => ({ x: at.x + dx * d, z: at.z + dz * d });
+  // d measured from the cell's middle towards the raised room.
+  const slab = (d0, d1, top) => {
+    const a = along((d0 + d1) / 2); const len = d1 - d0;
+    const w = dx ? len : W; const dd = dx ? W : len;
+    batcher.add(box(w, top, dd, 2, 1, 2), 'marble', place(a.x, at.y + top / 2, a.z), { chunk, ao: () => 0.92 });
+    addPlatform(a.x - w / 2, a.x + w / 2, a.z - dd / 2, a.z + dd / 2, at.y + top);
+  };
+  slab(HALF - landing, HALF, lift);
+  for (let i = 0; i < n - 1; i++) {
+    const d1 = HALF - landing - i * going;
+    slab(d1 - going, d1, lift - (i + 1) * MOUND_RISE);
+  }
+  const foot = HALF - landing - (n - 1) * going;
+  for (const s of [-1, 1]) {
+    // Cheek walls, their tops following the flight.
+    const steps = 6;
+    for (let k = 0; k < steps; k++) {
+      const d0 = foot + ((HALF - foot) * k) / steps; const d1 = foot + ((HALF - foot) * (k + 1)) / steps;
+      const top = Math.min(lift, ((d1 - foot) / (HALF - landing - foot + 0.001)) * lift) + 0.35;
+      const a = along((d0 + d1) / 2);
+      const cx = a.x + (dx ? 0 : s * (W / 2 + 0.3)); const cz = a.z + (dz ? 0 : s * (W / 2 + 0.3));
+      const len = d1 - d0;
+      const w = dx ? len : 0.6; const dd = dx ? 0.6 : len;
+      batcher.add(box(w, top, dd), 'marble', place(cx, at.y + top / 2, cz), { chunk, ao: () => 0.9 });
+      addCollider(cx - w / 2, cx + w / 2, cz - dd / 2, cz + dd / 2, at.y, at.y + top);
+    }
+  }
+  const a = along((foot + HALF) / 2); const len = HALF - foot;
+  raised.push({
+    x0: a.x - (dx ? len / 2 : W / 2), x1: a.x + (dx ? len / 2 : W / 2),
+    z0: a.z - (dz ? len / 2 : W / 2), z1: a.z + (dz ? len / 2 : W / 2), y: at.y, lift,
+  });
 }
 
 // ------------------------------------------------------------ the great tree ----

@@ -80,6 +80,12 @@ const RULES = [
     re: /\b(?:corpses?|carcass(?:es)?|cadavers?|half-eaten (?:body|bodies)|body parts|rotting (?:body|bodies|parts)|mangled bod(?:y|ies))\b/i,
     not: /\bcorpse (?:light|candle)\b|\b(?:contain\w*|jars?|bottles?)\b[^.]{0,30}\bbody parts\b|\bcarrying\b|\b(?:loot|sacrifice|command|get all)\b/i,
   },
+  // "Plastered on the far wall you see what looks like a human arm."
+  {
+    kind: 'arm', at: 'hang', many: 1,
+    re: /\b(?:plastered|nailed|stuck|pinned)\b[^.]{0,50}\b(?:human |severed |rotting )?arm\b|\b(?:human|severed|rotting) arm\b[^.]{0,40}\b(?:plastered|nailed|stuck|pinned|hang\w*)\b/i,
+    not: /\barm ?(?:chair|rest|our|band)\b|\bcoat of arms\b|\barms? of\b/i,
+  },
   {
     kind: 'shackles', at: 'hang', many: 2,
     re: /\b(?:shackles?|manacles?|fetters?|chains?)\b[^.]{0,40}\b(?:walls?|hang\w*|fastened|bolted)\b|\b(?:walls?)\b[^.]{0,30}\b(?:shackles|manacles|chains)\b/i,
@@ -227,6 +233,9 @@ function wallIn(sentence, exits) {
   const on = sentence.match(/\b(?:on|against|in|at|along|by|upon)\s+the\s+(north|south|east|west)(?:ern)?\s+(?:wall|side|end)\b/i)
     || sentence.match(/\b(north|south|east|west)(?:ern)?\s+wall\b/i);
   if (on) return { dir: WALL_WORD[on[1].toLowerCase()], door: false };
+  // "The far wall" of a room with one way in is the one facing it.
+  const ways = [0, 1, 2, 3].filter((d) => exits[d]);
+  if (/\bfar wall\b/i.test(sentence) && ways.length === 1) return { dir: (ways[0] + 2) % 4, door: false };
   const see = sentence.match(/\bto the (north|south|east|west)\b/i);
   if (see) {
     const dir = WALL_WORD[see[1].toLowerCase()];
@@ -286,7 +295,7 @@ export const CLUTTER_NAMES = [
   'clutter_painting_portrait', 'clutter_painting_landscape', 'clutter_painting_gathering', 'clutter_mural',
   'clutter_arms', 'clutter_tapestry', 'clutter_web', 'clutter_cocoon', 'clutter_cages', 'clutter_globe',
   'clutter_feast', 'clutter_carcass', 'clutter_pelts', 'clutter_hay', 'clutter_wreckage',
-  'clutter_chain_run', 'clutter_chain_anchor',
+  'clutter_chain_run', 'clutter_chain_anchor', 'clutter_arm',
 ];
 
 // Only ever indoors, so they carry the `aIndoor` flag the room kits do (no sky
@@ -297,7 +306,7 @@ const INDOOR_ONLY = new Set([
   'clutter_sarcophagus', 'clutter_alchemy', 'clutter_pentagram', 'clutter_blackboard', 'clutter_plaque',
   'clutter_sign', 'clutter_painting_portrait', 'clutter_painting_landscape', 'clutter_painting_gathering',
   'clutter_mural', 'clutter_arms', 'clutter_tapestry', 'clutter_cocoon', 'clutter_cages', 'clutter_globe',
-  'clutter_pelts', 'clutter_wreckage', 'clutter_hoard',
+  'clutter_pelts', 'clutter_wreckage', 'clutter_hoard', 'clutter_arm',
 ]);
 
 // clutter.py authors bone, iron and stone for a room under the sky; under the
@@ -323,6 +332,7 @@ const KINDS = {
   wreckage: { models: ['clutter_wreckage'] },
   skeleton_hanging: { models: ['clutter_skeleton_hanging'], solid: true },
   shackles: { models: ['clutter_shackles'] },
+  arm: { models: ['clutter_arm'] },
   blackboard: { models: ['clutter_blackboard'] },
   plaque: { models: ['clutter_plaque'] },
   sign: { models: ['clutter_sign'] },
@@ -477,6 +487,9 @@ export function placeClutter(ctx) {
       // procedural walls' and a Shire room's plaster at 5.0; the plan's
       // `face` says which, but is measured for the floor, not the wall.
       // A log room's round logs stand proud everywhere (the shell's lining).
+      // A rock cave's lining (build.js `buildCaveLining`) stands up to 0.85 m
+      // proud of the wall line, and its collider only 0.55: hang on its crowns.
+      if (!outside && info.materials && info.materials.rockCave) return ROOM / 2 - 0.86;
       if (plan && !outside) return ROOM / 2 + ((plan.face || 0) > 0 ? 0.13 : (shellKind === 'log' ? plan.face : 0));
       // A walled room's wall is never further out than ROOM / 2: a wall with
       // a doorway in it has had no collider past the opening's jambs.

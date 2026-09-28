@@ -2238,7 +2238,8 @@ const SURFACES = {
     const furrow = clamp01((0.42 - fibre) * 4);
     const band = fbm(u * 5 + warp, v * 1.5, 5, 2243, 3);
     let c = mix(rgb(0x7a4f30), rgb(0xa77449), band * 0.8 + fibre * 0.3);
-    c = mix(c, rgb(0x3e2616), furrow * 0.7 + knot * 0.45);
+    // Softly: at full strength the furrows read as tiger stripes by lamplight.
+    c = mix(c, rgb(0x4a2e1b), furrow * 0.42 + knot * 0.4);
     s.color = c;
     s.height = 0.5 + fibre * 0.35 - furrow * 0.25 - knot * 0.15;
     s.rough = 0.58 + furrow * 0.25 - band * 0.08;

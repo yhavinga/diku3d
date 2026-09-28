@@ -100,10 +100,17 @@ const cellKey = (level, cx, cz) => `${level}:${cx},${cz}`;
 export function createNav({ layout, built, world }) {
   const geometric = Array.isArray(built.platforms) && Array.isArray(built.colliders);
   const platforms = new Buckets();
+  // Ground built up above its level -- a temple's mound and its steps
+  // (build.js `mounds`): a platform with a `base` is the floor of that level,
+  // at its own height.
+  const mounds = new Buckets();
   const solids = new Buckets();
   const waters = [];
   if (geometric) {
-    for (const p of built.platforms) platforms.add(p);
+    for (const p of built.platforms) {
+      platforms.add(p);
+      if (p.base !== undefined) mounds.add(p);
+    }
     // Doors swing, so their boxes are the route's business and not the grid's.
     for (const c of built.colliders) if (!c.door) solids.add(c);
     for (const d of built.decor || []) {
@@ -114,6 +121,7 @@ export function createNav({ layout, built, world }) {
   }
   const grids = new Map();
   const _near = [];
+  const _mound = [];
 
   /**
    * The strip under an indoor room's doorway. Such a room's floor stops at the
@@ -149,7 +157,8 @@ export function createNav({ layout, built, world }) {
     const ox = cx * CELL - HALF;
     const oz = cz * CELL - HALF;
     const floors = platforms.around(cx * CELL, cz * CELL, []);
-    const boxes = solids.around(cx * CELL, cz * CELL, _near).filter((c) => c.y1 > y + BAND_LO && c.y0 < y + BAND_HI);
+    const up = mounds.around(cx * CELL, cz * CELL, []).reduce((m, p) => Math.max(m, p.top - p.base), 0);
+    const boxes = solids.around(cx * CELL, cz * CELL, _near).filter((c) => c.y1 > y + BAND_LO && c.y0 < y + BAND_HI + up);
     const doors = doorways(level, cx, cz) || [];
     const wet = waters.filter((w) => Math.abs(w.y - y) < 1);
     for (let j = 0; j < PER; j++) {
@@ -158,11 +167,17 @@ export function createNav({ layout, built, world }) {
         const x = ox + (i + 0.5) * NAV_RES;
         let ground = false;
         let raised = false;
+        let g = y;
         for (const p of floors) {
           if (x < p.x0 || x > p.x1 || z < p.z0 || z > p.z1) continue;
-          if (Math.abs(p.top - y) <= FLOOR_TOL) ground = true;
+          if (p.base !== undefined) {
+            if (Math.abs(p.base - y) <= FLOOR_TOL) { ground = true; g = Math.max(g, p.top); }
+          } else if (Math.abs(p.top - y) <= FLOOR_TOL) ground = true;
           else if (p.top > y + FLOOR_TOL && p.top < y + BAND_HI) raised = true;
         }
+        // On a mound the ground is the mound, and what is in the way is
+        // what stands on it -- not the mound's own sides.
+        if (g > y + FLOOR_TOL) raised = false;
         if (!ground) {
           for (const d of doors) if (x >= d.x0 && x <= d.x1 && z >= d.z0 && z <= d.z1) { ground = true; break; }
         }
@@ -170,6 +185,7 @@ export function createNav({ layout, built, world }) {
         if (value) {
           for (const c of boxes) {
             if (x <= c.x0 - RADIUS || x >= c.x1 + RADIUS || z <= c.z0 - RADIUS || z >= c.z1 + RADIUS) continue;
+            if (c.y1 <= g + BAND_LO || c.y0 >= g + BAND_HI) continue;
             if (c.obb) {
               // A prop turned on the spot: test its own footprint, not the
               // axis-aligned box round it.
@@ -216,6 +232,17 @@ export function createNav({ layout, built, world }) {
   }
 
   const levelOf = (y) => Math.round(y / LEVEL_H);
+
+  /** How high the ground stands at (x, z) on `level`, where a mound raises it; else null. */
+  function moundY(x, z, level) {
+    const base = level * LEVEL_H;
+    let top = null;
+    for (const p of mounds.around(x, z, _mound)) {
+      if (x < p.x0 || x > p.x1 || z < p.z0 || z > p.z1 || Math.abs(p.base - base) > FLOOR_TOL) continue;
+      if (top === null || p.top > top) top = p.top;
+    }
+    return top;
+  }
 
   /**
    * Which room a point belongs to -- main.js's `currentRoom`, for feet rather
@@ -312,7 +339,7 @@ export function createNav({ layout, built, world }) {
         if ((x - ox) ** 2 + (z - oz) ** 2 < (x - cxw) ** 2 + (z - czw) ** 2 + 4) continue;
       }
       x = centreOf(ixOf(x)); z = centreOf(ixOf(z));
-      if (ok(x, z)) return { x, y: cell.level * LEVEL_H, z };
+      if (ok(x, z)) return { x, y: moundY(x, z, cell.level) ?? cell.level * LEVEL_H, z };
     }
     if (!allowWater) return randomSpot(vnum, rand, { allowWater: true, near, radius, avoid });
     return null;
@@ -475,7 +502,7 @@ export function createNav({ layout, built, world }) {
     }
     if (!out.length) out.push(raw[raw.length - 1]);
     const y = level * LEVEL_H;
-    return out.map((p) => ({ x: p.x, y, z: p.z }));
+    return out.map((p) => ({ x: p.x, y: moundY(p.x, p.z, level) ?? y, z: p.z }));
   }
 
   /** A walk inside one room's own ground. */
@@ -604,7 +631,7 @@ export function createNav({ layout, built, world }) {
    * not count. Returns the point on its face and the way out of it, or null.
    */
   function wallNear(x, z, level, reach = 2) {
-    const y = level * LEVEL_H;
+    const y = moundY(x, z, level) ?? level * LEVEL_H;
     let best = null; let bestD = reach;
     for (const c of solids.around(x, z, _near)) {
       if (c.obb || c.y0 > y + 0.4 || c.y1 < y + 1.9) continue;
@@ -628,7 +655,7 @@ export function createNav({ layout, built, world }) {
    * leaner stood in the counter.
    */
   function clearOf(x, z, level, r, except = null) {
-    const y = level * LEVEL_H;
+    const y = moundY(x, z, level) ?? level * LEVEL_H;
     for (const c of solids.around(x, z, _near)) {
       if (c === except || c.y1 < y + 0.1 || c.y0 > y + 1.8) continue;
       if (c.obb) {
@@ -752,7 +779,7 @@ export function createNav({ layout, built, world }) {
   return {
     CELL, LEVEL_H, NAV_RES, levelOf,
     sample, roomAt, territory, randomSpot, findPath, pathInRoom, clearLine, nearestOpen, route, doorOpen,
-    stairY, wallNear, clearOf, sightBlocked,
+    stairY, moundY, wallNear, clearOf, sightBlocked,
     addInstances,
     /** How many cells have been rasterised so far -- the grid is built on demand. */
     get built() { return grids.size; },
