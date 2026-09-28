@@ -24,6 +24,26 @@ if (!('colorTexture' in THREE.BatchedMesh.prototype)) {
 }
 
 /**
+ * three's own opaque order, with one more key: whether the object is a
+ * BatchedMesh. A program is compiled per material *and* per kind of object,
+ * and three already keeps instanced and skinned draws of a material together
+ * (`materialVariant`) but not batched ones -- so a material shared by a region
+ * batch and a loose mesh flipped programs every time depth order interleaved
+ * them, ~50 times a frame on the Market Square. Material order, which
+ * anything drawn without depth writes may be leaning on, is untouched.
+ */
+export function opaqueSort(a, b) {
+  if (a.groupOrder !== b.groupOrder) return a.groupOrder - b.groupOrder;
+  if (a.renderOrder !== b.renderOrder) return a.renderOrder - b.renderOrder;
+  if (a.material.id !== b.material.id) return a.material.id - b.material.id;
+  const va = a.materialVariant + (a.object.isBatchedMesh ? 4 : 0);
+  const vb = b.materialVariant + (b.object.isBatchedMesh ? 4 : 0);
+  if (va !== vb) return va - vb;
+  if (a.z !== b.z) return a.z - b.z;
+  return a.id - b.id;
+}
+
+/**
  * `shadow` is the map size and `span` the half-width of the sun's frustum in
  * metres -- together they set how many centimetres a shadow texel covers. The
  * map is only redrawn when you cross a six-metre line (see main.js), so a
@@ -99,6 +119,7 @@ export class Quality {
     this.timer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
     this.query = null;
     this.pending = null;
+    renderer.setOpaqueSort(opaqueSort);
 
     this.apply(name);
   }
