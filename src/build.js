@@ -5802,8 +5802,11 @@ function buildGreatTree({ batcher, instances, chunk, room, pos, sides, addCollid
           const slope = (radius(v[3], v[4] + 0.05) - radius(v[3], v[4] - 0.05)) / 0.1;
           const len = Math.hypot(1, slope);
           N.push((Math.cos(v[3]) / len) * n, (-slope / len) * n, (Math.sin(v[3]) / len) * n);
-          // Round the trunk and up it, in metres of the tile.
-          U.push((v[3] * 5.5) * uvScale, v[4] * uvScale);
+          // Round the trunk and up it, in metres of the tile -- and the
+          // outside at twice the size: bark sized for an ordinary trunk
+          // knitted this twelve-metre one in fine lozenges.
+          const tile = facingIn ? uvScale : uvScale * 0.5;
+          U.push((v[3] * 5.5) * tile, v[4] * tile);
         }
       }
     }

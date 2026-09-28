@@ -97,9 +97,14 @@ function cellularA(x, y, px, py, seed, jitter = 0.45) {
  * Returns `h` (0 deep in a furrow to 1 on a plate), `top` (plate face rather
  * than furrow wall) and `id`, a roll per plate.
  */
-function barkPlates(u, v, { cols, rows, furrow, seed, warp = 0.35 }) {
+function barkPlates(u, v, { cols, rows, furrow, seed, warp = 0.35, stagger = 0 }) {
   const wx = u * cols + (fbmA(u * 2, v * 3, 2, 3, seed, 3) - 0.5) * 2 * warp * cols / 4;
-  const [, edge, id] = cellularA(wx, v * rows, cols, rows, seed + 3, 0.48);
+  // `stagger` slides the plates up and down a few columns at a time, in
+  // rows: jittered cells still end at much the same height across a
+  // trunk, and a wide one read as tiers of thatch.
+  const p = Math.max(1, Math.round(cols / 3));
+  const wy = v * rows + (fbmA(u * p, v * 2, p, 2, seed + 7, 2) - 0.5) * 2 * stagger;
+  const [, edge, id] = cellularA(wx, wy, cols, rows, seed + 3, 0.48);
   const fw = furrow * (0.75 + 0.5 * fbmA(u * 8, v * 6, 8, 6, seed + 5, 2));
   // Steep furrow walls and a flat plate: a slow ramp from the furrow to the
   // middle of the plate is a bevel, and every plate outlined by one read as
@@ -1695,7 +1700,7 @@ const SURFACES = {
    * axis, and it is the unwrap that makes the ridges run up the tree.
    */
   firbark(u, v, s) {
-    const R = barkPlates(u, v, { cols: 12, rows: 2, furrow: 0.75, seed: 939 });
+    const R = barkPlates(u, v, { cols: 14, rows: 2, furrow: 0.75, seed: 939, warp: 0.4, stagger: 1 });
     // Corky layers: fine and flaky across the ridge, the way the cork sheds.
     const cork = fbmA(u * 36, v * 64, 36, 64, 947, 3);
     const lichen = clamp01(fbmA(u * 4, v * 2, 4, 2, 953, 3) * 2.4 - 1.45) * R.top;
@@ -1729,13 +1734,17 @@ const SURFACES = {
    * and shorter cross-cracks, which is what an old oak's bark is.
    */
   bark(u, v, s) {
-    const R = barkPlates(u, v, { cols: 12, rows: 3, furrow: 0.5, seed: 181 });
-    // A rough face on every plate, so it reads as bark and not as a tile.
+    // Long narrow ridges, 3 by 27 cm on a trunk at scale 1. They were 13 by
+    // 53 on a tile twice the size -- half a metre across on Haon Dor's
+    // giants, each outlined by a furrow as deep as the bark is thick, which
+    // a judge rightly called reptile scales.
+    const R = barkPlates(u, v, { cols: 26, rows: 3, furrow: 0.5, seed: 181, warp: 0.3, stagger: 1 });
+    // A rough face on every ridge, so it reads as bark and not as a tile.
     const grain = fbmA(u * 48, v * 20, 48, 20, 187, 3);
     const moss = clamp01(fbmA(u * 3, v * 2, 3, 2, 191, 3) * 2.2 - 1.3) * R.top;
     const top = mix(rgb(0x4e4840), rgb(0x7a7166), R.id * 0.4 + grain * 0.6);
     s.color = mix(mix(rgb(0x221c16), rgb(0x3f352b), R.h), mix(top, rgb(0x4d5a2e), moss * 0.6), R.top);
-    s.height = R.h * 0.8 + grain * 0.2;
+    s.height = R.h * 0.7 + grain * 0.15;
     s.rough = 0.96;
   },
 
@@ -2731,7 +2740,11 @@ const RECIPES = {
   steel: { surface: 'steel', scale: 0.6, normalScale: 0.35, env: 1.5, wet: 0, detail: 0.25 },
   mail: { surface: 'mail', scale: 0.3, normalScale: 0.6, env: 1.3, wet: 0, detail: 0.2 },
   paint: { surface: 'paint', scale: 0.8, normalScale: 0.5, env: 0.6, wet: 0, detail: 0.4 },
-  bark: { surface: 'bark', scale: 1.6, normalScale: 1.0, env: 0.65, wet: 0, detail: 0.5 },
+  // The bark tiles are half trees.py's BARK_TILE, which an unwrapped trunk
+  // closes its seam on, so the seam still falls on a tile edge -- and at half
+  // the tile, on a Haon Dor giant scaled 2.5, a ridge is a hand wide and not
+  // a paving slab.
+  bark: { surface: 'bark', scale: 0.8, normalScale: 0.5, env: 0.65, wet: 0, detail: 0.5 },
   // The conifers. A needle card's UVs are the card, 0..1, so its tile is 1.
   // `cutout` is the alpha test: an alpha-*tested* card sorts and shadows like
   // anything opaque, where a blended one would need sorting per card.
@@ -2746,8 +2759,8 @@ const RECIPES = {
   weedleaf: { surface: 'weedleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   herbleaf: { surface: 'herbleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   fernleaf: { surface: 'fernleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
-  firbark: { surface: 'firbark', scale: 1.4, normalScale: 0.9, env: 0.35, wet: 0, detail: 0.5 },
-  cedarbark: { surface: 'cedarbark', scale: 1.2, normalScale: 0.9, env: 0.5, wet: 0, detail: 0.5 },
+  firbark: { surface: 'firbark', scale: 0.7, normalScale: 0.45, env: 0.35, wet: 0, detail: 0.5 },
+  cedarbark: { surface: 'cedarbark', scale: 0.6, normalScale: 0.45, env: 0.5, wet: 0, detail: 0.5 },
   water: { surface: 'water', scale: 7, normalScale: 0.5, env: 1.6, wet: 0, detail: 0.2 },
   // The sewer. `buried` hands their ambient, reflections and fog to the fixed
   // underground terms above instead of the sky, so `env` means nothing here.
@@ -2768,7 +2781,7 @@ const RECIPES = {
   rust: { surface: 'rust', scale: 1.2, normalScale: 0.5, env: 0.9, wet: 0, detail: 0.3 },
   fungus: { surface: 'fungus', scale: 0.8, normalScale: 0.4, env: 1, wet: 0, detail: 0.3, buried: true },
   bone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 1, wet: 0, detail: 0.3, buried: true },
-  sewerwood: { surface: 'bark', scale: 1.6, normalScale: 0.6, env: 1, wet: 0, detail: 0.4, buried: true },
+  sewerwood: { surface: 'bark', scale: 0.8, normalScale: 0.3, env: 1, wet: 0, detail: 0.4, buried: true },
   // The eastern mountains, outside and in.
   // `triplanar`: projected from the world in the shader, not from the model's
   // UVs -- a displaced cliff cube-projected in Blender wore its beds smeared
@@ -2782,7 +2795,7 @@ const RECIPES = {
   // A boulder and a fallen log, with the moss grown on in the shader rather
   // than modelled as a cap: a green shell has an edge, and moss does not.
   mossrock: { surface: 'caverock', scale: 2.6, normalScale: 0.8, env: 0.6, wet: 0.2, detail: 0.6, triplanar: true, moss: 0.42 },
-  mossbark: { surface: 'bark', scale: 1.6, normalScale: 1.0, env: 0.65, wet: 0, detail: 0.5, moss: 0.4 },
+  mossbark: { surface: 'bark', scale: 0.8, normalScale: 0.5, env: 0.65, wet: 0, detail: 0.5, moss: 0.4 },
   // A full `env`: cloth this open lets the sky through, and at 0.4 a tent's
   // corners went to RGB 0 after dark however hard the lantern burned.
   tentcloth: { surface: 'tentcloth', scale: 4, normalScale: 0.5, env: 1.0, wet: 0, detail: 0.4 },
@@ -2851,7 +2864,7 @@ const RECIPES = {
   // hollow of a tree; ice. `polisheddeep` is the same stone underground.
   polished: { surface: 'polished', scale: 3.0, normalScale: 0.45, env: 1.0, wet: 0, detail: 0.2 },
   polisheddeep: { surface: 'polished', scale: 3.0, normalScale: 0.45, env: 1, wet: 0, detail: 0.2, buried: true },
-  livingwood: { surface: 'livingwood', scale: 2.4, normalScale: 0.9, env: 0.7, wet: 0, detail: 0.4 },
+  livingwood: { surface: 'livingwood', scale: 2.4, normalScale: 0.45, env: 0.7, wet: 0, detail: 0.4 },
   ice: { surface: 'ice', scale: 3.0, normalScale: 0.5, env: 1.4, wet: 0, detail: 0.15 },
 };
 
