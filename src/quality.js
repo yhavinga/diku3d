@@ -105,6 +105,8 @@ export const SCALES = [0.55, 0.7, 0.85, 1.0];
 const IDLE_FPS = 10;
 /** How long the idle loop sleeps between frames: a vsync short of the idle rate. */
 export const IDLE_SLEEP_MS = 1000 / IDLE_FPS - 12;
+/** How early a frame may be taken against its beat: under half a vsync at 120 Hz. */
+const FRAME_SLACK_MS = 3.5;
 
 export class Quality {
   constructor({ renderer, pipeline, sun, lightPool, materials, name = 'high' }) {
@@ -119,7 +121,7 @@ export class Quality {
     // Per-setting overrides from the options screen, merged over the preset.
     this.overrides = {};
     this.autoScale = true;
-    this.lastRender = 0;
+    this.due = 0; // when the next frame is, on the cap's beat
     this.lastProbe = 0;
     this.gpuMs = null;
     this.frames = 0;
@@ -224,8 +226,18 @@ export class Quality {
     if (document.hidden) return false;
     const fps = idle ? IDLE_FPS : this.preset.fps;
     if (!fps) return true;
-    if (now - this.lastRender < (1000 / fps) - 1) return false;
-    this.lastRender = now;
+    // Frames fall due on a fixed beat, not a fixed gap after the last one.
+    // Timed from whenever the last callback happened to run, a frame that
+    // ran a millisecond late made the next one look early by as much, and
+    // it waited a whole vsync more: at 30 on a 120 Hz display one frame in
+    // five came 41.7 ms after the last instead of 33.3 (p90 39.5 ms). The
+    // slack is under half a vsync at 120 Hz, so no tick is taken early, and
+    // over any stretch the rate is still the cap.
+    const interval = 1000 / fps;
+    // Coming out of the idle crawl, the next beat is not a tenth of a second off.
+    if (this.due - now > interval) this.due = now;
+    if (now < this.due - FRAME_SLACK_MS) return false;
+    this.due = now - this.due > interval ? now + interval : this.due + interval;
     return true;
   }
 

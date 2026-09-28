@@ -1439,8 +1439,12 @@ async function boot() {
     quality.begin(now);
     composer.render();
     quality.end();
-    visibility.work();
+    // Measuring the next cells is no part of this frame: it runs in a task of
+    // its own straight after, so the frame goes to the screen first.
+    afterFrame.port2.postMessage(0);
   }
+  const afterFrame = new MessageChannel();
+  afterFrame.port1.onmessage = () => visibility.work();
 
   // Handy from the console, and how the screenshots for this were framed.
   window.diku = {

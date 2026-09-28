@@ -97,7 +97,7 @@ export function readPixelsAsync(renderer, target, width, height, buffer) {
 }
 
 export function createOcclusion({ renderer, scene, camera, world }) {
-  const state = { enabled: true, ready: false, tested: 0, occluded: 0 };
+  const state = { enabled: true, ready: false, tested: 0, occluded: 0, kept: 0 };
   let copy = null;         // full-size render target holding the copied depth
   let reduced = null;      // BLOCK-reduced eye depths
   let copied = false;      // this frame's copy was taken
@@ -206,25 +206,30 @@ export function createOcclusion({ renderer, scene, camera, world }) {
     renderer.setRenderTarget(previous);
     renderer.autoClear = autoClear;
     const w = reduced.width; const h = reduced.height;
-    const buffer = new Float32Array(w * h * 4);
+    if (!readBuffer || readBuffer.length !== w * h * 4) readBuffer = new Float32Array(w * h * 4);
+    const buffer = readBuffer;
     const taken = { view: pending.view.slice(), proj: pending.proj.slice(), eye: pending.eye.clone(), near: pending.near };
     reading = readPixelsAsync(renderer, reduced, w, h, buffer).then(() => {
       reading = null;
       if (reduced.width !== w || reduced.height !== h) return;
+      // Standing still, the depth that comes back is the depth already held,
+      // taken from the same place: keep the map, so that whatever was worked
+      // out from it still holds (cull.js keys on it).
+      if (map && map[0].w === w && map[0].h === h && sameAs(taken, buffer)) { state.kept++; return; }
       // The farthest depth over 1, 2, 4... blocks, so a big rectangle is a
       // few reads at a coarser level.
       // The nearest as well: how near the occluders are decides how far a
       // step of the eye can have slid them across the screen.
-      const levels = [];
-      let data = new Float32Array(w * h);
-      let near = new Float32Array(w * h);
+      // Two pyramids, drawn into in turn: the one in use is never written.
+      const levels = spare && spare[0].w === w && spare[0].h === h ? spare : pyramid(w, h);
+      let data = levels[0].data;
+      let near = levels[0].near;
       for (let i = 0; i < w * h; i++) { data[i] = buffer[i * 4]; near[i] = buffer[i * 4 + 1]; }
       let lw = w; let lh = h;
-      levels.push({ w: lw, h: lh, data, near });
-      while (lw > 1 || lh > 1) {
-        const nw = Math.ceil(lw / 2); const nh = Math.ceil(lh / 2);
-        const next = new Float32Array(nw * nh);
-        const nextNear = new Float32Array(nw * nh);
+      for (let l = 1; l < levels.length; l++) {
+        const nw = levels[l].w; const nh = levels[l].h;
+        const next = levels[l].data;
+        const nextNear = levels[l].near;
         for (let y = 0; y < nh; y++) {
           for (let x = 0; x < nw; x++) {
             let m = 0; let n = Infinity;
@@ -237,14 +242,35 @@ export function createOcclusion({ renderer, scene, camera, world }) {
             next[y * nw + x] = m; nextNear[y * nw + x] = n;
           }
         }
-        levels.push({ w: nw, h: nh, data: next, near: nextNear });
         data = next; near = nextNear; lw = nw; lh = nh;
       }
+      spare = map;
       map = levels;
       live.view.set(taken.view); live.proj.set(taken.proj); live.eye.copy(taken.eye); live.near = taken.near;
       live.w = w; live.h = h;
       state.ready = true;
     }, () => { reading = null; });
+  }
+
+  let readBuffer = null;
+  let spare = null;
+  function pyramid(w, h) {
+    const levels = [{ w, h, data: new Float32Array(w * h), near: new Float32Array(w * h) }];
+    let lw = w; let lh = h;
+    while (lw > 1 || lh > 1) {
+      lw = Math.ceil(lw / 2); lh = Math.ceil(lh / 2);
+      levels.push({ w: lw, h: lh, data: new Float32Array(lw * lh), near: new Float32Array(lw * lh) });
+    }
+    return levels;
+  }
+
+  /** Was this readback taken from where the held map was, and does it say the same? */
+  function sameAs(taken, buffer) {
+    if (taken.near !== live.near || !taken.eye.equals(live.eye)) return false;
+    for (let i = 0; i < 16; i++) if (taken.view[i] !== live.view[i] || taken.proj[i] !== live.proj[i]) return false;
+    const data = map[0].data; const near = map[0].near;
+    for (let i = 0; i < data.length; i++) if (data[i] !== buffer[i * 4] || near[i] !== buffer[i * 4 + 1]) return false;
+    return true;
   }
 
   /**
@@ -273,7 +299,7 @@ export function createOcclusion({ renderer, scene, camera, world }) {
   /**
    * `hidden` for the sphere at `a[o..o+3]`. What cull.js calls, tens of
    * thousands of times a frame: nothing in here may box a double, so the
-   * sphere comes in as an array and the extremes go out through `found`.
+   * sphere comes in as an array and the nearest depth goes out through `found`.
    */
   const found = new Float64Array(1);
   function hiddenAt(a, o) {
@@ -301,48 +327,57 @@ export function createOcclusion({ renderer, scene, camera, world }) {
     const step = movedSince();
     let grow = 1;
     if (step > 0) {
-      extreme(tx0 - 2, ty0 - 2, tx1 + 2, ty1 + 2, false);
+      nearest(tx0 - 2, ty0 - 2, tx1 + 2, ty1 + 2);
       const angle = step / Math.max(0.05, found[0]);
       grow += Math.ceil(angle * Math.max(p[0] * W, p[5] * H) / 2);
       if (grow > W / 2) return false;
     }
-    extreme(tx0 - grow, ty0 - grow, tx1 + grow, ty1 + grow, true);
-    const behind = front > found[0] * (1 + SHARE) + MARGIN;
+    const behind = !reaches(tx0 - grow, ty0 - grow, tx1 + grow, ty1 + grow, front);
     if (behind) state.occluded++;
     return behind;
   }
 
-  /** The farthest (`far`) or nearest eye depth over a rectangle of texels, into `found[0]`. */
-  function extreme(tx0, ty0, tx1, ty1, far) {
+  /**
+   * Does the farthest depth over the rectangle reach `front`, as the test
+   * above asks of it? The same answer as taking the farthest first -- the
+   * comparison only grows with the depth -- but it can stop at the first
+   * texel that says so, which for anything in plain view is the first one.
+   */
+  function reaches(tx0, ty0, tx1, ty1, front) {
     let level = 0;
     while (level < map.length - 1 && (tx1 - tx0 > 4 || ty1 - ty0 > 4)) {
       level++;
       tx0 >>= 1; ty0 >>= 1; tx1 >>= 1; ty1 >>= 1;
     }
     const layer = map[level];
-    const w = layer.w; const h = layer.h;
+    const w = layer.w; const h = layer.h; const data = layer.data;
     tx0 = Math.max(0, tx0); ty0 = Math.max(0, ty0); tx1 = Math.min(w - 1, tx1); ty1 = Math.min(h - 1, ty1);
-    if (far) {
-      const data = layer.data;
-      let v = 0;
-      for (let ty = ty0; ty <= ty1; ty++) {
-        for (let tx = tx0; tx <= tx1; tx++) {
-          const d = data[ty * w + tx];
-          if (d > v) v = d;
-        }
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        if (front <= data[ty * w + tx] * (1 + SHARE) + MARGIN) return true;
       }
-      found[0] = v;
-    } else {
-      const data = layer.near;
-      let v = Infinity;
-      for (let ty = ty0; ty <= ty1; ty++) {
-        for (let tx = tx0; tx <= tx1; tx++) {
-          const d = data[ty * w + tx];
-          if (d < v) v = d;
-        }
-      }
-      found[0] = v;
     }
+    return false;
+  }
+
+  /** The nearest eye depth over a rectangle of texels, into `found[0]`. */
+  function nearest(tx0, ty0, tx1, ty1) {
+    let level = 0;
+    while (level < map.length - 1 && (tx1 - tx0 > 4 || ty1 - ty0 > 4)) {
+      level++;
+      tx0 >>= 1; ty0 >>= 1; tx1 >>= 1; ty1 >>= 1;
+    }
+    const layer = map[level];
+    const w = layer.w; const h = layer.h; const data = layer.near;
+    tx0 = Math.max(0, tx0); ty0 = Math.max(0, ty0); tx1 = Math.min(w - 1, tx1); ty1 = Math.min(h - 1, ty1);
+    let v = Infinity;
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const d = data[ty * w + tx];
+        if (d < v) v = d;
+      }
+    }
+    found[0] = v;
   }
 
   return { state, capture, hidden, hiddenAt, sortMovers, sentinel };

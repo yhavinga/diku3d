@@ -290,30 +290,27 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
   const _d = new THREE.Vector3();
   const _p = new THREE.Vector3();
 
-  /** Every texel of the last cube as (direction, distance), handed to `each`. */
-  function forEachRay(faces, each) {
-    for (let f = 0; f < 6; f++) {
-      const m = faces[f];
-      for (let j = 0; j < RES; j++) {
-        for (let i = 0; i < RES; i++) {
-          const raw = readback[(j * RES * 6 + f * RES + i) * 4];
-          const t = raw >= REACH * 0.999 ? Infinity : raw;
-          _d.copy(rays[j * RES + i]).transformDirection(m);
-          each(_d, t);
-        }
-      }
-    }
+  /**
+   * Texel `q` of the last cube: its direction into `_d`, its distance
+   * returned (Infinity for nothing hit). Walked in a plain loop by each
+   * caller -- a callback per ray boxed the distance of all 24,576 of them.
+   */
+  function rayAt(faces, q) {
+    const f = Math.floor(q / (RES * RES)); const r = q - f * RES * RES;
+    const j = Math.floor(r / RES); const i = r - j * RES;
+    const raw = readback[(j * RES * 6 + f * RES + i) * 4];
+    _d.copy(rays[j * RES + i]).transformDirection(faces[f]);
+    return raw >= REACH * 0.999 ? Infinity : raw;
   }
+  const RAYS = 6 * RES * RES;
 
   /** Where a ray from `o` along `d` leaves `box` (o inside), as a distance. */
   function exitOf(o, d, box) {
     let t = Infinity;
-    for (let a = 0; a < 3; a++) {
-      const v = d.getComponent(a);
-      if (Math.abs(v) < 1e-9) continue;
-      const bound = v > 0 ? box.max.getComponent(a) : box.min.getComponent(a);
-      t = Math.min(t, (bound - o.getComponent(a)) / v);
-    }
+    const dx = d.x; const dy = d.y; const dz = d.z;
+    if (Math.abs(dx) >= 1e-9) t = Math.min(t, ((dx > 0 ? box.max.x : box.min.x) - o.x) / dx);
+    if (Math.abs(dy) >= 1e-9) t = Math.min(t, ((dy > 0 ? box.max.y : box.min.y) - o.y) / dy);
+    if (Math.abs(dz) >= 1e-9) t = Math.min(t, ((dz > 0 ? box.max.z : box.min.z) - o.z) / dz);
     return t;
   }
 
@@ -353,18 +350,19 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     // What the centre sees, kept: the eye counts as inside only where the
     // centre could see it, which a pillar or a partition can prevent.
     const seen = new Uint16Array(6 * RES * RES);
-    let k = 0;
-    forEachRay(faces, (d, t) => {
-      seen[k++] = Math.min(65535, Math.round(t * 100));
-      if (t >= exitOf(centre, d, grown)) return;
+    const d = _d;
+    for (let k = 0; k < RAYS; k++) {
+      const t = rayAt(faces, k);
+      seen[k] = Math.min(65535, Math.round(t * 100));
+      if (t >= exitOf(centre, d, grown)) continue;
       let f = 0; let best = 0;
       for (let q = 0; q < 6; q++) {
         const v = d.getComponent(FACE_AXIS[q]) * FACE_SIGN[q];
         if (v > best) { best = v; f = q; }
       }
-      if (best < 0.9) return;
+      if (best < 0.9) continue;
       reach[f].push(t * best);
-    });
+    }
     // Kept at half resolution, the nearest hit of each 2x2: a thousand cells
     // at full size is 50 MB, and the nearer hit only ever says "outside" more.
     const half = RES / 2;
@@ -408,9 +406,11 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
   /** Every ray from `eye` that leaves the cell unhit widens the aperture it leaves by. */
   function gatherLeaks(cell, faces, eye) {
     const grown = cell.box.clone().expandByScalar(SLACK);
-    forEachRay(faces, (d, t) => {
+    const d = _d;
+    for (let k = 0; k < RAYS; k++) {
+      const t = rayAt(faces, k);
       const out = exitOf(eye, d, grown);
-      if (t < out) return;
+      if (t < out) continue;
       const exit = exitOf(eye, d, cell.box);
       // From the inner face at the latest, and never less than a slab deep:
       // a cave's mouth is not a hole in a plane, and the box has to hold it.
@@ -420,18 +420,19 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       if (!box) { box = new THREE.Box3(); cell.apertures[f] = box; }
       box.expandByPoint(_p.copy(eye).addScaledVector(d, from));
       box.expandByPoint(_p.copy(eye).addScaledVector(d, exit));
-      if (t < exitOf(eye, d, pairBox(cell, f).expandByScalar(SLACK))) return;
-      if (cell.overflow[f]) return;
+      if (t < exitOf(eye, d, pairBox(cell, f).expandByScalar(SLACK))) continue;
+      if (cell.overflow[f]) continue;
       let list = cell.escapes[f];
       if (!list || list.n * 6 >= list.data.length) {
-        if (list && list.data.length >= ESCAPES * 6) { cell.overflow[f] = true; cell.escapes[f] = null; return; }
+        if (list && list.data.length >= ESCAPES * 6) { cell.overflow[f] = true; cell.escapes[f] = null; continue; }
         const data = new Float32Array(Math.min(ESCAPES, list ? list.data.length / 3 : 256) * 6);
         if (list) data.set(list.data);
         list = cell.escapes[f] = { data, n: list ? list.n : 0 };
       }
-      list.data.set([eye.x, eye.y, eye.z, d.x, d.y, d.z], list.n * 6);
+      const at = list.n * 6; const data = list.data;
+      data[at] = eye.x; data[at + 1] = eye.y; data[at + 2] = eye.z; data[at + 3] = d.x; data[at + 4] = d.y; data[at + 5] = d.z;
       list.n++;
-    });
+    }
   }
 
   /** The cell's box and its neighbour's across face `f`, as one box. */
@@ -913,7 +914,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     }
     scene.traverse((o) => {
       if (!o.isBatchedMesh || !o.pieceSpheres || !o.nearestVisible) return;
-      const owner = { entry: null, mesh: o, spheres: o.pieceSpheres(), n: o._instanceInfo.length, batch: o, marks: null, lo: 0, hi: -1, count: 0, nearest: Infinity, shrink: false };
+      const owner = { entry: null, mesh: o, spheres: o.pieceSpheres(), n: o._instanceInfo.length, batch: o, marks: null, lo: 0, hi: -1, count: 0, nearest: Infinity, shrink: false, list: new Int32Array(o._instanceInfo.length) };
       o._gridOwner = owner;
       owners.push(owner);
     });
@@ -994,6 +995,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
         else keep = visibleAt(a, o, false) || (shadow && castAt(a, o));
         if (!keep) continue;
         w.marks[i] = stamp;
+        if (info) w.list[w.count] = i;
         w.count++;
         if (i < w.lo) w.lo = i;
         if (i > w.hi) w.hi = i;
@@ -1005,7 +1007,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     sizeCull = false;
     for (let k = 0; k < owners.length; k++) {
       const w = owners[k];
-      if (w.batch) { w.batch.seenStamp(stamp); continue; }
+      if (w.batch) { w.batch.seenStamp(stamp, w.list, w.count); continue; }
       const entry = w.entry;
       if (!w.mesh.visible) continue;
       if (state.debugNoCompact) { restoreInstances(entry); continue; }

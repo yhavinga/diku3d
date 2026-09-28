@@ -542,6 +542,11 @@ export const cullHook = { test: null, select: null, camera: null, stamp: 0 };
  * same camera. The answer cannot have changed, so the second time it is
  * reused. The shadow pass has a camera of its own and culls for itself.
  */
+const _batchMatrix = new THREE.Matrix4();
+const _batchFrustum = new THREE.Frustum();
+const _batchEye = new THREE.Vector3();
+const _batchForward = new THREE.Vector3();
+
 export class StaticBatch extends THREE.BatchedMesh {
   constructor(...args) {
     super(...args);
@@ -560,14 +565,110 @@ export class StaticBatch extends THREE.BatchedMesh {
       for (let i = 0; i < 16 && same; i++) same = state[i] === view[i] && state[16 + i] === projection[i];
       if (same) return;
     }
-    super.onBeforeRender(renderer, scene, camera, geometry, material, group);
+    if (hook && this._seenStamp === stamp && this._seenList && !material.wireframe) {
+      this.drawSeen(camera, geometry, material);
+    } else {
+      super.onBeforeRender(renderer, scene, camera, geometry, material, group);
+      this._indirectMine = false;
+      if (hook) {
+        hook.select?.(this);
+        this.cullBehindWalls(hook.test, stamp);
+      }
+    }
     this._cullCamera = camera;
     this._cullStamp = stamp;
     for (let i = 0; i < 16; i++) { state[i] = view[i]; state[16 + i] = projection[i]; }
-    if (hook) {
-      hook.select?.(this);
-      this.cullBehindWalls(hook.test, stamp);
+  }
+
+  /**
+   * three's own cull and sort, over only the pieces cull.js has already seen
+   * this frame. three walks every piece of the batch for it -- reading each
+   * matrix back out of its texture, transforming each sphere -- and uploads
+   * the draw list whether it changed or not. Same frustum, same distances,
+   * same stable order (by distance, ties by index), from spheres worked out
+   * once; the list is uploaded only when it is not the one already there.
+   */
+  drawSeen(camera, geometry, material) {
+    const local = this.localSpheres();
+    const list = this._seenList; const count = this._seenCount;
+    _batchMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).multiply(this.matrixWorld);
+    _batchFrustum.setFromProjectionMatrix(_batchMatrix, camera.coordinateSystem, camera.reversedDepth);
+    _batchMatrix.copy(this.matrixWorld).invert();
+    _batchEye.setFromMatrixPosition(camera.matrixWorld).applyMatrix4(_batchMatrix);
+    _batchForward.set(0, 0, -1).transformDirection(camera.matrixWorld).transformDirection(_batchMatrix);
+    const planes = _batchFrustum.planes;
+    const n = this._instanceInfo.length;
+    if (!this._order || this._order.length !== n) {
+      this._order = new Int32Array(n); this._orderCount = 0;
+      this._keys = new Float64Array(n); this._in = new Int32Array(n); this._pass = 0;
     }
+    const keys = this._keys; const inList = this._in; const order = this._order;
+    const pass = ++this._pass;
+    const sign = material.transparent ? -1 : 1;
+    const vx = _batchEye.x; const vy = _batchEye.y; const vz = _batchEye.z;
+    const fx = _batchForward.x; const fy = _batchForward.y; const fz = _batchForward.z;
+    for (let k = 0; k < count; k++) {
+      const i = list[k]; const o = i * 4;
+      const cx = local[o]; const cy = local[o + 1]; const cz = local[o + 2]; const negRadius = -local[o + 3];
+      let inside = true;
+      for (let p = 0; p < 6 && inside; p++) {
+        const plane = planes[p]; const nrm = plane.normal;
+        if (nrm.x * cx + nrm.y * cy + nrm.z * cz + plane.constant < negRadius) inside = false;
+      }
+      if (!inside) continue;
+      keys[i] = sign * ((cx - vx) * fx + (cy - vy) * fy + (cz - vz) * fz);
+      inList[i] = pass;
+    }
+    // Last frame's order first -- nearly sorted already -- then the newcomers.
+    let m = 0;
+    const previous = this._orderCount;
+    for (let k = 0; k < previous; k++) {
+      const i = order[k];
+      if (inList[i] === pass) { order[m++] = i; inList[i] = -pass; }
+    }
+    for (let k = 0; k < count; k++) {
+      const i = list[k];
+      if (inList[i] === pass) { order[m++] = i; inList[i] = -pass; }
+    }
+    for (let k = 1; k < m; k++) {
+      const i = order[k]; const key = keys[i];
+      let j = k - 1;
+      while (j >= 0 && (keys[order[j]] > key || (keys[order[j]] === key && order[j] > i))) { order[j + 1] = order[j]; j--; }
+      order[j + 1] = i;
+    }
+    this._orderCount = m;
+    const bytes = geometry.getIndex() === null ? 1 : geometry.getIndex().array.BYTES_PER_ELEMENT;
+    const info = this._instanceInfo; const ranges = this._geometryInfo;
+    const starts = this._multiDrawStarts; const counts = this._multiDrawCounts;
+    const index = this._indirectTexture.image.data;
+    let same = this._indirectMine && this._multiDrawCount === m;
+    for (let k = 0; k < m; k++) {
+      const i = order[k]; const range = ranges[info[i].geometryIndex];
+      starts[k] = range.start * bytes; counts[k] = range.count;
+      if (same && index[k] !== i) same = false;
+      index[k] = i;
+    }
+    this._multiDrawCount = m;
+    if (!same) this._indirectTexture.needsUpdate = true;
+    this._indirectMine = true;
+    this._visibilityChanged = false;
+  }
+
+  /** Each piece's sphere in the batch's own frame, as three works it out every frame. */
+  localSpheres() {
+    if (!this._local) {
+      const n = this._instanceInfo.length;
+      this._local = new Float64Array(n * 4);
+      const m = new THREE.Matrix4(); const s = new THREE.Sphere();
+      for (let i = 0; i < n; i++) {
+        if (!this._instanceInfo[i].active) continue;
+        this.getMatrixAt(i, m);
+        this.getBoundingSphereAt(this._instanceInfo[i].geometryIndex, s).applyMatrix4(m);
+        this._local[i * 4] = s.center.x; this._local[i * 4 + 1] = s.center.y;
+        this._local[i * 4 + 2] = s.center.z; this._local[i * 4 + 3] = s.radius;
+      }
+    }
+    return this._local;
   }
 
   /**
@@ -591,7 +692,7 @@ export class StaticBatch extends THREE.BatchedMesh {
       const d = Math.sqrt(dx * dx + dy * dy + dz * dz) - spheres[o + 3];
       if (d < nearest) nearest = d;
     }
-    this._seenStamp = stamp;
+    this.seenStamp(stamp);
     return nearest;
   }
 
@@ -602,8 +703,13 @@ export class StaticBatch extends THREE.BatchedMesh {
     return this._seen;
   }
 
-  /** Every piece seen under `stamp` has been marked with it. */
-  seenStamp(stamp) { this._seenStamp = stamp; }
+  /**
+   * Every piece seen under `stamp` has been marked with it; `list` holds the
+   * first `count` of them, if cull.js kept one.
+   */
+  seenStamp(stamp, list = null, count = 0) {
+    this._seenStamp = stamp; this._seenList = list; this._seenCount = count;
+  }
 
   /**
    * World-space bounding sphere of every piece, rounded to float32 as they
