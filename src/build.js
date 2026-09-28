@@ -7128,6 +7128,139 @@ function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed }) 
   batcher.add(box(DOOR_W, 0.2, 0.2), 'iron', place(x, y + h * 0.55, z, rotY), { chunk });
 }
 
+/**
+ * A convex prism: `poly` is a convex outline in a vertical plane, given as
+ * [along, up] pairs, extruded across from `c0` to `c1`. `toWorld(a, y, c)`
+ * maps the plane to the world. Every face is turned away from the middle of
+ * the solid, so a mirrored frame (a flight climbing west rather than east)
+ * cannot turn it inside out.
+ */
+function convexPrism(batcher, toWorld, poly, c0, c1, material, options, grain = null) {
+  const n = poly.length;
+  const P = (k, c) => [poly[k][0], poly[k][1], c];
+  const tris = [];
+  for (let k = 1; k < n - 1; k++) {
+    tris.push([P(0, c0), P(k, c0), P(k + 1, c0)], [P(0, c1), P(k, c1), P(k + 1, c1)]);
+  }
+  for (let k = 0; k < n; k++) {
+    const j = (k + 1) % n;
+    tris.push([P(k, c0), P(j, c0), P(j, c1)], [P(k, c0), P(j, c1), P(k, c1)]);
+  }
+  const mid = [0, 0, 0];
+  const world = tris.map((t) => t.map((v) => toWorld(...v)));
+  for (const t of world) for (const v of t) for (let i = 0; i < 3; i++) mid[i] += v[i] / (tris.length * 3);
+  // With a grain, the texture runs along the member however it is pitched:
+  // `u` along `grain` in the outline's plane, `v` across it or across the
+  // prism, whichever the face shows. Planar projection laid a sloping
+  // string's grain level, which reads as corduroy.
+  const tile = (options.uvScale ?? batcher.materials[material].userData.uvScale) || 1;
+  const out = []; const uvs = [];
+  world.forEach(([a, b, c], t) => {
+    const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const nrm = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const f = [(a[0] + b[0] + c[0]) / 3 - mid[0], (a[1] + b[1] + c[1]) / 3 - mid[1], (a[2] + b[2] + c[2]) / 3 - mid[2]];
+    if (Math.hypot(...nrm) < 1e-9) return;
+    const flip = nrm[0] * f[0] + nrm[1] * f[1] + nrm[2] * f[2] < 0;
+    const order = flip ? [0, 2, 1] : [0, 1, 2];
+    const tri = [a, b, c]; const loc = tris[t];
+    const cap = loc[0][2] === loc[1][2] && loc[1][2] === loc[2][2];
+    for (const k of order) {
+      out.push(...tri[k]);
+      if (grain) {
+        const [la, ly, lc] = loc[k];
+        uvs.push((la * grain[0] + ly * grain[1]) * tile, (cap ? -la * grain[1] + ly * grain[0] : lc) * tile);
+      }
+    }
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+  if (grain) geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  batcher.add(geo, material, IDENTITY, grain ? { ...options, keepUv: true } : options);
+  geo.dispose();
+}
+
+/** Floors a flight is joinery in rather than masonry. */
+const WOODEN_FLOOR = new Set(['planks', 'boards', 'wood', 'sewerwood']);
+
+/**
+ * The flight itself, as a joiner or a mason builds one.
+ *
+ * It was twenty boxes of floor, each one riser tall and hung in the air at its
+ * own height, with a stepped iron rail made of short horizontal bars on posts.
+ * Seen from the side at the Grunting Boar that is a stack of plank slabs with
+ * a sawtooth underneath, and the rail read as four T-shaped iron brackets on
+ * the wall holding nothing -- both reported. A wooden stair is treads with a
+ * nosing, risers, a closed string either side and a boarded soffit under it,
+ * with one handrail running the pitch on newels and balusters. A stone one is
+ * solid: each step a block down to a sloping soffit, with iron at the side.
+ *
+ * Only the look changes: the platforms and the rail colliders are
+ * `buildStair`'s and stand exactly where they did.
+ */
+function buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, materials, buried }) {
+  const wooden = WOODEN_FLOOR.has(materials.floor);
+  const W = DOOR_W / 2;
+  const S = STAIR_START; const E = STAIR_END;
+  const slope = rise / STAIR_RUN;
+  // Height of the line through the steps' inner corners: 0 at the foot, `rise` at the head.
+  const pitch = (a) => (S - a) * slope;
+  const toWorld = (a, y, c) => [lower.x + (dx ? dx * a : c), lower.y + y, lower.z + (dz ? dz * a : c)];
+  const solid = (poly, c0, c1, material, ao = null, grain = null) => convexPrism(batcher, toWorld, poly, c0, c1, material, { chunk, ao }, grain);
+  const along = [-1 / Math.hypot(1, slope), slope / Math.hypot(1, slope)];
+  const shade = (i) => () => 0.72 + 0.28 * (i / STAIR_STEPS);
+
+  for (let i = 0; i < STAIR_STEPS; i++) {
+    const front = S - run * i; const back = front - run;
+    const y = riser * (i + 1);
+    if (wooden) {
+      solid([[front + 0.035, y - 0.055], [back, y - 0.055], [back, y], [front + 0.035, y]], -W, W, materials.floor, shade(i));
+      solid([[front, riser * i], [front, y - 0.055], [front - 0.03, y - 0.055], [front - 0.03, riser * i]], -W + 0.01, W - 0.01, materials.floor, shade(i));
+    } else {
+      // Down to a soffit a third of a metre under the pitch line.
+      const foot = (a) => Math.max(0, pitch(a) - 0.34);
+      solid([[front, foot(front)], [back, foot(back)], [back, y], [front, y]], -W, W, materials.floor, shade(i));
+    }
+  }
+
+  // `timber` is the half-timbered facade -- lime-wash with oak braces on it --
+  // and a string cut from it came out white. `wood` is the joiner's oak.
+  const frame = wooden ? 'wood' : materials.floor;
+  // The strings: from the floor in front of the first step to the edge of the
+  // opening, their top a hand above the nosings and their foot cut level.
+  const below = wooden ? 0.12 : 0.36;
+  const above = riser + 0.06;
+  const string = [
+    [S + above / slope, 0], [S - below / slope, 0], [E, rise - below], [E, rise], [E + above / slope, rise],
+  ];
+  const T = wooden ? 0.07 : 0.16;
+  for (const s of [-1, 1]) solid(string, s > 0 ? W : -W - T, s > 0 ? W + T : -W, frame, null, wooden ? along : null);
+  if (wooden) {
+    // The boarded underside, so the sawtooth of treads and risers is not
+    // what you see from the room below.
+    solid([[S, -0.1], [E, rise - 0.1], [E, rise - 0.06], [S, -0.06]], -W, W, materials.floor);
+  }
+
+  // The handrail: a newel at the foot and one at the head, the rail between
+  // them 0.9 m above the nosings, and balusters on every other tread.
+  const rail = wooden ? 'wood' : (buried ? 'rustiron' : 'iron');
+  const post = wooden ? 0.11 : 0.07;
+  const bar = wooden ? 0.045 : 0.03;
+  const R = (a) => pitch(a) + riser + 0.9;
+  const foot = S + 0.16; const head = E + 0.12;
+  for (const s of [-1, 1]) {
+    const c = s * (W + T / 2);
+    const box2 = (a0, a1, y0, y1, w, material) => solid([[a0, y0], [a1, y0], [a1, y1], [a0, y1]], c - w / 2, c + w / 2, material, null, wooden ? [0, 1] : null);
+    box2(foot + post / 2, foot - post / 2, 0, R(foot) + 0.12, post, rail);
+    box2(head + post / 2, head - post / 2, rise - 1.0, R(head) + 0.12, post, rail);
+    solid([[foot, R(foot) - 0.07], [head, R(head) - 0.07], [head, R(head)], [foot, R(foot)]], c - 0.04, c + 0.04, rail, null, wooden ? along : null);
+    for (let i = 1; i < STAIR_STEPS - 1; i += 2) {
+      const a = S - run * (i + 0.5);
+      box2(a + bar / 2, a - bar / 2, riser * (i + 1), R(a) - 0.06, bar, rail);
+    }
+  }
+}
+
 /** Straight flight from the lower room up through the opening in its ceiling. */
 function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform, materials, buried = false, shaftWalls = false, kerb = 'stonewall', lowerCeil = CEIL }) {
   const lower = worldOf(plan.lower);
@@ -7144,24 +7277,14 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
     const y = lower.y + riser * (i + 1);
     const w = dx !== 0 ? run : DOOR_W;
     const d = dz !== 0 ? run : DOOR_W;
-    batcher.add(box(w, riser, d), materials.floor, place(cx, y - riser / 2, cz),
-      { chunk, ao: () => 0.72 + 0.28 * (i / STAIR_STEPS) });
     addPlatform(cx - w / 2, cx + w / 2, cz - d / 2, cz + d / 2, y);
   }
+  buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, materials, buried });
 
   const segments = 6;
   for (const s of [-1, 1]) {
     const offX = dx !== 0 ? 0 : s * (DOOR_W / 2 + 0.15);
     const offZ = dz !== 0 ? 0 : s * (DOOR_W / 2 + 0.15);
-    for (let i = 0; i < segments; i++) {
-      const t = (i + 0.5) / segments;
-      const along = STAIR_START - STAIR_RUN * t;
-      const y = lower.y + rise * t + 0.95;
-      const w = dx !== 0 ? STAIR_RUN / segments : 0.18;
-      const d = dz !== 0 ? STAIR_RUN / segments : 0.18;
-      batcher.add(box(w, 0.18, d), buried ? 'rustiron' : 'iron', place(lower.x + dx * along + offX, y, lower.z + dz * along + offZ), { chunk });
-      batcher.add(box(0.13, 0.95, 0.13), buried ? 'rustiron' : 'iron', place(lower.x + dx * along + offX, y - 0.5, lower.z + dz * along + offZ), { chunk });
-    }
     // One collider per stretch of rail, spanning only the height the rail
     // is at there. It was one box from the floor to the top of the flight,
     // which sealed the room in two along the stair: in a sewer shaft the
@@ -8340,6 +8463,15 @@ const clutterProps = (room) => farmProps(room) || (REFUSE.test(room.name) ? REFU
  * Against a shop's walls, what its trade keeps there. The general list is a
  * guild hall's -- nettles, a hay bale and a trough in a baker's.
  */
+/**
+ * Against the wall of a room nobody trades in, what a household or an office
+ * keeps indoors. actors.js's own fallback list is a yard's: it stood a 2.5 m
+ * cartwheel in the Shiriff Post's front room, nettles on floorboards and a
+ * ladder leaning on a lobby wall, none of which the prose puts there and a
+ * judge photographed all three. A cart's wheel or a trough indoors needs the
+ * room to be a barn, and `farmProps` already says when it is.
+ */
+const INDOOR_PROPS = ['barrel', 'crate', 'sack', 'bench', 'stacked_crates', 'barrel_stack', 'firewood_pile', 'bucket', 'broom', 'rope_coil'];
 const TRADE_PROPS = {
   tavern: ['bench', 'bench', 'barrel', 'barrel_stack', 'firewood_pile', 'crate', 'bucket', 'broom'],
   smith: ['barrel', 'crate', 'firewood_pile', 'bucket', 'planks_pile', 'water_butt'],
@@ -8375,7 +8507,7 @@ function buildLooseProps({ room, pos, sides, decor, mats, plan = null, trade = n
     decor.push({
       kind: 'clutter', x: pos.x, y: pos.y, z: pos.z, half: SHELL,
       walls: blank, seed: hash3(room.vnum, 12, 0, 5), indoor: true,
-      props: farmProps(room) || TRADE_PROPS[trade] || null,
+      props: farmProps(room) || TRADE_PROPS[trade] || INDOOR_PROPS,
       // What the furniture already stands on, so a barrel is not stood in it.
       busy: plan ? plan.taken.slice(1) : null,
     });
