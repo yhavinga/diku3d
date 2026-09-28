@@ -2626,6 +2626,9 @@ export function populate(world, layout, built, options = {}) {
           x0: mesh.position.x - solid, x1: mesh.position.x + solid,
           z0: mesh.position.z - solid, z1: mesh.position.z + solid,
           y0: mesh.position.y, y1: mesh.position.y + 1.6,
+          // A fountain is a drum: round, so you walk round it (player.js).
+          // The modelled one's drum is 1.26 m in radius (props.py).
+          r: item.proto.itemType === ITEM.FOUNTAIN ? (modelled && instances ? 1.3 : solid) : undefined,
         });
       }
       if (item.proto.itemType === ITEM.FOUNTAIN) {
