@@ -5502,7 +5502,14 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
   if (enclosed) {
     for (const [end, next] of [[link.from, chain[1]], [link.to, chain[chain.length - 2]]]) {
       const endMats = pickMaterials(end.room, end.room.area);
-      if (!isBuried(endMats, end)) continue;
+      if (!isBuried(endMats, end)) {
+        closeCorners({
+          // At the corridor's own height, which a mound lifts with its rooms.
+          batcher, pos: { ...worldOf(end), y }, dir: dirBetween(end, next), chunk: chunkOf(end),
+          material: mats.wallIn, floor: mats.floor, ceiling: mats.ceil, addCollider,
+        });
+        continue;
+      }
       closeDoorway({ batcher, pos: worldOf(end), dir: dirBetween(end, next), chunk: chunkOf(end), material: endMats.wallIn, addCollider });
     }
   }
@@ -6767,6 +6774,40 @@ function closeDoorway({ batcher, pos, dir, chunk, material, addCollider }) {
   }
   add(HALF - T, HALF, -(DOOR_W / 2 + T), DOOR_W / 2 + T, y + DOOR_H, y + H);
   add(SHELL - 0.05, HALF - T, -DOOR_W / 2, DOOR_W / 2, y + DOOR_H, y + DOOR_H + 0.3);
+}
+
+/**
+ * Where a corridor meets a room above ground, the two corners between them.
+ *
+ * The corridor's walls stand 6-6.5 m off its line and stop at the cell edge;
+ * the room's walls stand 5.7 m off its middle. Either side of the doorway that
+ * leaves a slot 0.8 m deep and 0.3 m wide that nothing builds, and between two
+ * rooms of a freestanding building it looks out: walking north from #3001,
+ * the temple's corridor showed the sky and a roof across the square through
+ * its left-hand wall. A post in each corner closes it and leaves the room's
+ * face -- the temple's columns and windows -- to be seen down the corridor,
+ * which a face across the cell edge (`closeDoorway`) would hide.
+ */
+function closeCorners({ batcher, pos, dir, chunk, material, floor, ceiling, addCollider }) {
+  const y = pos.y;
+  const H = CEIL + SLAB;
+  // And the strip of floor in front of the room's face, where the grass 0.47 m
+  // below showed as a green line under its plinth. A centimetre down, so the
+  // doorway's own threshold wins wherever the two overlap.
+  const f = sewerRect(pos, dir, ROOM / 2, HALF, -HALF, HALF);
+  batcher.add(plane(f.x1 - f.x0, f.z1 - f.z0, 2), floor, place((f.x0 + f.x1) / 2, y - 0.01, (f.z0 + f.z1) / 2), { chunk });
+  // And over the same strip the corridor's ceiling carried on to the room's
+  // face: it stopped at the cell edge, and over a low front -- the Cleric's
+  // Bar -- the sky showed between the two.
+  const c = sewerRect(pos, dir, SHELL - 0.05, HALF, -HALF, HALF);
+  batcher.add(box(c.x1 - c.x0, SLAB, c.z1 - c.z0), ceiling,
+    place((c.x0 + c.x1) / 2, y + CEIL + SLAB / 2, (c.z0 + c.z1) / 2), { chunk, ao: () => 0.6 });
+  for (const s of [-1, 1]) {
+    const r = sewerRect(pos, dir, SHELL - 0.05, HALF, s * (SHELL - 0.05), s * HALF);
+    batcher.add(box(r.x1 - r.x0, H, r.z1 - r.z0), material,
+      place((r.x0 + r.x1) / 2, y + H / 2, (r.z0 + r.z1) / 2), { chunk, ao: wallAo(y) });
+    addCollider(r.x0, r.x1, r.z0, r.z1, y, y + H);
+  }
 }
 
 /**
@@ -8957,6 +8998,7 @@ function buildHorizon(group, bounds, groundY, layout) {
     'horizon-forest-ridge', -3, 'forest');
 
   // ---------------------------------------------------------------- hills --
+  const COPSE = 0x34482a;
   // The Shire: rolling farmland going blue with distance, a hedge-and-copse
   // comb in front, round-headed trees rather than spires.
   {
@@ -8991,9 +9033,14 @@ function buildHorizon(group, bounds, groundY, layout) {
         }
       }
     }
-    silhouette(points, colors, new THREE.MeshBasicMaterial({
-      color: 0x18221a, side: THREE.DoubleSide, vertexColors: true,
-    }), 'horizon-hills-copses', 0, 'hills');
+    // Broadleaf crowns in farmland, in daylight: an albedo lit by the hour
+    // like the slopes behind them, not a near-black left for the fog to lift.
+    // The Shire's noon fog is thin, so 0x18221a stayed what it was -- a black
+    // cardboard strip, RGB 4,7,8, across a sunlit field. Kept out of `haze`
+    // for the reason the combs are: a copse is overlapping loose crowns.
+    const copse = new THREE.MeshBasicMaterial({ color: COPSE, side: THREE.DoubleSide, vertexColors: true });
+    lit.push({ material: copse, albedo: new THREE.Color(COPSE) });
+    silhouette(points, colors, copse, 'horizon-hills-copses', 0, 'hills');
     // Two ranges of hills, the nearer greener, the further gone to haze.
     strip(rings[1].r + 20, 256, waves([[4, 7], [7, 5], [13, 2.5]], 22), drift(1.1, 0.95),
       litSlope(0x3f5634), 'horizon-hills-near', -2, 'hills');

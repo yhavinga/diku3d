@@ -18,6 +18,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ITEM } from './are.js';
 import { weaponKind } from './fx.js';
+import { buriedTwin } from './textures.js';
 
 const TAKE = 1;
 const hash = (s, salt = 0) => {
@@ -397,10 +398,14 @@ export function createItems({ scene, game, library, built }) {
   function draw(obj) {
     const indoor = indoorAt(obj);
     const shape = shapeOf(obj, indoor);
+    // Underground an object is lit as the sewer is, not by the sky over the
+    // rock: a crate in the Playpen metered RGB 0 at night.
+    const info = built.rooms.get(obj.inRoom);
+    const buried = !!info && (info.cell.level < 0 || !!(info.materials && info.materials.inRock));
     const node = new THREE.Group();
     const inner = new THREE.Group();
     for (const [geometry, material] of shape.parts) {
-      const mesh = new THREE.Mesh(geometry, material);
+      const mesh = new THREE.Mesh(geometry, buried ? buriedTwin(material) : material);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       inner.add(mesh);

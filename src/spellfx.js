@@ -543,11 +543,14 @@ const AURA_FRAG = `
     // Only the silhouette: facing surfaces add nothing, so the body stays
     // readable inside its halo even at arm's length.
     float f = pow(rim, 3.2);
-    // Soft (sanctuary): a broad glow that peaks inside the shell's outline
-    // and fades to nothing at it, so there is no drawn edge -- a shell's
-    // outline is a hard line at arm's length however it is lit -- and gentler
-    // still up close.
-    float soft = pow(rim, 2.6) * smoothstep(1.0, 0.72, rim) * 1.8 * (0.5 + 0.5 * smoothstep(0.8, 4.0, vDist));
+    // Soft (sanctuary): light along the body's own edge and nowhere else --
+    // rim light, the way a figure stands against a bright window. It used to
+    // be a broad band peaking *inside* a shell blown 6 cm off the body, and
+    // what that drew was a second, translucent, inflated copy of the whole
+    // figure over it: the executioner and the brass dragon read as ghosts in
+    // glass. The shell now sits a centimetre off the skin, so its outline is
+    // the body's, and only the last few degrees of the turn light up.
+    float soft = pow(rim, 5.0) * 1.6 * (0.6 + 0.4 * smoothstep(0.8, 4.0, vDist));
     f = mix(f, soft, uSoft);
     float n = vnoise(vW * 3.2 + vec3(0.0, -uTime * 1.3, 0.0));
     // A slow shimmer rising through it.
@@ -2479,7 +2482,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   const auras = new Map();   // figure -> { meshes, material, pulse }
   const AURA_KIND = [
     // flag or affect type, colour, intensity, thickness, flicker
-    { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.16, thick: 0.06, flicker: 0.1, soft: 1 },
+    { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.3, thick: 0.012, flicker: 0.05, soft: 1 },
     { test: (ch) => ch.affectedBy & AFF.FAERIE_FIRE, color: PAL.faerie.glow, intensity: 0.9, thick: 0.025, flicker: 0.6 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'shield' || a.type === 'stone skin'), color: PAL.ward.glow, intensity: 0.55, thick: 0.03, flicker: 0 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'armor' || a.type === 'protection'), color: PAL.ward.glow, intensity: 0.35, thick: 0.025, flicker: 0 },
@@ -2574,7 +2577,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
           const k = Math.sin(Math.PI * Math.min(1, pu * 2.5)) * (1 - pu * 0.3);
           if (!kind || a.pulse.intensity * k > intensity) {
             u.uColor.value.copy(a.pulse.color);
-            u.uThick.value = a.pulse.soft ? 0.06 : 0.03;
+            u.uThick.value = a.pulse.soft ? 0.012 : 0.03;
             u.uFlicker.value = 0.1;
             u.uSoft.value = a.pulse.soft;
             intensity = a.pulse.intensity * k;

@@ -8,6 +8,27 @@ is an opinion.
 
 ## 2026-09-28 — wave 6: what the rooms say they are
 
+### Rendering correctness (wave6-renderfix)
+
+- **Anything below ground must be dressed as buried, not only the sewer's
+  recipes.** Marble, door leaves, items, props, furniture and figures were
+  lit by the sky underground; 40 underground rooms differed noon-vs-night
+  by 3.70 mean luma, now 0.13. `buriedTwin(material, { sunless })`.
+- **Things that take no shadow get the sun through the rock** — door leaves
+  and skinned bodies were lit by the noon sun 7 m down. `sunless: true`.
+- **A thin line on the sky may be real geometry far away.** The "smoke
+  line" was the #3120 chain. Hiding children under `surface` does nothing,
+  because zone routing turns them back on each render; go one level down.
+- **A glowing shell brightest inside its own outline draws a ghost copy.**
+  Sanctuary sits 1.2 cm off the skin and lights only the silhouette edge.
+- **Covered corridors met above-ground rooms with an open 0.8 m slot each
+  side of the doorway** — the sky through the temple wall. `closeCorners`.
+- Outdoor figures and the first-person hands get a night fill
+  (`OUTDOOR_FILL = 1 - daylight`); a night cityguard 53% → 7% of pixels
+  under luma 12.
+- In probes, re-render with everything visible before a screenshot: with
+  the loop halted the shot is the last frame drawn, maybe with things hid.
+
 ### What the rooms say they are (wave6-proseshell)
 
 - **A cloned material keeps its maps but not its `defines` or

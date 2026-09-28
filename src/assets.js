@@ -16,6 +16,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { interiorGlass, markPanes } from './windows.js';
 import { CLUTTER_NAMES } from './clutter.js';
+import { buriedTwin } from './textures.js';
+
+/** In a placement's chunk name: it stands in a buried room (StaticBatches). */
+export const BURIED_MARK = '~buried';
 
 const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
@@ -653,6 +657,9 @@ export class StaticBatches {
   }
 
   entry(region, material) {
+    // Whatever is built or placed below ground is lit as the sewer is (see
+    // `buriedTwin`): an underground region, or a chunk its caller marked.
+    if (region.startsWith('d:') || region.includes(BURIED_MARK)) material = buriedTwin(material);
     const key = `${region}|${material.uuid}`;
     let entry = this.entries.get(key);
     if (!entry) {
