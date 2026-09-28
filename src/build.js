@@ -4858,7 +4858,13 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
   if (enclosed) {
     for (const [end, next] of [[link.from, chain[1]], [link.to, chain[chain.length - 2]]]) {
       const endMats = pickMaterials(end.room, end.room.area);
-      if (!isBuried(endMats, end)) continue;
+      if (!isBuried(endMats, end)) {
+        closeCorners({
+          batcher, pos: worldOf(end), dir: dirBetween(end, next), chunk: chunkOf(end),
+          material: mats.wallIn, floor: mats.floor, addCollider,
+        });
+        continue;
+      }
       closeDoorway({ batcher, pos: worldOf(end), dir: dirBetween(end, next), chunk: chunkOf(end), material: endMats.wallIn, addCollider });
     }
   }
@@ -5547,6 +5553,34 @@ function closeDoorway({ batcher, pos, dir, chunk, material, addCollider }) {
   }
   add(HALF - T, HALF, -(DOOR_W / 2 + T), DOOR_W / 2 + T, y + DOOR_H, y + H);
   add(SHELL - 0.05, HALF - T, -DOOR_W / 2, DOOR_W / 2, y + DOOR_H, y + DOOR_H + 0.3);
+}
+
+/**
+ * Where a corridor meets a room above ground, the two corners between them.
+ *
+ * The corridor's walls stand 6-6.5 m off its line and stop at the cell edge;
+ * the room's walls stand 5.7 m off its middle. Either side of the doorway that
+ * leaves a slot 0.8 m deep and 0.3 m wide that nothing builds, and between two
+ * rooms of a freestanding building it looks out: walking north from #3001,
+ * the temple's corridor showed the sky and a roof across the square through
+ * its left-hand wall. A post in each corner closes it and leaves the room's
+ * face -- the temple's columns and windows -- to be seen down the corridor,
+ * which a face across the cell edge (`closeDoorway`) would hide.
+ */
+function closeCorners({ batcher, pos, dir, chunk, material, floor, addCollider }) {
+  const y = pos.y;
+  const H = CEIL + SLAB;
+  // And the strip of floor in front of the room's face, where the grass 0.47 m
+  // below showed as a green line under its plinth. A centimetre down, so the
+  // doorway's own threshold wins wherever the two overlap.
+  const f = sewerRect(pos, dir, ROOM / 2, HALF, -HALF, HALF);
+  batcher.add(plane(f.x1 - f.x0, f.z1 - f.z0, 2), floor, place((f.x0 + f.x1) / 2, y - 0.01, (f.z0 + f.z1) / 2), { chunk });
+  for (const s of [-1, 1]) {
+    const r = sewerRect(pos, dir, SHELL - 0.05, HALF, s * (SHELL - 0.05), s * HALF);
+    batcher.add(box(r.x1 - r.x0, H, r.z1 - r.z0), material,
+      place((r.x0 + r.x1) / 2, y + H / 2, (r.z0 + r.z1) / 2), { chunk, ao: wallAo(y) });
+    addCollider(r.x0, r.x1, r.z0, r.z1, y, y + H);
+  }
 }
 
 /**
