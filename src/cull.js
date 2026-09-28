@@ -623,7 +623,13 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
    * round the sphere, which is conservative and costs a handful of flops.
    */
   const e = new Float64Array(16);
-  function sphereVisible(x, y, z, r) {
+  function sphereVisible(x, y, z, r, bound = false) {
+    // The zones' answer, for what is not under the zones: the actors' trees,
+    // lamps and props stand in regions of their own that reach from the
+    // street down into the sewer. A single thing goes by its centre; a volume
+    // round many only once all of it is on the hidden side.
+    if (surfaceHidden && (bound ? y - r : y) > zoneLine) return false;
+    if (deepHidden && (bound ? y + r : y) < deepLine) return false;
     const vx = e[0] * x + e[4] * y + e[8] * z + e[12];
     const vy = e[1] * x + e[5] * y + e[9] * z + e[13];
     const vz = e[2] * x + e[6] * y + e[10] * z + e[14];
@@ -657,6 +663,10 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     return false;
   }
   let farPlane = 900;
+  let surfaceHidden = false;
+  let deepHidden = false;
+  let zoneLine = 0;
+  let deepLine = 0;
 
   const _sphere = new THREE.Sphere();
   function objectWithin(o, test) {
@@ -680,7 +690,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       if (!g.boundingSphere) g.computeBoundingSphere();
       _sphere.copy(g.boundingSphere).applyMatrix4(o.matrixWorld);
     }
-    return sphereVisible(_sphere.center.x, _sphere.center.y, _sphere.center.z, _sphere.radius);
+    return sphereVisible(_sphere.center.x, _sphere.center.y, _sphere.center.z, _sphere.radius, true);
   }
 
   /**
@@ -763,7 +773,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
   const shadowFrustum = new THREE.Frustum();
   const _m = new THREE.Matrix4();
 
-  const seenOrCast = (x, y, z, r) => sphereVisible(x, y, z, r)
+  const seenOrCast = (x, y, z, r, bound) => sphereVisible(x, y, z, r, bound)
     || shadowFrustum.intersectsSphere(_sphere.set(_v.set(x, y, z), r));
 
   /** Keep the instances `keep(x, y, z, r)` accepts, in their original order. */
@@ -772,7 +782,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     let n = 0;
     for (const b of entry.buckets) {
       const s = b.sphere;
-      if (!keep(s.center.x, s.center.y, s.center.z, s.radius)) continue;
+      if (!keep(s.center.x, s.center.y, s.center.z, s.radius, true)) continue;
       for (const i of b.ids) {
         const o = i * 4;
         if (keep(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) kept[n++] = i;
@@ -868,6 +878,10 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       zones.update(camera.position);
       if (!zones.surface.visible) for (const o of sky) if (o.visible) hiddenNow.push(o);
     }
+    // A cull, so off with the rest: `?cull=off` must still draw everything.
+    surfaceHidden = state.enabled && !!zones && !zones.surface.visible;
+    deepHidden = state.enabled && !!zones && !zones.deep.visible;
+    if (zones) { zoneLine = zones.groundY - 1; deepLine = zones.groundY - LEVEL_H / 2; }
     if (!state.enabled) {
       state.active = false;
       for (const entry of instanced) restoreInstances(entry);
@@ -884,6 +898,13 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
 
     const at = locate(camera.position);
     const cell = cellAt(at.level, at.x, at.z, true);
+    // The eye's own cell before anything left queued from where it was: after
+    // a recall or a goto the queue still holds the last place's neighbours,
+    // and the new cell went unmeasured -- and unculled -- behind them.
+    if (!cell.done && queue[0] !== cell) {
+      queue.splice(queue.indexOf(cell), 1);
+      queue.unshift(cell);
+    }
     state.cell = cell;
     state.active = eyeInside(cell, camera.position);
     state.windows = state.active ? windowsFor(cell) : [];
@@ -911,7 +932,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
         if (o.count === 0) hiddenNow.push(o);
       } else if (o.isBatchedMesh && o.anyVisible) {
         if (!o.anyVisible(sphereVisible)) hiddenNow.push(o);
-      } else if (state.active && !objectVisible(o)) {
+      } else if ((state.active || surfaceHidden || deepHidden) && !objectVisible(o)) {
         hiddenNow.push(o);
       }
     }
@@ -921,7 +942,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
 
     cullHook.camera = camera;
     cullHook.stamp = state.stamp;
-    cullHook.test = state.active ? sphereVisible : null;
+    cullHook.test = state.active || surfaceHidden || deepHidden ? sphereVisible : null;
   }
 
   /** After the frame: put back what was hidden, so nothing else ever sees it. */

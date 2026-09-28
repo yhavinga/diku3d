@@ -1408,7 +1408,7 @@ async function boot() {
     // `wetness` is exposed because it is a slow-moving number nothing on screen
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
-    pipeline, environment, materials, wetness,
+    pipeline, environment, materials, wetness, assets,
     player, hud, layout, built, actors, world, applyTime, applyWeather, state, audio, visibility,
     times: TIMES, overcast: OVERCAST, rain,
     /**
