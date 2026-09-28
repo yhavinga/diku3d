@@ -116,7 +116,10 @@ BUDGET = {
     "beast_dragon": 8200,
     # monsters.py. The legged ones pay for their legs: eight of them, each a
     # separate little surface, is where a spider's triangles go.
-    "beast_spider": 5000, "beast_beetle": 4600, "beast_scorpion": 4800, "beast_drider": 7200,
+    "beast_spider": 5000, "beast_beetle": 4600, "beast_scorpion": 4800,
+    # Two in the world. Sixteen jointed, spined leg segments a side is where
+    # it goes, and a sculpted face with a head of hair on top of that.
+    "beast_drider": 12500,
     "beast_bat": 3400, "beast_mud": 5600, "beast_myconoid": 4400, "beast_ratman": 4600,
     "beast_imp": 4600, "beast_naga": 5600,
     # One in the world, ten metres of it seen whole: rings, plates, spines,

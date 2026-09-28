@@ -741,8 +741,8 @@ const BEASTS = [
   // The chreffn: 'head and torso copper-covered, with yellow, glowing eyes,
   // the lower body in an orange shading', crawling -- the drider's build, in
   // copper over orange.
-  { test: /\bchreffns?\b/, asset: 'beast_drider', scale: 0.72, coat: 0xa8521c, pale: 0xb07a44, points: 0x6a4020, glow: 0xffd02a, box: [1.0, 1.6, 'quad', 0xa8521c] },
-  { test: /\bdriders?\b/, asset: 'beast_drider', scale: 1.0, coat: 0x19161a, pale: 0x3d3947, points: 0xe2dfe8, glow: 0xff3a24, box: [1.2, 2.2, 'quad', 0x19161a] },
+  { test: /\bchreffns?\b/, asset: 'beast_drider', scale: 0.72, coat: 0xa8521c, pale: 0xb07a44, points: 0x6a4020, patch: 0xd08a3a, cover: 0.5, glow: 0xffd02a, box: [1.0, 1.6, 'quad', 0xa8521c] },
+  { test: /\bdriders?\b/, asset: 'beast_drider', scale: 1.0, coat: 0x26222c, pale: 0x4a4458, points: 0xe8e4ee, patch: 0x6a5282, cover: 0.5, glow: 0xff3a24, box: [1.2, 2.2, 'quad', 0x19161a] },
   { test: /\b(huge|giant|queen|empress|arachnos)\b.*\bspiders?\b|\bspiders?\b.*\b(huge|giant|queen|empress|arachnos)\b/, asset: 'beast_spider', scale: 2.2, coat: 0x1c1816, pale: 0x7a2a1c, points: 0x0d0b0a, patch: 0x2c2420, cover: 0.3, box: [0.5, 1.6, 'quad', 0x1c1816] },
   { test: /\bspiders?\b/, asset: 'beast_spider', scale: 0.6, coat: 0x2e2621, pale: 0x8f7d66, points: 0x16120f, patch: 0x44382e, cover: 0.35, box: [0.15, 0.5, 'quad', 0x2e2621] },
   { test: /\bscorpions?\b/, asset: 'beast_scorpion', scale: 0.8, coat: 0x7a3218, pale: 0xb0643c, points: 0x2e1409, patch: 0x5a2410, cover: 0.3, box: [0.12, 0.45, 'quad', 0x7a3218] },
@@ -948,7 +948,9 @@ const _patch = new THREE.Color();
  * beaks) keep the colour they were modelled with, times `horn` if the look
  * darkens them -- a crow's beak and legs are the duck's, in black.
  */
-const COATED = new Set(['fur', 'feather', 'scales', 'chitin', 'ooze', 'hide', 'bone']);
+// `skin` is the drider's drow half: its face, hair and torso are painted from
+// the masks like any coat, the skin the pale channel and the hair the points.
+const COATED = new Set(['fur', 'feather', 'scales', 'chitin', 'ooze', 'hide', 'bone', 'skin']);
 
 function paintedGeometry(asset, node, tag, look) {
   const key = `${node.name}|${look.key}`;
