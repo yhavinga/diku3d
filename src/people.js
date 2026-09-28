@@ -532,7 +532,10 @@ export function personOf(proto, ITEM, instance = 0) {
   if (ELF.test(w)) { out.scale = 1.03; out.pieces = out.pieces.filter((p) => !p.startsWith('beard') && p !== 'moustache'); }
   // Last, so nothing above can put a halfling back at a man's height; it
   // reads the prose on purpose, because the Shire mostly only says so there.
-  if (HALFLING.test(prose)) { out.scale = Math.min(out.scale, 1) * 0.6; out.headScale = Math.max(out.headScale, 1.1); }
+  // Their own build, not a man at 0.6 (actors.js `BUILDS`): shorter legs and
+  // arms, a broader trunk, a bigger head -- so the scale that makes them
+  // waist-high to a man is a little more than a man's 0.6.
+  if (HALFLING.test(prose)) { out.scale = Math.min(out.scale, 1) * 0.68; out.headScale = Math.max(out.headScale, 1.18); out.build = 'halfling'; }
   // A head is a smaller share of a bigger man.
   if (giant) { out.scale = giantScale(`${proto.long || ''} ${proto.description || ''}`); out.headScale = 0.94; }
   if (out.scale < 0.9) out.pieces = out.pieces.filter((p) => !p.startsWith('beard') && p !== 'moustache' || DWARF.test(w));

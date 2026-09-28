@@ -1726,6 +1726,40 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     light.spawn({ x: 0, y: 0, z: 0, anchor: fx.anchor, life: 0.05, size: coreSize * 0.8, color: (palette.core || palette.mote || palette.glow), alpha: 0.35 + u * 0.4, shape: 1, drag: 0, fadeIn: 0 });
   }
 
+  /**
+   * What stands between the hand and the target. The hand is off to the
+   * side of the eye (yours 0.2 m right), so a target you can see can still
+   * be behind a plinth's corner from the fist -- and a ball flown in a
+   * straight line from it went through the stone. When only the hand's line
+   * is blocked the flight bends out through a point on the eye's line
+   * (`via`); when the eye's is blocked too it truly is in the way, and the
+   * thing bursts where the line meets it (`wall`), not on the body.
+   */
+  const flightCounts = { clear: 0, via: 0, wall: 0 };
+  function lineOfFlight(fx, src) {
+    const nav = actors && actors.nav;
+    if (!nav || !nav.sightBlocked || !fx.to || fx.to.player || fx.to === fx.from) return;
+    const a = fx.aim;
+    const blocked = (p, q) => nav.sightBlocked(p.x, p.y, p.z, q.x, q.y, q.z);
+    if (!blocked(src, a)) { flightCounts.clear++; return; }
+    const eye = fx.from.player ? camera.position : mouthPoint(fx.from, new THREE.Vector3());
+    if (!blocked(eye, a)) {
+      const d = eye.distanceTo(a);
+      const via = new THREE.Vector3().lerpVectors(eye, a, Math.min(0.45, 1.6 / Math.max(1e-3, d)));
+      if (!blocked(src, via)) { fx.data.via = via; flightCounts.via++; return; }
+    }
+    // Bisect for where the hand's line first meets something.
+    let lo = 0; let hi = 1;
+    const p = new THREE.Vector3();
+    for (let k = 0; k < 12; k++) {
+      const mid = (lo + hi) / 2;
+      p.lerpVectors(src, a, mid);
+      if (blocked(src, p)) hi = mid; else lo = mid;
+    }
+    fx.data.wall = new THREE.Vector3().lerpVectors(src, a, Math.max(0, lo - 0.02));
+    flightCounts.wall++;
+  }
+
   function release(fx) {
     fx.released = true;
     fx.releaseT = fx.t;
@@ -1757,6 +1791,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       S.missile(src);
       takeLight(PAL.missile.light, (t) => (t < fx.flight + 0.15 && !fx.done ? { p: fx.data.head || src, intensity: 7, distance: 9 } : null));
     } else if ((f === 'fireball') && fx.to) {
+      lineOfFlight(fx, src);
       fx.data.ball = sphere();
       S.roar(src, fx.flight + 0.2);
       takeLight(PAL.fire.light, (t) => (fx.data.ballPos && !fx.landed ? { p: fx.data.ballPos, intensity: 24, distance: 13 } : null));
@@ -1870,9 +1905,16 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         if (!fx.to) break;
         const pos = fx.data.ballPos || (fx.data.ballPos = new THREE.Vector3());
         // At you, it bursts at arm's length (see impact), so it flies there.
-        const end = fx.to.player ? camera.getWorldDirection(_w).multiplyScalar(2.6).add(camera.position).add({ x: 0, y: -0.35, z: 0 }) : aim;
-        pos.lerpVectors(src, end, u);
-        pos.y += Math.sin(Math.PI * u) * Math.min(1.2, dist * 0.08);
+        const end = fx.to.player ? camera.getWorldDirection(_w).multiplyScalar(2.6).add(camera.position).add({ x: 0, y: -0.35, z: 0 }) : (fx.data.wall || aim);
+        if (fx.data.via && !fx.data.wall) {
+          // Out round the corner and on: a quadratic through the eye's line.
+          const s1 = 1 - u; const v = fx.data.via;
+          pos.set(s1 * s1 * src.x + 2 * s1 * u * v.x + u * u * end.x, s1 * s1 * src.y + 2 * s1 * u * v.y + u * u * end.y, s1 * s1 * src.z + 2 * s1 * u * v.z + u * u * end.z);
+        } else {
+          pos.lerpVectors(src, end, u);
+          // The lob only where it cannot carry the ball into what stopped it.
+          if (!fx.data.wall) pos.y += Math.sin(Math.PI * u) * Math.min(1.2, dist * 0.08);
+        }
         const ball = fx.data.ball;
         // Out of your own hand it starts small and swells as it leaves, or
         // the first frames are a ball of fire filling the view.
@@ -2142,6 +2184,11 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         // On you it goes off at arm's length and a size that leaves the frame
         // readable: the wash at the edges says the rest.
         if (onYou) { camera.getWorldDirection(_v); aim.copy(camera.position).addScaledVector(_v, 2.6); aim.y -= 0.35; }
+        if (fx.data.wall) {
+          // Stopped by what was in the way: it goes off there, on the ground below it.
+          explode(fx.data.wall, feet.set(fx.data.wall.x, feet.y, fx.data.wall.z), fx.saved ? 0.8 : 1);
+          break;
+        }
         explode(aim, feet, onYou ? 0.35 : (fx.saved ? 0.8 : 1));
         if (hitAny) hurtFigure(target, 1.4);
         if (onYou) flashScreen('radial-gradient(ellipse at 50% 50%, rgba(255,170,80,0) 25%, rgba(255,120,30,0.6) 72%, rgba(140,30,0,0.8) 100%)', 0.85, 700);
@@ -2924,6 +2971,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         effects: effects.length, light: light.n, matter: matter.n, ribbonVerts: glow.v + shade.v,
         decals: decals.filter((d) => d.busy).length, spheres: spheres.filter((s) => s.busy).length,
         lights: lights.filter((l) => l.busy).length, heat: heat.live.length, auras: [...auras.values()].filter((a) => a.on).length,
+        flight: { ...flightCounts },
       };
     },
     pools: { light, matter, glow, shade },

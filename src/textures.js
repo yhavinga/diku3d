@@ -2433,6 +2433,80 @@ const SURFACES = {
     s.height = drift * 0.3 + fine * 0.1 + lump * 0.4;
     s.rough = 0.96 - lump * 0.1;
   },
+
+  /**
+   * "Smooth purple stone walls", "the floor is made from black stone": dressed
+   * slabs with hairline joints, honed rather than polished to a mirror, in a
+   * pale neutral that build.js tints to whatever colour the prose names -- one
+   * bake for every coloured stone room. Five 0.6 m courses of 1.5 m slabs on a
+   * 3 m tile, half-bonded, each slab a shade of its own and a faint drifting
+   * figure in the stone.
+   */
+  polished(u, v, s) {
+    const rows = 5; const cols = 2;
+    const ry = v * rows; const row = Math.floor(ry); const fy = ry - row;
+    const rx = u * cols + (row % 2) * 0.5; const col = Math.floor(rx); const fx = rx - col;
+    const id = hash2(((col % cols) + cols) % cols, row, 97, 2203);
+    // Distance to the nearest joint, in metres of a 3 m tile.
+    const edge = Math.min(Math.min(fx, 1 - fx) * (3 / cols), Math.min(fy, 1 - fy) * (3 / rows));
+    const joint = edge < 0.005 ? 1 : 0;
+    const arris = clamp01(1 - (edge - 0.005) / 0.014);
+    const cloud = fbm(u * 4 + id * 3, v * 4, 4, 2207, 4);
+    const turb = fbm(u * 3, v * 3, 3, 2213, 3);
+    const figure = Math.pow(1 - Math.abs(Math.sin((u * 1.3 + v * 0.5 + turb * 1.5 + id) * Math.PI * 2)), 18);
+    const tone = 0.93 + (id - 0.5) * 0.1 + (cloud - 0.5) * 0.14;
+    const base = rgb(0xd2cec8);
+    let c = [base[0] * tone, base[1] * tone, base[2] * tone];
+    c = mix(c, rgb(0xe6e3de), figure * 0.35);
+    s.color = joint ? mix(c, rgb(0x34322f), 0.85) : mix(c, [c[0] * 0.8, c[1] * 0.8, c[2] * 0.8], arris * 0.5);
+    s.height = 0.62 - arris * 0.22 - joint * 0.3 + cloud * 0.015;
+    // Honed, not mirror-polished: at 0.27 the sewer's near-black sheen was
+    // most of what the walls showed, and a coloured room read as black.
+    s.rough = joint ? 0.72 : 0.5 + cloud * 0.12 + arris * 0.1;
+  },
+
+  /**
+   * The inside of a hollow tree: the wood the heart rotted out of, walked
+   * smooth where hands have touched it. Fibres run up the trunk and part
+   * round the knots, the grain darker in its furrows, the heartwood a warm
+   * reddish brown. `v` runs up the trunk.
+   */
+  livingwood(u, v, s) {
+    const warp = (fbm(u * 3, v * 2, 3, 2231, 3) - 0.5) * 2.2;
+    // Knots: a few per tile, the grain bending round each.
+    const [kd, , kid] = cellular(u * 3, v * 2, 3, 2237, 0.4);
+    const knot = kid > 0.72 ? clamp01(1 - kd * 3.2) : 0;
+    const swirl = knot * Math.sin(kd * 22) * 0.35;
+    const fibre = fbm(u * 46 + warp * 6 + swirl * 8, v * 3, 46, 2239, 2);
+    const furrow = clamp01((0.42 - fibre) * 4);
+    const band = fbm(u * 5 + warp, v * 1.5, 5, 2243, 3);
+    let c = mix(rgb(0x7a4f30), rgb(0xa77449), band * 0.8 + fibre * 0.3);
+    // Softly: at full strength the furrows read as tiger stripes by lamplight.
+    c = mix(c, rgb(0x4a2e1b), furrow * 0.42 + knot * 0.4);
+    s.color = c;
+    s.height = 0.5 + fibre * 0.35 - furrow * 0.25 - knot * 0.15;
+    s.rough = 0.58 + furrow * 0.25 - band * 0.08;
+  },
+
+  /**
+   * "The walls of the cavern are several feet thick with ice": blue-white
+   * ice with the cracks in it lit paler than the body, bubbles trapped in
+   * it, and a wet sheen. Opaque: there is no refraction to give it.
+   */
+  ice(u, v, s) {
+    const cloud = fbm(u * 4, v * 4, 4, 2251, 4);
+    const [, crack] = cellular(u * 5, v * 5, 5, 2257, 0.5);
+    // Bubbles: one to a lattice cell at most, a disc round a jittered point.
+    const bx = u * 30; const by = v * 30; const ix = Math.floor(bx); const iy = Math.floor(by);
+    const jx = hash2(ix, iy, 30, 2263) * 0.6 + 0.2; const jy = hash2(ix, iy, 30, 2269) * 0.6 + 0.2;
+    const bubble = hash2(ix, iy, 30, 2267) > 0.7 ? clamp01(1 - Math.hypot(bx - ix - jx, by - iy - jy) * 9) : 0;
+    const line = clamp01(1 - crack * 18);
+    let c = mix(rgb(0x8fb2c4), rgb(0xd8e8ef), cloud);
+    c = mix(c, rgb(0xf2f8fa), line * 0.6 + bubble * 0.5);
+    s.color = c;
+    s.height = 0.5 + cloud * 0.08 - line * 0.18 + bubble * 0.05;
+    s.rough = 0.08 + line * 0.3 + cloud * 0.06;
+  },
 };
 
 // -------------------------------------------------------------- baking ----
@@ -2772,6 +2846,13 @@ const RECIPES = {
   hide: { surface: 'hide', scale: 0.25, normalScale: 0.4, env: 0.5, wet: 0, detail: 0, moving: true },
   // A troll's skin, one of the surfaces a person is made of (dress.js).
   warthide: { surface: 'warthide', scale: 0.3, normalScale: 0.6, env: 0.45, wet: 0, detail: 0, moving: true },
+  // What a room's own words say its shell is made of (src/shells.js
+  // `readShell`): honed stone in any colour, tinted per room in build.js; the
+  // hollow of a tree; ice. `polisheddeep` is the same stone underground.
+  polished: { surface: 'polished', scale: 3.0, normalScale: 0.45, env: 1.0, wet: 0, detail: 0.2 },
+  polisheddeep: { surface: 'polished', scale: 3.0, normalScale: 0.45, env: 1, wet: 0, detail: 0.2, buried: true },
+  livingwood: { surface: 'livingwood', scale: 2.4, normalScale: 0.9, env: 0.7, wet: 0, detail: 0.4 },
+  ice: { surface: 'ice', scale: 3.0, normalScale: 0.5, env: 1.4, wet: 0, detail: 0.15 },
 };
 
 // --------------------------------------------------------------- decals ----
@@ -2942,6 +3023,648 @@ function createDecals(materials) {
     material.defaultAttributeValues = { aIndoor: [0] };
     materials[material.name] = material;
   }
+}
+
+// -------------------------------------------------------------- paintings ----
+
+/**
+ * What the prose says is painted, drawn or written on a room's walls, as
+ * against hung on them (clutter.js frames those): "most of the walls are
+ * covered by ancient wall paintings picturing Gods, Giants and peasants",
+ * "drawings of faces in pain are on the walls", "the walls are covered with
+ * blood", "you read the number '666'".
+ *
+ * Drawn with the 2D canvas at boot -- a figure is a handful of curves, which
+ * a per-pixel surface function cannot draw -- then weathered per pixel and
+ * handed to the same decorated material as every wall, so a painting is lit
+ * by the room it is in (indoor bounce, the sewer's buried fill) exactly as
+ * the stone under it is. Laid by build.js as quads with their own UVs, from
+ * the regions below.
+ *
+ * Canvas rows run down and a DataTexture's run up, so every region's `v` is
+ * measured from the bottom here.
+ */
+
+// Fresco earths. They go through the albedo lift like every baked colour, so
+// they are picked darker than they read on a swatch.
+const FRESCO = {
+  ground: '#d9c9a8', plaster: '#c7b692', line: '#2b1d16', ochre: '#c09037', gold: '#cfa03a',
+  red: '#8e3320', terra: '#a8532d', lapis: '#34507f', lapisDark: '#243a5e', verdigris: '#4b7563',
+  flesh: '#d9b48a', peasant: '#9a5f3a', giant: '#7b8583', giantDark: '#59625f', white: '#e9e0cc',
+  sky: '#7f97a6', skyLow: '#a9b3ad', field: '#b8984f', fieldDark: '#8f7337', black: '#1d1714',
+  dado: '#6a2819',
+};
+
+/** Where each composition lies in the mural atlas: [u0, v0, u1, v1], v up. */
+export const MURAL_REGIONS = {
+  wideA: [0, 0.5, 0.75, 1], tallA: [0.75, 0.5, 1, 1],
+  wideB: [0, 0, 0.75, 0.5], tallB: [0.75, 0, 1, 0.5],
+};
+/** The faces atlas: three by three, `faceRegion(k)` for the k-th. */
+export const faceRegion = (k) => {
+  const i = k % 3; const j = Math.floor(k / 3) % 3;
+  return [i / 3, 1 - (j + 1) / 3, (i + 1) / 3, 1 - j / 3];
+};
+/** The blood atlas: two by two. */
+export const bloodRegion = (k) => {
+  const i = k % 2; const j = Math.floor(k / 2) % 2;
+  return [i / 2, 1 - (j + 1) / 2, (i + 1) / 2, 1 - j / 2];
+};
+
+function canvas2d(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  return c;
+}
+
+/** A small deterministic generator, so the paintings are the same every boot. */
+function paintRng(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * One figure, in the hieratic manner of a temple wall: frontal or in
+ * profile, outlined in black, flat earth colours. `h` is its height in
+ * pixels from the soles to the crown; `dir` which way it faces.
+ */
+function paintFigure(ctx, f) {
+  const {
+    x, base, h, dir = 1, robe = FRESCO.lapis, trim = FRESCO.gold, skin = FRESCO.flesh,
+    hair = FRESCO.black, bulk = 1, legs = false, seated = false, halo = false, beard = false,
+    crown = false, arms = [0.35, -0.5], hold = null, lying = false,
+  } = f;
+  ctx.save();
+  if (lying) {
+    // A fallen giant: the same figure, turned onto its back along the ground.
+    ctx.translate(x, base);
+    ctx.rotate(-Math.PI / 2 * dir);
+    ctx.translate(-x, -base);
+  }
+  const lw = Math.max(2, h * 0.009);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  const ink = (width = lw) => { ctx.strokeStyle = FRESCO.line; ctx.lineWidth = width; ctx.stroke(); };
+  const r = h * 0.068;
+  const headY = base - h + r * 1.05;
+  const shY = headY + r + h * 0.045;
+  const sw = h * 0.125 * bulk;
+  const waistY = shY + h * (seated ? 0.22 : 0.27);
+  const hemY = seated ? base - h * 0.34 : base - (legs ? h * 0.34 : h * 0.025);
+  const hw = h * (legs ? 0.14 : 0.2) * bulk;
+
+  if (halo) {
+    ctx.beginPath(); ctx.arc(x, headY, r * 1.85, 0, Math.PI * 2);
+    ctx.fillStyle = FRESCO.gold; ctx.fill(); ink(lw * 0.8);
+    ctx.beginPath(); ctx.arc(x, headY, r * 1.55, 0, Math.PI * 2);
+    ctx.strokeStyle = '#a77a26'; ctx.lineWidth = lw * 0.7; ctx.stroke();
+  }
+  const limb = (x0, y0, x1, y1, width, colour) => {
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+    ctx.strokeStyle = FRESCO.line; ctx.lineWidth = width + lw * 2; ctx.stroke();
+    ctx.strokeStyle = colour; ctx.lineWidth = width; ctx.stroke();
+  };
+  const hand = (a, reach) => [x + Math.sin(a) * reach * dir, shY + Math.cos(a) * reach];
+  const armLen = h * 0.36 * (0.9 + bulk * 0.1);
+  const armW = h * 0.05 * bulk;
+  // The far arm first, behind the body.
+  const [bx, by] = hand(arms[1], armLen);
+  limb(x - sw * 0.7 * dir, shY + armW * 0.4, bx, by, armW, robe);
+  if (legs && !seated) {
+    for (const s of [-1, 1]) {
+      const lx = x + s * hw * 0.45;
+      limb(lx, hemY - h * 0.02, lx + s * h * 0.03, base - h * 0.025, h * 0.055 * bulk, skin);
+      ctx.beginPath(); ctx.ellipse(lx + s * h * 0.03 + dir * h * 0.025, base - h * 0.012, h * 0.045, h * 0.016, 0, 0, Math.PI * 2);
+      ctx.fillStyle = skin; ctx.fill(); ink();
+    }
+  }
+  if (seated) {
+    // The throne behind, the lap forward, the shins down to a footstool.
+    ctx.beginPath();
+    ctx.rect(x - h * 0.22, headY + r * 0.2, h * 0.44, base - headY - h * 0.06);
+    ctx.fillStyle = FRESCO.terra; ctx.fill(); ink();
+    ctx.beginPath(); ctx.rect(x - h * 0.26, base - h * 0.42, h * 0.52, h * 0.08);
+    ctx.fillStyle = FRESCO.gold; ctx.fill(); ink();
+    ctx.beginPath(); ctx.rect(x - h * 0.16, base - h * 0.06, h * 0.32, h * 0.06);
+    ctx.fillStyle = FRESCO.ochre; ctx.fill(); ink();
+    for (const s of [-1, 1]) limb(x + s * h * 0.07, hemY, x + s * h * 0.08, base - h * 0.07, h * 0.06, robe);
+  }
+  // The body, shoulders to hem, and its folds.
+  ctx.beginPath();
+  ctx.moveTo(x - sw, shY);
+  ctx.quadraticCurveTo(x - sw * 0.95, (shY + waistY) / 2, x - h * 0.1 * bulk, waistY);
+  ctx.quadraticCurveTo(x - hw * 0.95, (waistY + hemY) / 2, x - hw, hemY);
+  ctx.quadraticCurveTo(x, hemY + h * 0.02, x + hw, hemY);
+  ctx.quadraticCurveTo(x + hw * 0.95, (waistY + hemY) / 2, x + h * 0.1 * bulk, waistY);
+  ctx.quadraticCurveTo(x + sw * 0.95, (shY + waistY) / 2, x + sw, shY);
+  ctx.closePath();
+  ctx.fillStyle = robe; ctx.fill(); ink();
+  ctx.strokeStyle = 'rgba(20,14,10,0.45)'; ctx.lineWidth = lw * 0.8;
+  for (let k = -2; k <= 2; k++) {
+    ctx.beginPath();
+    ctx.moveTo(x + k * sw * 0.3, waistY + h * 0.02);
+    ctx.quadraticCurveTo(x + k * sw * 0.42 + dir * h * 0.01, (waistY + hemY) / 2, x + k * hw * 0.38, hemY - h * 0.01);
+    ctx.stroke();
+  }
+  // A belt and a hem of the trim colour.
+  ctx.beginPath(); ctx.rect(x - h * 0.1 * bulk, waistY - h * 0.012, h * 0.2 * bulk, h * 0.024);
+  ctx.fillStyle = trim; ctx.fill(); ink(lw * 0.7);
+  ctx.beginPath(); ctx.moveTo(x - hw, hemY - h * 0.02); ctx.quadraticCurveTo(x, hemY, x + hw, hemY - h * 0.02);
+  ctx.strokeStyle = trim; ctx.lineWidth = h * 0.02; ctx.stroke();
+  // Neck, head, hair, face.
+  ctx.beginPath(); ctx.rect(x - r * 0.4, headY + r * 0.6, r * 0.8, shY - headY - r * 0.5);
+  ctx.fillStyle = skin; ctx.fill(); ink(lw * 0.7);
+  ctx.beginPath(); ctx.ellipse(x, headY, r * 0.86, r, 0, 0, Math.PI * 2);
+  ctx.fillStyle = skin; ctx.fill(); ink();
+  ctx.beginPath(); ctx.ellipse(x - dir * r * 0.1, headY - r * 0.35, r * 0.92, r * 0.7, 0, Math.PI, Math.PI * 2);
+  ctx.fillStyle = hair; ctx.fill(); ink(lw * 0.8);
+  if (beard) {
+    ctx.beginPath();
+    ctx.moveTo(x - r * 0.75, headY + r * 0.2);
+    ctx.quadraticCurveTo(x, headY + r * 2.6, x + r * 0.75, headY + r * 0.2);
+    ctx.fillStyle = hair; ctx.fill(); ink(lw * 0.8);
+  }
+  ctx.fillStyle = FRESCO.line;
+  for (const s of [-1, 1]) {
+    ctx.beginPath(); ctx.ellipse(x + s * r * 0.33, headY - r * 0.05, r * 0.14, r * 0.08, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.beginPath(); ctx.moveTo(x, headY + r * 0.05); ctx.lineTo(x + dir * r * 0.08, headY + r * 0.35);
+  ctx.strokeStyle = FRESCO.line; ctx.lineWidth = lw * 0.6; ctx.stroke();
+  if (crown) {
+    ctx.beginPath();
+    const cy = headY - r * 0.75;
+    ctx.moveTo(x - r * 0.8, cy + r * 0.3);
+    for (let k = 0; k <= 4; k++) ctx.lineTo(x - r * 0.8 + k * r * 0.4, cy - (k % 2 ? 0 : r * 0.55));
+    ctx.lineTo(x + r * 0.8, cy + r * 0.3); ctx.closePath();
+    ctx.fillStyle = FRESCO.gold; ctx.fill(); ink(lw * 0.7);
+  }
+  // The near arm, and whatever it holds.
+  const [fx, fy] = hand(arms[0], armLen);
+  limb(x + sw * 0.8 * dir, shY + armW * 0.4, fx, fy, armW, robe);
+  ctx.beginPath(); ctx.arc(fx, fy, armW * 0.62, 0, Math.PI * 2); ctx.fillStyle = skin; ctx.fill(); ink(lw * 0.7);
+  if (hold === 'spear' || hold === 'staff') {
+    ctx.beginPath(); ctx.moveTo(fx, base - h * 0.01); ctx.lineTo(fx, fy - h * 0.42);
+    ctx.strokeStyle = FRESCO.line; ctx.lineWidth = h * 0.02; ctx.stroke();
+    ctx.strokeStyle = FRESCO.ochre; ctx.lineWidth = h * 0.011; ctx.stroke();
+    if (hold === 'spear') {
+      ctx.beginPath(); ctx.moveTo(fx - h * 0.025, fy - h * 0.4); ctx.lineTo(fx, fy - h * 0.5); ctx.lineTo(fx + h * 0.025, fy - h * 0.4); ctx.closePath();
+      ctx.fillStyle = FRESCO.white; ctx.fill(); ink(lw * 0.7);
+    }
+  } else if (hold === 'club') {
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx + dir * h * 0.1, fy - h * 0.34);
+    ctx.strokeStyle = FRESCO.line; ctx.lineWidth = h * 0.075; ctx.stroke();
+    ctx.strokeStyle = FRESCO.fieldDark; ctx.lineWidth = h * 0.055; ctx.stroke();
+  } else if (hold === 'hammer') {
+    ctx.beginPath(); ctx.moveTo(fx, fy + h * 0.05); ctx.lineTo(fx, fy - h * 0.16);
+    ctx.strokeStyle = FRESCO.line; ctx.lineWidth = h * 0.024; ctx.stroke();
+    ctx.beginPath(); ctx.rect(fx - h * 0.06, fy - h * 0.22, h * 0.12, h * 0.07);
+    ctx.fillStyle = '#8a8f93'; ctx.fill(); ink();
+  } else if (hold === 'sheaf') {
+    for (let k = -3; k <= 3; k++) {
+      ctx.beginPath(); ctx.moveTo(fx, fy + h * 0.06); ctx.lineTo(fx + k * h * 0.018, fy - h * 0.15);
+      ctx.strokeStyle = FRESCO.ochre; ctx.lineWidth = h * 0.012; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.ellipse(fx, fy - h * 0.16, h * 0.06, h * 0.04, 0, 0, Math.PI * 2);
+    ctx.fillStyle = FRESCO.gold; ctx.fill(); ink(lw * 0.6);
+  } else if (hold === 'sickle') {
+    ctx.beginPath(); ctx.arc(fx + dir * h * 0.06, fy - h * 0.04, h * 0.07, Math.PI * 0.9, Math.PI * 2.1);
+    ctx.strokeStyle = FRESCO.line; ctx.lineWidth = h * 0.02; ctx.stroke();
+    ctx.strokeStyle = '#9aa0a3'; ctx.lineWidth = h * 0.011; ctx.stroke();
+  } else if (hold === 'lamb') {
+    ctx.beginPath(); ctx.ellipse(fx, fy - h * 0.02, h * 0.1, h * 0.06, 0, 0, Math.PI * 2);
+    ctx.fillStyle = FRESCO.white; ctx.fill(); ink(lw * 0.7);
+    ctx.beginPath(); ctx.arc(fx + dir * h * 0.1, fy - h * 0.05, h * 0.035, 0, Math.PI * 2);
+    ctx.fillStyle = FRESCO.white; ctx.fill(); ink(lw * 0.7);
+  } else if (hold === 'rock') {
+    ctx.beginPath(); ctx.ellipse(fx, fy - h * 0.06, h * 0.11, h * 0.08, 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = FRESCO.giantDark; ctx.fill(); ink();
+  }
+  ctx.restore();
+}
+
+/** A bird in black, the ravens on the god's throne and in the sky. */
+function paintBird(ctx, x, y, s, dir = 1) {
+  ctx.beginPath();
+  ctx.ellipse(x, y, s, s * 0.45, -0.2 * dir, 0, Math.PI * 2);
+  ctx.moveTo(x + dir * s * 0.8, y - s * 0.3);
+  ctx.arc(x + dir * s * 0.85, y - s * 0.35, s * 0.32, 0, Math.PI * 2);
+  ctx.moveTo(x - dir * s * 0.7, y);
+  ctx.lineTo(x - dir * s * 1.5, y + s * 0.3); ctx.lineTo(x - dir * s * 0.9, y + s * 0.3);
+  ctx.fillStyle = FRESCO.black; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x + dir * s * 1.1, y - s * 0.35); ctx.lineTo(x + dir * s * 1.45, y - s * 0.25); ctx.lineTo(x + dir * s * 1.1, y - s * 0.2);
+  ctx.fillStyle = FRESCO.ochre; ctx.fill();
+}
+
+/** A stylised tree: trunk and a round crown, the way a fresco draws one. */
+function paintTree(ctx, x, base, h) {
+  ctx.beginPath(); ctx.rect(x - h * 0.05, base - h * 0.5, h * 0.1, h * 0.5);
+  ctx.fillStyle = FRESCO.fieldDark; ctx.fill();
+  ctx.strokeStyle = FRESCO.line; ctx.lineWidth = 3; ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(x, base - h * 0.68, h * 0.3, h * 0.34, 0, 0, Math.PI * 2);
+  ctx.fillStyle = FRESCO.verdigris; ctx.fill(); ctx.stroke();
+}
+
+/** The frame every panel shares: a meander frieze over, a dado under. */
+function paintPanelFrame(ctx, x0, y0, w, h, sky = true) {
+  const top = h * 0.06; const dado = h * 0.14;
+  const horizon = y0 + top + (h - top - dado) * 0.58;
+  if (sky) {
+    const g = ctx.createLinearGradient(0, y0 + top, 0, horizon);
+    g.addColorStop(0, FRESCO.sky); g.addColorStop(1, FRESCO.skyLow);
+    ctx.fillStyle = g; ctx.fillRect(x0, y0 + top, w, horizon - y0 - top);
+    const f = ctx.createLinearGradient(0, horizon, 0, y0 + h - dado);
+    f.addColorStop(0, FRESCO.field); f.addColorStop(1, FRESCO.fieldDark);
+    ctx.fillStyle = f; ctx.fillRect(x0, horizon, w, y0 + h - dado - horizon);
+    ctx.strokeStyle = 'rgba(60,40,20,0.35)'; ctx.lineWidth = 2;
+    for (let k = 1; k < 7; k++) {
+      const y = horizon + (y0 + h - dado - horizon) * (k / 7);
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + w, y + (k % 2 ? 4 : -4)); ctx.stroke();
+    }
+  } else {
+    ctx.fillStyle = FRESCO.ground; ctx.fillRect(x0, y0 + top, w, h - top - dado);
+  }
+  ctx.fillStyle = FRESCO.red; ctx.fillRect(x0, y0, w, top);
+  // The meander: a key pattern in ochre along the red band.
+  ctx.strokeStyle = FRESCO.ochre; ctx.lineWidth = Math.max(2, top * 0.14);
+  const step = top * 1.2;
+  ctx.beginPath();
+  for (let x = x0 + step * 0.2; x < x0 + w - step; x += step) {
+    const a = y0 + top * 0.78; const b = y0 + top * 0.22;
+    ctx.moveTo(x, a); ctx.lineTo(x, b); ctx.lineTo(x + step * 0.7, b); ctx.lineTo(x + step * 0.7, a - top * 0.28);
+    ctx.lineTo(x + step * 0.35, a - top * 0.28); ctx.lineTo(x + step * 0.35, a); ctx.lineTo(x + step, a);
+  }
+  ctx.stroke();
+  ctx.fillStyle = FRESCO.dado; ctx.fillRect(x0, y0 + h - dado, w, dado);
+  ctx.fillStyle = FRESCO.ochre; ctx.fillRect(x0, y0 + h - dado, w, dado * 0.08);
+  ctx.fillStyle = FRESCO.black; ctx.fillRect(x0, y0 + h - dado * 0.92, w, dado * 0.03);
+  ctx.strokeStyle = FRESCO.line; ctx.lineWidth = 4; ctx.strokeRect(x0 + 2, y0 + 2, w - 4, h - 4);
+  return { top: y0 + top, ground: y0 + h - dado, horizon };
+}
+
+/** The atlas: two wide panels and two narrow ones, Gods, Giants and peasants. */
+function paintMurals(size) {
+  const c = canvas2d(size, size);
+  const ctx = c.getContext('2d');
+  const k = size / 2048;
+  ctx.scale(k, k);
+  const peasants = (y, xs, rnd) => xs.forEach((px, i) => {
+    const holds = ['sickle', 'sheaf', 'lamb', 'sickle', 'sheaf', null];
+    paintFigure(ctx, {
+      x: px, base: y, h: 170 + rnd() * 30, dir: i % 2 ? -1 : 1, robe: [FRESCO.terra, FRESCO.ochre, FRESCO.white, FRESCO.verdigris][i % 4],
+      trim: FRESCO.red, skin: FRESCO.peasant, hair: i % 3 ? FRESCO.black : '#6a4526', legs: true,
+      arms: [0.9 + rnd() * 0.8, -0.3 - rnd() * 0.5], hold: holds[i % holds.length],
+    });
+  });
+
+  // Wide A: the gods enthroned between two giants, the harvest brought to them.
+  {
+    const rnd = paintRng(11);
+    const { top, ground } = paintPanelFrame(ctx, 0, 0, 1536, 1024);
+    paintTree(ctx, 380, ground - 150, 170); paintTree(ctx, 1160, ground - 140, 160);
+    paintFigure(ctx, { x: 190, base: ground, h: ground - top - 6, bulk: 1.45, dir: 1, robe: FRESCO.fieldDark, trim: FRESCO.terra, skin: FRESCO.giant, hair: FRESCO.giantDark, legs: true, beard: true, arms: [2.7, -0.4], hold: 'club' });
+    paintFigure(ctx, { x: 1346, base: ground, h: ground - top - 6, bulk: 1.45, dir: -1, robe: FRESCO.fieldDark, trim: FRESCO.terra, skin: FRESCO.giant, hair: FRESCO.giantDark, legs: true, beard: true, arms: [2.5, 0.3], hold: 'rock' });
+    paintFigure(ctx, { x: 768, base: ground - 30, h: 600, seated: true, halo: true, beard: true, crown: false, robe: FRESCO.lapis, trim: FRESCO.gold, hair: '#b9b4a8', arms: [0.5, -0.6], hold: 'spear' });
+    paintBird(ctx, 660, ground - 520, 26, 1); paintBird(ctx, 880, ground - 520, 26, -1);
+    paintFigure(ctx, { x: 520, base: ground - 20, h: 480, dir: 1, halo: true, beard: true, robe: FRESCO.red, trim: FRESCO.gold, hair: '#8a4a22', arms: [2.4, 0.2], hold: 'hammer' });
+    paintFigure(ctx, { x: 1016, base: ground - 20, h: 470, dir: -1, halo: true, robe: FRESCO.verdigris, trim: FRESCO.gold, hair: '#c79a45', arms: [0.4, -0.3], hold: 'sheaf', crown: true });
+    peasants(ground + 70, [330, 430, 620, 910, 1100, 1210], rnd);
+  }
+  // Tall A: a goddess with the harvest, a peasant kneeling at her feet.
+  {
+    const { top, ground } = paintPanelFrame(ctx, 1536, 0, 512, 1024);
+    paintFigure(ctx, { x: 1792, base: ground - 10, h: ground - top - 60, dir: 1, halo: true, crown: true, robe: FRESCO.lapis, trim: FRESCO.gold, hair: '#5a3218', arms: [0.35, -0.4], hold: 'staff' });
+    paintFigure(ctx, { x: 1660, base: ground + 20, h: 150, dir: 1, robe: FRESCO.terra, skin: FRESCO.peasant, legs: true, arms: [1.6, 1.2], hold: 'sheaf' });
+  }
+  // Wide B: the gods drive the giants back; below, the fields are ploughed.
+  {
+    const rnd = paintRng(23);
+    const { top, ground } = paintPanelFrame(ctx, 0, 1024, 1536, 1024);
+    ctx.beginPath(); ctx.arc(230, top + 150, 80, 0, Math.PI * 2);
+    ctx.fillStyle = FRESCO.gold; ctx.fill(); ctx.strokeStyle = FRESCO.line; ctx.lineWidth = 4; ctx.stroke();
+    for (let a = 0; a < 16; a++) {
+      const t = (a / 16) * Math.PI * 2;
+      ctx.beginPath(); ctx.moveTo(230 + Math.cos(t) * 95, top + 150 + Math.sin(t) * 95);
+      ctx.lineTo(230 + Math.cos(t) * 135, top + 150 + Math.sin(t) * 135);
+      ctx.strokeStyle = FRESCO.ochre; ctx.lineWidth = 8; ctx.stroke();
+    }
+    for (const [x, robe, hold] of [[330, FRESCO.lapis, 'spear'], [520, FRESCO.red, 'hammer'], [700, FRESCO.verdigris, 'spear']]) {
+      paintFigure(ctx, { x, base: ground - 90, h: 470, dir: 1, halo: true, beard: robe !== FRESCO.verdigris, robe, trim: FRESCO.gold, hair: '#6a4526', legs: true, arms: [2.2, 0.9], hold });
+    }
+    paintFigure(ctx, { x: 1080, base: ground - 60, h: 700, bulk: 1.5, dir: -1, robe: FRESCO.fieldDark, skin: FRESCO.giant, hair: FRESCO.giantDark, legs: true, beard: true, arms: [2.9, 1.9], hold: 'club' });
+    paintFigure(ctx, { x: 1330, base: ground - 50, h: 380, bulk: 1.5, dir: 1, lying: true, robe: FRESCO.fieldDark, skin: FRESCO.giant, hair: FRESCO.giantDark, legs: true, beard: true, arms: [1.2, -0.8] });
+    paintBird(ctx, 900, top + 120, 22, 1); paintBird(ctx, 980, top + 90, 18, 1);
+    // The plough: an ox and the man behind it.
+    const oy = ground + 60;
+    ctx.beginPath(); ctx.ellipse(1040, oy - 70, 95, 48, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#6f4a2c'; ctx.fill(); ctx.strokeStyle = FRESCO.line; ctx.lineWidth = 4; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(1140, oy - 90, 30, 24, 0.3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    for (const lx of [985, 1010, 1070, 1095]) {
+      ctx.beginPath(); ctx.moveTo(lx, oy - 40); ctx.lineTo(lx, oy); ctx.lineWidth = 14; ctx.strokeStyle = FRESCO.line; ctx.stroke();
+      ctx.lineWidth = 9; ctx.strokeStyle = '#6f4a2c'; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(945, oy - 70); ctx.lineTo(870, oy - 20); ctx.lineTo(850, oy);
+    ctx.lineWidth = 7; ctx.strokeStyle = FRESCO.line; ctx.stroke();
+    peasants(oy + 10, [800, 330, 480, 620], rnd);
+  }
+  // Tall B: a giant, and a peasant running from him.
+  {
+    const { top, ground } = paintPanelFrame(ctx, 1536, 1024, 512, 1024);
+    paintFigure(ctx, { x: 1800, base: ground, h: ground - top - 8, bulk: 1.5, dir: -1, robe: FRESCO.fieldDark, trim: FRESCO.terra, skin: FRESCO.giant, hair: FRESCO.giantDark, legs: true, beard: true, arms: [2.8, 0.2], hold: 'club' });
+    paintFigure(ctx, { x: 1640, base: ground + 30, h: 160, dir: -1, robe: FRESCO.white, skin: FRESCO.peasant, legs: true, arms: [2.2, -2.0] });
+  }
+  return c;
+}
+
+/** "Drawings of faces in pain": charcoal and red earth, drawn over and over. */
+function paintFaces(size) {
+  const c = canvas2d(size, size);
+  const ctx = c.getContext('2d');
+  const cell = size / 3;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (let k = 0; k < 9; k++) {
+    const rnd = paintRng(101 + k * 7);
+    const cx = (k % 3 + 0.5) * cell; const cy = (Math.floor(k / 3) + 0.5) * cell;
+    const s = cell * (0.8 + rnd() * 0.12);
+    const red = k % 3 === 1;
+    const colour = red ? 'rgba(120,32,20,0.95)' : 'rgba(18,14,12,0.95)';
+    // Every line drawn two or three times, a little off, the way charcoal is.
+    const scrawl = (draw, width) => {
+      for (let pass = 0; pass < 3; pass++) {
+        ctx.save();
+        ctx.translate((rnd() - 0.5) * s * 0.02, (rnd() - 0.5) * s * 0.02);
+        ctx.beginPath(); draw();
+        ctx.strokeStyle = colour; ctx.lineWidth = width * (0.6 + rnd() * 0.6); ctx.stroke();
+        ctx.restore();
+      }
+    };
+    const tilt = (rnd() - 0.5) * 0.4;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(tilt);
+    const rx = s * (0.27 + rnd() * 0.05); const ry = s * (0.38 + rnd() * 0.04);
+    scrawl(() => ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2), s * 0.018);
+    // Hands pressed to the cheeks, on some.
+    if (k % 2 === 0) {
+      for (const sx of [-1, 1]) {
+        scrawl(() => { ctx.moveTo(sx * rx * 0.95, ry * 0.1); ctx.lineTo(sx * rx * 1.15, -ry * 0.25); ctx.lineTo(sx * rx * 1.05, -ry * 0.55); }, s * 0.014);
+        scrawl(() => { ctx.moveTo(sx * rx * 1.05, ry * 0.2); ctx.quadraticCurveTo(sx * rx * 1.4, ry * 0.8, sx * rx * 1.2, ry * 1.2); }, s * 0.014);
+      }
+    }
+    // Brows up at the middle: anguish.
+    for (const sx of [-1, 1]) {
+      scrawl(() => { ctx.moveTo(sx * rx * 0.75, -ry * 0.22); ctx.lineTo(sx * rx * 0.12, -ry * 0.42); }, s * 0.016);
+      // Eyes: hollows, scribbled dark.
+      ctx.beginPath(); ctx.ellipse(sx * rx * 0.42, -ry * 0.12, rx * 0.2, ry * 0.12, sx * 0.3, 0, Math.PI * 2);
+      ctx.fillStyle = colour; ctx.fill();
+      // Tear lines.
+      scrawl(() => { ctx.moveTo(sx * rx * 0.45, ry * 0.02); ctx.lineTo(sx * rx * 0.5, ry * 0.45); }, s * 0.008);
+    }
+    scrawl(() => { ctx.moveTo(0, -ry * 0.05); ctx.lineTo(-rx * 0.08, ry * 0.2); ctx.lineTo(rx * 0.06, ry * 0.24); }, s * 0.01);
+    // The mouth, open, screaming.
+    const mw = rx * (0.28 + rnd() * 0.12); const mh = ry * (0.2 + rnd() * 0.12);
+    ctx.beginPath(); ctx.ellipse(0, ry * 0.55, mw, mh, 0, 0, Math.PI * 2);
+    ctx.fillStyle = colour; ctx.fill();
+    scrawl(() => ctx.ellipse(0, ry * 0.55, mw * 1.15, mh * 1.2, 0, 0, Math.PI * 2), s * 0.012);
+    // Cheekbones pulled tight.
+    for (const sx of [-1, 1]) scrawl(() => { ctx.moveTo(sx * rx * 0.7, ry * 0.15); ctx.quadraticCurveTo(sx * rx * 0.5, ry * 0.45, sx * mw * 1.3, ry * 0.62); }, s * 0.009);
+    ctx.restore();
+  }
+  return c;
+}
+
+/** Blood thrown at a wall: a splash, what was flung off it, and what ran down. */
+function paintBlood(size) {
+  const c = canvas2d(size, size);
+  const ctx = c.getContext('2d');
+  const cell = size / 2;
+  for (let k = 0; k < 4; k++) {
+    const rnd = paintRng(301 + k * 13);
+    const cx = (k % 2 + 0.5) * cell; const cy = (Math.floor(k / 2) + 0.42) * cell;
+    const R = cell * (0.14 + rnd() * 0.08);
+    const wet = `rgba(${86 + Math.floor(rnd() * 20)},${10 + Math.floor(rnd() * 8)},8,1)`;
+    ctx.fillStyle = wet; ctx.strokeStyle = wet;
+    // The splash: a lobed blob.
+    ctx.beginPath();
+    for (let a = 0; a <= 48; a++) {
+      const t = (a / 48) * Math.PI * 2;
+      const r = R * (0.7 + 0.35 * Math.sin(t * 3 + k) * Math.sin(t * 5 + k * 2) + rnd() * 0.25);
+      const x = cx + Math.cos(t) * r; const y = cy + Math.sin(t) * r * 0.85;
+      if (a) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.fill();
+    // Flung off it: streaks and drops along rays.
+    for (let i = 0; i < 26; i++) {
+      const t = rnd() * Math.PI * 2;
+      const d0 = R * (0.9 + rnd() * 0.3); const d1 = d0 + R * (0.3 + rnd() * 1.2);
+      ctx.lineWidth = 2 + rnd() * R * 0.12; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(cx + Math.cos(t) * d0, cy + Math.sin(t) * d0);
+      ctx.lineTo(cx + Math.cos(t) * d1, cy + Math.sin(t) * d1); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx + Math.cos(t) * (d1 + R * 0.2), cy + Math.sin(t) * (d1 + R * 0.2), 2 + rnd() * R * 0.07, 0, Math.PI * 2); ctx.fill();
+    }
+    for (let i = 0; i < 60; i++) {
+      const t = rnd() * Math.PI * 2; const d = R * (1.1 + rnd() * 1.9);
+      ctx.beginPath(); ctx.arc(cx + Math.cos(t) * d, cy + Math.sin(t) * d, 1 + rnd() * R * 0.05, 0, Math.PI * 2); ctx.fill();
+    }
+    // Runs: straight down, thinning, with a bead at the end.
+    for (let i = 0; i < 9; i++) {
+      const x = cx + (rnd() - 0.5) * R * 1.6;
+      const y0 = cy + R * (0.2 + rnd() * 0.5);
+      const len = cell * (0.15 + rnd() * 0.35);
+      ctx.lineWidth = 3 + rnd() * 7;
+      ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x + (rnd() - 0.5) * 6, Math.min(y0 + len, (Math.floor(k / 2) + 1) * cell - 12)); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, Math.min(y0 + len, (Math.floor(k / 2) + 1) * cell - 12), ctx.lineWidth * 0.8, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  return c;
+}
+
+/**
+ * The words on the wall, in the room's own spelling: "BEWARE adventurer!",
+ * "DANGER!!!", the number '666', the riddle at the T-crossing. Daubed with a
+ * finger in something dark red, each letter at its own slant, runs under the
+ * heavier strokes. `seed` picks the hand.
+ */
+function paintWriting(texts, seed, size = 2048) {
+  const c = canvas2d(size, size / 2);
+  const ctx = c.getContext('2d');
+  const rnd = paintRng(seed);
+  const lines = texts.flatMap((t) => String(t).split(/\n|(?<=[.!?,])\s+(?=\S)/)).map((l) => l.trim()).filter(Boolean).slice(0, 4);
+  const colour = seed % 2 ? 'rgba(92,18,12,1)' : 'rgba(24,18,15,1)';
+  const rows = lines.length;
+  const lineH = (size / 2) * 0.8 / rows;
+  const longest = Math.max(...lines.map((l) => l.length));
+  const px = Math.min(lineH * 0.8, (size * 0.94) / (longest * 0.56));
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = colour; ctx.strokeStyle = colour;
+  lines.forEach((line, r) => {
+    const y = (size / 2) * 0.1 + lineH * (r + 0.5);
+    ctx.font = `bold ${px.toFixed(0)}px Georgia, 'Times New Roman', serif`;
+    const width = ctx.measureText(line).width;
+    let x = (size - width) / 2 + (rnd() - 0.5) * size * 0.04;
+    for (const ch of line) {
+      const w = ctx.measureText(ch).width;
+      ctx.save();
+      ctx.translate(x + w / 2, y + (rnd() - 0.5) * px * 0.12);
+      ctx.rotate((rnd() - 0.5) * 0.18);
+      ctx.scale(1 + (rnd() - 0.5) * 0.12, 1 + (rnd() - 0.5) * 0.16);
+      ctx.fillText(ch, -w / 2, 0);
+      // A finger's width of paint round every stroke.
+      ctx.lineWidth = px * 0.07; ctx.strokeText(ch, -w / 2, 0);
+      ctx.restore();
+      if (ch.trim() && rnd() > 0.6) {
+        ctx.lineWidth = 2 + rnd() * 3; ctx.lineCap = 'round';
+        const dx = x + w * (0.3 + rnd() * 0.4);
+        const len = px * (0.3 + rnd() * 0.9);
+        ctx.beginPath(); ctx.moveTo(dx, y + px * 0.3); ctx.lineTo(dx, y + px * 0.3 + len); ctx.stroke();
+        ctx.beginPath(); ctx.arc(dx, y + px * 0.3 + len, ctx.lineWidth * 0.9, 0, Math.PI * 2); ctx.fill();
+      }
+      x += w * (0.96 + rnd() * 0.1);
+    }
+  });
+  return c;
+}
+
+/**
+ * Canvas to texture, with the albedo lift every baked colour gets, weathered
+ * as `wear` says: `fresco` fades, cracks and flakes the paint back to the
+ * plaster and rags the panel's edges; `stroke` leaves the marks as they are
+ * and makes everything unpainted transparent. Rows flipped: see above.
+ */
+function paintedTexture(canvas, wear, seed) {
+  const w = canvas.width; const h = canvas.height;
+  const src = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  const data = new Uint8ClampedArray(w * h * 4);
+  const height = new Float32Array(w * h);
+  const lift = (x) => 255 * Math.pow(Math.max(0, Math.min(1, x / 255)), 0.62);
+  // The weathering fields are smooth, so they are computed coarse and read
+  // back bilinear: 4 M pixels of fbm would be most of a second of boot.
+  const G = 128;
+  const field = (fn) => {
+    const f = new Float32Array((G + 1) * (G + 1));
+    for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) f[j * (G + 1) + i] = fn(i / G, j / G);
+    return (u, v) => {
+      const x = u * G; const y = v * G; const i = Math.min(G - 1, Math.floor(x)); const j = Math.min(G - 1, Math.floor(y));
+      const fx = x - i; const fy = y - j; const a = f[j * (G + 1) + i]; const b = f[j * (G + 1) + i + 1];
+      const cc = f[(j + 1) * (G + 1) + i]; const d = f[(j + 1) * (G + 1) + i + 1];
+      return lerp(lerp(a, b, fx), lerp(cc, d, fx), fy);
+    };
+  };
+  const fresco = wear === 'fresco';
+  // The broad fields change over tens of pixels: a nearest read of a finer
+  // lattice is as good as a bilinear one and a third of the cost.
+  const coarse = (fn, n = 256) => {
+    const f = new Float32Array(n * n);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) f[j * n + i] = fn(i / n, j / n);
+    return (u, v) => f[Math.min(n - 1, (v * n) | 0) * n + Math.min(n - 1, (u * n) | 0)];
+  };
+  const fade = coarse((u, v) => fbm(u * 6, v * 6, 64, seed + 1, 4));
+  const loss = field((u, v) => fbm(u * 14, v * 14, 64, seed + 2, 4));
+  const grime = coarse((u, v) => fbm(u * 3, v * 3, 64, seed + 3, 3), 128);
+  // Cracks: where a smooth field crosses its middle, which draws wandering
+  // hairlines rather than the closed cells of a Worley edge -- those read as
+  // crazy paving. Coarse field, sharp threshold, so the lines stay thin.
+  const crack = field((u, v) => fbm(u * 9 + 3, v * 9, 64, seed + 5, 3));
+  const crack2 = field((u, v) => fbm(u * 5, v * 5 + 7, 64, seed + 6, 3));
+  const ground = rgb(0xd6c6a4);
+  for (let y = 0; y < h; y++) {
+    const v = y / h;
+    for (let x = 0; x < w; x++) {
+      const u = x / w;
+      const si = (y * w + x) * 4;
+      const di = ((h - 1 - y) * w + x) * 4;
+      let r = src[si]; let g = src[si + 1]; let b = src[si + 2]; let a = src[si + 3];
+      let hgt = 0.5;
+      if (fresco) {
+        // Faded, then flaked back to the plaster where the loss field peaks,
+        // more of it low on the wall where damp comes up.
+        const f = clamp01((fade(u, v) - 0.35) * 1.6) * 0.45;
+        r = lerp(r, ground[0], f); g = lerp(g, ground[1], f); b = lerp(b, ground[2], f);
+        const l = loss(u, v);
+        const lost = l + (v % 0.5 > 0.4 ? (v % 0.5 - 0.4) * 1.5 : 0);
+        if (lost > 0.71) {
+          const p = 0.78 + grime(u, v) * 0.2;
+          r = 196 * p; g = 182 * p; b = 150 * p; hgt = 0.35;
+        }
+        if (Math.abs(crack(u, v) - 0.5) < 0.0035 || Math.abs(crack2(u, v) - 0.5) < 0.0025) { r *= 0.62; g *= 0.6; b *= 0.57; hgt = 0.3; }
+        // Smoke from the lamps, gathered towards the top of each panel.
+        const soot = 1 - clamp01(((v % 0.5) * 2 - 0.1) * 1.4) * 0.22 * grime(u, v);
+        r *= soot; g *= soot; b *= soot;
+        // The panel's edges are ragged: plaster gone back to the wall.
+        const e = Math.min(Math.min(u, Math.abs(u - 0.75), 1 - u) * w, Math.min(v % 0.5, 0.5 - (v % 0.5)) * h);
+        a = e < (5 + l * 22) * (w / 2048) ? 0 : 255;
+      } else {
+        hgt = 0.5 + (a / 255) * 0.1;
+        // Worn: the marks are patchy where they have been rubbed.
+        if (a > 0 && loss(u, v) > 0.74) a *= 0.35;
+      }
+      data[di] = lift(r); data[di + 1] = lift(g); data[di + 2] = lift(b); data[di + 3] = a;
+      height[(h - 1 - y) * w + x] = hgt;
+    }
+  }
+  const map = new THREE.DataTexture(data, w, h, THREE.RGBAFormat);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.generateMipmaps = true;
+  map.minFilter = THREE.LinearMipmapLinearFilter;
+  map.magFilter = THREE.LinearFilter;
+  map.anisotropy = 8;
+  map.needsUpdate = true;
+  // Normals at a quarter of the size: the relief is plaster and flake edges.
+  const nw = Math.max(4, w >> 2); const nh = Math.max(4, h >> 2);
+  const nd = new Uint8ClampedArray(nw * nh * 4);
+  const at = (x, y) => height[Math.min(h - 1, Math.max(0, y * 4)) * w + Math.min(w - 1, Math.max(0, x * 4))];
+  for (let y = 0; y < nh; y++) {
+    for (let x = 0; x < nw; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * 6; const dy = (at(x, y + 1) - at(x, y - 1)) * 6;
+      const len = Math.hypot(dx, dy, 1);
+      const i = (y * nw + x) * 4;
+      nd[i] = (-dx / len * 0.5 + 0.5) * 255; nd[i + 1] = (-dy / len * 0.5 + 0.5) * 255; nd[i + 2] = (1 / len * 0.5 + 0.5) * 255; nd[i + 3] = 255;
+    }
+  }
+  const normal = new THREE.DataTexture(nd, nw, nh, THREE.RGBAFormat);
+  normal.colorSpace = THREE.NoColorSpace;
+  normal.generateMipmaps = true;
+  normal.minFilter = THREE.LinearMipmapLinearFilter;
+  normal.magFilter = THREE.LinearFilter;
+  normal.needsUpdate = true;
+  return { map, normal };
+}
+
+/**
+ * Painted materials, decorated like the walls they are painted on. Each
+ * comes twice: lit as a room in the town is, and `_deep`, lit as the sewer's
+ * buried rooms are (see `buried`), because a painting has to take the light
+ * of the wall under it or it glows.
+ */
+function createPaintings(materials, macro, grain) {
+  const make = (name, textures, { rough = 0.85, env = 0.7, cut = 0 } = {}) => {
+    for (const deep of [false, true]) {
+      const material = new THREE.MeshStandardMaterial({
+        map: textures.map, normalMap: textures.normal, normalScale: new THREE.Vector2(0.6, 0.6),
+        roughness: rough, metalness: 0, envMapIntensity: env, vertexColors: true,
+        alphaTest: cut, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      });
+      material.name = deep ? `${name}_deep` : name;
+      material.userData.uvScale = 1;
+      material.shadowSide = THREE.DoubleSide;
+      material.defaultAttributeValues = { aIndoor: [0] };
+      decorate(material, { env, wet: 0, detail: 0.25, buried: deep }, macro, grain);
+      materials[material.name] = material;
+    }
+  };
+  // 1536: 245 texels a metre over the temple's wide bays, which is sharper
+  // than a torchlit wall is seen, at half the boot cost of 2048.
+  make('mural', paintedTexture(paintMurals(1536), 'fresco', 5101), { rough: 0.9, env: 0.6, cut: 0.5 });
+  make('faces', paintedTexture(paintFaces(1024), 'stroke', 5203), { rough: 0.9, env: 0.5, cut: 0.4 });
+  make('bloodwall', paintedTexture(paintBlood(1024), 'stroke', 5307), { rough: 0.42, env: 0.9, cut: 0.4 });
+  // Writing is per room -- it says what that room says -- so it is painted
+  // when build.js first asks for it, and kept by what it says.
+  materials.$writing = (texts, deep, seed) => {
+    const key = `writing_${seed}`;
+    if (!materials[key]) make(key, paintedTexture(paintWriting(texts, seed), 'stroke', seed), { rough: 0.6, env: 0.7, cut: 0.4 });
+    return deep ? `${key}_deep` : key;
+  };
 }
 
 // ------------------------------------------------------- surface detail ----
@@ -3617,6 +4340,7 @@ export function createMaterials(size = 512, onProgress = () => {}) {
   };
 
   createDecals(materials);
+  createPaintings(materials, macro, grain);
 
   // Not baked: the floor of an "In the air..." room, which has to read as
   // something you could stand on without becoming a lid over the street below.

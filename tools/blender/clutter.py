@@ -1957,12 +1957,32 @@ def build_chain_anchor():
     return deliver(p, "clutter_chain_anchor")
 
 
+def build_arm():
+    """"Plastered on the far wall you see what looks like a human arm": torn
+    off at the shoulder, bent at the elbow, stuck to the wall in its own
+    blood, the hand hanging open. Hangs like a painting: back at y = 0, the
+    front towards -y, the shoulder 1.75 m up."""
+    reset(7401)
+    p = []
+    sh, el, wr = (-0.36, -0.07, 1.74), (0.0, -0.075, 1.44), (0.33, -0.065, 1.25)
+    p.append(tube([sh, ((sh[0] + el[0]) / 2, -0.078, (sh[2] + el[2]) / 2 + 0.01), el],
+                  [0.058, 0.052, 0.046], sides=10, m="skin", name="upper"))
+    p.append(tube([el, ((el[0] + wr[0]) / 2, -0.07, (el[2] + wr[2]) / 2 - 0.005), wr],
+                  [0.045, 0.04, 0.03], sides=10, m="skin", name="fore"))
+    # The torn end: meat and the head of the bone out of it.
+    p.append(blob((sh[0] - 0.02, -0.07, sh[2] + 0.01), 0.064, "flesh", seg=8, rings=6, scale=(0.7, 1.0, 1.05), name="tear"))
+    p += long_bone((sh[0] - 0.02, -0.07, sh[2] + 0.01), (sh[0] - 0.09, -0.07, sh[2] + 0.06), 0.02)
+    p += hand(wr, (0.62, 0.0, -0.78), 1, m="skin", spread=0.5, curl=0.45, s=2.1)
+    # The blood it was stuck on with is the wall's own (build.js paints it).
+    return deliver(p, "clutter_arm")
+
+
 ASSETS = [build_skull, build_bones, build_skeleton, build_skeleton_seated, build_skeleton_hanging,
           build_shackles, build_strongbox, build_chest, build_hoard, build_sarcophagus, build_alchemy,
           build_pentagram, build_blackboard, build_plaque, build_sign, build_painting_portrait,
           build_painting_landscape, build_painting_gathering, build_mural, build_arms, build_tapestry, build_web,
           build_cocoon, build_cages, build_globe, build_feast, build_carcass, build_pelts, build_hay, build_wreckage,
-          build_chain_run, build_chain_anchor]
+          build_chain_run, build_chain_anchor, build_arm]
 
 
 def build(only=None):
