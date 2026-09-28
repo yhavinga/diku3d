@@ -76,6 +76,9 @@ const SPREAD = 0.8;
 /** How many cells deep sight is followed through sealed neighbours, and how many rectangles at most. */
 const DEPTH = 4;
 const MAX_WINDOWS = 32;
+/** Screen radius, in drawn pixels, under which a lit object is not worth a draw. */
+const DETAIL_PX = 0.75;
+const _size = new THREE.Vector2();
 /** Escaping rays kept per face to check the next cell against; past it, the face is not followed. */
 const ESCAPES = 6000;
 /** Past this share of its faces open, a cell is open ground and not worth the arithmetic. */
@@ -109,7 +112,7 @@ const DIST_FRAG = `
 
 const cellKey = (level, x, z) => `${level}:${x},${z}`;
 
-export function createVisibility({ renderer, scene, camera, world, sun, zones = null, sky = [] }) {
+export function createVisibility({ renderer, scene, camera, world, sun, zones = null, sky = [], impostors = null }) {
   const cells = new Map();
   const queue = [];
   const target = new THREE.WebGLRenderTarget(RES * 6, RES, {
@@ -636,6 +639,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     const depth = -vz;
     if (depth + r < near) return false;
     if (depth - r > farPlane) return false;
+    if (sizeCull && r < depth * detail) return false;
     let x0 = -1; let y0 = -1; let x1 = 1; let y1 = 1;
     if (depth - r > near) {
       const dn = depth - r; const df = depth + r;
@@ -663,6 +667,26 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     return false;
   }
   let farPlane = 900;
+  // Anything lit whose sphere is under DETAIL_PX in radius on screen is not
+  // drawn: a dropped dagger 300 m off, a sign bracket across the town. The
+  // forest view drew ~150 of them a pass. `detail` is that radius per metre
+  // of depth; `sizeCull` says whether what is being tested may go.
+  let detail = 0;
+  let sizeCull = false;
+  const detailOk = new WeakMap();
+  function mayShrink(material) {
+    let ok = detailOk.get(material);
+    if (ok === undefined) {
+      const list = Array.isArray(material) ? material : [material];
+      // Unlit and glowing things stay: a lamp is a point of light at any
+      // distance, and the horizon is all far away.
+      ok = list.every((m) => m && m.isMeshStandardMaterial && !m.emissiveMap
+        && !(m.emissiveIntensity > 0 && (m.emissive.r + m.emissive.g + m.emissive.b) > 0));
+      detailOk.set(material, ok);
+    }
+    return ok;
+  }
+  const selectOwner = (mesh) => { sizeCull = detail > 0 && mayShrink(mesh.material); };
   let surfaceHidden = false;
   let deepHidden = false;
   let zoneLine = 0;
@@ -764,28 +788,59 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
         mesh: o, total: n, spheres, buckets: list,
         source: o.instanceMatrix.array.slice(),
         kept: new Int32Array(n), keptCount: n, full: true,
+        lod: o.userData.lod || null, feet: null,
       };
+      if (entry.lod) {
+        // Where each copy stands, how big and which way it faces: what its
+        // card is drawn from, and what the crossfade measures to.
+        entry.feet = new Float32Array(n * 5);
+        const e = m.elements;
+        for (let i = 0; i < n; i++) {
+          o.getMatrixAt(i, m);
+          m.premultiply(o.matrixWorld);
+          entry.feet.set([e[12], e[13], e[14], Math.hypot(e[0], e[2]), Math.atan2(-e[2], e[0])], i * 5);
+        }
+      }
       instanced.push(entry);
       instancedBy.set(o, entry);
     });
   }
 
   const shadowFrustum = new THREE.Frustum();
+  const everything = () => true;
   const _m = new THREE.Matrix4();
 
   const seenOrCast = (x, y, z, r, bound) => sphereVisible(x, y, z, r, bound)
     || shadowFrustum.intersectsSphere(_sphere.set(_v.set(x, y, z), r));
 
-  /** Keep the instances `keep(x, y, z, r)` accepts, in their original order. */
-  function compact(entry, keep) {
+  /**
+   * Keep the instances `keep(x, y, z, r)` accepts, in their original order.
+   * A model drawn as a card far off keeps its full copies only short of the
+   * crossfade's far end -- and any the sun's camera needs, on a frame that
+   * redraws the shadows -- and hands the ones past its near end to the cards.
+   */
+  function compact(entry, keep, seen = keep, shadow = false) {
     const { spheres, kept } = entry;
+    const lod = entry.lod && impostors?.enabled ? entry.lod : null;
+    selectOwner(entry.mesh);
+    const cards = lod && lod.primary && lod.model.mesh ? lod.model : null;
+    const start = lod ? impostors.near : 0; const end = lod ? impostors.far : 0;
+    const eye = camera.position;
     let n = 0;
     for (const b of entry.buckets) {
       const s = b.sphere;
       if (!keep(s.center.x, s.center.y, s.center.z, s.radius, true)) continue;
       for (const i of b.ids) {
         const o = i * 4;
-        if (keep(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) kept[n++] = i;
+        if (!lod) {
+          if (keep(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) kept[n++] = i;
+          continue;
+        }
+        const f = i * 5; const feet = entry.feet;
+        const d = Math.hypot(feet[f] - eye.x, feet[f + 1] - eye.y, feet[f + 2] - eye.z);
+        const visible = seen(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3]);
+        if ((visible && d < end) || (shadow && shadowFrustum.intersectsSphere(_sphere.set(_v.set(spheres[o], spheres[o + 1], spheres[o + 2]), spheres[o + 3])))) kept[n++] = i;
+        if (cards && visible && d > start) impostors.push(cards, feet[f], feet[f + 1], feet[f + 2], feet[f + 3], feet[f + 4]);
       }
     }
     // Draw order is kept: the ids went in bucket by bucket, so sort them back.
@@ -805,6 +860,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       entry.keptCount = n;
       entry.full = false;
     }
+    sizeCull = false;
     state.stats.instances += entry.total;
     state.stats.instancesKept += n;
     return n;
@@ -884,7 +940,17 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     if (zones) { zoneLine = zones.groundY - 1; deepLine = zones.groundY - LEVEL_H / 2; }
     if (!state.enabled) {
       state.active = false;
-      for (const entry of instanced) restoreInstances(entry);
+      // Distance is not visibility: the cards stay on with culling off.
+      if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.begin(model);
+      if (shadow) {
+        sun.shadow.updateMatrices(sun);
+        shadowFrustum.setFromProjectionMatrix(_m.multiplyMatrices(sun.shadow.camera.projectionMatrix, sun.shadow.camera.matrixWorldInverse));
+      }
+      for (const entry of instanced) {
+        if (entry.lod && impostors?.enabled) compact(entry, everything, everything, shadow);
+        else restoreInstances(entry);
+      }
+      if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.finish(model);
       cullHook.test = null;
       if (hiddenNow.length) hideAll();
       return;
@@ -895,6 +961,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     proj = camera.projectionMatrix.elements;
     near = camera.near; farPlane = camera.far;
     viewProj.multiplyMatrices(camera.projectionMatrix, view);
+    detail = impostors?.enabled ? DETAIL_PX / (proj[5] * renderer.getDrawingBufferSize(_size).y / 2) : 0;
 
     const at = locate(camera.position);
     const cell = cellAt(at.level, at.x, at.z, true);
@@ -916,11 +983,13 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       sun.shadow.updateMatrices(sun);
       shadowFrustum.setFromProjectionMatrix(_m.multiplyMatrices(sun.shadow.camera.projectionMatrix, sun.shadow.camera.matrixWorldInverse));
     }
+    if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.begin(model);
     for (const entry of instanced) {
       if (!entry.mesh.visible) continue;
       if (state.debugNoCompact) { restoreInstances(entry); continue; }
-      compact(entry, shadow ? seenOrCast : sphereVisible);
+      compact(entry, shadow ? seenOrCast : sphereVisible, sphereVisible, shadow);
     }
+    if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.finish(model);
 
     // Whole objects. A region's batch or instanced mesh with nothing left in
     // view is hidden whatever the walls, since three would still bind it and
@@ -930,19 +999,24 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     for (const o of candidates) {
       if (o.isInstancedMesh && o.userData.cullable) {
         if (o.count === 0) hiddenNow.push(o);
-      } else if (o.isBatchedMesh && o.anyVisible) {
+        continue;
+      }
+      selectOwner(o);
+      if (o.isBatchedMesh && o.anyVisible) {
         if (!o.anyVisible(sphereVisible)) hiddenNow.push(o);
-      } else if ((state.active || surfaceHidden || deepHidden) && !objectVisible(o)) {
+      } else if ((state.active || surfaceHidden || deepHidden || sizeCull) && !objectVisible(o)) {
         hiddenNow.push(o);
       }
     }
+    sizeCull = false;
     state.stats.culled = hiddenNow.length;
     if (state.debugNoHide) hiddenNow.length = 0;
     if (hiddenNow.length) hideAll();
 
     cullHook.camera = camera;
     cullHook.stamp = state.stamp;
-    cullHook.test = state.active || surfaceHidden || deepHidden ? sphereVisible : null;
+    cullHook.test = state.active || surfaceHidden || deepHidden || detail > 0 ? sphereVisible : null;
+    cullHook.select = selectOwner;
   }
 
   /** After the frame: put back what was hidden, so nothing else ever sees it. */

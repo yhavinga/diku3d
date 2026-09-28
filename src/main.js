@@ -28,6 +28,7 @@ import { installSave } from './save.js';
 import { createKick } from './kick.js';
 import { setPaneDaylight } from './windows.js';
 import { createVisibility } from './cull.js';
+import { createImpostors } from './impostor.js';
 import { createTitleReel } from './title.js';
 
 const params = new URLSearchParams(location.search);
@@ -515,8 +516,15 @@ async function boot() {
   // Every draw of the frame goes through here, the console's and the probes'
   // included, so what is culled is decided in one place: see cull.js.
   // `?cull=off` draws everything, for A/B.
+  // Far trees as cards, baked from their own models; `?lod=off` keeps every
+  // tree whole, for A/B. cull.js decides which copies are which each frame.
+  const impostors = assets ? createImpostors({ renderer, library: assets }) : null;
+  if (impostors) {
+    impostors.adopt(scene);
+    impostors.setEnabled(params.get('lod') !== 'off');
+  }
   const visibility = createVisibility({
-    renderer, scene, camera, world: built.group, sun, zones: built.zones,
+    renderer, scene, camera, world: built.group, sun, zones: built.zones, impostors,
     sky: [sky, stars, ...built.group.children.filter((o) => o.name.startsWith('horizon-'))],
   });
   visibility.state.enabled = params.get('cull') !== 'off';
@@ -546,6 +554,10 @@ async function boot() {
     name: params.get('quality') || 'high',
   });
   if (params.get('fps')) quality.preset.fps = Number(params.get('fps'));
+  if (impostors) {
+    quality.impostors = impostors;
+    impostors.setRange(...quality.preset.trees);
+  }
 
   // --------------------------------------------------------------- player --
 
@@ -1408,7 +1420,7 @@ async function boot() {
     // `wetness` is exposed because it is a slow-moving number nothing on screen
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
-    pipeline, environment, materials, wetness, assets,
+    pipeline, environment, materials, wetness, assets, impostors,
     player, hud, layout, built, actors, world, applyTime, applyWeather, state, audio, visibility,
     times: TIMES, overcast: OVERCAST, rain,
     /**

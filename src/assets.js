@@ -524,8 +524,10 @@ function toBatchable(source) {
  * Set by cull.js while a frame is drawn: `test(x, y, z, r)` says whether a
  * sphere can be seen from `camera` at all, walls included. Only the main
  * camera's passes are filtered; the shadow camera culls for itself.
+ * `select(mesh)` is told which batch is asking first, so that a piece too
+ * small to see is dropped only where its material may be (not a lamp).
  */
-export const cullHook = { test: null, camera: null, stamp: 0 };
+export const cullHook = { test: null, select: null, camera: null, stamp: 0 };
 
 /**
  * A BatchedMesh that culls once per camera, not once per pass.
@@ -557,7 +559,10 @@ export class StaticBatch extends THREE.BatchedMesh {
     this._cullCamera = camera;
     this._cullStamp = stamp;
     for (let i = 0; i < 16; i++) { state[i] = view[i]; state[16 + i] = projection[i]; }
-    if (hook) this.cullBehindWalls(hook.test);
+    if (hook) {
+      hook.select?.(this);
+      this.cullBehindWalls(hook.test);
+    }
   }
 
   /**

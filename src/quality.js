@@ -23,6 +23,9 @@ import * as THREE from 'three';
  * with texels instead: 2048 over a 44 m span is 4 cm a texel, against the 11 cm
  * it used to be.
  *
+ * `trees` is where the far trees turn into cards (impostor.js): the crossfade's
+ * near and far ends, in metres.
+ *
  * `ao` and `shafts` are `{ scale, samples }`, where scale is the fraction of
  * the render resolution the effect runs at. Remeasured at 1600x900 with the
  * frame cap at 30: light shafts are the expensive item, about 4.3 ms of
@@ -42,20 +45,24 @@ export const PRESETS = {
   low: {
     dpr: 1.0, bloom: false, aa: 'none', shadow: 0, span: 55,
     ao: false, shafts: false, detail: false, lights: 6, fps: 60,
+    trees: [50, 62],
   },
   medium: {
     dpr: 1.25, bloom: 'half', aa: 'none', shadow: 2048, span: 44,
     ao: false, shafts: false, detail: false, lights: 10, fps: 60,
+    trees: [65, 80],
   },
   high: {
     dpr: 1.75, bloom: 'half', aa: 'smaa', shadow: 3072, span: 38,
     ao: { scale: 0.4, samples: 9, denoise: 4 },
     shafts: false, detail: true, lights: 14, fps: 60,
+    trees: [80, 95],
   },
   max: {
     dpr: 2.0, bloom: 'full', aa: 'smaa', shadow: 4096, span: 34,
     ao: { scale: 0.5, samples: 12, denoise: 8 },
     shafts: { scale: 0.4, samples: 24 }, detail: true, lights: 16, fps: 0,
+    trees: [110, 130],
   },
 };
 
@@ -123,6 +130,7 @@ export class Quality {
       this.sun.shadow.map = null;
     }
     this.setDetail(preset.detail);
+    this.impostors?.setRange(...preset.trees);
     // Grass thickness and reach follow the preset's name (grass.js).
     this.materials?.setGrass?.(this.name);
     this.renderer.shadowMap.needsUpdate = true;
@@ -135,6 +143,7 @@ export class Quality {
   setDetail(on) {
     if (!this.materials || !this.materials.setDetail) return;
     this.materials.setDetail(on);
+    this.impostors?.sync();
   }
 
   /** Effective device pixel ratio: the preset, scaled down if we're struggling. */
