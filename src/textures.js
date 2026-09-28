@@ -1749,6 +1749,8 @@ function bakeMacro(size = 128) {
  */
 const shadeLift = { value: 1 };
 const indoorBounce = { value: 1 };
+const skyBleach = { value: 0 };
+const skyBleachTint = { value: new THREE.Color(1.06, 1.0, 0.90) };
 
 const HEMI_LINE = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
 const POINT_LINE = 'getPointLightInfo( pointLight, geometryPosition, directLight );';
@@ -1847,6 +1849,8 @@ function decorate(material, recipe, macro, grain) {
     material.userData.wetBase = recipe.wet ?? 0;
     shader.uniforms.indoorBounce = indoorBounce;
     shader.uniforms.dikuShadeLift = shadeLift;
+    shader.uniforms.dikuSkyBleach = skyBleach;
+    shader.uniforms.dikuSkyBleachTint = skyBleachTint;
     shader.uniforms.dikuBuriedGain = buried.gain;
     shader.uniforms.dikuBuriedIrradiance = buried.irradiance;
     shader.uniforms.dikuBuriedRadiance = buried.radiance;
@@ -1874,6 +1878,8 @@ function decorate(material, recipe, macro, grain) {
         uniform float wetness;
         uniform float indoorBounce;
         uniform float dikuShadeLift;
+        uniform float dikuSkyBleach;
+        uniform vec3 dikuSkyBleachTint;
         uniform float dikuBuriedGain;
         uniform vec3 dikuBuriedIrradiance;
         uniform vec3 dikuBuriedRadiance;
@@ -1904,7 +1910,8 @@ function decorate(material, recipe, macro, grain) {
           // flags came out as blue-veined marble -- so indoors it keeps its
           // strength and loses most of its hue, to a warm neutral.
           float dikuIblL = dot( iblIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
-          iblIrradiance = mix( iblIrradiance, dikuIblL * vec3( 1.06, 1.0, 0.90 ), vIndoor * 0.8 );
+          iblIrradiance = mix( iblIrradiance, dikuIblL * mix( dikuSkyBleachTint, vec3( 1.06, 1.0, 0.90 ), vIndoor ),
+            max( vIndoor * 0.8, dikuSkyBleach ) );
           float dikuRadL = dot( radiance, vec3( 0.2126, 0.7152, 0.0722 ) );
           radiance = mix( radiance, dikuRadL * vec3( 1.03, 1.0, 0.95 ), vIndoor * 0.5 );
         #endif
@@ -2088,6 +2095,18 @@ export function createMaterials(size = 512, onProgress = () => {}) {
    * the sky is already bright; this is set per hour instead. A plain uniform.
    */
   materials.setShadeLift = (value) => { shadeLift.value = value; };
+
+  /**
+   * How much of the sky's hue the diffuse sky light loses outdoors, by the
+   * hour: the cube is a whole open sky, and a shaded street sees half of it as
+   * sunlit wall. Indoors already loses 0.8 of it; this is the outdoor floor.
+   */
+  materials.setSkyBleach = (value, tint = 0xffffff) => {
+    skyBleach.value = value;
+    skyBleachTint.value.setHex(tint);
+    // The tints are near-neutral multipliers around 1, not display colours.
+    skyBleachTint.value.multiplyScalar(3 / (skyBleachTint.value.r + skyBleachTint.value.g + skyBleachTint.value.b));
+  };
 
   /** Close-range detail normals, on or off. Recompiles; only the P key does it. */
   materials.setDetail = (on) => {

@@ -1756,9 +1756,18 @@ export function buildScene(world, layout, materials, assets = null) {
           closed: !!(side.exit.locks & EX_CLOSED),
           locked: !!(side.exit.locks & EX_LOCKED),
           keyword: side.exit.keyword || 'door',
+          // "Through the solid iron bars you see the Concourse": a grate is
+          // iron you can see through, not boards.
+          grate: GRATE.test(side.exit.keyword || ''),
           room: room.vnum,
         });
         if (gated) buildGatehouse({ batcher, chunk, pos, dir, addCollider });
+        // Out in the open a grate hangs in a railing, not on its own: iron
+        // runs from each jamb to the corner of the cell, on the line the
+        // graveyard's own railing takes.
+        if (openAir && GRATE.test(side.exit.keyword || '')) {
+          buildGrateRailing({ instances, model, chunk, pos, dir, addCollider });
+        }
       }
     }
 
@@ -3884,6 +3893,33 @@ function buildGraveyard({ instances, model, chunk, room, pos, sides }) {
  * from both sides into a row of pens.
  */
 const FENCE_PITCH = 2.6;
+
+const GRATE = /\b(grate|grating|grille|bars)\b/i;
+
+/** Railing either side of a grate on a cell edge, jamb to corner. */
+function buildGrateRailing({ instances, model, chunk, pos, dir, addCollider }) {
+  const name = model(['iron_fence'], 0);
+  if (!name) return;
+  const [dx, , dz] = DIR_STEP[dir];
+  const alongZ = dx !== 0;
+  const out = HALF - 0.35;
+  const rotY = alongZ ? -Math.PI / 2 : 0;
+  const lx = pos.x + dx * out;
+  const lz = pos.z + dz * out;
+  for (const s of [-1, 1]) {
+    // Panels run +along from their origin, so the far side starts a pitch out.
+    for (let a = DOOR_W / 2 + 0.1; a + FENCE_PITCH <= HALF + 0.05; a += FENCE_PITCH) {
+      const from = s > 0 ? a : -a - FENCE_PITCH;
+      instances.add(name, alongZ
+        ? { x: lx, y: pos.y, z: lz + from, rotY }
+        : { x: lx + from, y: pos.y, z: lz, rotY }, chunk);
+    }
+    const a0 = s > 0 ? DOOR_W / 2 + 0.1 : -HALF;
+    const a1 = s > 0 ? HALF : -DOOR_W / 2 - 0.1;
+    if (alongZ) addCollider(lx - 0.25, lx + 0.25, lz + a0, lz + a1, pos.y, pos.y + 2.2);
+    else addCollider(lx + a0, lx + a1, lz - 0.25, lz + 0.25, pos.y, pos.y + 2.2);
+  }
+}
 
 function buildIronFence({ instances, model, chunk, x, y, z, dir, addCollider }) {
   const name = model(['iron_fence'], 0);

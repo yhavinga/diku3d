@@ -418,6 +418,57 @@ def build_door_leaf():
     return kit.deliver(p, "door_leaf")
 
 
+def build_grate_leaf():
+    """One leaf of an iron grate, hung exactly as `door_leaf` is: hinge edge at
+    x = 0, running to +X, 1.35 by 2.85 reference, street side -Y. "Through the
+    solid iron bars you see the Concourse" -- the graveyard's grate at #3600
+    hung two boarded doors in the railing line, which read in the dark as a
+    wooden wall standing on its own on the gravel. Bars you can see through
+    are what the mud says, and they match the iron railing either side.
+
+    Stiles and rails are flat bar, the bars are square and set diamond-wise so
+    each catches a highlight down one arris, and they run through the top rail
+    to spear points, the same finish as the railing's."""
+    lib.reset()
+    p = []
+    W, H = 1.35, 2.85
+    stile, rail = 0.07, 0.065
+    for (sx, name) in ((stile / 2, "hinge_stile"), (W - stile / 2, "latch_stile")):
+        p.append(kit.timber((stile, 0.045, H - 0.02), (sx, 0, (H - 0.02) / 2),
+                            (0, 0, 0), "iron", 0.008, name))
+    for z in (0.12, 1.05, H - 0.30):
+        p.append(kit.timber((W - 2 * stile, 0.04, rail), (W / 2, 0, z),
+                            (0, 0, 0), "iron", 0.008, "rail"))
+    bars = 9
+    span = W - 2 * stile
+    for i in range(bars):
+        bx = stile + span * (i + 0.5) / bars
+        top = H - 0.12 + (0.06 if i % 2 else 0.0)
+        p.append(lib.box((0.024, 0.024, top - 0.06), (bx, 0, 0.06 + (top - 0.06) / 2),
+                         (0, 0, math.pi / 4), name="bar", mat="iron"))
+        p.append(lib.cone(0.03, 0.0, 0.13, (bx, 0, top + 0.065), (0, 0, math.pi / 4),
+                          verts=4, name="spear", mat="iron"))
+    # Dog bars: short intermediate pickets at the foot, which every real
+    # graveyard gate has so nothing small walks through.
+    for i in range(bars - 1):
+        bx = stile + span * (i + 1) / bars
+        p.append(lib.box((0.018, 0.018, 0.5), (bx, 0, 0.36), (0, 0, math.pi / 4),
+                         name="dogbar", mat="iron"))
+    # Scrolls between the middle and top rails: a C each side, so the leaf
+    # has one curve in it and is not a cage.
+    for (cx, rot) in ((stile + 0.18, 0.0), (W - stile - 0.18, math.pi)):
+        p.append(lib.torus(0.13, 0.012, (cx, 0, 1.4), (math.pi / 2, 0, rot),
+                           major_seg=12, minor_seg=4, name="scroll", mat="iron"))
+    # Lock box and ring on the street side of the latch stile.
+    p.append(kit.timber((0.16, 0.06, 0.22), (W - 0.11, -0.05, 1.05),
+                        (0, 0, 0), "iron", 0.01, "lockbox"))
+    p.append(lib.torus(0.06, 0.011, (W - 0.11, -0.09, 0.93), (math.pi / 2, 0, 0),
+                       major_seg=10, minor_seg=5, name="ring", mat="iron"))
+    for z in (0.35, H - 0.55):
+        p.append(lib.cylinder(0.03, 0.2, (0.0, 0, z), verts=10, name="knuckle", mat="iron"))
+    return kit.deliver(p, "grate_leaf")
+
+
 def build_stone_arch():
     """A 3.2 x 3.1 opening, which is the size of every doorway in the world, so
     this drops straight onto the archways layout.js leaves where an exit will
@@ -1181,7 +1232,7 @@ ASSETS = [
     build_water_butt, build_bucket, build_rope_coil, build_ladder,
     build_planks_pile, build_herb_pots, build_broom, build_cartwheel,
     build_nettles, build_door_round, build_log_cabin,
-    build_headstone, build_grave_slab, build_iron_fence,
+    build_headstone, build_grave_slab, build_iron_fence, build_grate_leaf,
 ]
 
 
