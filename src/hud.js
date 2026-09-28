@@ -338,8 +338,6 @@ export class Hud {
     this.ctx.scale(this.dpr, this.dpr);
     this.compass = new CompassRose(root.querySelector('#compass'), this.dpr);
     this.currentVnum = null;
-    this.typed = 0;
-    this.fullText = '';
     this.toastTimer = 0;
   }
 
@@ -349,19 +347,19 @@ export class Hud {
     this.el.title.textContent = room.name;
     this.room = room;
     this.drawArea();
-    this.fullText = room.description.replace(/\s*\n\s*/g, ' ').trim();
-    this.typed = 0;
-    this.el.desc.textContent = '';
+    // All of it at once, revealed by a mask the stylesheet sweeps down the
+    // panel. It used to be typed out a slice per frame, which left the panel
+    // growing under the log for a second and a half, and any still taken
+    // before the typing caught up -- or with the loop halted -- showed prose
+    // cut off mid-word: "...and you lo".
+    this.el.desc.textContent = room.description.replace(/\s*\n\s*/g, ' ').trim();
+    this.el.desc.classList.remove('reveal');
+    void this.el.desc.offsetWidth;
+    this.el.desc.classList.add('reveal');
     const exits = room.exits
       .map((exit, dir) => (exit ? DIR_NAME[dir] : null))
       .filter(Boolean);
     this.el.exits.textContent = exits.length ? `exits: ${exits.join(', ')}` : 'no obvious exits';
-  }
-
-  tickText(dt) {
-    if (this.typed >= this.fullText.length) return;
-    this.typed = Math.min(this.fullText.length, this.typed + dt * 420);
-    this.el.desc.textContent = this.fullText.slice(0, Math.floor(this.typed));
   }
 
   setLook(target) {
@@ -425,7 +423,6 @@ export class Hud {
   }
 
   update(dt, camera, roomVnum) {
-    this.tickText(dt);
     if (this.toastTimer > 0) {
       this.toastTimer -= dt;
       if (this.toastTimer <= 0) this.el.toast.classList.remove('visible');

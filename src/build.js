@@ -18,6 +18,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SECTOR, ROOM_INDOORS, EX_ISDOOR, EX_CLOSED, EX_LOCKED, DIR_STEP, DIR_NAME } from './are.js';
 import { InstanceBatch, StaticBatches } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
+import { classifyShells, shellFor } from './shells.js';
+import { placeClutter } from './clutter.js';
 
 export const CELL = 13;         // grid pitch; rooms sit two cells apart
 export const ROOM = 10;         // interior span of an indoor room
@@ -159,6 +161,9 @@ const WATER_LAP = 0.7;
  * written here because the rule is about being underground, not about the
  * Shire, and the next buried area with a door should not have to find it again.
  */
+/** Outer skins a window is dressed in stone for, rather than framed in oak. */
+const MASONRY = new Set(['stonewall', 'sootwall', 'brick', 'marble', 'crag', 'cliff', 'rock', 'caverock']);
+
 const isBuried = (mats, cell) => mats.cave && (cell.level < 0 || !!mats.inRock);
 
 /**
@@ -400,7 +405,7 @@ class Batcher {
     const material = this.materials[materialName];
     if (!material) throw new Error(`build: unknown material ${materialName}`);
     const {
-      tint = null, ao = null, chunk = '0', uvScale = null, indoor = this.indoor, normals = false,
+      tint = null, ao = null, chunk = '0', uvScale = null, indoor = this.indoor, normals = false, keepUv = false,
     } = options;
 
     const geo = geometry.index ? geometry.toNonIndexed() : geometry.clone();
@@ -412,6 +417,9 @@ class Batcher {
     const pos = geo.attributes.position;
     const nor = geo.attributes.normal;
     const scale = uvScale ?? material.userData.uvScale;
+    // `keepUv`: a surface laid round a curve -- a log's bark -- brings UVs of
+    // its own, already in the material's tile.
+    const given = keepUv ? geo.attributes.uv : null;
     const uv = new Float32Array(pos.count * 2);
     const col = new Float32Array(pos.count * 3);
 
@@ -420,7 +428,8 @@ class Batcher {
       const nx = Math.abs(nor.getX(i)); const ny = Math.abs(nor.getY(i)); const nz = Math.abs(nor.getZ(i));
       // Project from whichever axis the face points along: no UV bookkeeping,
       // and textures stay continuous where surfaces meet.
-      if (ny >= nx && ny >= nz) { uv[i * 2] = x * scale; uv[i * 2 + 1] = z * scale; }
+      if (given) { uv[i * 2] = given.getX(i); uv[i * 2 + 1] = given.getY(i); }
+      else if (ny >= nx && ny >= nz) { uv[i * 2] = x * scale; uv[i * 2 + 1] = z * scale; }
       else if (nx >= nz) { uv[i * 2] = z * scale; uv[i * 2 + 1] = y * scale; }
       else { uv[i * 2] = x * scale; uv[i * 2 + 1] = y * scale; }
 
@@ -699,7 +708,14 @@ function pickMaterials(room, area) {
   // tiled roof and lit windows, which is how the troll den stood in the
   // forest: `inRock` buries it (no roof, no windows) and `buildMassif` heaps
   // crag over it. Outside it is `crag`, the same rock lit by the sky.
-  const rockCave = cave && !style && !burrow && !holy && ROCK_CAVE.test(name);
+  // What the room's words say it is built as (src/shells.js). Asked only of a
+  // room with walls: a passage routed out of it asks this function too, and
+  // gets the shell's floor, which is the floor that runs out of its door.
+  const shell = isOpenAir(room) ? null : shellFor(room);
+  // "You are in a natural cave": the words, where the name alone missed it --
+  // Haon Dor's "Inside the cave" was the stone kit with a timber window in it.
+  if (shell && shell.kind === 'cave' && !style) cave = true;
+  const rockCave = cave && !style && !burrow && !holy && (ROCK_CAVE.test(name) || (shell && shell.kind === 'cave'));
   if (rockCave) { floor = 'cavefloor'; wallIn = 'caverock'; wallOut = 'crag'; ceil = 'caverock'; }
 
   // What the Shire builds when it does not dig: timber and plaster, and a
@@ -714,7 +730,43 @@ function pickMaterials(room, area) {
     else { floor = 'planks'; wallIn = 'plaster'; wallOut = 'plaster'; ceil = 'planks'; }
   }
 
-  if (!holy && !cave && !wood && !shire && hash3(room.vnum, 0, 0, 9) > 0.6) wallOut = 'timber';
+  // The rest of the shells, after the area's own rules so they overrule them,
+  // and before the neighborhood's, which is a different town.
+  const kind = shell && shell.kind;
+  let wallInTint = null;
+  // Underground the sewer's own lighting has to reach the surface, so a shell
+  // there takes the `buried` recipes; up in the town the daylit ones.
+  const deep = !!style;
+  if (kind === 'tomb') {
+    // Dressed stone, not the crazy paving `cave` handed every tomb.
+    cave = true;
+    floor = 'sewerflag'; wallIn = 'ashlar'; wallOut = 'ashlar'; ceil = 'ashlar';
+  } else if (kind === 'lair') {
+    floor = 'emberstone'; wallIn = 'scorched'; ceil = 'scorched';
+    if (!deep) wallOut = 'sootwall';
+  } else if (kind === 'dungeon') {
+    if (deep) { floor = 'sewerflag'; wallIn = 'ashlar'; ceil = 'ashlar'; } else { floor = 'flagstone'; wallIn = 'stonewall'; ceil = 'stonewall'; }
+    wallOut = deep ? wallOut : 'stonewall';
+    // "Dark stone walls, hard and cold to the touch": the same stone, damp.
+    wallInTint = [0.66, 0.68, 0.7];
+  } else if (kind === 'vault') {
+    floor = 'flagstone'; wallIn = 'stonewall'; ceil = 'stonewall'; wallOut = 'stonewall';
+  } else if (kind === 'log') {
+    // The logs are built in front of both skins (`buildLogWalls`); what shows
+    // between them is the chinking, lime daub, on either face.
+    floor = 'planks'; wallIn = 'plaster'; wallOut = 'plaster'; ceil = 'planks'; roof = 'boards';
+  } else if (kind === 'panelled') {
+    floor = 'planks'; wallIn = 'plaster'; ceil = 'planks';
+  } else if (kind === 'farmhouse' && shire === 'timber') {
+    // A farmer's house is built of what is in his fields: rough stone, a
+    // flagged floor you can bring a boot into, thatch.
+    floor = 'flagstone'; wallIn = 'stonewall'; wallOut = 'stonewall'; roof = 'thatch';
+  } else if (kind === 'smial' && isShire(room)) {
+    smial = true; burrow = true; cave = true; shire = null;
+    floor = 'planks'; wallIn = 'plaster'; ceil = 'plaster'; wallOut = 'grass'; wallUv = TURF_UV; roof = 'grass';
+  }
+
+  if (!holy && !cave && !wood && !shire && !kind && hash3(room.vnum, 0, 0, 9) > 0.6) wallOut = 'timber';
   if (!holy && !burrow && hash3(room.vnum, 1, 0, 3) > 0.84) roof = 'thatch';
 
   // The neighborhood, after everything else, because it overrules the sector
@@ -729,7 +781,7 @@ function pickMaterials(room, area) {
   if (hood && hood !== 'ruin' && !holy && !wood) wallOut = 'sootwall';
   return {
     floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv, sewer: style, inRock: inRock || rockCave, hood,
-    rockCave, shire,
+    rockCave, shire, shell, wallInTint,
   };
 }
 
@@ -1441,6 +1493,7 @@ export function buildScene(world, layout, materials, assets = null) {
   const addPlatform = (x0, x1, z0, z1, top) => platforms.push({ x0, x1, z0, z1, top });
 
   classifySewer(world);
+  classifyShells(world, (room) => room.sector !== SECTOR.AIR && !isOpenAir(room));
   const turfAt = hoodTurf(layout);
   // The whole kit or none of it: a chamber with no tunnel to leave by is worse
   // than the plain walled room it falls back to.
@@ -1552,7 +1605,7 @@ export function buildScene(world, layout, materials, assets = null) {
     // the kits are dressed masonry and would look absurd in Moria.
     const hood = mats.hood;
     const ruin = hood === 'ruin';
-    const kit = (!openAir && !mats.cave && !mats.shire && instances)
+    const kit = (!openAir && !mats.cave && !mats.shire && !mats.shell && instances)
       ? (ruin && model(['ruin_wall_solid']) ? 'ruin_'
         : mats.holy && model(['temple_wall_solid']) ? 'temple_'
           : (model(['wall_solid']) ? '' : null))
@@ -1603,6 +1656,12 @@ export function buildScene(world, layout, materials, assets = null) {
         shaft: stairPlans.some((plan) => plan.lower === cell),
         addCollider, addPlatform, lights, decor, portals, skyHoles,
       });
+      // "An old and worn well from before this century": the stair down is
+      // its shaft, and a windlass stands over it.
+      const shaftTop = roomHoles.filter((h) => !h.ceiling);
+      if (mats.shell && mats.shell.kind === 'well' && shaftTop.length) {
+        buildWellhead({ batcher, instances, chunk, pos, hole: unionRect(shaftTop), wood: 'sewerwood' });
+      }
       continue;
     }
 
@@ -1814,24 +1873,36 @@ export function buildScene(world, layout, materials, assets = null) {
     }
 
     if (!openAir) {
-      if (!ruin) {
+      const shellKind = mats.shell && mats.shell.kind;
+      const ceilHoles = roomHoles.filter((h) => h.ceiling);
+      // "The walls and ceiling seem miles away": the lining goes up, and the
+      // flat ceiling that would hide it does not go in.
+      const top = ceilingOf(room, cell, layout);
+      if (!ruin && top !== VAST_CEIL) {
         buildCeiling({
-          batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + CEIL, z: pos.z,
+          batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + top, z: pos.z,
           half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
         });
       }
       if (mats.shire) {
         buildTimberFrame({
           batcher, chunk, pos, sides, addCollider, barn: mats.shire === 'barn',
-          holes: roomHoles.filter((h) => h.ceiling),
+          holes: roomHoles.filter((h) => h.ceiling), rail: shellKind !== 'inn',
         });
       }
+      buildShell({
+        kind: shellKind, batcher, instances, chunk, room, cell, pos, sides, addCollider, lights, decor, mats, materials,
+        holes: ceilHoles, stairDir: stairPlans.find((plan) => plan.lower === cell)?.dir ?? -1,
+      });
       // Lanterns hang from the beams: the barn's tie beams, the smial's ribs.
       let lanterns = mats.shire === 'barn' ? [[-1.8, -2.6], [1.8, 2.6]] : null;
       if (mats.smial) lanterns = buildSmialVault({ batcher, chunk, pos, sides, addCollider });
       if (instances && lanterns) hangLanterns({ instances, chunk, pos, decor, lights, room, points: lanterns });
       if (instances && (deepStyle(room) === 'cave' || mats.rockCave)) {
-        buildCaveLining({ instances, chunk, room, pos, sides, roofed: !roomHoles.some((h) => h.ceiling), addCollider });
+        buildCaveLining({
+          instances, chunk, room, pos, sides, roofed: !roomHoles.some((h) => h.ceiling), addCollider,
+          height: top,
+        });
       }
       // ...and a room with earth over it has no roof either. Same family as the
       // windows below, and it was visible: a tomb sits 5.65 m under the
@@ -1853,11 +1924,15 @@ export function buildScene(world, layout, materials, assets = null) {
       if (!isBuried(mats, cell) && !ruin && hood !== 'lair') {
         decor.push({
           kind: 'windows', x: pos.x, y: pos.y, z: pos.z,
-          w: SHELL * 2, d: SHELL * 2, h: CEIL + 1.1, seed: hash3(room.vnum, 2, 0, 11), doorSides: sides,
+          // On a log wall the casement sits on the logs' face, and the logs
+          // are cut round it (`buildLogWalls`).
+          w: (SHELL + (shellKind === 'log' ? LOG_FACE : 0)) * 2, d: (SHELL + (shellKind === 'log' ? LOG_FACE : 0)) * 2,
+          h: CEIL + 1.1, seed: hash3(room.vnum, 2, 0, 11), doorSides: sides,
+          frame: (kit !== null || MASONRY.has(mats.wallOut)) ? 'stone' : 'timber',
         });
       }
       if (isDeep(room)) buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider });
-      else if (!ruin) buildInteriorProps({ room, pos, sides, decor, mats, holes: roomHoles.filter((h) => !h.ceiling), lights, kit });
+      else if (!ruin) rooms.get(room.vnum).plan = buildInteriorProps({ room, pos, sides, decor, mats, holes: roomHoles.filter((h) => !h.ceiling), lights, kit });
       // "The inn actually looks fairly functional despite its lack of repair
       // ... It looks as if the beer is still on tap!!!" The one place in the
       // neighborhood with a sign out and a light at the door.
@@ -2013,6 +2088,7 @@ export function buildScene(world, layout, materials, assets = null) {
     buildStair({
       batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
       materials: lowerMats,
+      lowerCeil: ceilingOf(plan.lower.room, plan.lower, layout),
       // Going down into the ground rather than up a storey: the opening wants
       // a parapet round it, and a lining through the earth between the room
       // below's ceiling and this floor -- unless the room below is a sewer
@@ -2162,6 +2238,12 @@ export function buildScene(world, layout, materials, assets = null) {
       chunk: chunkOf(spot),
       sector: spot.east ? SECTOR.DESERT : spot.sector, bog: spot.bog, shire: spot.shire, x: pos.x, y: pos.y, z: pos.z,
       seed: hash3(spot.x, spot.z, spot.level, 17), addCollider, lights, decor,
+      // Sides where a room with walls stands next door: nothing grows through them.
+      walled: [0, 1, 2, 3].map((d) => {
+        const vn = layout.at(spot.level, spot.x + DIR_STEP[d][0], spot.z + DIR_STEP[d][2]);
+        const info = vn !== undefined ? rooms.get(vn) : null;
+        return !!info && !info.unbuilt && !isOpenAir(info.room);
+      }),
     });
   }
   // The town wall's lengths, and a tower wherever a length ends without
@@ -2261,6 +2343,33 @@ export function buildScene(world, layout, materials, assets = null) {
   }
 
   buildVerges({ batcher, instances, model, groundAt, chunkOf });
+  // What each room's own words put in it (src/clutter.js), once everything
+  // it has to find a clear place among is standing.
+  const clutter = placeClutter({
+    world, rooms, decor, colliders, addCollider, instances, lights, worldOf, openAir: isOpenAir, ROOM, HALF,
+    BufferAttribute: THREE.BufferAttribute,
+  });
+
+  // No tree grows through a room's walls. A forest fir is modelled with its
+  // lowest boughs 3.6 m out and planted at up to 2.6x, so one standing a
+  // whole cell away from Haon Dor's cabin still put its crown through the
+  // logs. A tree near a walled room is kept to the size its crown has room
+  // for, and one with no room left is not planted.
+  const walledRooms = [...rooms.values()].filter((i) => !i.unbuilt && !isOpenAir(i.room))
+    .map((i) => ({ x: i.cell.x * CELL, y: i.cell.level * LEVEL_H, z: i.cell.z * CELL }));
+  const CROWN = 3.2; // bough reach per unit of scale, at the height of a wall
+  for (let i = decor.length - 1; i >= 0; i--) {
+    const d = decor[i];
+    if (d.kind !== 'tree') continue;
+    let room = Infinity;
+    for (const b of walledRooms) {
+      if (Math.abs(d.y - b.y) > 2) continue;
+      room = Math.min(room, Math.max(Math.abs(d.x - b.x), Math.abs(d.z - b.z)) - SHELL - 0.2);
+    }
+    const fits = room / CROWN;
+    if (fits < 0.7) decor.splice(i, 1);
+    else if ((d.scale || 1) > fits) d.scale = fits;
+  }
 
   const mist = buildMist(group, mistCells);
 
@@ -2279,6 +2388,7 @@ export function buildScene(world, layout, materials, assets = null) {
     stats.instanced = placed.triangles;
   }
   stats.meshes = batches.finish(zones.route);
+  stats.clutter = clutter;
   return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones };
 }
 
@@ -2557,7 +2667,7 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
   }
 
   for (const skin of (kit !== null && kit !== undefined && instances ? [] : [
-    { name: mats.wallIn, t: WALL_IN, offset: WALL_IN / 2, height: CEIL },
+    { name: mats.wallIn, t: WALL_IN, offset: WALL_IN / 2, height: CEIL, tint: mats.wallInTint },
     // `uv` is undefined for every room but a smial, and undefined falls through
     // to the material's own tile inside `Batcher.add`.
     { name: mats.wallOut, t: WALL_OUT, offset: WALL_IN + WALL_OUT / 2, height: eave, uv: mats.wallUv },
@@ -2566,7 +2676,7 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
     const sz = z + dz * skin.offset;
     if (!gap) {
       batcher.add(box(width, skin.height, skin.t, 3, 4, 1), skin.name,
-        place(sx, y + skin.height / 2, sz, rotY), { chunk, ao: wallAo(y), uvScale: skin.uv });
+        place(sx, y + skin.height / 2, sz, rotY), { chunk, ao: wallAo(y), uvScale: skin.uv, tint: skin.tint });
       continue;
     }
     const sideW = (width - gap) / 2;
@@ -2574,12 +2684,12 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
       const offset = s * (gap + sideW) / 2;
       batcher.add(box(sideW, skin.height, skin.t, 2, 4, 1), skin.name,
         place(sx + (along ? 0 : offset), y + skin.height / 2, sz + (along ? offset : 0), rotY),
-        { chunk, ao: wallAo(y), uvScale: skin.uv });
+        { chunk, ao: wallAo(y), uvScale: skin.uv, tint: skin.tint });
     }
     const lintel = skin.height - DOOR_H;
     if (lintel > 0.05) {
       batcher.add(box(gap, lintel, skin.t, 2, 1, 1), skin.name,
-        place(sx, y + DOOR_H + lintel / 2, sz, rotY), { chunk, ao: () => 0.72, uvScale: skin.uv });
+        place(sx, y + DOOR_H + lintel / 2, sz, rotY), { chunk, ao: () => 0.72, uvScale: skin.uv, tint: skin.tint });
     }
   }
 
@@ -2694,7 +2804,7 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
       return;
     }
     // A blank three-storey wall along the street was reported; give it openings.
-    decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed });
+    decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed, frame: stone || marble ? 'stone' : 'timber' });
   };
 
   /**
@@ -2716,7 +2826,7 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
       seed > 0.38 ? 'thatch' : 'rooftile',
       place(bx, pos.y + h, bz, wide ? Math.PI / 2 : 0), { chunk });
     addCollider(bx - sx / 2, bx + sx / 2, bz - sz / 2, bz + sz / 2, pos.y, pos.y + h);
-    decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed });
+    decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed, frame: 'timber' });
     if (hash3(Math.round(bx), Math.round(bz), cell.level, 71) > 0.5) {
       decor.push({ kind: 'smoke', x: bx, y: pos.y + h + roofH, z: bz });
     }
@@ -5056,25 +5166,27 @@ const CAVE_STRETCH = 13 / 10.6;
  * what read as a level editor's room with a rock texture on it. A wall with a
  * way through it gets the panel with the opening in it.
  */
-function buildCaveLining({ instances, chunk, room, pos, sides, roofed, addCollider }) {
+function buildCaveLining({ instances, chunk, room, pos, sides, roofed, addCollider, height = CEIL }) {
+  // A vast cavern stretches the same rock up: the panels are authored to CEIL.
+  const scaleY = height / CEIL;
   for (let dir = 0; dir < 4; dir++) {
     const side = sides[dir];
     const open = !!side && ['alley', 'portal', 'gate'].includes(side.kind);
     const [dx, , dz] = DIR_STEP[dir];
     instances.add(open ? 'cave_wall_door' : 'cave_wall', {
-      x: pos.x + dx * ROOM / 2, y: pos.y, z: pos.z + dz * ROOM / 2, rotY: FACE_ROT[dir],
+      x: pos.x + dx * ROOM / 2, y: pos.y, z: pos.z + dz * ROOM / 2, rotY: FACE_ROT[dir], scaleY,
     }, chunk);
     // The rock stands up to 0.9 m proud of the wall line the room's own
     // colliders are on; without these you walked into it to the knees.
     const runs = open ? [[-ROOM / 2, -CAVE_HOLE], [CAVE_HOLE, ROOM / 2]] : [[-ROOM / 2, ROOM / 2]];
     for (const [c0, c1] of runs) {
       const r = sewerRect(pos, dir, ROOM / 2 - CAVE_PROUD, ROOM / 2, c0, c1);
-      addCollider(r.x0, r.x1, r.z0, r.z1, pos.y, pos.y + CEIL);
+      addCollider(r.x0, r.x1, r.z0, r.z1, pos.y, pos.y + height);
     }
   }
   if (roofed) {
     instances.add('cave_roof', {
-      x: pos.x, y: pos.y + CEIL, z: pos.z, rotY: Math.floor(hash3(room.vnum, 83, 0, 2) * 4) * Math.PI / 2,
+      x: pos.x, y: pos.y + height, z: pos.z, rotY: Math.floor(hash3(room.vnum, 83, 0, 2) * 4) * Math.PI / 2,
     }, chunk);
   }
 }
@@ -5373,7 +5485,8 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
   const inside = [];            // {level, x, z, swap} cells that are cave or cave corridor
   for (const cell of layout.order) {
     if (cell.level < 0 || !rocky(cell.room)) continue;
-    inside.push({ level: cell.level, x: cell.x, z: cell.z, swap: skin(cell.room) });
+    const top = ceilingOf(cell.room, cell, layout);
+    inside.push({ level: cell.level, x: cell.x, z: cell.z, swap: skin(cell.room), top });
   }
   for (const link of layout.links) {
     if (link.kind !== 'alley' || !link.path || link.from.level < 0) continue;
@@ -5455,7 +5568,7 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
     }
     // A cap on the room's own ceiling, unless another cave stands on it.
     if (layout.at(c.level + 1, c.x, c.z) !== undefined) continue;
-    const y = c.level * LEVEL_H + CEIL;
+    const y = c.level * LEVEL_H + (c.top ?? CEIL);
     instances.add(hash3(c.x, c.z, c.level, 213) > 0.5 ? 'massif_a' : 'massif_b', {
       x: c.x * CELL, y, z: c.z * CELL, rotY: Math.floor(hash3(c.x, c.z, 3, 213) * 4) * Math.PI / 2,
       scaleY: 0.45 + hash3(c.x, c.z, 4, 213) * 0.35,
@@ -5494,7 +5607,7 @@ function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed }) 
 }
 
 /** Straight flight from the lower room up through the opening in its ceiling. */
-function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform, materials, buried = false, shaftWalls = false, kerb = 'stonewall' }) {
+function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform, materials, buried = false, shaftWalls = false, kerb = 'stonewall', lowerCeil = CEIL }) {
   const lower = worldOf(plan.lower);
   const chunk = chunkOf(plan.lower);
   const [dx, , dz] = DIR_STEP[plan.dir];
@@ -5602,7 +5715,7 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
   }
   // And the lining: the room below stops at its ceiling, this floor starts a
   // metre and a half higher, and between the two there was nothing at all.
-  const y0 = lower.y + CEIL + SLAB; const y1 = upper.y - SLAB;
+  const y0 = lower.y + lowerCeil + SLAB; const y1 = upper.y - SLAB;
   if (y1 - y0 < 0.05) return;
   for (const [p, q] of [
     [at(a0, c0 - 0.25), at(a1, c0)], [at(a0, c1), at(a1, c1 + 0.25)],
@@ -5624,7 +5737,7 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
 const FRAME_POST = 0.26;
 const FRAME_PLATE = 0.24;
 
-function buildTimberFrame({ batcher, chunk, pos, sides, addCollider, holes, barn }) {
+function buildTimberFrame({ batcher, chunk, pos, sides, addCollider, holes, barn, rail = true }) {
   const post = barn ? 0.34 : FRAME_POST;
   const inner = ROOM / 2;
   const y = pos.y;
@@ -5657,7 +5770,7 @@ function buildTimberFrame({ batcher, chunk, pos, sides, addCollider, holes, barn
       const p = at(0, post / 2);
       add(DOOR_W + post * 2, 0.26, post, p.x, y + DOOR_H + 0.13, p.z, rotY);
     }
-    if (!barn) {
+    if (!barn && rail) {
       // A rail at the height of a chair back, broken by the door.
       const runs = open ? [[-inner, -DOOR_W / 2 - post], [DOOR_W / 2 + post, inner]] : [[-inner, inner]];
       for (const [a, b] of runs) {
@@ -5687,20 +5800,46 @@ const VAULT_CORNER = 2.3;       // the plan's corner radius: over the cove's 2.0
 const VAULT_BOARDS = 1.05;
 
 function buildSmialVault({ batcher, chunk, pos, sides, addCollider }) {
-  const H = ROOM / 2;
-  const cove = CEIL - VAULT_SPRING;
-  const straight = H - VAULT_CORNER;
+  return buildVaultLining({
+    batcher, chunk, pos, sides, addCollider,
+    spring: VAULT_SPRING, corner: VAULT_CORNER,
+    surface: (h) => (h <= VAULT_BOARDS + 1e-6 ? 'planks' : 'plaster'),
+    rib: 'timber',
+  });
+}
+
+/**
+ * A lining that curves from the walls into the ceiling: the smial's plaster
+ * tube, a tomb's low stone vault, a laboratory's smoke-stained one. Walls
+ * rise straight to `spring`, then a quarter-circle cove carries them in to a
+ * flat crown at CEIL; in plan the corners are rounded off by `corner`. The
+ * room's own walls and colliders stand behind it.
+ *
+ * `surface(h)` names the material a band of it is at the height its top is at;
+ * `rib` is what the transverse ribs and the beam over the crown are built of.
+ * `holes` are the ceiling's openings, which the crown is cut back from.
+ * `shade(y)` darkens it by height -- the smoke that climbed a laboratory.
+ */
+function buildVaultLining({
+  batcher, chunk, pos, sides, addCollider, spring, corner, surface, rib, ribW = 0.12, ribs = [-2.7, 2.7],
+  holes = [], inset = 0, shade = null,
+}) {
+  const H = ROOM / 2 - inset;
+  const cove = CEIL - spring;
+  const straight = H - corner;
   // Profile: [inset from the wall face, height, normal tilt t (0 wall, pi/2 ceiling)]
-  const profile = [[0, 0, 0], [0, VAULT_BOARDS, 0], [0, 2.1, 0], [0, DOOR_H, 0], [0, VAULT_SPRING, 0]];
+  const profile = [0, VAULT_BOARDS, 2.1, DOOR_H].filter((h) => h < spring - 1e-6).map((h) => [0, h, 0]);
+  profile.push([0, spring, 0]);
   const ARC = 10;
   for (let i = 1; i <= ARC; i++) {
     const t = (i / ARC) * Math.PI / 2;
-    profile.push([cove - cove * Math.cos(t), VAULT_SPRING + cove * Math.sin(t), t]);
+    profile.push([cove - cove * Math.cos(t), spring + cove * Math.sin(t), t]);
   }
   // Path round the room: [x, z, inward nx, nz, side, along].
   const path = [];
   const cornerSteps = 6;
-  const alongs = [-straight, -2.4, -DOOR_W / 2, -0.8, 0, 0.8, DOOR_W / 2, 2.4, straight];
+  const alongs = [-straight, -2.4, -DOOR_W / 2, -0.8, 0, 0.8, DOOR_W / 2, 2.4, straight]
+    .filter((a) => Math.abs(a) <= straight + 1e-6);
   // North, east, south, west, going clockwise seen from above (x east, z south).
   const SIDES = [
     { dir: 0, origin: [0, -H], axis: [1, 0], normal: [0, 1] },
@@ -5713,8 +5852,8 @@ function buildSmialVault({ batcher, chunk, pos, sides, addCollider }) {
       path.push({ x: origin[0] + axis[0] * a, z: origin[1] + axis[1] * a, nx: normal[0], nz: normal[1], dir, along: a });
     }
     // The corner after this side, round a centre inset by the radius.
-    const cx = origin[0] + axis[0] * straight + normal[0] * VAULT_CORNER;
-    const cz = origin[1] + axis[1] * straight + normal[1] * VAULT_CORNER;
+    const cx = origin[0] + axis[0] * straight + normal[0] * corner;
+    const cz = origin[1] + axis[1] * straight + normal[1] * corner;
     for (let k = 1; k < cornerSteps; k++) {
       const f = k / cornerSteps;
       // From pointing out of this side to pointing out along the axis.
@@ -5722,18 +5861,21 @@ function buildSmialVault({ batcher, chunk, pos, sides, addCollider }) {
       const oz = -normal[1] * (1 - f) + axis[1] * f;
       const len = Math.hypot(ox, oz);
       const ux = ox / len; const uz = oz / len;
-      path.push({ x: cx + ux * VAULT_CORNER, z: cz + uz * VAULT_CORNER, nx: -ux, nz: -uz, dir: -1, along: 0 });
+      path.push({ x: cx + ux * corner, z: cz + uz * corner, nx: -ux, nz: -uz, dir: -1, along: 0 });
     }
   }
   const doorway = [0, 1, 2, 3].map((d) => !!sides[d] && (sides[d].kind === 'alley' || sides[d].kind === 'portal'));
-  const surfaces = { planks: [[], []], plaster: [[], []] };
+  const surfaces = new Map();
   const vertex = (p, row) => {
-    const [inset, h, t] = profile[row];
+    const [ins, h, t] = profile[row];
     return {
-      x: pos.x + p.x + p.nx * inset, y: pos.y + h, z: pos.z + p.z + p.nz * inset,
+      x: pos.x + p.x + p.nx * ins, y: pos.y + h, z: pos.z + p.z + p.nz * ins,
       nx: p.nx * Math.cos(t), ny: -Math.sin(t), nz: p.nz * Math.cos(t),
     };
   };
+  // A stair's opening in the ceiling, a little wider, in the room's frame.
+  const overHole = (v) => holes.some((h) => v.x - pos.x > h.x0 - 0.15 && v.x - pos.x < h.x1 + 0.15
+    && v.z - pos.z > h.z0 - 0.15 && v.z - pos.z < h.z1 + 0.15);
   for (let i = 0; i < path.length; i++) {
     const a = path[i]; const b = path[(i + 1) % path.length];
     const sameSide = a.dir === b.dir && a.dir >= 0;
@@ -5741,51 +5883,60 @@ function buildSmialVault({ batcher, chunk, pos, sides, addCollider }) {
       && Math.max(a.along, b.along) <= DOOR_W / 2 + 1e-6 && Math.min(a.along, b.along) >= -DOOR_W / 2 - 1e-6;
     for (let r = 0; r < profile.length - 1; r++) {
       if (inDoor && profile[r + 1][1] <= DOOR_H + 1e-6) continue;
-      const [pos3, nor] = surfaces[profile[r + 1][1] <= VAULT_BOARDS + 1e-6 ? 'planks' : 'plaster'];
       // Two triangles facing into the room.
       const quad = [vertex(a, r), vertex(b, r), vertex(b, r + 1), vertex(a, r), vertex(b, r + 1), vertex(a, r + 1)];
+      if (holes.length && profile[r + 1][1] > DOOR_H && quad.some(overHole)) continue;
+      const name = surface(profile[r + 1][1]);
+      if (!surfaces.has(name)) surfaces.set(name, [[], []]);
+      const [pos3, nor] = surfaces.get(name);
       for (const v of quad) { pos3.push(v.x, v.y, v.z); nor.push(v.nx, v.ny, v.nz); }
     }
   }
-  for (const [name, [p, n]] of Object.entries(surfaces)) {
+  const ao = shade ? (x, y) => wallAo(pos.y)(x, y) * shade(y - pos.y) : wallAo(pos.y);
+  for (const [name, [p, n]] of surfaces) {
     if (!p.length) continue;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
-    batcher.add(geo, name, IDENTITY, { chunk, normals: true, ao: wallAo(pos.y) });
+    batcher.add(geo, name, IDENTITY, { chunk, normals: true, ao });
   }
   // Ribs over the pair of walls with fewer doors in them, and a beam across
   // the flat of the ceiling from one to the other.
   const pair = (doorway[0] ? 1 : 0) + (doorway[2] ? 1 : 0) <= (doorway[1] ? 1 : 0) + (doorway[3] ? 1 : 0) ? [0, 2] : [1, 3];
-  for (const along of [-2.7, 2.7]) {
+  const ribAo = shade ? (x, y) => shade(y - pos.y) : null;
+  for (const along of ribs) {
     for (const dir of pair) {
       const side = SIDES[dir];
       const p0 = { x: side.origin[0] + side.axis[0] * along, z: side.origin[1] + side.axis[1] * along, nx: side.normal[0], nz: side.normal[1] };
       const p3 = []; const n3 = [];
       for (let r = 0; r < profile.length - 1; r++) {
         const quad = [];
-        for (const [rr, w] of [[r, -0.12], [r, 0.12], [r + 1, 0.12], [r, -0.12], [r + 1, 0.12], [r + 1, -0.12]]) {
+        for (const [rr, w] of [[r, -ribW], [r, ribW], [r + 1, ribW], [r, -ribW], [r + 1, ribW], [r + 1, -ribW]]) {
           const v = vertex(p0, rr);
           quad.push({
             ...v,
             x: v.x + side.axis[0] * w + v.nx * 0.05, y: v.y + v.ny * 0.05, z: v.z + side.axis[1] * w + v.nz * 0.05,
           });
         }
+        if (holes.length && quad.some(overHole)) continue;
         for (const v of quad) { p3.push(v.x, v.y, v.z); n3.push(v.nx, v.ny, v.nz); }
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(p3, 3));
       geo.setAttribute('normal', new THREE.Float32BufferAttribute(n3, 3));
-      batcher.add(geo, 'timber', IDENTITY, { chunk, normals: true });
+      batcher.add(geo, rib, IDENTITY, { chunk, normals: true, ao: ribAo });
     }
-    const across = ROOM - 2 * cove;
+    const across = 2 * H - 2 * cove;
     const bx = pair[0] === 0 ? along : 0; const bz = pair[0] === 0 ? 0 : along;
-    batcher.add(box(pair[0] === 0 ? 0.24 : across, 0.2, pair[0] === 0 ? across : 0.24), 'timber',
-      place(pos.x + (pair[0] === 0 ? bx : 0), pos.y + CEIL - 0.1, pos.z + (pair[0] === 0 ? 0 : bz)), { chunk });
+    const beam = { x: pos.x + (pair[0] === 0 ? bx : 0), z: pos.z + (pair[0] === 0 ? 0 : bz) };
+    if (across > 0.3 && !(holes.length && overHole({ x: beam.x, z: beam.z }))) {
+      batcher.add(box(pair[0] === 0 ? ribW * 2 : across, 0.2, pair[0] === 0 ? across : ribW * 2), rib,
+        place(beam.x, pos.y + CEIL - 0.1, beam.z), { chunk, ao: ribAo });
+    }
   }
   const lanterns = pair[0] === 0 ? [[-2.7, -1.2], [2.7, 1.2]] : [[-1.2, -2.7], [1.2, 2.7]];
   // The rounded corners stand inside the room's square colliders.
-  const c = H - VAULT_CORNER * (1 - Math.SQRT1_2);
+  const c = H - corner * (1 - Math.SQRT1_2);
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       const x0 = pos.x + sx * c; const z0 = pos.z + sz * c;
@@ -5794,6 +5945,367 @@ function buildSmialVault({ batcher, chunk, pos, sides, addCollider }) {
     }
   }
   return lanterns;
+}
+
+// ------------------------------------------------------------ room shells ----
+
+/**
+ * The room-frame helpers every shell below uses: `along` runs the wall's way,
+ * the same frame `buildSmialVault` walks, and `inset` is measured into the
+ * room from the inner face at ROOM/2.
+ */
+const SHELL_SIDES = [
+  { origin: [0, -1], axis: [1, 0], normal: [0, 1] },
+  { origin: [1, 0], axis: [0, 1], normal: [-1, 0] },
+  { origin: [0, 1], axis: [-1, 0], normal: [0, -1] },
+  { origin: [-1, 0], axis: [0, -1], normal: [1, 0] },
+];
+const onWall = (pos, dir, along, inset, face = ROOM / 2) => {
+  const { origin, axis, normal } = SHELL_SIDES[dir];
+  return {
+    x: pos.x + origin[0] * face + axis[0] * along + normal[0] * inset,
+    z: pos.z + origin[1] * face + axis[1] * along + normal[1] * inset,
+  };
+};
+/** A box lying along wall `dir`: `len` along it, `h` tall, `d` deep into the room. */
+function wallBox(batcher, chunk, material, pos, dir, a0, a1, y0, y1, i0, i1, opts = {}) {
+  const c = onWall(pos, dir, (a0 + a1) / 2, (i0 + i1) / 2);
+  const along = dir === 0 || dir === 2;
+  const len = a1 - a0; const d = i1 - i0;
+  batcher.add(box(along ? len : d, y1 - y0, along ? d : len), material, place(c.x, pos.y + (y0 + y1) / 2, c.z), { chunk, ...opts });
+  return c;
+}
+const openSide = (side) => !!side && (side.kind === 'alley' || side.kind === 'portal');
+/** Spans of a wall clear of its doorway, `pad` past each jamb. */
+const wallRuns = (side, pad = 0.1, half = ROOM / 2) => (openSide(side)
+  ? [[-half, -DOOR_W / 2 - pad], [DOOR_W / 2 + pad, half]] : [[-half, half]]);
+
+/**
+ * "A dark burial chamber beneath a large tomb stone." Loculi -- shelf graves --
+ * cut into every wall the stair does not come down against: two tiers of three
+ * under the spring of the vault, a masonry band half a metre deep with the
+ * recesses left in it. Some are sealed with a slab, some are open with what is
+ * left of the dead in them. The band stands where the wall is, so it takes the
+ * wall's collider out to its own face.
+ */
+const LOCULI = [[-4.3, -2.1], [-1.1, 1.1], [2.1, 4.3]];
+const TIERS = [[0.35, 0.95], [1.2, 1.8]];
+function buildTombNiches({ batcher, instances, chunk, room, pos, sides, stairDir, addCollider, material, decor, lights }) {
+  const D = 0.5;
+  // Somebody still keeps a light for them: a candle or two, in open niches
+  // of the lower tier. Without them the chamber read as a black box.
+  let candles = instances && instances.library.get('furn_candle') ? 2 : 0;
+  for (let dir = 0; dir < 4; dir++) {
+    if (sides[dir] && !deadExit(sides[dir].exit)) continue;
+    // The flight's foot is against this wall and three metres wide.
+    const bays = dir === stairDir ? [LOCULI[0], LOCULI[2]] : LOCULI;
+    const spans = dir === stairDir ? [[-5, -2.0], [2.0, 5]] : [[-5, 5]];
+    for (const [s0, s1] of spans) {
+      // Plinth, the shelf between the tiers, and the cornice under the vault.
+      for (const [y0, y1] of [[0, 0.35], [0.95, 1.2], [1.8, 2.0]]) {
+        wallBox(batcher, chunk, material, pos, dir, s0, s1, y0, y1, 0, D, { ao: wallAo(pos.y) });
+      }
+      // Piers between the bays, up both tiers.
+      const edges = [s0, ...bays.flat().filter((a) => a > s0 && a < s1), s1];
+      for (let k = 0; k < edges.length; k += 2) {
+        if (edges[k + 1] - edges[k] < 0.05) continue;
+        for (const [y0, y1] of TIERS) wallBox(batcher, chunk, material, pos, dir, edges[k], edges[k + 1], y0, y1, 0, D, { ao: wallAo(pos.y) });
+      }
+      const r0 = onWall(pos, dir, s0, 0); const r1 = onWall(pos, dir, s1, D);
+      addCollider(Math.min(r0.x, r1.x), Math.max(r0.x, r1.x), Math.min(r0.z, r1.z), Math.max(r0.z, r1.z), pos.y, pos.y + 2.0);
+    }
+    bays.forEach(([a0, a1], b) => {
+      TIERS.forEach(([y0, y1], t) => {
+        const roll = hash3(room.vnum, dir * 8 + b, t, 131);
+        if (roll < 0.42) {
+          // Sealed: a slab set a few centimetres back in the opening.
+          wallBox(batcher, chunk, material, pos, dir, a0 + 0.04, a1 - 0.04, y0 + 0.03, y1 - 0.03, D - 0.12, D - 0.06, { ao: () => 0.82 });
+        } else if (instances && roll > 0.6) {
+          const c = onWall(pos, dir, (a0 + a1) / 2 + (roll - 0.8) * 0.8, 0.26);
+          instances.add('bone_pile', { x: c.x, y: pos.y + y0, z: c.z, rotY: roll * 12, scale: 0.42 }, chunk);
+        } else if (candles && t === 0 && (candles === 2 || b === 2)) {
+          candles--;
+          const c = onWall(pos, dir, (a0 + a1) / 2, 0.3);
+          instances.add('furn_candle', { x: c.x, y: pos.y + y0, z: c.z, rotY: 0 }, chunk);
+          decor.push({ kind: 'torch', bare: true, candle: true, x: c.x, y: pos.y + y0 + 0.215, z: c.z });
+          const l = onWall(pos, dir, (a0 + a1) / 2, 0.9);
+          lights.push({ x: l.x, y: pos.y + y0 + 0.5, z: l.z, color: 0xffb060, intensity: 8, radius: 12, flicker: true });
+        }
+      });
+    });
+  }
+}
+
+/**
+ * A log wall, both faces: "a small one-room cabin made entirely from heavy
+ * logs", "the cafe is built from large logs". Round logs stacked on the two
+ * skins, touching, with the skins' lime daub showing in the lines between them
+ * as chinking. Outside they run past the corners and cross, the two pairs of
+ * walls half a course apart, the way `log_cabin` is built (props.py); inside
+ * they butt. Bark UVs run along each log, which the Batcher's projection could
+ * not do on a curve.
+ */
+const LOG_R = 0.18;
+// A little over two radii: the daub between the logs shows as a pale line,
+// which is what draws each log's round against the one above it.
+const LOG_PITCH = 0.4;
+const LOG_OVER = 0.34;
+function logGeometry(length, r, uvScale, grainAlongU = false) {
+  const geo = new THREE.CylinderGeometry(r, r, length, 12, 1, false);
+  const uv = geo.attributes.uv;
+  // Around the log and along it, in metres, then into the tile. Bark runs its
+  // fissures up v; planed wood its grain along u.
+  for (let i = 0; i < uv.count; i++) {
+    const round = uv.getX(i) * Math.PI * 2 * r * uvScale; const along = uv.getY(i) * length * uvScale;
+    if (grainAlongU) uv.setXY(i, along, round); else uv.setXY(i, round, along);
+  }
+  geo.rotateZ(Math.PI / 2);
+  return geo;
+}
+function buildLogWalls({ batcher, chunk, pos, sides, addCollider, windows, materials }) {
+  const add = (x0, x1, y, zc, alongX, f) => {
+    if (x1 - x0 < 0.2) return;
+    const r = LOG_R * (0.93 + hash3(Math.round(x0 * 10), Math.round(y * 10), Math.round(zc * 10), 141) * 0.14);
+    const geo = logGeometry(x1 - x0, r, materials[f.material].userData.uvScale, f.inside);
+    const m = alongX
+      ? place((x0 + x1) / 2, y, zc, 0)
+      : place(zc, y, (x0 + x1) / 2, Math.PI / 2);
+    batcher.add(geo, f.material, m, { chunk, normals: true, keepUv: true, tint: f.tint });
+    geo.dispose();
+  };
+  const faces = [
+    // Inside, peeled and adzed: honey-coloured round logs, butting at the
+    // corners, their centres just proud of the daubed inner face.
+    { face: ROOM / 2 - LOG_R * 0.5, reach: ROOM / 2 - LOG_R * 0.5, top: CEIL - 0.3, stagger: false, inside: true, material: 'wood', tint: [1.08, 1.0, 0.9] },
+    // Outside in the bark, the way `log_cabin` is: running past the corner
+    // and crossing the other pair half a course up.
+    { face: SHELL + LOG_R * 0.3, reach: SHELL + LOG_OVER, top: CEIL + 1.1, stagger: true, inside: false, material: 'bark', tint: [0.92, 0.88, 0.84] },
+  ];
+  for (const f of faces) {
+    for (let dir = 0; dir < 4; dir++) {
+      const [dx, , dz] = DIR_STEP[dir];
+      const alongX = dz !== 0;
+      const zc = (alongX ? pos.z : pos.x) + (alongX ? dz : dx) * f.face;
+      const c0 = alongX ? pos.x : pos.z;
+      const lift = f.stagger && !alongX ? LOG_PITCH / 2 : 0;
+      for (let y = LOG_R * 0.9 + lift; y < f.top - LOG_R * 0.5; y += LOG_PITCH) {
+        let cuts = [];
+        if (openSide(sides[dir]) && y < DOOR_H + LOG_R) cuts.push([-DOOR_W / 2, DOOR_W / 2]);
+        // Outside, clear of the casements `actors.js` lays on this face.
+        if (!f.inside && windows) {
+          for (const w of windows) if (y > w.y0 && y < w.y1) cuts.push([w.a - w.half, w.a + w.half]);
+        }
+        // The fitting frame's `along` runs against the world axis on two sides;
+        // cuts here are symmetric, so the sign does not matter.
+        cuts = cuts.sort((a, b) => a[0] - b[0]);
+        let a = -f.reach;
+        for (const [k0, k1] of cuts) { add(c0 + a, c0 + k0, pos.y + y, zc, alongX, f); a = Math.max(a, k1); }
+        add(c0 + a, c0 + f.reach, pos.y + y, zc, alongX, f);
+      }
+      if (f.inside) {
+        // A squared wall plate along the top, which the joists sit on.
+        wallBox(batcher, chunk, 'timber', pos, dir, -ROOM / 2, ROOM / 2, CEIL - 0.34, CEIL, 0, 0.3);
+        // A log cut at a doorway shows a cylinder's end; a board each side and
+        // over the head closes it, as `log_cabin` trims its own openings.
+        if (openSide(sides[dir])) {
+          for (const sgn of [-1, 1]) wallBox(batcher, chunk, 'timber', pos, dir, sgn * (DOOR_W / 2) - 0.11, sgn * (DOOR_W / 2) + 0.11, 0, DOOR_H + 0.1, -0.02, 0.3);
+          wallBox(batcher, chunk, 'timber', pos, dir, -DOOR_W / 2 - 0.11, DOOR_W / 2 + 0.11, DOOR_H, DOOR_H + 0.26, -0.02, 0.3);
+        }
+        for (const [r0, r1] of wallRuns(sides[dir], 0.12)) {
+          const p0 = onWall(pos, dir, r0, 0); const p1 = onWall(pos, dir, r1, LOG_R * 1.1);
+          addCollider(Math.min(p0.x, p1.x), Math.max(p0.x, p1.x), Math.min(p0.z, p1.z), Math.max(p0.z, p1.z), pos.y, pos.y + CEIL);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * The town's civic rooms and the Shire's inns: panelling to the height of a
+ * chair back -- a skirting, stiles and rails, a capping rail -- plaster above.
+ * `beams` crosses the ceiling with joists where nothing else does.
+ */
+function buildWainscot({ batcher, chunk, pos, sides, tint = null, beams = false, holes = [] }) {
+  const H = 1.25;
+  const opts = { chunk, tint, ao: wallAo(pos.y) };
+  for (let dir = 0; dir < 4; dir++) {
+    for (const [a0, a1] of wallRuns(sides[dir], 0.05)) {
+      wallBox(batcher, chunk, 'wood', pos, dir, a0, a1, 0, H, 0, 0.035, opts);
+      wallBox(batcher, chunk, 'wood', pos, dir, a0, a1, 0, 0.2, 0, 0.07, opts);
+      wallBox(batcher, chunk, 'wood', pos, dir, a0, a1, H - 0.08, H, 0, 0.085, opts);
+      wallBox(batcher, chunk, 'wood', pos, dir, a0, a1, H - 0.34, H - 0.26, 0, 0.06, opts);
+      const n = Math.max(1, Math.round((a1 - a0) / 0.95));
+      for (let k = 0; k <= n; k++) {
+        const a = a0 + ((a1 - a0) * k) / n;
+        wallBox(batcher, chunk, 'wood', pos, dir, Math.max(a0, a - 0.05), Math.min(a1, a + 0.05), 0.2, H - 0.08, 0, 0.06, opts);
+      }
+    }
+  }
+  if (!beams) return;
+  const hole = holes.length ? unionRect(holes) : null;
+  for (const off of [-3.0, 0, 3.0]) {
+    if (hole && off + 0.2 > hole.z0 && off - 0.2 < hole.z1) continue;
+    batcher.add(box(ROOM, 0.28, 0.24), 'timber', place(pos.x, pos.y + CEIL - 0.14, pos.z + off), { chunk });
+  }
+}
+
+/**
+ * A jail, a torture room: iron in the walls. On each wall with nothing in it,
+ * two staples with a ring and a length of chain hanging from each to a
+ * manacle -- "along the walls skeletons are hanging in rusty chains".
+ */
+function buildShackles({ batcher, chunk, pos, sides, iron }) {
+  const ring = new THREE.TorusGeometry(0.085, 0.017, 5, 12);
+  const link = new THREE.TorusGeometry(0.032, 0.009, 4, 8);
+  const cuff = new THREE.TorusGeometry(0.055, 0.014, 5, 12);
+  const _m = new THREE.Matrix4(); const _r = new THREE.Matrix4();
+  for (let dir = 0; dir < 4; dir++) {
+    if (openSide(sides[dir])) continue;
+    const face = (dir === 1 || dir === 3) ? Math.PI / 2 : 0;
+    for (const along of [-2.3, 2.3]) {
+      const top = 2.25 + hash3(pos.x, pos.z, dir * 4 + (along > 0 ? 1 : 0), 151) * 0.3;
+      wallBox(batcher, chunk, iron, pos, dir, along - 0.07, along + 0.07, top - 0.1, top + 0.12, 0, 0.035);
+      const at = onWall(pos, dir, along, 0.06);
+      // The ring hangs flat against the wall from its staple.
+      _m.makeRotationY(face); _m.setPosition(at.x, pos.y + top - 0.09, at.z);
+      batcher.add(ring, iron, _m, { chunk, normals: true });
+      const links = 9 + Math.floor(hash3(pos.x, pos.z, dir * 4 + (along > 0 ? 3 : 2), 153) * 6);
+      for (let k = 0; k < links; k++) {
+        const c = onWall(pos, dir, along, 0.075);
+        _m.makeRotationY(face + (k % 2 ? Math.PI / 2 : 0));
+        _m.setPosition(c.x, pos.y + top - 0.2 - k * 0.055, c.z);
+        batcher.add(link, iron, _m, { chunk, normals: true });
+      }
+      const c = onWall(pos, dir, along, 0.1);
+      _r.makeRotationX(Math.PI / 2);
+      _m.makeRotationY(face).multiply(_r); _m.setPosition(c.x, pos.y + top - 0.25 - links * 0.055, c.z);
+      batcher.add(cuff, iron, _m, { chunk, normals: true });
+    }
+  }
+  ring.dispose(); link.dispose(); cuff.dispose();
+}
+
+/**
+ * "You are standing by an old and worn well from before this century ... the
+ * well leads down into darkness. Metal bars implanted in the side of the well
+ * lead down as a ladder." The opening already has its kerb (`buildStair`);
+ * over it, a windlass: two posts, a drum with a crank, rope down to a bucket.
+ */
+function buildWellhead({ batcher, instances, chunk, pos, hole, wood }) {
+  const cx = pos.x + (hole.x0 + hole.x1) / 2; const cz = pos.z + (hole.z0 + hole.z1) / 2;
+  const wideX = hole.x1 - hole.x0 > hole.z1 - hole.z0;
+  // Posts off the long sides' middles, the drum across the short way.
+  const half = (wideX ? hole.z1 - hole.z0 : hole.x1 - hole.x0) / 2 + 0.45;
+  const top = 2.9;
+  for (const s of [-1, 1]) {
+    const px = cx + (wideX ? 0 : s * half); const pz = cz + (wideX ? s * half : 0);
+    batcher.add(box(0.24, top + 0.2, 0.24), wood, place(px, pos.y + (top + 0.2) / 2, pz), { chunk });
+  }
+  const drum = new THREE.CylinderGeometry(0.16, 0.16, half * 2, 12);
+  drum.rotateZ(Math.PI / 2);
+  batcher.add(drum, wood, place(cx, pos.y + top - 0.15, cz, wideX ? Math.PI / 2 : 0), { chunk, normals: true });
+  drum.dispose();
+  // The crank, out past one post.
+  const kx = cx + (wideX ? 0 : half + 0.2); const kz = cz + (wideX ? half + 0.2 : 0);
+  batcher.add(box(0.06, 0.45, 0.06), 'rustiron', place(kx, pos.y + top - 0.35, kz), { chunk });
+  const rope = new THREE.CylinderGeometry(0.02, 0.02, 1.9, 6);
+  batcher.add(rope, 'rope', place(cx, pos.y + top - 0.15 - 0.95, cz), { chunk, normals: true });
+  rope.dispose();
+  if (instances) instances.add('bucket', { x: cx, y: pos.y + top - 2.4, z: cz, rotY: 0.4 }, chunk);
+}
+
+/** A vast cavern's roof, where nothing stands on the cell above. */
+const VAST_CEIL = CEIL * 2;
+/** How far past the outer skin a log wall's face stands. */
+const LOG_FACE = 0.2;
+
+/** Rooms and passages on the cell above this one: a vast cavern needs none. */
+const roomsAbove = (layout, cell) => (layout.at(cell.level + 1, cell.x, cell.z) !== undefined ? 1 : 0)
+  + (layout.isPath(cell.level + 1, cell.x, cell.z) ? 1 : 0);
+/**
+ * How high a room's ceiling is. A vast cavern goes to twice the storey with
+ * nothing over it, and otherwise right up under the floor of the room above --
+ * #5011's way out is a stair up, so "miles away" has to fit in one level.
+ */
+const ceilingOf = (room, cell, layout) => {
+  const shell = shellFor(room);
+  if (!shell || !shell.vast || isOpenAir(room)) return CEIL;
+  return roomsAbove(layout, cell) ? LEVEL_H - 2 * SLAB - 0.02 : VAST_CEIL;
+};
+
+/**
+ * The lining a room's shell puts inside its walls (src/shells.js for which
+ * rooms). Materials were chosen in `pickMaterials`; this is the geometry that
+ * makes a tomb a vault and a cafe a log house rather than a box wearing
+ * another texture. Caves and smials are built by their own long-standing
+ * paths and need nothing here.
+ */
+function buildShell({ kind, batcher, instances, chunk, room, cell, pos, sides, addCollider, lights, decor, mats, materials, holes, stairDir }) {
+  if (!kind) return;
+  const deep = !!mats.sewer;
+  if (kind === 'tomb') {
+    // A low vault: the walls spring at two metres and turn in to the crown.
+    buildVaultLining({
+      batcher, chunk, pos, sides, addCollider, spring: 2.0, corner: 0.6,
+      surface: () => mats.wallIn, rib: mats.wallIn, ribW: 0.2, holes,
+      shade: (h) => 0.92 - 0.2 * Math.min(1, Math.max(0, (h - 2) / 3.2)),
+    });
+    buildTombNiches({ batcher, instances, chunk, room, pos, sides, stairDir, addCollider, material: mats.wallIn, decor, lights });
+  } else if (kind === 'vault') {
+    // "Dark smoke-stained stones arch over": the soot climbs the curve.
+    buildVaultLining({
+      batcher, chunk, pos, sides, addCollider, spring: VAULT_SPRING, corner: 0.9,
+      surface: () => mats.wallIn, rib: mats.wallIn, ribW: 0.24, holes,
+      shade: (h) => 1 - 0.55 * Math.min(1, Math.max(0, (h - 2.2) / 2.8)),
+    });
+  } else if (kind === 'dungeon') {
+    buildShackles({ batcher, chunk, pos, sides, iron: deep ? 'rustiron' : 'rust' });
+    // Nobody hangs a torch in a torture room under the sewer; they keep a
+    // brazier for the irons, in the corner furthest from the way in.
+    if (deep && instances) {
+      const way = [0, 1, 2, 3].find((d) => openSide(sides[d])) ?? 2;
+      const [wx, , wz] = DIR_STEP[way];
+      const sx = wx ? -wx : 1; const sz = wz ? -wz : 1;
+      // Not `hoodBrazier`: its light is an outdoor one, which the hour puts
+      // out at noon, and down here noon is as dark as midnight.
+      const x = pos.x + sx * 3.4; const z = pos.z + sz * 3.4;
+      const top = instances.library.get('brazier')?.bounds?.max.y;
+      if (top !== undefined && hoodProp({ instances, chunk, addCollider, name: 'brazier', x, y: pos.y, z, half: [0.42, 0.42], height: 1.1 })) {
+        decor.push({ kind: 'torch', bare: true, x, y: pos.y + top - 0.12, z });
+        lights.push({ x, y: pos.y + top + 0.5, z, color: 0xff8a3a, intensity: 16, radius: 12, flicker: true });
+      }
+    }
+  } else if (kind === 'lair') {
+    // The heat is in the floor: a low red light out of the cracks, which is
+    // what the scorch on the walls is lit by.
+    for (const [ox, oz] of [[-2.4, 1.8], [2.2, -2.0], [1.6, 2.6]]) {
+      lights.push({ x: pos.x + ox, y: pos.y + 0.6, z: pos.z + oz, color: 0xff5a20, intensity: 12, radius: 10, flicker: true });
+    }
+  } else if (kind === 'log') {
+    const span = (SHELL + LOG_FACE) * 2;
+    const cols = Math.max(1, Math.floor(span / 3.0));
+    const windows = [];
+    for (let c = 0; c < cols; c++) {
+      const a = (c - (cols - 1) / 2) * (span / cols);
+      // actors.js leaves the middle one out for the door on every face.
+      if (Math.abs(a) >= 1.5) windows.push({ a, half: 0.78, y0: 0.72, y1: 2.9 });
+    }
+    buildLogWalls({ batcher, chunk, pos, sides, addCollider, windows, materials });
+    // Round joists across, the same logs.
+    const uv = materials.wood.userData.uvScale;
+    const hole = holes.length ? unionRect(holes) : null;
+    for (const off of [-3.1, 0, 3.1]) {
+      if (hole && off + 0.3 > hole.z0 && off - 0.3 < hole.z1) continue;
+      const geo = logGeometry(ROOM, 0.17, uv, true);
+      batcher.add(geo, 'wood', place(pos.x, pos.y + CEIL - 0.19, pos.z + off), { chunk, normals: true, keepUv: true, tint: [0.95, 0.88, 0.8] });
+      geo.dispose();
+    }
+  } else if (kind === 'panelled') {
+    buildWainscot({ batcher, chunk, pos, sides, tint: [0.82, 0.74, 0.66], beams: !mats.shire, holes });
+  } else if (kind === 'inn') {
+    // Darker, and older: a taproom's panelling has had a century of pipes.
+    buildWainscot({ batcher, chunk, pos, sides, tint: [0.62, 0.52, 0.45] });
+  }
 }
 
 /**
@@ -6133,8 +6645,10 @@ function buildInteriorProps({ room, pos, sides, decor, mats, holes = [], lights 
   // Where the walls' inner faces really are: the stone and temple kits stand
   // at 5.10 from the middle, not the 5.00 the procedural walls do, and a
   // Shire room's chair rail stands 0.1 m proud of its plaster.
+  // A shell's lining stands proud of the wall too: a log's round, panelling.
+  const lining = { log: -LOG_R * 1.5, panelled: -0.09, inn: -0.1 }[mats.shell && mats.shell.kind] ?? 0;
   const plan = floorPlan(sides, holes, {
-    face: kit === '' || kit === 'temple_' ? 0.1 : (mats.shire && mats.shire !== 'barn' ? -0.1 : 0),
+    face: kit === '' || kit === 'temple_' ? 0.1 : Math.min(lining, mats.shire && mats.shire !== 'barn' ? -0.1 : 0),
     buttress: kit === '', smial: !!mats.smial,
   });
   const piece = (kind, at, spin = 0, extra = null) => decor.push({
@@ -6250,6 +6764,7 @@ function buildInteriorProps({ room, pos, sides, decor, mats, holes = [], lights 
   }
   clearTorches(plan, pos, decor, lights);
   buildLooseProps({ room, pos, sides, decor, mats, plan, trade });
+  return plan;
 }
 
 /**
@@ -6361,7 +6876,7 @@ const FILLER_GROUND = {
 };
 
 /** Scenery for an empty cell: houses along a street, trees along a path. */
-function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, shire, x, y, z, seed, addCollider, lights, decor }) {
+function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, shire, x, y, z, seed, addCollider, lights, decor, walled = [] }) {
   const GROUND = FILLER_GROUND;
   // A bog is what its rooms say, and so is everything between them. Half the
   // Old Marsh is sectored MOUNTAIN, and taken at its word that put an
@@ -6420,7 +6935,7 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
         batcher.add(triPrism(w + 1.0, cRoof, d + 1.0), hash3(x, z, 0, 24) > 0.35 ? 'thatch' : 'rooftile',
           place(x, y + ch, z, hash3(x, z, 0, 25) > 0.5 ? Math.PI / 2 : 0), { chunk });
         addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2, y, y + ch);
-        decor.push({ kind: 'windows', x, y, z, w, d, h: ch, seed: hash3(x, z, 0, 26) });
+        decor.push({ kind: 'windows', x, y, z, w, d, h: ch, seed: hash3(x, z, 0, 26), frame: 'timber' });
         if (hash3(x, z, 0, 27) > 0.45) decor.push({ kind: 'smoke', x, y: y + ch + cRoof, z });
         break;
       }
@@ -6449,7 +6964,7 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
       batcher.add(triPrism(w + 0.9, roofH, d + 0.9), hash3(x, z, 0, 24) > 0.82 ? 'thatch' : 'rooftile',
         place(x, y + h, z, hash3(x, z, 0, 25) > 0.5 ? Math.PI / 2 : 0), { chunk });
       addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2, y, y + h);
-      decor.push({ kind: 'windows', x, y, z, w, d, h, seed: hash3(x, z, 0, 26) });
+      decor.push({ kind: 'windows', x, y, z, w, d, h, seed: hash3(x, z, 0, 26), frame: stone ? 'stone' : 'timber' });
       if (hash3(x, z, 0, 27) > 0.55) decor.push({ kind: 'smoke', x, y: y + h + roofH, z });
       break;
     }
@@ -6459,9 +6974,16 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
       // says this wood is old. It keeps the trunk's collider either way.
       const snag = instances && hash3(x, z, 0, 161) < 1 / 6 ? model(['tree_snag'], 0) : null;
       const spar = snag ? Math.floor(hash3(x, z, 1, 161) * 5) : -1;
+      // A fir's crown is three metres and more across: planted within a stride
+      // of the cell edge beside a walled room, it grew through the wall -- one
+      // stood in the middle of Haon Dor's cabin, ferns round its foot.
+      const keep = (d, v) => (walled[d] ? Math.min(v, HALF - 3.4) : v);
       for (let i = 0; i < 5; i++) {
-        const tx = x + (hash3(x, z, i, 31) - 0.5) * CELL * 0.9;
-        const tz = z + (hash3(x, z, i, 32) - 0.5) * CELL * 0.9;
+        let ox = (hash3(x, z, i, 31) - 0.5) * CELL * 0.9;
+        let oz = (hash3(x, z, i, 32) - 0.5) * CELL * 0.9;
+        ox = -keep(3, -keep(1, ox)); oz = -keep(0, -keep(2, oz));
+        const tx = x + ox;
+        const tz = z + oz;
         if (i === spar) {
           instances.add(snag, {
             x: tx, y, z: tz, rotY: hash3(x, z, i, 162) * Math.PI * 2,
@@ -6479,6 +7001,7 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
       scatterUndergrowth({
         instances, chunk, x, y, z,
         rand: (i, k, salt) => hash3(x, z, i, salt + k),
+        clears: walled.some(Boolean) ? edgeClear(walled, 1.6) : null,
         kinds: [
           { name: model(['fern'], 0), count: 3 + Math.floor(hash3(x, z, 0, 144) * 3), ring: 4.2, spread: 4.0, size: 1.0, salt: 140 },
           { name: model(['salal_bush'], 0), count: 1 + Math.floor(hash3(x, z, 0, 154) * 3), ring: 4.6, spread: 3.6, size: 1.0, salt: 150 },

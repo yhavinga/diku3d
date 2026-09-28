@@ -52,6 +52,60 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Props from the prose (src/clutter.js, tools/blender/clutter.py)
+
+- **A doorway wall has no collider beyond its jambs**, so measuring outward
+  from the room centre found the "wall" at 6.2 m. Clamp walled rooms to
+  ROOM/2; the stone and temple kits' inner face raycasts at 5.13 m.
+- **Gold at metalness 0.9 renders black in a dark lair**; a heap needs the
+  less metallic `coin` material and a light of its own.
+- **Props placed through build.js's `instances` above ground draw behind
+  walls from the street** (+22 calls in the Market Square); route indoor
+  props through the furniture batch, which switches off past 32 m.
+- The vocabulary reads prose, extra descriptions and fixed objects, and its
+  reject list is as long as its match list ("no …", "has been stolen",
+  "entrance to the tomb", "well-paved", "chain mail", "your chest").
+  `tools/clutter-check.mjs [--all | --kind X]`; `diku.built.stats.clutter`.
+- Blender's vertex-colour trap struck again (every painting blank); colours
+  go out as the `_col` attribute, as people.py does.
+
+### Room shells by kind (src/shells.js)
+
+- **three puts only a front-sided material's back faces in the shadow map**,
+  so a 3 cm ledge on the inside of a stone-kit wall was "shaded" by the
+  wall's own inner face — inside the shadow bias — and came out lit: the
+  judge's white streaks along the mortar, and at dusk whole courses of the
+  Park Cafe lit by the sun through a closed room. `shadowSide = DoubleSide`
+  on every baked surface. Find such leaks by setting `sun.intensity = 0`.
+- **A forest fir's crown reaches 3.6 m × its scale** (up to 2.6×), so a tree
+  a whole cell away grew through the cabin's logs. Check planted trees
+  against walled rooms' boxes, not cell edges.
+- The shell is chosen from name and prose, never the sector (the sector
+  lies — LEARNINGS' sewer round); rooms off Bag End inherit the smial shell
+  through the door they share. `tools/shell-check.mjs [--table]`.
+- New hooks: a surface generator may set `s.emit` and a recipe `glow` for
+  an emissive map (the lair's glowing floor cracks); `Batcher.add(…,
+  { keepUv: true })` for curved surfaces with their own UVs;
+  `ceilingOf(room, cell, layout)`.
+
+### Text that is never cut, and a title that shows the world (hud3)
+
+- **Text typed out over time is laid out over time**, so every still and
+  every layout measurement caught the room description half-written — the
+  judge's "cut mid-word". Lay text out whole; animate only how it is shown
+  (a CSS mask sweep that runs even with the render loop halted).
+- **Combat events wait for their beat**, so after a teleport they appear in
+  the wrong room. Clear the queue on a jump, and end a fight when the foe is
+  beyond 14 m and neither in your room nor the next (`loseTouch`, Merc's
+  stop_fighting without the penalty).
+- **`nav.sightBlocked` tests collision boxes, not what is drawn**; to judge
+  a framing, raycast `built.group`.
+- **The judge's harness hides `#title` and unpauses by hand**; anything that
+  runs during the title must stop itself then, or it pulls the camera away
+  from every `goto()`.
+- Floating combat text: 54 of 81 overlapping pairs over a 15 s fight → 0 of
+  80, by moving each new number up until it touches nothing on screen.
+
 ### Rigs: grazing, skirts, giants, faces (wave4-rigs)
 
 - **The beast rigs face −Y.** Face angles need `atan2(y.z, -y.y)`, and a

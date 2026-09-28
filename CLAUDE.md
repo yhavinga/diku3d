@@ -300,6 +300,10 @@ choose.
   frame.** `goto()` *after* `applyTime` leaves the destination outside the
   shadow frustum and every shaded face measures lit. Camera first, then the
   hour, let a frame render, then freeze and measure.
+- **A thin ledge near a wall's inner face leaks sunlight.** three renders
+  a front-sided material's back faces into the shadow map, so anything
+  within the shadow bias of that face is lit. Baked surfaces use
+  `shadowSide = DoubleSide`; keep it on new ones.
 - **A vertex census lies about surfaces.** A log-cabin gable read "open" by
   vertex count (a log wall's vertices sit only at the ends) and a roof prism
   reported "0 cells affected" (six vertices, none mid-span). Sample triangle
