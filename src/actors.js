@@ -2046,7 +2046,10 @@ export function populate(world, layout, built, options = {}) {
 
       if (item.fitting === 'counter') {
         const L = 4.4; const D = 0.72; const H = 1.06;
-        const front = WALL_Z + 0.45 + D / 2;
+        // A metre out from the wall: room behind it for whoever keeps it,
+        // clear of the shelves. At 0.45 m the keeper's head was in them, so
+        // the bartender stood out in the middle of the floor instead.
+        const front = WALL_Z + 1.0 + D / 2;
         pushPart(props, G.box(L, H - 0.09, D), 0x8a6740, put(shift, item.y + (H - 0.09) / 2, front));
         // The top is what the description is about: "old archaic writing,
         // carvings and symbols cover its top". Darker than the carcase, worn
@@ -2100,6 +2103,12 @@ export function populate(world, layout, built, options = {}) {
           furniture.push({ x: cx, z: cz, yaw: ry, hx: L / 2 + 0.09, hz: D / 2 + 0.12, y0: item.y, y1: item.y + H + 0.045, part: 'counter' });
         }
         // Somewhere to stand with your elbows on it.
+        // Behind it, facing the room: the keeper's place (motion.js puts the
+        // room's shopkeeper there).
+        {
+          const [kx, kz] = worldOf(shift, WALL_Z + 0.52);
+          spots.push({ kind: 'keeper', x: kx, y: item.y, z: kz, yaw: ry + Math.PI });
+        }
         // Between the stools (at -1.575, -0.525, 0.525, 1.575), not on them:
         // at -1.3 and 1.3 a drinker stood 0.28 m from a stool's centre.
         for (const lx of [-1.05, 0, 1.05]) {

@@ -398,14 +398,17 @@ function turnWorld(bone, q) {
  * Two-bone IK on a leg: bend the knee to the length the hip-to-target
  * distance wants (law of cosines, about the leg's own plane, so it bends the
  * way the clip already bends it), then swing the thigh to point there. The
- * foot keeps the world orientation the clip gave it, so a sole stays flat.
+ * foot keeps the world orientation the clip gave it, so a sole stays flat,
+ * or `footQ`'s: a planted foot does not swivel as the body turns over it.
  * `w` blends from the clip's ankle towards `target`.
  */
-function legIK(thigh, shin, foot, target, w) {
+function legIK(thigh, shin, foot, target, w, footQ = null, qw = w) {
   thigh.getWorldPosition(_h);
   shin.getWorldPosition(_k);
   foot.getWorldPosition(_an);
   foot.getWorldQuaternion(_fq);
+  // A planted foot may keep its own heading rather than the clip's.
+  if (footQ && qw > 0) _fq.slerp(footQ, qw);
   _t.copy(_an).lerp(target, w);
   const a = _h.distanceTo(_k); const b = _k.distanceTo(_an);
   const d = clamp(_h.distanceTo(_t), Math.abs(a - b) + 1e-3, a + b - 1e-3);
@@ -429,6 +432,7 @@ function legIK(thigh, shin, foot, target, w) {
 
 const _qa = new THREE.Quaternion();
 const _xAxis = new THREE.Vector3(1, 0, 0);
+const _yAxis = new THREE.Vector3(0, 1, 0);
 const _pa = new THREE.Vector3();
 const _pb = new THREE.Vector3();
 
@@ -477,7 +481,10 @@ function measureSit(fig, bones) {
 export function createMotion({ figures, nav, zones = null, spots = [] }) {
   // Each spot knows its room and where to stand before settling into it.
   const spotsByRoom = new Map();
+  // Behind a counter, for the room's keeper: not a place anyone settles.
+  const keeperSpots = spots.filter((spot) => spot.kind === 'keeper');
   for (const spot of spots) {
+    if (spot.kind === 'keeper') continue;
     const level = nav.levelOf(spot.y);
     spot.level = level;
     spot.room = nav.roomAt(spot.x, spot.y, spot.z);
@@ -816,9 +823,22 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     const s = m.settle;
     s.next = (s.next ?? 2 + fig.rand() * 6) - dt;
     if (s.next > 0 || m.speech > 0) return;
-    s.next = 5 + fig.rand() * 11;
+    s.next = 3.5 + fig.rand() * 7;
     const kind = s.spot.kind;
     const r = fig.rand();
+    // Company settled close by is talked to: a few words with the hands,
+    // turned to them, and they nod or answer on their own next turn.
+    neighbours(fig, near);
+    const company = near.filter((o) => o.m.settle && o.m.settle.phase === 'hold' && !(o.m.speech > 0)
+      && (o.at.x - fig.at.x) ** 2 + (o.at.z - fig.at.z) ** 2 < 2.6 * 2.6);
+    if (company.length && r < 0.5 && fig.actions.talk) {
+      const o = company[Math.floor(fig.rand() * company.length)];
+      m.speech = 2.2 + fig.rand() * 3.5;
+      m.lookAt = o; o.m.lookAt = fig;
+      if (fig.rand() < 0.7) nod(o);
+      o.m.settle.next = Math.min(o.m.settle.next ?? 9, m.speech + 0.5 + fig.rand());
+      return;
+    }
     if (kind === 'sit' && s.clip) {
       if (s.spot.from === 'behind' && r < 0.55) m.sip = true;
     } else if (kind === 'bar' && fig.actions.sit && r < 0.75) {
@@ -957,6 +977,10 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     s.stand = m.feet && m.feet.w > 0.99
       ? m.feet.P.map((p, i) => ({ x: p.x, y: floor + (i ? I.ankleR.y : I.ankleL.y), z: p.z }))
       : [place(I.ankleL, s.from.x, s.from.z, floor + I.ankleL.y), place(I.ankleR, s.from.x, s.from.z, floor + I.ankleR.y)];
+    // ...and turned the way they stand, until each is stepped.
+    const b = fig.bones;
+    s.standQ = m.feet && m.feet.w > 0.99 ? m.feet.Q.map((q) => q.clone())
+      : [b.footL.getWorldQuaternion(new THREE.Quaternion()), b.footR.getWorldQuaternion(new THREE.Quaternion())];
     m.feet = null;
     s.seatFeet = [place(P.ankleL, rx, rz, floor + P.ankleL.y), place(P.ankleR, rx, rz, floor + P.ankleR.y)];
     // A leg too short for the floor from this seat hangs, as a child's does
@@ -975,7 +999,10 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       if (d < 0.1) return 0;
       return behind ? spot.seat + 0.07 : Math.min(0.12, 0.05 + d * 0.15);
     });
-    m.ik = { feet: [new THREE.Vector3(), new THREE.Vector3()], w: 1 };
+    // Starting where the feet stand: the turn that called this has already
+    // run its frame, and targets left at the origin stretched both legs
+    // towards it for one frame -- a metre-long flicker, measured.
+    m.ik = { feet: s.stand.map((p) => new THREE.Vector3(p.x, p.y, p.z)), w: 1, q: s.standQ, qw: [1, 1] };
     // Into the clip from its first frame, which is its rest.
     fig.actions[clip].time = 0;
     m.sip = false;
@@ -1004,6 +1031,9 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       const f = smooth(e);
       t.set(from.x + (to.x - from.x) * f, from.y + (to.y - from.y) * f, from.z + (to.z - from.z) * f);
       t.y += s.lift[i] * Math.min(1, 1.7 * Math.sin(Math.PI * e));
+      // Down, a foot keeps its standing heading until it is stepped; up,
+      // it takes it back as it lands.
+      if (m.ik.qw) m.ik.qw[i] = 1 - f;
     }
     m.ik.w = 1;
     const done = s.phase === 'down' ? u >= 1 : u <= 0;
@@ -1023,7 +1053,8 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       // From however far down it got, back the way it came.
       const u = s.phase === 'down' ? clamp(s.t / s.dur, 0, 1) : 1;
       s.phase = 'up'; s.t = (1 - u) * s.dur;
-      fig.m.ik = { feet: [new THREE.Vector3(), new THREE.Vector3()], w: 1 };
+      const b = fig.bones;
+      fig.m.ik = { feet: [b.footL.getWorldPosition(new THREE.Vector3()), b.footR.getWorldPosition(new THREE.Vector3())], w: 1, q: s.standQ, qw: [0, 0] };
       return;
     }
     const k = s.spot.kind === 'sit' ? fig.m.sitW : (s.spot.kind === 'lean' ? fig.m.leanW : fig.m.barW);
@@ -1305,7 +1336,11 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       const face = m.fighting && m.faceYaw !== undefined ? m.faceYaw : m.turnTo;
       if (face !== null && face !== undefined) {
         const err = wrap(face - yaw);
-        const step = clamp(err, -TURN_STANDING * dt * (m.fighting ? 1.4 : 0.7), TURN_STANDING * dt * (m.fighting ? 1.4 : 0.7));
+        // Still coming to a stop: the turn waits on the feet, or the body
+        // swings round over a planted foot and drags it (0.3-0.9 m/s,
+        // measured, on every guard that stopped to look at the player).
+        const rate = TURN_STANDING * (m.fighting ? 1.4 : 0.7) * (m.speed > 0.05 && !m.fighting ? clamp(m.speed / 1.0, 0.25, 1) * 0.4 : 1);
+        const step = clamp(err, -rate * dt, rate * dt);
         yaw += step;
         m.turning = Math.abs(err) > 0.05 ? Math.sign(err) : 0;
         if (Math.abs(err) < 0.02 && !m.fighting) m.turnTo = null;
@@ -1361,7 +1396,11 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       return;
     }
     m.turning = 0;
-    const rate = TURN_WALKING * (m.speed > fig.runFrom ? 0.75 : 1);
+    // A body only comes round as fast as its feet can carry it there: at a
+    // shuffle a 2.6 rad/s turn swung the planted foot round the hips at
+    // 0.3 m/s. Slow walking turns slowly; a turn wanted faster than that is
+    // taken standing, on footwork.
+    const rate = TURN_WALKING * (m.speed > fig.runFrom ? 0.75 : 1) * clamp(m.speed / 1.0, 0.25, 1);
     yaw += clamp(err, -rate * dt, rate * dt);
     fig.object.rotation.y = yaw;
 
@@ -1585,7 +1624,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     // The walk comes in whole as soon as the body is really moving, played
     // as slowly as it has to be: a walk at half weight over a moving body
     // slides the planted foot by the other half of the speed.
-    const moving = clamp((speed - 0.02) / 0.13, 0, 1);
+    const moving = clamp((speed - 0.01) / 0.06, 0, 1);
     if (a.run) {
       const r = clamp((speed - fig.runFrom + 0.35) / 0.7, 0, 1);
       wRun = moving * r;
@@ -1598,7 +1637,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     // Feet moving under a body that is not going anywhere: footwork in a
     // fight, the shuffle of sitting down.
     if (m.shuffle > 0 && a.walk && !(fig.bones && !m.fighting)) wWalk = Math.max(wWalk, m.shuffle);
-    const still = 1 - (wWalk + wRun);
+    const still = Math.max(0, 1 - (wWalk + wRun));
     // Talking: in a conversation when it is this one's turn, or saying
     // something the game has put in its mouth.
     const settle = m.settle && m.settle.clip && m.settle.phase !== 'go' && m.settle.phase !== 'turn' ? m.settle : null;
@@ -1607,25 +1646,32 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     let wTalk = 0;
     if (m.fighting && a.fight) wFight = still; else if (talks) wTalk = still; else wIdle = still;
 
+    // Walking and running follow the speed exactly -- the speed is already
+    // eased, and a walk faded in behind it is a planted foot sliding by the
+    // part of the speed it does not carry. What the body does standing
+    // (idle, idle2, guard, talk) crossfades as shares of the rest.
     const rate = Math.min(1, dt * 7);
-    const want = { idle: 0, idle2: 0, walk: wWalk, run: wRun, fight: wFight, talk: wTalk };
-    want[m.idle === 'idle2' && a.idle2 ? 'idle2' : 'idle'] = wIdle;
-    let total = 0;
+    const want = { idle: 0, idle2: 0, fight: 0, talk: 0 };
+    if (wFight > 0) want.fight = 1; else if (wTalk > 0) want.talk = 1;
+    else want[m.idle === 'idle2' && a.idle2 ? 'idle2' : 'idle'] = 1;
     const base = m.base || (m.base = { idle: 1 });
-    for (const name of LOOP) {
-      if (!a[name]) continue;
+    let shares = 0;
+    for (const name of ['idle', 'idle2', 'fight', 'talk']) {
+      if (!a[name]) { base[name] = 0; continue; }
       const w = base[name] || 0;
-      base[name] = w + ((want[name] || 0) - w) * rate;
-      total += base[name];
+      base[name] = w + (want[name] - w) * rate;
+      shares += base[name];
     }
     // Anything that has no clip of its own falls back onto idle, so the sum holds.
-    if (total < 1e-3) { base.idle = 1; total = 1; }
+    if (shares < 1e-3) { base.idle = 1; shares = 1; }
+    const total = shares;
     // Seated or against a wall on the rig's own clip: that clip, at exactly
     // the weight the settling says, and the standing loops under the rest.
     const held = settle ? (settle.clip === 'sit' ? m.sitW : m.leanW) : 0;
     for (const name of LOOP) {
       if (!a[name]) continue;
-      a[name].setEffectiveWeight((base[name] / total) * (1 - over) * (1 - held));
+      const w = name === 'walk' ? wWalk : name === 'run' ? wRun : (base[name] / total) * still;
+      a[name].setEffectiveWeight(w * (1 - over) * (1 - held));
     }
     for (const name of ['sit', 'lean']) {
       if (a[name]) a[name].setEffectiveWeight(settle && settle.clip === name ? held * (1 - over) : 0);
@@ -1856,10 +1902,15 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
   const FOOT_STEP = 0.09;
   const _d0 = new THREE.Vector3();
   const _d1 = new THREE.Vector3();
+  const _dq0 = new THREE.Quaternion();
+  const _dq1 = new THREE.Quaternion();
   function footwork(fig, dt) {
     const m = fig.m;
     const b = fig.bones;
-    const standing = !m.dead && !m.climb && !m.fighting && !m.overlay && m.speed < 0.05
+    // A gesture over the stance (a cast, a peck of the hand) leaves the feet
+    // where they are; a blow, a flinch or a fall moves them itself.
+    const busy = m.overlay && ONE_SHOT.has(m.overlay.name);
+    const standing = !m.dead && !m.climb && !m.fighting && !busy && m.speed < 0.05
       && !(m.settle && m.settle.clip) && m.stage !== 'out' && m.stage !== 'in';
     let F = m.feet;
     if (!standing) {
@@ -1869,20 +1920,24 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     }
     fig.object.updateMatrixWorld(true);
     const D = [b.footL.getWorldPosition(_d0), b.footR.getWorldPosition(_d1)];
-    if (!F) { m.feet = { P: [D[0].clone(), D[1].clone()], step: null, w: 1 }; return; }
+    const DQ = [b.footL.getWorldQuaternion(_dq0), b.footR.getWorldQuaternion(_dq1)];
+    if (!F) { m.feet = { P: [D[0].clone(), D[1].clone()], Q: [DQ[0].clone(), DQ[1].clone()], step: null, w: 1 }; return; }
     if (standing) {
       if (!F.step) {
-        let worst = -1; let most = FOOT_STEP * (fig.scale || 1);
+        // Out of place by a step's length, or turned by a third of a right
+        // angle: that foot is picked up.
+        let worst = -1; let most = 1;
         for (let i = 0; i < 2; i++) {
-          const e = Math.hypot(F.P[i].x - D[i].x, F.P[i].z - D[i].z);
+          const e = Math.max(Math.hypot(F.P[i].x - D[i].x, F.P[i].z - D[i].z) / (FOOT_STEP * (fig.scale || 1)), F.Q[i].angleTo(DQ[i]) / 0.5);
           if (e > most) { most = e; worst = i; }
         }
-        if (worst >= 0) F.step = { i: worst, from: F.P[worst].clone(), t: 0, dur: 0.26 + fig.rand() * 0.06 };
+        if (worst >= 0) F.step = { i: worst, from: F.P[worst].clone(), fromQ: F.Q[worst].clone(), t: 0, dur: 0.26 + fig.rand() * 0.06 };
       }
       if (F.step) {
         const st = F.step;
         st.t += dt;
         const u = clamp(st.t / st.dur, 0, 1);
+        F.Q[st.i].slerpQuaternions(st.fromQ, DQ[st.i], smooth(u));
         F.P[st.i].lerpVectors(st.from, D[st.i], smooth(u));
         F.P[st.i].y += 0.07 * (fig.scale || 1) * Math.sin(Math.PI * u);
         if (u >= 1) F.step = null;
@@ -1892,11 +1947,11 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     let off = 0;
     for (let i = 0; i < 2; i++) {
       if (!F.step || F.step.i !== i) F.P[i].y = D[i].y;
-      off = Math.max(off, F.P[i].distanceTo(D[i]));
+      off = Math.max(off, F.P[i].distanceTo(D[i]), F.Q[i].angleTo(DQ[i]) * 0.1);
     }
     if (off < 0.004) return;
-    legIK(b.thighL, b.shinL, b.footL, F.P[0], F.w);
-    legIK(b.thighR, b.shinR, b.footR, F.P[1], F.w);
+    legIK(b.thighL, b.shinL, b.footL, F.P[0], F.w, F.Q[0]);
+    legIK(b.thighR, b.shinR, b.footR, F.P[1], F.w, F.Q[1]);
   }
 
   /**
@@ -1909,8 +1964,22 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     if (close && b.footR) footwork(fig, dt); else m.feet = null;
     if (m.ik && m.ik.w > 0 && m.settle && m.settle.clip) {
       fig.object.updateMatrixWorld(true);
-      legIK(b.thighL, b.shinL, b.footL, m.ik.feet[0], m.ik.w);
-      legIK(b.thighR, b.shinR, b.footR, m.ik.feet[1], m.ik.w);
+      const q = m.ik.q; const qw = m.ik.qw;
+      legIK(b.thighL, b.shinL, b.footL, m.ik.feet[0], m.ik.w, q && q[0], qw ? qw[0] : 0);
+      legIK(b.thighR, b.shinR, b.footR, m.ik.feet[1], m.ik.w, q && q[1], qw ? qw[1] : 0);
+    }
+    // The head comes round to whoever it is attending to -- the one
+    // speaking at the table, the partner in a conversation -- within what a
+    // neck allows, and back to the front when there is no one.
+    let want = 0;
+    if (m.lookAt && m.lookAt.at && !m.dead) {
+      want = clamp(wrap(Math.atan2(m.lookAt.at.x - fig.at.x, m.lookAt.at.z - fig.at.z) - fig.object.rotation.y), -1.1, 1.1);
+    }
+    m.headYaw = (m.headYaw || 0) + clamp(want - (m.headYaw || 0), -2.5 * dt, 2.5 * dt);
+    if (Math.abs(m.headYaw) > 0.005 && b.head) {
+      if (!b.neck) b.neck = b.head.parent;
+      turnWorld(b.neck, _qw.setFromAxisAngle(_yAxis, m.headYaw * 0.4));
+      turnWorld(b.head, _qw.setFromAxisAngle(_yAxis, m.headYaw * 0.6));
     }
     if (m.nod) {
       const n = m.nod;
@@ -2169,7 +2238,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       if (m.speech > 0) m.speech -= dt;
       fig.walking = m.speed > 0.16;
       placeObject(fig);
-      if (fig.bones) finishPose(fig, dt, dx * dx + dz * dz < 22 * 22);
+      if (fig.bones) finishPose(fig, dt, dx * dx + dz * dz < 36 * 36);
     }
   }
 
@@ -2384,6 +2453,18 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
    * who are near each other start in conversation.
    */
   function openingScene() {
+    // A shopkeeper whose room has a counter keeps it from behind. The game
+    // reads its home off `at` after this, so that is where it holds.
+    for (const spot of keeperSpots) {
+      const room = nav.roomAt(spot.x, spot.y, spot.z);
+      const keeper = figures.find((f) => f.shop && !spot.by && nav.roomAt(f.at.x, f.at.y, f.at.z) === room);
+      if (!keeper) continue;
+      spot.by = keeper;
+      keeper.at.x = spot.x; keeper.at.z = spot.z;
+      keeper.object.rotation.y = spot.yaw;
+      keeper.m.holdYaw = spot.yaw;
+      if (keeper.homeSpot) { keeper.homeSpot.x = spot.x; keeper.homeSpot.z = spot.z; }
+    }
     for (const fig of figures) {
       if (!canSettle(fig) || onWatch(fig) || fig.rand() > 0.72) continue;
       const room = nav.roomAt(fig.at.x, fig.at.y, fig.at.z);
