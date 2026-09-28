@@ -1953,10 +1953,12 @@ export function buildScene(world, layout, materials, assets = null) {
 
   // --- streets and corridors ----------------------------------------------
 
-  // Every cell Wall Road runs through, for the corridors that share one.
+  // Every cell an open street runs through, for the corridors that share one:
+  // Wall Road down four cells of the corridor between #3022 and #3023, and
+  // four more in Midgaard that layout.js could not route apart.
   const openStreet = new Set();
   for (const link of layout.links) {
-    if (link.kind !== 'alley' || !!hoodStyle(link.from.room) === !!hoodStyle(link.to.room)) continue;
+    if (link.kind !== 'alley' || alleyEnclosed(link)) continue;
     for (const c of link.path) openStreet.add(cellKey(link.from.level, c.x, c.z));
   }
   for (const link of layout.links) {
@@ -4422,6 +4424,11 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
     const chunk = chunkOf(cellRef);
     const pos = worldOf(cellRef);
     const openDirs = new Set([dirBetween(c, chain[i - 1]), dirBetween(c, chain[i + 1])]);
+    // An open street routed through the same cell makes it a street: a
+    // corridor's walls and ceiling there would stand across the road, and its
+    // floorboards would lie over the river "On the River" runs down. The
+    // street builds the cell.
+    if (enclosed && streetCells && cellKey && streetCells.has(cellKey(level, c.x, c.z))) continue;
 
     batcher.add(plane(CELL, CELL, 6), mats.floor, place(pos.x, y, pos.z), {
       chunk, ao: enclosed ? floorAo(pos.x, pos.z, HALF, HALF) : null,
@@ -4463,12 +4470,6 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
       }
       continue;
     }
-    // Wall Road routed through the same cell makes it a street: a corridor's
-    // walls and ceiling there would stand across the road. It runs down four
-    // cells of the corridor between #3022 and #3023. (Nine cells in Midgaard
-    // already have an open street and a corridor sharing them, and are left
-    // as they were.)
-    if (streetCells && cellKey && streetCells.has(cellKey(level, c.x, c.z))) continue;
 
     for (let dir = 0; dir < 4; dir++) {
       if (openDirs.has(dir)) continue;
