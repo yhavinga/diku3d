@@ -2178,8 +2178,13 @@ export function populate(world, layout, built, options = {}) {
       group.add(fig);
       if (made.roost && !info.outdoor) {
         built.group.updateMatrixWorld(true);
+        // No room is taller than CEIL inside, but the ray does not always
+        // meet the roof it is under: from 8 points in every enclosed room,
+        // 525 of 2800 found their first surface over 5.4 m up -- the floor of
+        // the level above, through a sewer junction's vault -- and a bat
+        // roosted there hung inside the rock.
         const up = ceilingAbove(built.group, fig.position);
-        if (up && up > 2.2) made.roost(up);
+        if (up && up > 2.2) made.roost(Math.min(up, CEIL - 0.15));
       }
 
       const aggressive = !!(mob.proto.act & ACT_AGGRESSIVE);
