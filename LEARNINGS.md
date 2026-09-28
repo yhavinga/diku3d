@@ -52,6 +52,23 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Props from the prose (src/clutter.js, tools/blender/clutter.py)
+
+- **A doorway wall has no collider beyond its jambs**, so measuring outward
+  from the room centre found the "wall" at 6.2 m. Clamp walled rooms to
+  ROOM/2; the stone and temple kits' inner face raycasts at 5.13 m.
+- **Gold at metalness 0.9 renders black in a dark lair**; a heap needs the
+  less metallic `coin` material and a light of its own.
+- **Props placed through build.js's `instances` above ground draw behind
+  walls from the street** (+22 calls in the Market Square); route indoor
+  props through the furniture batch, which switches off past 32 m.
+- The vocabulary reads prose, extra descriptions and fixed objects, and its
+  reject list is as long as its match list ("no …", "has been stolen",
+  "entrance to the tomb", "well-paved", "chain mail", "your chest").
+  `tools/clutter-check.mjs [--all | --kind X]`; `diku.built.stats.clutter`.
+- Blender's vertex-colour trap struck again (every painting blank); colours
+  go out as the `_col` attribute, as people.py does.
+
 ### Room shells by kind (src/shells.js)
 
 - **three puts only a front-sided material's back faces in the shadow map**,
