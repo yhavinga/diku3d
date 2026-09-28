@@ -773,6 +773,31 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     return test(_sphere.center.x, _sphere.center.y, _sphere.center.z, _sphere.radius);
   }
 
+  /**
+   * Is any copy of a small instanced mesh that moves -- the door leaves, a
+   * handful of meshes of a dozen or two doors each, spread over the whole
+   * town -- in view? One sphere round all of them is always in view; the
+   * doors seldom are: 37 draws between the main pass and the AO prepass at
+   * the graveyard. Each copy by its whole sphere and at any size, so that
+   * one hidden is one that draws nothing.
+   */
+  const FEW = 64;
+  function anyInstanceVisible(o) {
+    const g = o.geometry;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    const was = sizeCull;
+    sizeCull = false;
+    let seen = false;
+    for (let i = 0; i < o.count && !seen; i++) {
+      o.getMatrixAt(i, _m);
+      _sphere.copy(g.boundingSphere).applyMatrix4(_m.premultiply(o.matrixWorld));
+      scratch[0] = _sphere.center.x; scratch[1] = _sphere.center.y; scratch[2] = _sphere.center.z; scratch[3] = _sphere.radius;
+      seen = visibleAt(scratch, 0, true);
+    }
+    sizeCull = was;
+    return seen;
+  }
+
   function objectVisible(o) {
     const g = o.geometry;
     if (o.isSkinnedMesh) {
@@ -1290,6 +1315,8 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
         if (d === Infinity) hiddenNow.push(o);
         else if (d > state.aoReach) aoFar.push(o);
       } else if ((state.active || surfaceHidden || deepHidden || sizeCull || occluding) && !objectVisible(o)) {
+        hiddenNow.push(o);
+      } else if (o.isInstancedMesh && !o.userData.cullable && o.count <= FEW && !anyInstanceVisible(o)) {
         hiddenNow.push(o);
       } else if (!o.isSkinnedMesh && !o.isInstancedMesh && o.geometry) {
         if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
