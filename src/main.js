@@ -550,6 +550,10 @@ async function boot() {
   gameUi.setCamera(() => camera.position);
   const kick = createKick({ fx, camera, game, audio });
   game.listen((event) => rulesSound(event));
+  // A mobile that says something is seen to say it (motion.js `speak`).
+  game.listen((event) => {
+    if (event.kind === 'mobsay' && event.slot && event.slot.figure) actors.motion.speak(event.slot.figure, event.said || '');
+  });
   // A light you hold lights the way: one more candidate for the light pool,
   // moved with you, so it costs a pooled light rather than a new one.
   const heldLight = { x: 0, y: 0, z: 0, color: 0xffa25a, intensity: 5.5, radius: 12, flicker: true, outdoor: false, key: null };

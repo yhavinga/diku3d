@@ -646,9 +646,18 @@ function buildPerson(library, who, proto, instance) {
     const o = new THREE.Object3D();
     o.name = name;
     o.userData.fromResets = fromResets;
+    // `visible` is whether it is held at all (items.js keeps it to the
+    // game's word); `stowed` puts it by while its owner sits or leans, and
+    // only hides it -- motion.js's business, never the game's.
+    let held = show[axis] > 0.5;
+    let stowed = false;
     Object.defineProperty(o, 'visible', {
-      get: () => show[axis] > 0.5,
-      set: (v) => { show[axis] = v ? 1 : 0; },
+      get: () => held,
+      set: (v) => { held = !!v; show[axis] = held && !stowed ? 1 : 0; },
+    });
+    Object.defineProperty(o, 'stowed', {
+      get: () => stowed,
+      set: (v) => { stowed = !!v; show[axis] = held && !stowed ? 1 : 0; },
     });
     body.getObjectByName(bone).add(o);
     return o;
@@ -1713,6 +1722,12 @@ export function populate(world, layout, built, options = {}) {
   // Where people settle: seats on the benches, places at a bar and a hearth
   // (motion.js `spots`). Filled as the furniture is placed.
   const spots = [];
+  // The furniture those spots belong to, as turned boxes { x, z, yaw, hx, hz,
+  // y0, y1, seat? } in the same frame as `at()`: motion.js lifts a foot over a
+  // bench by it, and a probe can test a settled body against it. The nav
+  // grid's colliders are one box round a whole table and its two benches.
+  const furniture = [];
+  const solid = (x, z, yaw, hx, hz, y0, y1, part) => furniture.push({ x, z, yaw, hx, hz, y0, y1, part });
   // Declared here rather than with the windows: the hearths built below push
   // their fires into it, and those run first.
   const windowLights = [];
@@ -1932,6 +1947,10 @@ export function populate(world, layout, built, options = {}) {
           instances.add(prop, { x: px, y: item.y, z: pz, rotY: spin }, 'props');
           // props.py's bench: 1.85 m long, seat at 0.45, its back to local -Z.
           if (prop === 'bench') {
+            // props.py: seat 1.85 x 0.42 x 0.07 centred 0.45 up, back rails and
+            // uprights 0.16-0.17 behind it.
+            solid(px, pz, spin, 0.925, 0.21, item.y + 0.415, item.y + 0.485, 'seat');
+            solid(px - 0.17 * Math.sin(spin), pz - 0.17 * Math.cos(spin), spin, 0.9, 0.04, item.y + 0.485, item.y + 1.02, 'back');
             for (const lx of [-0.5, 0.5]) {
               spots.push({ kind: 'sit', seat: 0.48, x: px + lx * Math.cos(spin) + 0.06 * Math.sin(spin), y: item.y, z: pz - lx * Math.sin(spin) + 0.06 * Math.cos(spin), yaw: spin });
             }
@@ -1955,20 +1974,32 @@ export function populate(world, layout, built, options = {}) {
       const s2 = Math.sin(spin); const c2 = Math.cos(spin);
       // Two to a bench, facing the table, stepped over from behind.
       for (const side of [-1, 1]) {
-        for (const lx of [-0.36, 0.36]) {
-          const lz = side * 0.74;
-          spots.push({ kind: 'sit', from: 'behind', seat: 0.5, x: item.x + lx * c2 + lz * s2, y: item.y, z: item.z - lx * s2 + lz * c2, yaw: spin + (side > 0 ? Math.PI : 0) });
+        for (const lx of [-0.3, 0.3]) {
+          // The hips a little behind the bench's middle: the hands in a lap
+          // and a cup coming up must clear the table's edge.
+          const lz = side * 0.77;
+          spots.push({ kind: 'sit', from: 'behind', seat: 0.455, x: item.x + lx * c2 + lz * s2, y: item.y, z: item.z - lx * s2 + lz * c2, yaw: spin + (side > 0 ? Math.PI : 0) });
         }
       }
       const set = (lx, y, lz) => at(item.x + lx * c2 + lz * s2, y, item.z - lx * s2 + lz * c2, 0, spin, 0);
-      pushPart(props, G.box(1.5, 0.1, 0.75), 0x93714a, set(0, item.y + 0.78, 0));
+      const part = (lx, lz, hx, hz, y0, y1, name) => solid(item.x + lx * c2 + lz * s2, item.z - lx * s2 + lz * c2, spin, hx, hz, item.y + y0, item.y + y1, name);
+      part(0, 0, 0.75, 0.375, 0.77, 0.83, 'top');
+      for (const [ox, oz] of [[-0.62, -0.28], [0.62, -0.28], [-0.62, 0.28], [0.62, 0.28]]) part(ox, oz, 0.045, 0.045, 0, 0.77, 'leg');
+      for (const s of [-1, 1]) {
+        part(0, s * 0.72, 0.7, 0.17, 0.365, 0.455, 'seat');
+        for (const e of [-0.52, 0.52]) part(e, s * 0.72, 0.045, 0.14, 0, 0.365, 'benchleg');
+      }
+      // A 6 cm top and a 0.455 m bench -- a table and bench at the heights
+      // people sit at. With a 10 cm top over a 0.505 m bench, a seated
+      // body's hands in its lap were 5 cm up inside the table.
+      pushPart(props, G.box(1.5, 0.06, 0.75), 0x93714a, set(0, item.y + 0.80, 0));
       for (const [ox, oz] of [[-0.62, -0.28], [0.62, -0.28], [-0.62, 0.28], [0.62, 0.28]]) {
-        pushPart(props, G.box(0.09, 0.78, 0.09), 0x6b4d31, set(ox, item.y + 0.39, oz));
+        pushPart(props, G.box(0.09, 0.77, 0.09), 0x6b4d31, set(ox, item.y + 0.385, oz));
       }
       for (const s of [-1, 1]) {
-        pushPart(props, G.box(1.4, 0.09, 0.34), 0x84633f, set(0, item.y + 0.46, s * 0.72));
+        pushPart(props, G.box(1.4, 0.09, 0.34), 0x84633f, set(0, item.y + 0.41, s * 0.72));
         for (const e of [-0.52, 0.52]) {
-          pushPart(props, G.box(0.09, 0.46, 0.28), 0x6b4d31, set(e, item.y + 0.23, s * 0.72));
+          pushPart(props, G.box(0.09, 0.365, 0.28), 0x6b4d31, set(e, item.y + 0.1825, s * 0.72));
         }
       }
       // Tankards, because an empty table is furniture and a table with two
@@ -2060,11 +2091,19 @@ export function populate(world, layout, built, options = {}) {
           pushPart(props, G.cylinder(0.19, 0.19, 0.07, 10), 0x7a5a38, put(sx, item.y + 0.63, sz, spin));
           pushPart(props, G.cylinder(0.055, 0.075, 0.60, 8), 0x60472c, put(sx, item.y + 0.30, sz, spin));
           pushPart(props, G.cylinder(0.17, 0.17, 0.04, 8), 0x60472c, put(sx, item.y + 0.05, sz, spin));
+          const [cx, cz] = worldOf(sx, sz);
+          furniture.push({ x: cx, z: cz, yaw: ry, hx: 0.19, hz: 0.19, y0: item.y, y1: item.y + 0.665, part: 'stool' });
         }
         solid(shift, front, L / 2, D / 2 + 0.12, 0, H);
+        {
+          const [cx, cz] = worldOf(shift, front);
+          furniture.push({ x: cx, z: cz, yaw: ry, hx: L / 2 + 0.09, hz: D / 2 + 0.12, y0: item.y, y1: item.y + H + 0.045, part: 'counter' });
+        }
         // Somewhere to stand with your elbows on it.
-        for (const lx of [-1.3, 0, 1.3]) {
-          const [wx, wz] = worldOf(shift + lx, front + D / 2 + 0.42);
+        // Between the stools (at -1.575, -0.525, 0.525, 1.575), not on them:
+        // at -1.3 and 1.3 a drinker stood 0.28 m from a stool's centre.
+        for (const lx of [-1.05, 0, 1.05]) {
+          const [wx, wz] = worldOf(shift + lx, front + D / 2 + 0.52);
           spots.push({ kind: 'bar', x: wx, y: item.y, z: wz, yaw: ry + Math.PI });
         }
       } else if (item.fitting === 'hearth') {
@@ -2858,7 +2897,7 @@ export function populate(world, layout, built, options = {}) {
   // collider for the player but a mobile still walks round it.
   const nav = createNav({ layout, built, world });
   if (assets) nav.addInstances([built.group, group], assets, THREE);
-  const motion = createMotion({ figures, nav, zones: built.zones || null, spots });
+  const motion = createMotion({ figures, nav, zones: built.zones || null, spots, furniture });
 
   /**
    * Play a clip on a mobile's body -- `target` is a figure, a game slot
@@ -2901,7 +2940,7 @@ export function populate(world, layout, built, options = {}) {
   }
 
   return {
-    group, interactables, update, doors, figures, nav, motion, perform, respawn,
+    group, interactables, update, doors, figures, nav, motion, perform, respawn, furniture,
     setSun, setDaylight, setSky, lights: windowLights,
   };
 }
