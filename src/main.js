@@ -1787,6 +1787,35 @@ async function boot() {
 
   options.start();
 
+  // Every material's program, now, behind the loading screen. three compiles
+  // a program the first time something wearing it is drawn, so walking
+  // into the desert or the sewer for the first time stalled a frame for the
+  // sand, the rock and the vaults -- 517 ms measured at #5028 -- and the
+  // far-tree cards stall the first time the forest is far enough off.
+  // Hidden things too: the zone that is not in view, the cards, the doors.
+  {
+    const hidden = [];
+    scene.traverse((o) => {
+      // `placements` is a record for nav.js, never drawn.
+      if (o.visible || o.name === 'placements' || o.parent?.name === 'placements') return;
+      o.visible = true;
+      hidden.push(o);
+    });
+    const started = performance.now();
+    // Compiled for the composer's own target: a program's key carries the
+    // output colour space and tone mapping of wherever it draws, and against
+    // the canvas every one of these came out a variant nothing ever uses.
+    const previous = renderer.getRenderTarget();
+    renderer.setRenderTarget(composer.renderTarget1);
+    try {
+      await renderer.compileAsync(scene, camera);
+    } finally {
+      renderer.setRenderTarget(previous);
+      for (const o of hidden) o.visible = false;
+    }
+    console.info(`precompiled in ${(performance.now() - started).toFixed(0)} ms`);
+  }
+
   await progress(1, 'ready');
   dom.loading.classList.add('hidden');
   // What the build came to belongs with the frame rate on the stats overlay

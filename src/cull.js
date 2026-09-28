@@ -110,6 +110,7 @@ const DIST_FRAG = `
   varying vec3 vWorld;
   void main() { gl_FragColor = vec4(length(vWorld - eye), 0.0, 0.0, 1.0); }`;
 
+const WAIT = 'wait';
 const cellKey = (level, x, z) => `${level}:${x},${z}`;
 
 export function createVisibility({ renderer, scene, camera, world, sun, zones = null, sky = [], impostors = null }) {
@@ -492,10 +493,18 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
 
   /**
    * One face's worth of measuring. Returns false when there is nothing left
-   * to do. A cell is 11 cubes of 6 faces, each face a small draw; spread over
-   * frames by `work`, which keeps to a budget.
+   * to do, WAIT while a cube is on its way back from the GPU. A cell is 11
+   * cubes of 6 faces, each face a small draw; spread over frames by `work`,
+   * which keeps to a budget.
+   *
+   * The cube used to be read back at once, which made the CPU wait for the
+   * GPU to finish everything queued before it -- the whole frame just drawn.
+   * Walking into a new cell that was eleven stalls of several milliseconds,
+   * and `work()` averaged 3.4-4.5 ms against its 1.5 ms budget. Read back
+   * asynchronously it arrives a frame or two later and costs nothing. `sync`
+   * is for `settle` and `measure`, which want the answer now.
    */
-  function step() {
+  function step(sync = false) {
     while (queue.length && queue[0].done) queue.shift();
     const cell = queue[0];
     if (!cell) return false;
@@ -507,9 +516,26 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     }
     const job = cell.job;
     const eye = job.sample === 0 ? cell.centre : cell.samples[job.sample];
-    job.faces[job.face] = renderFace(job.scene, eye, job.face);
-    if (++job.face < 6) return true;
-    renderer.readRenderTargetPixels(target, 0, 0, RES * 6, RES, readback);
+    // A read left pending is only good if nothing has drawn over it since;
+    // asked for synchronously, draw the cube again rather than guess.
+    if (sync && job.face === 6 && !job.ready) job.face = 0;
+    if (job.face < 6) {
+      job.faces[job.face] = renderFace(job.scene, eye, job.face);
+      if (++job.face < 6) return true;
+      if (sync) {
+        renderer.readRenderTargetPixels(target, 0, 0, RES * 6, RES, readback);
+        job.ready = 'now';
+      } else {
+        job.ready = false;
+        job.buffer ||= new Float32Array(readback.length);
+        const reading = job.reading = renderer.readRenderTargetPixelsAsync(target, 0, 0, RES * 6, RES, job.buffer)
+          .then(() => { if (job.reading === reading) job.ready = 'later'; });
+        return WAIT;
+      }
+    }
+    if (!job.ready) return WAIT;
+    if (job.ready === 'later') readback.set(job.buffer);
+    job.ready = false; job.reading = null;
     if (job.sample === 0) measureInside(cell, job.faces, eye);
     gatherLeaks(cell, job.faces, eye);
     job.face = 0;
@@ -1043,7 +1069,9 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
 
   function measureFor(start, budget) {
     while (performance.now() - start < budget) {
-      if (step()) continue;
+      const r = step();
+      if (r === WAIT) break;
+      if (r) continue;
       // The neighbours next, so a cell is ready by the time the eye walks in.
       const c = state.cell;
       if (!c) break;
@@ -1062,7 +1090,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     const at = locate(camera.position);
     const cell = cellAt(at.level, at.x, at.z, true);
     for (let round = 0; round < 64; round++) {
-      while (step());
+      while (step(true));
       if (!eyeInside(cell, camera.position)) break;
       camera.updateMatrixWorld();
       view.copy(camera.matrixWorld).invert();
@@ -1076,7 +1104,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
 
   return { begin, end, work, settle, state, cells, instanced, sensor, measure: (level, x, z) => {
     const cell = cellAt(level, x, z, true);
-    while (!cell.done) step();
+    while (!cell.done) step(true);
     return cell;
   } };
 }

@@ -291,8 +291,12 @@ export class LightPool {
       light.dispose();
     }
     while (this.lights.length < count) {
+      // Always visible, dark when unused. The number of lights is part of
+      // every lit material's program, so switching one off by `visible`
+      // recompiled everything in view each time the count of lamps nearby
+      // changed -- 50-500 ms stalls walking between the desert, the town and
+      // the sewer (measured: 10 programs rebuilt in one frame at #5028).
       const light = new THREE.PointLight(0xffffff, 0, 20, 2);
-      light.visible = false;
       this.scene.add(light);
       this.lights.push(light);
     }
@@ -327,10 +331,9 @@ export class LightPool {
     for (let i = 0; i < this.lights.length; i++) {
       const light = this.lights[i];
       const candidate = this.near[i];
-      if (!candidate) { light.visible = false; continue; }
+      if (!candidate) { light.intensity = 0; continue; }
       const lit = candidate.outdoor ? 1 - this.daylight : 1;
-      if (lit <= 0.01) { light.visible = false; continue; }
-      light.visible = true;
+      if (lit <= 0.01) { light.intensity = 0; continue; }
       light.position.set(candidate.x, candidate.y, candidate.z);
       light.color.setHex(candidate.color);
       light.distance = candidate.radius || 16;
