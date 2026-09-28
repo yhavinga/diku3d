@@ -191,6 +191,98 @@ def build_bush():
     return deliver_conifer(objs, cards.mesh("leaves"), "bush")
 
 
+def build_hedge(name, L, D, H, seed):
+    """A clipped hedge, `L` long, `D` deep and `H` tall: the Shire's kept
+    hedgerows and the knot of hedge at a lane corner.
+
+    Its turf banks and corners were half-ellipsoids in the lawn texture, and a
+    judge saw four-metre faceted green domes. A hedge is leaf over a woody
+    frame: stems out of the ground branching into it, and small-leaved sprays
+    laid over a rounded box -- the shape the shears keep -- tipped a little
+    out of it so the outline is leafy and not ruled. Thinner at the foot,
+    where the shade kills the leaves and the stems show."""
+    lib.reset()
+    rng = random.Random(seed)
+    objs = []
+    cards = Cards("hedgeleaf", tile=0.6)
+    hx, hy, hz = L / 2, D / 2, H / 2
+    ex = 5.0
+
+    def surface(d):
+        """Where direction `d` from the centre meets the rounded box, and the
+        box's normal there."""
+        k = (abs(d.x / hx) ** ex + abs(d.y / hy) ** ex + abs(d.z / hz) ** ex) ** (1.0 / ex)
+        q = d / k
+        n = mathutils.Vector((abs(q.x / hx) ** (ex - 1) * math.copysign(1, q.x) / hx,
+                              abs(q.y / hy) ** (ex - 1) * math.copysign(1, q.y) / hy,
+                              abs(q.z / hz) ** (ex - 1) * math.copysign(1, q.z) / hz)).normalized()
+        return q, n
+
+    # The frame: stems from the ground forking into the body.
+    for i in range(max(4, int(L * 1.6))):
+        x = -hx * 0.85 + (2 * hx * 0.85) * (i + rng.uniform(0.2, 0.8)) / max(4, int(L * 1.6))
+        base = mathutils.Vector((x, rng.uniform(-hy, hy) * 0.3, 0.0))
+        d = mathutils.Vector((rng.uniform(-0.3, 0.3), rng.uniform(-0.3, 0.3), 1.0))
+        objs.append(segment(tuple(base), tuple(d), H * 0.55, 0.045, 0.025, verts=5, name="stem"))
+        for side in (-1, 1):
+            d2 = mathutils.Vector((rng.uniform(-0.4, 0.4), side * rng.uniform(0.4, 0.8), 0.9))
+            objs.append(segment(tuple(base + d.normalized() * H * 0.3), tuple(d2), H * 0.4, 0.028, 0.012,
+                                verts=4, name="branch"))
+    centre = mathutils.Vector((0, 0, hz))
+    area = 2 * (L * D + L * H + D * H)
+    count = int(area * 10)
+    placed = 0
+    tries = 0
+    while placed < count and tries < count * 4:
+        tries += 1
+        d = mathutils.Vector((rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1)))
+        if d.length < 1e-6:
+            continue
+        q, n = surface(d)
+        z = q.z + hz
+        if z < 0.12 or (z < 0.45 and rng.random() < 0.6):
+            continue
+        # Narrower at the foot: the shade underneath has killed the outer leaf.
+        foot = 1.0 - 0.14 * max(0.0, 1.0 - z / (H * 0.35))
+        p = mathutils.Vector((q.x * foot, q.y * foot, z))
+        t = n.cross(mathutils.Vector((0, 0, 1)))
+        if t.length < 1e-3:
+            t = mathutils.Vector((1, 0, 0))
+        t.normalize()
+        b = n.cross(t)
+        a = rng.uniform(0, 2 * math.pi)
+        u = (t * math.cos(a) + b * math.sin(a))
+        # Tipped out of the surface a little: a clipped face, but a leafy one.
+        u = (u + n * rng.uniform(0.03, 0.16)).normalized()
+        v = n.cross(u).normalized()
+        length = rng.uniform(0.36, 0.5)
+        width = rng.uniform(0.28, 0.36)
+        base = p - u * length * 0.45 - n * rng.uniform(0.02, 0.08)
+        cards.card(base, u, v, length, width, 0.2, n + mathutils.Vector((0, 0, 0.35)))
+        placed += 1
+    # A second, inner layer, so the gaps in the first show leaf and not sky.
+    for k in range(int(count * 0.25)):
+        d = mathutils.Vector((rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1)))
+        q, n = surface(d)
+        p = centre + (q) * 0.7
+        if p.z < 0.3:
+            continue
+        u = mathutils.Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-0.3, 0.6))).normalized()
+        v = n.cross(u)
+        if v.length < 1e-3:
+            continue
+        cards.card(p, u, v.normalized(), 0.55, 0.4, 0.2, n + mathutils.Vector((0, 0, 0.35)))
+    return deliver_conifer(objs, cards.mesh("leaves"), name)
+
+
+def build_hedge_clump():
+    return build_hedge("hedge_clump", 3.4, 3.4, 2.2, 70031)
+
+
+def build_hedge_row():
+    return build_hedge("hedge_row", 6.6, 1.3, 1.9, 70033)
+
+
 def build_grass_tuft():
     """Blades, not billboards: eight tapered strips leaning out of one clump.
     Sixteen triangles a blade, because these get scattered by the hundred."""
@@ -759,7 +851,7 @@ def build_moss_rock():
 
 ASSETS = [build_tree_oak, build_tree_pine, build_tree_fir, build_tree_cedar, build_tree_snag,
           build_bush, build_salal_bush, build_fern, build_moss_rock,
-          build_grass_tuft]
+          build_grass_tuft, build_hedge_clump, build_hedge_row]
 
 
 def build():

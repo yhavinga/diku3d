@@ -569,6 +569,10 @@ const LEAF_SHAPES = {
   ovate: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.85)), 0.75),
   salal: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.62)), 0.7) * (0.94 + 0.06 * Math.abs(Math.sin(a * 70))),
   pinna: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.5)), 0.6) * (0.88 + 0.12 * Math.abs(Math.sin(a * 40))),
+  // A nettle's: heart-based, long-pointed and coarsely toothed.
+  nettle: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.55)), 0.75) * (0.8 + 0.2 * Math.abs(Math.sin(a * 34))),
+  // A dock's or a willowherb's: long, narrow and plain.
+  lance: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.7)), 0.9),
 };
 
 function leafSpray(spec) {
@@ -631,6 +635,27 @@ const LEAF_SPRAYS = {
   salal: leafSpray({ seed: 5309, shape: 'salal', leaf: 0.2, width: 0.3, angle: 0.95, spread: 0.5, spacing: 0.085,
     sides: 3, sideLen: 0.32, sideAngle: 0.75, twig: 0.007, mainLeaves: true, alternate: true,
     palette: [0x243f22, 0x2b4a26, 0x33552b, 0x3d5f2f], back: 0x142214, stem: 0x5a3326 }),
+  // A clipped hedge: privet and beech, small leaves crowded thick, and the
+  // cut makes them denser still.
+  hedgeleaf: leafSpray({ seed: 5503, shape: 'ovate', leaf: 0.05, width: 0.34, angle: 1.0, spread: 1.1, spacing: 0.017,
+    sides: 12, sideLen: 0.4, sideAngle: 1.0, twig: 0.004, mainLeaves: true, alternate: false,
+    palette: [0x24401c, 0x2c4b21, 0x355626, 0x3f5f2a, 0x2a4420], back: 0x16241a }),
+  // A nettle top: opposite pairs of toothed leaves up a square stem.
+  nettleleaf: leafSpray({ seed: 5601, shape: 'nettle', leaf: 0.17, width: 0.3, angle: 1.05, spread: 0.3, spacing: 0.1,
+    sides: 2, sideLen: 0.3, sideAngle: 0.9, twig: 0.006, mainLeaves: true, alternate: false, taper: 0.55,
+    palette: [0x2e4a1f, 0x365424, 0x3f5d28], back: 0x19281a, stem: 0x3f4a26 }),
+  // Bramble: dark, toothed leaflets in threes and fives on a purple cane.
+  brambleleaf: leafSpray({ seed: 5701, shape: 'nettle', leaf: 0.1, width: 0.36, angle: 0.8, spread: 0.6, spacing: 0.05,
+    sides: 5, sideLen: 0.3, sideAngle: 0.85, twig: 0.007, mainLeaves: true, alternate: true,
+    palette: [0x1f3518, 0x263d1c, 0x2e4620, 0x3a4a22], back: 0x121c10, stem: 0x4a2a2e }),
+  // Dock and willowherb gone rank: long plain leaves, some of them yellowing.
+  weedleaf: leafSpray({ seed: 5801, shape: 'lance', leaf: 0.22, width: 0.2, angle: 0.6, spread: 0.4, spacing: 0.07,
+    sides: 2, sideLen: 0.34, sideAngle: 0.6, twig: 0.006, mainLeaves: true, alternate: true, taper: 0.5,
+    palette: [0x3a5226, 0x45592a, 0x566230, 0x6d6a35], back: 0x1c2716, stem: 0x5b5a32 }),
+  // Pot herbs: sage, thyme, rosemary -- small leaves, greyed green.
+  herbleaf: leafSpray({ seed: 5901, shape: 'ovate', leaf: 0.045, width: 0.3, angle: 0.8, spread: 0.7, spacing: 0.02,
+    sides: 8, sideLen: 0.34, sideAngle: 0.8, twig: 0.004, mainLeaves: true, alternate: false,
+    palette: [0x4a5a3a, 0x566648, 0x60704f, 0x3f5232], back: 0x1e2618, stem: 0x4f4a36 }),
   // A sword fern's frond: the rachis along u, pinnae both sides.
   fernleaf: leafSpray({ seed: 5407, shape: 'pinna', leaf: 0.2, width: 0.14, angle: 1.2, spread: 0.12, spacing: 0.034,
     sides: 0, sideLen: 0, sideAngle: 0, twig: 0.005, mainLeaves: true, alternate: false, taper: 0.8,
@@ -690,6 +715,11 @@ const SURFACES = {
     s.rough = s.alpha ? 0.42 : 0.8;
   },
   fernleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.fernleaf, u, v, s); },
+  hedgeleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.hedgeleaf, u, v, s); },
+  nettleleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.nettleleaf, u, v, s); },
+  brambleleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.brambleleaf, u, v, s); },
+  weedleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.weedleaf, u, v, s); },
+  herbleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.herbleaf, u, v, s); },
 
   /**
    * The grass atlas (GRASS_CARDS). Every texel is the front-most shape over
@@ -1226,7 +1256,12 @@ const SURFACES = {
   },
 
   sand(u, v, s) {
-    const ripple = Math.sin((u * 26 + fbm(u * 4, v * 4, 4, 163, 3) * 6) * Math.PI) * 0.5 + 0.5;
+    // Wind ripples are ten to fifteen centimetres crest to crest -- 48 over
+    // the 6 m tile; at 13 they were half a metre, the size of a dune's own
+    // ribs -- and lopsided: a long gentle back and a short steep lee.
+    const rp = u * 48 + fbm(u * 4, v * 4, 4, 163, 3) * 7 + fbm(u * 12, v * 12, 12, 171, 2) * 1.2;
+    const rf = rp - Math.floor(rp);
+    const ripple = rf < 0.75 ? rf / 0.75 : (1 - rf) / 0.25;
     const grit = fbm(u * 90, v * 90, 90, 167, 2);
     const drift = fbm(u * 3, v * 3, 3, 169, 3);
     // The ripple is relief, not paint: a ridge and its trough are one sand,
@@ -1235,7 +1270,9 @@ const SURFACES = {
     s.color = mix(mix(rgb(0xc59a64), rgb(0xdcb784), drift * 0.7 + grit * 0.3), rgb(0xe3c396), ripple * 0.12);
     // Low: a ripple is a centimetre high on a ten-centimetre wavelength, and
     // at half the height range a raking dusk sun drew it as a zebra.
-    s.height = ripple * 0.06 + drift * 0.22 + grit * 0.1;
+    // The drift used to be a fifth of the relief, and over a dune that is a
+    // lumpy skin: dough, a judge said. The shape is the geometry's job.
+    s.height = ripple * 0.035 + drift * 0.05 + grit * 0.06;
     s.rough = 0.84 + grit * 0.14;
   },
 
@@ -2550,6 +2587,11 @@ const RECIPES = {
   oakleaf: { surface: 'oakleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   shrubleaf: { surface: 'shrubleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   salal: { surface: 'salal', scale: 1, normalScale: 0.4, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
+  hedgeleaf: { surface: 'hedgeleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  nettleleaf: { surface: 'nettleleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  brambleleaf: { surface: 'brambleleaf', scale: 1, normalScale: 0.4, env: 0.45, wet: 0, detail: 0, cutout: 0.5 },
+  weedleaf: { surface: 'weedleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  herbleaf: { surface: 'herbleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   fernleaf: { surface: 'fernleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   firbark: { surface: 'firbark', scale: 1.4, normalScale: 0.9, env: 0.35, wet: 0, detail: 0.5 },
   cedarbark: { surface: 'cedarbark', scale: 1.2, normalScale: 0.9, env: 0.5, wet: 0, detail: 0.5 },
