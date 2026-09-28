@@ -1848,7 +1848,7 @@ export function buildScene(world, layout, materials, assets = null) {
         });
       }
       if (isDeep(room)) buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider });
-      else if (!ruin) buildInteriorProps({ room, pos, sides, decor, mats });
+      else if (!ruin) buildInteriorProps({ room, pos, sides, decor, mats, holes: roomHoles.filter((h) => !h.ceiling), lights, kit });
       // "The inn actually looks fairly functional despite its lack of repair
       // ... It looks as if the beer is still on tap!!!" The one place in the
       // neighborhood with a sign out and a light at the door.
@@ -5808,36 +5808,333 @@ function readFittings(room, sides) {
   return [...found].map(([kind, dir]) => ({ kind, dir }));
 }
 
-function buildInteriorProps({ room, pos, sides, decor, mats }) {
-  for (const f of readFittings(room, sides)) {
+/**
+ * The trade a room is kept for: its shopkeeper's first, then its own name.
+ * This is what tells a smithy's counter from a tavern's -- both are a counter
+ * in the prose, and the smithy was getting bar stools, a gantry of bottles
+ * and three tables with benches. Measured over all 45 areas: every keyword
+ * here lands on a keeper of that trade and nothing else.
+ */
+const TRADE_KEEPER = [
+  ['tavern', /\b(bartender|barkeep|barmaid|waiter|waitress|innkeeper|hostess|landlord|publican|maid)\b/i],
+  ['smith', /\b(blacksmith|weaponsmith|swordsmith|smith)\b/i],
+  ['armourer', /\barmou?rer\b/i],
+  ['baker', /\bbaker\b/i],
+  ['grocer', /\b(grocer|shopkeeper|storekeeper)\b/i],
+  ['magic', /\b(wizard|alchemist)\b/i],
+  ['leather', /\bleather\b/i],
+];
+const TRADE_ROOM = [
+  ['smith', /\b(smithy|forge|weapon ?shop|house of arms)\b/i],
+  ['armourer', /\barmou?ry\b/i],
+  ['baker', /\bbakery\b/i],
+  ['grocer', /\b(general store|grocer)/i],
+  ['leather', /\bleather shop\b/i],
+];
+export function tradeOf(room) {
+  for (const mob of room.mobs || []) {
+    if (!mob.shop) continue;
+    const words = `${mob.proto.keywords} ${mob.proto.short}`;
+    for (const [trade, pattern] of TRADE_KEEPER) if (pattern.test(words)) return trade;
+  }
+  if (TAPROOM.test(room.name) && !NOT_THE_ROOM_ITSELF.test(room.name)) return 'tavern';
+  for (const [trade, pattern] of TRADE_ROOM) if (pattern.test(room.name)) return trade;
+  return null;
+}
+/** Trades served across a counter, whether or not the prose mentions one. */
+const COUNTER_TRADES = new Set(['tavern', 'smith', 'armourer', 'baker', 'grocer']);
+
+/**
+ * Footprints of the furniture actors.js places (tools/blender/furniture.py),
+ * in the fitting frame: x0..x1 along the wall, z0..z1 out of it from the
+ * model's origin, which is on the wall line for pieces that stand against
+ * one and at the middle for the rest. Measured off the exported files.
+ */
+export const PIECES = {
+  cask_rack: { model: 'furn_cask_rack', x0: -1.06, x1: 1.06, z0: 0, z1: 1.04, h: 0.75 },
+  // `high`: half the span along the wall that stands past 2.2 m, where a wall
+  // torch's bracket is -- a hood and flue, a board of weapons, a rack's top.
+  forge: { model: 'furn_forge', x0: -2.2, x1: 1.58, z0: 0, z1: 1.14, h: 0.9, high: 1.0 },
+  anvil: { model: 'furn_anvil', x0: -0.36, x1: 0.51, z0: -0.31, z1: 0.32, h: 0.85 },
+  grindstone: { model: 'furn_grindstone', x0: -0.43, x1: 0.56, z0: -0.56, z1: 0.56, h: 1.07 },
+  weapon_rack: { model: 'furn_weapon_rack', x0: -0.89, x1: 0.89, z0: 0, z1: 0.46, h: 2.24, high: 0.9 },
+  // Hung on the wall from 0.9 m up: nothing to walk into, but nothing to put
+  // against the wall under it either.
+  weapon_board: { model: 'furn_weapon_board', x0: -0.96, x1: 0.96, z0: 0, z1: 0.3, h: 0, high: 1.0 },
+  armour_stand: { model: 'furn_armour_stand', x0: -0.44, x1: 0.44, z0: -0.36, z1: 0.36, h: 1.77 },
+  oven: { model: 'furn_oven', x0: -1.0, x1: 1.04, z0: 0, z1: 2.1, h: 1.8, high: 0.6 },
+  bed: { model: 'furn_bed', x0: -0.52, x1: 0.52, z0: 0, z1: 2.06, h: 0.6 },
+  desk: { model: 'furn_desk', x0: -0.91, x1: 0.91, z0: -0.44, z1: 0.44, h: 0.8 },
+  chair: { model: 'furn_chair', x0: -0.24, x1: 0.24, z0: -0.25, z1: 0.23, h: 0.97 },
+  armchair: { model: 'furn_armchair', x0: -0.42, x1: 0.42, z0: -0.56, z1: 0.42, h: 0.7 },
+  worktable: { model: 'furn_table_board', x0: -0.76, x1: 0.76, z0: -0.39, z1: 0.39, h: 0.83 },
+};
+
+// "A bed, a chair and a table", "two beds to the side" -- a bed the text puts
+// in the room, not a river bed or an armchair that "resembles a bed".
+const BED = /(?<!(?:resembles|like|river|sea|lava|flower|stream)\s+)\b(?:a|the|two|three|several|many|some|his|her|their|small|large|wooden|straw|unmade|soft)\s+(?:\w+\s+)?(beds?|cots?|bunks?)\b/i;
+const BEDROOM = /\b(bed ?room|barracks|sleeping quarters|dormitory)\b/i;
+const HOW_MANY_BEDS = (text) => (/\b(several|many|rows? of)\b[^.]{0,20}\b(beds|cots|bunks)\b|\bbarracks\b/i.test(text) ? 3
+  : /\b(two|pair of)\s+(\w+\s+)?(beds|cots|bunks)\b/i.test(text) ? 2 : 1);
+
+/**
+ * Where things already stand on a room's floor, as rectangles about its
+ * centre, and room left for more. Everything here is in the frame
+ * `actors.js` builds fittings in: `lx` along wall `dir`, `lz` from the room's
+ * centre with the wall's inner face at -ROOM/2.
+ */
+function floorPlan(sides, holes, style = {}) {
+  const FACE = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
+  const WALL = -ROOM / 2;
+  const taken = [];
+  // What stands up past a wall torch's bracket, per wall, as spans along it.
+  const tall = [[], [], [], []];
+  const rect = (dir, lx0, lx1, lz0, lz1) => {
+    const c = Math.round(Math.cos(FACE[dir])); const s = Math.round(Math.sin(FACE[dir]));
+    const xs = []; const zs = [];
+    for (const lx of [lx0, lx1]) {
+      for (const lz of [lz0, lz1]) { xs.push(lx * c + lz * s); zs.push(-lx * s + lz * c); }
+    }
+    return { x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) };
+  };
+  const clear = (r, pad = 0.12) => r.x0 >= WALL - 0.01 && r.x1 <= -WALL + 0.01 && r.z0 >= WALL - 0.01 && r.z1 <= -WALL + 0.01
+    && !taken.some((t) => r.x0 < t.x1 + pad && r.x1 > t.x0 - pad && r.z0 < t.z1 + pad && r.z1 > t.z0 - pad);
+  // Where you arrive, the ways out, a staircase and the hole it comes up through.
+  taken.push({ x0: -1.3, x1: 1.3, z0: -1.3, z1: 1.3 });
+  for (let d = 0; d < 4; d++) {
+    const side = sides[d];
+    if (!side) continue;
+    taken.push(side.kind === 'stair' ? rect(d, -2.1, 2.1, WALL, 3.4) : rect(d, -2.0, 2.0, WALL, WALL + 2.0));
+  }
+  for (const h of holes) taken.push({ x0: h.x0 - 0.3, x1: h.x1 + 0.3, z0: h.z0 - 0.3, z1: h.z1 + 0.3 });
+  // The stone kit's engaged buttresses stand 0.62 m proud of its face on every
+  // wall, 2.32 to 3.38 m either side of the middle; a smial's corners are
+  // rounded off 2.3 m in plan. Measured by raycasting the built rooms.
+  for (let d = 0; d < 4; d++) {
+    if (style.buttress) for (const s of [-1, 1]) taken.push(rect(d, s * 2.85 - 0.56, s * 2.85 + 0.56, WALL, WALL + 0.55));
+    if (style.smial) for (const s of [-1, 1]) taken.push(rect(d, s > 0 ? 2.8 : -5, s > 0 ? 5 : -2.8, WALL, WALL + 2.2));
+  }
+  const BUTTRESS = [[-3.41, -2.29], [2.29, 3.41]];
+  return {
+    face: style.face || 0,
+    /**
+     * Where along its wall a fitting goes and how far it stands off it. A
+     * fitting on the wall with the door slides aside; one that lands on a
+     * buttress is brought out to stand in front of it (the models carry a
+     * backing that closes the gap behind).
+     */
+    settle(kind, blocked) {
+      const half = { hearth: 1.25, shelves: 1.55 }[kind];
+      const shift = blocked ? (style.buttress && kind === 'hearth' ? -3.3 : -(1.6 + 1.55)) : 0;
+      const out = half && style.buttress && BUTTRESS.some(([a0, a1]) => shift - half < a1 && shift + half > a0) ? 0.55 : 0;
+      return { shift, out };
+    },
+    taken, rect, clear, tall,
+    take(r) { taken.push(r); return r; },
+    /** A fitting where actors.js will build it, with the floor it needs in front. */
+    fitting(kind, dir, shift, bar = false, out = 0) {
+      const reach = { counter: [2.35, 2.75], hearth: [1.55, 1.8], shelves: [1.6, 0.5], altar: [1.7, 2.65] }[kind];
+      if (reach) taken.push(rect(dir, shift - reach[0], shift + reach[0], WALL, WALL + out + reach[1]));
+      // A bar's gantry, a chimney breast and a shelving unit all reach 2.5 m.
+      const high = { counter: bar ? 1.95 : 0, hearth: 1.15, shelves: 1.6 }[kind];
+      if (high) tall[dir].push([shift - high, shift + high]);
+    },
+    /**
+     * The first clear place for a piece against one of `walls`, trying
+     * `alongs` on each; `out` is how far its origin stands off the wall.
+     */
+    wall(kind, walls, alongs, out = 0, spin = 0) {
+      const p = PIECES[kind];
+      // A piece turned on its own spot claims the square round everything it
+      // could reach.
+      const k = spin ? Math.max(-p.x0, p.x1, -p.z0, p.z1) : 0;
+      const [x0, x1, z0, z1] = spin ? [-k, k, -k, k] : [p.x0, p.x1, p.z0, p.z1];
+      // After the preferred places, anywhere along the wall at all.
+      const scan = [];
+      for (let a = -4.4; a <= 4.41; a += 0.2) scan.push(Math.round(a * 10) / 10);
+      for (const dir of walls) {
+        for (const along of [...alongs, ...scan]) {
+          const r = rect(dir, along + x0, along + x1, WALL + out + z0, WALL + out + z1);
+          if (clear(r)) {
+            taken.push(r);
+            if (p.high && out === 0) tall[dir].push([along - p.high, along + p.high]);
+            return { dir, along, out };
+          }
+        }
+      }
+      return null;
+    },
+  };
+}
+
+/**
+ * A wall torch hangs at the middle of a blank wall, 2.9 m up, and it was
+ * being hung straight through whatever the room's own furniture put there:
+ * the Grunting Boar's torch burned in the middle of its gantry of bottles.
+ * The torch and its light are slid along the wall to the nearest place clear
+ * of anything that tall.
+ */
+function clearTorches(plan, pos, decor, lights) {
+  for (let dir = 0; dir < 4; dir++) {
+    const spans = plan.tall[dir];
+    if (!spans.length) continue;
+    const [dx, , dz] = DIR_STEP[dir];
+    const onWall = (o) => dx * (o.x - pos.x) + dz * (o.z - pos.z) > ROOM / 2 - 1.2
+      && Math.abs(dz * (o.x - pos.x) - dx * (o.z - pos.z)) < 0.3 && Math.abs(o.y - pos.y) < 4;
+    const torch = decor.find((d) => d.kind === 'torch' && !d.bare && onWall(d));
+    if (!torch) continue;
+    const blocked = (a) => spans.some(([a0, a1]) => a > a0 - 0.35 && a < a1 + 0.35);
+    if (!blocked(0)) continue;
+    let to = null;
+    for (let k = 1; k <= 38 && to === null; k++) {
+      for (const a of [k * 0.1, -k * 0.1]) if (to === null && !blocked(a)) to = a;
+    }
+    if (to === null) continue;
+    // Along the wall is +x for a north or south wall and +z for east or west.
+    const ax = dz !== 0 ? 1 : 0; const az = dx !== 0 ? 1 : 0;
+    const light = lights.find((l) => Math.abs(l.x - (torch.x - dx * 0.4)) < 0.05 && Math.abs(l.z - (torch.z - dz * 0.4)) < 0.05);
+    for (const o of [torch, light]) {
+      if (!o) continue;
+      o.x += ax * to;
+      o.z += az * to;
+    }
+  }
+}
+
+function buildInteriorProps({ room, pos, sides, decor, mats, holes = [], lights = [], kit = null }) {
+  const trade = tradeOf(room);
+  const fittings = readFittings(room, sides);
+  const blank = [0, 1, 2, 3].filter((d) => !sides[d]);
+  // A trade served over a counter gets one, on a wall with no door and no
+  // other fitting, if the prose did not already put one somewhere.
+  if (COUNTER_TRADES.has(trade) && !fittings.some((f) => f.kind === 'counter') && blank.length) {
+    const used = new Set(fittings.map((f) => f.dir));
+    fittings.push({ kind: 'counter', dir: blank.find((d) => !used.has(d)) ?? blank[0] });
+  }
+  // "All sorts of items are stacked on shelves behind the counter."
+  const counterAt = fittings.find((f) => f.kind === 'counter');
+  const shelvesAt = fittings.find((f) => f.kind === 'shelves');
+  if (counterAt && shelvesAt && /\bshelves\s+behind\s+the\s+counter\b/i.test(room.description)) shelvesAt.dir = counterAt.dir;
+  // Where the walls' inner faces really are: the stone and temple kits stand
+  // at 5.10 from the middle, not the 5.00 the procedural walls do, and a
+  // Shire room's chair rail stands 0.1 m proud of its plaster.
+  const plan = floorPlan(sides, holes, {
+    face: kit === '' || kit === 'temple_' ? 0.1 : (mats.shire && mats.shire !== 'barn' ? -0.1 : 0),
+    buttress: kit === '', smial: !!mats.smial,
+  });
+  const piece = (kind, at, spin = 0, extra = null) => decor.push({
+    kind: 'piece', piece: kind, dir: at.dir, along: at.along, out: at.out, spin, face: plan.face,
+    x: pos.x, y: pos.y, z: pos.z, seed: hash3(room.vnum, at.dir, Math.round(at.along * 10), 77), ...extra,
+  });
+  for (const f of fittings) {
     // A wall the text names may still be the one with the door in it -- the
     // Grunting Boar's fireplace is in the western wall and west is its only way
     // out. Slide the fitting along until it clears the opening rather than
     // moving it to a wall the mud did not choose.
     const blocked = !!sides[f.dir];
+    const { shift, out } = plan.settle(f.kind, blocked);
     decor.push({
-      kind: 'fitting', fitting: f.kind, dir: f.dir, blocked,
+      kind: 'fitting', fitting: f.kind, dir: f.dir, blocked, trade, shift, out, face: plan.face,
+      // "In the crackling fireplace hangs a big iron pot with boiling water."
+      pot: f.kind === 'hearth' && /\b(iron pot|cauldron|kettle)\b/i.test(room.description),
       x: pos.x, y: pos.y, z: pos.z, seed: hash3(room.vnum, f.dir, 0, 71),
     });
+    plan.fitting(f.kind, f.dir, shift, !trade || trade === 'tavern', out);
     // A bar with nowhere to sit and drink is a counter. The prose does not
     // list the tables because nobody would think to; "this place makes you
-    // feel like home" is the line that stands in for them.
-    if (f.kind === 'counter') {
+    // feel like home" is the line that stands in for them. A shop's counter is
+    // not a bar, and a smithy with three tables and benches in it is a tavern.
+    if (f.kind === 'counter' && (trade === 'tavern' || !trade)) {
       const [nx, , nz] = DIR_STEP[f.dir];
       for (let i = 0; i < 3; i++) {
         const along = (i - 1) * 2.9 + (hash3(room.vnum, i, 0, 73) - 0.5) * 0.8;
         const back = 1.7 + hash3(room.vnum, i, 0, 74) * 1.7;
+        const tx = -nx * back - nz * along;
+        const tz = -nz * back - nx * along;
         decor.push({
           kind: 'table', benches: true,
-          x: pos.x - nx * back - nz * along,
+          x: pos.x + tx,
           y: pos.y,
-          z: pos.z - nz * back - nx * along,
+          z: pos.z + tz,
           spin: (hash3(room.vnum, i, 0, 75) - 0.5) * 0.5,
         });
+        plan.take({ x0: tx - 1.15, x1: tx + 1.15, z0: tz - 1.15, z1: tz + 1.15 });
       }
     }
   }
-  buildLooseProps({ room, pos, sides, decor, mats });
+
+  // The tools of the trade, against walls with no door first.
+  const walls = [...blank, ...[0, 1, 2, 3].filter((d) => sides[d])];
+  const ends = [-3.2, 3.2, -1.6, 1.6, 0];
+  const middle = [0, -1.2, 1.2, -2.6, 2.6];
+  if (trade === 'tavern') {
+    const at = plan.wall('cask_rack', walls, [3.7, -3.7, 2.6, -2.6]);
+    if (at) piece('cask_rack', at);
+  } else if (trade === 'smith') {
+    const forge = plan.wall('forge', walls, [0.4, -0.6, 1.2, -1.4]);
+    if (forge) {
+      piece('forge', forge);
+      // The anvil a stride out from the fire, turned so the smith stands
+      // between the two.
+      for (const [da, out] of [[0.2, 2.1], [1.3, 2.0], [-1.1, 2.0], [0.2, 2.6]]) {
+        const at = plan.wall('anvil', [forge.dir], [forge.along + da], out, Math.PI / 2);
+        if (at) { piece('anvil', at, Math.PI / 2); break; }
+      }
+    }
+    const grind = plan.wall('grindstone', walls, ends, 0.75, Math.PI / 2);
+    if (grind) piece('grindstone', grind, Math.PI / 2);
+    for (let i = 0; i < 2; i++) {
+      const at = plan.wall('weapon_rack', walls, ends);
+      if (at) piece('weapon_rack', at);
+    }
+  } else if (trade === 'armourer') {
+    // "All kinds of armours on the walls and in the window."
+    for (let i = 0; i < 2; i++) {
+      const at = plan.wall('armour_stand', walls, ends, 0.55);
+      if (at) piece('armour_stand', at);
+    }
+    const board = plan.wall('weapon_board', walls, [-2.6, 2.6, -3.3, 3.3, 0]);
+    if (board) piece('weapon_board', board);
+    const rack = plan.wall('weapon_rack', walls, ends);
+    if (rack) piece('weapon_rack', rack);
+  } else if (trade === 'baker') {
+    const at = plan.wall('oven', walls, middle);
+    if (at) piece('oven', at);
+  } else if (trade === 'leather') {
+    // "In the middle of the room is a large oak table."
+    const at = plan.wall('worktable', walls, [0, -1.5, 1.5], 2.9);
+    if (at) piece('worktable', at);
+  }
+
+  // What the prose puts in the room that nobody trades in.
+  const text = `${room.name}. ${room.description}`;
+  if (/\bdesks?\b/i.test(room.description)) {
+    // "Dividing the room in two is a large desk", "a big desk ... standing in
+    // the centre of the room": out in the floor, with its chair behind it.
+    const desk = plan.wall('desk', walls, [0, -1.4, 1.4, -2.6, 2.6], 2.6);
+    if (desk) {
+      // "A large and polished but completely empty desk."
+      piece('desk', desk, 0, { things: !/\bempty\b/i.test(room.description) });
+      const seat = /\barm-?chair\b/i.test(room.description) ? 'armchair' : 'chair';
+      const at = plan.wall(seat, [desk.dir], [desk.along], desk.out - (seat === 'armchair' ? 1.1 : 0.95));
+      if (at) piece(seat, at);
+    }
+  }
+  if (/\bchairs\b/i.test(room.description)) {
+    // "Wooden chairs stand along the walls."
+    for (let i = 0; i < 4; i++) {
+      const at = plan.wall('chair', walls, [-3.9, 3.9, -3.2, 3.2, -2.5, 2.5], 0.3);
+      if (at) piece('chair', at);
+    }
+  }
+  if (BEDROOM.test(room.name) || BED.test(room.description)) {
+    for (let i = HOW_MANY_BEDS(text); i > 0; i--) {
+      const at = plan.wall('bed', walls, [-3.9, 3.9, -2.6, 2.6, -1.3, 1.3]);
+      if (at) piece('bed', at);
+    }
+  }
+  clearTorches(plan, pos, decor, lights);
+  buildLooseProps({ room, pos, sides, decor, mats, plan, trade });
 }
 
 /**
@@ -5885,7 +6182,20 @@ const wantsClutter = (room) => !GRAVEYARD.test(room.name)
 const clutterProps = (room) => farmProps(room) || (REFUSE.test(room.name) ? REFUSE_PROPS : null)
   || (isPark(room) ? PARK_PROPS : null);
 
-function buildLooseProps({ room, pos, sides, decor, mats }) {
+/**
+ * Against a shop's walls, what its trade keeps there. The general list is a
+ * guild hall's -- nettles, a hay bale and a trough in a baker's.
+ */
+const TRADE_PROPS = {
+  tavern: ['bench', 'bench', 'barrel', 'barrel_stack', 'firewood_pile', 'crate', 'bucket', 'broom'],
+  smith: ['barrel', 'crate', 'firewood_pile', 'bucket', 'planks_pile', 'water_butt'],
+  armourer: ['crate', 'stacked_crates', 'barrel'],
+  baker: ['sack', 'sack', 'furn_basket', 'furn_basket', 'barrel', 'firewood_pile', 'broom'],
+  grocer: ['sack', 'sack', 'furn_basket', 'barrel', 'crate', 'stacked_crates', 'barrel_stack', 'rope_coil'],
+  leather: ['crate', 'barrel', 'bucket', 'stacked_crates'],
+};
+
+function buildLooseProps({ room, pos, sides, decor, mats, plan = null, trade = null }) {
   const blank = [];
   for (let d = 0; d < 4; d++) if (!sides[d]) blank.push(d);
   if (blank.length && /temple|altar|sanctum|hall|throne/i.test(room.name)) {
@@ -5894,18 +6204,24 @@ function buildLooseProps({ room, pos, sides, decor, mats }) {
   // An inn with a named landlord was a bare stone box: eighteen prop models
   // existed and only routed alley cells ever placed one. Rooms dress
   // themselves now, against whichever walls have no door in them.
+  // The table first, so the clutter knows where it is.
+  if (mats.floor === 'planks' && !trade && hash3(room.vnum, 9, 0, 7) > 0.45) {
+    const tx = (hash3(room.vnum, 10, 0, 1) - 0.5) * 3.5;
+    const tz = (hash3(room.vnum, 11, 0, 2) - 0.5) * 3.5;
+    const r = { x0: tx - 1.15, x1: tx + 1.15, z0: tz - 1.15, z1: tz + 1.15 };
+    // The arrival square is the one thing this table may overlap: it always has.
+    if (!plan || plan.taken.slice(1).every((t) => !(r.x0 < t.x1 && r.x1 > t.x0 && r.z0 < t.z1 && r.z1 > t.z0))) {
+      if (plan) plan.take(r);
+      decor.push({ kind: 'table', x: pos.x + tx, y: pos.y, z: pos.z + tz });
+    }
+  }
   if (blank.length) {
     decor.push({
       kind: 'clutter', x: pos.x, y: pos.y, z: pos.z, half: SHELL,
       walls: blank, seed: hash3(room.vnum, 12, 0, 5), indoor: true,
-      props: farmProps(room),
-    });
-  }
-  if (mats.floor === 'planks' && hash3(room.vnum, 9, 0, 7) > 0.45) {
-    decor.push({
-      kind: 'table',
-      x: pos.x + (hash3(room.vnum, 10, 0, 1) - 0.5) * 3.5, y: pos.y,
-      z: pos.z + (hash3(room.vnum, 11, 0, 2) - 0.5) * 3.5,
+      props: farmProps(room) || TRADE_PROPS[trade] || null,
+      // What the furniture already stands on, so a barrel is not stood in it.
+      busy: plan ? plan.taken.slice(1) : null,
     });
   }
 }

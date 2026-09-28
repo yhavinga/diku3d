@@ -57,7 +57,7 @@ function takeColour(geometry) {
 // are the feather surface: rows of overlapping scallops is what both of them
 // are, and at the size either is seen the two read the same.
 // Wool is the cloth recipe under its own tint; plate is worked steel.
-const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', wool: 'cloth', plate: 'steel', scales: 'feather' };
+const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', wool: 'cloth', plate: 'steel', scales: 'feather', wicker: 'rope' };
 // (linen and wool have recipes of their own now; the aliases are the fallback.)
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
@@ -85,13 +85,25 @@ const TAG_MATERIALS = {
   // own colour in the vertex colours; glossy, because that is the difference
   // between an eye and a painted dot.
   horn: { color: 0xffffff, roughness: 0.34, metalness: 0 },
+  // The furniture's small things (tools/blender/furniture.py): too small to
+  // wear a baked surface, and read by colour and sheen. `soot` is the inside
+  // of a fireplace -- dark, and never RGB 0.
+  // Half metal: fully metallic, a tankard mirrored the blue sky light and
+  // read as blue glass across the room.
+  pewter: { color: 0x8a8a84, roughness: 0.5, metalness: 0.45 },
+  brass: { color: 0xb08a4a, roughness: 0.38, metalness: 0.85 },
+  bottle: { color: 0x2f4a32, roughness: 0.12, metalness: 0 },
+  earthenware: { color: 0x9a6444, roughness: 0.66, metalness: 0 },
+  wax: { color: 0xe6dcc2, roughness: 0.5, metalness: 0 },
+  bread: { color: 0xb07436, roughness: 0.8, metalness: 0 },
+  soot: { color: 0x2c2723, roughness: 0.95, metalness: 0 },
   glass: {
     color: 0xd8c48a, roughness: 0.12, metalness: 0,
     transparent: true, opacity: 0.55, emissive: 0x000000,
   },
 };
 /** Tags whose flat material wants the shared grain, at this strength. */
-const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6, bone: 0.5, velvet: 0.3 };
+const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6, bone: 0.5, velvet: 0.3, earthenware: 0.3, bread: 0.5, soot: 0.6 };
 
 export class AssetLibrary {
   constructor(materials, baseUrl = 'assets') {
@@ -590,6 +602,17 @@ export class StaticBatches {
 
 const UP = new THREE.Vector3(0, 1, 0);
 
+/** Everything furniture.py makes; actors.js furnishes the rooms from these. */
+export const FURNITURE_NAMES = [
+  'furn_table_trestle', 'furn_table_board', 'furn_bench_plank', 'furn_bench_staked', 'furn_stool', 'furn_settle',
+  'furn_bar_counter', 'furn_shop_counter', 'furn_backbar', 'furn_cask_rack',
+  'furn_hearth', 'furn_hearth_pot', 'furn_forge', 'furn_anvil', 'furn_grindstone',
+  'furn_weapon_rack', 'furn_weapon_board', 'furn_armour_stand', 'furn_oven',
+  'furn_shelves_goods', 'furn_shelves_bread', 'furn_shelves_jars', 'furn_shelves_hides',
+  'furn_bed', 'furn_desk', 'furn_desk_things', 'furn_chair', 'furn_armchair',
+  'furn_tankard', 'furn_tankard_pewter', 'furn_jug', 'furn_candle', 'furn_scales', 'furn_basket',
+];
+
 /** Everything the world builder will ask for, so one call loads the lot. */
 export const ASSET_NAMES = [
   'house_a', 'house_b', 'house_c', 'house_stone_a', 'house_stone_b',
@@ -634,4 +657,6 @@ export const ASSET_NAMES = [
   'beast_spider', 'beast_beetle', 'beast_scorpion', 'beast_drider', 'beast_bat', 'beast_mud',
   'beast_myconoid', 'beast_ratman', 'beast_imp', 'beast_naga', 'beast_sandworm', 'beast_basilisk',
   'beast_dustdigger', 'beast_camel', 'beast_dracolich',
+  // The rooms' furniture: tools/blender/furniture.py.
+  ...FURNITURE_NAMES,
 ];

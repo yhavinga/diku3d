@@ -279,6 +279,51 @@ const SURFACES = {
     s.rough = 0.72 + grain * 0.2;
   },
 
+  /**
+   * Joiner's oak for the furniture (tools/blender/furniture.py): close grain
+   * running along u, a slow figure across it and the odd silver fleck of a
+   * medullary ray -- and no seams. `planks` is floorboards on a 2.4 m tile,
+   * and on a table top its board lines fall wherever the tile does, which is
+   * never where the boards are. furniture.py lays every wooden part's u along
+   * its own grain.
+   */
+  wood(u, v, s) {
+    // Growth rings cut lengthways: fine dark latewood lines along u, warped
+    // gently so they wander the way a plank's do, and 2 cm apart on a 1.2 m
+    // tile. A sine of v alone tiles; the warp is itself tileable noise.
+    const warp = fbm(u * 3, v * 3, 3, 701, 3);
+    const figure = fbm(u * 2, v * 2, 2, 703, 3);
+    const ring = 0.5 + 0.5 * Math.sin((v * 56 + warp * 3) * Math.PI * 2);
+    const late = ring * ring * ring * ring;
+    const pore = fbm(u * 48, v * 48, 48, 709, 2);
+    const ray = clamp01(1 - cellular(u * 9, v * 36, 9, 713, 0.5)[0] * 6) * 0.15;
+    const wear = clamp01(fbm(u * 4, v * 4, 4, 719, 3) * 1.6 - 0.6);
+    const base = mix(rgb(0x62442a), rgb(0x86613d), figure);
+    const grained = mix(base, rgb(0x46301d), late * 0.22 + (1 - pore) * 0.06);
+    s.color = mix(mix(grained, rgb(0x9a7a55), ray), rgb(0x8a6a48), wear * 0.2);
+    // Shallow: planed and waxed, the grain is a colour more than a relief --
+    // deeper, and a fire's raking light drew it as corduroy.
+    s.height = 0.5 + pore * 0.04 - late * 0.03;
+    // Waxed and handled: a table top has a sheen on it where hands have been.
+    s.rough = 0.6 + pore * 0.12 - wear * 0.1;
+  },
+
+  /** A woollen blanket in a two-colour check, russet on madder brown. */
+  blanket(u, v, s) {
+    const cu = Math.floor(u * 8) % 2; const cv = Math.floor(v * 8) % 2;
+    const stripe = (Math.abs(((u * 32) % 1) - 0.5) < 0.08 ? 1 : 0) + (Math.abs(((v * 32) % 1) - 0.5) < 0.08 ? 1 : 0);
+    const weave = fbm(u * 96, v * 96, 96, 727, 2);
+    const fade = fbm(u * 4, v * 4, 4, 733, 3);
+    let c = cu === cv ? rgb(0x8a3a24) : rgb(0x6a2e22);
+    if (cu !== cv && (cu || cv)) c = mix(c, rgb(0x9c6a36), 0.35);
+    c = mix(c, rgb(0xc9a064), stripe * 0.35);
+    c = mix(c, rgb(0x8c7864), fade * 0.25);
+    const shade = 0.88 + weave * 0.2;
+    s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
+    s.height = 0.5 + weave * 0.12;
+    s.rough = 0.96;
+  },
+
   rooftile(u, v, s) {
     const rows = 9; const cols = 12;
     const gy = v * rows;
@@ -1510,6 +1555,11 @@ const RECIPES = {
   rubble: { surface: 'rubble', scale: 2.4, normalScale: 1.1, env: 0.8, lift: true, wet: 0, detail: 0.6 },
   charred: { surface: 'charred', scale: 1.4, normalScale: 0.55, env: 0.5, lift: true, wet: 0, detail: 0.5 },
   boards: { surface: 'boards', scale: 2.0, normalScale: 0.7, env: 0.7, wet: 0, detail: 0.45 },
+  // The furniture (tools/blender/furniture.py). `firebrick` is the sewer's
+  // brick without `buried`, for an oven and a forge that stand in a lit room.
+  wood: { surface: 'wood', scale: 1.2, normalScale: 0.3, env: 0.75, wet: 0, detail: 0.2 },
+  blanket: { surface: 'blanket', scale: 0.6, normalScale: 0.4, env: 0.3, wet: 0, detail: 0 },
+  firebrick: { surface: 'brick', scale: 2.25, normalScale: 0.5, env: 0.8, wet: 0, detail: 0.5 },
   brokencobble: { surface: 'brokencobble', scale: 2.2, normalScale: 1.0, env: 1.05, lift: true, wet: 0.55, detail: 0.5 },
   ash: { surface: 'ash', scale: 3.0, normalScale: 0.6, env: 0.6, lift: true, wet: 0, detail: 0.6 },
   wasteground: { surface: 'wasteground', scale: 4.0, normalScale: 0.7, env: 0.45, lift: true, wet: 0, detail: 0.6 },

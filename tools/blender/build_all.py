@@ -39,6 +39,7 @@ MODULES = [
     "people",
     "beasts",
     "monsters",
+    "furniture",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a
@@ -128,6 +129,16 @@ BUDGET = {
     "beast_dustdigger": 3000, "beast_camel": 4600,
     # Bones are all edges: a rib cage and a spine of knuckles do not decimate.
     "beast_dracolich": 9600,
+    # furniture.py. Tables, benches and stools are placed a dozen to a tavern
+    # and stay under the prop cap. The bar, its gantry and the shelving carry
+    # everything that stands on them -- bottles, jugs, loaves, books -- and are
+    # one or two to a room, a few rooms in the world; the hearth, forge and
+    # oven reach the ceiling.
+    "furn_bar_counter": 3000, "furn_shop_counter": 2800, "furn_backbar": 4600, "furn_cask_rack": 1600,
+    "furn_hearth": 1600, "furn_hearth_pot": 1900, "furn_forge": 1900, "furn_oven": 1800,
+    "furn_shelves_goods": 5500, "furn_shelves_bread": 5500, "furn_shelves_jars": 5500,
+    "furn_shelves_hides": 3400, "furn_weapon_rack": 1800, "furn_weapon_board": 1600,
+    "furn_armour_stand": 1500, "furn_settle": 1000, "furn_armchair": 1000, "furn_desk": 1100,
 }
 PROP_BUDGET = 800
 # people.py: an archetype is a whole dressed person, one skinned draw per
