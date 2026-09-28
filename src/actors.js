@@ -3499,6 +3499,10 @@ export function populate(world, layout, built, options = {}) {
     m.onBeforeCompile = base.onBeforeCompile;
     m.customProgramCacheKey = base.customProgramCacheKey;
     m.onBeforeRender = base.onBeforeRender;
+    // Nor its defines, which say whether it is lit as underground: without
+    // them a buried stone door mirrored the sky and came out white.
+    m.defines = { ...base.defines };
+    m.defaultAttributeValues = base.defaultAttributeValues;
     if (leaf.tint) m.color.setRGB(leaf.tint[0], leaf.tint[1], leaf.tint[2]);
     slabMaterials.set(key, m);
     return m;

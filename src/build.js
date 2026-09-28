@@ -1001,7 +1001,7 @@ function pickMaterials(room, area, passage = false) {
  * the stone, only a shade of it.
  */
 const SHELL_COLOUR = {
-  purple: 0x8e6fa2, violet: 0x866aa8, black: 0x4a4648, 'jet-black': 0x3c393b, white: 0xe4e0d8,
+  purple: 0x8e6fa2, violet: 0x866aa8, black: 0x5a5658, 'jet-black': 0x48454a, white: 0xe4e0d8,
   'milky white': 0xe8e3d6, red: 0x8a3a2c, 'deep red': 0x7a2a20, crimson: 0x8c2426, blue: 0x4a6690,
   green: 0x55724c, yellow: 0xbc9c4a, grey: 0x8c8a86, gray: 0x8c8a86, golden: 0xb08c3e,
 };
