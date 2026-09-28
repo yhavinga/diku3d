@@ -82,6 +82,7 @@ export class Player {
     this._shakeTime = 0;
     this.lookAssist = null;
     this._shakeRoll = 0;
+    this.lockRefused = false;
 
     const down = (event) => {
       if (event.repeat) return;
@@ -91,6 +92,30 @@ export class Player {
     document.addEventListener('keydown', down);
     document.addEventListener('keyup', up);
     window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  /**
+   * Ask for the mouse. Refusal is normal -- a headless browser never grants
+   * it, and Chrome refuses for a second after Escape -- and the game plays on
+   * without it, keys and all, so it is reported rather than thrown; the next
+   * click on the view asks again. `lockRefused` lets a click that could not
+   * take the mouse still count as a swing.
+   */
+  requestLock() {
+    const element = this.controls.domElement;
+    if (document.pointerLockElement === element) return;
+    const onError = () => {
+      this.lockRefused = true;
+      console.warn('player.js: pointer lock refused -- keys still work; click the view to try again');
+    };
+    document.addEventListener('pointerlockerror', onError, { once: true });
+    document.addEventListener('pointerlockchange', () => {
+      document.removeEventListener('pointerlockerror', onError);
+      this.lockRefused = false;
+    }, { once: true });
+    const pending = element.requestPointerLock();
+    // Chrome also rejects the promise it returns; the event above has said so.
+    if (pending && pending.catch) pending.catch(() => {});
   }
 
   spawn(x, y, z, yaw = 0) {

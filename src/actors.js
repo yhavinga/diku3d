@@ -389,6 +389,27 @@ function pushPart(parts, geometry, colour, matrix) {
   parts.push(geo);
 }
 
+/**
+ * World-space UVs from whichever axis a face points along, in the material's
+ * own tile -- the projection `Batcher` in build.js gives the town's walls, so
+ * a surround's grain runs the way the wall's does.
+ */
+function projectUv(geo, material) {
+  const pos = geo.attributes.position;
+  const nor = geo.attributes.normal;
+  const scale = material.userData.uvScale ?? 1;
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    const nx = Math.abs(nor.getX(i)); const ny = Math.abs(nor.getY(i)); const nz = Math.abs(nor.getZ(i));
+    const x = pos.getX(i); const y = pos.getY(i); const z = pos.getZ(i);
+    if (ny >= nx && ny >= nz) { uv[i * 2] = x * scale; uv[i * 2 + 1] = z * scale; }
+    else if (nx >= nz) { uv[i * 2] = z * scale; uv[i * 2 + 1] = y * scale; }
+    else { uv[i * 2] = x * scale; uv[i * 2 + 1] = y * scale; }
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  return geo;
+}
+
 const G = {
   capsule: (r, len, seg = 8) => new THREE.CapsuleGeometry(r, len, 3, seg),
   sphere: (r, seg = 12) => new THREE.SphereGeometry(r, seg, seg * 0.75),
@@ -2868,7 +2889,15 @@ export function populate(world, layout, built, options = {}) {
   if (windows.length) {
     const panes = [];
     const dark = [];
-    const frames = [];
+    const materials = options.materials;
+    if (!materials || !materials.wood || !materials.dressing) throw new Error('actors: windows need the wood and dressing materials');
+    // Surrounds and glazing bars wear baked surfaces, grouped by material.
+    const dressings = new Map();
+    const dressing = (name) => {
+      if (!dressings.has(name)) dressings.set(name, []);
+      return dressings.get(name);
+    };
+    const bars = dressing('wood');
     // 1.4 x 1.7 is a picture window. A casement in a town of this date is
     // barely a metre across, and at five metres -- which is what a street is
     // now -- the old size subtended sixteen degrees and read as a shop front.
@@ -2882,6 +2911,11 @@ export function populate(world, layout, built, options = {}) {
       { nx: 1, nz: 0, ry: Math.PI / 2 }, { nx: -1, nz: 0, ry: -Math.PI / 2 },
     ];
     for (const w of windows) {
+      // The surround is what the wall is built of: dressed stone round a
+      // window in masonry, oak in a timber frame. It was vertex-coloured flat
+      // brown in the prop material, and a raking dusk sun turned every one of
+      // them into a saturated orange block standing off the wall.
+      const surround = dressing(w.frame === 'stone' ? 'dressing' : 'wood');
       const rows = Math.max(1, Math.floor((w.h - 1.4) / 2.6));
       for (const f of FACES) {
         const tx = f.nz; const tz = -f.nx;
@@ -2917,8 +2951,8 @@ export function populate(world, layout, built, options = {}) {
             // is the single thing that says "a texture of a window" rather
             // than "a window" -- and a light of this date is a small leaded
             // one, not a sheet. One mullion, one transom: four lights.
-            pushPart(frames, G.box(0.055, PANE_H, 0.05), 0x53442f, out(0.065));
-            pushPart(frames, G.box(PANE_W, 0.055, 0.05), 0x53442f, out(0.065));
+            pushPart(bars, G.box(0.055, PANE_H, 0.05), 0xb8a896, out(0.065));
+            pushPart(bars, G.box(PANE_W, 0.055, 0.05), 0xb8a896, out(0.065));
             // Jamb, head and sill were 0x36291d, which is a dark enough brown
             // that in a dim interior it tone maps to nothing and the window
             // keeps its black rectangle -- only now as a thick border round a
@@ -2927,14 +2961,14 @@ export function populate(world, layout, built, options = {}) {
             // surface in the room, not the worst. Weathered oak catching light
             // off its own window.
             for (const s of [-1, 1]) {
-              pushPart(frames, G.box(0.17, PANE_H + 0.34, REVEAL), 0x6f5b45,
+              pushPart(surround, G.box(0.17, PANE_H + 0.34, REVEAL), 0xffffff,
                 at(px + tx * s * (PANE_W / 2 + 0.085) + f.nx * (REVEAL / 2),
                    y, pz + tz * s * (PANE_W / 2 + 0.085) + f.nz * (REVEAL / 2), 0, f.ry, 0));
             }
-            pushPart(frames, G.box(PANE_W + 0.34, 0.17, REVEAL), 0x6f5b45,
+            pushPart(surround, G.box(PANE_W + 0.34, 0.17, REVEAL), 0xffffff,
               at(px + f.nx * (REVEAL / 2), y + PANE_H / 2 + 0.085, pz + f.nz * (REVEAL / 2), 0, f.ry, 0));
             // The sill oversails the reveal and is what the rain runs off.
-            pushPart(frames, G.box(PANE_W + 0.56, 0.15, REVEAL + 0.14), 0x806c54,
+            pushPart(surround, G.box(PANE_W + 0.56, 0.15, REVEAL + 0.14), 0xe8e2d8,
               at(px + f.nx * (REVEAL / 2 + 0.05), y - PANE_H / 2 - 0.095,
                  pz + f.nz * (REVEAL / 2 + 0.05), 0, f.ry, 0));
             // A window bright enough to see from thirty metres is spilling
@@ -3013,7 +3047,12 @@ export function populate(world, layout, built, options = {}) {
       mesh.receiveShadow = true;
       group.add(mesh);
     }
-    if (frames.length) group.add(new THREE.Mesh(mergeGeometries(frames, false), propMaterial));
+    for (const [name, list] of dressings) {
+      const mesh = new THREE.Mesh(projectUv(mergeGeometries(list, false), materials[name]), materials[name]);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
   }
 
   // --- water surfaces -----------------------------------------------------
