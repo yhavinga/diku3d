@@ -144,6 +144,7 @@ const CSS = `
 #g-gates li { list-style: none; font-size: 13px; line-height: 1.45; color: var(--dim);
   display: flex; justify-content: space-between; gap: 10px; }
 #g-gates ul { margin: 0; padding: 0; }
+#g-gates li[hidden] { display: none; }
 #g-gates li em { font-style: normal; font-family: var(--mono); font-size: 10px;
   letter-spacing: 0.08em; opacity: 0.75; white-space: nowrap; }
 #g-gates li.open { color: var(--gold); text-decoration: line-through; text-decoration-thickness: 1px; }
@@ -314,7 +315,7 @@ const el = (tag, className, html) => {
   return node;
 };
 
-export function createGameUi(game) {
+export function createGameUi(game, { built = null } = {}) {
   const style = el('style');
   style.textContent = CSS;
   document.head.appendChild(style);
@@ -532,6 +533,44 @@ export function createGameUi(game) {
     return y;
   }
 
+  /**
+   * Out from under the HUD. A blow's number is put beside the body or over
+   * the health bar and stepped up clear of the others, and both of those
+   * walked it onto the minimap: a MISS off a guard's shoulder at the right
+   * of the frame, a -31 climbing out of the vitals. The box it will sweep
+   * -- its rise and drift included -- is moved the shortest way off every
+   * panel that is showing, and kept on the screen.
+   */
+  const PANELS = ['#room-block', '#desc-block', '#minimap-block', '#g-vitals', '#g-log', '#g-spells', '#g-gates', '#g-skills'];
+  function offPanels(node, x, y, side, rise, drift) {
+    const w = node.offsetWidth; const h = node.offsetHeight;
+    const W = window.innerWidth; const H = window.innerHeight;
+    const rects = [];
+    for (const sel of PANELS) {
+      const e = document.querySelector(sel);
+      if (!e) continue;
+      const cs = getComputedStyle(e);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.2) continue;
+      const r = e.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) rects.push(r);
+    }
+    for (let pass = 0; pass < 4; pass++) {
+      const left = (side > 0 ? x : side < 0 ? x - w : x - w / 2) - Math.abs(drift) - 6;
+      const right = left + w + Math.abs(drift) * 2 + 12;
+      const top = y - h / 2 - rise - 6; const bottom = y + h / 2 + 6;
+      const r = rects.find((o) => o.left < right && o.right > left && o.top < bottom && o.bottom > top);
+      if (!r) break;
+      const moves = [
+        { dx: r.left - right, dy: 0 }, { dx: r.right - left, dy: 0 },
+        { dx: 0, dy: r.top - bottom }, { dx: 0, dy: r.bottom - top },
+      ].filter((m) => left + m.dx >= 0 && right + m.dx <= W && top + m.dy >= 0 && bottom + m.dy <= H);
+      if (!moves.length) break;
+      moves.sort((a, b) => Math.abs(a.dx) + Math.abs(a.dy) - Math.abs(b.dx) - Math.abs(b.dy));
+      x += moves[0].dx; y += moves[0].dy;
+    }
+    return { x, y };
+  }
+
   /** Experience, gold: a note that rises over the crosshair and goes. */
   function float(text, colour) {
     const node = el('span', 'note', text);
@@ -627,10 +666,12 @@ export function createGameUi(game) {
     node.style.top = `${y.toFixed(1)}px`;
     floats.appendChild(node);
     y = clearOf(node, x, y, side);
-    node.style.top = `${y.toFixed(1)}px`;
     const ax = side > 0 ? '0%' : '-100%';
     const drift = side * (10 + Math.random() * 8);
     const rise = onYou ? 34 : 58;
+    ({ x, y } = offPanels(node, x, y, side, rise, drift));
+    node.style.left = `${x.toFixed(1)}px`;
+    node.style.top = `${y.toFixed(1)}px`;
     const frames = crit
       ? [
         { transform: `translate(${ax}, -50%) scale(1.75)`, opacity: 0 },
@@ -1095,7 +1136,7 @@ export function createGameUi(game) {
           drawGates();
           break;
         case 'gate-seen':
-          say(event.text, 'faint', true);
+          heldNotes.set(event.gate.warden, event.text);
           drawGates();
           break;
         case 'ending':
@@ -1167,8 +1208,8 @@ export function createGameUi(game) {
       if (!byWarden.has(gate.warden)) byWarden.set(gate.warden, []);
       byWarden.get(gate.warden).push(gate);
     }
-    gatesPanel.classList.toggle('on', byWarden.size > 0);
     gatesList.textContent = '';
+    gateRows.length = 0;
     let count = 0;
     for (const list of byWarden.values()) {
       const open = list.every((gate) => gate.open);
@@ -1180,9 +1221,76 @@ export function createGameUi(game) {
         el('em', null, open ? 'open' : `${list[0].wardenName} · ${list[0].wardenLevel}`),
       );
       gatesList.appendChild(li);
+      gateRows.push({ li, list, room, shownUntil: -1 });
     }
     gatesTitle.textContent = count > 1 ? 'the ways out' : 'the way out';
-    placeLog();
+    showGates(true);
+  }
+
+  /**
+   * The board is for the gate you are at, not the room you are in. It used
+   * to go up the moment you entered a gate's room, so a new player's first
+   * frame in the temple said "Up, beyond the map -- the executioner · 50"
+   * about a stair behind them. A row now shows while you face its arch (from
+   * build.js's sealed-gate marker) within 16 m or stand by it, or -- in the
+   * warden's own room -- while you look at the warden; and for a second and
+   * a half after, so a glance away does not flicker it. What the log says
+   * about the gate waits for the same moment.
+   */
+  const gateRows = [];
+  const gateSpots = new Map();
+  const heldNotes = new Map();
+  function gateSpot(gate) {
+    if (gateSpots.has(gate)) return gateSpots.get(gate);
+    let best = null;
+    const info = built && built.rooms.get(gate.vnum);
+    if (info) {
+      let bd = 16;
+      for (const d of built.decor) {
+        if (d.kind !== 'gateSign' || d.text !== gate.way) continue;
+        const dd = Math.hypot(d.x - info.center.x, d.z - info.center.z);
+        if (dd < bd) { bd = dd; best = d; }
+      }
+    }
+    gateSpots.set(gate, best);
+    return best;
+  }
+  function gateInView(row) {
+    const eye = game.eye; const face = game.facing;
+    if (!eye || !face) return true;
+    const gate = row.list[0];
+    if (row.room !== gate.vnum) {
+      const f = game.focused();
+      if (f && f.slot && f.slot.record === gate.warden) return true;
+      const slot = game.mobs && game.mobs.find((m) => m.record === gate.warden && !m.dead);
+      return !!(slot && slot.pos && Math.hypot(slot.pos.x - eye.x, slot.pos.z - eye.z) < 4);
+    }
+    return row.list.some((g) => {
+      const spot = gateSpot(g);
+      // No arch to point at (a sewer grating): the room is the gate.
+      if (!spot) return true;
+      const dx = spot.x - eye.x; const dz = spot.z - eye.z;
+      const d = Math.hypot(dx, dz);
+      return d < 3.5 || (d < 16 && (dx * face.x + dz * face.z) / d > 0.82);
+    });
+  }
+  function showGates(force = false) {
+    const now = performance.now();
+    let any = false;
+    for (const row of gateRows) {
+      if (gateInView(row)) row.shownUntil = now + 1500;
+      const on = row.shownUntil > now;
+      if (on !== !row.li.hidden || force) row.li.hidden = !on;
+      if (on) {
+        any = true;
+        const note = heldNotes.get(row.list[0].warden);
+        if (note) { heldNotes.delete(row.list[0].warden); say(note, 'faint', true); }
+      }
+    }
+    if (any !== gatesPanel.classList.contains('on') || force) {
+      gatesPanel.classList.toggle('on', any);
+      placeLog();
+    }
   }
 
   // -- the spell bar ---------------------------------------------------------
@@ -1468,6 +1576,7 @@ export function createGameUi(game) {
     xpFill.style.width = width(span - Math.min(span, s.expToLevel), span);
     if (s.level !== lastLevel) { lastLevel = s.level; drawGates(); }
     if (s.roomVnum !== gatesRoom) drawGates();
+    else if (gateRows.length) showGates();
     if (s.roomVnum !== logRoom) {
       // One step through an exit, either way round, is a walk; anything
       // else is being carried there.
@@ -1494,7 +1603,11 @@ export function createGameUi(game) {
     const head = foeT ? plateAt(foeT.slot, 0) : null;
     foe.classList.toggle('on', !!head);
     if (head) {
-      foe.style.transform = `translate(${head.x.toFixed(1)}px, ${head.y.toFixed(1)}px) translate(-50%, -100%)`;
+      // A foe beside you puts its head at the frame's edge, and the plate
+      // went up over the minimap with it: held off the panels the same way.
+      const ph = foe.offsetHeight;
+      const at = offPanels(foe, head.x, head.y - ph / 2, 0, 0, 0);
+      foe.style.transform = `translate(${at.x.toFixed(1)}px, ${(at.y + ph / 2).toFixed(1)}px) translate(-50%, -100%)`;
       if (foeName.textContent !== t.name) foeName.textContent = t.name;
       foeNow.style.width = `${percent}%`;
       foeLag.style.width = `${percent}%`;
@@ -1518,7 +1631,9 @@ export function createGameUi(game) {
     const fhead = f && (!foeT || f.slot !== foeT.slot) ? plateAt(f.slot, 0) : null;
     focusPlate.classList.toggle('on', !!fhead);
     if (fhead) {
-      focusPlate.style.transform = `translate(${fhead.x.toFixed(1)}px, ${fhead.y.toFixed(1)}px) translate(-50%, -100%)`;
+      const ph = focusPlate.offsetHeight;
+      const at = offPanels(focusPlate, fhead.x, fhead.y - ph / 2, 0, 0, 0);
+      focusPlate.style.transform = `translate(${at.x.toFixed(1)}px, ${(at.y + ph / 2).toFixed(1)}px) translate(-50%, -100%)`;
       if (focusName.textContent !== f.name) focusName.textContent = f.name;
       const sub = f.warden ? `level ${f.level} · holds ${f.holds}`
         : `level ${f.level}${f.shop ? ' · shopkeeper' : ''}${f.aggressive ? ' · aggressive' : ''}`;

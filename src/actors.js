@@ -136,51 +136,6 @@ export function makeLabel(text, height = 0.5, options) {
 }
 
 /**
- * The board over a sealed gate: the way it points, and that the map ends
- * there, painted on planks. Lit like everything else (it is wood, not a
- * label), and seen only from the side it faces.
- */
-function gateBoard(dirName) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512; canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  const grad = ctx.createLinearGradient(0, 0, 0, 128);
-  grad.addColorStop(0, '#6a4a2e'); grad.addColorStop(1, '#4e3520');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 512, 128);
-  // Three planks, and the grain along them.
-  ctx.strokeStyle = 'rgba(20,12,6,0.55)';
-  ctx.lineWidth = 3;
-  for (const y of [43, 86]) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(512, y); ctx.stroke(); }
-  ctx.lineWidth = 1;
-  for (let i = 0; i < 40; i++) {
-    const y = (i * 37) % 128; ctx.strokeStyle = `rgba(30,18,8,${0.08 + (i % 5) * 0.03})`;
-    ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.bezierCurveTo(170, y + 3, 340, y - 3, 512, y + 1.5); ctx.stroke();
-  }
-  ctx.strokeStyle = '#24170c'; ctx.lineWidth = 10; ctx.strokeRect(5, 5, 502, 118);
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#ead9b2';
-  ctx.font = '600 36px "Iowan Old Style", "Palatino Linotype", Georgia, serif';
-  ctx.fillText(`The way ${dirName} lies beyond the map`, 256, 66, 470);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
-  // One material, so one draw: the edges and the back take their colour
-  // from the painted frame in the canvas's corner.
-  const geometry = new THREE.BoxGeometry(2.2, 0.55, 0.06);
-  const uv = geometry.attributes.uv;
-  const front = geometry.groups[4];
-  for (let i = 0; i < uv.count; i++) {
-    if (i >= front.start / 1.5 && i < (front.start + front.count) / 1.5) continue;
-    uv.setXY(i, 0.004, 0.98);
-  }
-  geometry.clearGroups();
-  const board = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: texture, roughness: 0.85 }));
-  board.castShadow = false;
-  return board;
-}
-
-/**
  * The shop's name, painted on its sign: "The Grunting Boar", "The Weapon
  * Shop" -- what a real one says. It replaced a two-metre serif word floating
  * over the keeper's head ("Bartender"), which made his bounds 3.2 m tall and
@@ -642,6 +597,7 @@ function carriedClip(asset, name, carry) {
   const set = clipsOf(asset);
   const clip = set.base.get(name);
   if (!clip || (!carry.right && !carry.left)) return clip;
+  if (name === 'fight') return guardClip(set, clip, carry);
   if (!['idle', 'idle2', 'walk', 'run'].includes(name)) return clip;
   const key = `${name}|${carry.right}|${carry.left}`;
   if (set.carried.has(key)) return set.carried.get(key);
@@ -660,6 +616,70 @@ function carriedClip(asset, name, carry) {
     ? new THREE.QuaternionKeyframeTrack(t.name, [0], swap.get(t.name)) : t));
   set.carried.set(key, out);
   return out;
+}
+
+/**
+ * The fighting guard with the shield opened out to the side. The clip holds
+ * it square across the chest, and from the player's eye two metres off that
+ * is a disc covering the whole torso and the sword arm -- judged as "the
+ * shield fills the frame, you can't see his body or his swings". Each key of
+ * the left arm is turned most of the way to the carry pose, so the guard
+ * still bobs; the `block` clip, which is when a shield should be in the way,
+ * is left alone.
+ */
+const GUARD_OPEN = 0.7;
+function guardClip(set, clip, carry) {
+  const src = carry.left && set.base.get(carry.left);
+  if (!src) return clip;
+  const key = `fight|${carry.left}`;
+  if (set.carried.has(key)) return set.carried.get(key);
+  const qa = new THREE.Quaternion(); const qb = new THREE.Quaternion();
+  const out = clip.clone();
+  out.name = `fight+${carry.left}`;
+  out.tracks = out.tracks.map((t) => {
+    const bone = t.name.replace(/\.quaternion$/, '');
+    if (bone === t.name || !LEFT_ARM.includes(bone)) return t;
+    const to = src.tracks.find((s) => s.name === t.name);
+    if (!to) return t;
+    qb.fromArray(to.values, 0);
+    const values = t.values.slice();
+    for (let i = 0; i < values.length; i += 4) qa.fromArray(values, i).slerp(qb, GUARD_OPEN).toArray(values, i);
+    return new THREE.QuaternionKeyframeTrack(t.name, t.times.slice(), values);
+  });
+  set.carried.set(key, out);
+  return out;
+}
+
+/**
+ * Bodies that are not a man's at another size. A halfling was the adult rig
+ * scaled to 0.6 -- a small man, with a man's long legs and a man's small
+ * head, which is how the judge read them. Clips carry no scale tracks
+ * (`clipsOf`), so bone scales set here hold through every clip. Uniform
+ * scales only: a non-uniform one on a parent bone shears its children as
+ * they turn. The legs are the thighs (the shin and foot follow), the arms the
+ * upper arms, and the broader trunk is the spine a little up, which also
+ * carries the arms and head with it. The body is lowered by what the legs
+ * lost, measured on the bind pose, so the feet stay on the ground.
+ * Returns the legs' scale, which the stride is timed against.
+ */
+const BUILDS = {
+  halfling: { thigh: 0.8, upperarm: 0.9, spine: 1.08 },
+};
+function shapeBuild(body, build) {
+  const b = BUILDS[build];
+  if (!b) return 1;
+  const foot = body.getObjectByName('footL');
+  const low = () => { body.updateMatrixWorld(true); return foot.getWorldPosition(new THREE.Vector3()).y; };
+  const before = low();
+  for (const side of ['L', 'R']) {
+    body.getObjectByName(`thigh${side}`).scale.setScalar(b.thigh);
+    body.getObjectByName(`upperarm${side}`).scale.setScalar(b.upperarm);
+  }
+  body.getObjectByName('spine').scale.setScalar(b.spine);
+  const drop = low() - before;
+  body.position.y -= drop;
+  body.userData.drop = drop;
+  return b.thigh;
 }
 
 /**
@@ -852,6 +872,7 @@ function buildPerson(library, who, proto, instance) {
     const head = body.getObjectByName('head');
     if (head) head.scale.setScalar(who.headScale);
   }
+  const legK = shapeBuild(body, who.build);
   const group = new THREE.Group();
   group.add(body);
   // The figure contract has always handed back what is held, and items.js
@@ -928,8 +949,9 @@ function buildPerson(library, who, proto, instance) {
   lookWithEyes(body, mixer, group, mesh, dressed.geometry, far.geometry);
   const facts = CLIP_FACTS[who.file];
   return {
-    group, headGroup: null, height: heightOf(asset, who.file, who.arch) * scale, scale, mixer, actions, clips,
-    stride: { walk: facts.walk * scale, run: facts.run * scale },
+    group, headGroup: null, height: heightOf(asset, who.file, who.arch) * scale - (body.userData.drop || 0), scale, mixer, actions, clips,
+    // A leg scaled by legK carries the foot legK as far each stride.
+    stride: { walk: facts.walk * scale * legK, run: facts.run * scale * legK },
     hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
     indoor: mesh.material.dikuIndoor,
   };
@@ -2362,6 +2384,32 @@ function smokeTexture() {
   return texture;
 }
 
+/**
+ * One puff of low cloud: soft blobs heaped inside a circle, so it reads as
+ * billow rather than as the single radial smear the chimney smoke uses.
+ * Seeded, so every boot draws the same cloud.
+ */
+function mistTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let i = 0; i < 46; i++) {
+    const a = rnd() * Math.PI * 2; const r = Math.sqrt(rnd()) * 34;
+    const x = 64 + Math.cos(a) * r; const y = 64 + Math.sin(a) * r * 0.8;
+    const size = 14 + rnd() * 20;
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, size);
+    grad.addColorStop(0, 'rgba(255,255,255,0.22)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 128, 128);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 // ------------------------------------------------------------------- main ----
 
 /**
@@ -2390,6 +2438,7 @@ export function populate(world, layout, built, options = {}) {
   const windows = [];
   const flames = [];
   const smokes = [];
+  const mists = [];
   const waters = [];
   const clutter = [];
   const banners = [];
@@ -2585,6 +2634,7 @@ export function populate(world, layout, built, options = {}) {
       case 'tree': trees.push(item); break;
       case 'windows': windows.push(item); break;
       case 'smoke': smokes.push(item); break;
+      case 'chainMist': mists.push(item); break;
       case 'water': waters.push(item); break;
       case 'clutter': clutter.push(item); break;
       case 'banner': banners.push(item); break;
@@ -2595,16 +2645,9 @@ export function populate(world, layout, built, options = {}) {
       // with the furniture, so it is switched off past FURNITURE_REACH
       // instead of drawing behind the walls from the street.
       case 'prop': if (furnishing) furnishing.add(item.name, item, 'furniture'); break;
-      case 'gateSign': {
-        // A painted board over the sealed arch, not words hanging in the air:
-        // it was a two-metre floating "up · #3700 — outside the loaded world"
-        // across the temple's nave.
-        const sign = gateBoard(item.text);
-        sign.position.set(item.x + item.dx * 0.42, item.y + 0.78, item.z + item.dz * 0.42);
-        sign.rotation.y = Math.atan2(-item.dx, -item.dz);
-        group.add(sign);
-        break;
-      }
+      // A sealed gate gets no placard. "The way up lies beyond the map" is
+      // the interface talking, and painted on planks it read as a prop the
+      // mud never had; the ways-out panel says it, when you look that way.
       default: break;
     }
   }
@@ -2620,6 +2663,28 @@ export function populate(world, layout, built, options = {}) {
       x, y, z, rotY, ...(scale && { scaleX: scale[0], scaleY: scale[1], scaleZ: scale[2] }),
     }, 'furniture');
     const WALL_VEC = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    /**
+     * How far along the axis (wx, wz) from (x, z) the nearest standing face
+     * is -- a wall at least 2.6 m tall, wide enough to take a ladder -- or
+     * null for none within `reach`, or for a point already inside one.
+     */
+    const faceAhead = (x, y, z, wx, wz, reach) => {
+      let best = null;
+      for (const c of built.colliders) {
+        if (c.y0 > y + 0.4 || c.y1 < y + 2.6) continue;
+        if (x > c.x0 && x < c.x1 && z > c.z0 && z < c.z1) return null;
+        let d;
+        if (wx) {
+          if (z < c.z0 + 0.8 || z > c.z1 - 0.8) continue;
+          d = ((wx > 0 ? c.x0 : c.x1) - x) * wx;
+        } else {
+          if (x < c.x0 + 0.8 || x > c.x1 - 0.8) continue;
+          d = ((wz > 0 ? c.z0 : c.z1) - z) * wz;
+        }
+        if (d >= 0 && d <= reach && (best === null || d < best)) best = d;
+      }
+      return best;
+    };
     for (const item of clutter) {
       const kinds = Math.floor(item.seed * 3);
       const half = item.half || 6.5;
@@ -2647,6 +2712,20 @@ export function populate(world, layout, built, options = {}) {
           'stacked_crates', 'barrel_stack', 'firewood_pile', 'water_butt', 'bucket',
           'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',
         ], strHash(`${item.z}`, i));
+        if (prop === 'ladder' && instances) {
+          // A ladder leans on something or it is not a ladder. At a random
+          // turn in the open it stood on its own feet in the Market Square,
+          // leaning on the air. props.py builds it with its top on the wall
+          // plane z = 0 and its feet 0.93 m out, so it goes against the
+          // nearest tall face in the direction of the wall it was meant for,
+          // turned to it -- or, with nothing within reach, not at all.
+          const wall = faceAhead(px, item.y, pz, wx, wz, 2.6);
+          const tally = built.stats.ladders || (built.stats.ladders = { leaned: [], dropped: [] });
+          if (wall === null) { tally.dropped.push([Math.round(px), Math.round(pz)]); continue; }
+          tally.leaned.push([Math.round(px + wx * wall), Math.round(pz + wz * wall)]);
+          instances.add('ladder', { x: px + wx * (wall - 0.03), y: item.y, z: pz + wz * (wall - 0.03), rotY: Math.atan2(-wx, -wz) }, 'props');
+          continue;
+        }
         if (prop && instances) {
           // Indoors a wall bench is a high-backed settle, sat on exactly the
           // same way: furniture.py builds it to props.py's bench's seat.
@@ -2877,7 +2956,20 @@ export function populate(world, layout, built, options = {}) {
         // Behind it, facing the room: the keeper's place (motion.js puts the
         // room's shopkeeper there).
         {
-          const [kx, kz] = worldOf(shift, WALL_Z + 0.52);
+          // Not under a wall torch: the sconce is centred on the back wall
+          // as often as the counter is, and from the shop floor the flame
+          // grew out of the weaponsmith's head. Along the counter a step,
+          // away from it.
+          let along = shift;
+          const [tx, tz] = worldOf(shift, WALL_Z + 0.52);
+          const torch = flames.find((f) => !f.candle && !f.lamp && f.y > item.y + 1.2 && f.y < item.y + 3.4
+            && Math.hypot(f.x - tx, f.z - tz) < 0.9);
+          if (torch) {
+            const [px1, pz1] = worldOf(shift + 1, WALL_Z + 0.52);
+            const side = (px1 - tx) * (torch.x - tx) + (pz1 - tz) * (torch.z - tz) > 0 ? -1 : 1;
+            along = shift + side * 1.15;
+          }
+          const [kx, kz] = worldOf(along, WALL_Z + 0.52);
           spots.push({ kind: 'keeper', x: kx, y: item.y, z: kz, yaw: ry + Math.PI });
         }
         // Between the stools (at -1.575, -0.525, 0.525, 1.575), not on them:
@@ -3394,6 +3486,50 @@ export function populate(world, layout, built, options = {}) {
     smokeSystem = { points, geo, base: positions.slice(), seeds };
   }
 
+  // --- the cloud the giant chain goes up into ----------------------------
+  // #3120: "The chain disappears in the clouds." Drawn to its full height it
+  // was 130 m of iron, a hairline hanging from the top of the frame down the
+  // Concourse. It stops at 36 m now, inside a heap of low cloud that hides
+  // where it goes. Lit, not glowing: at night it is barely there, as a cloud
+  // is. One instanced draw of camera-facing puffs, turned each frame.
+  let mistSystem = null;
+  if (mists.length) {
+    const PUFFS = 20;
+    // Coloured each frame from the fog, which is the colour of the haze at
+    // the horizon at this hour: lit by the sun, a cloud seen against the
+    // light at dusk came out as a black blot on the sky.
+    const material = new THREE.MeshBasicMaterial({
+      map: mistTexture(), transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      fog: false, toneMapped: false,
+    });
+    const mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), material, mists.length * PUFFS);
+    const puffs = [];
+    mists.forEach((m, k) => {
+      for (let i = 0; i < PUFFS; i++) {
+        const a = strHash(`${m.x},${m.z}`, i) * Math.PI * 2;
+        // The first few sit on the chain's end and hide it; the rest spread
+        // it into a bank, wider than it is deep.
+        // The core is stacked up the last of the chain to past its end, so
+        // no line of sight -- from the Concourse or from right under it --
+        // finds the end outside the cloud.
+        const core = 7;
+        const r = i < core ? 0.5 + (i % 2) * 0.8 : 2 + strHash(`${m.z}`, i + 40) * 10;
+        const size = i < core ? 7 + (i % 3) : 8 + strHash(`${m.x}`, i + 80) * 7;
+        const span = (m.top ?? m.y + 6) + 3 - m.y;
+        puffs.push({
+          x: m.x + Math.cos(a) * r, y: m.y + (i < core ? (i / (core - 1)) * span - 1 : -2 + strHash(`${m.x}${m.z}`, i + 9) * 7), z: m.z + Math.sin(a) * r,
+          w: size * 2.1, h: size, spin: strHash(`${m.z}${m.x}`, i) * Math.PI * 2, index: k * PUFFS + i,
+        });
+      }
+    });
+    mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.layers.set(OVERLAY_LAYER); // out of the AO prepass, like the smoke
+    group.add(mesh);
+    mistSystem = { mesh, puffs, white: new THREE.Color(0.93, 0.94, 0.96), q: new THREE.Quaternion(), roll: new THREE.Quaternion(), m: new THREE.Matrix4(), p: new THREE.Vector3(), s: new THREE.Vector3(), z: new THREE.Vector3(0, 0, 1) };
+  }
+
   // --- doors --------------------------------------------------------------
 
   // A 2.7 m opening is a gateway, not a house door, and one leaf across the
@@ -3825,6 +3961,34 @@ export function populate(world, layout, built, options = {}) {
 
   function update(dt, time, camera) {
     if (flameSystem) flameSystem.material.uniforms.time.value = time;
+    if (mistSystem) {
+      const ms = mistSystem;
+      let root = ms.mesh; while (root.parent) root = root.parent;
+      if (root.fog) {
+        // The fog colour is a display value and the sky behind is HDR, so
+        // taken as it is the cloud is a grey smudge at noon: lifted, and
+        // whitened in proportion to how bright the hour is.
+        const c = ms.mesh.material.color.copy(root.fog.color);
+        const lum = 0.3 * c.r + 0.59 * c.g + 0.11 * c.b;
+        c.multiplyScalar(1.35).addScalar(lum * 0.45);
+        c.r = Math.min(1, c.r); c.g = Math.min(1, c.g); c.b = Math.min(1, c.b);
+        // With the sun well up the haze colour is a warm grey and the cloud
+        // should be white: toward it as the sun climbs past ten degrees.
+        const high = THREE.MathUtils.smoothstep(sun.elevation ?? 0, 6, 26) * (0.55 + 0.45 * overhead.sun);
+        // The frame is tone mapped after everything is drawn and the noon
+        // sky is ~3 in linear units, so a white of 1 comes out as grey
+        // against it: by day the cloud is given the sky's own scale.
+        c.lerp(ms.white, high).multiplyScalar(1 + 1.9 * high);
+      }
+      for (const p of ms.puffs) {
+        ms.roll.setFromAxisAngle(ms.z, Math.sin(p.spin) * 0.25 + time * 0.004);
+        ms.q.copy(camera.quaternion).multiply(ms.roll);
+        ms.p.set(p.x + Math.sin(time * 0.05 + p.spin) * 0.8, p.y, p.z);
+        ms.m.compose(ms.p, ms.q, ms.s.set(p.w, p.h, 1));
+        ms.mesh.setMatrixAt(p.index, ms.m);
+      }
+      ms.mesh.instanceMatrix.needsUpdate = true;
+    }
     if (furnished.length) cullFurniture(camera);
     for (const material of waterMaterials) material.uniforms.time.value = time;
     for (const fountain of fountains) fountain.update(time);
