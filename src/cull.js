@@ -938,6 +938,15 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
    */
   function work(budget = 1.5) {
     const start = performance.now();
+    // The probe's draws are not the frame's: keep them off the stats overlay.
+    const info = renderer.info.render;
+    const counted = [info.calls, info.triangles, info.points, info.lines];
+    try { measureFor(start, budget); } finally {
+      [info.calls, info.triangles, info.points, info.lines] = counted;
+    }
+  }
+
+  function measureFor(start, budget) {
     while (performance.now() - start < budget) {
       if (step()) continue;
       // The neighbours next, so a cell is ready by the time the eye walks in.
