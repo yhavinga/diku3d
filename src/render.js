@@ -510,8 +510,7 @@ class ScaledGTAOPass extends GTAOPass {
 
   /** The override's own normal material, cut by the foliage's alpha. */
   foliageNormal(source) {
-    // Grass bends and thins in its vertex shader, and brings a prepass
-    // material that does the same (grass.js).
+    // Grass brings its own prepass material (grass.js), which keeps it out.
     if (source.userData.aoMaterial) return source.userData.aoMaterial;
     let material = this.foliageNormals.get(source);
     if (material) return material;

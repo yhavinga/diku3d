@@ -227,7 +227,7 @@ const GRASS_UV = /* glsl */`
 `;
 
 /** Wire the grass vertex stage into any material's shader. */
-function injectGrass(shader, { uvTargets = [], extraHead = '', extraUv = '' } = {}) {
+function injectGrass(shader, { uvTargets = [] } = {}) {
   Object.assign(shader.uniforms, uniforms);
   const remap = uvTargets.map((name) => {
     const varying = `v${name[0].toUpperCase()}${name.slice(1)}Uv`;
@@ -235,8 +235,8 @@ function injectGrass(shader, { uvTargets = [], extraHead = '', extraUv = '' } = 
   }).join('\n');
   const before = shader.vertexShader;
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', `#include <common>\n${GRASS_VERTEX_HEAD}${extraHead}`)
-    .replace('#include <uv_vertex>', `#include <uv_vertex>\n${GRASS_UV}${remap}\n${extraUv}`)
+    .replace('#include <common>', `#include <common>\n${GRASS_VERTEX_HEAD}`)
+    .replace('#include <uv_vertex>', `#include <uv_vertex>\n${GRASS_UV}${remap}`)
     .replace('#include <begin_vertex>', `#include <begin_vertex>\n${GRASS_VERTEX_BODY}`);
   // Fail loudly if three renames a chunk: silently unbent grass is a bug
   // nobody would find.
@@ -263,29 +263,15 @@ function dressLit(material) {
 }
 
 /**
- * What the AO prepass draws for grass: the cut-out, not the card, and bent
- * and thinned exactly as the lit pass is -- see `foliageNormal` in render.js,
- * which takes this in place of its generic one.
+ * What the AO prepass draws for grass: nothing. `foliageNormal` in render.js
+ * takes this in place of its generic cut-out. Drawn into the prepass, a
+ * field of cards occluded itself: under overcast, where the ambient is all
+ * the light there is, it took a meadow from 65 to 55 of luminance and added
+ * a quarter to its blotchiness -- measured by swapping this material in the
+ * page. Left out, the pass sees the turf, which is flat, and a blade takes
+ * the occlusion of the ground it stands on, which is what it should.
  */
-function aoMaterial(lit) {
-  const material = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
-  material.blending = THREE.NoBlending;
-  material.allowOverride = false;
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.grassMap = { value: lit.map };
-    shader.uniforms.grassCut = { value: lit.alphaTest };
-    injectGrass(shader, {
-      extraHead: 'varying vec2 vGrassUv;\n',
-      extraUv: '\tvGrassUv = gAtlasUv;\n',
-    });
-    shader.fragmentShader = shader.fragmentShader
-      .replace('uniform float opacity;', 'uniform float opacity;\nuniform sampler2D grassMap;\nuniform float grassCut;\nvarying vec2 vGrassUv;')
-      .replace('#include <normal_fragment_begin>',
-        'if ( texture2D( grassMap, vGrassUv ).a < grassCut ) discard;\n\t#include <normal_fragment_begin>');
-  };
-  material.customProgramCacheKey = () => 'grass-normal';
-  return material;
-}
+const NOT_IN_PREPASS = new THREE.MeshBasicMaterial({ visible: false });
 
 /** The sun's shadow map: cut-out and bent the same way. */
 function depthMaterial(lit) {
@@ -536,7 +522,7 @@ export function buildGrass({ groups, instances, colliders, layout, rooms, materi
     block.size.push(spec.w * (0.85 + rng() * 0.4), spec.h * height, card, rng());
     // Drier and yellower in patches, and every clump a shade of its own.
     const dry = patchNoise(x / 9, z / 9, 51);
-    const value = 0.9 + 0.2 * rng();
+    const value = 0.94 + 0.12 * rng();
     block.tint.push(value * (0.96 + dry * 0.1), value, value * (1.02 - dry * 0.12), rng());
     block.y0 = Math.min(block.y0, y); block.y1 = Math.max(block.y1, y + spec.h * height);
     counts.sown++;
@@ -619,7 +605,7 @@ export function buildGrass({ groups, instances, colliders, layout, rooms, materi
 
   // --- draw ---------------------------------------------------------------------
   dressLit(lit);
-  lit.userData.aoMaterial = aoMaterial(lit);
+  lit.userData.aoMaterial = NOT_IN_PREPASS;
   const depth = depthMaterial(lit);
   const clump = clumpGeometry();
   const field = new GrassField();
