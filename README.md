@@ -60,7 +60,9 @@ worm, the dracolich and a Will-O-Wisp that carries its own light over the bog. T
 and walk the routed street to get there; fights are Merc's `fight.c`, played
 on the beat with the swing's contact frame landing on the blow. Nothing is
 named unless you look at it; a foe you cannot see gets a marker telling you
-which way to turn. People sit at tables, talk in pairs, stand at the bar and
+which way to turn. Shops and inns are furnished by the keeper's trade and the room's own
+description — a forge and anvil for the smith, racks for the weaponsmith, a
+bar with its back shelves for the tavern. People sit at tables, talk in pairs, stand at the bar and
 climb the stairs rather than vanishing at the foot of them. The casters
 cast: `spec_cast_mage`, `_cleric`, `_undead`, `_adept` and the dragons' breath
 run on the mobile pulse, with 57 spells out of `magic.c` — each family drawn

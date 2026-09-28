@@ -52,6 +52,25 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Furniture by trade (tools/blender/furniture.py)
+
+- **`bmesh … uv.verify()` names a new UV layer `Float2`, and `join()` keeps
+  only layers matching the active part's names.** Every timber, prism and
+  loft joined onto a box exported with its UVs at (0,0) — flat paint.
+  `unwrap()` forces `UVMap`; check any new Blender module for UVs stuck at 0.
+- **Frustum culling is not occlusion culling.** Indoor batches drew behind
+  walls from the street (+116 calls in the Market Square) until pieces past
+  32 m were switched off; instanced repeats of 16+ are never culled at all,
+  one bounding sphere covering the whole town.
+- **Stone-kit rooms' inner face is at 5.10 m, with buttresses 0.62 m proud
+  at ±2.32–3.38 m along every wall** — the Boar's old hearth had one inside
+  its fire. Raycast the walls before placing anything against them. The
+  fitting frame's "along" axis runs against the world axis on the south and
+  west walls.
+- The trade comes from the shopkeeper first, the room name second; only
+  taverns get tables, and the smithy gets a forge and anvil, not bottles.
+  All 197 bench seats raycast at 45.5 cm, so life's seat fit is unchanged.
+
 ### Atmosphere: shade, conifers, moon, windows, horizons (wave4-atmos)
 
 - **Outdoor shade was blue because nothing took the sky's colour out of it
