@@ -432,10 +432,8 @@ def conifer(name, sp):
         base = top + lean * (H * 0.03 * (i % 2))
         cards.card(base, d * 0.7 + lean * 0.7, (-math.sin(a), math.cos(a), 0), H * 0.07, spray_w * 0.6, 0.3,
                    d * 0.6 + mathutils.Vector((0, 0, 0.8)))
-    tip = top + lean * (H * 0.08)
     cards.card(top + lean * (H * 0.02), lean, (1, 0, 0), H * 0.07, spray_w * 0.45, 0.2, (0.3, 0.3, 1.0))
     cards.card(top + lean * (H * 0.02), lean, (0, 1, 0), H * 0.07, spray_w * 0.45, 0.2, (0.3, -0.3, 1.0))
-    del tip
     return deliver_conifer(parts, cards.mesh(), name)
 
 
