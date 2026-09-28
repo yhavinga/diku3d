@@ -595,7 +595,11 @@ def style_fringe(S, P, name="hair_fringe", seed=23):
     """Bald on top, a fringe round the back and sides: a monk's, or an old
     man's."""
     def grow(p, soft=0.004):
-        top = np.clip((0.050 - p[:, 2]) / max(soft, 0.008), 0, 1)
+        # The fringe's top edge rises from the temples to the back of the
+        # skull, as a balding man's does. Level all round at 5 cm, it was a
+        # dark band at eye height that a judge took for a blindfold.
+        back = np.clip((np.abs(np.degrees(theta_of(p))) - 90) / 70, 0, 1)
+        top = np.clip((0.050 + 0.030 * back - p[:, 2]) / max(soft, 0.008), 0, 1)
         sides = np.clip((np.abs(np.degrees(theta_of(p))) - 55) / 8, 0, 1)
         return scalp_mask(p, soft=soft) * top * sides
     fm_obj, fm = mass(S, name + "_mass", _thick(0.006, 0.006, 0.007), grow, target=300)
