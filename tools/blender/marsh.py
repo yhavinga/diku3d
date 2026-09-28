@@ -124,11 +124,9 @@ def build_dead_log():
     the middle of the log rests on the ground and both ends lift, which is what
     a log that has been lying there does.
 
-    The moss is the same move `moss_rock` makes, transposed a quarter turn. It
-    is a second solid buried *inside* the log except along the top, so its hem
-    is wherever it crosses back out through the bark rather than a line drawn on
-    purpose, and it tapers back inside at both ends so its own end caps never
-    surface. A cap of moss that finishes in mid-air is a green plate."""
+    The moss is the `mossbark` material's, grown along the top in the shader
+    with a soft edge; it used to be a lofted shell down the spine, and a shell
+    has an edge however it is buried."""
     lib.reset()
     rng = random.Random(70023)
     sides = 9
@@ -144,7 +142,7 @@ def build_dead_log():
              (L, 0.17, 0.00, -0.03)]
     # Unwrapped, so the bark runs along the log rather than across it in
     # facets (see `trees.hull`).
-    log = trees.hull(rings, sides, wob, jag, mat="bark", name="log", unwrap=True)
+    log = trees.hull(rings, sides, wob, jag, mat="mossbark", name="log", unwrap=True)
     # Ry(90) sends (x, y, z) to (z, y, -x): the log's length becomes X and each
     # ring's bow becomes its height. Then slide it back to centre on X.
     kit.place([log], (-L / 2, 0, 0), (0, math.pi / 2, 0))
@@ -214,39 +212,9 @@ def build_dead_log():
                                   0.18 + 0.08 * (i % 2), 0.09, 0.018, verts=4,
                                   mat="bark", name="spur"))
 
-    # The moss ridge. `loft` on the x axis puts the section's first offset in
-    # Z and the second in Y -- (t, ra, rb, z, y) -- which is worth writing down,
-    # because filling those two in the order they read gives a log with a green
-    # stripe up one side.
-    #
-    # How wide the ridge comes out is arithmetic, not taste, and it took two
-    # renders. A *round* shell can only trade the two things that matter off
-    # against each other: it surfaces wherever
-    #   R^2 + lift^2 + 2.lift.R.cos(t) > rad^2,
-    # so wide-and-low (rad + 22 mm, lift 75 mm) opened to |t| < 114 degrees and
-    # the log read as green with brown ends, while narrow-and-low closed to a
-    # 20 mm proud sliver that the hull's own +-13% wobble then swallowed --
-    # `axis_at` returns the mean radius, and the bark is 13% fatter than that
-    # every eighth of a turn.
-    #
-    # An *ellipse* separates them: `loft` takes the two semi-axes apart, so the
-    # shell can stand 70 mm proud of the crown (clear of the wobble by 35) and
-    # still be held to a third of a metre across, because its horizontal
-    # semi-axis is only 0.72 of the log's. Solved with lift 30 mm it opens to
-    # 51 degrees and closes almost exactly flush underneath, which is where the
-    # log meets the ground and nothing should be sticking out. Both end
-    # sections go narrower than the log all round so the caps stay buried -- a
-    # moss cap that finishes in mid-air is a green plate.
-    moss = []
-    for (t, tall, wide, lift) in ((0.38, -0.040, 0.45, 0.000),
-                                  (0.80, +0.040, 0.72, 0.030),
-                                  (1.45, +0.048, 0.76, 0.030),
-                                  (2.05, +0.040, 0.72, 0.026),
-                                  (2.60, +0.034, 0.66, 0.024),
-                                  (3.05, -0.040, 0.45, 0.000)):
-        cx, cy, cz, rad = axis_at(t)
-        moss.append((cx, rad + tall, rad * wide, cz + lift, cy))
-    objs.append(lib.loft(moss, sides=8, axis="x", name="moss", mat="grass"))
+    # No moss ridge: the log's own `mossbark` grows it along the top in the
+    # shader. The ridge was a lofted shell, and a shell has an edge -- the
+    # judge's flat green lid.
     return kit.deliver(objs, "dead_log")
 
 

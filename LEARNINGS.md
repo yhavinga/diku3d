@@ -6,6 +6,41 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-09-28 — wave 6: what the rooms say they are
+
+### Nature and terrain (wave6-nature)
+
+- **The height-to-normal bake is steep**: a height step of 0.04 already
+  tips a normal past 45°, so a recessed bed joint turns the top of every
+  course into an upward strip that catches and reflects the sky — the blue
+  lines in the burnt district. Confirm with `normalScale = 0`.
+- **A shader projection must include the instance matrix**; the existing
+  surface-position value leaves it out, which is fine for mottling and
+  wrong for projecting onto instanced rocks (`triplanar`).
+- **Moss or a cap built as a second mesh always shows an edge.** Grow it in
+  the shader from facing and noise (`moss` 0–1).
+- **Geometry that should shade smooth must compute normals while still
+  indexed and go in with `normals: true`**; the batcher unrolls the mesh.
+- Burned is cold char; only prose that says the floor is hot keeps glowing.
+
+### Set pieces from the prose (tools/blender/setpiece.py)
+
+- **Blender's front is three's +Z.** The glTF exporter maps Blender −Y to
+  three +Z, so kit.py's old comment ("front at −Y becomes three's −Z") was
+  wrong; `FACE_ROT[d]` turns Blender +Y toward d. `localBox()` in build.js
+  converts Blender-frame boxes to world colliders.
+- **Seen from a fortress's gate, east is the viewer's left** (Blender −X);
+  the "northeast" tower first went up on the west.
+- **A raised drawbridge must be shorter than its arch**, or it hides the
+  lowered portcullis the prose also asks for.
+- **The albedo lift takes a raw 0x2f to ~0x59**, so a "black" stone needs
+  block colours of 0x12–0x1f. Cellular ridge lines in a glossy material's
+  colour or relief tile into a crackle net; keep them in roughness only.
+- **The underground `caverock` renders as a dark slab in daylight**; outdoor
+  reuse of cave pieces swaps it for `crag`.
+- The Market Square statue is what its own description says it is: the
+  Midgaard Worm coiled round the Palace of Midgaard.
+
 ## 2026-09-27 — people, animals, and a town that walks
 
 Five agents in parallel, each in its own worktree with its own port and a

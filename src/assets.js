@@ -734,7 +734,7 @@ export const ASSET_NAMES = [
   'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',
   'tree_oak', 'tree_pine', 'bush', 'grass_tuft',
   'tree_fir', 'tree_cedar', 'tree_snag', 'fern', 'salal_bush', 'moss_rock',
-  'reed_clump', 'tussock', 'dead_log',
+  'reed_clump', 'tussock', 'dead_log', 'hedge_clump', 'hedge_row',
   'headstone', 'grave_slab', 'iron_fence',
   // the sewer: tools/blender/sewer.py
   'sewer_tunnel', 'sewer_arm', 'sewer_hub', 'sewer_hub_end', 'sewer_chamber', 'sewer_chamber_air', 'sewer_shaft',
@@ -763,6 +763,8 @@ export const ASSET_NAMES = [
   'beast_spider', 'beast_beetle', 'beast_scorpion', 'beast_drider', 'beast_bat', 'beast_mud',
   'beast_myconoid', 'beast_ratman', 'beast_imp', 'beast_naga', 'beast_sandworm', 'beast_basilisk',
   'beast_dustdigger', 'beast_camel', 'beast_dracolich',
+  // Landmarks the prose names out of doors: tools/blender/setpiece.py.
+  'gatehouse', 'fortress', 'monolith', 'statue_worm',
   // The rooms' furniture: tools/blender/furniture.py.
   ...FURNITURE_NAMES,
   // What the rooms' prose puts in them: tools/blender/clutter.py.

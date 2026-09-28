@@ -162,6 +162,29 @@ function cellular(x, y, period, seed, jitter = 0.45) {
   return [d1, d2 - d1, id];
 }
 
+/**
+ * `cellular`, but returning where (x, y) lies relative to its cell's feature
+ * point -- [dx, dy, id, edge] -- so each cell can carry a plane of its own:
+ * a facet, not a dimple.
+ */
+function facetCell(x, y, px, py, seed, jitter = 0.45) {
+  const ix = Math.floor(x); const iy = Math.floor(y);
+  let d1 = 1e9; let d2 = 1e9; let best = [0, 0, 0];
+  for (let oy = -1; oy <= 1; oy++) {
+    for (let ox = -1; ox <= 1; ox++) {
+      const cx = ix + ox; const cy = iy + oy;
+      const wx = ((cx % px) + px) % px; const wy = ((cy % py) + py) % py;
+      const h = hash2(wx, wy, 1 << 20, seed);
+      const h2 = hash2(wx, wy, 1 << 20, seed + 7717);
+      const fx = cx + 0.5 + (h - 0.5) * 2 * jitter;
+      const fy = cy + 0.5 + (h2 - 0.5) * 2 * jitter;
+      const d = Math.hypot(fx - x, fy - y);
+      if (d < d1) { d2 = d1; d1 = d; best = [x - fx, y - fy, h * 0.5 + h2 * 0.5]; } else if (d < d2) d2 = d;
+    }
+  }
+  return [best[0], best[1], best[2], d2 - d1];
+}
+
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
@@ -315,6 +338,71 @@ const RUBBLE = (() => {
   });
   return { T, rows, stones };
 })();
+
+/**
+ * Bedded rock broken by joints: beds of `bed` (min, span) of the tile's
+ * height, each cut by `joints` (min, span) cracks that do not line up from one
+ * bed to the next, and every block with its own tilt -- a fracture face is a
+ * plane at some angle to the wall, never a noise. Used by `caverock` and the
+ * earth cut of a burrow.
+ */
+function strataLayout(seed, bed, joints) {
+  const r = seeded(seed);
+  const edges = [0];
+  while (edges[edges.length - 1] < 1 - bed[0]) edges.push(edges[edges.length - 1] + bed[0] + r() * bed[1]);
+  const k = 1 / edges[edges.length - 1];
+  for (let i = 0; i < edges.length; i++) edges[i] *= k;
+  const beds = [];
+  for (let i = 0; i < edges.length - 1; i++) {
+    const n = joints[0] + Math.floor(r() * joints[1]);
+    const cuts = Array.from({ length: n }, () => r()).sort((a, b) => a - b);
+    beds.push({
+      v0: edges[i], v1: edges[i + 1], cuts,
+      slant: (r() - 0.5) * 2.4,
+      // How far this bed stands proud of the one under it: a harder bed
+      // weathers out as a ledge, a softer one is cut back.
+      proud: r(),
+      tilts: cuts.map(() => [(r() - 0.5) * 2, (r() - 0.5) * 2]),
+      tones: cuts.map(() => r()),
+    });
+  }
+  return beds;
+}
+
+/**
+ * Where (u, v) falls in a `strataLayout`: which bed and block, how far (in
+ * tile units) from the nearest bedding plane and the nearest joint, and the
+ * position inside the block. The bedding planes wander a little, and joints
+ * lean, so nothing is ruled.
+ */
+function strataAt(beds, u, v, seed) {
+  const vv = (((v + (fbm(u * 3, 0.37, 3, seed, 3) - 0.5) * 0.05
+    + (fbm(u * 16, v * 2, 16, seed + 5, 2) - 0.5) * 0.012) % 1) + 1) % 1;
+  let i = 0;
+  while (i < beds.length - 1 && vv >= beds[i].v1) i++;
+  const b = beds[i];
+  const fy = (vv - b.v0) / (b.v1 - b.v0);
+  // A joint zigzags: it follows the weakest grain, not a ruler.
+  const uu = (((u + (fy - 0.5) * (b.v1 - b.v0) * b.slant
+    + (fbm(u * 4, v * 24, 4, seed + 9, 3) - 0.5) * 0.03) % 1) + 1) % 1;
+  const n = b.cuts.length;
+  let j = 0;
+  while (j < n && uu >= b.cuts[j]) j++;
+  // Block j lies between cuts[j-1] and cuts[j], wrapping round the tile.
+  const left = j === 0 ? b.cuts[n - 1] - 1 : b.cuts[j - 1];
+  const right = j === n ? b.cuts[0] + 1 : b.cuts[j];
+  const k = j % n;
+  const fx = (uu - left) / (right - left);
+  return {
+    bed: b, block: k, fx, fy,
+    dBed: Math.min(vv - b.v0, b.v1 - vv),
+    dJoint: Math.min(uu - left, right - uu),
+    tilt: b.tilts[k], tone: b.tones[k],
+  };
+}
+
+const CAVE_BEDS = strataLayout(4471, [0.07, 0.13], [2, 4]);
+const EARTH_BEDS = strataLayout(4481, [0.07, 0.12], [1, 3]);
 
 
 /**
@@ -481,6 +569,10 @@ const LEAF_SHAPES = {
   ovate: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.85)), 0.75),
   salal: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.62)), 0.7) * (0.94 + 0.06 * Math.abs(Math.sin(a * 70))),
   pinna: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.5)), 0.6) * (0.88 + 0.12 * Math.abs(Math.sin(a * 40))),
+  // A nettle's: heart-based, long-pointed and coarsely toothed.
+  nettle: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.55)), 0.75) * (0.8 + 0.2 * Math.abs(Math.sin(a * 34))),
+  // A dock's or a willowherb's: long, narrow and plain.
+  lance: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.7)), 0.9),
 };
 
 function leafSpray(spec) {
@@ -543,6 +635,27 @@ const LEAF_SPRAYS = {
   salal: leafSpray({ seed: 5309, shape: 'salal', leaf: 0.2, width: 0.3, angle: 0.95, spread: 0.5, spacing: 0.085,
     sides: 3, sideLen: 0.32, sideAngle: 0.75, twig: 0.007, mainLeaves: true, alternate: true,
     palette: [0x243f22, 0x2b4a26, 0x33552b, 0x3d5f2f], back: 0x142214, stem: 0x5a3326 }),
+  // A clipped hedge: privet and beech, small leaves crowded thick, and the
+  // cut makes them denser still.
+  hedgeleaf: leafSpray({ seed: 5503, shape: 'ovate', leaf: 0.05, width: 0.34, angle: 1.0, spread: 1.1, spacing: 0.017,
+    sides: 12, sideLen: 0.4, sideAngle: 1.0, twig: 0.004, mainLeaves: true, alternate: false,
+    palette: [0x24401c, 0x2c4b21, 0x355626, 0x3f5f2a, 0x2a4420], back: 0x16241a }),
+  // A nettle top: opposite pairs of toothed leaves up a square stem.
+  nettleleaf: leafSpray({ seed: 5601, shape: 'nettle', leaf: 0.17, width: 0.3, angle: 1.05, spread: 0.3, spacing: 0.1,
+    sides: 2, sideLen: 0.3, sideAngle: 0.9, twig: 0.006, mainLeaves: true, alternate: false, taper: 0.55,
+    palette: [0x2e4a1f, 0x365424, 0x3f5d28], back: 0x19281a, stem: 0x3f4a26 }),
+  // Bramble: dark, toothed leaflets in threes and fives on a purple cane.
+  brambleleaf: leafSpray({ seed: 5701, shape: 'nettle', leaf: 0.1, width: 0.36, angle: 0.8, spread: 0.6, spacing: 0.05,
+    sides: 5, sideLen: 0.3, sideAngle: 0.85, twig: 0.007, mainLeaves: true, alternate: true,
+    palette: [0x1f3518, 0x263d1c, 0x2e4620, 0x3a4a22], back: 0x121c10, stem: 0x4a2a2e }),
+  // Dock and willowherb gone rank: long plain leaves, some of them yellowing.
+  weedleaf: leafSpray({ seed: 5801, shape: 'lance', leaf: 0.22, width: 0.2, angle: 0.6, spread: 0.4, spacing: 0.07,
+    sides: 2, sideLen: 0.34, sideAngle: 0.6, twig: 0.006, mainLeaves: true, alternate: true, taper: 0.5,
+    palette: [0x3a5226, 0x45592a, 0x566230, 0x6d6a35], back: 0x1c2716, stem: 0x5b5a32 }),
+  // Pot herbs: sage, thyme, rosemary -- small leaves, greyed green.
+  herbleaf: leafSpray({ seed: 5901, shape: 'ovate', leaf: 0.045, width: 0.3, angle: 0.8, spread: 0.7, spacing: 0.02,
+    sides: 8, sideLen: 0.34, sideAngle: 0.8, twig: 0.004, mainLeaves: true, alternate: false,
+    palette: [0x4a5a3a, 0x566648, 0x60704f, 0x3f5232], back: 0x1e2618, stem: 0x4f4a36 }),
   // A sword fern's frond: the rachis along u, pinnae both sides.
   fernleaf: leafSpray({ seed: 5407, shape: 'pinna', leaf: 0.2, width: 0.14, angle: 1.2, spread: 0.12, spacing: 0.034,
     sides: 0, sideLen: 0, sideAngle: 0, twig: 0.005, mainLeaves: true, alternate: false, taper: 0.8,
@@ -602,6 +715,11 @@ const SURFACES = {
     s.rough = s.alpha ? 0.42 : 0.8;
   },
   fernleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.fernleaf, u, v, s); },
+  hedgeleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.hedgeleaf, u, v, s); },
+  nettleleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.nettleleaf, u, v, s); },
+  brambleleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.brambleleaf, u, v, s); },
+  weedleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.weedleaf, u, v, s); },
+  herbleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.herbleaf, u, v, s); },
 
   /**
    * The grass atlas (GRASS_CARDS). Every texel is the front-most shape over
@@ -882,12 +1000,44 @@ const SURFACES = {
     const id = hash2(board, 0, boards, 29);
     const grain = fbm(u * 5 + id * 4, v * boards * 26, 5, 37, 4);
     const knot = cellular(u * 3.5 + id, v * boards * 0.9, 4, 43, 0.5)[0];
-    const knotMark = clamp01(1 - knot * 3.2);
+    // A knot is a small dark eye, not a smear: at 3.2 they ran a third of a
+    // board long and read under a torch as scorch marks.
+    const knotMark = clamp01(1 - knot * 6);
     const seam = clamp01(Math.min(fy, 1 - fy) * 26);
     const wood = mix(rgb(0x6b4d31), rgb(0x8d6a45), grain * 0.8 + id * 0.2);
     s.color = mix(mix(wood, rgb(0x2e2015), knotMark * 0.8), rgb(0x241a11), 1 - seam);
     s.height = 0.6 * seam + grain * 0.15 - knotMark * 0.15;
     s.rough = 0.72 + grain * 0.2;
+  },
+
+  /**
+   * A door's boards: weathered oak with the grain running up the leaf. The
+   * leaves wore `planks`, which is floorboards -- seams every 20 cm across
+   * the grain and dark knots that, cube-projected onto an upright board,
+   * came out as a grid, and under a torch as orange streaks a judge read as
+   * embers. Each board is its own solid in the model, so no seams here:
+   * grain, the silvering of old oak where the weather gets at it, and the
+   * checks that open along the grain as it dries.
+   */
+  doorboard(u, v, s) {
+    const warp = fbm(u * 2, v * 2, 2, 741, 3);
+    const grain = fbmA(u * 48 + warp * 3, v * 3, 48, 3, 743, 3);
+    const ring = 0.5 + 0.5 * Math.sin((u * 30 + warp * 2.5) * Math.PI * 2);
+    const silver = clamp01(fbmA(u * 3, v * 5, 3, 5, 747, 3) * 1.8 - 0.55);
+    // A check follows the grain: a short straight split, in a few columns.
+    const cu = u * 18 + warp * 0.6;
+    const ci = Math.floor(cu);
+    const check = clamp01(1 - Math.abs(cu - ci - 0.5) / 0.05)
+      * (hash2(ci, 0, 18, 749) > 0.7 ? 1 : 0)
+      * clamp01(fbmA(ci * 0.37, v * 4, 18, 4, 751, 2) * 4 - 2.1);
+    const grime = fbm(u * 8, v * 8, 8, 753, 3);
+    let c = mix(rgb(0x5f4834), rgb(0x7d6246), grain * 0.7 + ring * 0.3);
+    c = mix(c, rgb(0x857e70), silver * 0.6);
+    c = mix(c, rgb(0x2f261d), grime * 0.25 + check * 0.7);
+    s.color = c;
+    s.height = 0.55 + grain * 0.015 + ring * 0.004 - check * 0.12;
+    // Weathered oak is dead matt; only the grime has any sheen at all.
+    s.rough = 0.86 + silver * 0.08 - grime * 0.04;
   },
 
   /**
@@ -975,6 +1125,39 @@ const SURFACES = {
     s.height = lumps * 0.5 + stone * 0.4 + grit * 0.1;
     // Damp trodden earth against dry dust and the odd embedded stone.
     s.rough = 0.82 + (1 - lumps) * 0.14 - stone * 0.12;
+  },
+
+  /**
+   * The cut face of a burrow: a bank dug out of the hillside, not a mined
+   * rock and not a trodden floor. `dirt` did this job and its relief is a
+   * floor's -- lumps meant to be walked on -- which up a wall under a torch
+   * came out as an orange swirl. What a spade leaves in clay is soft layers
+   * across the face, stones sitting in them, the vertical scrape of the
+   * blade, and the odd pale root hair.
+   */
+  earthwall(u, v, s) {
+    const at = strataAt(EARTH_BEDS, u, v, 4483);
+    const body = fbm(u * 5, v * 5, 5, 4485, 4);
+    const fine = fbm(u * 60, v * 60, 60, 4487, 2);
+    const wu = u * 14 + (fbm(u * 28, v * 28, 28, 4499, 2) - 0.5) * 0.5;
+    const wv = v * 14 + (fbm(u * 28 + 3.1, v * 28, 28, 4499, 2) - 0.5) * 0.5;
+    const [sd, , sid] = cellular(wu, wv, 14, 4489, 0.5);
+    const big = hash2(Math.floor(sid * 7919), 1, 1 << 20, 4501);
+    const stone = clamp01((0.06 + big * big * 0.3 - sd) * 9) * (sid > 0.68 ? 1 : 0);
+    const stoneTone = hash2(Math.floor(sid * 7919), 2, 1 << 20, 4503);
+    // Spade marks: short vertical gouges, a blade's width apart.
+    const blade = Math.abs(Math.sin((u * 26 + fbm(u * 4, v * 4, 4, 4491, 2) * 2) * Math.PI));
+    const scrape = (1 - blade) * clamp01(fbm(u * 8, v * 3, 8, 4493, 2) * 3 - 1.7);
+    const root = clamp01(1 - Math.abs(fbm(u * 3, v * 16, 3, 4495, 3) - 0.5) * 90) * clamp01(fbm(u * 7, v * 7, 7, 4497, 2) * 3 - 1.6);
+    const layer = at.bed.proud;
+    let c = mix(rgb(0x5a4633), rgb(0x7a6247), body * 0.6 + layer * 0.4);
+    c = mix(c, rgb(0x6c5a41), clamp01(1 - at.dBed / 0.01) * 0.4);
+    c = mix(c, mix(rgb(0x7a7264), rgb(0x9a9282), stoneTone), stone * 0.75);
+    c = mix(c, rgb(0xa08a68), root * 0.6);
+    const shade = 0.95 + fine * 0.1;
+    s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
+    s.height = 0.5 + body * 0.1 + stone * 0.05 - scrape * 0.03 + root * 0.02 + fine * 0.02;
+    s.rough = 0.9 + fine * 0.08 - stone * 0.15;
   },
 
   /**
@@ -1073,7 +1256,12 @@ const SURFACES = {
   },
 
   sand(u, v, s) {
-    const ripple = Math.sin((u * 26 + fbm(u * 4, v * 4, 4, 163, 3) * 6) * Math.PI) * 0.5 + 0.5;
+    // Wind ripples are ten to fifteen centimetres crest to crest -- 48 over
+    // the 6 m tile; at 13 they were half a metre, the size of a dune's own
+    // ribs -- and lopsided: a long gentle back and a short steep lee.
+    const rp = u * 48 + fbm(u * 4, v * 4, 4, 163, 3) * 7 + fbm(u * 12, v * 12, 12, 171, 2) * 1.2;
+    const rf = rp - Math.floor(rp);
+    const ripple = rf < 0.75 ? rf / 0.75 : (1 - rf) / 0.25;
     const grit = fbm(u * 90, v * 90, 90, 167, 2);
     const drift = fbm(u * 3, v * 3, 3, 169, 3);
     // The ripple is relief, not paint: a ridge and its trough are one sand,
@@ -1082,7 +1270,9 @@ const SURFACES = {
     s.color = mix(mix(rgb(0xc59a64), rgb(0xdcb784), drift * 0.7 + grit * 0.3), rgb(0xe3c396), ripple * 0.12);
     // Low: a ripple is a centimetre high on a ten-centimetre wavelength, and
     // at half the height range a raking dusk sun drew it as a zebra.
-    s.height = ripple * 0.06 + drift * 0.22 + grit * 0.1;
+    // The drift used to be a fifth of the relief, and over a dune that is a
+    // lumpy skin: dough, a judge said. The shape is the geometry's job.
+    s.height = ripple * 0.035 + drift * 0.05 + grit * 0.06;
     s.rough = 0.84 + grit * 0.14;
   },
 
@@ -1667,23 +1857,44 @@ const SURFACES = {
    * iron, pale calcite -- weeping down.
    */
   caverock(u, v, s) {
-    const warp = fbm(u * 4, v * 4, 4, 497, 3);
-    // Beds a few centimetres to a couple of decimetres thick, gently warped.
-    const strata = Math.sin((v * 11 + warp * 2.2 + fbm(u * 9, v * 9, 9, 501, 2) * 0.8) * Math.PI * 2) * 0.5 + 0.5;
+    // The first cut drew its strata as a warped sine and its fractures as
+    // the contour of a noise, and at the contrast its relief had, the two
+    // together were wood grain -- a judge called the Troll Den's walls marble.
+    // Rock breaks along planes: bedding across the face, joints up it that
+    // stop at bedding planes, and each piece a facet at its own tilt. Not
+    // every plane has opened -- a wall of them all equally open is masonry.
+    const at = strataAt(CAVE_BEDS, u, v, 4473);
     const body = fbm(u * 6, v * 6, 6, 499, 4);
     const pits = fbm(u * 24, v * 24, 24, 503, 3);
     const fine = fbm(u * 70, v * 70, 70, 505, 2);
-    const crack = clamp01(1 - Math.abs(fbm(u * 4 + 0.7, v * 3, 4, 509, 3) - 0.5) * 26);
+    // Conchoidal chips: each Worley cell a small plane at its own angle, so a
+    // block's face breaks into facets instead of being one slab.
+    const [cdx, cdy, chip] = facetCell(u * 6, v * 10, 6, 10, 513, 0.5);
+    const chip2 = hash2(Math.floor(chip * 977), 3, 1 << 20, 515);
+    const bedOpen = clamp01(fbm(u * 5, at.bed.v0 * 50, 5, 517, 2) * 2.6 - 0.9);
+    const bedLine = clamp01(1 - at.dBed / (0.002 + bedOpen * 0.004)) * (0.12 + bedOpen * 0.88);
+    const jointOpen = clamp01(fbm(u * 3 + at.block, v * 8, 3, 519, 2) * 2.8 - 1.0);
+    const jointLine = clamp01(1 - at.dJoint / (0.002 + jointOpen * 0.004)) * jointOpen;
+    const crack = Math.max(bedLine, jointLine);
     const ochre = clamp01(fbm(u * 3, v * 1.2, 3, 521, 3) * 2.3 - 1.3);
-    const calcite = clamp01(fbm(u * 8, v * 2, 8, 523, 3) * 2.5 - 1.5);
-    let c = mix(rgb(0x4a453d), rgb(0x736b5e), body * 0.65 + pits * 0.27 + strata * 0.08);
-    c = mix(c, rgb(0x7d5c38), ochre * 0.5);
-    c = mix(c, rgb(0xa39d8f), calcite * 0.45);
-    c = mix(c, rgb(0x2c2823), crack * 0.32);
-    const shade = 0.9 + fine * 0.2;
+    // Stain runs *down* from a bedding plane, where the water comes out.
+    const weep = clamp01(fbm(u * 18, v * 1.5, 18, 525, 2) * 2 - 0.9) * (1 - at.fy) * bedOpen;
+    const calcite = clamp01(fbm(u * 8, v * 2, 8, 523, 3) * 2.5 - 1.6);
+    let c = mix(rgb(0x55504a), rgb(0x7a7264), body * 0.45 + at.tone * 0.2 + chip * 0.15 + at.bed.proud * 0.2);
+    c = mix(c, rgb(0x7a5e3e), ochre * 0.35 + weep * 0.25);
+    c = mix(c, rgb(0x9a9486), calcite * 0.35);
+    c = mix(c, rgb(0x2e2a25), crack * 0.62);
+    const shade = 0.94 + fine * 0.12;
     s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
-    s.height = body * 0.3 + pits * 0.3 + strata * 0.05 + fine * 0.1 - crack * 0.22;
-    s.rough = 0.7 + fine * 0.2 - calcite * 0.25;
+    // Facets, a ledge per bed, and only a little grain on top: the relief is
+    // in the breaks, not everywhere, or the whole face is mould.
+    const facet = at.tilt[0] * (at.fx - 0.5) * 0.1 + at.tilt[1] * (at.fy - 0.5) * 0.1;
+    const chipPlane = ((chip - 0.5) * cdx + (chip2 - 0.5) * cdy) * 0.07;
+    // Fracture surfaces are creased, not bumpy: a ridged noise.
+    const crease = 1 - Math.abs(fbm(u * 7, v * 5, 7, 527, 3) * 2 - 1);
+    s.height = 0.55 + at.bed.proud * 0.1 + facet + chipPlane + body * 0.06 + pits * 0.03
+      - crack * 0.32 + crease * 0.06;
+    s.rough = 0.78 + fine * 0.14 - calcite * 0.2 - weep * 0.08;
   },
 
   /**
@@ -1906,6 +2117,28 @@ const SURFACES = {
     s.emit = crack * (0.25 + heat * 0.75);
   },
 
+  /**
+   * The same flags after the fire has gone out: "a room which once had been
+   * quite burned". Blackened stone, crazed across by the heat, grey ash
+   * lodged in the joints -- and cold, so nothing glows. `embers` on every
+   * lair made the burned room a floor of live lava cracks.
+   */
+  cinders(u, v, s) {
+    const [, edge, id] = cellular(u * 7, v * 7, 7, 811, 0.42);
+    const grain = fbm(u * 40, v * 40, 40, 813, 3);
+    const split = fbm(u * 18, v * 18, 18, 821, 3);
+    const soot = clamp01(fbm(u * 3, v * 3, 3, 817, 3) * 2 - 0.5);
+    const joint = clamp01(1 - edge / 0.07);
+    const crack = clamp01(1 - Math.abs(split - 0.5) / 0.015) * (id > 0.5 ? 1 : 0);
+    const stone = mix(rgb(0x4a4540), rgb(0x635c53), id * 0.6 + grain * 0.4);
+    let c = mix(stone, rgb(0x1f1c19), soot * 0.7);
+    c = mix(c, rgb(0x8a857c), joint * 0.6);
+    c = mix(c, rgb(0x191614), crack * 0.7);
+    s.color = c;
+    s.height = 0.62 + grain * 0.08 - joint * 0.3 - crack * 0.2;
+    s.rough = 0.9 + grain * 0.08;
+  },
+
   sootwall(u, v, s) {
     // Random rubble, not coursed: courses of 19 to 32 cm and stones of 40 to
     // 90, no two rows alike. The ruins wore the town's coursed stone -- every
@@ -1945,7 +2178,17 @@ const SURFACES = {
     // 0x221e1b -- nothing under a sky reads zero, and burnt stone is not ink).
     const greyed = mix(base, rgb(0x3b3733), 0.66 + grime * 0.2);
     s.color = mix(greyed, rgb(0x221e1b), clamp01(soot * 1.3));
-    s.height = inBlock ? 0.62 + bevel * 0.3 + grain * 0.08 : 0.12;
+    // Relief at the perpends only. The bake's Sobel is steep -- a step of a
+    // few hundredths already tips a normal past forty-five degrees -- so the
+    // top arris of every course was a strip facing straight up, and in the
+    // shade what lights and what it mirrors is the sky: every course in the
+    // district wore a blue line along it, which a judge read as blue mortar.
+    // With the normal map off the lines were gone. The bed joint keeps its
+    // colour and a whisper of recess; the perpends, facing sideways, a
+    // little more -- at full depth a dusk sun raked them into a comb.
+    const perpBevel = clamp01(Math.min((fx - jx) * w, (1 - jx - fx) * w) / 0.03);
+    const bedBevel = clamp01(Math.min((fy - jy) * h, (1 - jy - fy) * h) / 0.03);
+    s.height = 0.6 + perpBevel * 0.06 + bedBevel * 0.015 + grain * 0.03;
     s.rough = Math.min(1, (inBlock ? 0.72 + grain * 0.2 : 0.94) + soot * 0.12);
   },
 
@@ -2095,6 +2338,79 @@ const SURFACES = {
     s.height = 0.5 + cloud * 0.1 - frac * 0.2;
     s.rough = 0.06 + frac * 0.2 + cloud * 0.05;
     s.metal = 0.15;
+  },
+
+  /**
+   * The marsh fortress, "hewn of black stone and heavily fortified": big
+   * dressed blocks of a dark basalt, coursed, 0.6 m to a course and a metre
+   * or more long, with pale lime weeping out of the joints and grey
+   * weathering on the faces. Black stone is not ink -- a basalt ashlar in
+   * sun is a dark slate grey, and the lime and the lichen are what show its
+   * courses from across a lake.
+   */
+  blackstone(u, v, s) {
+    const rows = 6;
+    const row = Math.floor(v * rows);
+    const cols = row % 3 === 0 ? 3 : 4;
+    const gx = u * cols + ((row * 0.37) % 1);
+    const col = Math.floor(gx);
+    const fx = gx - col; const fy = v * rows - row;
+    const w = 3.6 / cols; const h = 3.6 / rows;
+    const jx = 0.01 / w; const jy = 0.01 / h;
+    const inBlock = fx > jx && fx < 1 - jx && fy > jy && fy < 1 - jy;
+    const bevel = clamp01(Math.min((fx - jx) * w, (1 - jx - fx) * w, (fy - jy) * h, (1 - jy - fy) * h) / 0.035);
+    const id = hash2(col + row * 7, row, 64, 1201);
+    const grain = fbm(u * 48 + id * 5, v * 48, 48, 1203, 3);
+    const weather = fbm(u * 5, v * 5, 5, 1207, 4);
+    const lichen = clamp01((fbm(u * 14, v * 14, 14, 1209, 3) - 0.58) * 5);
+    // Albedo goes through the gamma lift, which takes 0x16 to about 0x3a:
+    // the town's stone is 0x8d, so this is under half of it once lit.
+    const block = mix(rgb(0x121113), rgb(0x1f1d1e), id);
+    const face = mix(mix(block, rgb(0x353331), weather * 0.3), rgb(0x0c0b0c), (1 - bevel) * 0.3 + grain * 0.12);
+    // Lime leached out of the joint and run down the face below it.
+    const weep = clamp01(1 - fy * 3.5) * clamp01(fbm(u * 40, v * 3, 40, 1211, 2) * 2 - 0.7);
+    s.color = inBlock
+      ? mix(mix(face, rgb(0x46463e), lichen * 0.5), rgb(0x55524c), weep * 0.3)
+      : mix(rgb(0x2e2c2a), rgb(0x3a3834), grain);
+    s.height = inBlock ? 0.6 + bevel * 0.32 + grain * 0.07 : 0.1;
+    s.rough = inBlock ? 0.66 + grain * 0.2 + lichen * 0.1 : 0.94;
+  },
+
+  /**
+   * "Its black obsidian surface shines darkly": volcanic glass, black in its
+   * body and all reflection on its faces, with the shell-shaped ripples a
+   * conchoidal fracture leaves and a faint grey banding from how it flowed.
+   * The darkness is the albedo's; the shine is the environment's.
+   */
+  obsidian(u, v, s) {
+    const [d1, edge, id] = cellular(u * 3, v * 3, 3, 1301, 0.5);
+    // Ripples running out from each fracture's point of impact, dying away.
+    // Faint: at full strength the rings read as a carved spiral pattern.
+    const ripple = Math.sin(d1 * 22 + id * 6) * Math.exp(-d1 * 3.5);
+    const ridge = clamp01(1 - edge * 22);
+    const band = fbm(u * 2, v * 18, 2, 1303, 3);
+    // The fracture edges only in the gloss, not the colour or the relief: as
+    // lines they tiled into a crackle net across the whole stone.
+    s.color = mix(rgb(0x0f0e12), rgb(0x1a1820), band);
+    s.height = 0.5 + ripple * 0.035;
+    s.rough = 0.07 + ridge * 0.06 + band * 0.05;
+  },
+
+  /**
+   * Cast bronze that has stood a century in the rain: the metal still shows
+   * brown where hands and weather wear it smooth, and verdigris lies in
+   * everything sheltered. The Market Square's worm is cast in it.
+   */
+  bronze(u, v, s) {
+    const patch = fbm(u * 4, v * 4, 4, 1401, 4);
+    const fine = fbm(u * 30, v * 30, 30, 1403, 3);
+    const run = fbm(u * 18, v * 3, 18, 1405, 2);
+    const green = clamp01((patch * 0.7 + run * 0.3 - 0.42) * 3.2);
+    const metal = mix(rgb(0x7a5733), rgb(0x9a7446), fine);
+    s.color = mix(metal, mix(rgb(0x4f8a74), rgb(0x76ad95), fine), green);
+    s.height = 0.5 + fine * 0.08 + green * 0.06;
+    s.rough = 0.38 + green * 0.45 + fine * 0.1;
+    s.metal = 0.85 * (1 - green);
   },
 
   /**
@@ -2299,6 +2615,8 @@ const RECIPES = {
   plaster: { surface: 'plaster', scale: 3, normalScale: 0.34, env: 0.7, wet: 0, detail: 0.45 },
   stonewall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55 },
   timber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45 },
+  // A door leaf's boards: see the surface.
+  doorboard: { surface: 'doorboard', scale: 1.4, normalScale: 0.6, env: 0.7, wet: 0, detail: 0.4 },
   planks: { surface: 'planks', scale: 2.4, normalScale: 0.7, env: 0.85, wet: 0, detail: 0.45 },
   rooftile: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0.35, detail: 0.5 },
   thatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7 },
@@ -2348,6 +2666,11 @@ const RECIPES = {
   oakleaf: { surface: 'oakleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   shrubleaf: { surface: 'shrubleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   salal: { surface: 'salal', scale: 1, normalScale: 0.4, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
+  hedgeleaf: { surface: 'hedgeleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  nettleleaf: { surface: 'nettleleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  brambleleaf: { surface: 'brambleleaf', scale: 1, normalScale: 0.4, env: 0.45, wet: 0, detail: 0, cutout: 0.5 },
+  weedleaf: { surface: 'weedleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  herbleaf: { surface: 'herbleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   fernleaf: { surface: 'fernleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   firbark: { surface: 'firbark', scale: 1.4, normalScale: 0.9, env: 0.35, wet: 0, detail: 0.5 },
   cedarbark: { surface: 'cedarbark', scale: 1.2, normalScale: 0.9, env: 0.5, wet: 0, detail: 0.5 },
@@ -2362,6 +2685,8 @@ const RECIPES = {
   // The town's own flags, rock and iron, as they are below ground: the same
   // surfaces, lit the way everything down there is lit.
   sewerflag: { surface: 'flagstone', scale: 2.6, normalScale: 0.85, env: 1, wet: 0, detail: 0.5, buried: true },
+  // A burrow's walls: see the surface. Indoors, and never wet enough to shine.
+  earthwall: { surface: 'earthwall', scale: 3.4, normalScale: 0.7, env: 0.6, wet: 0, detail: 0.5 },
   caverock: { surface: 'caverock', scale: 4.4, normalScale: 1.0, env: 1, wet: 0, detail: 0.6, buried: true },
   cavefloor: { surface: 'cavefloor', scale: 3.2, normalScale: 0.8, env: 1, wet: 0, detail: 0.6, buried: true },
   rustiron: { surface: 'rust', scale: 1.2, normalScale: 0.5, env: 1, wet: 0, detail: 0.3, buried: true },
@@ -2371,11 +2696,19 @@ const RECIPES = {
   bone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 1, wet: 0, detail: 0.3, buried: true },
   sewerwood: { surface: 'bark', scale: 1.6, normalScale: 0.6, env: 1, wet: 0, detail: 0.4, buried: true },
   // The eastern mountains, outside and in.
-  cliff: { surface: 'sandstone', scale: 9, normalScale: 0.35, env: 0.3, wet: 0, detail: 0.6 },
+  // `triplanar`: projected from the world in the shader, not from the model's
+  // UVs -- a displaced cliff cube-projected in Blender wore its beds smeared
+  // down every face that leaned. `moss` is how far up the flanks it creeps,
+  // 0 to 1: see DIKU_MOSS.
+  cliff: { surface: 'sandstone', scale: 9, normalScale: 0.35, env: 0.3, wet: 0, detail: 0.6, triplanar: true },
   // The cave rock again, out under the sky: the crag heaped over the troll
   // den. Not `rock`, which is crazy paving, and not `cliff`, which is the
   // desert's sandstone and read as a mesa in a fir forest.
-  crag: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0.2, detail: 0.6 },
+  crag: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0.2, detail: 0.6, triplanar: true, moss: 0.18 },
+  // A boulder and a fallen log, with the moss grown on in the shader rather
+  // than modelled as a cap: a green shell has an edge, and moss does not.
+  mossrock: { surface: 'caverock', scale: 2.6, normalScale: 0.8, env: 0.6, wet: 0.2, detail: 0.6, triplanar: true, moss: 0.42 },
+  mossbark: { surface: 'bark', scale: 1.6, normalScale: 1.0, env: 0.65, wet: 0, detail: 0.5, moss: 0.4 },
   // A full `env`: cloth this open lets the sky through, and at 0.4 a tent's
   // corners went to RGB 0 after dark however hard the lantern burned.
   tentcloth: { surface: 'tentcloth', scale: 4, normalScale: 0.5, env: 1.0, wet: 0, detail: 0.4 },
@@ -2395,7 +2728,7 @@ const RECIPES = {
   // dark grey read as plain grey stone in the sun and went under 8 in the
   // shade at dusk (51% of a No Man's Land frame); streaked, it reads as soot
   // in the sun and the grime holds the shade up. Mean albedo 0.14, and the dusk and night shade held up by `lift`.
-  sootwall: { surface: 'sootwall', scale: 3.6, normalScale: 1.0, env: 0.6, lift: true, wet: 0, detail: 0.55 },
+  sootwall: { surface: 'sootwall', scale: 3.6, normalScale: 0.8, env: 0.6, lift: true, wet: 0, detail: 0.55 },
   rubble: { surface: 'rubble', scale: 2.4, normalScale: 1.1, env: 0.8, lift: true, wet: 0, detail: 0.6 },
   charred: { surface: 'charred', scale: 1.4, normalScale: 0.55, env: 0.5, lift: true, wet: 0, detail: 0.5 },
   boards: { surface: 'boards', scale: 2.0, normalScale: 0.7, env: 0.7, wet: 0, detail: 0.45 },
@@ -2408,6 +2741,8 @@ const RECIPES = {
   // walls, and a floor whose cracks are still hot (`glow` is the emissive's
   // strength, over the bloom threshold where the heat is).
   scorched: { surface: 'sootwall', scale: 3.6, normalScale: 1.0, env: 1, wet: 0, detail: 0.55, buried: true },
+  // ...and the same floor cold, for a room the fire is long out of.
+  charstone: { surface: 'cinders', scale: 3.2, normalScale: 0.8, env: 1, wet: 0, detail: 0.5, buried: true },
   emberstone: { surface: 'embers', scale: 3.2, normalScale: 0.9, env: 1, wet: 0, detail: 0.5, buried: true, glow: 3.2 },
   // The sewer's ashlar in daylight: the dressed stone round a window in a
   // masonry wall, which is finer and paler work than the wall it stands in.
@@ -2418,6 +2753,12 @@ const RECIPES = {
   oldbone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 0.7, wet: 0, detail: 0.3 },
   // Ice Dragon Way's smashed crystal statues: nearly all reflection.
   crystal: { surface: 'crystal', scale: 0.8, normalScale: 0.35, env: 1.7, wet: 0, detail: 0.1 },
+  // Set pieces (tools/blender/setpiece.py): the marsh fortress's black stone,
+  // the monolith's volcanic glass, the Market Square worm's bronze. The two
+  // dark ones take `lift` for the same reason soot does.
+  blackstone: { surface: 'blackstone', scale: 3.6, normalScale: 0.9, env: 0.75, lift: true, wet: 0, detail: 0.5 },
+  obsidian: { surface: 'obsidian', scale: 3.2, normalScale: 0.3, env: 1.5, lift: true, wet: 0, detail: 0.1 },
+  bronze: { surface: 'bronze', scale: 1.2, normalScale: 0.4, env: 1.1, wet: 0, detail: 0.3 },
   // The animals. A 0.4 m tile is a hand's-breadth clump pattern on a dog and
   // still reads as a coat on a horse. `moving` keeps the world-space effects
   // off them: a splash line fixed to the paving and a grain fixed to the world
@@ -2804,6 +3145,8 @@ function decorate(material, recipe, macro, grain) {
     shader.uniforms.dikuBuriedRadiance = buried.radiance;
     shader.uniforms.dikuMurk = buried.murk;
     shader.uniforms.dikuMurkDensity = buried.murkDensity;
+    shader.uniforms.dikuTriScale = { value: 1 / recipe.scale };
+    shader.uniforms.dikuMoss = { value: recipe.moss ?? 0 };
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSurfacePos;\nattribute float aIndoor;\nvarying float vIndoor;')
@@ -2812,6 +3155,19 @@ function decorate(material, recipe, macro, grain) {
         '#include <worldpos_vertex>\n\tvSurfacePos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;'
         + '\n\tvIndoor = aIndoor;',
       );
+    if (material.defines?.DIKU_TRIPLANAR || material.defines?.DIKU_MOSS) {
+      // `vSurfacePos` leaves out the instance matrix, which is fine for
+      // mottling and wrong for a projection: a triplanar rock placed as an
+      // instance has to be sampled where it actually stands.
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vDikuWorld;')
+        .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
+        vec4 dikuWorld = vec4( transformed, 1.0 );
+        #ifdef USE_INSTANCING
+          dikuWorld = instanceMatrix * dikuWorld;
+        #endif
+        vDikuWorld = ( modelMatrix * dikuWorld ).xyz;`);
+    }
 
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', /* glsl */`
@@ -2833,6 +3189,16 @@ function decorate(material, recipe, macro, grain) {
         uniform vec3 dikuBuriedRadiance;
         uniform vec3 dikuMurk;
         uniform float dikuMurkDensity;
+        uniform float dikuTriScale;
+        uniform float dikuMoss;
+        #if defined( DIKU_TRIPLANAR ) || defined( DIKU_MOSS )
+          varying vec3 vDikuWorld;
+        #endif
+        // Three projections of one map, blended by how much the surface faces
+        // each axis. A macro rather than a function: the samplers are declared
+        // after this chunk.
+        #define DIKU_TRI( tex ) ( texture2D( tex, dikuTriX ) * dikuTriW.x + texture2D( tex, dikuTriY ) * dikuTriW.y + texture2D( tex, dikuTriZ ) * dikuTriW.z )
+        #define DIKU_TRI_N( uv ) ( vec3( ( texture2D( normalMap, uv ).xy * 2.0 - 1.0 ) * normalScale, 0.0 ) )
       `)
       .replace('#include <lights_fragment_begin>', LIGHTS_FRAGMENT_INDOOR)
       .replace('#include <lights_fragment_end>', /* glsl */`
@@ -2878,7 +3244,42 @@ function decorate(material, recipe, macro, grain) {
         #endif
       `)
       .replace('#include <map_fragment>', /* glsl */`
-        #include <map_fragment>
+        #if defined( DIKU_TRIPLANAR ) || defined( DIKU_MOSS )
+          // The world normal, from the interpolated view normal: the
+          // perturbed one does not exist yet at this point in the shader.
+          vec3 dikuWN = normalize( ( vec4( normalize( vNormal ) * ( gl_FrontFacing ? 1.0 : - 1.0 ), 0.0 ) * viewMatrix ).xyz );
+        #endif
+        #ifdef DIKU_TRIPLANAR
+          // A cliff that was cube-projected in Blender and then displaced
+          // wears its texture smeared down every face that leans; projected
+          // here from the world, each face takes the axis it faces most.
+          vec3 dikuTriW = pow( abs( dikuWN ), vec3( 4.0 ) );
+          dikuTriW /= dikuTriW.x + dikuTriW.y + dikuTriW.z;
+          vec3 dikuTriP = vDikuWorld * dikuTriScale;
+          vec3 dikuTriS = sign( dikuWN ) + vec3( equal( dikuWN, vec3( 0.0 ) ) );
+          vec2 dikuTriX = vec2( dikuTriP.z * dikuTriS.x, dikuTriP.y );
+          vec2 dikuTriY = vec2( dikuTriP.x, dikuTriP.z * dikuTriS.y );
+          vec2 dikuTriZ = vec2( - dikuTriP.x * dikuTriS.z, dikuTriP.y );
+          diffuseColor *= DIKU_TRI( map );
+        #else
+          #include <map_fragment>
+        #endif
+        #ifdef DIKU_MOSS
+          // Moss creeps over whatever faces the sky and the north, thinning
+          // out down the flanks along a ragged edge, never as a lid. Two
+          // octaves of the macro noise in the world, so the edge wanders at a
+          // hand's breadth and at a boulder's.
+          float dikuMossN = texture2D( macroMap, vDikuWorld.xz * 0.23 + vDikuWorld.y * 0.17 ).r;
+          float dikuMossF = texture2D( macroMap, ( vDikuWorld.xz - vDikuWorld.zy ) * 1.9 ).g;
+          // ...and a fine clump term off the grain map, so the mat is tufted
+          // rather than painted.
+          float dikuMossC = texture2D( detailMap, ( vDikuWorld.xz + vDikuWorld.yx * 0.7 ) * 0.9 ).x;
+          float dikuMossK = dikuWN.y * 0.8 - dikuWN.z * 0.35 + ( dikuMossN - 0.7 ) * 3.0
+            + ( dikuMossF - 0.5 ) * 1.3 + ( dikuMossC - 0.5 ) * 0.5;
+          float dikuMossAmt = smoothstep( 0.62 - dikuMoss, 0.86 - dikuMoss, dikuMossK ) * step( 0.001, dikuMoss );
+          vec3 dikuMossCol = mix( vec3( 0.05, 0.08, 0.02 ), vec3( 0.13, 0.17, 0.045 ), clamp( dikuMossF * 0.6 + dikuMossC * 0.6 - 0.1, 0.0, 1.0 ) );
+          diffuseColor.rgb = mix( diffuseColor.rgb, dikuMossCol, dikuMossAmt );
+        #endif
         // A skewed projection rather than a true triplanar one: this is
         // mottling, and it only has to vary along all three axes.
         vec2 dikuMacroUv = vec2(
@@ -2907,6 +3308,12 @@ function decorate(material, recipe, macro, grain) {
       `)
       .replace('#include <roughnessmap_fragment>', /* glsl */`
         #include <roughnessmap_fragment>
+        #ifdef DIKU_TRIPLANAR
+          roughnessFactor = roughness * DIKU_TRI( roughnessMap ).g;
+        #endif
+        #ifdef DIKU_MOSS
+          roughnessFactor = mix( roughnessFactor, 0.95, dikuMossAmt );
+        #endif
         roughnessFactor *= 0.84 + dikuMacro.b * 0.32;
         #ifdef DIKU_WET
           // World normal, from the view normal and an orthonormal view matrix.
@@ -2938,7 +3345,23 @@ function decorate(material, recipe, macro, grain) {
         roughnessFactor = clamp( roughnessFactor, 0.045, 1.0 );
       `)
       .replace('#include <normal_fragment_maps>', /* glsl */`
-        #include <normal_fragment_maps>
+        #ifdef DIKU_TRIPLANAR
+          // Each projection's tangent frame is known in world space, so the
+          // map's relief is added along it and the sum turned back into view
+          // space: the UDN blend, which is plenty for rock.
+          vec3 dikuNX = DIKU_TRI_N( dikuTriX ); vec3 dikuNY = DIKU_TRI_N( dikuTriY ); vec3 dikuNZ = DIKU_TRI_N( dikuTriZ );
+          vec3 dikuNW = normalize( dikuWN
+            + dikuTriW.x * ( vec3( 0.0, 0.0, dikuTriS.x ) * dikuNX.x + vec3( 0.0, 1.0, 0.0 ) * dikuNX.y )
+            + dikuTriW.y * ( vec3( 1.0, 0.0, 0.0 ) * dikuNY.x + vec3( 0.0, 0.0, dikuTriS.y ) * dikuNY.y )
+            + dikuTriW.z * ( vec3( - dikuTriS.z, 0.0, 0.0 ) * dikuNZ.x + vec3( 0.0, 1.0, 0.0 ) * dikuNZ.y ) );
+          normal = normalize( mat3( viewMatrix ) * dikuNW );
+        #else
+          #include <normal_fragment_maps>
+        #endif
+        #ifdef DIKU_MOSS
+          // A mat of moss is soft: most of the rock's relief goes under it.
+          normal = normalize( mix( normal, nonPerturbedNormal, dikuMossAmt * 0.7 ) );
+        #endif
         #ifdef DIKU_FOLIAGE
           // A needle card's normals are baked to point out of the crown, and
           // both faces of the card are the same needles: undo the two-sided
@@ -2970,12 +3393,15 @@ function decorate(material, recipe, macro, grain) {
   if (recipe.moving) material.defines = { ...material.defines, DIKU_MOVING: 1 };
   if (recipe.lift) material.defines = { ...material.defines, DIKU_LIFT: 1 };
   if (recipe.cutout) material.defines = { ...material.defines, DIKU_FOLIAGE: 1 };
+  if (recipe.triplanar) material.defines = { ...material.defines, DIKU_TRIPLANAR: 1 };
+  if (recipe.moss) material.defines = { ...material.defines, DIKU_MOSS: 1 };
   // Our injected source differs from stock, so it needs a key of its own or
   // three will hand us a program compiled for an undecorated material.
   material.customProgramCacheKey = () => `diku|${material.defines?.DIKU_DETAIL ? 1 : 0}`
     + `|${material.defines?.DIKU_WET ? 1 : 0}|${material.defines?.DIKU_BURIED ? 1 : 0}`
     + `|${material.defines?.DIKU_MOVING ? 1 : 0}|${material.defines?.DIKU_LIFT ? 1 : 0}`
-    + `|${material.defines?.DIKU_FOLIAGE ? 1 : 0}`;
+    + `|${material.defines?.DIKU_FOLIAGE ? 1 : 0}|${material.defines?.DIKU_TRIPLANAR ? 1 : 0}`
+    + `|${material.defines?.DIKU_MOSS ? 1 : 0}`;
 }
 
 /**

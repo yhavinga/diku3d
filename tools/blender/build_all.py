@@ -41,6 +41,7 @@ MODULES = [
     "monsters",
     "furniture",
     "clutter",
+    "setpiece",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a
@@ -68,6 +69,9 @@ BUDGET = {
     # to PROP_BUDGET's 800. A headstone gets scattered by the dozen and a fence
     # by the segment, so the loose cap would not have caught a regression here.
     "headstone": 250, "grave_slab": 120, "iron_fence": 450,
+    # Clipped hedge: leaf cards over a rounded box, one knot at a Shire lane
+    # corner and two along a hedgebank -- a tree's worth of foliage each.
+    "hedge_clump": 2200, "hedge_row": 2200,
     # The sewer kit. Like the room kit these are pieces of a building, one per
     # cell side, so read them against a wall panel's 2000 rather than a prop's
     # 800: a chamber is a groin vault, four piers and two ribs; a tunnel is a
@@ -156,6 +160,9 @@ BUDGET = {
     "clutter_mural": 4000, "clutter_arms": 2000, "clutter_tapestry": 3100, "clutter_web": 2600,
     "clutter_cages": 1600, "clutter_globe": 900, "clutter_feast": 4100, "clutter_carcass": 2500,
     "clutter_pelts": 2000,
+    # setpiece.py: one of each in the world, or four gatehouses. The fortress
+    # is a whole castle seen from a hundred metres.
+    "gatehouse": 6000, "fortress": 20000, "monolith": 400, "statue_worm": 7000,
 }
 PROP_BUDGET = 800
 # people.py: an archetype is a whole dressed person, one skinned draw per

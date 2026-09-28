@@ -3545,9 +3545,13 @@ export function populate(world, layout, built, options = {}) {
   const LEAF_W = 1.35;
   const LEAF_H = 2.85;
   const doors = [];
-  const primitivesOf = (asset) => {
+  // A door under the street is lit as the sewer's walls are: wearing the
+  // sky's light it was black boards with only their torch-lit arrises
+  // showing, which a judge read as embers.
+  const primitivesOf = (asset, buried = false) => {
     const leaf = new THREE.Group();
-    for (const primitive of asset.primitives) {
+    for (const base of asset.primitives) {
+      const primitive = buried ? { ...base, material: buriedTwin(base.material) } : base;
       const mesh = new THREE.Mesh(primitive.geometry, primitive.material);
       mesh.castShadow = true;
       mesh.userData.doorPrimitive = primitive;
@@ -3557,14 +3561,14 @@ export function populate(world, layout, built, options = {}) {
   };
   // Same hinge and reference size as `door_leaf`, in iron bars: a grate.
   const grateAsset = assets ? assets.get('grate_leaf') : null;
-  const makeLeaf = (leafWidth, height, grate = false) => {
+  const makeLeaf = (leafWidth, height, grate = false, buried = false) => {
     if (grate && grateAsset) {
-      const leaf = primitivesOf(grateAsset);
+      const leaf = primitivesOf(grateAsset, buried);
       leaf.scale.set(leafWidth / LEAF_W, (height - 0.05) / LEAF_H, 1);
       return leaf;
     }
     if (leafAsset) {
-      const leaf = primitivesOf(leafAsset);
+      const leaf = primitivesOf(leafAsset, buried);
       leaf.scale.set(leafWidth / LEAF_W, (height - 0.05) / LEAF_H, 1);
       return leaf;
     }
@@ -3629,7 +3633,7 @@ export function populate(world, layout, built, options = {}) {
       pivot.rotation.y = spec.rotY;
       const leaf = spec.round
         ? makeRoundLeaf(Math.min(spec.width, spec.height))
-        : makeLeaf(leafWidth, spec.height, spec.grate);
+        : makeLeaf(leafWidth, spec.height, spec.grate, spec.y < -2);
       // The right-hand leaf is the left one mirrored, so its boards run back
       // toward the middle and its straps still face the street. A negative
       // scale flips the winding; three flips the front face with it.
