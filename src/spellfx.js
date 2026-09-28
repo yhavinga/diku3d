@@ -80,6 +80,10 @@ const PAL = {
 };
 const BOLT_MID = C(1.1, 1.5, 3.6);
 const MISSILE_STREAK = C(3.2, 2.4, 6);
+const FIRE_TRAIL = PAL.fire.glow.clone().multiplyScalar(1.4);
+const FIRE_BURST = PAL.fire.glow.clone().multiplyScalar(1.5);
+const HARM_BRIGHT = PAL.harm.glow.clone().multiplyScalar(1.5);
+const DRAIN_SMOKE = C(0.06, 0.005, 0.005);
 const TRAIL = 12;
 const WHITE_HOT = C(9, 9, 10);
 // A fire tongue, drawn with functions made once.
@@ -102,9 +106,10 @@ const prismColourHot = (u) => _spec2.copy(spectral(prismRay.hue + u * 0.4, 2.6))
 const prismAlphaWide = (u) => prismRay.a * 0.5 * Math.pow(1 - u, 1.2) * Math.min(1, u * 8);
 const prismAlphaThin = (u) => prismRay.a * Math.pow(1 - u, 1.6);
 // Width and alpha along a ribbon, made once: u is 0 at the head.
-const tapers = new Map();
-const taper1 = (w) => tapers.get('w' + w) || tapers.set('w' + w, (u) => w * (1 - u)).get('w' + w);
-const fadeSq = (a) => tapers.get('a' + a) || tapers.set('a' + a, (u) => a * (1 - u) * (1 - u)).get('a' + a);
+const widths = new Map();
+const fades = new Map();
+const taper1 = (w) => widths.get(w) || widths.set(w, (u) => w * (1 - u)).get(w);
+const fadeSq = (a) => fades.get(a) || fades.set(a, (u) => a * (1 - u) * (1 - u)).get(a);
 const BOLT_GHOST = C(0.55, 0.42, 1.8);
 /** Return strokes of a lightning flash, seconds after the leader. */
 const STROKES = [0, 0.07, 0.15, 0.27];
@@ -1708,7 +1713,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       light.spawn({
         x: Math.cos(th) * r, y: ph * r * 0.7, z: Math.sin(th) * r, anchor: fx.anchor,
         vx: 0, vy: 0, vz: 0, drag: 0, swirl: rand(3, 6) * (Math.random() < 0.5 ? -1 : 1), pull: rand(3.5, 5.5),
-        life: rand(0.35, 0.55), size: rand(0.025, 0.05), color: palette.glow.clone().multiplyScalar(1.6), color2: palette.core || palette.mote || palette.glow,
+        life: rand(0.35, 0.55), size: rand(0.025, 0.05), color: palette.gather || (palette.gather = palette.glow.clone().multiplyScalar(1.6)), color2: palette.core || palette.mote || palette.glow,
         shape: 1, fadeIn: 0.3,
       });
     }
@@ -1885,7 +1890,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
           light.spawn({
             x: pos.x + rand(-0.08, 0.08), y: pos.y + rand(-0.08, 0.08), z: pos.z + rand(-0.08, 0.08),
             vx: -dir.x * rand(0.5, 2) + rand(-0.4, 0.4), vy: rand(0.2, 0.9), vz: -dir.z * rand(0.5, 2) + rand(-0.4, 0.4),
-            life: rand(0.22, 0.42), size: rand(0.16, 0.3) * near, grow: 1.8, color: PAL.fire.glow.clone().multiplyScalar(1.4), color2: PAL.fire.dark,
+            life: rand(0.22, 0.42), size: rand(0.16, 0.3) * near, grow: 1.8, color: FIRE_TRAIL, color2: PAL.fire.dark,
             shape: 4, drag: 2.5, gravity: -1.5, fadeIn: 0.05,
           });
         }
@@ -2141,7 +2146,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       }
       case 'flame': case 'breath-fire': case 'flamestrike': {
         const big = f !== 'flame';
-        burst(light, aim, big ? 40 : 22, { speed: [1, big ? 4 : 2.5], up: 0.3, life: [0.35, 0.7], size: [0.18, 0.34], grow: 2.4, color: PAL.fire.glow.clone().multiplyScalar(1.5), color2: PAL.fire.dark, drag: 2.6, gravity: -2, shape: 4, fadeIn: 0.05 });
+        burst(light, aim, big ? 40 : 22, { speed: [1, big ? 4 : 2.5], up: 0.3, life: [0.35, 0.7], size: [0.18, 0.34], grow: 2.4, color: FIRE_BURST, color2: PAL.fire.dark, drag: 2.6, gravity: -2, shape: 4, fadeIn: 0.05 });
         burst(light, aim, big ? 30 : 16, { speed: [2, 6], life: [0.4, 0.9], size: [0.02, 0.035], color: PAL.fire.ember, color2: PAL.fire.dark, drag: 1, gravity: 6, shape: 1, floor: feet.y + 0.02 });
         burst(matter, aim, big ? 14 : 8, { speed: [0.3, 1], up: 0.8, life: [1.2, 2], size: [0.4, 0.7], grow: 2.2, color: C(0.16, 0.14, 0.13), alpha: 0.45, drag: 1.4, gravity: -0.45, shape: 3, fadeIn: 0.2 });
         mark(feet, f === 'flame' ? 0.9 : 1.5, 3, PAL.fire.glow, f === 'flame' ? 6 : 9, 2.5);
@@ -2180,7 +2185,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       }
       case 'frost': case 'breath-frost': {
         burst(light, aim, 40, { speed: [0.8, 3.4], life: [0.7, 1.3], size: [0.06, 0.14], color: PAL.frost.crystal, color2: PAL.frost.glow, drag: 2, gravity: 3, shape: 2, floor: feet.y + 0.02, occ: 0.35 });
-        burst(light, aim, 18, { speed: [0.2, 0.9], life: [1.4, 2.2], size: [0.35, 0.6], grow: 2, color: PAL.frost.mist, alpha: 0.3, drag: 1.5, gravity: 0.15, shape: 3, fadeIn: 0.15, floor: feet.y + 0.1, occ: 0.5 });
+        burst(light, aim, 18, { speed: [0.2, 0.9], life: [1.4, 2.2], size: [0.3, 0.5], grow: 1.8, color: PAL.frost.mist, alpha: 0.18, drag: 1.5, gravity: 0.15, shape: 3, fadeIn: 0.15, floor: feet.y + 0.1, occ: 0.5 });
         glowAt(light, aim, PAL.frost.glow, 1.3 * scale, 0.35, 0.8, 0, 0.3);
         decal(feet, 1.1, 2, PAL.frost.glow.clone().multiplyScalar(0.7), 2.2, (d, u, t) => { u.uAlpha.value = Math.min(1, t / 0.1) * (1 - t / 2.2); });
         mark(feet, f === 'breath-frost' ? 1.6 : 1.0, 5, PAL.frost.rime, 7, 1.2);
@@ -2408,13 +2413,16 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   /** A shaft of light standing on `feet` for `life` seconds. */
   function column(feet, color, life) {
     const t0 = clock;
-    const base = feet.clone();
+    const pts = [0, 0.25, 0.5, 0.75, 1].map((k) => ({ x: feet.x, y: feet.y + k * 5.5, z: feet.z }));
+    const tint = color.clone().multiplyScalar(0.35);
+    const width = (u) => 1.1 * (1 - u * 0.3);
+    let a = 0;
+    const alpha = (u) => a * (1 - u) * (1 - u) * 0.9;
     effects.push({ kind: 'custom', update() {
       const t = clock - t0;
       if (t > life) return false;
-      const a = Math.sin(Math.PI * clamp(t / life, 0, 1));
-      const pts = [0, 0.25, 0.5, 0.75, 1].map((k) => ({ x: base.x, y: base.y + k * 5.5, z: base.z }));
-      glow.strip(pts, (u) => 1.1 * (1 - u * 0.3), color.clone().multiplyScalar(0.35), (u) => a * (1 - u) * (1 - u) * 0.9, 0);
+      a = Math.sin(Math.PI * clamp(t / life, 0, 1));
+      glow.strip(pts, width, tint, alpha, 0);
       return true;
     } });
   }
@@ -2777,9 +2785,10 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         if (!s.w.player) {
           for (let k = 0; k < 3; k++) {
             const a0 = rand(0, TAU); const a1 = a0 + rand(0.6, 1.6);
-            const p0 = { x: feet.x + Math.cos(a0) * 0.3, y: feet.y + rand(0.3, h), z: feet.z + Math.sin(a0) * 0.3 };
-            const p1 = { x: feet.x + Math.cos(a1) * 0.3, y: feet.y + rand(0.3, h), z: feet.z + Math.sin(a1) * 0.3 };
-            const path = bolt(p0, p1, 0.3, 3);
+            const arcs = s.arcs || (s.arcs = [P3(9), P3(9), P3(9)]);
+            _v.set(feet.x + Math.cos(a0) * 0.3, feet.y + rand(0.3, h), feet.z + Math.sin(a0) * 0.3);
+            _w.set(feet.x + Math.cos(a1) * 0.3, feet.y + rand(0.3, h), feet.z + Math.sin(a1) * 0.3);
+            const path = jag(arcs[k], _v, _w, 0.3, 3);
             glow.strip(path, 0.14, PAL.lightning.glow, 0.5 * fade, 0);
             glow.strip(path, 0.02, PAL.lightning.core, fade, 1);
           }
@@ -2788,11 +2797,10 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     }
     // Shocking grasp: the arc from the hand while the spell is on its way.
     if (f === 'shock' && fx.released && fx.to && (!fx.landed || fx.t - fx.landT < 0.3)) {
-      const aim = chestPoint(fx.to, tmpA, true).clone();
-      const path = bolt(fx.data.src, aim, 0.3, 4);
-      glow.strip(path, 0.3, PAL.lightning.glow, 0.5, 0);
-      glow.strip(path, 0.035, PAL.lightning.core, 1, 1);
-      fx.data.mid = aim;
+      const aim = chestPoint(fx.to, tmpA, true);
+      const path = jag(fx.data.arc || (fx.data.arc = P3(17)), fx.data.src, aim, 0.3, 4);
+      glow.strip(path, 0.16, PAL.lightning.glow, 0.45, 0);
+      glow.strip(path, 0.025, PAL.lightning.core, 1, 1);
     }
     // Flamestrike: the pillar itself, coming down.
     if (f === 'flamestrike' && fx.data.column && (!fx.landed || fx.t - fx.landT < 0.35)) {
@@ -2835,7 +2843,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       const life = fx.flight + 0.5;
       if (age < life) {
         const src = fx.data.src;
-        const aim = chestPoint(fx.to, tmpA, true).clone();
+        const aim = chestPoint(fx.to, tmpA, true);
         const reach = smooth(age / Math.max(0.1, fx.flight));
         const fade = 1 - smooth((age - fx.flight) / 0.5);
         // Three strands wound round the line between them, each turning and
@@ -2844,10 +2852,11 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         const len = Math.hypot(dx, dy, dz) || 1;
         const ax = dx / len; const az = dz / len;
         const sx = -az; const sz = ax;   // horizontal side
-        const smokeC = f === 'drain' ? C(0.06, 0.005, 0.005) : PAL.dark.smoke;
+        const smokeC = f === 'drain' ? DRAIN_SMOKE : PAL.dark.smoke;
+        const strands = fx.data.strands || (fx.data.strands = [P3(21), P3(21), P3(21)]);
         const glowC = f === 'drain' ? PAL.harm.glow : PAL.dark.glow;
         for (let k = 0; k < 3; k++) {
-          const pts = [];
+          const pts = strands[k];
           const phase = k * 2.094 + clock * 5.5;
           for (let j = 0; j <= 20; j++) {
             const u = (j / 20) * reach;
@@ -2855,11 +2864,10 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
             const ang = phase + u * 11;
             const r = env * (0.8 + 0.4 * Math.sin(u * 17 + clock * 9 + k));
             const arch = Math.sin(Math.PI * u) * Math.min(1.0, len * 0.12);
-            pts.push({
-              x: src.x + dx * u + sx * Math.cos(ang) * r,
-              y: src.y + dy * u + Math.sin(ang) * r + arch,
-              z: src.z + dz * u + sz * Math.cos(ang) * r,
-            });
+            const q = pts[j];
+            q.x = src.x + dx * u + sx * Math.cos(ang) * r;
+            q.y = src.y + dy * u + Math.sin(ang) * r + arch;
+            q.z = src.z + dz * u + sz * Math.cos(ang) * r;
           }
           shade.strip(pts, (u) => 0.16 * (1 - u * 0.4), smokeC, (u) => 0.8 * fade * (0.4 + 0.6 * Math.sin(Math.PI * Math.min(1, u * 1.2))), 0);
           glow.strip(pts, (u) => 0.045 * (1 - u * 0.4), glowC, (u) => 0.9 * fade, 0.3);
@@ -2876,7 +2884,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       const to = handPoint(fx.from, tmpB);
       for (let k = 0; k < n(3); k++) {
         const t = rand(0.35, 0.55);
-        light.spawn({ x: from.x + rand(-0.2, 0.2), y: from.y + rand(-0.3, 0.3), z: from.z + rand(-0.2, 0.2), vx: (to.x - from.x) / t, vy: (to.y - from.y) / t, vz: (to.z - from.z) / t, life: t, size: rand(0.03, 0.06), color: PAL.harm.glow.clone().multiplyScalar(1.5), shape: 1, drag: 0 });
+        light.spawn({ x: from.x + rand(-0.2, 0.2), y: from.y + rand(-0.3, 0.3), z: from.z + rand(-0.2, 0.2), vx: (to.x - from.x) / t, vy: (to.y - from.y) / t, vz: (to.z - from.z) / t, life: t, size: rand(0.03, 0.06), color: HARM_BRIGHT, shape: 1, drag: 0 });
       }
     }
     // Dispel evil: rays thrown out of the struck.
