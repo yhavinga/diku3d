@@ -1864,7 +1864,13 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
           // A cubic from the hand, bowing out to one side, into the chest --
           // and weaving across it as it goes, which is what makes a bolt
           // dart rather than glide. The weave dies at both ends.
-          const p1 = tmpA.copy(src).addScaledVector(b.bend, Math.min(3, dist * 0.35));
+          // Yours bow far less and lead forward: the first control point is
+          // what the bolt heads for as it leaves, and a pure sideways bow of
+          // 1.6 m half a metre from the lens took it out of the frame at the
+          // top right and back in -- a beam out of the sky, not out of the hand.
+          const p1 = fx.from.player
+            ? tmpA.lerpVectors(src, aim, 0.3).addScaledVector(b.bend, Math.min(1, dist * 0.12))
+            : tmpA.copy(src).addScaledVector(b.bend, Math.min(3, dist * 0.35));
           const p2 = tmpB.copy(aim).addScaledVector(b.bend2, Math.min(2, dist * 0.25));
           const s = 1 - bu;
           const head = b.head.set(

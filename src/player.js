@@ -2,7 +2,8 @@
  * First-person movement. Ground height comes from the platform list the builder
  * hands over (floors, passages, stair treads) rather than from raycasts, so a
  * flight of twenty-two steps costs the same as flat ground. Walls are axis-
- * aligned boxes resolved along the shallowest penetration.
+ * aligned boxes resolved along the shallowest penetration; a collider with an
+ * `r` is round (a fountain's drum) and pushes out along its radius instead.
  */
 
 import * as THREE from 'three';
@@ -48,6 +49,18 @@ class SpatialGrid {
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
+
+/** Push a point out of a round collider (radius `r` about its box's centre), along the radius. */
+function outOfCircle(c, x, z) {
+  const cx = (c.x0 + c.x1) / 2; const cz = (c.z0 + c.z1) / 2;
+  const dx = x - cx; const dz = z - cz;
+  const d = Math.hypot(dx, dz);
+  const R = c.r + RADIUS;
+  if (d >= R) return [x, z];
+  // At the exact centre there is no radius to follow; any way out will do.
+  if (d < 1e-6) return [cx + R, cz];
+  return [cx + (dx / d) * R, cz + (dz / d) * R];
+}
 
 // The camera looks down -Z at yaw 0, so facing along a segment is the atan2
 // of the NEGATED offset -- the sign that has shipped wrong twice before.
@@ -147,6 +160,11 @@ export class Player {
       if (c.door && c.door.open) continue;
       if (c.y1 <= feetY + STEP_UP || c.y0 >= headY) continue;
       if (x < c.x0 - RADIUS || x > c.x1 + RADIUS || z < c.z0 - RADIUS || z > c.z1 + RADIUS) continue;
+      if (c.r) {
+        const [ox, oz] = outOfCircle(c, x, z);
+        x = ox; z = oz;
+        continue;
+      }
       const px = Math.min(x - (c.x0 - RADIUS), (c.x1 + RADIUS) - x);
       const pz = Math.min(z - (c.z0 - RADIUS), (c.z1 + RADIUS) - z);
       if (px < pz) x += (x < (c.x0 + c.x1) / 2 ? -px : px);
@@ -371,6 +389,7 @@ export class Player {
     const stepZ = wishZ * speed * dt;
     this.position.x += stepX;
     this.position.z += stepZ;
+    this.skirt(stepX, stepZ, feetY);
     this.resolveCollisions(feetY);
 
     // vertical
@@ -413,6 +432,34 @@ export class Player {
     this.camera.rotation.z = -inputX * 0.022 * this.bob;
   }
 
+  /**
+   * Walking into something round turns the part of the step that goes into
+   * it into a step round it. Pushing out along the radius alone slides you
+   * off at an angle, but straight at the centre the push is exactly
+   * backwards: held W down the temple's axis stopped dead against the
+   * fountain for as long as it was held. Only within 45 degrees of head-on,
+   * so brushing past still feels like brushing past.
+   */
+  skirt(stepX, stepZ, feetY) {
+    const items = this.colliders.near(this.position.x, this.position.z, this._scratch);
+    const headY = feetY + HEIGHT;
+    for (const c of items) {
+      if (!c.r || c.y1 <= feetY + STEP_UP || c.y0 >= headY) continue;
+      const cx = (c.x0 + c.x1) / 2; const cz = (c.z0 + c.z1) / 2;
+      const dx = this.position.x - cx; const dz = this.position.z - cz;
+      const d = Math.hypot(dx, dz);
+      if (d >= c.r + RADIUS || d < 1e-6) continue;
+      const nx = dx / d; const nz = dz / d;
+      const into = -(stepX * nx + stepZ * nz);
+      const along = stepX * -nz + stepZ * nx;
+      if (into <= 0 || Math.abs(along) >= into) continue;
+      // Dead centre has no side to prefer; take the right-hand one.
+      const side = along < -1e-6 ? -1 : 1;
+      this.position.x += -nz * side * (into - Math.abs(along));
+      this.position.z += nx * side * (into - Math.abs(along));
+    }
+  }
+
   resolveCollisions(feetY) {
     const items = this.colliders.near(this.position.x, this.position.z, this._scratch);
     const headY = feetY + HEIGHT;
@@ -421,6 +468,11 @@ export class Player {
       if (c.y1 <= feetY + STEP_UP || c.y0 >= headY) continue;
       const x = this.position.x; const z = this.position.z;
       if (x < c.x0 - RADIUS || x > c.x1 + RADIUS || z < c.z0 - RADIUS || z > c.z1 + RADIUS) continue;
+      if (c.r) {
+        const [ox, oz] = outOfCircle(c, x, z);
+        this.position.x = ox; this.position.z = oz;
+        continue;
+      }
       const px = Math.min(x - (c.x0 - RADIUS), (c.x1 + RADIUS) - x);
       const pz = Math.min(z - (c.z0 - RADIUS), (c.z1 + RADIUS) - z);
       if (px < pz) this.position.x += (x < (c.x0 + c.x1) / 2 ? -px : px);

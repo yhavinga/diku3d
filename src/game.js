@@ -1219,6 +1219,13 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   state.name = 'you';
   const position = { x: 0, y: 0, z: 0 };
   const facing = { x: 0, y: 0, z: -1 };
+  // `position` is your eye, 1.72 m up; a mobile's is its feet. Reach is
+  // measured feet to feet, as between two mobiles. Eye to feet, MELEE's 3.2 m
+  // was 2.7 m on the ground -- and the kick, which measures on the ground,
+  // still reached: from 2.7 to 3.2 m a fight was on, nobody swung, a sentinel
+  // never closed in, and the only thing that happened was the kick.
+  const feetAt = { x: 0, y: 0, z: 0 };
+  const feet = () => { feetAt.x = position.x; feetAt.y = position.y - 1.72; feetAt.z = position.z; return feetAt; };
 
   Object.defineProperty(state, 'expToLevel', { get: () => expToLevel(state), enumerable: true });
   Object.defineProperty(state, 'ac', { get: () => getAc(state), enumerable: true });
@@ -1415,7 +1422,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
      */
     strikeBack(victim, ch) {
       if (victim.fighting || !isAwake(victim)) return;
-      if (dist2(posOf(victim), posOf(ch)) > MELEE * MELEE) {
+      if (dist2(victim === state ? feet() : victim.slot.pos, ch === state ? feet() : ch.slot.pos) > MELEE * MELEE) {
         ctx.setFighting(victim, ch);
         if (!ch.fighting) ctx.setFighting(ch, victim);
         return;
@@ -1808,7 +1815,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       // dead: IS_AWAKE is false and violence_update drops you out of the fight.
       if (!isAwake(state)) ctx.stopFighting(state, false);
       else if (mob.position === POS.DEAD || dist2(mob.slot.pos, position) > BREAK * BREAK) breakOff(true);
-      else if (dist2(mob.slot.pos, position) <= MELEE * MELEE) multiHit(state, mob, undefined, ctx);
+      else if (dist2(mob.slot.pos, feet()) <= MELEE * MELEE) multiHit(state, mob, undefined, ctx);
     }
     for (const slot of mobs) {
       const mob = slot.instance;
@@ -1816,7 +1823,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (!isAwake(mob)) { ctx.stopFighting(mob, false); continue; }
       // Whoever it is fighting: you, or -- a cityguard answering a scream -- another mobile.
       const victim = mob.fighting;
-      const there = victim === state ? position : (victim.slot && !victim.slot.dead ? victim.slot.pos : null);
+      const there = victim === state ? feet() : (victim.slot && !victim.slot.dead ? victim.slot.pos : null);
       if (!there || victim.position === POS.DEAD) { ctx.stopFighting(mob, false); continue; }
       if (dist2(slot.pos, there) > BREAK * BREAK) { ctx.stopFighting(mob); continue; }
       if (dist2(slot.pos, there) > MELEE * MELEE) continue;
@@ -1841,7 +1848,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (rch.proto !== ch.proto && rng.bits(3) !== 0) continue;
       if (!canSee(rch, victim)) continue;
       if (victim === state && invulnerable > 0) continue;
-      const there = victim === state ? position : victim.slot.pos;
+      const there = victim === state ? feet() : victim.slot.pos;
       if (dist2(slot.pos, there) > MELEE * MELEE) {
         ctx.setFighting(rch, victim);
         if (!victim.fighting) ctx.setFighting(victim, rch);
@@ -1865,7 +1872,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       // used to land from across the street. Out of reach, the mobile only
       // picks the fight (set_fighting, both ways, as damage() would) and
       // comes at you; the violence pulse swings once it is there.
-      if (dist2(slot.pos, position) > MELEE * MELEE) {
+      if (dist2(slot.pos, feet()) > MELEE * MELEE) {
         ctx.setFighting(mob, state);
         if (!state.fighting) ctx.setFighting(state, mob);
         continue;
@@ -2308,7 +2315,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     if (state.position < POS.RESTING) return { ok: false, text: "You can't do that right now." };
     if (!slot || slot.dead) return { ok: false, text: 'They aren\'t here.' };
     const mob = wake(slot);
-    if (dist2(slot.pos, position) > MELEE * MELEE && state.fighting !== mob) {
+    if (dist2(slot.pos, feet()) > MELEE * MELEE && state.fighting !== mob) {
       ctx.setFighting(state, mob);
       if (!mob.fighting) ctx.setFighting(mob, state);
       return { ok: true, text: `You attack ${mob.name}.` };
@@ -2650,13 +2657,13 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     willSwing(slot) {
       const mob = slot.instance;
       return !!(mob && !slot.dead && mob.fighting === state && isAwake(mob)
-        && invulnerable <= 0 && dist2(slot.pos, position) <= MELEE * MELEE);
+        && invulnerable <= 0 && dist2(slot.pos, feet()) <= MELEE * MELEE);
     },
 
     /** Would you swing on the next round? */
     playerWillSwing() {
       const mob = state.fighting;
-      return !!(mob && isAwake(state) && !mob.slot.dead && dist2(mob.slot.pos, position) <= MELEE * MELEE);
+      return !!(mob && isAwake(state) && !mob.slot.dead && dist2(mob.slot.pos, feet()) <= MELEE * MELEE);
     },
 
     recall: () => recall(false),

@@ -609,9 +609,15 @@ class ViewModel {
     this.casting = { t: 0, windup: Math.max(0.2, windup), lost };
   }
 
-  /** Where a spell sits in your hand: just past the knuckles, in world space. */
+  /**
+   * Where a spell sits in your hand: just past the knuckles, in world space.
+   * The offset is in the hand's own frame (knuckles +Y, back of the hand +Z;
+   * see the fist in `proceduralWeapon`). It used to be added in the camera's
+   * frame, which put the gathering light 7 cm straight up the screen from
+   * the fist -- 100 px clear of it at 1280x720, so it hung in the air.
+   */
   castPoint(out) {
-    return out.set(this.hand.position.x - 0.03, this.hand.position.y + 0.07, this.hand.position.z - 0.08)
+    return out.set(0, 0.06, -0.02).applyQuaternion(this.hand.quaternion).add(this.hand.position)
       .applyQuaternion(this.camera.quaternion).add(this.camera.position);
   }
 
