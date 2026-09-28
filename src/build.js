@@ -1806,7 +1806,7 @@ export function buildScene(world, layout, materials, assets = null) {
       // ... It looks as if the beer is still on tap!!!" The one place in the
       // neighborhood with a sign out and a light at the door.
       const pub = hood === 'room' && TAPROOM.test(room.name);
-      if (isShop(room) || pub) buildShopSign({ room, pos, sides, instances, model, chunk });
+      if (isShop(room) || pub) buildShopSign({ room, pos, sides, instances, model, chunk, decor });
       if (pub) {
         const d = [0, 1, 2, 3].find((k) => sides[k] && sides[k].kind === 'alley');
         if (d !== undefined) {
@@ -2906,7 +2906,7 @@ const SIGN_CLEAR = 2.6;
  * street to hang anything over, so it gets none: that is the bars and back
  * rooms in Midgaard's temple block, which are reached through other rooms.
  */
-function buildShopSign({ room, pos, sides, instances, model, chunk }) {
+function buildShopSign({ room, pos, sides, instances, model, chunk, decor }) {
   if (!instances) return;
   // A missing model means no sign. Procedural ironwork and a painted board is
   // not worth inventing for something this small.
@@ -2926,14 +2926,17 @@ function buildShopSign({ room, pos, sides, instances, model, chunk }) {
   // that off the model's own bounds rather than trusting it: a regenerated
   // sign that sits lower has to be lifted, not left hanging in the doorway.
   const bottom = instances.library.get(sign)?.bounds?.min.y ?? 0;
-  instances.add(sign, {
+  const placed = {
     x: pos.x + dx * SHELL + (dx ? 0 : along),
     y: pos.y + Math.max(0, SIGN_CLEAR - bottom),
     z: pos.z + dz * SHELL + (dz ? 0 : along),
     // `FACE_ROT` turns a model's -z towards a direction; the arm reaches the
     // other way, so half a turn past that swings it out over the street.
     rotY: FACE_ROT[dir] + Math.PI,
-  }, chunk);
+  };
+  instances.add(sign, placed, chunk);
+  // actors.js paints the shop's name on the board (its `shopSigns`).
+  decor.push({ kind: 'shopSign', vnum: room.vnum, name: room.name, ...placed });
 }
 
 /**

@@ -365,6 +365,7 @@ const state = {
   // waiting for the weather to turn -- see the note on the hook itself.
   forcedRain: null,
   showStats: false,
+  worldStats: null,
   roomVnum: null,
   paused: true,
 };
@@ -374,7 +375,6 @@ const dom = {
   loadingText: document.getElementById('loading-text'),
   loadingBar: document.getElementById('loading-bar'),
   title: document.getElementById('title'),
-  titleStats: document.getElementById('title-stats'),
   enter: document.getElementById('enter'),
   fade: document.getElementById('fade'),
   hint: document.getElementById('hint'),
@@ -957,7 +957,7 @@ async function boot() {
       else player.controls.lock();
     }
     if (event.code === 'Escape' && options.open) options.close();
-    if (event.code === 'KeyF') state.showStats = !state.showStats;
+    if (event.code === 'KeyF') { state.showStats = !state.showStats; hud.setDebug(state.showStats); }
     if (event.code === 'KeyP') {
       const names = Object.keys(PRESETS);
       const next = names[(names.indexOf(quality.name) + 1) % names.length];
@@ -1272,7 +1272,7 @@ async function boot() {
     if (state.showStats) {
       const info = renderer.info.render;
       hud.setStats(`${fps.toFixed(0)} fps · ${info.calls} draws · ${(info.triangles / 1000).toFixed(0)}k tris`
-        + ` · ${quality.describe()} · ${state.time}`);
+        + ` · ${quality.describe()} · ${state.time}${state.worldStats ? ` · ${state.worldStats}` : ''}`);
     } else {
       hud.setStats('');
     }
@@ -1542,30 +1542,101 @@ async function boot() {
       // Face whatever is worth looking at: a prop or mobile in the room if
       // there is one, otherwise down the room's first exit.
       let aim = null;
+      let subject = null;
       let best = Infinity;
       for (const item of actors.interactables) {
         const d2 = item.position.distanceToSquared(info.center);
-        if (d2 < best && d2 < 60) { best = d2; aim = item.position; }
+        if (d2 < best && d2 < 60) { best = d2; aim = item.position; subject = item.figure || null; }
       }
-      const back = options.back ?? (aim ? 4.2 : 0);
+      // A mobile walks: aim at where it is now, not where it was reset.
+      if (subject) aim = subject.object.position.clone().setY(subject.object.position.y + subject.height * 0.6);
       // The camera looks down -Z at yaw 0, so its forward is (-sin, 0, -cos).
       // Facing a point therefore needs atan2 of the *negated* offset, and
       // standing back from it means moving along +(sin, cos).
       let yaw = options.yaw;
-      if (yaw === undefined) {
-        if (aim) yaw = Math.atan2(info.center.x - aim.x, info.center.z - aim.z);
-        else {
+      let at = { x: info.center.x, z: info.center.z };
+      if (yaw === undefined && aim) {
+        const stand = this.vantage(place.vnum, aim, subject, options.back);
+        yaw = stand.yaw; at = stand;
+      } else {
+        if (yaw === undefined) {
           const dir = info.room.exits.findIndex((e, i) => e && i < 4);
           yaw = dir >= 0 ? Math.atan2(-DIR_STEP[dir][0], -DIR_STEP[dir][2]) : 0;
         }
+        const back = options.back ?? (aim ? 4.2 : 0);
+        at = { x: info.center.x + Math.sin(yaw) * back, z: info.center.z + Math.cos(yaw) * back };
       }
-      this.look(
-        info.center.x + Math.sin(yaw) * back,
-        info.center.y,
-        info.center.z + Math.cos(yaw) * back,
-        yaw, options.pitch ?? -0.04,
-      );
+      this.look(at.x, info.center.y, at.z, yaw, options.pitch ?? -0.04);
       return { vnum: place.vnum, room: info.room.name, why: place.why, facing: aim ? 'a subject' : 'an exit' };
+    },
+
+    /**
+     * Where to stand to look at `aim` in room `vnum`: on open floor in that
+     * room, with nothing solid and nobody between the eye and the subject,
+     * and not inside anyone. Backing a fixed 4.2 m away from the room's
+     * centre put the camera through the wall of a small room (#3002, the
+     * HUD then naming whatever was behind it) and inside the sand worm.
+     * Tries a fan of bearings round the subject, nearest the old one first.
+     */
+    vantage(vnum, aim, subject = null, want = undefined) {
+      const info = built.rooms.get(vnum);
+      const nav = actors.nav;
+      const level = info.cell.level;
+      const eye = info.center.y + 1.72;
+      const base = Math.atan2(info.center.x - aim.x, info.center.z - aim.z);
+      const ideal = want ?? 4.2;
+      const bodies = actors.figures.filter((f) => f !== subject && !(f.m && (f.m.gone || f.m.dead)))
+        .map((f) => ({ x: f.object.position.x, z: f.object.position.z, r: (f.body ? f.body.r + f.body.h : 0.35) }))
+        .filter((b) => Math.hypot(b.x - aim.x, b.z - aim.z) < 14);
+      const reach = subject && subject.body ? subject.body.r + subject.body.h : 0.3;
+      const stands = [];
+      for (const turn of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4, 1.9, -1.9, 2.4, -2.4, Math.PI]) {
+        for (const d of [ideal, ideal - 0.8, ideal + 1, ideal - 1.4, ideal + 2]) {
+          if (d < reach + 1.2) continue;
+          const yaw = base + turn;
+          const x = aim.x + Math.sin(yaw) * d; const z = aim.z + Math.cos(yaw) * d;
+          if (!nav.sample(x, z, level)) continue;
+          // A metre of floor all round, or the near wall fills half the frame.
+          let cramped = false;
+          for (let k = 0; k < 8 && !cramped; k++) {
+            if (!nav.sample(x + Math.cos(k * Math.PI / 4) * 1.1, z + Math.sin(k * Math.PI / 4) * 1.1, level)) cramped = true;
+          }
+          if (cramped) continue;
+          // Up to the near side of the subject: a fountain's own collider is
+          // not in the way of looking at the fountain.
+          const near = Math.max(0.1, (d - (subject ? reach : 2.2)) / d);
+          if (nav.sightBlocked(x, eye, z, x + (aim.x - x) * near, eye + (aim.y - eye) * near, z + (aim.z - z) * near)) continue;
+          // Nobody within arm's reach of the eye, nor standing in the line.
+          let crowded = false;
+          for (const b of bodies) {
+            const dx = aim.x - x; const dz = aim.z - z;
+            const t = Math.max(0, Math.min(1, ((b.x - x) * dx + (b.z - z) * dz) / (dx * dx + dz * dz)));
+            const gap = Math.hypot(b.x - (x + dx * t), b.z - (z + dz * t));
+            if (Math.hypot(b.x - x, b.z - z) < b.r + 0.9 || gap < b.r + 0.25) { crowded = true; break; }
+          }
+          if (crowded) continue;
+          const score = Math.abs(turn) + Math.abs(d - ideal) * 0.6 + (nav.roomAt(x, info.center.y, z) === vnum ? 0 : 3);
+          stands.push({ x, z, yaw, score, clear: d * near });
+        }
+      }
+      // The colliders are the walls you walk into, not everything you see:
+      // a temple column has none, and stood square in front of the
+      // guildmaster. So the survivors are checked against the built world
+      // itself, best first, and the first clear one wins.
+      stands.sort((a, b) => a.score - b.score);
+      const ray = new THREE.Raycaster();
+      const from = new THREE.Vector3();
+      const to = new THREE.Vector3();
+      for (const stand of stands.slice(0, 24)) {
+        from.set(stand.x, eye, stand.z);
+        to.copy(aim).sub(from);
+        const length = to.length();
+        ray.set(from, to.normalize());
+        ray.far = Math.min(length, stand.clear + 0.3);
+        if (!ray.intersectObject(built.group, true).length) return stand;
+      }
+      // Nowhere clear: the room's own centre, still facing the subject.
+      return stands[0] || { x: info.center.x, z: info.center.z, yaw: base };
     },
 
     look(x, y, z, yaw = 0, pitch = 0) {
@@ -1585,11 +1656,12 @@ async function boot() {
 
   await progress(1, 'ready');
   dom.loading.classList.add('hidden');
-  // The triangle count is rounded because an indexed geometry's triangles are
-  // index.count/3 and the sum is taken over position.count/3, so it comes out
-  // fractional: the title used to read "1,454,852.667 triangles".
-  dom.titleStats.textContent = `${layout.stats.placed} rooms · ${layout.stats.alleys + layout.stats.stairs} passages · `
-    + `${layout.stats.portals} archways · ${Math.round(built.stats.triangles).toLocaleString()} triangles`;
+  // What the build came to belongs with the frame rate on the stats overlay
+  // (F), not on the title, where it read as a spec sheet. The triangle count is
+  // rounded because an indexed geometry's triangles are index.count/3 and the
+  // sum is taken over position.count/3, so it comes out fractional.
+  state.worldStats = `${layout.stats.placed} rooms · ${layout.stats.alleys + layout.stats.stairs} passages · `
+    + `${layout.stats.portals} archways · ${(built.stats.triangles / 1e6).toFixed(2)}M tris built`;
   dom.title.classList.remove('hidden');
   frame();
 }

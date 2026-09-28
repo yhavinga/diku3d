@@ -16,7 +16,7 @@
  * and this only decides what colour they are and how long they stay.
  */
 
-import { WEAR_NAME, MERC, armourWord } from './game.js';
+import { WEAR_NAME, MERC, armourWord, waysPhrase } from './game.js';
 import { createConsole } from './console.js';
 
 const CSS = `
@@ -386,7 +386,8 @@ export function createGameUi(game) {
   // -- gates ----------------------------------------------------------------
   const gatesPanel = el('div', 'panel');
   gatesPanel.id = 'g-gates';
-  gatesPanel.appendChild(el('h3', null, 'the ways out'));
+  const gatesTitle = el('h3', null, 'the way out');
+  gatesPanel.appendChild(gatesTitle);
   const gatesList = el('ul');
   gatesPanel.appendChild(gatesList);
   root.appendChild(gatesPanel);
@@ -1054,18 +1055,35 @@ export function createGameUi(game) {
   }
 
   // -- the gate board -------------------------------------------------------
+  // Only the gate you are standing at: the room it leaves from or the one its
+  // warden stands in. A running list of every gate seen so far put "Outside the
+  // West Gate" on the panel at the East Gate, and the executioner's stair over
+  // the Grunting Boar's fireplace.
+  let gatesRoom;
   function drawGates() {
-    const seen = game.gates.filter((gate) => gate.seen || gate.open);
-    gatesPanel.classList.toggle('on', seen.length > 0);
+    const room = game.state.roomVnum;
+    gatesRoom = room;
+    const byWarden = new Map();
+    for (const gate of game.gates) {
+      if (gate.vnum !== room && gate.wardenRoom !== room) continue;
+      if (!byWarden.has(gate.warden)) byWarden.set(gate.warden, []);
+      byWarden.get(gate.warden).push(gate);
+    }
+    gatesPanel.classList.toggle('on', byWarden.size > 0);
     gatesList.textContent = '';
-    for (const gate of seen) {
-      const li = el('li', gate.open ? 'open' : '');
+    let count = 0;
+    for (const list of byWarden.values()) {
+      const open = list.every((gate) => gate.open);
+      const ways = waysPhrase(list).replace(/^the ways? /, '');
+      count += new Set(list.map((gate) => gate.way)).size;
+      const li = el('li', open ? 'open' : '');
       li.append(
-        el('span', null, gate.name),
-        el('em', null, gate.open ? 'open' : `${gate.wardenName} · ${gate.wardenLevel}`),
+        el('span', null, `${ways.charAt(0).toUpperCase()}${ways.slice(1)}, beyond the map`),
+        el('em', null, open ? 'open' : `${list[0].wardenName} · ${list[0].wardenLevel}`),
       );
       gatesList.appendChild(li);
     }
+    gatesTitle.textContent = count > 1 ? 'the ways out' : 'the way out';
   }
 
   // -- the spell bar ---------------------------------------------------------
@@ -1342,6 +1360,7 @@ export function createGameUi(game) {
     const span = 1000;
     xpFill.style.width = width(span - Math.min(span, s.expToLevel), span);
     if (s.level !== lastLevel) { lastLevel = s.level; drawGates(); }
+    if (s.roomVnum !== gatesRoom) drawGates();
 
     let t = game.target();
     // The killing blow is still on its way when the rules already have the
@@ -1385,7 +1404,7 @@ export function createGameUi(game) {
     if (fhead) {
       focusPlate.style.transform = `translate(${fhead.x.toFixed(1)}px, ${fhead.y.toFixed(1)}px) translate(-50%, -100%)`;
       if (focusName.textContent !== f.name) focusName.textContent = f.name;
-      const sub = f.warden ? `level ${f.level} · warden of ${f.warden.name}`
+      const sub = f.warden ? `level ${f.level} · holds ${f.holds}`
         : `level ${f.level}${f.shop ? ' · shopkeeper' : ''}${f.aggressive ? ' · aggressive' : ''}`;
       if (focusSub.textContent !== sub) focusSub.textContent = sub;
       focusSub.classList.toggle('warden', !!f.warden);

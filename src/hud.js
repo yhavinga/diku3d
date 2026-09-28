@@ -347,7 +347,8 @@ export class Hud {
     if (!room || room.vnum === this.currentVnum) return;
     this.currentVnum = room.vnum;
     this.el.title.textContent = room.name;
-    this.el.area.textContent = `${room.area} · #${room.vnum} · ${SECTOR_NAME[room.sector] || 'somewhere'}`;
+    this.room = room;
+    this.drawArea();
     this.fullText = room.description.replace(/\s*\n\s*/g, ' ').trim();
     this.typed = 0;
     this.el.desc.textContent = '';
@@ -400,6 +401,23 @@ export class Hud {
     this.el.toast.textContent = text;
     this.el.toast.classList.add('visible');
     this.toastTimer = 2.6;
+  }
+
+  /**
+   * The line under the room's name is the area. The vnum and the raw sector
+   * are the builder's view -- "SEWER · #7220 · FOREST" read as a bug to anyone
+   * else -- so they only show with the stats overlay (F).
+   */
+  setDebug(on) {
+    this.debug = !!on;
+    this.drawArea();
+  }
+
+  drawArea() {
+    const room = this.room;
+    if (!room) return;
+    this.el.area.textContent = this.debug
+      ? `${room.area} · #${room.vnum} · ${SECTOR_NAME[room.sector] || 'somewhere'}` : room.area;
   }
 
   setStats(text) {
