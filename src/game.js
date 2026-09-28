@@ -986,10 +986,18 @@ const WARDEN_MIN_LEVEL = 5;
  * and room names are not noun phrases -- "holds the way out of Outside the West
  * Gate of Midgaard" is what reading them as one produced.
  */
-export function waysPhrase(gates) {
-  const ways = [...new Set(gates.map((g) => g.way))];
+export function waysPhrase(gates, lead = null) {
+  // `lead(gate)` words a gate from where the reader stands. A warden can hold
+  // an exit of the room next door -- the sailor in the Abandoned Warehouse
+  // holds the east end of the alley -- and bare "east" in the warehouse named
+  // a way the warehouse does not have. Its own ways first, then the others.
+  const worded = gates.map((g) => (lead && lead(g)) || { way: g.way, near: true });
+  worded.sort((a, b) => b.near - a.near);
+  const ways = [...new Set(worded.map((w) => w.way))];
   if (!ways.length) return '';
-  const list = ways.length === 1 ? ways[0] : `${ways.slice(0, -1).join(', ')} and ${ways[ways.length - 1]}`;
+  // "up, and north then east": the comma keeps a two-step way in one piece.
+  const joint = ways.some((w) => w.includes(' then ')) ? ', and ' : ' and ';
+  const list = ways.length === 1 ? ways[0] : `${ways.slice(0, -1).join(', ')}${joint}${ways[ways.length - 1]}`;
   return `the way${ways.length > 1 ? 's' : ''} ${list}`;
 }
 const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
@@ -1312,6 +1320,13 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     });
   }
   gates.sort((a, b) => a.wardenLevel - b.wardenLevel || a.vnum - b.vnum);
+  /** waysPhrase's `lead` for someone standing in room `vnum`. */
+  const wayFrom = (vnum) => (gate) => {
+    if (gate.vnum === vnum) return { way: gate.way, near: true };
+    const room = world.rooms.get(vnum);
+    const dir = room ? room.exits.findIndex((e) => e && e.to === gate.vnum) : -1;
+    return dir >= 0 ? { way: `${DIR_NAME[dir]} then ${gate.way}`, near: false } : null;
+  };
   /** The roads out of the city: the gates in the open air. Those are the ending. */
   const roads = gates.filter((g) => g.outdoor);
 
@@ -1515,7 +1530,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (gate.outdoor && !roads.some((g) => g !== gate && g.open)) firstRoad = true;
     }
     if (opened.length) {
-      const ways = waysPhrase(opened);
+      const ways = waysPhrase(opened, wayFrom(state.roomVnum));
       emit({
         kind: 'gate', vnum: opened[0].vnum, to: opened[0].to, name: opened[0].name, gates: opened,
         text: `${capital(ways)} ${opened.length > 1 && ways.startsWith('the ways') ? 'are' : 'is'} no longer held.`,
@@ -1605,6 +1620,26 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
    * nobody swinging at you -- long enough to turn round and run, which is the
    * same bargain in a different shape.
    */
+  /**
+   * fight.c's violence_update ends a fight whenever the two are no longer in
+   * one room: stop_fighting, not a flight, so it costs nothing. A fight here
+   * spans a few metres of street, so it holds while the foe is in this room
+   * or the next one, or within BREAK -- past all of that you were carried
+   * off (recall, a portal, a debug jump), and the troll's plate used to ride
+   * along through two rooms of another area saying "fighting you".
+   */
+  function loseTouch() {
+    const mob = state.fighting;
+    if (!mob || !mob.slot) return;
+    if (dist2(mob.slot.pos, position) <= BREAK * BREAK) return;
+    const here = world.rooms.get(state.roomVnum);
+    const there = world.rooms.get(mob.slot.roomVnum);
+    if (here && here === there) return;
+    const joined = (a, b) => !!(a && b && a.exits.some((e) => e && e.to === b.vnum));
+    if (joined(here, there) || joined(there, here)) return;
+    ctx.stopFighting(state);
+  }
+
   function breakOff(forced) {
     if (!state.fighting) return;
     const name = state.fighting.name;
@@ -2472,6 +2507,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
     const room = nearestRoom(position);
     if (room) state.roomVnum = room.vnum;
+    loseTouch();
 
     // Walking is the body's, not a typed command, so what a command would end
     // ends when you walk: resting and sleeping (you get up) and hiding.
@@ -2501,7 +2537,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       const warden = mobs.find((slot) => slot.record === gate.warden && !slot.dead);
       const level = warden ? wake(warden).level : gate.wardenLevel;
       for (const g of held) { g.seen = true; g.wardenLevel = level; }
-      emit({ kind: 'gate-seen', gate, gates: held, text: `${capital(gate.wardenName)} holds ${waysPhrase(held)}.` });
+      emit({ kind: 'gate-seen', gate, gates: held, text: `${capital(gate.wardenName)} holds ${waysPhrase(held, wayFrom(state.roomVnum))}.` });
     }
 
     // db.c rolls a mobile the moment it is reset into the world; here it waits
@@ -2527,8 +2563,11 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
   const game = {
     state,
+    world,
     events,
     gates,
+    /** waysPhrase's `lead` for room `vnum`: how a gate is reached from there. */
+    wayFrom,
     roads,
     mobs,
     ground,
@@ -2625,6 +2664,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
     /** Whoever you are fighting, or looking at, with the mud's condition line. */
     target() {
+      loseTouch();
       const mob = currentTarget();
       if (!mob) return null;
       return {
@@ -2634,7 +2674,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
         fighting: state.fighting === mob,
         aggressive: !!(mob.act & ACT_AGGRESSIVE),
         warden: gates.find((g) => !g.open && g.warden === mob.slot.record) || null,
-        holds: waysPhrase(gates.filter((g) => !g.open && g.warden === mob.slot.record)),
+        holds: waysPhrase(gates.filter((g) => !g.open && g.warden === mob.slot.record), wayFrom(state.roomVnum)),
         shop: !!mob.slot.record.shop,
         focused: mob.slot === focusSlot,
         slot: mob.slot,
@@ -2659,7 +2699,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
         name: mob.name, level: mob.level, aggressive: !!(mob.act & ACT_AGGRESSIVE),
         shop: !!slot.record.shop, fighting: state.fighting === mob,
         warden: gates.find((g) => !g.open && g.warden === slot.record) || null, slot,
-        holds: waysPhrase(gates.filter((g) => !g.open && g.warden === slot.record)),
+        holds: waysPhrase(gates.filter((g) => !g.open && g.warden === slot.record), wayFrom(state.roomVnum)),
       };
     },
 

@@ -43,11 +43,30 @@
     text-shadow: 0 1px 8px rgba(0,0,0,0.9);
   }
 
+  /* The longest room in the nine areas (the temple, 547 characters) is ten
+     lines at 1280x720, so the panel always holds the whole of the prose. The
+     cap is only for a window far smaller than that, and it scrolls rather
+     than clips: a mud's text is never cut off. */
   #desc-block {
     position: absolute; left: 26px; bottom: 26px; max-width: 40vw;
+    max-height: calc(100vh - 150px); overflow-y: auto;
     padding: 15px 18px 14px;
   }
   #room-desc { font-size: 15.5px; line-height: 1.58; margin: 0; color: #e7dcc4; }
+  /* Arriving reads the room top to bottom, the way a terminal printed it --
+     but the text is all there from the first frame, so the panel's size never
+     changes under the log and no still can catch it half written. */
+  #room-desc.reveal {
+    -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 42%, transparent 58%);
+    mask-image: linear-gradient(180deg, #000 0%, #000 42%, transparent 58%);
+    -webkit-mask-size: 100% 300%; mask-size: 100% 300%;
+    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+    animation: desc-reveal 700ms cubic-bezier(.3,.6,.4,1) both;
+  }
+  @keyframes desc-reveal {
+    from { -webkit-mask-position: 0 100%; mask-position: 0 100%; }
+    to { -webkit-mask-position: 0 0; mask-position: 0 0; }
+  }
   #exits {
     margin-top: 9px; font-family: var(--mono); font-size: 11px;
     letter-spacing: 0.1em; color: var(--gold); opacity: 0.75;
@@ -74,7 +93,7 @@
       0 -1px 2px rgba(0,0,0,0.85), 1px 0 2px rgba(0,0,0,0.85), -1px 0 2px rgba(0,0,0,0.85),
       0 2px 12px rgba(0,0,0,0.7);
   }
-  body.g-caster #look { bottom: 136px; }
+  body.g-caster #look { bottom: calc(var(--g-over-bar, 112px) + 24px); }
   body.g-fighting #look { visibility: hidden; }
   .look-name { display: block; font-size: 19px; }
   .look-sub { display: block; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; color: var(--gold); opacity: 0.8; margin-top: 3px; text-transform: uppercase; }
@@ -119,14 +138,28 @@
     z-index: 30; transition: opacity 700ms ease;
   }
   #loading.hidden, #title.hidden { opacity: 0; pointer-events: none; }
+  /* The title card stands in front of the world (title.js drives a camera
+     through it), so it has no backdrop of its own: a vignette to hold the
+     type, and a veil that is the black between one shot and the next. */
+  #title { background: none; align-items: flex-start; padding-left: max(56px, 7vw);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.75); }
+  #title::before {
+    content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      linear-gradient(90deg, rgba(4,4,7,0.88) 0%, rgba(4,4,7,0.78) 32%, rgba(4,4,7,0.42) 50%, rgba(4,4,7,0) 66%),
+      linear-gradient(to top, rgba(4,4,7,0.6) 0%, rgba(4,4,7,0) 18%),
+      radial-gradient(ellipse 90% 85% at 60% 50%, rgba(3,3,5,0) 55%, rgba(3,3,5,0.55) 100%);
+  }
+  #title-veil { position: absolute; inset: 0; z-index: -2; background: #05060a; pointer-events: none; }
+  body.titling #hud, body.titling #game-ui { visibility: hidden; }
   #loading-text { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; color: var(--gold); opacity: 0.8; text-align: center; }
   #loading-track { width: min(360px, 60vw); height: 2px; background: rgba(224,189,119,0.16); }
   #loading-bar { width: 2%; height: 100%; background: var(--gold); transition: width 220ms ease; }
 
   #title h1 {
-    font-size: clamp(48px, 9vw, 104px); margin: 0; letter-spacing: 0.22em;
-    text-indent: 0.22em; font-weight: 400; color: #f4e7cb;
-    text-shadow: 0 0 42px rgba(224, 160, 80, 0.28);
+    font-size: clamp(44px, 7vw, 96px); margin: 0 0 0 -0.04em; letter-spacing: 0.18em;
+    font-weight: 400; color: #f4e7cb; line-height: 1;
+    text-shadow: 0 0 42px rgba(224, 160, 80, 0.28), 0 2px 10px rgba(0,0,0,0.6);
   }
   #title h2 {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.34em;
@@ -141,9 +174,9 @@
   #enter:hover { transform: translateY(-1px); box-shadow: 0 8px 26px rgba(224,189,119,0.22); }
   #class-pick { margin-top: 14px; display: flex; gap: 4px; align-items: center; pointer-events: auto;
     font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
-  #class-pick span { opacity: 0.45; margin-right: 8px; }
+  #class-pick span { opacity: 0.6; margin-right: 8px; }
   #class-pick button { font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer;
-    color: var(--gold); background: none; border: 1px solid rgba(224,189,119,0.22); padding: 6px 11px; border-radius: 2px;
+    color: var(--gold); background: rgba(8,7,6,0.4); border: 1px solid rgba(224,189,119,0.26); padding: 6px 11px; border-radius: 2px;
     opacity: 0.65; transition: opacity 140ms ease, border-color 140ms ease, background 140ms ease; }
   #class-pick button:hover { opacity: 1; }
   #class-pick button.on { opacity: 1; border-color: rgba(224,189,119,0.8); background: rgba(224,189,119,0.1); }
@@ -154,13 +187,13 @@
   #continue:hover { background: rgba(224,189,119,0.08); }
   #continue[hidden] { display: none; }
   #keys {
-    margin-top: 14px; display: grid; grid-template-columns: auto auto; gap: 5px 20px;
-    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; opacity: 0.45;
+    margin-top: 14px; display: grid; grid-template-columns: auto minmax(0, min(560px, 42vw)); gap: 5px 20px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; opacity: 0.8;
   }
   #keys b { font-weight: 400; color: var(--gold); }
   #credit {
-    position: absolute; bottom: 26px; font-family: var(--mono); font-size: 10px;
-    letter-spacing: 0.12em; opacity: 0.32; text-align: center; line-height: 1.7;
+    position: absolute; bottom: 26px; left: max(56px, 7vw); right: 26px; font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.12em; opacity: 0.6; text-align: left; line-height: 1.7;
   }
 
   #hint {
@@ -215,6 +248,7 @@
 <div id="hint">click to look around</div>
 
 <div id="title" class="hidden">
+  <div id="title-veil"></div>
   <h1>MIDGAARD</h1>
   <h2>DikuMUD · Merc 2.1 · in three dimensions</h2>
   <button id="enter">enter the temple</button>

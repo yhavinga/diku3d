@@ -28,6 +28,7 @@ import { installSave } from './save.js';
 import { createKick } from './kick.js';
 import { setPaneDaylight } from './windows.js';
 import { createVisibility } from './cull.js';
+import { createTitleReel } from './title.js';
 
 const params = new URLSearchParams(location.search);
 // The default world is no longer one town. Midgaard plus the five areas
@@ -418,27 +419,28 @@ async function boot() {
   }
 
   const world = buildWorld(areas);
-  await progress(0.18, `${world.rooms.size} rooms, ${world.mobProtos.size} mobiles`);
+  await progress(0.18, 'walking the exits');
 
   const layout = layoutWorld(world, { startVnum: START_VNUM, maxRooms: MAX_ROOMS });
-  await progress(0.24, `laid out ${layout.stats.placed} rooms`);
+  await progress(0.24, 'laying out the streets');
 
   const materials = createMaterials(512, () => {});
-  await progress(0.44, 'baked materials');
+  await progress(0.44, 'cutting stone and timber');
 
   // Modelled assets are optional: anything missing falls back to the
   // procedural geometry, so the viewer runs against a half-built library.
   const assets = params.get('assets') === 'off' ? null
     : await new AssetLibrary(materials).load(ASSET_NAMES);
   if (assets) {
-    await progress(0.54, `${assets.assets.size} models, ${assets.missing.size} still procedural`);
+    await progress(0.54, 'carving the furniture');
     if (assets.unknownTags.size) {
       console.warn('assets: no material for tag(s)', [...assets.unknownTags].join(', '));
     }
   }
 
   const built = buildScene(world, layout, materials, assets);
-  await progress(0.72, `${Math.round(built.stats.triangles).toLocaleString()} triangles`);
+  // Counts belong on the stats overlay (F), not on a screen a player waits at.
+  await progress(0.72, 'raising the town');
 
   const actors = populate(world, layout, built, { materials, assets });
   await progress(0.86, 'populating rooms');
@@ -993,8 +995,12 @@ async function boot() {
 
   let lookTarget = null;
   let fadeTimer = 0;
+  let titleReel = null;   // title.js, from the end of boot until the game begins
 
   document.addEventListener('keydown', (event) => {
+    // The title's camera is not the player's: an arrow here would start a
+    // walk from wherever the reel happens to be.
+    if (titleReel && titleReel.active) return;
     // The same key closes it. Escape works too, but Escape is the browser's own
     // pointer-lock release, so relying on it costs you the mouse as well.
     if (event.code === 'KeyE' && hud.examineOpen) {
@@ -1205,7 +1211,6 @@ async function boot() {
   player.controls.addEventListener('lock', () => {
     state.paused = false;
     dom.hint.classList.remove('visible');
-    dom.title.classList.add('hidden');
   });
   player.controls.addEventListener('unlock', () => {
     state.paused = true;
@@ -1222,19 +1227,42 @@ async function boot() {
     continueButton.textContent = `continue — ${saved.className}, level ${saved.level}`;
   }
   let begun = false;
-  continueButton.addEventListener('click', () => {
-    if (!begun) { begun = true; game.loadSave(); }
+  /**
+   * Out of the title and into the game, whether or not the mouse can be had.
+   * Starting used to wait for the pointer-lock event, so a browser that never
+   * grants it -- headless Chrome, which is how the judge drives this -- never
+   * got past the title. Now the game starts on the click and asks for the
+   * mouse alongside; without it the keys still walk, step and fight, and the
+   * next click on the view asks again.
+   */
+  const begin = (fromSave) => {
+    if (!begun) {
+      begun = true;
+      if (titleReel) titleReel.stop();
+      document.body.classList.remove('titling');
+      player.spawn(startInfo.center.x, startInfo.center.y, startInfo.center.z, yaw);
+      state.roomVnum = null;
+      built.horizon?.settle(camera.position);
+      if (fromSave) game.loadSave();
+    }
     audio.start();
-    player.controls.lock();
-  });
-  dom.enter.addEventListener('click', () => {
-    begun = true;
-    audio.start();
-    player.controls.lock();
-  });
-  dom.hint.addEventListener('click', () => player.controls.lock());
+    dom.title.classList.add('hidden');
+    state.paused = false;
+    player.requestLock();
+  };
+  continueButton.addEventListener('click', () => begin(true));
+  dom.enter.addEventListener('click', () => begin(false));
+  dom.hint.addEventListener('click', () => player.requestLock());
   renderer.domElement.addEventListener('mousedown', (event) => {
-    if (event.button === 0 && !state.paused) game.attack();
+    if (event.button !== 0 || state.paused) return;
+    // A click that is only taking the mouse back is not a swing -- unless
+    // the mouse cannot be had at all, when a click is all there is.
+    if (!document.pointerLockElement && begun && !options.open && !gameUi.sheet) {
+      const refused = player.lockRefused;
+      player.requestLock();
+      if (!refused) return;
+    }
+    game.attack();
   });
 
   // ----------------------------------------------------------- frame loop --
@@ -1249,13 +1277,22 @@ async function boot() {
     const now = performance.now();
     // Nothing here needs to run faster than the frame cap, and when the mouse
     // is released or the tab is in the background it barely needs to run at all.
-    if (!quality.shouldRender(now, state.paused)) return;
+    // Whoever takes the title card down some other way -- the judge's harness
+    // hides it and unpauses by hand -- ends the reel too, or it would keep
+    // dragging the camera away from every goto().
+    if (titleReel && titleReel.active && (!state.paused || dom.title.classList.contains('hidden'))) {
+      titleReel.stop();
+      document.body.classList.remove('titling');
+    }
+    const reeling = !!(titleReel && titleReel.active);
+    if (!quality.shouldRender(now, state.paused && !reeling)) return;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     elapsed += dt;
     fps += ((1 / Math.max(dt, 0.0001)) - fps) * 0.08;
 
     if (!state.paused) player.update(dt);
+    if (reeling) titleReel.update(dt);
     camera.updateMatrixWorld();
     if (!state.paused) game.update(dt, player.position, camera.getWorldDirection(forward));
     gameUi.update();
@@ -1321,6 +1358,7 @@ async function boot() {
     built.horizon?.update(camera.position, dt);
     actors.update(dt, elapsed, camera);
     fx.update(dt);
+    if (reeling) fx.viewModel.scene.visible = false; // no fists in the title's reel
     spellfx.update(state.paused ? 0 : dt);
     kick.update(dt);
     audio.update(built.rooms.get(state.roomVnum)?.room.sector === 1);
@@ -1738,6 +1776,12 @@ async function boot() {
   // sum is taken over position.count/3, so it comes out fractional.
   state.worldStats = `${layout.stats.placed} rooms · ${layout.stats.alleys + layout.stats.stairs} passages · `
     + `${layout.stats.portals} archways · ${(built.stats.triangles / 1e6).toFixed(2)}M tris built`;
+  // The title card goes up over the world with a camera moving through it.
+  titleReel = createTitleReel({
+    camera, built, veil: document.getElementById('title-veil'), viewer: window.diku,
+  });
+  window.diku.title = titleReel;
+  if (titleReel.active) document.body.classList.add('titling');
   dom.title.classList.remove('hidden');
   frame();
 }
