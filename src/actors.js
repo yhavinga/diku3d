@@ -767,7 +767,10 @@ const BEASTS = [
   { test: /\b(homonc?ulus|imps?|quasits?)\b/, asset: 'beast_imp', scale: 1.0, coat: 0x4a5a28, pale: 0x7a8a48, points: 0x283018, glow: 0xffc020, box: [0.45, 0.3, 'quad', 0x4a5a28] },
   { test: /\bnagas?\b/, asset: 'beast_naga', scale: 1.0, stands: 1.9, coat: 0x56662a, pale: 0xc8b25e, points: 0x56662a, patch: 0x8a8a3a, cover: 0.35, box: [0.3, 5, 'quad', 0x56662a] },
   { test: /\bbasilisks?\b/, asset: 'beast_basilisk', scale: 1.0, coat: 0x5a4a32, pale: 0xbca264, points: 0x3a3020, patch: 0x4a3c28, cover: 0.3, glow: 0x9cff9c, box: [0.5, 2.5, 'quad', 0x5a4a32] },
-  { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, stands: 3.6, coat: 0x5c2c68, pale: 0x8e6096, points: 0x3a1a44, patch: 0x4a2254, cover: 0.3, box: [0.8, 9, 'quad', 0x5c2c68] },
+  // The worm stands in a crater of its own sand, which is all the ground it
+  // touches: its contact patch is the crater's, not ten metres of body, and
+  // sand is thrown up wherever the body goes through the surface.
+  { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, stands: 4.1, coat: 0x4c2458, pale: 0x9a7090, points: 0x22102a, patch: 0x3a1a46, cover: 0.3, footprint: [2.4, 2.4], sand: 0xc9ae84, box: [0.8, 9, 'quad', 0x5c2c68] },
   { test: /\bdustdiggers?\b/, asset: 'beast_dustdigger', scale: 1.0, coat: 0xc2a070, pale: 0x9a7c58, points: 0x7a5a3a, patch: 0xb08c5c, cover: 0.35, box: [0.3, 4, 'quad', 0xc2a070] },
   { test: /\bcamels?\b/, asset: 'beast_camel', scale: 1.0, coat: 0xb48c5c, pale: 0xd6be96, points: 0x8a6a44, box: [1.9, 3, 'quad', 0xb48c5c] },
   // The dracolich lies as a heap of bones until it rises: its idle is the
@@ -1124,7 +1127,10 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   mixer.update(0);
 
   const size = asset.size;
-  group.userData.footprint = { length: size.z * scale, width: size.x * scale * width };
+  group.userData.footprint = spec.footprint
+    ? { length: spec.footprint[0] * scale, width: spec.footprint[1] * scale }
+    : { length: size.z * scale, width: size.x * scale * width };
+  if (spec.sand) group.add(sandSpray(body, spec.sand));
   // A flier is built on the ground and flown by its clips, `hover` metres up
   // (in the model's units): its name and its examine point go up with it.
   const hover = spec.air ? (info.hover || 0) * scale : 0;
@@ -1136,6 +1142,120 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
     afloat,
   };
+}
+
+/**
+ * Sand thrown up where a burrowing body goes through the ground: a trickle
+ * off a worm standing still in its hole, a spray where it surfaces or dives.
+ * It finds the crossings itself, from the chain of body bones either side of
+ * the surface, and emits in proportion to how fast each crossing slides --
+ * so it follows the clips without knowing which one is playing.
+ *
+ * Lit, not glowing: each puff is a camera-facing quad whose normal points up,
+ * so it takes exactly the light the sand beneath it does -- an unlit sprite in
+ * the sand's own colour read as dark smudges against sand in full sun. One
+ * instanced draw, updated only while the worm is on screen.
+ */
+function sandSpray(body, colour) {
+  const COUNT = 96;
+  const chain = [];
+  for (let i = 1; ; i++) {
+    const bone = body.getObjectByName(`body${i}`);
+    if (!bone) break;
+    chain.push(bone);
+  }
+  const quad = new THREE.PlaneGeometry(1, 1);
+  const normal = quad.attributes.normal;
+  for (let i = 0; i < normal.count; i++) normal.setXYZ(i, 0, 1, 0);
+  const material = new THREE.MeshStandardMaterial({
+    color: colour, map: wispHaloTexture(), transparent: true, depthWrite: false, roughness: 1, metalness: 0,
+    opacity: 0.6,
+  });
+  const mesh = new THREE.InstancedMesh(quad, material, COUNT);
+  mesh.frustumCulled = false;
+  mesh.name = 'sandSpray';
+  mesh.layers.set(OVERLAY_LAYER); // kept out of the AO prepass, see makeLabel
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  const pos = new Float32Array(COUNT * 3);
+  const vel = new Float32Array(COUNT * 3);
+  const life = new Float32Array(COUNT).fill(1);
+  const age = new Float32Array(COUNT).fill(1e9);
+  const grow = new Float32Array(COUNT);
+  const last = new Map();
+  const _a = new THREE.Vector3();
+  const _b = new THREE.Vector3();
+  const _q = new THREE.Quaternion();
+  const _gq = new THREE.Quaternion();
+  const _s = new THREE.Vector3();
+  const _p = new THREE.Vector3();
+  const _m = new THREE.Matrix4();
+  let next = 0;
+  let before = performance.now();
+  let carry = 0;
+  mesh.onBeforeRender = (renderer, scene, camera) => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - before) / 1000);
+    before = now;
+    const holder = mesh.parent;
+    if (!holder || dt <= 0) return;
+    // Where the body passes through y = 0, in the figure's own frame.
+    for (let i = 0; i < chain.length - 1; i++) {
+      holder.worldToLocal(chain[i].getWorldPosition(_a));
+      holder.worldToLocal(chain[i + 1].getWorldPosition(_b));
+      if ((_a.y > 0) === (_b.y > 0)) { last.delete(i); continue; }
+      const k = _a.y / (_a.y - _b.y);
+      const x = _a.x + (_b.x - _a.x) * k;
+      const z = _a.z + (_b.z - _a.z) * k;
+      const prev = last.get(i);
+      const speed = prev ? Math.min(8, Math.hypot(x - prev[0], z - prev[1]) / dt) : 0;
+      last.set(i, [x, z]);
+      carry += dt * (6 + speed * 36);
+      while (carry >= 1) {
+        carry -= 1;
+        const j = next;
+        next = (next + 1) % COUNT;
+        const a = Math.random() * Math.PI * 2;
+        const r = 0.5 + Math.random() * 0.3;
+        pos[j * 3] = x + Math.cos(a) * r;
+        pos[j * 3 + 1] = 0.25 + Math.random() * 0.25;
+        pos[j * 3 + 2] = z + Math.sin(a) * r;
+        const out = 0.3 + Math.random() * 0.8 + speed * 0.25;
+        vel[j * 3] = Math.cos(a) * out;
+        vel[j * 3 + 1] = 0.7 + Math.random() * 1.5 + speed * 0.45;
+        vel[j * 3 + 2] = Math.sin(a) * out;
+        age[j] = 0;
+        life[j] = 0.9 + Math.random() * 0.9;
+        grow[j] = 0.35 + Math.random() * 0.35;
+      }
+    }
+    holder.getWorldQuaternion(_gq).invert();
+    _q.copy(_gq).multiply(camera.quaternion);
+    for (let j = 0; j < COUNT; j++) {
+      age[j] += dt;
+      const t = age[j] / life[j];
+      if (t >= 1) {
+        _m.makeScale(0, 0, 0);
+        mesh.setMatrixAt(j, _m);
+        continue;
+      }
+      vel[j * 3 + 1] -= 6.5 * dt;
+      // Air drag: the dust a spray raises slows and hangs.
+      const drag = Math.exp(-1.6 * dt);
+      vel[j * 3] *= drag;
+      vel[j * 3 + 2] *= drag;
+      pos[j * 3] += vel[j * 3] * dt;
+      pos[j * 3 + 1] = Math.max(0.08, pos[j * 3 + 1] + vel[j * 3 + 1] * dt);
+      pos[j * 3 + 2] += vel[j * 3 + 2] * dt;
+      // Swells as it spreads, gone by the end of its life.
+      const size = grow[j] * (0.5 + 1.6 * t) * Math.sin(Math.PI * Math.min(1, t * 1.25 + 0.05));
+      _p.set(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2]);
+      _s.set(size, size, size);
+      mesh.setMatrixAt(j, _m.compose(_p, _q, _s));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  };
+  return mesh;
 }
 
 let wispHalo = null;
