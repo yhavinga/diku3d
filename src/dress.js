@@ -22,6 +22,7 @@
  */
 
 import * as THREE from 'three';
+import { SHARED_LIGHT } from './textures.js';
 
 /** Every surface a person, or what a person carries, is made of. */
 export const SLOTS = ['skin', 'cloth', 'cloth2', 'linen', 'leather', 'mail', 'steel', 'iron', 'hair',
@@ -80,6 +81,19 @@ function arrayTexture(data, colorSpace) {
   return t;
 }
 
+/** A layer's mean linear luminance. */
+function meanAlbedo(data, offset) {
+  const lin = (v) => { const c = v / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  let sum = 0;
+  let n = 0;
+  for (let i = 0; i < LAYER * LAYER; i += 3) {
+    const o = offset + i * 4;
+    sum += 0.2126 * lin(data[o]) + 0.7152 * lin(data[o + 1]) + 0.0722 * lin(data[o + 2]);
+    n++;
+  }
+  return sum / n;
+}
+
 const surfaceSets = new WeakMap();
 
 /**
@@ -96,12 +110,14 @@ function surfaces(library) {
   const orm = new Uint8Array(LAYER * LAYER * 4 * MAX_SLOTS);
   const params = new Float32Array(MAX_SLOTS * 2);
   const base = [];
+  const mean = [];
   SLOTS.forEach((tag, i) => {
     const m = library.materialFor(tag);
     const off = i * LAYER * LAYER * 4;
     const img = (tex) => (tex && tex.image && tex.image.data ? tex.image : null);
     const a = img(m.map);
     if (a) resample(a.data, a.width, albedo, off); else fill(albedo, off, 255, 255, 255);
+    mean.push(meanAlbedo(albedo, off));
     const n = img(m.normalMap);
     if (n) resample(n.data, n.width, normal, off); else fill(normal, off, 128, 128, 255);
     const r = img(m.roughnessMap);
@@ -118,12 +134,33 @@ function surfaces(library) {
     orm: arrayTexture(orm, THREE.NoColorSpace),
     params,
     base,
+    mean,
   };
   surfaceSets.set(library, set);
   return set;
 }
 
 // --- the material -------------------------------------------------------------
+
+/**
+ * What a dyed surface's colour means, and the darkest it may be.
+ *
+ * people.js's colours are the colour of the cloth -- 0x3f5a2f is a green
+ * tunic -- but they were multiplied over the cloth texture, whose own mean is
+ * 0.56, and linen's 0.67: every garment came out at half the albedo it was
+ * given. A green tunic was 5% albedo in front of a limestone wall at 43%, and
+ * indoors, where nothing but the sky and a torch lights either, a person was
+ * a dark cut-out with a face. So for the surfaces in `DYED_MEAN` the tint is
+ * divided by the texture's mean: the weave still varies about it, and the
+ * garment averages the colour it was given.
+ *
+ * And the palettes went down to 0x1f1a2e robes and 0x1c1714 hair -- 1-2%
+ * albedo, darker than soot, black in any light but the sun. Black wool is
+ * 3-5%; `TINT_FLOOR` keeps a colour's hue and lifts it only where it is
+ * below that, as linear luminance of the surface it ends up as.
+ */
+const DYED_MEAN = new Set(['cloth', 'cloth2', 'wool', 'velvet', 'linen', 'leather', 'paint']);
+const TINT_FLOOR = { cloth: 0.05, cloth2: 0.05, wool: 0.05, velvet: 0.05, linen: 0.05, leather: 0.04, paint: 0.05, hair: 0.03 };
 
 /** Whose colour a surface takes when a person names none for it: a cloak in
  * wool is the second cloth's colour, a shield's paint the first's. */
@@ -137,14 +174,89 @@ dummyColour.needsUpdate = true;
 
 const SLOT_OF = 'int( vSlot + 0.5 )';
 
-const ENVMAP_BY_SLOT = THREE.ShaderChunk.envmap_physical_pars_fragment.replace(
-  /envMapColor\.rgb \* envMapIntensity;/g, `envMapColor.rgb * envMapIntensity * slotParams[ ${SLOT_OF} ].y;`);
-if (ENVMAP_BY_SLOT === THREE.ShaderChunk.envmap_physical_pars_fragment) {
+/**
+ * How much of the sky each surface believes -- but only for what it
+ * *reflects*. The per-surface `env` of a recipe (wool 0.22, cloth 0.35, skin
+ * 0.5, steel 1.5) used to scale the diffuse sky light too, because three's
+ * `envMapIntensity` scales both; a stone wall believes 0.72 of the same sky,
+ * so a woollen coat standing in front of it took a third of the ambient the
+ * wall did, and indoors -- where the sky is nearly all the light there is --
+ * every figure came out a dark shape against a lit wall. Diffuse sky light
+ * does not care what a surface is made of: every surface of a person takes
+ * `DIFFUSE_ENV`, the town's walls' own share (stone 0.72, plaster 0.7,
+ * timber 0.8, planks 0.85).
+ */
+const DIFFUSE_ENV = 0.75;
+const IBL_IRRADIANCE = 'return PI * envMapColor.rgb * envMapIntensity;';
+const IBL_RADIANCE = 'return envMapColor.rgb * envMapIntensity;';
+const ENVMAP_BY_SLOT = THREE.ShaderChunk.envmap_physical_pars_fragment
+  .replace(IBL_IRRADIANCE, `return PI * envMapColor.rgb * envMapIntensity * ${DIFFUSE_ENV.toFixed(3)};`)
+  .replace(IBL_RADIANCE, `return envMapColor.rgb * envMapIntensity * slotParams[ ${SLOT_OF} ].y;`);
+if (!ENVMAP_BY_SLOT.includes(DIFFUSE_ENV.toFixed(3)) || !ENVMAP_BY_SLOT.includes('slotParams')) {
   throw new Error('dress: three\'s environment chunk moved; the per-surface sky injection missed');
 }
 
-function inject(shader, set, tints, show) {
+/**
+ * The light loop, as the town's surfaces have it (textures.js): the noon
+ * hemisphere is the sunlit ground's bounce and does not reach indoors. It
+ * reached every figure indoors at full strength, lighting people from below
+ * the floor they stood on.
+ */
+const HEMI_LINE = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
+const POINT_LINE = 'getPointLightInfo( pointLight, geometryPosition, directLight );';
+const LIGHTS_BEGIN = 'vec3 dikuTorch = vec3( 0.0 );\n' + THREE.ShaderChunk.lights_fragment_begin
+  .replace(HEMI_LINE,
+    'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal ) * mix( 1.0, indoorBounce, dikuIndoor );')
+  // What the torches deliver here whichever way the surface faces: the fill
+  // below is a share of it.
+  .replace(POINT_LINE, `${POINT_LINE}\n\t\tdikuTorch += directLight.visible ? directLight.color : vec3( 0.0 );`);
+if (!LIGHTS_BEGIN.includes('dikuIndoor') || !LIGHTS_BEGIN.includes('dikuTorch +=')) {
+  throw new Error('dress: three\'s light loop moved; the indoor hemisphere or torch injection missed');
+}
+
+/**
+ * A fill that stands where you stand. Indoors a person against a lit wall is
+ * lit by the same sky and torches as the wall, and nearly everything a person
+ * wears is darker than limestone and plaster -- dyed wool is 5-10% albedo, a
+ * wall 30-40% -- so they read as a cut-out, with their faces lost. Films and
+ * games light the actor, not only the set; this is that fill, kept honest:
+ *
+ *  - it is a share of the light already there -- the sky and the hemisphere
+ *    this fragment receives, and half of what the torches deliver to the
+ *    spot, whichever way it faces -- so a figure in a dark cellar stays dark,
+ *    one by a window or a hearth gets more, and at night, when the torches
+ *    are all the light a room has, it still has something to be a share of;
+ *  - it comes from just above the viewer's eye and wraps a little, so it
+ *    models a face and fills the eye sockets instead of flattening it;
+ *  - it is warm-neutral, as light off plaster and floorboards is;
+ *  - and it is indoors only (`dikuIndoor`, eased per person as they walk in
+ *    and out), because out of doors the sun and the open sky already do it.
+ */
+export const FIGURE_FILL = { value: 2.4 };
+
+const LIGHTS_END = `
+  {
+    // The sky indoors has lost its hue by the time it reaches anyone, as the
+    // walls' has; outdoors the hour's own bleach -- both as textures.js.
+    float dikuIblL = dot( iblIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
+    iblIrradiance = mix( iblIrradiance, dikuIblL * mix( dikuSkyBleachTint, vec3( 1.06, 1.0, 0.90 ), dikuIndoor ),
+      max( dikuIndoor * 0.8, dikuSkyBleach ) );
+    float dikuRadL = dot( radiance, vec3( 0.2126, 0.7152, 0.0722 ) );
+    radiance = mix( radiance, dikuRadL * vec3( 1.03, 1.0, 0.95 ), dikuIndoor * 0.5 );
+    // The fill: view space, so +z is towards the camera and +y up.
+    float dikuAmbient = dot( iblIrradiance + irradiance + 0.5 * dikuTorch, vec3( 0.2126, 0.7152, 0.0722 ) );
+    float dikuWrap = clamp( ( dot( geometryNormal, normalize( vec3( 0.25, 0.45, 1.0 ) ) ) + 0.3 ) / 1.3, 0.0, 1.0 );
+    irradiance += vec3( 1.04, 1.0, 0.94 ) * ( dikuFill * dikuIndoor * dikuAmbient * dikuWrap );
+  }
+  #include <lights_fragment_end>`;
+
+function inject(shader, set, tints, show, indoor) {
   shader.uniforms.heldShow = { value: show };
+  shader.uniforms.dikuIndoor = indoor;
+  shader.uniforms.indoorBounce = SHARED_LIGHT.indoorBounce;
+  shader.uniforms.dikuSkyBleach = SHARED_LIGHT.skyBleach;
+  shader.uniforms.dikuSkyBleachTint = SHARED_LIGHT.skyBleachTint;
+  shader.uniforms.dikuFill = FIGURE_FILL;
   shader.uniforms.slotAlbedo = { value: set.albedo };
   shader.uniforms.slotNormal = { value: set.normal };
   shader.uniforms.slotOrm = { value: set.orm };
@@ -167,7 +279,14 @@ function inject(shader, set, tints, show) {
       uniform highp sampler2DArray slotNormal;
       uniform highp sampler2DArray slotOrm;
       uniform vec2 slotParams[ ${MAX_SLOTS} ];
-      uniform vec3 slotTint[ ${MAX_SLOTS} ];`)
+      uniform vec3 slotTint[ ${MAX_SLOTS} ];
+      uniform float dikuIndoor;
+      uniform float indoorBounce;
+      uniform float dikuSkyBleach;
+      uniform vec3 dikuSkyBleachTint;
+      uniform float dikuFill;`)
+    .replace('#include <lights_fragment_begin>', LIGHTS_BEGIN)
+    .replace('#include <lights_fragment_end>', LIGHTS_END)
     .replace('#include <map_fragment>', `
       int dikuSlot = ${SLOT_OF};
       vec4 sampledDiffuseColor = texture( slotAlbedo, vec3( vMapUv, float( dikuSlot ) ) );
@@ -181,9 +300,11 @@ function inject(shader, set, tints, show) {
       vec3 mapN = texture( slotNormal, vec3( vNormalMapUv, float( dikuSlot ) ) ).xyz * 2.0 - 1.0;
       mapN.xy *= normalScale * slotParams[ dikuSlot ].x;
       normal = normalize( tbn * mapN );`);
-  // How much of the sky each surface believes, as the town's own materials
-  // do through envMapIntensity: steel most, wool least.
+  // What each surface reflects of the sky: see ENVMAP_BY_SLOT.
   const envd = frag.replace('#include <envmap_physical_pars_fragment>', ENVMAP_BY_SLOT);
+  if (!frag.includes('dikuWrap') || !frag.includes('indoorBounce, dikuIndoor')) {
+    throw new Error('dress: the person material missed its light-loop injection');
+  }
   for (const [before, after] of [[shader.fragmentShader, frag], [frag, envd]]) {
     if (before === after) throw new Error('dress: a shader chunk moved; the person material missed an injection');
   }
@@ -202,6 +323,11 @@ export function personMaterial(library, tint, ghost, show = new THREE.Vector2(1,
     const from = TINT_FROM[tag] || [tag];
     const hex = from.map((k) => tint[k]).find((h) => h !== undefined && h !== null);
     if (hex !== undefined && hex !== null) c.setHex(hex); else c.copy(set.base[i]);
+    const mean = DYED_MEAN.has(tag) ? set.mean[i] : 1;
+    if (mean < 1) c.multiplyScalar(1 / Math.max(mean, 0.2));
+    const floor = TINT_FLOOR[tag];
+    const lum = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) * mean;
+    if (floor && lum < floor) c.multiplyScalar(floor / Math.max(lum, 1e-4));
     tints[i * 3] = c.r; tints[i * 3 + 1] = c.g; tints[i * 3 + 2] = c.b;
   });
   const m = new THREE.MeshStandardMaterial({
@@ -212,8 +338,12 @@ export function personMaterial(library, tint, ghost, show = new THREE.Vector2(1,
   // Captured, not kept on userData: a material clone (motion.js fades the
   // dying with one) deep-copies userData through JSON, which would turn the
   // array into an object; the closure goes with the function.
-  m.onBeforeCompile = (shader) => inject(shader, set, tints, show);
-  m.customProgramCacheKey = () => 'diku-person-2';
+  // How far indoors this person is, 0..1, eased by actors.js as they walk in
+  // and out; shared by the material's clones, which share this closure.
+  const indoor = { value: 0 };
+  m.onBeforeCompile = (shader) => inject(shader, set, tints, show, indoor);
+  m.customProgramCacheKey = () => 'diku-person-3';
+  m.dikuIndoor = indoor;
   if (ghost) {
     m.transparent = true;
     m.opacity = 0.34;

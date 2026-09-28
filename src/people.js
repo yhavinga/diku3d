@@ -270,9 +270,15 @@ export function personOf(proto, ITEM, instance = 0) {
     return out;
   }
 
+  // No Man's Land's Ogres and Trolls are street gangs, not a people: "a
+  // member of the Ogres", "he's lived a life of violence ever since he was
+  // little", and to the patrolman they are "these nasty kids". They were
+  // dressed as ogres and trolls, 2.4 m and hairy, beside a human vandal.
+  const gang = /\bgang\b/i.test(w) ? (/\bogres?\b/i.test(w) ? 'ogres' : (/\btrolls?\b/i.test(w) ? 'trolls' : 'gang')) : null;
+
   // Monsters.
   for (const [kind, re] of MONSTERS) {
-    if (!re.test(w)) continue;
+    if (!re.test(w) || gang) continue;
     out.kind = kind;
     if (kind === 'troll') {
       out.file = 'troll';
@@ -284,9 +290,6 @@ export function personOf(proto, ITEM, instance = 0) {
       out.tint = { skin: spec.skin, leather: 0x4a3a2a, linen: 0x8a7a5a, hair: 0x2a2418 };
       if (/\b(ogres?|giants?|ettins?|gnolls?|orcs?|hobgoblins?|bugbears?)\b/i.test(w)) out.weapon = 'weapon_mace';
       if (/\b(orcs?|hobgoblins?|goblins?|kobolds?)\b/i.test(w)) out.weapon = pick(['weapon_axe', 'weapon_spear', 'weapon_mace'], seed);
-      // A gang's ogres and trolls wear what they took: a crude leather
-      // jacket over the hide -- every ogre, half the trolls.
-      if (/\bgang\b/i.test(w) && (/\bogres?\b/i.test(w) || seed2 < 0.5)) out.arch = 'brute';
       // An ogre's own face: the troll's kin, blunter, and without tusks --
       // no ogre in the stock areas is described with any.
       if (/\b(ogres?|ogrillons?)\b/i.test(w)) out.face = 'face_ogre';
@@ -325,7 +328,7 @@ export function personOf(proto, ITEM, instance = 0) {
   // The neighbourhood's: a gang leader is a knife, a bruiser a brawler with
   // a chain and a battered lid for a shield, a vandal a ragged youth.
   if (/\bgang\b/i.test(w)) { arch = 'rogue'; out.weapon = 'weapon_dagger'; }
-  if (/\bbruisers?\b/i.test(w)) { arch = 'peasant'; out.weapon = 'weapon_mace'; out.shield = 'shield_round'; out.scale = 1.08; }
+  if (/\bbruisers?\b/i.test(w)) { arch = 'peasant'; out.weapon = 'weapon_mace'; out.shield = 'shield_round'; out.scale = 1.12; } // "6'6\" 245 pounds"
   if (/\bvandals?\b/i.test(w)) { arch = 'beggar'; out.scale = 0.92; }
   // The dark dwarves are soldiers of the deep.
   if (special === 'duergar') arch = 'guard';
@@ -497,6 +500,9 @@ export function personOf(proto, ITEM, instance = 0) {
         { const b = beard(); if (b) P.push(b); }
     }
     out.pieces = P;
+    // A gang is known by its colours: the Ogres in ox-blood, the Trolls in
+    // moss green, the leader's own crew in black.
+    if (gang) out.tint = { ...out.tint, cloth: { ogres: 0x6e2a22, trolls: 0x3e5a2a, gang: 0x2a2724 }[gang] };
     if (special === 'duergar') {
       // Grey-skinned, bald under a helm, and bearded.
       out.tint = { ...out.tint, skin: 0x7c7f84, hair: 0x3a3a3c, cloth: pick(DARK, seed), cloth2: pick(DARK, seed3), leather: 0x2a2622 };

@@ -1699,58 +1699,97 @@ def imp():
 
 
 def naga():
-    """The guardian naga: five metres of snake, green-gold, a row of silver
-    triangles down the back, carrying the front of her body reared up a man's
-    height off the floor under a head that is more a woman's than a snake's
-    -- a rounded brow, a straight nose, a small chin, a hood of scales
-    framing it. The body is beasts.serpent's; `rear` holds it up."""
+    """The guardian naga: 'a snake-liked creature. She is covered in
+    green-gold scale with silvery triangles along her back. Her eyes are
+    golden.' Five metres of serpent carrying a woman's upper body reared a
+    man's height off the floor -- shoulders, arms folded before her, a
+    woman's head -- all of it in the same green-gold scale, and a row of flat
+    silver triangles laid down the serpent's back behind her. The body is
+    beasts.serpent's; `rear` holds it up.
+
+    Built lying down, like everything else in the chain, and stood up by the
+    clips: the torso lies along the front of the chain face down (the human
+    'up' is the serpent's forward, her chest its belly), while the head is
+    modelled upright and looking forward, because the clips pitch it level
+    whatever the neck does."""
     Ln = 5.0
-    girth = lambda u: 0.06 + 0.13 * math.sin(math.pi * min(1.0, (u + 0.1) / 1.0)) ** 0.7 * (1 - u) ** 0.4
-    spec = B.serpent("beast_naga", "naga", Ln, girth, 18, 0.3, 0.009, 3600,
-                     dict(stride=1.3, frames=44, amp=0.18, lift=0.0, rear=1.55, rear_n=7),
+    snake = lambda u: 0.06 + 0.13 * math.sin(math.pi * min(1.0, (u + 0.1) / 1.0)) ** 0.7 * (1 - u) ** 0.4
+    # The front 0.7 m is her waist, chest and neck, which the torso solids
+    # below give their shape: the tube itself thins there to a neck.
+    waist = 0.14
+    girth = lambda u: snake(u) if u >= waist else lerp(0.055, snake(waist), (u / waist) ** 1.5)
+    spec = B.serpent("beast_naga", "naga", Ln, girth, 18, 0.3, 0.009, 4200,
+                     dict(stride=1.3, frames=44, amp=0.18, lift=0.0, rear=1.6, rear_n=8, upright=3),
                      mask=B.spots(0.12, seed=97))
-    front = spec["joints"][0]
-    r = girth(0)
-    z0 = r * 0.82
-    # A head of a woman's proportions instead of the snake's wedge.
-    spec["body"] = spec["body"][:-2] + [
-        ell(P(0, front + 0.12, z0 + 0.06), (0.1, 0.12, 0.12), "head", blend=0.05),
-        ell(P(0, front + 0.2, z0 + 0.02), (0.075, 0.07, 0.08), "head", blend=0.04),
-        ell(P(0, front + 0.255, z0 + 0.06), (0.06, 0.025, 0.02), "head", blend=0.02),
-        cone(P(0, front + 0.265, z0 + 0.05), P(0, front + 0.29, z0 - 0.0), 0.014, 0.017, "head", blend=0.015),
-        ell(P(0, front + 0.24, z0 - 0.07), (0.035, 0.03, 0.03), "head", blend=0.03),
+    F = spec["joints"][0]
+    z0 = girth(0) * 0.82
+    t1 = "body1"
+    t12 = {"body1": 0.5, "body2": 0.5}
+    t2 = "body2"
+    # The torso, head-up along +forward, chest to -up.
+    torso = [
+        ell(P(0, F - 0.11, z0 + 0.01), (0.19, 0.07, 0.085), t1, blend=0.05),            # shoulders
+        ell(P(0, F - 0.22, z0 - 0.005), (0.16, 0.14, 0.1), t1, blend=0.06),             # chest
+        ell(P(0, F - 0.43, z0), (0.125, 0.15, 0.09), t12, blend=0.07),                  # waist
+        ell(P(0, F - 0.62, z0 + 0.01), (0.15, 0.14, 0.11), t2, blend=0.08),             # hips into the tail
+        ell(P(0.07, F - 0.25, z0 - 0.08), (0.06, 0.055, 0.05), t1, blend=0.035),        # breasts
+        ell(P(-0.07, F - 0.25, z0 - 0.08), (0.06, 0.055, 0.05), t1, blend=0.035),
+        cone(P(0, F - 0.1, z0), P(0, F + 0.02, z0 + 0.03), 0.052, 0.046,
+             ("grad", "body1", "head", P(0, F - 0.06, z0), P(0, F + 0.03, z0 + 0.04)), blend=0.03),  # neck
     ]
+    # A woman's head, upright on the neck: rounded brow, straight nose,
+    # small chin.
+    hc = P(0, F + 0.035, z0 + 0.15)
+    hx, hf, hu = hc.x, -hc.y, hc.z
+    head = [
+        ell(P(0, hf, hu), (0.075, 0.095, 0.11), "head", blend=0.03),                    # cranium
+        ell(P(0, hf + 0.045, hu - 0.055), (0.058, 0.06, 0.06), "head", blend=0.03),     # jaw and cheeks
+        ell(P(0, hf + 0.075, hu + 0.03), (0.06, 0.03, 0.03), "head", blend=0.02),       # brow
+        cone(P(0, hf + 0.098, hu + 0.012), P(0, hf + 0.112, hu - 0.022), 0.009, 0.013, "head", blend=0.012),  # nose
+        ell(P(0, hf + 0.075, hu - 0.1), (0.028, 0.025, 0.022), "head", blend=0.02),     # chin
+    ]
+    spec["body"] = spec["body"][:-2] + torso + head
     snake_parts = spec["parts"]
 
     def parts(body_solids):
         out = snake_parts(body_solids)
         # The snake's jaw, gape and eyes are built for a snake's wedge of a
-        # head; on her face they came out as a pair of pink lips stuck on the
-        # chin and an eye on each cheek. Hers instead: gold eyes that glow,
-        # set under the brow, and a thin dark line of a mouth.
+        # head. Hers instead: gold eyes that glow, set under the brow, and a
+        # thin dark line of a mouth.
         for o in [o for o in out if o.name.split(".")[0] in ("jaw", "mouth", "eye")]:
             out.remove(o)
             bpy.data.objects.remove(o, do_unlink=True)
         for side in (1, -1):
-            at = B.surface_point(body_solids, P(side * 0.036, front + 0.6, z0 + 0.038), P(0, -1, 0), sink=0.005)
-            out.append(B.solid_part([ell(tuple(at), (0.015, 0.008, 0.0085), "head", blend=0.002)],
-                                    0.0018, 70, "eye", "glow", (1.0, 1.0, 1.0), smooth=0))
-        at = B.surface_point(body_solids, P(0, front + 0.6, z0 - 0.035), P(0, -1, 0), sink=0.003)
-        out.append(B.solid_part([ell(tuple(at), (0.026, 0.006, 0.0035), "head", blend=0.002)],
+            at = B.surface_point(body_solids, P(side * 0.03, hf + 0.5, hu + 0.012), P(0, -1, 0), sink=0.005)
+            out.append(B.solid_part([ell(tuple(at), (0.014, 0.007, 0.008), "head", blend=0.002)],
+                                    0.0016, 70, "eye", "glow", (1.0, 1.0, 1.0), smooth=0))
+        at = B.surface_point(body_solids, P(0, hf + 0.5, hu - 0.06), P(0, -1, 0), sink=0.003)
+        out.append(B.solid_part([ell(tuple(at), (0.02, 0.005, 0.003), "head", blend=0.002)],
                                 0.0015, 60, "mouth", "horn", (0.06, 0.03, 0.03), smooth=0))
-        # The hood: two fans of scale either side of the neck, behind the head.
-        hood = [ell(P(0, front - 0.22, z0 + 0.03), (0.26, 0.3, 0.035), ("grad", "body1", "body2", P(0, front - 0.05, 0), P(0, front - 0.45, 0)), blend=0.05)]
-        out.append(B.sdf_part(hood, 0.007, 700, "hood", "hide", smooth=1,
-                              mask_fn=lambda co, n, p, d: (np.clip((-n[:, 2] - 0.2) / 0.4, 0, 1), d)))
-        # Silver triangles down the spine.
+        # Arms, their own mesh so they do not web into her sides: hanging
+        # from the shoulders, bent at the elbow, hands folded before her.
+        arms = []
+        for sd in (1, -1):
+            sh = P(sd * 0.2, F - 0.12, z0 + 0.005)
+            el = P(sd * 0.225, F - 0.39, z0 - 0.025)
+            wr = P(sd * 0.075, F - 0.47, z0 - 0.19)
+            arms += [
+                ell(sh, (0.055, 0.06, 0.05), t1, blend=0.02),
+                cone(sh, el, 0.046, 0.036, t1, blend=0.02),
+                cone(el, wr, 0.036, 0.027, t12, blend=0.015),
+                ell(P(sd * 0.045, F - 0.49, z0 - 0.215), (0.03, 0.045, 0.02), t12, blend=0.015),
+            ]
+        out.append(B.sdf_part(arms, 0.006, 900, "arms", "hide", smooth=1))
+        # Silver triangles down the serpent's back, from below her waist:
+        # flat plates lying along the scale, point to the tail.
         ridge = []
         joints = spec["joints"]
-        for i in range(1, len(joints) - 3):
+        for i in range(3, len(joints) - 3):
             f = joints[i]
             u = i / (len(joints) - 1)
-            top = girth(u) * 0.82 + girth(u) * 0.95
-            ridge.append(cone(P(0, f + 0.06, top - 0.02), P(0, f - 0.04, top + girth(u) * 0.5), girth(u) * 0.35, 0.004,
-                              "body%d" % (i + 1), blend=0.004, squash=(0.35, 1, 1), group="r%d" % i))
+            top = girth(u) * 0.82 + girth(u) * 0.92
+            ridge.append(cone(P(0, f + 0.05, top - 0.01), P(0, f - 0.07, top + girth(u) * 0.08), girth(u) * 0.3, 0.003,
+                              "body%d" % (i + 1), blend=0.004, squash=(0.3, 1, 1), group="r%d" % i))
         out.append(B.solid_part(ridge, 0.006, 40 * len(ridge), "ridge", "horn", (0.72, 0.74, 0.76), smooth=0))
         return out
     spec["parts"] = parts
