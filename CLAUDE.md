@@ -374,6 +374,9 @@ choose.
   walk playback rate from the rig's `stride` (m per cycle) and the clip
   length. Change a walk cycle and re-measure it as the median backward speed
   of the foot that is low *and* moving back, or every figure skates.
+- **three r185 has a BatchedMesh program-cache bug** (`colorTexture` vs
+  `_colorsTexture`), patched by a getter in `quality.js`. If the vendored
+  three is ever updated, check whether the patch is still needed.
 - **Never toggle a light's `visible` per frame.** The visible-light count
   is part of every shader's program key; the pool moves in precompiled
   steps (0/2/4/8/all) for that reason.

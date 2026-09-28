@@ -8,6 +8,27 @@ is an opinion.
 
 ## 2026-09-28 — wave 6: what the rooms say they are
 
+### Main-thread CPU (wave6-cpu)
+
+- **three r185 checks `object.colorTexture` for BatchedMesh, which does not
+  exist** (it is `_colorsTexture`), so every batched draw without instance
+  colours counted as a program change: ~160 `getProgram` calls a frame,
+  31 ms/s and ~20 MB/s of garbage at the Market Square. A getter on
+  `BatchedMesh.prototype` fixes it. Count program changes before blaming
+  draw calls. three's opaque sort also ignores "batched"; `opaqueSort`
+  adds it.
+- **three recomputes the matrices of hidden subtrees.** ~15k of 17k scene
+  nodes are bones of figures hidden past range — 64 ms/s. A hidden figure
+  now holds its descendants until it is shown (`holdWhileHidden`).
+- **Measure CPU per second of wall time, not per frame**: at 10 fps a frame
+  costs about twice what it does at 30, because the processor is barely
+  kept busy.
+- **Freeze `performance.now`, `Math.random` and `Date.now` for pixel A/B**;
+  otherwise some cameras differ by 5–80 px between two renders of one frame.
+- Main-thread CPU −18 to −33% in every playing state (standing still at
+  #3014 284 → 222 ms/s, walking 359 → 286). Remaining largest non-render
+  cost: cull.js (~22 ms/s standing, ~40 walking) and occlusion.js.
+
 ### Impostors, occlusion and the stutter (wave6-perf)
 
 - **The number of visible lights is part of every shader's key.** Toggling

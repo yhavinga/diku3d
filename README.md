@@ -145,9 +145,12 @@ the fleur-de-lis. The card is sprung, so it settles rather than snaps.
 
 ## Keeping the laptop cool
 
-The scene is around 1300 draw calls on the Market Square — still not much, and
-most of the cost is pixels rather than submissions. `src/quality.js` owns all four dials:
-render resolution, multisampling, the bloom chain, and the frame cap. It also
+Outdoor views are now 250–450 draw calls and 1–3.5M triangles: each camera
+cell measures what it can see through its openings (`src/cull.js`), whatever a
+depth pyramid of the static world hides is skipped (`src/occlusion.js`), and
+trees past 80–95 m are cards baked from the real models at load
+(`src/impostor.js`). `src/quality.js` owns the dials: render resolution,
+multisampling, the bloom chain, grass reach and the frame cap. It also
 measures the result on the GPU with `EXT_disjoint_timer_query_webgl2` rather
 than inferring it from wall time, and drops the render scale a step if a frame
 threatens its budget.
@@ -166,8 +169,10 @@ render loop halted so nothing else is drawing:
 frontages forward roughly doubled the geometry — 2.0M triangles against 631k —
 which is a third of the 30 fps budget and worth every millisecond.
 
-Release the mouse or switch tabs and it drops to 10 fps; hide the tab and it
-stops drawing altogether. The sun's shadow map is snapped to a six-metre grid
+Release the mouse or switch tabs and it drops to 10 fps and sleeps between
+frames rather than waking at the display's refresh rate; a title screen left
+in an unfocused window does the same; hide the tab and it stops drawing
+altogether. The sun's shadow map is snapped to a six-metre grid
 and only redrawn when you cross a line or the time of day changes, instead of
 every frame.
 
@@ -176,7 +181,8 @@ the table above, because the GPU drops to a low clock between frames and the
 same work takes longer — which is the point.
 
 WebGPU would not help here. Its win is CPU-side driver overhead across thousands
-of draw calls; this scene submits ~300 in well under a millisecond. The port is
+of draw calls; this scene submits a few hundred, and the main-thread cost that remains is
+scene-graph and visibility bookkeeping, not submission. The port is
 also not free: the flame, water and sky shaders and the whole post-processing
 chain are WebGL-only and would have to be rewritten as TSL node materials.
 
