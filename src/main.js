@@ -759,6 +759,19 @@ async function boot() {
     // The bog's ground mist, lit by the same haze the rain is and thickest when
     // the ground is coldest. Only the marsh has any, so this is null elsewhere.
     built.mist?.setHour(preset.haze, preset.elevation);
+    // The far slopes that have a colour of their own (sand, grass, red rock)
+    // take the hour's light: full at noon's exposure, falling with the sun,
+    // and divided by the exposure so a brighter-exposed hour does not lift
+    // them. The haze colour tints them the way distance does.
+    // What a lit Lambert face would give: the sun on a slope half-turned to
+    // it, over pi, plus a little sky -- unlit materials go through the same
+    // exposure as everything else, so they have to be given a radiance.
+    {
+      const up = Math.max(0, Math.sin(THREE.MathUtils.degToRad(preset.elevation + 12)));
+      const light = new THREE.Color(preset.sun).lerp(new THREE.Color(preset.haze), 0.35);
+      built.horizon?.setHour(light.getHex(),
+        (preset.sunIntensity * up * 0.55 + 1.2 * preset.env) / Math.PI);
+    }
     renderer.toneMappingExposure = preset.exposure;
     bloom.strength = preset.bloom;
     bloom.threshold = preset.bloomThreshold;
@@ -1280,6 +1293,7 @@ async function boot() {
     shafts.aim(camera, sunDirection, sunElevation, shaftTint, state.shaftGain);
 
     lightPool.update(camera.position, elapsed);
+    built.horizon?.update(camera.position, dt);
     actors.update(dt, elapsed, camera);
     fx.update(dt);
     spellfx.update(state.paused ? 0 : dt);
@@ -1677,6 +1691,8 @@ async function boot() {
       player.spawn(x, y, z, yaw);
       camera.rotation.set(pitch, yaw, 0);
       state.roomVnum = null;
+      // A jump is not a walk: the skyline should not be seen sinking.
+      built.horizon?.settle(camera.position);
     },
     goto(vnum, yaw = 0, pitch = 0) {
       const info = built.rooms.get(vnum);

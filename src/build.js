@@ -1520,7 +1520,7 @@ export function buildScene(world, layout, materials, assets = null) {
   }
   // ...and something for it to end against, out where the fog is thick enough
   // to do the work.
-  buildHorizon(group, bounds, groundY);
+  const horizon = buildHorizon(group, bounds, groundY, layout);
 
   // --- rooms ---------------------------------------------------------------
 
@@ -2102,6 +2102,7 @@ export function buildScene(world, layout, materials, assets = null) {
     return n >= 2;
   };
 
+  const townWalls = [];
   for (const spot of frontage.values()) {
     if (mountain.has(cellKey(spot.level, spot.x, spot.z))) continue;
     if (reserved.has(cellKey(spot.level, spot.x, spot.z))) continue;
@@ -2129,6 +2130,30 @@ export function buildScene(world, layout, materials, assets = null) {
       });
       continue;
     }
+    // The edge of the town. A city cell with open country on one side --
+    // Haon Dor's field at #6000 -- got a fit-scaled Tudor house like any
+    // other, and a judge photographed it standing on the forest's grass: the
+    // town cut off mid-cell. What ends a walled town is its wall, so the side
+    // facing the country gets a length of curtain wall instead of a house,
+    // its merlons outwards, and the town keeps its cobbles behind it.
+    if (spot.sector === SECTOR.CITY && !spot.shire && !spot.east && !spot.bog && instances
+      && instances.library.get('city_wall')) {
+      const wild = [];
+      for (let dir = 0; dir < 4; dir++) {
+        const [dx, , dz] = DIR_STEP[dir];
+        const vn = layout.at(spot.level, spot.x + dx, spot.z + dz);
+        const link = vn === undefined ? layout.passageAt(spot.level, spot.x + dx, spot.z + dz) : null;
+        const room = vn !== undefined ? world.rooms.get(vn) : (link ? (isOpenAir(link.from.room) ? link.from.room : link.to.room) : null);
+        if (room && isOpenAir(room) && COUNTRY.has(room.sector) && !isShire(room)) wild.push(dir);
+      }
+      if (wild.length) {
+        const key = cellKey(spot.level, spot.x, spot.z);
+        groundAt.set(key, 'cobble');
+        batcher.add(plane(CELL, CELL, 3), 'cobble', place(pos.x, pos.y, pos.z), { chunk: chunkOf(spot) });
+        for (const dir of wild) townWalls.push({ spot, pos, dir });
+        continue;
+      }
+    }
     if (spot.bog) mistCells.push(pos);
     const paved = spot.bog ? 'peat' : (spot.east ? 'sand' : FILLER_GROUND[spot.sector]);
     if (paved) groundAt.set(cellKey(spot.level, spot.x, spot.z), paved);
@@ -2139,6 +2164,37 @@ export function buildScene(world, layout, materials, assets = null) {
       seed: hash3(spot.x, spot.z, spot.level, 17), addCollider, lights, decor,
     });
   }
+  // The town wall's lengths, and a tower wherever a length ends without
+  // another one beside it facing the same way: a curtain wall that simply
+  // stops shows its cut end.
+  const walled = new Set(townWalls.map(({ spot, dir }) => `${cellKey(spot.level, spot.x, spot.z)}|${dir}`));
+  for (const { spot, pos, dir } of townWalls) {
+    const [dx, , dz] = DIR_STEP[dir];
+    const chunk = chunkOf(spot);
+    const out = HALF - 1.25;
+    const wx = pos.x + dx * out; const wz = pos.z + dz * out;
+    // The model's town side is its +z; turn that away from the country.
+    instances.add('city_wall', { x: wx, y: pos.y, z: wz, rotY: FACE_ROT[(dir + 2) % 4] + Math.PI }, chunk);
+    const [w, d] = dx ? [2.5, CELL] : [CELL, 2.5];
+    addCollider(wx - w / 2, wx + w / 2, wz - d / 2, wz + d / 2, pos.y, pos.y + 8.4);
+    const tx = dz ? 1 : 0; const tz = dx ? 1 : 0;
+    for (const s of [-1, 1]) {
+      if (walled.has(`${cellKey(spot.level, spot.x + tx * s, spot.z + tz * s)}|${dir}`)) continue;
+      const cx = wx + tx * s * (HALF - 1.6); const cz = wz + tz * s * (HALF - 1.6);
+      const T = 4.4; const TH = 10.2;
+      batcher.add(box(T, TH, T, 2, 4, 2), 'stonewall', place(cx, pos.y + TH / 2, cz), { chunk, ao: wallAo(pos.y) });
+      batcher.add(box(T + 0.5, 0.45, T + 0.5), 'stonewall', place(cx, pos.y + TH + 0.22, cz), { chunk });
+      for (let i = 0; i < 4; i++) {
+        for (const k of [-1, 1]) {
+          const m = (T + 0.5) / 2 - 0.3;
+          const [mx, mz] = i < 2 ? [k * (T / 4), (i ? 1 : -1) * m] : [(i === 2 ? 1 : -1) * m, k * (T / 4)];
+          batcher.add(box(0.9, 1.0, 0.9), 'stonewall', place(cx + mx, pos.y + TH + 0.95, cz + mz), { chunk });
+        }
+      }
+      addCollider(cx - T / 2, cx + T / 2, cz - T / 2, cz + T / 2, pos.y, pos.y + TH + 1.5);
+    }
+  }
+
   // Every cell you can stand on out of doors in the town: the rooms and the
   // passages routed between them. A party wall is only ever laid where one of
   // these can see the gap, which is what keeps it a street feature.
@@ -2223,7 +2279,7 @@ export function buildScene(world, layout, materials, assets = null) {
     stats.instanced = placed.triangles;
   }
   stats.meshes = batches.finish(zones.route);
-  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, stats, zones };
+  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones };
 }
 
 // --------------------------------------------------------------- zones ----
@@ -3911,6 +3967,9 @@ function buildGraveyard({ instances, model, chunk, room, pos, sides }) {
 const FENCE_PITCH = 2.6;
 
 const GRATE = /\b(grate|grating|grille|bars)\b/i;
+
+/** Open country: what a town wall faces. */
+const COUNTRY = new Set([SECTOR.FIELD, SECTOR.FOREST, SECTOR.HILLS, SECTOR.MOUNTAIN]);
 
 /** Railing either side of a grate on a cell edge, jamb to corner. */
 function buildGrateRailing({ instances, model, chunk, pos, dir, addCollider }) {
@@ -6232,14 +6291,17 @@ const HORIZON_SEED = 20931;
  * `depthWrite` stays on: within one ring a nearer blade drawn after a further
  * one must hide it rather than blend twice over it.
  */
-function haze(material) {
+function haze(material, clarity = 1) {
   material.transparent = true;
   material.depthWrite = true;
+  // `clarity` thins the air for one material: a desert's dry air carries a
+  // mesa twice as far as a Pacific haze carries a ridge.
+  const k = clarity.toFixed(3);
   material.onBeforeCompile = (shader) => {
     shader.fragmentShader = shader.fragmentShader.replace('#include <fog_fragment>', [
       '#ifdef USE_FOG',
       '  #ifdef FOG_EXP2',
-      '    gl_FragColor.a *= exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );',
+      `    gl_FragColor.a *= exp( - fogDensity * fogDensity * vFogDepth * vFogDepth * ${k} * ${k} );`,
       '  #else',
       '    gl_FragColor.a *= 1.0 - smoothstep( fogNear, fogFar, vFogDepth );',
       '  #endif',
@@ -6303,7 +6365,35 @@ function haze(material) {
  * The treeline is for the streets that can see out; in the middle of town
  * the buildings are the horizon.
  */
-function buildHorizon(group, bounds, groundY) {
+/**
+ * Which skyline an area stands under. Keyed on the area file, as the other
+ * area tests in this file are; anything not named is a town, which is what the
+ * rest of the default world -- Midgaard, the graveyard, the district -- is.
+ */
+const HORIZON_STYLE = {
+  'haon.are': 'forest', 'trollden.are': 'forest', 'shire.are': 'hills',
+  'eastern.are': 'desert', 'marsh.are': 'marsh',
+};
+const HORIZON_STYLES = ['town', 'forest', 'hills', 'desert', 'marsh'];
+/** Metres around the camera over which the areas' rooms vote on the skyline. */
+const HORIZON_REACH = 90;
+
+/**
+ * The horizon, per area.
+ *
+ * There used to be one skyline for the whole world -- the conifer combs and
+ * the ridge below -- and from the Great Eastern Desert it read as fir forest
+ * standing in front of a blue sea: the ridge's dark rock dissolved into a noon
+ * sky is a band of mid blue, flat enough to be water. So each area has its own
+ * skyline on the same rings -- mesas and dune haze past the desert, green
+ * hills past the Shire, rooftops past the town, reeds and mist past the marsh,
+ * fir ridges past Haon Dor -- and the rooms around the camera vote on which is
+ * up. A skyline that is not wanted sinks into the ground rather than fading:
+ * fading the combs means blending them, and loose blended triangles stack
+ * into glass (see below), while a skyline squashed to half height is still an
+ * opaque skyline. Crossing a seam, one range goes down as the other comes up.
+ */
+function buildHorizon(group, bounds, groundY, layout) {
   const cx = ((bounds.minX + bounds.maxX) / 2) * CELL;
   const cz = ((bounds.minZ + bounds.maxZ) / 2) * CELL;
   const town = Math.hypot((bounds.maxX - bounds.minX) * CELL, (bounds.maxZ - bounds.minZ) * CELL) / 2;
@@ -6315,6 +6405,25 @@ function buildHorizon(group, bounds, groundY) {
   let draw = 0;
   const rng = () => hash3(draw++, 0, 0, HORIZON_SEED);
   const rnd = (lo, hi) => lo + rng() * (hi - lo);
+
+  // Each style's meshes share one `rise`, 0..1, applied in the vertex shader
+  // about the ground: see the note on the function.
+  const rises = new Map(HORIZON_STYLES.map((name) => [name, { value: name === 'town' ? 1 : 0 }]));
+  const meshes = new Map(HORIZON_STYLES.map((name) => [name, []]));
+  const risen = (material, style) => {
+    const previous = material.onBeforeCompile;
+    material.onBeforeCompile = (shader, renderer) => {
+      if (previous) previous(shader, renderer);
+      shader.uniforms.horizonRise = rises.get(style);
+      shader.uniforms.horizonGround = { value: groundY };
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float horizonRise;\nuniform float horizonGround;')
+        .replace('#include <begin_vertex>',
+          '#include <begin_vertex>\n\ttransformed.y = horizonGround + ( transformed.y - horizonGround ) * horizonRise;');
+    };
+    material.customProgramCacheKey = () => `horizon-rise-${material.transparent}-${material.userData.clarity ?? 1}`;
+    return material;
+  };
 
   // Unlit, and dark. A lit material was tried first -- up-normals handing the
   // silhouettes the same sun and sky the field gets -- and at noon that made
@@ -6328,16 +6437,24 @@ function buildHorizon(group, bounds, groundY) {
   // grey dam, and repetition the eye forgives in a texture it does not
   // forgive in a skyline. One factor per tree and a slow wave along the
   // ridge break it for free; the material stays unlit.
-  const conifer = new THREE.MeshBasicMaterial({
+  const conifer = () => new THREE.MeshBasicMaterial({
     color: 0x141a14, side: THREE.DoubleSide, vertexColors: true,
   });
-  // Colder and bluer than the trees, so the ridge reads as a further plane
-  // before the haze has said anything about it.
-  const rock = haze(new THREE.MeshBasicMaterial({
-    color: 0x10151d, side: THREE.DoubleSide, vertexColors: true,
-  }));
+  // A far slope that is *lit*: sand, grass, stone in daylight. Unlike the
+  // near-black combs these have an albedo, so the hour has to set how much
+  // light is on them (`setHour`) or noon's colour would come out four times
+  // as bright at night's exposure.
+  const lit = [];
+  const litSlope = (albedo, clarity = 1) => {
+    const material = haze(new THREE.MeshBasicMaterial({
+      color: albedo, side: THREE.DoubleSide, vertexColors: true,
+    }), clarity);
+    material.userData.clarity = clarity;
+    lit.push({ material, albedo: new THREE.Color(albedo) });
+    return material;
+  };
 
-  const silhouette = (points, colors, material, name, order) => {
+  const silhouette = (points, colors, material, name, order, style) => {
     const position = new Float32Array(points);
     // The unlit material never reads these, but the AO prepass renders the
     // scene with a normal material, and a missing attribute there is a
@@ -6350,7 +6467,7 @@ function buildHorizon(group, bounds, groundY) {
     geo.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
     geo.computeBoundingSphere();
-    const mesh = new THREE.Mesh(geo, material);
+    const mesh = new THREE.Mesh(geo, risen(material, style));
     mesh.name = name;
     // The sun's shadow camera is 260 m of span following the player. Nothing
     // out here may enter that pass, casting or receiving.
@@ -6363,14 +6480,62 @@ function buildHorizon(group, bounds, groundY) {
     // in the world is further away than it is. The combs are opaque and the
     // depth buffer already has them right.
     mesh.renderOrder = order;
+    mesh.visible = rises.get(style).value > 0.002;
     group.add(mesh);
+    meshes.get(style).push(mesh);
   };
 
+  /**
+   * A closed strip from the ground up to `crest(a)`, one layer, which is the
+   * only shape the haze dissolve is honest on. `tone(a, top)` shades it.
+   */
+  const strip = (radius, segments, crest, tone, material, name, order, style, rows = 1) => {
+    const points = [];
+    const colors = [];
+    // `tone(a, top)` sees a boolean for a single row and the height fraction
+    // for more, which is what lets a cliff carry strata.
+    const push = (a, v) => {
+      const h = crest(a) * v;
+      points.push(cx + Math.cos(a) * radius, groundY + h, cz + Math.sin(a) * radius);
+      const t = tone(a, rows === 1 ? v > 0.5 : v, h);
+      colors.push(t[0], t[1], t[2]);
+    };
+    for (let i = 0; i < segments; i++) {
+      const a0 = (i / segments) * Math.PI * 2; const a1 = ((i + 1) / segments) * Math.PI * 2;
+      for (let j = 0; j < rows; j++) {
+        const v0 = j / rows; const v1 = (j + 1) / rows;
+        push(a0, v0); push(a1, v0); push(a1, v1);
+        push(a0, v0); push(a1, v1); push(a0, v1);
+      }
+    }
+    silhouette(points, colors, material, name, order, style);
+  };
+  // Whole cycles per turn, because a ring has to close. A frequency that is
+  // not an integer leaves f(2pi) != f(0), which is a vertical cliff in the
+  // skyline at one bearing -- the seam is worse than the repetition it was
+  // meant to avoid. Coprime frequencies, so nothing repeats inside a turn.
+  const waves = (list, base) => {
+    const w = list.map(([f, amp]) => ({ f, amp, phase: rng() * Math.PI * 2 }));
+    return (a) => w.reduce((sum, v) => sum + v.amp * Math.sin(v.f * a + v.phase), base);
+  };
+  // Tone drifts along a ring the same way a crest does, and the crest sits a
+  // shade lighter than the foot, which is what haze does to a far slope.
+  // Without this a ridge was one continuous grey band and read as a dam.
+  const drift = (top, foot) => {
+    const tw = waves([[2, 0.06], [5, 0.05], [13, 0.03]], 1);
+    return (a, isTop) => { const t = tw(a) * (isTop ? top : foot); return [t, t, t * 1.04]; };
+  };
+
+  // --------------------------------------------------------------- forest --
+  // The three radii are three planes of depth. They cannot come closer: they
+  // have to clear everything built, and the town's own radius is 213 m at
+  // Midgaard alone.
   const rings = [
     { r: town + 120, low: 14, high: 30 },
     { r: town + 165, low: 18, high: 38 },
   ];
-  rings.forEach((ring, index) => {
+  const ridgeR = town + 250;
+  const combs = (style, colourOf) => rings.forEach((ring, index) => {
     const points = [];
     const colors = [];
     const span = 2 * Math.PI * ring.r;
@@ -6388,8 +6553,7 @@ function buildHorizon(group, bounds, groundY) {
       const lean = h * rnd(-0.06, 0.06);
       // One tone per tree: brightness spread wide, hue nudged so a few read
       // browner (dead tops) and a few bluer, the way a real stand mixes.
-      const tone = rnd(0.68, 1.3);
-      const hue = rnd(0.9, 1.1);
+      const [r, g, b] = colourOf(rnd(0.68, 1.3), rnd(0.9, 1.1));
       const blade = (from, to, apex, top) => {
         // Wound so the side facing the town is the front face: three flips a
         // back face's normal, and these normals are all up, so the back of one
@@ -6397,7 +6561,7 @@ function buildHorizon(group, bounds, groundY) {
         points.push(px + tx * from, groundY, pz + tz * from);
         points.push(px + tx * to, groundY, pz + tz * to);
         points.push(px + tx * apex, groundY + top, pz + tz * apex);
-        for (let k = 0; k < 3; k++) colors.push(tone * hue, tone, tone * (2 - hue));
+        for (let k = 0; k < 3; k++) colors.push(r, g, b);
       };
       blade(-w / 2, w / 2, lean, h);
       if (rng() < 1 / 6) {
@@ -6411,38 +6575,232 @@ function buildHorizon(group, bounds, groundY) {
         blade(off - half, off + half, off, h * rnd(0.4, 0.58));
       }
     }
-    silhouette(points, colors, conifer, `horizon-trees-${index}`, 0);
+    silhouette(points, colors, conifer(), `horizon-${style}-trees-${index}`, 0, style);
   });
+  combs('forest', (tone, hue) => [tone * hue, tone, tone * (2 - hue)]);
 
-  // The ridge: one strip ring, ground to crest.
-  const SEG = 256;
-  // Whole cycles per turn, because the ring has to close. A frequency that is
-  // not an integer leaves crest(2pi) != crest(0), which is a vertical cliff in
-  // the skyline at one bearing -- the seam is worse than the repetition it was
-  // meant to avoid. 3, 7 and 11 are coprime, so nothing repeats inside a turn.
-  const waves = [[3, 11], [7, 6], [11, 3]].map(([f, amp]) => ({ f, amp, phase: rng() * Math.PI * 2 }));
-  const crest = (a) => waves.reduce((sum, w) => sum + w.amp * Math.sin(w.f * a + w.phase), 65);
-  const ridgeR = town + 250;
-  // Tone drifts along the ridge the same way the crest does -- coprime whole
-  // cycles, so it closes -- and the crest sits a shade lighter than the foot,
-  // which is what haze does to a far slope. Without this the ridge was one
-  // continuous grey band and read as a dam, not a range.
-  const toneWaves = [[2, 0.06], [5, 0.05], [13, 0.03]].map(([f, amp]) => ({ f, amp, phase: rng() * Math.PI * 2 }));
-  const ridgeTone = (a) => toneWaves.reduce((sum, w) => sum + w.amp * Math.sin(w.f * a + w.phase), 1);
-  const ridge = [];
-  const ridgeColors = [];
-  const push = (x, y, z, a, top) => {
-    ridge.push(x, y, z);
-    const t = ridgeTone(a) * (top ? 1.14 : 0.92);
-    ridgeColors.push(t, t, t * 1.04);
-  };
-  for (let i = 0; i < SEG; i++) {
-    const a0 = (i / SEG) * Math.PI * 2; const a1 = ((i + 1) / SEG) * Math.PI * 2;
-    const x0 = cx + Math.cos(a0) * ridgeR; const z0 = cz + Math.sin(a0) * ridgeR;
-    const x1 = cx + Math.cos(a1) * ridgeR; const z1 = cz + Math.sin(a1) * ridgeR;
-    const top0 = groundY + crest(a0); const top1 = groundY + crest(a1);
-    push(x0, groundY, z0, a0, false); push(x1, groundY, z1, a1, false); push(x1, top1, z1, a1, true);
-    push(x0, groundY, z0, a0, false); push(x1, top1, z1, a1, true); push(x0, top0, z0, a0, true);
+  // **The aerial perspective is a dissolve, not a fog blend** -- see `haze`.
+  // Only the strips get it, and that is not a compromise: alpha compositing
+  // attenuates once per *surface* where air attenuates once per *metre*, so
+  // it is only honest where a ray crosses the thing once. A tree ring is 440
+  // loose triangles about 1.5 deg wide spaced 0.6 deg apart, so two or three
+  // of them stack on any bearing -- dissolved at 64% each they come to 92%
+  // together, and what that looks like is not a hazier treeline but a heap of
+  // glass cones, each one visible through the next. Photographed and
+  // rejected. The combs keep the stock fog blend.
+  // The ridge behind is forested mountain in daylight, not a dark cut-out: in
+  // near-black rock, dissolved into a noon sky, it came out a flat band of mid
+  // blue and was reported as the sea.
+  strip(ridgeR, 360, waves([[3, 16], [7, 9], [11, 4], [23, 2]], 62), drift(1.14, 0.92), litSlope(0x2e3f33),
+    'horizon-forest-ridge', -3, 'forest');
+
+  // ---------------------------------------------------------------- hills --
+  // The Shire: rolling farmland going blue with distance, a hedge-and-copse
+  // comb in front, round-headed trees rather than spires.
+  {
+    const points = [];
+    const colors = [];
+    const ring = rings[0];
+    const span = 2 * Math.PI * ring.r;
+    for (let arc = 0; arc < span; arc += rnd(5, 16)) {
+      const a = arc / ring.r;
+      const radius = ring.r + rnd(-15, 15);
+      const px = cx + Math.cos(a) * radius; const pz = cz + Math.sin(a) * radius;
+      const tx = -Math.sin(a); const tz = Math.cos(a);
+      // A copse is a few crowns side by side; a hedge line is low and long.
+      const crowns = rng() < 0.35 ? 1 : 2 + Math.floor(rng() * 3);
+      const tone = rnd(0.75, 1.25);
+      for (let c = 0; c < crowns; c++) {
+        const r = rnd(5, 11);
+        const h = r * rnd(1.3, 2.1);
+        const off = (c - (crowns - 1) / 2) * r * 1.3 + rnd(-1.5, 1.5);
+        const SEG = 7;
+        for (let k = 0; k < SEG; k++) {
+          const t0 = (k / SEG) * Math.PI; const t1 = ((k + 1) / SEG) * Math.PI;
+          const at = (t) => [off + Math.cos(t) * r, h - r + Math.sin(t) * r];
+          const [x0, y0] = at(t0); const [x1, y1] = at(t1);
+          points.push(px + tx * (off + r), groundY, pz + tz * (off + r));
+          points.push(px + tx * (off - r), groundY, pz + tz * (off - r));
+          points.push(px + tx * x0, groundY + y0, pz + tz * x0);
+          points.push(px + tx * (off - r), groundY, pz + tz * (off - r));
+          points.push(px + tx * x1, groundY + y1, pz + tz * x1);
+          points.push(px + tx * x0, groundY + y0, pz + tz * x0);
+          for (let q = 0; q < 6; q++) colors.push(tone * 0.95, tone, tone * 0.9);
+        }
+      }
+    }
+    silhouette(points, colors, new THREE.MeshBasicMaterial({
+      color: 0x18221a, side: THREE.DoubleSide, vertexColors: true,
+    }), 'horizon-hills-copses', 0, 'hills');
+    // Two ranges of hills, the nearer greener, the further gone to haze.
+    strip(rings[1].r + 20, 256, waves([[4, 7], [7, 5], [13, 2.5]], 22), drift(1.1, 0.95),
+      litSlope(0x3f5634), 'horizon-hills-near', -2, 'hills');
+    strip(ridgeR, 256, waves([[3, 12], [5, 8], [11, 3]], 44), drift(1.12, 0.94),
+      litSlope(0x4d5a52), 'horizon-hills-far', -3, 'hills');
   }
-  silhouette(ridge, ridgeColors, rock, 'horizon-ridge', -3);
+
+  // --------------------------------------------------------------- desert --
+  // Mesas and buttes: flat tops, cliffs, talus -- the silhouette nothing else
+  // has -- and a low swell of dunes in front, all in sand and red rock that the
+  // noon haze turns pale.
+  {
+    const SEG = 720;
+    const tops = [];
+    for (let a = 0; a < Math.PI * 2;) {
+      const width = rnd(0.05, 0.22);
+      const gap = rnd(0.02, 0.14);
+      // Some buttes stand in two tiers: a caprock over a wider bench.
+      tops.push({ a0: a, a1: a + width, h: rnd(28, 78), shoulder: rnd(0.004, 0.012), tier: rng() < 0.4 ? rnd(0.55, 0.8) : 1 });
+      a += width + gap;
+    }
+    // The last one must not run over the seam at 2 pi.
+    tops[tops.length - 1].a1 = Math.min(tops[tops.length - 1].a1, Math.PI * 2 - 0.01);
+    const base = waves([[5, 3], [9, 2]], 9);
+    const mesa = (a) => {
+      let h = base(a);
+      for (const m of tops) {
+        const inside = Math.min(a - m.a0, m.a1 - a);
+        if (inside <= -m.shoulder * 3) continue;
+        // A cliff above a talus slope: steep for the upper two thirds.
+        const t = THREE.MathUtils.clamp((inside + m.shoulder * 3) / (m.shoulder * 4), 0, 1);
+        let top = m.h * (t < 0.35 ? t / 0.35 * 0.35 : 0.35 + 0.65 * THREE.MathUtils.smoothstep(t, 0.35, 0.6));
+        // The caprock sits back from the bench's edge.
+        if (m.tier < 1) {
+          const back = (m.a1 - m.a0) * 0.22;
+          top = Math.min(top, inside > back ? m.h : m.h * m.tier);
+        }
+        // Weathered, not ruled: a few metres of broken edge along the top.
+        top *= 1 + 0.025 * Math.sin(a * 310) * Math.sin(a * 83 + 1.3);
+        h = Math.max(h, top);
+      }
+      return h;
+    };
+    // Strata by height, a darker talus at the foot, and each butte turned a
+    // little more or less to the sun -- one flat tone read as cardboard.
+    const faceOf = (a) => {
+      for (let i = 0; i < tops.length; i++) if (a >= tops[i].a0 - 0.04 && a <= tops[i].a1 + 0.04) return 0.78 + 0.34 * hash3(i, 0, 0, 7117);
+      return 0.9;
+    };
+    const strata = (a, v, h) => {
+      const band = 0.9 + 0.1 * Math.sin(h * 0.9 + Math.sin(a * 40) * 0.6) + 0.06 * Math.sin(h * 2.7);
+      const talus = THREE.MathUtils.smoothstep(v, 0.0, 0.3);
+      const k = faceOf(a) * band * (0.72 + 0.28 * talus);
+      return [k * 1.02, k, k * 0.97];
+    };
+    strip(ridgeR, SEG, mesa, strata, litSlope(0xd8a482, 0.55), 'horizon-desert-mesas', -3, 'desert', 8);
+    strip(rings[1].r, 256, waves([[11, 3], [17, 2], [29, 1.2]], 8), (a, top) => (top ? [1.05, 1.02, 0.96] : [0.86, 0.8, 0.74]),
+      litSlope(0xd2b48a, 0.55), 'horizon-desert-dunes', -2, 'desert');
+  }
+
+  // ----------------------------------------------------------------- town --
+  // Past the town, more town: gables, chimneys, a tower now and then and the
+  // line of a wall -- one strip whose crest traces the roofs, so the haze can
+  // dissolve it like a ridge.
+  {
+    const r = rings[0].r;
+    const pts = [];
+    for (let arc = 0; arc < 2 * Math.PI * r - 30;) {
+      const a = arc / r;
+      const kind = rng();
+      if (kind < 0.12) {
+        // A tower with a spire.
+        const w = rnd(8, 11); const h = rnd(32, 44); const spire = rnd(10, 18);
+        pts.push([arc, 10], [arc, h], [arc + w / 2, h + spire], [arc + w, h], [arc + w, 10]);
+        arc += w + rnd(2, 6);
+      } else if (kind < 0.22) {
+        // A stretch of wall with crenels.
+        const len = rnd(20, 45);
+        for (let x = 0; x < len; x += 3) pts.push([arc + x, 12], [arc + x, 13.6], [arc + x + 1.5, 13.6], [arc + x + 1.5, 12]);
+        arc += len;
+      } else {
+        // A house: eaves, a gable, sometimes a chimney.
+        const w = rnd(10, 22); const eave = rnd(12, 19); const ridge = eave + w * rnd(0.3, 0.45);
+        pts.push([arc, eave], [arc + w / 2, ridge], [arc + w, eave]);
+        if (rng() < 0.4) {
+          const c = arc + w * rnd(0.6, 0.8);
+          const at = eave + (ridge - eave) * (1 - Math.abs(c - (arc + w / 2)) / (w / 2));
+          pts.splice(pts.length - 1, 0, [c, at], [c, at + 3.5], [c + 1.6, at + 3.5], [c + 1.6, at - 1.6 * (ridge - eave) / (w / 2)]);
+        }
+        arc += w + rnd(0, 3);
+      }
+    }
+    pts.push([2 * Math.PI * r, pts[0][1]]);
+    const crest = (a) => {
+      const arc = a * r;
+      let lo = 0; let hi = pts.length - 1;
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (pts[mid][0] <= arc) lo = mid; else hi = mid; }
+      const [x0, y0] = pts[lo]; const [x1, y1] = pts[hi];
+      return x1 > x0 ? y0 + (y1 - y0) * (arc - x0) / (x1 - x0) : y1;
+    };
+    // Sampled finely enough to keep the corners: 1.5 m of arc a segment.
+    strip(r, Math.round(2 * Math.PI * r / 1.5), crest, (a, top) => (top ? [1.0, 1.0, 1.05] : [0.85, 0.85, 0.9]),
+      haze(new THREE.MeshBasicMaterial({ color: 0x1a1d24, side: THREE.DoubleSide, vertexColors: true })),
+      'horizon-town-roofs', -2, 'town');
+    // Farmland and wooded hills beyond the walls, going blue with distance.
+    strip(ridgeR, 360, waves([[3, 14], [7, 8], [11, 4], [19, 2]], 48), drift(1.12, 0.94), litSlope(0x4a5a4c),
+      'horizon-town-ridge', -3, 'town');
+  }
+
+  // ---------------------------------------------------------------- marsh --
+  // Flat: a reed bed's ragged top a few metres high, a low bank of willow
+  // beyond it, and nothing else -- the haze does the rest.
+  {
+    const reed = (a) => {
+      const k = a * 2400;
+      const saw = Math.abs(((k % 2) + 2) % 2 - 1);
+      return 3.2 + 1.8 * saw * (0.6 + 0.4 * Math.sin(a * 37)) + 1.2 * Math.sin(a * 13);
+    };
+    strip(rings[0].r, 4800, reed, (a, top) => (top ? [1.0, 1.02, 0.94] : [0.8, 0.84, 0.78]),
+      litSlope(0x4f5a3e), 'horizon-marsh-reeds', -2, 'marsh');
+    strip(ridgeR, 256, waves([[9, 3], [16, 2], [27, 1.4]], 12), drift(1.08, 0.96),
+      litSlope(0x55605a), 'horizon-marsh-willows', -3, 'marsh');
+  }
+
+  // Which style each room votes for, and where it stands.
+  const voters = [];
+  for (const cell of layout.order) {
+    if (!cell.room) continue;
+    const style = HORIZON_STYLE[cell.room.areaFile] || 'town';
+    voters.push({ x: cell.x * CELL, y: cell.level * LEVEL_H, z: cell.z * CELL, style });
+  }
+  const weights = new Map(HORIZON_STYLES.map((n) => [n, 0]));
+
+  return {
+    /**
+     * The hour's light on the far slopes that have an albedo. `level` is
+     * already divided by the exposure, so the slopes keep their noon value
+     * on screen at noon and fall with the light, not with the camera.
+     */
+    setHour(tintHex, level) {
+      const tint = new THREE.Color(tintHex);
+      for (const { material, albedo } of lit) material.color.copy(albedo).multiply(tint).multiplyScalar(level);
+    },
+    /** Vote, then ease each skyline towards its share. */
+    update(position, dt) {
+      for (const n of HORIZON_STYLES) weights.set(n, 0);
+      let total = 0;
+      for (const v of voters) {
+        // Only rooms on the camera's own level: the sewer runs under the
+        // Shire, and its rooms are the town's.
+        if (Math.abs(v.y - position.y) > LEVEL_H * 0.75) continue;
+        const d = Math.hypot(v.x - position.x, v.z - position.z);
+        if (d >= HORIZON_REACH) continue;
+        const w = (1 - d / HORIZON_REACH) ** 2;
+        weights.set(v.style, weights.get(v.style) + w);
+        total += w;
+      }
+      if (total <= 0) return; // off in the fields: keep what was up
+      const k = 1 - Math.exp(-dt / 0.8);
+      for (const n of HORIZON_STYLES) {
+        const rise = rises.get(n);
+        const target = THREE.MathUtils.smoothstep(weights.get(n) / total, 0.05, 0.6);
+        rise.value += (target - rise.value) * k;
+        if (Math.abs(target - rise.value) < 0.002) rise.value = target;
+        for (const mesh of meshes.get(n)) mesh.visible = rise.value > 0.002;
+      }
+    },
+    /** Jump straight to the vote, for a camera that has teleported. */
+    settle(position) { for (let i = 0; i < 40; i++) this.update(position, 1); },
+    rises,
+  };
 }
