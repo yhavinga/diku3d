@@ -129,7 +129,18 @@ PROP_BUDGET = 800
 # and a busy square shows about a dozen, so these are paid perhaps twelve
 # times a frame, not per chunk.
 PERSON_BUDGET = 6500
-HEAD_PIECE_BUDGET = 1000
+# Hoods, coifs and scarves are cut from the sculpted skull, which is denser
+# than the ring-stack it replaced.
+HEAD_PIECE_BUDGET = 1600
+# A face is the skin with the ears, two eyeballs and the brows: the part of a
+# person that is looked at hardest, and so the densest.
+FACE_BUDGET = 3800
+# Hair in locks: the sculpted mass and, for long hair, the fall. A woman's
+# hair to her shoulders is most of what reads of her at twenty metres, so it
+# is paid for; everything else on a head stays under the old cap.
+HAIR_BUDGET = {"hair_long": 8000, "turban": 1200, "face_ettin": 7200, "hair_braid": 3000, "hair_bun": 3000, "hair_tail": 3500,
+               "hair_short": 2600, "hair_crop": 1600, "hair_fringe": 1400, "beard_full": 1800,
+               "beard_short": 1200, "moustache": 400}
 TREE_BUDGET = 1500
 
 
@@ -182,8 +193,9 @@ def check(report):
         if len(bits) < 3 or bits[2] != "tris":
             continue
         name, tris = bits[0], int(bits[1])
-        cap = BUDGET.get(name, TREE_BUDGET if name.startswith("tree") else
+        cap = BUDGET.get(name) or HAIR_BUDGET.get(name) or (TREE_BUDGET if name.startswith("tree") else
                          PERSON_BUDGET if name.startswith("arch_") else
+                         FACE_BUDGET if name.startswith("face_") else
                          HEAD_PIECE_BUDGET if name.startswith(("hair_", "beard_", "helm_", "hat_",
                                                                "hood", "coif", "scarf", "moustache"))
                          else PROP_BUDGET)

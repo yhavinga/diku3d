@@ -13,7 +13,7 @@ const argv = process.argv.slice(2);
 const all = argv.includes('--all');
 const only = (argv.find((a) => a.startsWith('--only=')) || '').slice(7);
 const pickAreas = argv.filter((a) => !a.startsWith('--'));
-const DEFAULT = ['midgaard', 'haon', 'shire', 'marsh', 'trollden', 'grave'];
+const DEFAULT = ['midgaard', 'haon', 'shire', 'marsh', 'trollden', 'grave', 'sewer', 'eastern'];
 const files = readdirSync(areaDir).filter((f) => f.endsWith('.are')).sort()
   .filter((f) => all || (pickAreas.length ? pickAreas : DEFAULT).some((a) => f.startsWith(a)));
 const areas = files.map((f) => parseArea(readFileSync(join(areaDir, f), 'latin1'), f));

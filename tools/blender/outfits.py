@@ -263,7 +263,9 @@ def loft_skirt(body, name, top, hem, flare=1.35, mat="cloth", sides=24, rings=8,
             r = ((loc - V((0.0, cy, z))).xy.length if loc is not None else 0.0) + ease
             reach[i] = max(reach[i], r)
             rr = reach[i] * k
-            fold = 1.0 + hem_wave * t * t * math.sin(a * 9 + 0.7)
+            # Folds that fall from the waist and deepen to the hem, not a
+            # fluted column: two sets out of step, so no two are alike.
+            fold = 1.0 + hem_wave * t * t * (0.65 * math.sin(a * 7 + 0.7) + 0.35 * math.sin(a * 13 + 2.1))
             zz = z
             if ri == rings:
                 zz += ragged * (0.5 + 0.5 * math.sin(a * 13.0) * math.sin(a * 5.0 + 1.0))
@@ -720,7 +722,7 @@ def peasant(body, arm, C):
     """A labourer: a short belted tunic over hose, and boots."""
     top = tunic_body(body, arm, C, sleeve=0.55, hem=C.z(0.93))
     skirt = loft_skirt(body, "tunic_skirt", C.z(1.00), C.zl(0.70), flare=1.12, mat="cloth",
-                       hem_wave=0.035, under=[top])
+                       hem_wave=0.06, under=[top])
     hang(skirt, arm, body, C, C.z(0.99), C.zl(0.70), follow=0.55)
     rim(skirt, 0.006)
     legs = hose(body, arm, C)
@@ -861,7 +863,7 @@ def robe(body, arm, C, mat="cloth", hem=0.06, flare=1.45, sleeve=0.92, name="rob
     top = tunic_body(body, arm, C, sleeve=sleeve, hem=C.z(0.93), mat=mat, offset=0.012,
                      neck_drop=0.02, name=name)
     skirt = loft_skirt(body, name + "_skirt", C.z(1.00), C.zl(hem), flare=flare, mat=mat,
-                       hem_wave=0.05, under=[top], rings=14)
+                       hem_wave=0.08, under=[top], rings=14)
     hang(skirt, arm, body, C, C.z(1.00), C.zl(hem), follow=0.42)
     rim(skirt, 0.006)
     out = [top, skirt]
@@ -886,7 +888,7 @@ def merchant(body, arm, C):
     """A shopkeeper: a knee-length tunic, hose, shoes, and an apron over it."""
     top = tunic_body(body, arm, C, sleeve=0.7, hem=C.z(0.93))
     skirt = loft_skirt(body, "tunic_skirt", C.z(1.00), C.zl(0.50), flare=1.16, mat="cloth",
-                       hem_wave=0.04, under=[top], rings=12)
+                       hem_wave=0.06, under=[top], rings=12)
     hang(skirt, arm, body, C, C.z(1.00), C.zl(0.50), follow=0.5)
     rim(skirt, 0.006)
     legs = hose(body, arm, C)
@@ -980,7 +982,7 @@ def rogue(body, arm, C):
     bt = belt(body, C.z(1.03), under=[top, skirt])
     for b in bt:
         hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
-    ck = cloak(body, arm, C, C.zl(0.45), mat="cloth", under=[top, skirt] + bt)
+    ck = cloak(body, arm, C, C.zl(0.45), mat="wool", under=[top, skirt] + bt)
     return [top, skirt, legs, feet, ck] + bt
 
 
@@ -1003,7 +1005,7 @@ def noble(body, arm, C):
     good belt and boots."""
     top = tunic_body(body, arm, C, sleeve=0.9, hem=C.z(0.93), mat="cloth")
     skirt = loft_skirt(body, "gown_skirt", C.z(1.00), C.zl(0.34), flare=1.25, mat="cloth",
-                       hem_wave=0.04, under=[top], rings=12)
+                       hem_wave=0.06, under=[top], rings=12)
     hang(skirt, arm, body, C, C.z(1.00), C.zl(0.34), follow=0.5)
     rim(skirt, 0.006)
     legs = hose(body, arm, C)
@@ -1011,7 +1013,7 @@ def noble(body, arm, C):
     bt = belt(body, C.z(1.04), under=[top, skirt], buckle="iron")
     for b in bt:
         hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
-    cape = cloak(body, arm, C, C.z(1.02), mat="cloth2", under=[top] + bt, name="cape")
+    cape = cloak(body, arm, C, C.z(1.02), mat="wool", under=[top] + bt, name="cape")
     return [top, skirt, legs, feet, cape] + bt
 
 
@@ -1076,7 +1078,7 @@ def woman(body, arm, C, hem=0.03, ragged=0.0, apron_on=False, shawl=False):
     the ankle gathered at the waist, a sash, and shoes."""
     top = tunic_body(body, arm, C, sleeve=0.8, hem=C.z(0.99), neck_drop=0.05, mat="cloth")
     skirt = loft_skirt(body, "skirt", C.z(1.06), C.zl(hem), flare=1.55, mat="cloth",
-                       hem_wave=0.06, ragged=ragged, under=[top], rings=10)
+                       hem_wave=0.08, ragged=ragged, under=[top], rings=10)
     hang(skirt, arm, body, C, C.z(1.06), C.zl(hem), follow=0.4)
     rim(skirt, 0.005)
     feet = boots(body, arm, C, top=0.9)
@@ -1090,7 +1092,7 @@ def woman(body, arm, C, hem=0.03, ragged=0.0, apron_on=False, shawl=False):
         hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
     out += sash
     if shawl:
-        out.append(cloak(body, arm, C, C.z(1.05), mat="cloth2", under=out, name="shawl",
+        out.append(cloak(body, arm, C, C.z(1.05), mat="wool", under=out, name="shawl",
                          ragged=0.03))
     return out
 
@@ -1101,6 +1103,34 @@ def maid(body, arm, C):
 
 def crone(body, arm, C):
     return woman(body, arm, C, hem=0.05, ragged=0.04, shawl=True)
+
+
+def lady(body, arm, C):
+    """A noblewoman: a fitted gown in velvet with long sleeves and a square
+    neck, its skirt full to the floor and trailing, a girdle of gilt plates
+    low on the hips, and a mantle from the shoulders."""
+    top = tunic_body(body, arm, C, sleeve=0.95, hem=C.z(0.99), neck_drop=0.06, mat="velvet")
+    skirt = loft_skirt(body, "skirt", C.z(1.06), C.zl(-0.01), flare=1.75, mat="velvet",
+                       hem_wave=0.09, under=[top], rings=12)
+    hang(skirt, arm, body, C, C.z(1.06), C.zl(0.0), follow=0.35)
+    rim(skirt, 0.005)
+    feet = boots(body, arm, C, top=0.92)
+    girdle = belt(body, C.z(1.00), under=[top, skirt], width=0.022, buckle="gold", mat="gold", ease=0.012)
+    for b in girdle:
+        hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
+    mantle = cloak(body, arm, C, C.zl(0.10), mat="wool", under=[top, skirt] + girdle, name="mantle")
+    return [top, skirt, feet, mantle] + girdle
+
+
+def nomad(body, arm, C):
+    """A man of the desert: a long loose robe to the ankle with full
+    sleeves, a broad sash wound at the waist, and soft boots."""
+    parts = robe(body, arm, C, mat="cloth", hem=0.07, flare=1.35, sleeve=0.9, wide=True, name="thobe")
+    feet = boots(body, arm, C, top=0.9)
+    sash = belt(body, C.z(1.04), under=parts, width=0.075, buckle=None, mat="cloth2", ease=0.012)
+    for b in sash:
+        hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
+    return parts + [feet] + sash
 
 
 def troll(body, arm, C):
@@ -1140,27 +1170,10 @@ def skeleton(body, arm, C):
     tl = lambda n: b[n].tail_local.copy()
     P = C.P
     out = []
-    # The skull is the head with the face taken off it: no nose, the sockets
-    # and the nose hole dark.
-    sk = _skull(dict(P, nose=0.0, brow=1.6, chin=P["chin"] * 1.3))
-    for v in sk.data.vertices:
-        c = people.head_center(P)
-        v.co = c + (v.co - c) * 0.94
-    sk.data.materials.clear()
-    sk.data.materials.append(lib.material("bone"))
+    import heads
+    sk = heads.skull(P)
     rig.set_rigid(sk, "head")
     out.append(sk)
-    c = people.head_center(P)
-    hw, hd, hh = P["head"]
-    for sx in (-1, 1):
-        e = people.ellipsoid(tuple(c + V((sx * 0.031, -hd * 0.84, 0.004))), (0.017, 0.012, 0.016),
-                             name="socket", mat="eye", seg=8, rings=6)
-        rig.set_rigid(e, "head")
-        out.append(e)
-    nh = people.ellipsoid(tuple(c + V((0.0, -hd * 0.86, -0.030))), (0.010, 0.010, 0.014),
-                          name="nosehole", mat="eye", seg=8, rings=6)
-    rig.set_rigid(nh, "head")
-    out.append(nh)
     # Spine: neck to sacrum, bumped every vertebra.
     for (name, r) in (("neck", 0.016), ("chest", 0.019), ("spine", 0.021)):
         h, t = hl(name) + V((0, 0.03, 0)), tl(name) + V((0, 0.03, 0))
@@ -1233,7 +1246,22 @@ def skeleton(body, arm, C):
     return out
 
 
-DRESS = {"skeleton": skeleton, "troll": troll, "woman": woman, "maid": maid, "crone": crone, "peasant": peasant, "guard": guard, "merchant": merchant, "smith": smith,
+def brute(body, arm, C):
+    """A gang's troll or ogre: a sleeveless leather jerkin, too small, laced
+    over the hide, the loincloth under it and a rope for a belt."""
+    top = tunic_body(body, arm, C, sleeve=-0.9, hem=C.z(0.95), mat="leather", offset=0.012, neck_drop=0.05,
+                     name="jerkin")
+    skirt = loft_skirt(body, "loincloth", C.z(1.02), C.zl(0.60), flare=1.12, mat="leather",
+                       hem_wave=0.06, ragged=0.08, rings=6, under=[top])
+    hang(skirt, arm, body, C, C.z(1.02), C.zl(0.60), follow=0.6)
+    rim(skirt, 0.006)
+    rope = belt(body, C.z(1.03), under=[top, skirt], width=0.02, buckle=None, mat="linen")
+    for b in rope:
+        hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
+    return [top, skirt] + rope
+
+
+DRESS = {"brute": brute, "lady": lady, "nomad": nomad, "skeleton": skeleton, "troll": troll, "woman": woman, "maid": maid, "crone": crone, "peasant": peasant, "guard": guard, "merchant": merchant, "smith": smith,
          "priest": priest, "mage": mage, "rogue": rogue, "beggar": beggar, "noble": noble,
          "knight": knight, "zombie": zombie, "ghost": ghost}
 
@@ -1348,104 +1376,67 @@ def cap(P, name, keep, push, mat="hair", thick=0.004, smooth=True, bone="head", 
     return skull
 
 
+# Hair and beards are hair.py's: sculpted locks over a dark mass, grown on
+# the face of the body's sex. These are the names the viewer knows them by.
+
+def _hair():
+    import hair
+    import heads
+    importlib.reload(hair)
+    return hair, heads
+
+
 def hair_short(P):
-    return cap(P, "hair_short", lambda l: l.z > hairline(_theta(l)),
-               lambda l: 0.006 + 0.008 * max(0.0, l.z / 0.118) + 0.004 * max(0.0, l.y / 0.1),
-               edge=lambda l: hairline(_theta(l)))
+    hair, heads = _hair()
+    return hair.style_short(heads.spec_for(P), P, "hair_short")
 
 
 def hair_crop(P):
-    return cap(P, "hair_crop", lambda l: l.z > hairline(_theta(l)) + 0.008,
-               lambda l: 0.0035, edge=lambda l: hairline(_theta(l)) + 0.008)
+    hair, heads = _hair()
+    return hair.style_crop(heads.spec_for(P), P, "hair_crop")
 
 
-def hair_long(P, name="hair_long", length=0.16):
-    """Hair to the shoulders: the short cap, and a curtain hanging from the
-    back and sides of it."""
-    top = cap(P, name, lambda l: l.z > hairline(_theta(l)) - 0.004,
-              lambda l: 0.008 + 0.009 * max(0.0, l.z / 0.118),
-              edge=lambda l: hairline(_theta(l)) - 0.004)
-    c = people.head_center(P)
-    hw, hd, hh = P["head"]
-    rings = []
-    zs = [(-0.035, 1.0), (-0.09, 1.0), (-0.09 - length * 0.5, 0.94), (-0.09 - length, 0.86)]
-    verts, faces = [], []
-    sides = 14
-    for (z, k) in zs:
-        for i in range(sides + 1):
-            # From one temple round the back to the other.
-            a = math.radians(-100 + 200 * i / sides)
-            x = math.sin(a) * (hw + 0.012) * k * (1.15 if z < -0.1 else 1.0)
-            y = -math.cos(a) * (hd * 0.92 + 0.012) * k
-            y = max(y, -0.01)
-            verts.append((c.x + x, c.y + y + 0.01, c.z + z * hh / 0.118))
-    for r in range(len(zs) - 1):
-        for i in range(sides):
-            a0 = r * (sides + 1) + i
-            faces.append((a0, a0 + 1, a0 + sides + 2, a0 + sides + 1))
-    me = bpy.data.meshes.new(name + "_fall")
-    me.from_pydata(verts, [], faces)
-    me.validate()
-    fall = bpy.data.objects.new(name + "_fall", me)
-    bpy.context.collection.objects.link(fall)
-    lib.assign(fall, "hair")
-    people.outward(fall)
-    for p in fall.data.polygons:
-        p.use_smooth = True
-    thicken(fall, 0.012)
-    rig.set_rigid(fall, "head")
-    return people.join([top, fall], name)
+def hair_long(P):
+    hair, heads = _hair()
+    S = heads.spec_for(P)
+    # A man's to the collar, a woman's past her shoulders.
+    return hair.style_long(S, P, "hair_long", length=0.30 if S["sex"] == "f" else 0.17)
 
 
 def hair_fringe(P):
-    """Bald on top, a fringe round the back and sides: a monk's, or an old
-    man's."""
-    return cap(P, "hair_fringe", lambda l: hairline(_theta(l)) < l.z < 0.045 and
-               abs(math.degrees(_theta(l))) > 60, lambda l: 0.006)
+    hair, heads = _hair()
+    return hair.style_fringe(heads.spec_for(P), P, "hair_fringe")
 
 
 def hair_bun(P):
-    h = cap(P, "hair_bun", lambda l: l.z > hairline(_theta(l)) - 0.004,
-            lambda l: 0.005 + 0.005 * max(0.0, l.z / 0.118),
-            edge=lambda l: hairline(_theta(l)) - 0.004)
-    c = people.head_center(P)
-    hw, hd, hh = P["head"]
-    bun = people.ellipsoid(tuple(c + V((0.0, hd * 0.95, 0.045 * hh / 0.118))), (0.034, 0.030, 0.032),
-                           name="bun", mat="hair", seg=12, rings=8)
-    for p in bun.data.polygons:
-        p.use_smooth = True
-    rig.set_rigid(bun, "head")
-    return people.join([h, bun], "hair_bun")
+    hair, heads = _hair()
+    return hair.style_bun(heads.spec_for(P), P, "hair_bun")
+
+
+def hair_braid(P):
+    hair, heads = _hair()
+    return hair.style_braid(heads.spec_for(P), P, "hair_braid")
+
+
+def hair_tail(P):
+    hair, heads = _hair()
+    S = heads.spec_for(P)
+    return hair.style_tail(S, P, "hair_tail", length=0.26 if S["sex"] == "f" else 0.18)
 
 
 def beard_full(P):
-    def keep(l):
-        a = abs(math.degrees(_theta(l)))
-        if a > 105:
-            return False
-        if a > 70:
-            return l.z < -0.005            # sideburns, down to the jaw
-        if abs(l.x) < 0.024 and -0.078 < l.z < -0.052:
-            return False                    # the mouth
-        return l.z < -0.050
-    return cap(P, "beard_full", keep,
-               lambda l: 0.007 + 0.012 * max(0.0, (-0.06 - l.z) / 0.06))
+    hair, heads = _hair()
+    return hair.style_beard(heads.spec_for(P), P, "beard_full", "full")
 
 
 def beard_short(P):
-    def keep(l):
-        a = abs(math.degrees(_theta(l)))
-        if a > 95:
-            return False
-        if abs(l.x) < 0.024 and -0.078 < l.z < -0.052:
-            return False
-        return l.z < (-0.020 if a > 70 else -0.050)
-    return cap(P, "beard_short", keep, lambda l: 0.004)
+    hair, heads = _hair()
+    return hair.style_beard(heads.spec_for(P), P, "beard_short", "short")
 
 
 def moustache(P):
-    return cap(P, "moustache", lambda l: abs(l.x) < 0.034 and -0.070 < l.z < -0.040 and
-               abs(math.degrees(_theta(l))) < 50, lambda l: 0.004)
+    hair, heads = _hair()
+    return hair.style_beard(heads.spec_for(P), P, "moustache", "moustache")
 
 
 def hood(P, name="hood", mat="cloth"):
@@ -1609,13 +1600,42 @@ def hat_wizard(P):
     return people.join([cone, brim], "hat_wizard")
 
 
+def turban(P):
+    """A turban: a cloth dome wound round the head in three turns, the loose
+    end hanging behind -- a desert man's, and a dervish's."""
+    c = people.head_center(P)
+    hw, hd, hh = P["head"]
+    k = hh / 0.118
+    crown = _dome(P, "turban", 0.034, 0.018, mat="linen")
+    for v in crown.data.vertices:
+        # Wound high: the cloth stands well above the crown.
+        if v.co.z > c.z + 0.06 * k:
+            v.co.z += (v.co.z - (c.z + 0.06 * k)) * 0.9
+    parts = [crown]
+    for i, (z, tilt) in enumerate(((0.028, 8), (0.052, -7), (0.076, 10), (0.098, -5))):
+        band = ring("band%d" % i, tuple(c + V((0, 0.006, z * k))), 1.0, 0.20, mat="linen", seg=20,
+                    rot=(math.radians(tilt), 0, 0), scale=(hw + 0.040 - i * 0.007, hd + 0.040 - i * 0.007,
+                                                         0.11))
+        rig.set_rigid(band, "head")
+        parts.append(band)
+    tail = people.ring_loft(c + V((0.02, hd * 0.95, 0.04 * k)), (0.1, 0.4, -1), [
+        (0.0, 0.030, 0.008, 0.008), (0.10, 0.034, 0.006, 0.006), (0.16, 0.026, 0.005, 0.005)],
+        sides=8, side=(1, 0, 0), name="turban_tail", mat="linen")
+    for pl in tail.data.polygons:
+        pl.use_smooth = True
+    rig.set_rigid(tail, "head")
+    parts.append(tail)
+    return people.join(parts, "turban")
+
+
 def hat_cap(P):
     """A soft felt cap: the everyday hat of a tradesman."""
     return _dome(P, "hat_cap", 0.016, 0.040, mat="cloth2")
 
 
 HEAD_PIECES = {
-    "male": [hair_short, hair_crop, hair_long, hair_fringe, beard_full, beard_short, moustache,
-             hood, coif, helm_kettle, helm_nasal, helm_great, hat_wizard, hat_cap],
-    "female": [hair_long, hair_bun, hair_short, scarf, coif, hood],
+    "male": [hair_short, hair_crop, hair_long, hair_fringe, hair_tail, beard_full, beard_short, moustache,
+             hood, coif, helm_kettle, helm_nasal, helm_great, hat_wizard, hat_cap, turban],
+    "female": [hair_long, hair_bun, hair_braid, hair_tail, hair_short, scarf, coif, hood,
+               helm_kettle, helm_nasal, hat_wizard],
 }

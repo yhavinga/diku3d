@@ -303,7 +303,7 @@ MALE = dict(
     # joints
     hip=(0.092, 0.0, 0.955), knee=(0.100, -0.012, 0.515), ankle=(0.106, 0.012, 0.090),
     shoulder=(0.182, 0.012, 1.445), neck_base=1.470, head_joint=1.600, crown=1.752,
-    arm_a=40.0, upper=0.292, fore=0.252, hand=0.185,
+    arm_a=22.0, arm_drop=0.030, upper=0.292, fore=0.252, hand=0.185,
     # girths (half-widths / half-depths, m)
     hips=(0.168, 0.100, 0.118), waist=(0.142, 0.094, 0.090), chest=(0.158, 0.112, 0.100),
     lats=0.163, neck=0.060, thigh=0.086, calf=0.060, knee_r=0.050, ankle_r=0.034,
@@ -315,7 +315,7 @@ FEMALE = dict(
     MALE, name="female",
     hip=(0.090, 0.0, 0.905), knee=(0.094, -0.010, 0.488), ankle=(0.098, 0.012, 0.085),
     shoulder=(0.160, 0.012, 1.358), neck_base=1.382, head_joint=1.508, crown=1.650,
-    upper=0.272, fore=0.232, hand=0.170,
+    arm_drop=0.026, upper=0.272, fore=0.232, hand=0.170,
     hips=(0.176, 0.100, 0.125), waist=(0.122, 0.082, 0.080), chest=(0.146, 0.104, 0.090),
     lats=0.140, neck=0.047, thigh=0.086, calf=0.055, knee_r=0.045, ankle_r=0.030,
     upper_r=0.043, elbow_r=0.033, wrist_r=0.025, delt=0.050,
@@ -332,7 +332,7 @@ TROLL = dict(
     MALE, name="troll",
     hip=(0.125, 0.0, 0.860), knee=(0.135, -0.022, 0.470), ankle=(0.145, 0.012, 0.095),
     shoulder=(0.245, 0.020, 1.500), neck_base=1.535, head_joint=1.650, crown=1.860,
-    arm_a=40.0, upper=0.400, fore=0.380, hand=0.270,
+    arm_a=26.0, arm_drop=0.036, upper=0.400, fore=0.380, hand=0.270,
     hips=(0.205, 0.140, 0.150), waist=(0.215, 0.165, 0.125), chest=(0.232, 0.160, 0.160),
     lats=0.252, neck=0.090, thigh=0.122, calf=0.092, knee_r=0.072, ankle_r=0.050,
     upper_r=0.076, elbow_r=0.058, wrist_r=0.046, delt=0.100,
@@ -348,6 +348,10 @@ def arm_axis(P, side):
     d = V((side * math.sin(a), 0.0, -math.cos(a)))
     s = V(P["shoulder"])
     s.x *= side
+    # The joint sits a hand's breadth of deltoid below the top of the
+    # shoulder: at the shoulder line itself, the cap stood five centimetres
+    # proud of the base of the neck and every man shrugged.
+    s.z -= P["arm_drop"]
     e = s + d * P["upper"]
     w = e + d * P["fore"]
     return s, e, w, d
@@ -392,8 +396,10 @@ def torso(P):
         (z(1.474) - hz, lw * 0.64, cf * 0.54, cb * 0.68, 0, 0.012, 2.1),
         (z(1.490) - hz, lw * 0.50, cf * 0.50, cb * 0.62, 0, 0.012, 2.0),
         (nb - hz + 0.030, n * 1.12, n * 0.98, n * 1.12, 0, 0.010, 2.0),
-        (nb - hz + 0.065, n, n * 0.96, n * 1.02, 0, 0.004, 2.0),
-        (hj - hz + 0.010, n * 0.97, n * 0.95, n * 1.0, 0, 0.004, 2.0),
+        # The neck leans back up into the skull: its front, the throat,
+        # is well behind the chin, and the head's own neck ends inside it.
+        (nb - hz + 0.065, n, n * 0.92, n * 1.0, 0, -0.004, 2.0),
+        (hj - hz + 0.010, n * 0.96, n * 0.88, n * 0.98, 0, -0.012, 2.0),
     ]
     # side=-X so that the ring's "front" depth is at -Y, as it is for a limb.
     return ring_loft((0, 0, hz), (0, 0, 1), rings, sides=28, side=(-1, 0, 0), name="torso")
@@ -427,8 +433,8 @@ def shoulders(P):
         r = P["delt"]
         # A rounded cap over the joint, long along the arm: a loft ended in a
         # flat disc here and stood up off the shoulder like a wing.
-        at = s + d * 0.075 + V((-sx * 0.006, 0.0, 0.0))
-        cap = ellipsoid(tuple(at), (r * 0.84, 0.095, r * 0.86), name="deltoid", seg=20, rings=14)
+        at = s + d * 0.055 + V((-sx * 0.010, 0.0, 0.0))
+        cap = ellipsoid(tuple(at), (r * 0.92, 0.090, r * 0.94), name="deltoid", seg=20, rings=14)
         _orient(cap, at, d)
         out.append(cap)
     return out
@@ -437,7 +443,14 @@ def shoulders(P):
 def arm(P, sx):
     s, e, w, d = arm_axis(P, sx)
     ur, er, wr = P["upper_r"], P["elbow_r"], P["wrist_r"]
+    # The top of the arm closes in a dome that runs up under the deltoid and
+    # into the slope of the shoulder. It used to end in a flat cap at the
+    # joint, and the rim of that cap stood out of the fused skin as a lip --
+    # the square, padded shoulder every tunic cut from this body wore.
     up = ring_loft(s, d, [
+        (-0.050, ur * 0.25, ur * 0.25, ur * 0.25),
+        (-0.040, ur * 0.62, ur * 0.60, ur * 0.60),
+        (-0.024, ur * 0.88, ur * 0.85, ur * 0.85),
         (0.00, ur * 1.05, ur, ur),
         (0.08, ur * 1.02, ur * 1.05, ur * 0.98),     # biceps in front
         (0.16, ur * 0.95, ur * 1.02, ur * 0.95),
@@ -478,7 +491,9 @@ def hand(P, sx, w, d):
         base = knuckles + across * (off * k)
         # Curl: each finger bends towards the palm a little more than the one
         # before it, as a hand at rest does.
-        curl = math.radians(18 + i * 6)
+        # Half closed, as a hand at rest is -- and round enough that a
+        # hilt in it looks held, which a flat hand never did.
+        curl = math.radians(34 + i * 7)
         seg = []
         p = base
         dirn = along.copy()
@@ -548,6 +563,11 @@ def foot(P, sx, a):
 
 
 # --- the head -------------------------------------------------------------
+#
+# The head is heads.py's: a signed distance field per face, meshed, rigged by
+# vertex group on the head, jaw, nose and eye bones. Each file carries the
+# faces of its body (young and old), as separate objects the viewer chooses
+# between, like the hair.
 
 def head_center(P):
     """The eye line, which is the middle of the head from chin to crown."""
@@ -564,129 +584,30 @@ def _interp(table, z):
     return table[-1][1]
 
 
-# The head, as a man's, in metres about the eye line, then scaled per person.
-# Half-width, depth in front of the axis, depth behind it: the three views a
-# sculptor blocks a head in from.
-HEAD_W = [(-0.118, 0.010), (-0.112, 0.024), (-0.100, 0.042), (-0.085, 0.055), (-0.060, 0.063),
-          (-0.030, 0.071), (0.000, 0.075), (0.030, 0.077), (0.070, 0.071), (0.095, 0.056),
-          (0.110, 0.036), (0.118, 0.010)]
-HEAD_F = [(-0.118, 0.040), (-0.108, 0.066), (-0.090, 0.079), (-0.068, 0.085), (-0.045, 0.084),
-          (-0.020, 0.086), (0.008, 0.088), (0.025, 0.094), (0.050, 0.088), (0.080, 0.074),
-          (0.100, 0.055), (0.112, 0.034), (0.118, 0.010)]
-HEAD_B = [(-0.118, -0.030), (-0.105, -0.018), (-0.090, 0.004), (-0.070, 0.036), (-0.050, 0.074),
-          (-0.020, 0.096), (0.020, 0.104), (0.060, 0.098), (0.090, 0.072), (0.108, 0.044),
-          (0.118, 0.010)]
-# Nose, on the midline: how far it stands proud of the face, and how wide.
-NOSE_OUT = [(-0.062, 0.0), (-0.054, 0.005), (-0.048, 0.013), (-0.040, 0.023), (-0.032, 0.025),
-            (-0.024, 0.021),
-            (-0.010, 0.015), (0.004, 0.008), (0.014, 0.002), (0.022, 0.0)]
-NOSE_W = [(-0.056, 0.012), (-0.046, 0.016), (-0.036, 0.015), (-0.020, 0.010), (0.000, 0.008),
-          (0.020, 0.010)]
+_SKULLS = {}
 
 
 def head(P):
-    """Skull, jaw, brow, cheekbones, nose, lips, ears -- as a stack of
-    horizontal sections read off three profiles, with the features laid on as
-    displacements, and then fused with the neck.
-
-    The first cut of every face in this project was a ball with marks on it,
-    and a review called it featureless every time. At three metres a face is
-    not features, it is the planes that hold light and shadow: a forehead
-    that faces up, a brow that shades the eyes, cheekbones that step out, a
-    nose that throws a shadow down one side, and a jaw that turns under into
-    the neck. Those are what is modelled here, a little overstated, as a
-    sculptor does for a figure meant to be seen from the street."""
-    hw, hd, hh = P["head"]
-    sw, sd, sh = hw / 0.077, hd / 0.100, hh / 0.118
-    c = head_center(P)
-    jaw = P["jaw"] / 0.062
-    chin = P["chin"] / 0.025
-    brow = P["brow"]
-    nose = P["nose"]
-    # Not fused with the body. A voxel remesh of the eye sockets comes out as
-    # a speckle of tiny folds at any voxel size and any decimation budget --
-    # tried at 900, 1400 and 2200 triangles, sym and not -- while the rings
-    # themselves are clean quads. So the head keeps its own topology, spent
-    # where a face is looked at: columns crowd towards the front, rings
-    # towards the band from chin to brow. The neck ends inside it.
-    sides = 28
-    # Evenly up the face from the chin to the brow, then by latitude over the
-    # crown -- even steps in z put two rings on the whole dome and made a cone.
-    zs = [-0.118 + (0.030 + 0.118) * i / 17.0 for i in range(18)]
-    for i in range(1, 7):
-        phi = (math.pi / 2) * i / 7.0
-        zs.append(0.030 + (0.118 - 0.030) * math.sin(phi))
-    def g(u, s):
-        return math.exp(-(u / s) ** 2)
-
-    verts, faces = [], []
-    for z in zs:
-        W = _interp(HEAD_W, z)
-        if z < -0.03:
-            W *= 1.0 + (jaw - 1.0) * min(1.0, (-0.03 - z) / 0.06)
-        F = _interp(HEAD_F, z)
-        B = _interp(HEAD_B, z)
-        for i in range(sides):
-            u = -1.0 + 2.0 * i / sides
-            a = 1.5 * math.pi + math.pi * math.copysign(abs(u) ** 1.45, u)
-            ca, sa = math.cos(a), -math.sin(a)          # sa > 0 is the front (-Y)
-            if sa > 0:
-                # The face is flatter than an ellipse: a rounded-box section.
-                e = 2.0 / 2.7
-                cu = math.copysign(abs(ca) ** e, ca)
-                sv = abs(sa) ** e
-                x, y = W * cu, -F * sv
-            else:
-                # Behind the axis; where B is negative the whole section is in
-                # front of it, which is the jaw below the skull.
-                x, y = W * ca, -B * sa
-            # Features, pushed straight out of the face.
-            out = 0.0
-            ax = abs(x)
-            if sa > 0.2:
-                out += 0.007 * brow * g(z - 0.024, 0.009) * g(ax / 0.06, 1.0) * (1.0 if ax < 0.058 else 0.4)
-                out -= 0.012 * g(ax - 0.033, 0.016) * g(z - 0.004, 0.010)          # eye socket
-                out += 0.005 * g(ax - 0.050, 0.014) * g(z + 0.022, 0.012)          # cheekbone
-                out -= 0.004 * g(ax - 0.044, 0.014) * g(z + 0.048, 0.016)          # under the cheekbone
-                out += 0.0045 * g(ax / 0.024, 1.0) * g(z + 0.058, 0.006)           # upper lip
-                out += 0.0035 * g(ax / 0.020, 1.0) * g(z + 0.075, 0.005)           # lower lip
-                out -= 0.0035 * g(ax / 0.024, 1.0) * g(z + 0.0665, 0.0022)         # the mouth
-                out += 0.006 * chin * g(ax / 0.020, 1.0) * g(z + 0.098, 0.010)     # chin
-                nw = _interp(NOSE_W, z)
-                out += nose * _interp(NOSE_OUT, z) * g(ax / nw, 1.0)
-                # Nostril wings either side of the tip, kept shallow: a deep
-                # one undercuts the tip and remeshes into a black hole.
-                out += 0.004 * nose * g(ax - 0.014, 0.007) * g(z + 0.042, 0.007)
-                out *= min(1.0, (sa - 0.2) / 0.3)
-            y -= out
-            verts.append((c.x + x * sw, c.y + y * sd, c.z + z * sh))
-    n = sides
-    for k in range(len(zs) - 1):
-        b = k * n
-        for i in range(n):
-            j = (i + 1) % n
-            faces.append((b + i, b + j, b + j + n, b + i + n))
-    faces.append(tuple(range(n - 1, -1, -1)))
-    last = (len(zs) - 1) * n
-    faces.append(tuple(range(last, last + n)))
-    mesh = bpy.data.meshes.new("skull")
-    mesh.from_pydata(verts, [], faces)
-    mesh.validate()
-    obj = bpy.data.objects.new("skull", mesh)
+    """The bare skull of this body's face, no ears, no eyes: what hair, hoods
+    and caps are grown from and fitted to. Built once per body and copied:
+    a dozen head pieces each meshing their own took most of a minute."""
+    import heads
+    key = P["name"]
+    if key not in _SKULLS or _SKULLS[key].users == 0:
+        skull, _, _ = heads.build(heads.spec_for(P), P, "skull", ears=False)
+        _SKULLS[key] = skull.data.copy()
+        _SKULLS[key].use_fake_user = True
+        bpy.data.objects.remove(skull, do_unlink=True)
+    me = _SKULLS[key].copy()
+    obj = bpy.data.objects.new("skull", me)
     bpy.context.collection.objects.link(obj)
-    lib.assign(obj, "skin")
-    outward(obj)
-    parts = [obj]
-    # Ears: flat ovals laid against the side of the head behind the jaw, the
-    # top level with the brow and the lobe level with the base of the nose,
-    # and swept back a little at the top.
-    for sx in (-1, 1):
-        wz = _interp(HEAD_W, -0.012) * sw
-        e = ellipsoid(tuple(c + V((sx * (wz + 0.002), 0.016 * sd, -0.012 * sh))),
-                      (0.0075, 0.017 * sd, 0.029 * sh),
-                      name="ear", seg=10, rings=7, rot=(math.radians(-14), 0, sx * math.radians(-14)))
-        parts.append(e)
-    return parts
+    return [obj]
+
+
+def faces(P):
+    import heads
+    importlib.reload(heads)
+    return [heads.face(S, P, name) for (name, S) in heads.FACES[P["name"]]]
 
 
 # --- assembly -------------------------------------------------------------
@@ -701,116 +622,35 @@ def body_parts(P):
 
 def build_body(P, target=2700):
     parts = body_parts(P)
-    neck = P["head_joint"] - 0.02
-    # The head and the hands, graded so the membership has no hard edge for
-    # the decimation to leave a seam along.
-    wrist_z = arm_axis(P, 1)[2].z
-
-    def protect(co):
-        return min(1.0, max(0.0, (co.z - neck) / 0.03))
-    body = fuse(parts, "body_" + P["name"], voxel=0.0045, smooth=3, smooth_factor=0.5,
+    return fuse(parts, "body_" + P["name"], voxel=0.0045, smooth=3, smooth_factor=0.5,
                 target=target)
-    hd_parts = head(P)
-    hp = hd_parts + face_parts(P, hd_parts[0])
-    for o in hp:
-        for poly in o.data.polygons:
-            poly.use_smooth = True
-    return body, join(hp, "head_" + P["name"])
-
-
-def _face_y(skull, x, z):
-    """Where the face surface is, front-on, at (x, z): a ray in from the front."""
-    from mathutils.bvhtree import BVHTree
-    bm = bmesh.new()
-    bm.from_mesh(skull.data)
-    tree = BVHTree.FromBMesh(bm)
-    bm.free()
-    loc, _, _, _ = tree.ray_cast(V((x, -0.5, z)), V((0.0, 1.0, 0.0)), 1.0)
-    return loc.y if loc is not None else None
-
-
-def face_parts(P, skull=None):
-    """Eyes and brows. At three metres an eye is four pixels, and what makes
-    those four pixels read as a person looking back is a dark iris with a
-    glint in it set in a little white -- so the iris is its own glossy
-    material, and the white is kept small and a shade off white, because a
-    full bright sclera at that size is a doll's stare."""
-    hw, hd, hh = P["head"]
-    sw, sd, sh = hw / 0.077, hd / 0.100, hh / 0.118
-    c = head_center(P)
-    out = []
-    for sx in (-1, 1):
-        # Proud of the socket by a few millimetres: set flush, the white was
-        # buried in the face and all that showed in the game was a black bead.
-        ex, ez = sx * 0.0325 * sw, c.z + 0.0045 * sh
-        # The white stands 2.5 mm proud of the socket floor under it, found by
-        # a ray rather than by formula.
-        fy = _face_y(skull, ex, ez) if skull else None
-        front = (fy if fy is not None else c.y - 0.078 * sd) - 0.0025
-        ec = V((ex, front + 0.0108 * sd, ez))
-        out.append(ellipsoid(tuple(ec), (0.0126 * sw, 0.0108 * sd, 0.0078 * sh),
-                             name="eyeball", mat="eyewhite", seg=8, rings=5))
-        out.append(ellipsoid((ex, front + 0.0012, ez - 0.0006), (0.0060 * sw, 0.0022, 0.0062 * sh),
-                             name="iris", mat="eye", seg=6, rings=4))
-        # The brow: a thin tapering bar along the ridge, in hair.
-        inner = c + V((sx * 0.012 * sw, -0.0975 * sd, 0.026 * sh))
-        outer = c + V((sx * 0.056 * sw, -0.083 * sd, 0.024 * sh))
-        out.append(ring_loft(inner, outer - inner, [
-            (0.0, 0.0035, 0.004, 0.002), ((outer - inner).length * 0.45, 0.0045, 0.004, 0.002),
-            ((outer - inner).length, 0.002, 0.002, 0.0015)],
-            sides=6, side=(0, 0, 1), name="brow", mat="hair"))
-    # The nose, as its own solid. On the head's rings it was two columns wide
-    # and came out as nothing at all: in the game the face had no nose. A
-    # bridge from between the eyes down and out to a rounded tip, and the
-    # wings either side of it.
-    nk = P["nose"]
-    top = c + V((0.0, -hd * 0.88, 0.014 * sh))
-    tip = c + V((0.0, -hd * 0.88 - 0.021 * nk, -0.036 * sh))
-    d = tip - top
-    out.append(ring_loft(top, d, [
-        (0.000, 0.0055, 0.0030, 0.006), (d.length * 0.35, 0.0065, 0.0050, 0.007),
-        (d.length * 0.75, 0.0095, 0.0075, 0.009), (d.length, 0.0125, 0.0090, 0.011),
-        (d.length + 0.006, 0.0085, 0.0045, 0.009)],
-        sides=10, side=(1, 0, 0), name="nose", mat="skin"))
-    for sx in (-1, 1):
-        out.append(ellipsoid(tuple(tip + V((sx * 0.0115 * sw, 0.0065, 0.001))), (0.0068, 0.0072, 0.0060),
-                             name="nostril", mat="skin", seg=6, rings=4))
-    # A mouth: fuller lips in the skin and a dark line between them, which is
-    # the one mark on a face that reads at street distance after the eyes.
-    mz = c.z - 0.0665 * sh
-    fy = _face_y(skull, 0.0, mz) if skull else None
-    my = fy if fy is not None else c.y - hd * 0.86
-    # One lip roll above the line and one below, sunk mostly into the face so
-    # only their fronts show.
-    out.append(ellipsoid((0.0, my + 0.0030, mz + 0.0048), (0.020 * sw, 0.0058, 0.0040),
-                         name="lip", mat="skin", seg=8, rings=4))
-    out.append(ellipsoid((0.0, my + 0.0036, mz - 0.0050), (0.017 * sw, 0.0058, 0.0042),
-                         name="lip", mat="skin", seg=8, rings=4))
-    out.append(ring_loft(V((-0.019 * sw, my - 0.0018, mz)), (1, 0, 0), [
-        (0.0, 0.0010, 0.0007, 0.0007), (0.019 * sw, 0.0014, 0.0010, 0.0010),
-        (0.038 * sw, 0.0010, 0.0007, 0.0007)], sides=4, side=(0, 0, 1), name="mouth", mat="eye"))
-    return out
 
 
 def base(P, target=2700):
-    """The body, bound and stood arms-down on its rig. Returns (body, rig)."""
+    """The body, bound and stood arms-down on its rig, and the faces that go
+    on it. Returns (body, rig, faces)."""
     import rig
-    body, hd = build_body(P, target)
+    body = build_body(P, target)
     arm = rig.build_armature(P, "rig")
-    # Bone heat on the trunk and limbs only. The head is its own set of
-    # islands -- skull, ears, eyes, brows -- and heat on a few dozen loose
-    # triangles fails outright ("failed to find solution"), leaving hundreds
-    # of vertices with no weight at all. The head is rigid anyway.
     rig.bind_heat(arm, body)
-    rig.set_rigid(hd, "head")
-    body = join([body, hd], "body_" + P["name"])
-    rig.arms_down(arm, [body], P)
+    rig.deform_face(arm)
+    # The faces are rigged by vertex group, and go through the arms-down and
+    # the troll's hunch with the body, so they sit on the head of the rest
+    # pose the clips are written against.
+    fs = faces(P)
+    for f in fs:
+        rig.bind_groups(arm, f)
+    rig.arms_down(arm, [body] + fs, P)
     if P["name"] == "troll":
-        rig.repose(arm, [body], {"hips": (6, 0, 0), "spine": (18, 0, 0), "chest": (24, 0, 0),
-                                 "neck": (-20, 0, 0), "head": (-24, 0, 0),
-                                 "upperarm.L": (-12, 0, -8), "upperarm.R": (-12, 0, 8),
-                                 "forearm.L": (-16, 0, 0), "forearm.R": (-16, 0, 0)})
-    return body, arm
+        # The hunch has to read from the front too, where a bent back does
+        # not show: so the shoulders come up and forward round the head,
+        # which sinks between them.
+        rig.repose(arm, [body] + fs, {"hips": (6, 0, 0), "spine": (18, 0, 0), "chest": (24, 0, 0),
+                                      "neck": (-14, 0, 0), "head": (-30, 0, 0),
+                                      "shoulder.L": (10, 0, 9), "shoulder.R": (10, 0, -9),
+                                      "upperarm.L": (-12, 0, -8), "upperarm.R": (-12, 0, 8),
+                                      "forearm.L": (-16, 0, 0), "forearm.R": (-16, 0, 0)})
+    return body, arm, fs
 
 
 # --- looking at it --------------------------------------------------------
@@ -849,9 +689,9 @@ def render(path, objs=None, azims=(0, 35, 90, 180), dist=3.2, cz=0.95, lens=50,
 # Which archetypes are built on which body, and so into which file.
 FILES = {
     "person_male": (MALE, ["peasant", "guard", "merchant", "smith", "priest", "mage", "rogue",
-                           "beggar", "noble", "knight", "zombie", "ghost", "skeleton"]),
-    "person_female": (FEMALE, ["woman", "maid", "crone"]),
-    "troll": (TROLL, ["troll"]),
+                           "beggar", "noble", "knight", "zombie", "ghost", "skeleton", "nomad"]),
+    "person_female": (FEMALE, ["woman", "maid", "crone", "lady", "guard", "priest", "mage", "rogue"]),
+    "troll": (TROLL, ["troll", "brute"]),
 }
 
 
@@ -860,11 +700,13 @@ def build_file(fname):
     assets/<fname>.glb. Returns report lines and the clip facts."""
     import rig
     import outfits
+    import heads
     importlib.reload(rig)
     importlib.reload(outfits)
     lib.reset()
+    _SKULLS.clear()
     P, names = FILES[fname]
-    body, arm = base(P)
+    body, arm, fs = base(P)
     meshes = []
     report = []
     for n in names:
@@ -872,6 +714,9 @@ def build_file(fname):
         meshes.append(o)
         report.append("%-16s %5d tris" % ("arch_" + n if fname != "troll" else "arch_troll",
                                           tri_count(o)))
+    for f in fs:
+        meshes.append(f)
+        report.append("%-16s %5d tris" % (f.name, tri_count(f)))
     kind = {"person_male": "male", "person_female": "female"}.get(fname)
     for fn in (outfits.HEAD_PIECES.get(kind, []) if kind else []):
         o = fn(P)
@@ -884,7 +729,7 @@ def build_file(fname):
         box_uv(o)
         if o.parent is None:
             rig.bind_groups(arm, o)
-    info = rig.make_all(arm)
+    info = rig.make_all(arm, P=P)
     for o in meshes:
         o.data.name = o.name
         o.data.validate()
@@ -893,7 +738,20 @@ def build_file(fname):
         select_mesh(o)
         bpy.ops.object.vertex_group_limit_total(group_select_mode="ALL", limit=4)
         bpy.ops.object.vertex_group_normalize_all(group_select_mode="ALL", lock_active=False)
+        # Every mesh carries a colour: the viewer's materials multiply by it,
+        # and a mesh without one would read as black.
+        heads.white(o)
+        # Written as a custom attribute, not as COLOR_0. The exporter's own
+        # vertex colour gives the real values to the first material of a mesh
+        # only and fills every other primitive with white -- the eyes of every
+        # face came out white-on-white that way (Blender 5.2,
+        # primitive_extract.py compares a colour's name against its glTF
+        # slot). assets.js hands `_col` back to three as `color`.
+        o.data.color_attributes["Col"].name = "_col"
+    meshes += [lod(o) for o in meshes]
     lib.export(fname, [arm] + meshes,
+               export_vertex_color="NONE",
+               export_attributes=True,
                export_animations=True,
                export_animation_mode="ACTIONS",
                export_skins=True,
@@ -901,6 +759,29 @@ def build_file(fname):
                export_bake_animation=True,
                export_optimize_animation_size=False)
     return report, info
+
+
+def lod(o, share=0.28, floor=160):
+    """A far copy of a mesh, `lod_<name>`: decimated to about a quarter,
+    weights and colours carried through the collapse. Past fifteen metres a
+    person is a figure of forty pixels, and a face's three and a half
+    thousand triangles are spent on nothing the eye can find there."""
+    c = o.copy()
+    c.data = o.data.copy()
+    c.name = c.data.name = "lod_" + o.name
+    bpy.context.collection.objects.link(c)
+    c.data.calc_loop_triangles()
+    n = len(c.data.loop_triangles)
+    dm = c.modifiers.new("lod", "DECIMATE")
+    dm.ratio = min(1.0, max(floor / max(1, n), share))
+    dm.use_collapse_triangulate = True
+    select_mesh(c)
+    bpy.ops.object.modifier_move_to_index(modifier="lod", index=0)
+    bpy.ops.object.modifier_apply(modifier="lod")
+    c.data.validate()
+    bpy.ops.object.vertex_group_limit_total(group_select_mode="ALL", limit=4)
+    bpy.ops.object.vertex_group_normalize_all(group_select_mode="ALL", lock_active=False)
+    return c
 
 
 def box_uv(obj):

@@ -87,7 +87,40 @@ def bone_table(P):
             ("foot." + tag, tuple(a), tuple(ball), "shin." + tag, True),
             ("toe." + tag, tuple(ball), tuple(tip), "foot." + tag, True),
         ]
+    out += face_bones(P)
     return out
+
+
+# Bones in the face that no clip ever keys: the eyes, which the viewer turns
+# towards whatever the person is looking at, and the jaw and the nose, which it
+# scales a little per person so a crowd is not one face twenty times. They
+# point forward out of the face, so their local Y is the line of sight (or of
+# the nose) and X is the figure's left, like every other bone here. Created
+# non-deforming, so bone heat on the body never hands them the neck; switched
+# to deforming once the body is bound (`deform_face`).
+FACE_BONES = ("eye.L", "eye.R", "jaw", "nose")
+
+
+def face_bones(P):
+    import heads
+    S = heads.spec_for(P)
+    ex, ey, ez = S["eye"]
+    fwd = (0.0, -0.02, 0.0)
+    out = []
+    for (sx, tag) in ((1, "L"), (-1, "R")):
+        c = heads.canon_to_world(P, (sx * ex, ey, ez))
+        out.append(("eye." + tag, c, tuple(V(c) + V(fwd)), "head", False))
+    for name, at in (("jaw", heads.JAW_PIVOT), ("nose", heads.NOSE_PIVOT)):
+        c = heads.canon_to_world(P, at)
+        out.append((name, c, tuple(V(c) + V(fwd)), "head", False))
+    return out
+
+
+def deform_face(arm):
+    select_only([arm], arm)
+    for n in FACE_BONES:
+        if n in arm.data.bones:
+            arm.data.bones[n].use_deform = True
 
 
 # The Z axis each holding bone's roll aims at, in the A-pose.
@@ -119,6 +152,10 @@ def build_armature(P, name="rig"):
             bone.use_connect = (V(eb[parent].tail) - V(head)).length < 1e-6
     _roll(arm, P)
     bpy.ops.object.mode_set(mode="OBJECT")
+    import people
+    # Where the middle of the head is, in the head bone's own frame: kept
+    # here because a hunch reposes the bone and the head goes with it.
+    arm["head_center"] = tuple(arm.data.bones["head"].matrix_local.inverted() @ people.head_center(P))
     return arm
 
 
@@ -150,6 +187,15 @@ def bind_heat(arm, mesh):
     missing = [v.index for v in mesh.data.vertices if not v.groups]
     if missing:
         raise RuntimeError("bone heat left %d vertices of %s unweighted" % (len(missing), mesh.name))
+    # Heat hands a joint over from one bone to the next in a band a couple of
+    # centimetres wide. At the shoulder that is a crease: swinging the A-pose
+    # arm down to the side tore the top of the arm away from the torso in a
+    # lip, and every tunic cut from it wore the lip as a padded shoulder.
+    # Relaxed, the hand-over spreads and the joint bends as flesh does.
+    select_only([mesh], mesh)
+    bpy.ops.object.mode_set(mode="WEIGHT_PAINT")
+    bpy.ops.object.vertex_group_smooth(group_select_mode="ALL", factor=0.5, repeat=6, expand=0.2)
+    bpy.ops.object.mode_set(mode="OBJECT")
     return mesh
 
 
@@ -376,7 +422,9 @@ def bake(arm, act, frames):
     three can play without a solver. Returns the samples; `commit` writes
     them into a clean action once the controls are gone."""
     arm.animation_data.action = act
-    names = [b.name for b in arm.data.bones if b.name not in CONTROLS]
+    # The face bones are the viewer's to move, not the clips': a clip that
+    # carried them would put every eye back to the front every frame.
+    names = [b.name for b in arm.data.bones if b.name not in CONTROLS and b.name not in FACE_BONES]
     samples = []
     scene = bpy.context.scene
     for f in range(frames[0], frames[1] + 1):
@@ -672,6 +720,40 @@ def foot_slip(arm, frames, stride, stance):
     return worst, sink
 
 
+def head_clearance(arm, P, frames, limbs=("forearm", "hand"), margin=0.045):
+    """The least gap, in metres, between the arms and the head over a clip:
+    points down each forearm and hand against the head's ellipsoid, carried
+    by the head bone, with `margin` for the flesh and the sleeve round the
+    bone. Negative is an arm through the skull -- which a review found the
+    overhand cut doing to every unarmed man and every troll."""
+    import people
+    scene = bpy.context.scene
+    hb = arm.data.bones["head"]
+    hc = V(arm["head_center"])
+    hw, hd, hh = P["head"]
+    radii = V((hw + 0.012, hd + 0.012, hh + 0.010))
+    worst = (9.0, None, None)
+    for f in range(frames[0], frames[1] + 1):
+        scene.frame_set(f)
+        H = arm.pose.bones["head"].matrix
+        Hi = H.inverted()
+        for t in "LR":
+            for limb in limbs:
+                pb = arm.pose.bones[limb + "." + t]
+                for k in range(6):
+                    p = pb.head + (pb.tail - pb.head) * (k / 5.0)
+                    # Into the head bone's rest frame, where the ellipsoid is
+                    # axis-aligned with the figure.
+                    q = hb.matrix_local @ (Hi @ p)
+                    c = hb.matrix_local @ hc
+                    d = q - c
+                    r = V((d.x / radii.x, d.y / radii.y, d.z / radii.z)).length
+                    gap = (r - 1.0) * min(radii) - margin
+                    if gap < worst[0]:
+                        worst = (gap, f, limb + "." + t)
+    return worst
+
+
 # --- poses --------------------------------------------------------------------
 
 # Where the feet stand, per stance: (ankle offset from rest (x, y), yaw, pitch).
@@ -680,6 +762,10 @@ STANCES = {
     # Left foot leading, right foot back and turned out: a swordsman's stance.
     "guard": {"L": ((0.030, -0.200), 16.0, 0.0), "R": ((-0.040, 0.210), -38.0, 0.0)},
     "lunge": {"L": ((0.030, -0.330), 12.0, 0.0), "R": ((-0.040, 0.210), -38.0, 0.0)},
+    # Seated: both feet a pace forward of the hips, a little apart.
+    "sit": {"L": ((0.020, -0.340), 8.0, 0.0), "R": ((-0.020, -0.340), -8.0, 0.0)},
+    # Leaning on a wall: the left foot crossed in front of the right.
+    "lean": {"L": ((-0.080, -0.110), -10.0, 0.0), "R": ((0.010, 0.020), -8.0, 0.0)},
 }
 
 
@@ -703,7 +789,7 @@ def pose(arm, frame, bones, hips=None, stance="rest", feet=True):
     if feet:
         stance_feet(arm, stance, frame)
     for pb in p:
-        if pb.name in CONTROLS or pb.name == "hips" or pb.name.startswith(("grip", "shield")):
+        if pb.name in CONTROLS or pb.name in FACE_BONES or pb.name == "hips" or pb.name.startswith(("grip", "shield")):
             continue
         if pb.name.startswith(("thigh", "shin", "foot")):
             continue
@@ -793,14 +879,16 @@ def anim_idle2(arm):
         b = merge(HANG, {"spine": (1, chest * 0.3, 0), "chest": (1, chest * 0.5, 0),
                          "neck": (2, look * 0.45, 0), "head": (-2 + rub * 8, look * 0.55, 0)})
         if rub:
-            b.update({"upperarm.R": (-128, 0, 38), "forearm.R": (-128, 0, 0), "hand.R": (-20, 0, 0)})
+            # Elbow high and out to the side, the hand behind the neck: the
+            # old key rubbed the neck through the middle of the skull.
+            b.update({"upperarm.R": (-135, -40, 110), "forearm.R": (-130, 0, 0), "hand.R": (-20, 0, 0)})
         sway = 0.008 if look > 0 else (-0.008 if look < 0 else 0.0)
         k.append((f, b, ((sway, 0.0, -0.005), 0.0, look * 0.08, -sway * 100), "rest"))
     # The rub itself: two strokes of the hand while it is up.
     act = _clip(arm, "idle2", k)
     p = arm.pose.bones
     for (f, dx) in ((65, -12), (68, 6), (70, -10)):
-        fk(p["forearm.R"], f, x=-128 + dx)
+        fk(p["forearm.R"], f, x=-130 + dx)
     return "idle2", (1, act)
 
 
@@ -827,12 +915,16 @@ def anim_attack(arm):
     off, pitch, hy, roll = GUARD_HIPS
     k = [
         (1, GUARD, GUARD_HIPS, "guard"),
+        # Cocked: the elbow up and out, the upper arm turned out so the
+        # forearm folds back beside the head, not over it. Found by search
+        # against `head_clearance` on all three rigs: the old key (-150, 0, 42)
+        # put the forearm 98 mm into the skull.
         (7, merge(GUARD, {"spine": (0, -4, 0), "chest": (-4, -10, 0), "head": (-6, 14, 0),
-                          "upperarm.R": (-150, 0, 42), "forearm.R": (-105, 0, 0), "hand.R": (30, 0, 0),
+                          "upperarm.R": (-65, 100, 20), "forearm.R": (-130, 0, 0), "hand.R": (30, 0, 0),
                           "upperarm.L": (-40, 40, 14)}),
          ((0.0, 0.02, -0.05), 2.0, -36.0, 0.0), "guard"),
         (9, merge(GUARD, {"spine": (6, 6, 0), "chest": (2, 2, 0), "head": (-6, 4, 0),
-                          "upperarm.R": (-140, 0, 30), "forearm.R": (-70, 0, 0), "hand.R": (40, 0, 0),
+                          "upperarm.R": (-100, 45, 16), "forearm.R": (-85, 0, 0), "hand.R": (40, 0, 0),
                           "upperarm.L": (-36, 40, 14)}),
          ((0.0, -0.02, -0.08), 8.0, -18.0, 0.0), "guard"),
         (11, merge(GUARD, {"spine": (12, 12, 0), "chest": (10, 22, 0), "head": (-14, -8, 0),
@@ -929,7 +1021,63 @@ def anim_death(arm):
         (31, lie, ((0.0, 0.78, -0.83), -89.0, -6.0, 2.0), "guard"),
         (36, lie, ((0.0, 0.78, -0.83), -89.0, -6.0, 2.0), "guard"),
     ]
-    return "death", (1, _clip(arm, "death", k))
+    end = _clip(arm, "death", k)
+    _lay_down_held(arm, lie, (27, 31, 36))
+    return "death", (1, end)
+
+
+def _lay_down_held(arm, lie, frames):
+    """Turn the hands on the ground so what they hold lies flat. A hand at
+    rest on its back holds a sword with the blade straight up at the sky --
+    the thumb side of a fist points up when the arm lies palm-down -- and a
+    review found every dead guard's sword and shield standing on end. So the
+    right hand is turned until the blade (the grip bone's Y) lies level, and
+    the left forearm until the shield's face (the shield bone's Z) is up or
+    down. Searched, keyed on the held frames."""
+    p = arm.pose.bones
+    scene = bpy.context.scene
+    last = frames[-1]
+
+    def measure(bone, axis):
+        scene.frame_set(last)
+        bpy.context.view_layer.update()
+        M = arm.pose.bones[bone].matrix.to_3x3()
+        return (M @ V(axis)).normalized()
+    # First the arms down onto the ground: lie's arms were written against
+    # the torso and left the hands a third of a metre up in the air.
+    for t in "LR":
+        ux, uy, uz = lie["upperarm." + t]
+        best = None
+        for lower in range(-20, 61, 4):
+            for f in frames:
+                fk(p["upperarm." + t], f, x=ux + lower, y=uy, z=uz)
+            scene.frame_set(last)
+            bpy.context.view_layer.update()
+            h = min(arm.pose.bones["hand." + t].head.z, arm.pose.bones["hand." + t].tail.z)
+            if best is None or abs(h - 0.035) < best[0]:
+                best = (abs(h - 0.035), lower)
+        for f in frames:
+            fk(p["upperarm." + t], f, x=ux + best[1], y=uy, z=uz)
+    x, _, z = lie["hand.R"]
+    best = None
+    for twist in range(-90, 91, 10):
+        for f in frames:
+            fk(p["hand.R"], f, x=x, y=twist, z=z)
+        tilt = abs(measure("grip.R", (0, 1, 0)).z)
+        if best is None or tilt < best[0]:
+            best = (tilt, twist)
+    for f in frames:
+        fk(p["hand.R"], f, x=x, y=best[1], z=z)
+    fx, _, fz = lie["forearm.L"]
+    best = None
+    for twist in range(-90, 91, 10):
+        for f in frames:
+            fk(p["forearm.L"], f, x=fx, y=twist, z=fz)
+        flat = abs(measure("shield.L", (0, 0, 1)).z)
+        if best is None or flat > best[0]:
+            best = (flat, twist)
+    for f in frames:
+        fk(p["forearm.L"], f, x=fx, y=best[1], z=fz)
 
 
 def anim_cast(arm):
@@ -959,21 +1107,113 @@ def anim_cast(arm):
         (19, release, ((0, -0.02, -0.012), -3, 0, 0), "rest"),
         (25, HANG, ((0, 0, -0.004), 0, 0, 0), "rest"),
     ]
-    return "cast", (1, _clip(arm, "cast", k)), (15 - 1) / 24.0
+    end = _clip(arm, "cast", k)
+    _stand_up(arm, "hand.R", release["hand.R"], (15, 19))
+    return "cast", (1, end), (15 - 1) / 24.0
+
+
+def _stand_up(arm, bone, rot, frames):
+    """Pitch a hand until what it holds (the grip bone's Y) stands straight
+    up on the given frames: a staff thrust at the sky, not leaning out at
+    thirty degrees as the written key left it on every rig."""
+    p = arm.pose.bones
+    scene = bpy.context.scene
+    x0, y0, z0 = rot
+    best = None
+    for dx in range(-80, 81, 4):
+        for f in frames:
+            fk(p[bone], f, x=x0 + dx, y=y0, z=z0)
+        scene.frame_set(frames[-1])
+        bpy.context.view_layer.update()
+        up = (arm.pose.bones["grip.R"].matrix.to_3x3() @ V((0, 1, 0))).normalized().z
+        if best is None or up > best[0]:
+            best = (up, dx)
+    for f in frames:
+        fk(p[bone], f, x=x0 + best[1], y=y0, z=z0)
+    return best
+
+
+def anim_sit(arm):
+    """Five seconds seated on a bench: the hips down on a seat 0.46 m high
+    (at scale 1, a man's rig), feet planted a pace forward, hands on the
+    thighs, breathing -- and halfway through the right hand comes up to the
+    mouth with a cup and goes back down."""
+    rest = merge(HANG, {"spine": (6, 0, 0), "chest": (4, 0, 0), "neck": (-2, 0, 0), "head": (-4, 0, 0),
+                        "upperarm.L": (-34, 0, -8), "upperarm.R": (-34, 0, 8),
+                        "forearm.L": (-44, 0, 0), "forearm.R": (-44, 0, 0),
+                        "hand.L": (14, 0, 0), "hand.R": (14, 0, 0)})
+    sip = merge(rest, {"upperarm.R": (-44, 0, 18), "forearm.R": (-128, 0, 0), "hand.R": (-24, 0, 0),
+                       "head": (-12, 0, 0), "neck": (-4, 0, 0), "chest": (1, 0, 0)})
+    breathe = merge(rest, {"chest": (2, 0, 0), "spine": (5, 0, 0), "head": (-2, 5, 0)})
+    ls = _leg_scale(arm)
+    drop = arm.data.bones["hips"].head_local.z - (SEAT * ls + 0.05 * ls)
+    STANCES["sit"] = {"L": ((0.020, -0.340 * ls), 8.0, 0.0), "R": ((-0.020, -0.340 * ls), -8.0, 0.0)}
+    hips = ((0.0, 0.10 * ls, -drop), -4.0, 0.0, 0.0)
+    k = [(1, rest, hips, "sit"), (22, breathe, hips, "sit"), (44, rest, hips, "sit"),
+         (58, merge(rest, {"head": (-4, -6, 0)}), hips, "sit"),
+         (70, sip, hips, "sit"), (84, sip, hips, "sit"), (96, rest, hips, "sit"),
+         (108, breathe, hips, "sit"), (121, rest, hips, "sit")]
+    return "sit", (1, _clip(arm, "sit", k))
+
+
+# The seat the sit is written for, in metres at scale 1 for a man's legs
+# (scaled by leg length for the others): the hip joint sits 0.05 m above it.
+SEAT = 0.46
+
+# Arms folded across the chest, found by search against each hand's target
+# on the far side of the chest and the forearms' clearance of it.
+FOLDED = {"upperarm.R": (-30, -60, 30), "forearm.R": (-100, 0, 0), "hand.R": (10, 0, 0),
+          "upperarm.L": (-50, 60, -50), "forearm.L": (-100, 0, 0), "hand.L": (10, 0, 0)}
+
+
+def anim_lean(arm):
+    """Four seconds leaning back against a wall: the shoulders on it, the
+    hips a hand's breadth off it, arms folded, the left foot crossed over in
+    front, the head turning now and then to watch the street."""
+    base = merge(HANG, FOLDED, {"spine": (-5, 0, 0), "chest": (-4, 0, 0), "neck": (4, 0, 0), "head": (2, 0, 0)})
+    hips = ((0.0, 0.05, -0.012), -4.0, 0.0, 1.5)
+    k = [(1, base, hips, "lean"),
+         (30, merge(base, {"head": (4, 16, 0), "neck": (4, 8, 0), "chest": (-3, 0, 0)}), hips, "lean"),
+         (55, merge(base, {"head": (1, 12, 0), "neck": (3, 6, 0)}), hips, "lean"),
+         (75, merge(base, {"head": (0, -8, 0), "neck": (2, -4, 0), "chest": (-5, 0, 0)}), hips, "lean"),
+         (97, base, hips, "lean")]
+    return "lean", (1, _clip(arm, "lean", k))
+
+
+def anim_talk(arm):
+    """Three seconds of talking: the right hand opening out and back with
+    the phrase, the left joining it once, the head nodding and turning a
+    little, the weight shifting under it."""
+    base = merge(HANG, {"forearm.R": (-58, 0, 0), "upperarm.R": (-14, 0, 6), "hand.R": (-10, 0, 0)})
+    a = merge(base, {"upperarm.R": (-26, 0, 16), "forearm.R": (-78, 0, 0), "hand.R": (-30, 0, 0),
+                     "head": (4, 4, 0), "neck": (2, 2, 0)})
+    b = merge(base, {"upperarm.R": (-20, 0, 24), "forearm.R": (-66, 0, 0), "hand.R": (-44, 0, 0),
+                     "upperarm.L": (-16, 0, -18), "forearm.L": (-64, 0, 0), "hand.L": (-30, 0, 0),
+                     "head": (-3, -3, 0), "chest": (2, -4, 0)})
+    c = merge(base, {"upperarm.R": (-18, 0, 10), "forearm.R": (-70, 0, 0), "hand.R": (-20, 0, 0),
+                     "head": (6, 2, 0), "neck": (3, 0, 0)})
+    hips = ((0.0, 0.0, -0.004), 0.0, 0.0, 0.0)
+    k = [(1, base, hips, "rest"), (12, a, ((0.006, 0, -0.004), 0, 2, -1), "rest"), (24, c, hips, "rest"),
+         (38, b, ((-0.006, 0, -0.004), 0, -2, 1), "rest"), (52, a, hips, "rest"), (62, c, hips, "rest"),
+         (73, base, hips, "rest")]
+    return "talk", (1, _clip(arm, "talk", k))
 
 
 def anim_carry(arm, name):
     new_action(arm, name)
     pose(arm, 1, CARRY[name])
     pose(arm, 2, CARRY[name])
+    if name == "carry_pole":
+        # A pole carried is carried upright, on whatever rig.
+        _stand_up(arm, "hand.R", CARRY[name]["hand.R"], (1, 2))
     return name, (1, 2)
 
 
 CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "block", "death",
-         "cast")
+         "cast", "sit", "lean", "talk")
 
 
-def make_all(arm, measure=True):
+def make_all(arm, measure=True, P=None):
     """Author every clip on the IK rig, bake them, strip the controls, and
     write the baked clips back as plain actions. Returns what the viewer
     needs to know about them: durations, strides, contact frames, and the
@@ -984,7 +1224,7 @@ def make_all(arm, measure=True):
     baked = {}
     info = {}
     fns = [anim_idle, anim_idle2, anim_walk, anim_run, anim_fight, anim_attack, anim_attack2,
-           anim_hit, anim_block, anim_death, anim_cast]
+           anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk]
     for fn in fns:
         r = fn(arm)
         name, frames = r[0], r[1]
@@ -1008,7 +1248,14 @@ def make_all(arm, measure=True):
     strip_controls(arm)
     for name, (samples, frames) in baked.items():
         commit(arm, name, samples)
-    if measure:
+    if measure and P is not None:
+        for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2", "lean", "talk"):
+            arm.animation_data.action = bpy.data.actions[name]
+            gap, f, limb = head_clearance(arm, P, (0, info[name]["frames"]))
+            info[name]["head_gap"] = round(gap, 4)
+            if gap < 0:
+                raise RuntimeError("%s: %s goes %.0f mm into the head at frame %d of %s"
+                                   % (P["name"], limb, -gap * 1000, f, name))
         for name in ("walk", "run"):
             arm.animation_data.action = bpy.data.actions[name]
             fr = (0, info[name]["frames"])
