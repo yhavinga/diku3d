@@ -1342,6 +1342,10 @@ const RECIPES = {
   sewerwood: { surface: 'bark', scale: 1.6, normalScale: 0.6, env: 1, wet: 0, detail: 0.4, buried: true },
   // The eastern mountains, outside and in.
   cliff: { surface: 'sandstone', scale: 9, normalScale: 0.35, env: 0.3, wet: 0, detail: 0.6 },
+  // The cave rock again, out under the sky: the crag heaped over the troll
+  // den. Not `rock`, which is crazy paving, and not `cliff`, which is the
+  // desert's sandstone and read as a mesa in a fir forest.
+  crag: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0.2, detail: 0.6 },
   // A full `env`: cloth this open lets the sky through, and at 0.4 a tent's
   // corners went to RGB 0 after dark however hard the lantern burned.
   tentcloth: { surface: 'tentcloth', scale: 4, normalScale: 0.5, env: 1.0, wet: 0, detail: 0.4 },
@@ -1776,6 +1780,17 @@ function decorate(material, recipe, macro, grain) {
           irradiance = dikuBuriedIrradiance * dikuUpFill;
           iblIrradiance = irradiance;
           radiance = dikuBuriedRadiance;
+        #else
+          // Inside a room the sky arrives through a door and a window or two,
+          // off plaster and floorboards and lamplit walls, and it is no longer
+          // blue by then. Taken straight from the cube it lit every interior
+          // in the world the colour of the sky outside -- the Green Dragon's
+          // flags came out as blue-veined marble -- so indoors it keeps its
+          // strength and loses most of its hue, to a warm neutral.
+          float dikuIblL = dot( iblIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
+          iblIrradiance = mix( iblIrradiance, dikuIblL * vec3( 1.06, 1.0, 0.90 ), vIndoor * 0.8 );
+          float dikuRadL = dot( radiance, vec3( 0.2126, 0.7152, 0.0722 ) );
+          radiance = mix( radiance, dikuRadL * vec3( 1.03, 1.0, 0.95 ), vIndoor * 0.5 );
         #endif
         #include <lights_fragment_end>
       `)

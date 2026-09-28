@@ -212,6 +212,16 @@ const BURROW = /\b(smial|bag ?end|halfling hole|tunnel|intersection)\b/i;
 /** A yard with animals in it is not a terrace of shops. */
 const FARMYARD = /\b(pig ?pen|barn|chicken coop|stable|byre|sty)\b/i;
 
+/**
+ * Rock somebody lives in, as against a crypt somebody built. The `cave` test
+ * in `pickMaterials` takes both, and handed both the same `rock` -- a 70 cm
+ * crazy paving that came out on the troll den's floor, walls and ceiling
+ * alike. Over the 45 stock areas this names the troll den's five rooms,
+ * seven caverns in the catacombs, three dens and one in Moria; the tombs,
+ * crypts and catacomb passages stay dressed stone.
+ */
+const ROCK_CAVE = /\b(den|caverns?|grotto)\b|moria/;
+
 /** How high a Shire bank stands: a garden wall, not a storey. */
 const BANK_LO = 2.9;
 const BANK_HI = 3.7;
@@ -369,6 +379,7 @@ export function hash3(a, b, c, salt = 0) {
 // ------------------------------------------------------------- batching ----
 
 const _matrix = new THREE.Matrix4();
+const IDENTITY = new THREE.Matrix4();
 const WHITE = [1, 1, 1];
 
 class Batcher {
@@ -389,12 +400,14 @@ class Batcher {
     const material = this.materials[materialName];
     if (!material) throw new Error(`build: unknown material ${materialName}`);
     const {
-      tint = null, ao = null, chunk = '0', uvScale = null, indoor = this.indoor,
+      tint = null, ao = null, chunk = '0', uvScale = null, indoor = this.indoor, normals = false,
     } = options;
 
     const geo = geometry.index ? geometry.toNonIndexed() : geometry.clone();
     geo.applyMatrix4(matrix);
-    geo.computeVertexNormals();
+    // `normals` keeps the ones a curved surface came with; recomputed on a
+    // non-indexed geometry they are one per face, and a vault turns faceted.
+    if (!normals) geo.computeVertexNormals();
 
     const pos = geo.attributes.position;
     const nor = geo.attributes.normal;
@@ -646,7 +659,13 @@ function pickMaterials(room, area) {
       // cap -- a building with a dome, which is the opposite of the point. In
       // grass, wall and dome are one green mass with a doorway in it. The tile
       // has to come with it or the wall wears the ground's 5.5 m grass.
-      if (smial) { wallOut = 'grass'; wallUv = TURF_UV; }
+      if (smial) {
+        wallOut = 'grass'; wallUv = TURF_UV;
+        // Inside, it is a home and not a hole: "the proper dwelling place for
+        // halflings". Plaster on the curve and boards underfoot; the bare
+        // earth is for the tunnels between them. See `buildSmialVault`.
+        floor = 'planks'; wallIn = 'plaster'; ceil = 'plaster';
+      }
     } else if (cave) {
       // "Gamgee Resi*den*ce" is not a den. The cave test above is a substring
       // match, so a farmer's cottage came out in bare rock with a rock ceiling;
@@ -676,7 +695,26 @@ function pickMaterials(room, area) {
     if (style !== 'vault' && sewerMud(room)) floor = 'sludge';
   }
 
-  if (!holy && !cave && !wood && hash3(room.vnum, 0, 0, 9) > 0.6) wallOut = 'timber';
+  // A cave above ground is a hill with a hole in it, not a rock box with a
+  // tiled roof and lit windows, which is how the troll den stood in the
+  // forest: `inRock` buries it (no roof, no windows) and `buildMassif` heaps
+  // crag over it. Outside it is `crag`, the same rock lit by the sky.
+  const rockCave = cave && !style && !burrow && !holy && ROCK_CAVE.test(name);
+  if (rockCave) { floor = 'cavefloor'; wallIn = 'caverock'; wallOut = 'crag'; ceil = 'caverock'; }
+
+  // What the Shire builds when it does not dig: timber and plaster, and a
+  // barn is boarded. Chosen here, for every room in the area, because the
+  // alternative was the town's masonry kit on all of them -- the Green Dragon
+  // was a stone hall with a blue flagged floor and the barn cut brick with a
+  // torch beside the hay.
+  let shire = null;
+  if (isShire(room) && !burrow && !isOpenAir(room)) {
+    shire = FARMYARD.test(room.name) ? 'barn' : 'timber';
+    if (shire === 'barn') { floor = 'dirt'; wallIn = 'boards'; wallOut = 'boards'; ceil = 'planks'; roof = 'thatch'; }
+    else { floor = 'planks'; wallIn = 'plaster'; wallOut = 'plaster'; ceil = 'planks'; }
+  }
+
+  if (!holy && !cave && !wood && !shire && hash3(room.vnum, 0, 0, 9) > 0.6) wallOut = 'timber';
   if (!holy && !burrow && hash3(room.vnum, 1, 0, 3) > 0.84) roof = 'thatch';
 
   // The neighborhood, after everything else, because it overrules the sector
@@ -689,7 +727,10 @@ function pickMaterials(room, area) {
   else if (hood === 'court') floor = 'flagstone';
   else if (hood === 'street' || hood === 'nml' || hood === 'wall') floor = 'brokencobble';
   if (hood && hood !== 'ruin' && !holy && !wood) wallOut = 'sootwall';
-  return { floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv, sewer: style, inRock, hood };
+  return {
+    floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv, sewer: style, inRock: inRock || rockCave, hood,
+    rockCave, shire,
+  };
 }
 
 // ---------------------------------------------- the Dangerous Neighborhood ----
@@ -1511,7 +1552,7 @@ export function buildScene(world, layout, materials, assets = null) {
     // the kits are dressed masonry and would look absurd in Moria.
     const hood = mats.hood;
     const ruin = hood === 'ruin';
-    const kit = (!openAir && !mats.cave && instances)
+    const kit = (!openAir && !mats.cave && !mats.shire && instances)
       ? (ruin && model(['ruin_wall_solid']) ? 'ruin_'
         : mats.holy && model(['temple_wall_solid']) ? 'temple_'
           : (model(['wall_solid']) ? '' : null))
@@ -1650,7 +1691,7 @@ export function buildScene(world, layout, materials, assets = null) {
         buildIndoorWall({
           batcher, chunk, mats, x: wx, y: pos.y, z: wz, rotY, open, kit, instances,
           width: ROOM + (WALL_IN + WALL_OUT) * 2, addCollider, dir, room, lights, decor,
-          cellX: pos.x, cellZ: pos.z, breach: dir === breach, unlit: ruin,
+          cellX: pos.x, cellZ: pos.z, breach: dir === breach, unlit: ruin || mats.shire === 'barn' || mats.smial,
         });
       } else if (!airborne) {
         // Nothing walls a room under the canopy: `buildForest` stands a picket
@@ -1770,7 +1811,17 @@ export function buildScene(world, layout, materials, assets = null) {
           half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
         });
       }
-      if (instances && deepStyle(room) === 'cave') {
+      if (mats.shire) {
+        buildTimberFrame({
+          batcher, chunk, pos, sides, addCollider, barn: mats.shire === 'barn',
+          holes: roomHoles.filter((h) => h.ceiling),
+        });
+      }
+      // Lanterns hang from the beams: the barn's tie beams, the smial's ribs.
+      let lanterns = mats.shire === 'barn' ? [[-1.8, -2.6], [1.8, 2.6]] : null;
+      if (mats.smial) lanterns = buildSmialVault({ batcher, chunk, pos, sides, addCollider });
+      if (instances && lanterns) hangLanterns({ instances, chunk, pos, decor, lights, room, points: lanterns });
+      if (instances && (deepStyle(room) === 'cave' || mats.rockCave)) {
         buildCaveLining({ instances, chunk, room, pos, sides, roofed: !roomHoles.some((h) => h.ceiling), addCollider });
       }
       // ...and a room with earth over it has no roof either. Same family as the
@@ -5200,20 +5251,24 @@ const TENT_H = 5.6;
 const MOUTH_W = 2.0;
 
 function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey }) {
-  const inside = [];            // {level, x, z} cells that are cave or cave corridor
+  // The desert's caves wear its sandstone; a cave anywhere else -- the troll
+  // den in Haon Dor's firs -- the same crags in grey rock.
+  const rocky = (room) => eastStyle(room) === 'cave' || pickMaterials(room, room.area).rockCave;
+  const skin = (room) => (eastStyle(room) === 'cave' ? null : { cliff: 'crag' });
+  const inside = [];            // {level, x, z, swap} cells that are cave or cave corridor
   for (const cell of layout.order) {
-    if (cell.level < 0 || eastStyle(cell.room) !== 'cave') continue;
-    inside.push({ level: cell.level, x: cell.x, z: cell.z });
+    if (cell.level < 0 || !rocky(cell.room)) continue;
+    inside.push({ level: cell.level, x: cell.x, z: cell.z, swap: skin(cell.room) });
   }
   for (const link of layout.links) {
     if (link.kind !== 'alley' || !link.path || link.from.level < 0) continue;
-    if (eastStyle(link.from.room) !== 'cave' || eastStyle(link.to.room) !== 'cave') continue;
-    for (const c of link.path) inside.push({ level: link.from.level, x: c.x, z: c.z });
+    if (!rocky(link.from.room) || !rocky(link.to.room)) continue;
+    for (const c of link.path) inside.push({ level: link.from.level, x: c.x, z: c.z, swap: skin(link.from.room) });
   }
   const taken = new Set();
   const free = (x, z) => layout.at(0, x, z) === undefined && !layout.isPath(0, x, z)
     && layout.at(1, x, z) === undefined && !layout.isPath(1, x, z);
-  const block = (x, z) => {
+  const block = (x, z, swap) => {
     const k = cellKey(0, x, z);
     if (taken.has(k)) return;
     taken.add(k);
@@ -5223,7 +5278,7 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
     const scaleY = 0.85 + hash3(x, z, 1, 211) * 0.45;
     instances.add(name, {
       x: cx, y: 0, z: cz, rotY: Math.floor(hash3(x, z, 2, 211) * 4) * Math.PI / 2, scaleY,
-    }, chunkOf({ level: 0, x, z }));
+    }, chunkOf({ level: 0, x, z }), swap);
     addCollider(cx - HALF, cx + HALF, cz - HALF, cz + HALF, 0, (name === 'massif_a' ? 12 : 9) * scaleY);
   };
   // The way out of a cave onto the open air goes through the cliff: the first
@@ -5234,14 +5289,14 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
     const ends = [[link.from, link.to, link.path[0], link.path[1] || link.to],
       [link.to, link.from, link.path[link.path.length - 1], link.path[link.path.length - 2] || link.from]];
     for (const [cave, far, first, next] of ends) {
-      if (eastStyle(cave.room) !== 'cave' || !isOpenAir(far.room)) continue;
+      if (!rocky(cave.room) || !isOpenAir(far.room)) continue;
       const inDir = dirBetween(first, cave);
       if (inDir < 0 || dirBetween(first, next) !== (inDir + 2) % 4) continue;
       const k = cellKey(0, first.x, first.z);
       if (taken.has(k)) continue;
       taken.add(k);
       const cx = first.x * CELL; const cz = first.z * CELL;
-      instances.add('massif_mouth', { x: cx, y: 0, z: cz, rotY: inDir % 2 ? Math.PI / 2 : 0 }, chunkOf({ level: 0, x: first.x, z: first.z }));
+      instances.add('massif_mouth', { x: cx, y: 0, z: cz, rotY: inDir % 2 ? Math.PI / 2 : 0 }, chunkOf({ level: 0, x: first.x, z: first.z }), skin(cave.room));
       for (const s of [-1, 1]) {
         const r = sewerRect({ x: cx, z: cz }, inDir, -HALF, HALF, s * MOUTH_W, s * HALF);
         addCollider(r.x0, r.x1, r.z0, r.z1, 0, 10);
@@ -5273,14 +5328,14 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
       const out = (inDir + 2) % 4;
       const room = { x: cave.x * CELL, y: 0, z: cave.z * CELL };
       const [ox, , oz] = DIR_STEP[out];
-      instances.add('cave_wall_long_door', { x: room.x + ox * HALF, y: 0, z: room.z + oz * HALF, rotY: FACE_ROT[inDir] }, chunkOf(cave));
+      instances.add('cave_wall_long_door', { x: room.x + ox * HALF, y: 0, z: room.z + oz * HALF, rotY: FACE_ROT[inDir] }, chunkOf(cave), skin(cave.room));
       closeDoorway({ batcher, pos: room, dir: out, chunk: chunkOf(cave), material: 'caverock', addCollider });
     }
   }
   for (const c of inside) {
     for (let dx = -1; dx <= 1; dx++) {
       for (let dz = -1; dz <= 1; dz++) {
-        if (c.level === 0 && free(c.x + dx, c.z + dz)) block(c.x + dx, c.z + dz);
+        if (c.level === 0 && free(c.x + dx, c.z + dz)) block(c.x + dx, c.z + dz, c.swap);
       }
     }
     // A cap on the room's own ceiling, unless another cave stands on it.
@@ -5289,7 +5344,7 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
     instances.add(hash3(c.x, c.z, c.level, 213) > 0.5 ? 'massif_a' : 'massif_b', {
       x: c.x * CELL, y, z: c.z * CELL, rotY: Math.floor(hash3(c.x, c.z, 3, 213) * 4) * Math.PI / 2,
       scaleY: 0.45 + hash3(c.x, c.z, 4, 213) * 0.35,
-    }, chunkOf(c));
+    }, chunkOf(c), c.swap);
   }
   return taken;
 }
@@ -5441,6 +5496,206 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
 }
 
 /** Pitched roof over an indoor room, with a chimney now and then. */
+// ------------------------------------------------------ Shire interiors ----
+
+/**
+ * The frame a Shire room is built on, standing inside its plaster: a post at
+ * every corner and either side of every door, a plate along the head of each
+ * wall and tie beams across under the boards of the floor above. A barn is
+ * the same frame heavier, without the rail. It is what makes a timber
+ * building's inside read as one -- a plaster box with a plank ceiling read
+ * as the stone box it replaced, repainted.
+ */
+const FRAME_POST = 0.26;
+const FRAME_PLATE = 0.24;
+
+function buildTimberFrame({ batcher, chunk, pos, sides, addCollider, holes, barn }) {
+  const post = barn ? 0.34 : FRAME_POST;
+  const inner = ROOM / 2;
+  const y = pos.y;
+  const add = (w, h, d, x, yy, z, rotY = 0) => batcher.add(box(w, h, d), 'timber', place(x, yy, z, rotY), { chunk });
+  // Corners.
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      add(post, CEIL, post, pos.x + sx * (inner - post / 2), y + CEIL / 2, pos.z + sz * (inner - post / 2));
+    }
+  }
+  for (let dir = 0; dir < 4; dir++) {
+    const [dx, , dz] = DIR_STEP[dir];
+    const rotY = dir === 1 || dir === 3 ? Math.PI / 2 : 0;
+    const open = !!sides[dir] && (sides[dir].kind === 'alley' || sides[dir].kind === 'portal');
+    // The face of the wall, and a point `along` it (the axis across dx/dz).
+    const at = (along, inset) => ({
+      x: pos.x + dx * (inner - inset) + (dx ? 0 : along),
+      z: pos.z + dz * (inner - inset) + (dz ? 0 : along),
+    });
+    const plate = at(0, FRAME_PLATE / 2);
+    add(ROOM, FRAME_PLATE, FRAME_PLATE, plate.x, y + CEIL - FRAME_PLATE / 2, plate.z, rotY);
+    const studs = open ? [-(DOOR_W / 2 + post / 2), DOOR_W / 2 + post / 2] : [0];
+    for (const s of studs) {
+      const p = at(s, post / 2);
+      add(post, CEIL, post, p.x, y + CEIL / 2, p.z, rotY);
+      addCollider(p.x - post / 2, p.x + post / 2, p.z - post / 2, p.z + post / 2, y, y + CEIL);
+    }
+    if (open) {
+      // The door head, spanning both posts.
+      const p = at(0, post / 2);
+      add(DOOR_W + post * 2, 0.26, post, p.x, y + DOOR_H + 0.13, p.z, rotY);
+    }
+    if (!barn) {
+      // A rail at the height of a chair back, broken by the door.
+      const runs = open ? [[-inner, -DOOR_W / 2 - post], [DOOR_W / 2 + post, inner]] : [[-inner, inner]];
+      for (const [a, b] of runs) {
+        const p = at((a + b) / 2, 0.05);
+        add(b - a, 0.14, 0.1, p.x, y + 1.05, p.z, rotY);
+      }
+    }
+  }
+  // Tie beams across, clear of any stair coming up through the ceiling.
+  const hole = holes.length ? unionRect(holes) : null;
+  for (const offset of [-2.6, 2.6]) {
+    if (hole && offset + 0.2 > hole.z0 && offset - 0.2 < hole.z1) continue;
+    add(ROOM, barn ? 0.36 : 0.3, barn ? 0.3 : 0.26, pos.x, y + CEIL - 0.16, pos.z + offset);
+  }
+}
+
+/**
+ * A smial is round. "A hole in the ground which serves as the proper dwelling
+ * place for halflings": plaster curving from the walls into the ceiling, the
+ * corners rounded off in plan, boards to waist height and a timber rib over
+ * the vault every couple of metres -- the tube-shaped hall of the book, cut to
+ * the square room the mud gives it. The room's own walls still stand behind
+ * it, and so do its colliders; this is a lining.
+ */
+const VAULT_SPRING = 3.2;       // above the 3.1 m doorways, so no door cuts the curve
+const VAULT_CORNER = 2.3;       // the plan's corner radius: over the cove's 2.0, or the corners fold
+const VAULT_BOARDS = 1.05;
+
+function buildSmialVault({ batcher, chunk, pos, sides, addCollider }) {
+  const H = ROOM / 2;
+  const cove = CEIL - VAULT_SPRING;
+  const straight = H - VAULT_CORNER;
+  // Profile: [inset from the wall face, height, normal tilt t (0 wall, pi/2 ceiling)]
+  const profile = [[0, 0, 0], [0, VAULT_BOARDS, 0], [0, 2.1, 0], [0, DOOR_H, 0], [0, VAULT_SPRING, 0]];
+  const ARC = 10;
+  for (let i = 1; i <= ARC; i++) {
+    const t = (i / ARC) * Math.PI / 2;
+    profile.push([cove - cove * Math.cos(t), VAULT_SPRING + cove * Math.sin(t), t]);
+  }
+  // Path round the room: [x, z, inward nx, nz, side, along].
+  const path = [];
+  const cornerSteps = 6;
+  const alongs = [-straight, -2.4, -DOOR_W / 2, -0.8, 0, 0.8, DOOR_W / 2, 2.4, straight];
+  // North, east, south, west, going clockwise seen from above (x east, z south).
+  const SIDES = [
+    { dir: 0, origin: [0, -H], axis: [1, 0], normal: [0, 1] },
+    { dir: 1, origin: [H, 0], axis: [0, 1], normal: [-1, 0] },
+    { dir: 2, origin: [0, H], axis: [-1, 0], normal: [0, -1] },
+    { dir: 3, origin: [-H, 0], axis: [0, -1], normal: [1, 0] },
+  ];
+  for (const { dir, origin, axis, normal } of SIDES) {
+    for (const a of alongs) {
+      path.push({ x: origin[0] + axis[0] * a, z: origin[1] + axis[1] * a, nx: normal[0], nz: normal[1], dir, along: a });
+    }
+    // The corner after this side, round a centre inset by the radius.
+    const cx = origin[0] + axis[0] * straight + normal[0] * VAULT_CORNER;
+    const cz = origin[1] + axis[1] * straight + normal[1] * VAULT_CORNER;
+    for (let k = 1; k < cornerSteps; k++) {
+      const f = k / cornerSteps;
+      // From pointing out of this side to pointing out along the axis.
+      const ox = -normal[0] * (1 - f) + axis[0] * f;
+      const oz = -normal[1] * (1 - f) + axis[1] * f;
+      const len = Math.hypot(ox, oz);
+      const ux = ox / len; const uz = oz / len;
+      path.push({ x: cx + ux * VAULT_CORNER, z: cz + uz * VAULT_CORNER, nx: -ux, nz: -uz, dir: -1, along: 0 });
+    }
+  }
+  const doorway = [0, 1, 2, 3].map((d) => !!sides[d] && (sides[d].kind === 'alley' || sides[d].kind === 'portal'));
+  const surfaces = { planks: [[], []], plaster: [[], []] };
+  const vertex = (p, row) => {
+    const [inset, h, t] = profile[row];
+    return {
+      x: pos.x + p.x + p.nx * inset, y: pos.y + h, z: pos.z + p.z + p.nz * inset,
+      nx: p.nx * Math.cos(t), ny: -Math.sin(t), nz: p.nz * Math.cos(t),
+    };
+  };
+  for (let i = 0; i < path.length; i++) {
+    const a = path[i]; const b = path[(i + 1) % path.length];
+    const sameSide = a.dir === b.dir && a.dir >= 0;
+    const inDoor = sameSide && doorway[a.dir]
+      && Math.max(a.along, b.along) <= DOOR_W / 2 + 1e-6 && Math.min(a.along, b.along) >= -DOOR_W / 2 - 1e-6;
+    for (let r = 0; r < profile.length - 1; r++) {
+      if (inDoor && profile[r + 1][1] <= DOOR_H + 1e-6) continue;
+      const [pos3, nor] = surfaces[profile[r + 1][1] <= VAULT_BOARDS + 1e-6 ? 'planks' : 'plaster'];
+      // Two triangles facing into the room.
+      const quad = [vertex(a, r), vertex(b, r), vertex(b, r + 1), vertex(a, r), vertex(b, r + 1), vertex(a, r + 1)];
+      for (const v of quad) { pos3.push(v.x, v.y, v.z); nor.push(v.nx, v.ny, v.nz); }
+    }
+  }
+  for (const [name, [p, n]] of Object.entries(surfaces)) {
+    if (!p.length) continue;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
+    batcher.add(geo, name, IDENTITY, { chunk, normals: true, ao: wallAo(pos.y) });
+  }
+  // Ribs over the pair of walls with fewer doors in them, and a beam across
+  // the flat of the ceiling from one to the other.
+  const pair = (doorway[0] ? 1 : 0) + (doorway[2] ? 1 : 0) <= (doorway[1] ? 1 : 0) + (doorway[3] ? 1 : 0) ? [0, 2] : [1, 3];
+  for (const along of [-2.7, 2.7]) {
+    for (const dir of pair) {
+      const side = SIDES[dir];
+      const p0 = { x: side.origin[0] + side.axis[0] * along, z: side.origin[1] + side.axis[1] * along, nx: side.normal[0], nz: side.normal[1] };
+      const p3 = []; const n3 = [];
+      for (let r = 0; r < profile.length - 1; r++) {
+        const quad = [];
+        for (const [rr, w] of [[r, -0.12], [r, 0.12], [r + 1, 0.12], [r, -0.12], [r + 1, 0.12], [r + 1, -0.12]]) {
+          const v = vertex(p0, rr);
+          quad.push({
+            ...v,
+            x: v.x + side.axis[0] * w + v.nx * 0.05, y: v.y + v.ny * 0.05, z: v.z + side.axis[1] * w + v.nz * 0.05,
+          });
+        }
+        for (const v of quad) { p3.push(v.x, v.y, v.z); n3.push(v.nx, v.ny, v.nz); }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(p3, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(n3, 3));
+      batcher.add(geo, 'timber', IDENTITY, { chunk, normals: true });
+    }
+    const across = ROOM - 2 * cove;
+    const bx = pair[0] === 0 ? along : 0; const bz = pair[0] === 0 ? 0 : along;
+    batcher.add(box(pair[0] === 0 ? 0.24 : across, 0.2, pair[0] === 0 ? across : 0.24), 'timber',
+      place(pos.x + (pair[0] === 0 ? bx : 0), pos.y + CEIL - 0.1, pos.z + (pair[0] === 0 ? 0 : bz)), { chunk });
+  }
+  const lanterns = pair[0] === 0 ? [[-2.7, -1.2], [2.7, 1.2]] : [[-1.2, -2.7], [1.2, 2.7]];
+  // The rounded corners stand inside the room's square colliders.
+  const c = H - VAULT_CORNER * (1 - Math.SQRT1_2);
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const x0 = pos.x + sx * c; const z0 = pos.z + sz * c;
+      addCollider(Math.min(x0, pos.x + sx * H), Math.max(x0, pos.x + sx * H),
+        Math.min(z0, pos.z + sz * H), Math.max(z0, pos.z + sz * H), pos.y, pos.y + CEIL);
+    }
+  }
+  return lanterns;
+}
+
+/**
+ * Light that hangs, for rooms where a torch in an iron bracket is wrong: a
+ * barn full of hay, a halfling's parlour. The desert's lantern, on its chain
+ * from a beam, with the flame and the light where the tents put theirs.
+ */
+function hangLanterns({ instances, chunk, pos, decor, lights, room, points }) {
+  points.forEach(([ox, oz], i) => {
+    const lx = pos.x + ox; const lz = pos.z + oz;
+    const top = pos.y + CEIL - 0.3;
+    instances.add('lantern', { x: lx, y: top, z: lz, rotY: hash3(room.vnum, i, 0, 91) * 6.28 }, chunk);
+    decor.push({ kind: 'torch', bare: true, x: lx, y: top - 1.72, z: lz });
+    lights.push({ x: lx, y: top - 2.0, z: lz, color: 0xffb566, intensity: 22, radius: 14, flicker: true });
+  });
+}
+
 function buildRoof({ batcher, chunk, mats, room, x, y, z, decor }) {
   // "A smial, a hole in the ground which serves as the proper dwelling place
   // for halflings." What is over one is the hill, not a roof -- so a turf dome

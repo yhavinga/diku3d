@@ -317,13 +317,15 @@ export class InstanceBatch {
    * @param {string} name asset in the library
    * @param {object} transform {x,y,z, rotY, scale | scaleX/scaleY/scaleZ}
    * @param {string} chunk grouping key, usually the cell chunk
+   * @param {object} swap tag -> tag, to wear another surface: the desert's
+   *   sandstone crags stand over the troll den in grey rock
    */
-  add(name, transform, chunk = '0') {
+  add(name, transform, chunk = '0', swap = null) {
     const asset = this.library.get(name);
     if (!asset) return false;
-    const key = `${chunk}|${name}`;
+    const key = swap ? `${chunk}|${name}|${JSON.stringify(swap)}` : `${chunk}|${name}`;
     let bucket = this.buckets.get(key);
-    if (!bucket) { bucket = { asset, chunk, transforms: [] }; this.buckets.set(key, bucket); }
+    if (!bucket) { bucket = { asset, chunk, swap, transforms: [] }; this.buckets.set(key, bucket); }
     bucket.transforms.push(transform);
     return true;
   }
@@ -347,7 +349,7 @@ export class InstanceBatch {
     placements.updateMatrixWorld = () => {};
     let triangles = 0;
     const placed = new Map(); // asset -> every matrix it was placed with
-    for (const { asset, chunk, transforms } of this.buckets.values()) {
+    for (const { asset, chunk, swap, transforms } of this.buckets.values()) {
       const byRegion = new Map();
       const matrices = transforms.map((t) => {
         _position.set(t.x, t.y, t.z);
@@ -360,8 +362,10 @@ export class InstanceBatch {
         byRegion.get(region).push(matrix);
         return matrix;
       });
+      const wear = (primitive) => (swap && swap[primitive.materialName]
+        ? this.library.materialFor(swap[primitive.materialName]) : primitive.material);
       for (const [region, list] of byRegion) {
-        for (const primitive of asset.primitives) target.add(region, primitive.material, primitive.geometry, list);
+        for (const primitive of asset.primitives) target.add(region, wear(primitive), primitive.geometry, list);
       }
       for (const primitive of asset.primitives) {
         triangles += (primitive.geometry.attributes.position.count / 3) * matrices.length;
