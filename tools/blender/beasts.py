@@ -2763,14 +2763,28 @@ def dragon():
             tip = V(apply_side(L["extra"]["wing2*"][1], side))
             wing = [cone(P(*sh), P(*wr), 0.09, 0.06, "wing1" + t, blend=0.04, group="arm"),
                     cone(P(*wr), P(*tip), 0.06, 0.015, "wing2" + t, blend=0.04, group="arm")]
-            # The membrane: a thin blade hung between the arm, the fingers and
-            # the flank, sloping out from the body.
-            tilt = 16 * side
-            cen = sh * 0.25 + wr * 0.35 + tip * 0.4 + V((0, 0, -0.2))
-            wing.append(ell(P(cen.x, cen.y, cen.z), (0.022, 1.05, 0.5),
-                            ("grad", "wing1" + t, "wing2" + t, P(*sh), P(*tip)), blend=0.05,
-                            rot=(0, -tilt, 0), mask=(0, 0.55)))
-            out.append(sdf_part(wing, 0.015, 380, "wing", "scales", smooth=1))
+            # Fingers: three more spars fanned back from the wrist to the
+            # trailing edge, as a bat's, and the membrane in lobes between
+            # them that sag short of the line from tip to tip -- a scalloped
+            # edge, which is what says wing at any distance. It was one slab,
+            # and folded on the back it read as a pair of leaves.
+            tips = [tip] + [V(apply_side(q, side)) for q in ((0.5, -1.35, 1.42), (0.53, -0.85, 1.38),
+                                                                (0.5, -0.35, 1.5))]
+            for i, ft in enumerate(tips[1:]):
+                wing.append(cone(P(*wr), P(*ft), 0.04, 0.012, "wing2" + t, blend=0.03, group="f%d" % i))
+            tips.append(V(apply_side((0.4, 0.2, 1.75), side)))
+            for i in range(len(tips) - 1):
+                a_, b_ = tips[i], tips[i + 1]
+                mid = wr.lerp((a_ + b_) * 0.5, 0.86)
+                half = (a_ - b_).length * 0.5
+                d_ = (mid - wr)
+                n_ = d_.cross(b_ - a_).normalized()
+                # Thin across the membrane's own plane.
+                sq = tuple(max(0.07, abs(n_[k]) * 0.07 + (1 - abs(n_[k])) * 1.0) for k in range(3))
+                bone = "wing2" + t if i < 3 else ("grad", "wing1" + t, "wing2" + t, P(*sh), P(*wr))
+                wing.append(cone(P(*wr.lerp(mid, 0.1)), P(*mid), 0.06, half * 0.95, bone, blend=0.04,
+                                 squash=(sq[0], sq[1], sq[2]), mask=(0, 0.55)))
+            out.append(sdf_part(wing, 0.013, 800, "wing", "scales", smooth=1))
         out += claws(L, "fore", 3, 0.16, 0.035, 0.008, colour=(0.18, 0.16, 0.12))
         out += claws(L, "hind", 3, 0.14, 0.035, 0.008, colour=(0.18, 0.16, 0.12))
         return out
