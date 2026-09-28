@@ -6,6 +6,26 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-09-28 — wave 7: below and inside
+
+### Spell source, stalled melee, the fountain (wave7-combat)
+
+- **`game.js`'s player position is the eye; a mobile's is its feet.** Any
+  reach to a mobile must subtract 1.72 m, or MELEE 3.2 is 2.7 along the
+  ground — the bartender fight that stalled for 9 s with no events.
+- **A hand-relative offset is rotated by the hand's quaternion before the
+  camera's.** Check by projecting both points to the screen; the cast point
+  sat ~100 px above the fist.
+- **A curve's first control point decides where it heads first**; a
+  sideways bow 0.6 m from the lens leaves the frame and comes back as a
+  beam from the sky.
+- **Pushing out of a box or circle towards its centre has no sideways
+  component**; a round obstacle needs an explicit sidestep (`skirt()`), or
+  held W stops dead at the fountain.
+- Deterministic 60 Hz sequences: override `requestAnimationFrame` and
+  `performance.now` in the page and set `quality.preset.fps = 0`.
+  Sanctuary test: `tools/judge/sanctuary.js`.
+
 ## 2026-09-28 — wave 6: what the rooms say they are
 
 ### Main-thread CPU (wave6-cpu)
