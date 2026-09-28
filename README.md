@@ -60,7 +60,10 @@ worm, the dracolich and a Will-O-Wisp that carries its own light over the bog. T
 and walk the routed street to get there; fights are Merc's `fight.c`, played
 on the beat with the swing's contact frame landing on the blow. Nothing is
 named unless you look at it; a foe you cannot see gets a marker telling you
-which way to turn. Shops and inns are furnished by the keeper's trade and the room's own
+which way to turn. Rooms take their plan, materials and colours, doors, water depth, blood and
+wall paintings from their own descriptions: the Temple of Midgaard stands on
+its mound behind marble steps, painted with gods and giants, and Haon Dor's
+great tree is a hollow trunk you walk into. Shops and inns are furnished by the keeper's trade and the room's own
 description — a forge and anvil for the smith, racks for the weaponsmith, a
 bar with its back shelves for the tavern. People sit at tables, talk in pairs, stand at the bar and
 climb the stairs rather than vanishing at the foot of them. The casters

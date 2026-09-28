@@ -344,6 +344,9 @@ choose.
   ring's winding. Fixed, but the shape of the bug generalises: after any
   permutation-based placement, verify face orientation by sampling normals,
   not by eye; backface culling hides the error from every front-on look.
+- **Cloning a material drops its `defines` and `onBeforeCompile`.** A
+  clone of a buried surface loses `DIKU_BURIED` and reflects the sky
+  underground. Copy defines, hooks and `defaultAttributeValues` explicitly.
 - **`env` in a recipe is not only shine.** It scales the diffuse sky light
   too, so a low-`env` cloth is a dark cloth indoors. Figures take the same
   sky share and indoor treatment as the walls (`SHARED_LIGHT`); check a
