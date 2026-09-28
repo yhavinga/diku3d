@@ -557,6 +557,12 @@ class ViewModel {
     this.lag = { x: 0, y: 0 };
     this.beat = 0;
     this.primedFor = null;
+    // The one being fought, in camera space, and how far its body reaches
+    // round that point: set by the fx each frame. A blow reaches it.
+    this.target = null;
+    this.targetR = 0.3;
+    // Hit-stop: while this runs the swing does not advance.
+    this.freeze = 0;
   }
 
   equip(kind, shieldKind) {
@@ -654,6 +660,15 @@ class ViewModel {
     // the follow-through a third again as far, which is what a miss looks
     // like from behind the blade.
     const follow = (s) => {
+      // Parried: the blade stops on theirs and springs back a third of the
+      // way to where it came from, instead of carrying through.
+      if (s.parried) {
+        if (!s.back) {
+          const c = s.shape.contact; const w = s.shape.windup;
+          s.back = { p: c.p.map((v, i) => v + (w.p[i] - v) * 0.35), blade: c.blade, elbow: c.elbow };
+        }
+        return s.back;
+      }
       if (!s.miss) return s.shape.follow;
       if (!s.over) {
         const c = s.shape.contact; const f = s.shape.follow;
@@ -676,16 +691,29 @@ class ViewModel {
       if (!this.kind) off = { a: mix(off), b: P.block, u: w };
     }
 
-    // The latest queued swing that has started is the one on screen.
-    for (let i = 0; i < this.queue.length; i++) this.queue[i].t += dt;
+    // The latest queued swing that has started is the one on screen. A blow
+    // that connects holds still for a few frames (`freeze`), which is most of
+    // what makes it read as having met something.
+    const held = this.freeze > 0;
+    this.freeze = Math.max(0, this.freeze - dt);
+    const sdt = held ? 0 : dt;
+    for (let i = 0; i < this.queue.length; i++) this.queue[i].t += sdt;
     while (this.queue.length && this.queue[0].t >= 0) {
       this.swing = this.queue.shift();
-      this.swing.t -= dt; // advanced once below
+      this.swing.t -= sdt; // advanced once below
     }
+    let reach = 0;
+    let reachHand = 'hand';
     if (this.swing) {
       const s = this.swing;
-      s.t += dt;
+      s.t += sdt;
       const t = s.t;
+      // How far out the blow carries towards the foe: nothing through the
+      // wind-up, all of it at contact, back again over the recovery.
+      const k = s.windup + s.strike;
+      reach = t < s.windup ? 0 : t < k ? easeIn((t - s.windup) / s.strike)
+        : t < k + 0.12 ? 1 : t < k + 0.55 ? 1 - ease((t - k - 0.12) / 0.43) : 0;
+      reachHand = s.hand;
       const cur = s.hand === 'off' ? off : main;
       const base = mix(cur);
       let seg;
@@ -708,6 +736,7 @@ class ViewModel {
       obj.position.y += by - drop - this.lag.y * 0.6 - jolt;
     };
     place(this.hand, main, false);
+    if (reach > 0 && this.target) this.extend(reachHand === 'off' ? this.off : this.hand, reach, this.swing);
     if (this.shield) {
       // A shield is not held like a blade: its board stays square to you, low
       // and out to the left, and comes up across the body in a fight.
@@ -718,6 +747,24 @@ class ViewModel {
       place(this.off, off, true);
     }
     this.off.visible = !this.kind || !!this.shield;
+  }
+
+  /**
+   * Carry a hand out to the foe. The poses are drawn for a body at arm's
+   * length; a guard standing 1.8 m off is well past that, and a fist that
+   * stops half a metre short of him reads as shadow-boxing. The weapon's own
+   * length counts: a sword's tip, not its hilt, is what has to arrive.
+   */
+  extend(obj, weight, swing) {
+    const t = this.target;
+    const dist = t.length();
+    const blade = !this.kind ? 0 : this.style === 'thrust' ? 0.8 : 0.62;
+    const hand = obj.position.length();
+    const extra = clamp(dist - this.targetR - 0.05 - blade - hand, 0, 0.85) * weight;
+    if (extra <= 0) return;
+    _v.copy(t).normalize();
+    obj.position.addScaledVector(_v, extra);
+    if (swing) swing.reached = Math.max(swing.reached || 0, extra);
   }
 
   light(sun, hemi, scene, indoor, pool) {
@@ -775,6 +822,9 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
 
   let clock = 0;
   const queue = [];
+  const holds = [];
+  const KICK_TIME = 0.22;
+  const kick = { t: KICK_TIME, amount: 0, roll: 0, pitch: 0, rollNow: 0, rollAt: null, lean: null, at: null };
   let ambient = 1;
   let lastViolence = Infinity;
 
@@ -822,6 +872,55 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     // the bloom threshold's reach -- at 5x and 22 cm it lit a starburst across
     // half a noon frame.
     sparks.spawn({ x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0, life: 0.06, size: 0.09 * strength, r: 1.6, g: 1.25, b: 0.8, alpha: 0.8, fade: 2 });
+  }
+
+  /**
+   * Steel on steel: a hard white-gold point with a short star of streaks
+   * flat to the view round it, gone in about five frames. The ordinary spark
+   * is a hit on armour; a parry is two blades meeting and has to read as a
+   * clash from across a room.
+   */
+  function clash(p, away) {
+    const right = _v.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + Math.random() * 0.3;
+      const s = 5.5 + Math.random() * 2.5;
+      const dx = right.x * Math.cos(a) + up.x * Math.sin(a);
+      const dy = right.y * Math.cos(a) + up.y * Math.sin(a);
+      const dz = right.z * Math.cos(a) + up.z * Math.sin(a);
+      streaks.spawn({
+        x: p.x, y: p.y, z: p.z, vx: dx * s, vy: dy * s, vz: dz * s,
+        life: 0.07 + Math.random() * 0.04, drag: 9, gravity: 0,
+        r: 4.5, g: 4.0, b: 3.2,
+      });
+    }
+    // Under the bloom's reach at this size and life: a flash, not a flare.
+    sparks.spawn({ x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0, life: 0.09, size: 0.3, grow: 0.6, r: 2.2, g: 2.0, b: 1.6, alpha: 1, fade: 1.6 });
+    spark(p, away, 1.2);
+  }
+
+  /** Your swing that this blow is landing with: the one on screen if it has not passed contact, else the next. */
+  function landing() {
+    const s = vm.swing;
+    return s && s.t <= s.windup + s.strike + 0.06 ? s : (vm.queue[0] || null);
+  }
+
+  /** Hold a figure's animation still for a few frames: the other half of a hit-stop. */
+  function hold(fig, seconds) {
+    if (!fig || !fig.mixer) return;
+    const was = holds.find((h) => h.fig === fig);
+    if (was) { was.left = Math.max(was.left, seconds); return; }
+    holds.push({ fig, left: seconds, scale: fig.mixer.timeScale });
+    fig.mixer.timeScale = 0;
+  }
+
+  /** A jolt to the view when your own blow lands: pitch up, a hair of roll, a lean in. */
+  function kickView(amount) {
+    const left = kick.amount * Math.max(0, 1 - kick.t / KICK_TIME);
+    kick.t = 0;
+    kick.amount = Math.max(left, amount);
+    kick.roll = (Math.random() < 0.5 ? -1 : 1) * amount;
   }
 
   function flesh(p, away, strength = 1) {
@@ -902,6 +1001,17 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
       case 'hit': {
         const strength = clamp(event.dam / Math.max(8, event.maxHp || 20) * 2.2, 0.3, 1.4);
         if (toFig) motion.react(toFig, 'hit', strength);
+        if (!event.from && toFig) {
+          // Your blow connected: both of you stop for a few frames, then the
+          // view kicks and they reel. A blow that takes a fifth of them is a
+          // stagger, a step and a half back, not a flinch.
+          const stop = 0.055 + strength * 0.03;
+          vm.freeze = Math.max(vm.freeze, stop);
+          hold(toFig, stop);
+          kickView(0.5 + strength * 0.5);
+          const share = event.dam / Math.max(1, event.maxHp || 20);
+          if (share >= 0.2 && toFig.m && !toFig.m.dead) toFig.m.recoil = { t: 0, amount: 1.7 };
+        }
         // A blow on you is felt -- the shake, the vignette -- not seen as
         // debris hanging in front of your eye.
         if (event.to) {
@@ -922,15 +1032,40 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
         break;
       case 'parry': {
         if (toFig) motion.react(toFig, 'block');
-        if (!event.to) vm.block = 0.45;
-        spark(contact, away, 0.8);
+        // Where the blades meet: out in front of the one parrying, between
+        // the two of you, not on their chest.
+        const meet = at.clone().addScaledVector(away, -0.5);
+        meet.y += 0.08;
+        meet.floor = contact.floor;
+        if (!event.to) {
+          vm.block = 0.45;
+          player.shake(0.14);
+        } else if (!event.from) {
+          // Yours, stopped on their blade: a short hold, your hand springs
+          // back, and the view takes a little of the shock.
+          const s = landing();
+          if (s) s.parried = true;
+          vm.freeze = Math.max(vm.freeze, 0.05);
+          vm.jolt = Math.max(vm.jolt, 0.16);
+          if (toFig) hold(toFig, 0.05);
+          kickView(0.35);
+        }
+        clash(meet, away);
         audio.clang && audio.clang({ ...place });
         break;
       }
       case 'dodge': {
         if (toFig) {
           motion.react(toFig, 'dodge');
-          dust({ x: toFig.at.x, y: toFig.at.y, z: toFig.at.z }, 0.5);
+          // motion.js's sidestep is 0.38 m, which from behind a raised
+          // shield at two metres was not seen at all: half again, so the
+          // body clearly leaves the line and your swing carries through it.
+          if (toFig.m && toFig.m.sway) toFig.m.sway.side *= 1.5;
+          dust({ x: toFig.at.x, y: toFig.at.y, z: toFig.at.z }, 0.7);
+        }
+        if (!event.from && event.to) {
+          const s = landing();
+          if (s) s.miss = true;
         }
         if (!event.to) player.shake(0.12);
         audio.dodge && audio.dodge({ ...place });
@@ -953,6 +1088,22 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
 
   function update(dt) {
     clock += dt;
+    // Take last frame's kick back off. The pitch is the mouse's own state and
+    // is always handed back; the position only if player.js has not already
+    // rebuilt it from its feet this frame (it does, unless paused).
+    camera.rotation.x -= kick.pitch;
+    if (kick.rollAt !== null && camera.rotation.z === kick.rollAt) camera.rotation.z -= kick.rollNow;
+    if (kick.at && camera.position.equals(kick.at)) camera.position.sub(kick.lean);
+    kick.pitch = 0; kick.rollNow = 0; kick.rollAt = null; kick.at = null;
+
+    for (let i = holds.length - 1; i >= 0; i--) {
+      const h = holds[i];
+      h.left -= dt;
+      if (h.left <= 0 || !h.fig.mixer) {
+        if (h.fig.mixer) h.fig.mixer.timeScale = h.scale;
+        holds.splice(i, 1);
+      }
+    }
 
     // Start each opponent's first swing of the coming round early enough that
     // its contact frame lands on the pulse (and yours on yours).
@@ -1021,6 +1172,35 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     vm.equip(weaponKind(wield), shield ? (/kite|tower|heater/i.test(shield.name) ? 'kite' : 'round') : null);
     const room = built.rooms.get(s.roomVnum);
     vm.light(sun, hemi, scene, room ? !room.outdoor : false, lightPool);
+
+    // The foe in camera space, for a blow to reach -- only one in front of
+    // you and within a long step.
+    vm.target = null;
+    if (foeFig && !foeFig.m.dead) {
+      camera.updateMatrixWorld();
+      const local = camera.worldToLocal(new THREE.Vector3(foeFig.at.x, foeFig.at.y + foeFig.height * 0.62, foeFig.at.z));
+      if (local.z < -0.3 && local.length() < 3.2) {
+        vm.target = local;
+        vm.targetR = foeFig.body ? foeFig.body.r : 0.3;
+      }
+    }
+
+    // The kick: up and a hair of roll at once, gone over a fifth of a second,
+    // with the body leaning a hand's width into the blow.
+    if (kick.t < KICK_TIME) {
+      kick.t += dt;
+      const u = clamp(kick.t / KICK_TIME, 0, 1);
+      const e = Math.sin(Math.min(1, u * 4) * Math.PI / 2) * (1 - u) * (1 - u);
+      kick.pitch = 0.022 * kick.amount * e;
+      kick.rollNow = 0.008 * kick.roll * e;
+      camera.rotation.x += kick.pitch;
+      camera.rotation.z += kick.rollNow;
+      kick.rollAt = camera.rotation.z;
+      kick.lean = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).setY(0).multiplyScalar(0.09 * kick.amount * e);
+      camera.position.add(kick.lean);
+      kick.at = camera.position.clone();
+    } else kick.amount = 0;
+
     vm.update(dt, player, !!s.fighting);
   }
 

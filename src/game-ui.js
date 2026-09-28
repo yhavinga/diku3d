@@ -95,8 +95,13 @@ const CSS = `
   font-size: 30px; font-weight: 700; line-height: 1; white-space: nowrap; letter-spacing: 0.01em;
   -webkit-text-stroke: 5px rgba(12,8,5,0.92); paint-order: stroke fill;
   text-shadow: 0 2px 10px rgba(0,0,0,0.55); will-change: transform, opacity; }
-#g-floats span.word { font-weight: 600; font-style: italic; letter-spacing: 0.04em;
-  -webkit-text-stroke: 4px rgba(12,8,5,0.9); }
+/* A blow that did not land is a word: upright small capitals, heavy ink round
+   them, set off the shoulder and clear of the body and whatever it holds up.
+   Italic light-blue over a raised shield was the first thing a review said it
+   could not read. */
+#g-floats span.word { font-weight: 700; font-style: normal; font-variant: small-caps;
+  letter-spacing: 0.09em; -webkit-text-stroke: 6px rgba(8,6,4,0.96);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 2px 12px rgba(0,0,0,0.6); }
 #g-floats span.crit { text-shadow: 0 0 18px rgba(255,120,40,0.55), 0 2px 10px rgba(0,0,0,0.6); }
 #g-floats span.note { font-size: 19px; font-weight: 600; -webkit-text-stroke: 3.5px rgba(12,8,5,0.85); }
 #g-hurt { position: absolute; inset: 0; opacity: 0; pointer-events: none;
@@ -496,7 +501,7 @@ export function createGameUi(game) {
     if (!chest || !above) return null;
     const perMetre = Math.max(12, Math.abs(chest.y - above.y) * 2);
     const reach = fig.body ? fig.body.r + fig.body.h * 0.6 : 0.3;
-    return { x: chest.x, y: chest.y, half: Math.max(0.24, reach) * perMetre };
+    return { x: chest.x, y: chest.y, perMetre, half: Math.max(0.24, reach) * perMetre };
   }
 
   /**
@@ -519,8 +524,8 @@ export function createGameUi(game) {
       if (crit) cls = 'crit';
     } else {
       text = event.kind === 'miss' ? 'miss' : (onYou ? event.kind : (event.kind === 'parry' ? 'parried' : 'dodged'));
-      colour = event.kind === 'miss' ? '#e4ddcd' : '#cfe3ff';
-      size = 23;
+      colour = event.kind === 'miss' ? '#efe8d8' : event.kind === 'parry' ? '#eef5ff' : '#fff0c8';
+      size = 27;
       cls = 'word';
     }
     let x; let y; let side;
@@ -532,8 +537,15 @@ export function createGameUi(game) {
       side = -last.side;
       const n = now - last.t < 700 ? last.n + 1 : 0;
       recent.set(key, { side, t: now, n });
-      x = body.x + side * (body.half + 14);
-      y = body.y - 8 - (n % 3) * 20;
+      if (cls === 'word') {
+        // Off the shoulder and past anything carried: a shield or a guard
+        // reaches half a metre either side of the body.
+        x = body.x + side * (Math.max(body.half, 0.5 * body.perMetre) + 20);
+        y = body.y - 0.42 * body.perMetre - (n % 3) * 24;
+      } else {
+        x = body.x + side * (body.half + 14);
+        y = body.y - 8 - (n % 3) * 20;
+      }
     } else if (onYou) {
       // Off your own health bar, where it is being taken from: in the middle
       // of the frame it sat on whoever was hitting you.
