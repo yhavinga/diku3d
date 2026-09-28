@@ -637,6 +637,30 @@ const SURFACES = {
     s.rough = 0.55 + groove * 0.2 + id * 0.08;
   },
 
+  /**
+   * A troll's hide: thick and leathery, creased in a net of fine folds,
+   * pebbled, and studded here and there with warts that stand well proud --
+   * the one surface on a troll that says, at arm's length, that it is not a
+   * man painted green. Neutral like the skin, because the tint is per mobile.
+   */
+  warthide(u, v, s) {
+    const [d1, , id] = cellular(u * 11, v * 11, 11, 601, 0.8);
+    const [d2] = cellular(u * 34, v * 34, 34, 607, 0.6);
+    const crease = fbm(u * 8, v * 8, 8, 611, 4);
+    const blotch = fbm(u * 3, v * 3, 3, 613, 3);
+    // Warts in about one cell in three, each its own size.
+    const wart = id > 0.62 ? clamp01(1 - d1 * (2.6 + (1 - id) * 5)) ** 0.7 : 0;
+    const pebble = clamp01(1 - d2 * 2.2);
+    const fold = clamp01(1 - Math.abs(crease - 0.5) * 11);
+    // As bright as the human skin recipe, which it stands in for: the tint
+    // and the body's own colours do the darkening.
+    const base = mix(rgb(0xaeaeaa), rgb(0xc0bdb6), blotch);
+    const shade = (1 - fold * 0.16) * (0.98 + pebble * 0.02) * (1 + wart * 0.06);
+    s.color = [base[0] * shade, base[1] * shade * (1 + wart * 0.02), base[2] * shade * (1 - wart * 0.06)];
+    s.height = 0.5 + wart * 0.16 + pebble * 0.035 - fold * 0.05;
+    s.rough = 0.74 + fold * 0.12 - wart * 0.14;
+  },
+
   iron(u, v, s) {
     const brush = fbm(u * 8, v * 120, 8, 173, 3);
     const rust = clamp01(fbm(u * 9, v * 9, 9, 179, 4) * 1.7 - 0.8);
@@ -1413,6 +1437,8 @@ const RECIPES = {
   chitin: { surface: 'chitin', scale: 0.35, normalScale: 0.35, env: 0.9, wet: 0, detail: 0, moving: true },
   ooze: { surface: 'ooze', scale: 0.6, normalScale: 0.5, env: 1.1, wet: 0, detail: 0, moving: true },
   hide: { surface: 'hide', scale: 0.25, normalScale: 0.4, env: 0.5, wet: 0, detail: 0, moving: true },
+  // A troll's skin, one of the surfaces a person is made of (dress.js).
+  warthide: { surface: 'warthide', scale: 0.3, normalScale: 0.6, env: 0.45, wet: 0, detail: 0, moving: true },
 };
 
 // --------------------------------------------------------------- decals ----

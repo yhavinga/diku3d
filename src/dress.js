@@ -25,7 +25,7 @@ import * as THREE from 'three';
 
 /** Every surface a person, or what a person carries, is made of. */
 export const SLOTS = ['skin', 'cloth', 'cloth2', 'linen', 'leather', 'mail', 'steel', 'iron', 'hair',
-  'eyewhite', 'eye', 'gold', 'bone', 'oak', 'paint', 'wool', 'plate', 'velvet'];
+  'eyewhite', 'eye', 'gold', 'bone', 'oak', 'paint', 'wool', 'plate', 'velvet', 'warthide'];
 const MAX_SLOTS = 20;
 /** Texels a side for each layer: 2.7 mm on a 0.7 m cloth tile. */
 const LAYER = 256;
@@ -127,7 +127,7 @@ function surfaces(library) {
 
 /** Whose colour a surface takes when a person names none for it: a cloak in
  * wool is the second cloth's colour, a shield's paint the first's. */
-const TINT_FROM = { wool: ['wool', 'cloth2', 'cloth'], velvet: ['velvet', 'cloth'], paint: ['cloth'] };
+const TINT_FROM = { wool: ['wool', 'cloth2', 'cloth'], velvet: ['velvet', 'cloth'], paint: ['cloth'], warthide: ['skin'] };
 
 const dummy = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
 dummy.needsUpdate = true;

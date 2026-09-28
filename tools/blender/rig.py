@@ -156,6 +156,7 @@ def build_armature(P, name="rig"):
     # Where the middle of the head is, in the head bone's own frame: kept
     # here because a hunch reposes the bone and the head goes with it.
     arm["head_center"] = tuple(arm.data.bones["head"].matrix_local.inverted() @ people.head_center(P))
+    arm["troll"] = bool(P.get("troll"))
     return arm
 
 
@@ -921,7 +922,10 @@ def anim_attack(arm):
         # put the forearm 98 mm into the skull.
         (7, merge(GUARD, {"spine": (0, -4, 0), "chest": (-4, -10, 0), "head": (-6, 14, 0),
                           "upperarm.R": (-65, 100, 20), "forearm.R": (-130, 0, 0), "hand.R": (30, 0, 0),
-                          "upperarm.L": (-40, 40, 14)}),
+                          "upperarm.L": (-40, 40, 14)},
+                  # A troll's head is bigger and sits low and forward between
+                  # its shoulders: it clubs from out wide instead.
+                  {"upperarm.R": (-52, 124, 46), "forearm.R": (-108, 0, 0), "hand.R": (22, 0, 0)} if arm.get("troll") else {}),
          ((0.0, 0.02, -0.05), 2.0, -36.0, 0.0), "guard"),
         (9, merge(GUARD, {"spine": (6, 6, 0), "chest": (2, 2, 0), "head": (-6, 4, 0),
                           "upperarm.R": (-100, 45, 16), "forearm.R": (-85, 0, 0), "hand.R": (40, 0, 0),
