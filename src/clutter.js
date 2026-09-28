@@ -583,13 +583,15 @@ export function placeClutter(ctx) {
       return outside ? HALF : ROOM / 2;
     };
 
-    const put = (name, x, z, rotY, { scale = 1, collide = false, y = pos.y } = {}) => {
+    const put = (name, x, z, rotY, { scale = 1, collide = false, y = pos.y, far = false } = {}) => {
       if (!library.get(name)) return null;
       // Indoors above ground it goes with the furniture (actors.js), which
       // is switched off past 32 m: from the Market Square every room to the
       // north is in the frustum, walls and all. Underground the zones hide
-      // it whole, and out of doors it is seen from afar.
-      if (!outside && info.cell.level >= 0) decor.push({ kind: 'prop', name, x, y, z, rotY, scale });
+      // it whole, and out of doors it is seen from afar. `far` is for what a
+      // room is built round -- Odin is the end of the temple's axis, 33 m
+      // from its door -- and is left to the visibility cull like the walls.
+      if (!outside && info.cell.level >= 0 && !far) decor.push({ kind: 'prop', name, x, y, z, rotY, scale });
       else instances.add(name, { x, y, z, rotY, scale }, chunk, swap);
       where.push({ vnum, name, x: +x.toFixed(2), y: +y.toFixed(2), z: +z.toFixed(2), rotY: +rotY.toFixed(2) });
       const b = library.get(name).bounds;
@@ -915,7 +917,7 @@ export function placeClutter(ctx) {
       const face = wallAt(dir, along) - back - 0.01;
       const x = pos.x + dx * face + (dz ? along : 0); const z = pos.z + dz * face + (dx ? along : 0);
       const rotY = FACE_ROT[dir];
-      put(name, x, z, rotY, { collide: true });
+      put(name, x, z, rotY, { collide: true, far: true });
       take(footprint(asset.bounds, x, z, rotY), true);
       // Lit from in front and above, the way a cult statue is: a warm light
       // over the altar, clear of the figure, so the face is not only lit by

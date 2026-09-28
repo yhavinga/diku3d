@@ -470,6 +470,19 @@ def build_statue_odin():
     parts += plinth_parts()
     parts += throne_parts()
     parts += spear()
+    # A dossal on the wall behind the throne: deep blue cloth hung from a
+    # gilt rod. White marble against the temple's white marble walls was
+    # lost from the far end of the hall; against this it is the figure.
+    cloth = lib.box((2.5, 0.025, 4.1), (0, 1.075, PLINTH + 0.1 + 2.05), name="dossal", mat="stonewall")
+    F.tag(cloth, "weave")
+    parts.append(cloth)
+    rod = lib.cylinder(0.035, 2.8, (0, 1.03, PLINTH + 4.25), rotation=(0, math.pi / 2, 0), verts=10, name="rod", mat="stonewall")
+    F.tag(rod, "gold")
+    parts.append(rod)
+    for sx in (-1, 1):
+        fin = lib.sphere(0.06, (sx * 1.42, 1.03, PLINTH + 4.25), 10, 6, name="finial", mat="stonewall")
+        F.tag(fin, "gold")
+        parts.append(fin)
     parts.append(carve(odin_body(), 0.014, 22000, "odin"))
     parts.append(carve(odin_head(), 0.005, 16000, "odin_head"))
     parts.append(carve(odin_circlet(), 0.008, 1200, "circlet", m="gold", smooth=1))
@@ -481,7 +494,7 @@ def build_statue_odin():
     # Turned out over the room, so their tails do not run back into the wall.
     for s, turn in ((1, 0.75), (-1, -0.95)):
         parts.append(carve(moved(raven(), (s * 1.02, BACK_Y + 0.02, 3.22), turn=turn, scale=1.15), 0.008, 2200, "raven"))
-    return deliver(parts, "statue_odin")
+    return deliver(parts, "statue_odin", colours={"weave": (0.07, 0.1, 0.26)})
 
 
 # --- the altars ----------------------------------------------------------------
