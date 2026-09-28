@@ -86,7 +86,7 @@ const WALK_ROUND = new Set([
   'stacked_crates', 'barrel_stack', 'firewood_pile', 'water_butt', 'bucket',
   'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel',
   'market_stall', 'well', 'fountain', 'signpost', 'bush', 'salal_bush', 'moss_rock',
-  'dead_log', 'headstone', 'grave_slab', 'iron_fence',
+  'dead_log', 'headstone', 'grave_slab', 'iron_fence', 'shire_fence', 'shire_flowerbed',
 ]);
 
 const cellKey = (level, cx, cz) => `${level}:${cx},${cz}`;

@@ -2027,6 +2027,69 @@ function makeFlames(count) {
   return { mesh, material };
 }
 
+// ----------------------------------------------------------------- embers ----
+
+/**
+ * Sparks going up off an open fire: tiny billboards that rise, drift and go
+ * out, all of it in the vertex shader off one clock, so a fire costs one
+ * instanced draw for every ember in the town and no script at all. World-
+ * sized quads rather than points, so they need no pixel scale from the
+ * composer's resolution.
+ */
+const EMBER_VERT = `
+  attribute float seed;
+  uniform float time;
+  varying float vHeat;
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    float life = fract(time * (0.3 + seed * 0.35) + seed * 7.13);
+    float a = seed * 43.0;
+    vec4 origin = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+    vec3 p = origin.xyz;
+    p.y += life * (1.6 + fract(seed * 5.3) * 2.2);
+    p.x += (sin(a + time * 1.9 + life * 6.0) * 0.18 + cos(a) * 0.35) * life;
+    p.z += (cos(a * 1.3 + time * 1.4 + life * 5.0) * 0.18 + sin(a) * 0.35) * life;
+    vHeat = (1.0 - life) * smoothstep(0.0, 0.06, life);
+    vec4 mv = modelViewMatrix * vec4(p, 1.0);
+    mv.xy += position.xy * (0.028 + 0.02 * fract(seed * 13.0)) * (0.4 + vHeat * 0.6);
+    gl_Position = projectionMatrix * mv;
+  }`;
+
+const EMBER_FRAG = `
+  varying float vHeat;
+  varying vec2 vUv;
+  void main() {
+    float d = length(vUv - 0.5) * 2.0;
+    float a = (1.0 - smoothstep(0.35, 1.0, d)) * vHeat;
+    if (a < 0.01) discard;
+    gl_FragColor = vec4(vec3(1.0, 0.42 + 0.38 * vHeat, 0.1) * 2.4, a);
+  }`;
+
+function makeEmbers(origins, per = 26) {
+  const count = origins.length * per;
+  const material = new THREE.ShaderMaterial({
+    vertexShader: EMBER_VERT, fragmentShader: EMBER_FRAG, uniforms: { time: { value: 0 } },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+  });
+  const mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), material, count);
+  mesh.frustumCulled = false;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  const seeds = new Float32Array(count);
+  const m = new THREE.Matrix4();
+  origins.forEach((o, i) => {
+    for (let k = 0; k < per; k++) {
+      const j = i * per + k;
+      seeds[j] = strHash(`${o.x},${o.z}`, k + 300);
+      mesh.setMatrixAt(j, m.makeTranslation(o.x, o.y, o.z));
+    }
+  });
+  mesh.geometry.setAttribute('seed', new THREE.InstancedBufferAttribute(seeds, 1));
+  mesh.instanceMatrix.needsUpdate = true;
+  return { mesh, material };
+}
+
 // ------------------------------------------------------- contact shadows ----
 
 /**
@@ -3229,7 +3292,7 @@ export function populate(world, layout, built, options = {}) {
       // A torch flame starts a hand lower and a quarter larger than it did:
       // at scale 1 from 0.2 up, the tarred head poked out under it and a
       // review read the head as the flame. The fire has to wrap its fuel.
-      dummy.position.set(f.x, f.y + (f.hearth ? 0 : f.lamp ? 0.05 : 0.12), f.z);
+      dummy.position.set(f.x, f.y + (f.hearth || f.fire || f.lantern ? 0 : f.lamp ? 0.05 : 0.12), f.z);
       // A forge's fire is a bed of coals under the blast, not logs.
       if (f.forge) dummy.scale.set(1.5, 0.55, 1.5);
       // A fire the room is full of (clutter.js `fireRing`): tall, and each its own height.
@@ -3237,13 +3300,23 @@ export function populate(world, layout, built, options = {}) {
       // tongues differ by size, not by shape.
       else if (f.blaze) dummy.scale.setScalar(f.blaze);
       else if (f.hearth) dummy.scale.set(1.9, 1.15, 1.9);
+      // An open fire out of doors: three tongues, each taller than a torch's.
+      else if (f.fire) dummy.scale.setScalar(f.size || 1.6);
       else if (f.candle) dummy.scale.setScalar(0.14);
+      else if (f.lantern) dummy.scale.setScalar(0.34);
       else dummy.scale.setScalar(f.lamp ? 1.15 : 1.28);
       dummy.updateMatrix();
       flameSystem.mesh.setMatrixAt(i, dummy.matrix);
     });
     flameSystem.mesh.instanceMatrix.needsUpdate = true;
     group.add(flameSystem.mesh);
+  }
+  const emberOrigins = flames.filter((f) => f.embers);
+  const emberSystem = emberOrigins.length ? makeEmbers(emberOrigins) : null;
+  if (emberSystem) {
+    // Out of the AO prepass, like the smoke: a spark is not an occluder.
+    emberSystem.mesh.layers.set(OVERLAY_LAYER);
+    group.add(emberSystem.mesh);
   }
 
   // --- trees --------------------------------------------------------------
@@ -3319,9 +3392,21 @@ export function populate(world, layout, built, options = {}) {
     // face: the lit pane just proud of the wall, its frame and sill proud of
     // that. Read from a step away it sits in the wall convincingly enough.
     const FACES = [
-      { nx: 0, nz: 1, ry: 0 }, { nx: 0, nz: -1, ry: Math.PI },
-      { nx: 1, nz: 0, ry: Math.PI / 2 }, { nx: -1, nz: 0, ry: -Math.PI / 2 },
+      { nx: 0, nz: 1, ry: 0, dir: 2 }, { nx: 0, nz: -1, ry: Math.PI, dir: 0 },
+      { nx: 1, nz: 0, ry: Math.PI / 2, dir: 1 }, { nx: -1, nz: 0, ry: -Math.PI / 2, dir: 3 },
     ];
+    // A hobbit's window: a round light in a painted ring, a cross of glazing
+    // bars, and a box of flowers under it where a casement has its sill.
+    const ROUND_R = 0.5;
+    const ringSeg = 16;
+    const roundPane = G.cylinder(ROUND_R, ROUND_R, 0.06, 24).rotateX(Math.PI / 2);
+    const ringParts = [];
+    for (let k = 0; k < ringSeg; k++) {
+      const a = (k / ringSeg) * Math.PI * 2;
+      ringParts.push(G.box(2 * Math.PI * (ROUND_R + 0.08) / ringSeg + 0.015, 0.16, 0.3)
+        .translate(0, ROUND_R + 0.08, 0.15).rotateZ(a));
+    }
+    const FACE_ROT_OF = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
     for (const w of windows) {
       // The surround is what the wall is built of: dressed stone round a
       // window in masonry, oak in a timber frame. It was vertex-coloured flat
@@ -3330,6 +3415,7 @@ export function populate(world, layout, built, options = {}) {
       const surround = dressing(w.frame === 'stone' ? 'dressing' : 'wood');
       const rows = Math.max(1, Math.floor((w.h - 1.4) / 2.6));
       for (const f of FACES) {
+        if (w.only && !w.only.includes(f.dir)) continue;
         const tx = f.nz; const tz = -f.nx;
         const span = (f.nx ? w.d : w.w);
         const cols = Math.max(1, Math.floor(span / 3.0));
@@ -3345,6 +3431,25 @@ export function populate(world, layout, built, options = {}) {
             const pz = cz + tz * spread;
             const out = (o) => at(px + f.nx * o, y, pz + f.nz * o, 0, f.ry, 0);
             const lit = hash3(Math.round(px * 4), Math.round(y * 4), Math.round(pz * 4), 71) > 0.42;
+            if (w.round) {
+              pushPart(lit ? panes : dark, roundPane, lit ? 0xffc47e : 0xffffff, out(0.03));
+              pushPart(bars, G.box(0.05, ROUND_R * 2, 0.05), 0xb8a896, out(0.065));
+              pushPart(bars, G.box(ROUND_R * 2, 0.05, 0.05), 0xb8a896, out(0.065));
+              const ring = dressing(w.paint || 'doorgreen');
+              for (const part of ringParts) pushPart(ring, part, 0xffffff, out(0));
+              if (instances) {
+                instances.add('shire_window_box', {
+                  x: px + f.nx * 0.02, y: y - ROUND_R - 0.34, z: pz + f.nz * 0.02, rotY: FACE_ROT_OF[f.dir],
+                }, chunkAt('props', px, y, pz));
+              }
+              if (lit) {
+                windowLights.push({
+                  x: px + f.nx * 0.9, y, z: pz + f.nz * 0.9,
+                  color: 0xffb063, intensity: 5.0, radius: 9.0, flicker: false, outdoor: true,
+                });
+              }
+              continue;
+            }
             // A wall is half a metre thick, so a window is a hole with depth
             // and the head of the reveal is always in shade. The pane used to
             // sit *proud* of the wall with its frame proud of that, which is a
@@ -3658,6 +3763,22 @@ export function populate(world, layout, built, options = {}) {
    */
   const ROUND_LEAF = 1.5;
   const roundAsset = assets ? assets.get('door_round') : null;
+  /**
+   * The Shire's doors in a round doorway (tools/blender/shire.py): the circle
+   * the ring round them makes, 3.2 m across with the floor cutting its foot,
+   * at its real size and hung on the left jamb like every leaf here. Its
+   * boards are modelled in `doorgreen` and wear the colour the room chose.
+   */
+  const shireLeafAsset = assets ? assets.get('shire_door_leaf') : null;
+  const makeShireLeaf = (width, paint) => {
+    const leaf = primitivesOf(shireLeafAsset);
+    leaf.scale.setScalar(width / 3.2);
+    const coat = paint && options.materials && options.materials[paint];
+    if (coat) {
+      for (const mesh of leaf.children) if (mesh.material && mesh.material.name === 'doorgreen') mesh.material = coat;
+    }
+    return leaf;
+  };
   const makeRoundLeaf = (size) => {
     if (roundAsset) {
       const leaf = primitivesOf(roundAsset);
@@ -3759,7 +3880,8 @@ export function populate(world, layout, built, options = {}) {
       const pivot = new THREE.Group();
       pivot.position.set(spec.x + side * ux * spec.width / 2, spec.y, spec.z + side * uz * spec.width / 2);
       pivot.rotation.y = spec.rotY;
-      const leaf = spec.round
+      const leaf = spec.shire && shireLeafAsset ? makeShireLeaf(spec.width, spec.paint)
+        : spec.round
         ? makeRoundLeaf(Math.min(spec.width, spec.height))
         : (spec.leaf && !spec.grate ? makeSlab(leafWidth, spec.height, spec.leaf) : makeLeaf(leafWidth, spec.height, spec.grate, spec.y < -2));
       // The right-hand leaf is the left one mirrored, so its boards run back
@@ -4026,6 +4148,7 @@ export function populate(world, layout, built, options = {}) {
 
   function update(dt, time, camera) {
     if (flameSystem) flameSystem.material.uniforms.time.value = time;
+    if (emberSystem) emberSystem.material.uniforms.time.value = time;
     if (mistSystem) {
       const ms = mistSystem;
       let root = ms.mesh; while (root.parent) root = root.parent;

@@ -402,7 +402,10 @@ def build_wall_solid():
 def build_wall_door():
     lib.reset()
     p = _courses(_stone_bands(), "stonewall", hole=(MASON / 2.0, DOOR_H))
-    p += _doorway("stonewall", "timber", sill=True)
+    # Oak, not `timber`: that recipe is a half-timbered facade -- lime-wash
+    # with braces on it -- and on a 0.4 m architrave it came out as a white
+    # and brown barber's pole round every stone doorway in the town.
+    p += _doorway("stonewall", "oak", sill=True)
     p += _buttresses()
     return kit.deliver(p, "wall_door")
 
@@ -425,7 +428,7 @@ def build_wall_roof():
     lib.reset()
     span, rise = 12.3, 2.9
     p = kit.gable_roof(span, span, rise, 0.0, thick=0.24, eave=0.45, verge=0.34,
-                       mat="rooftile", trim="timber", tympanum="stonewall", along="x")
+                       mat="rooftile", trim="oak", tympanum="stonewall", along="x")
     p += _cover_tiles(span, span, rise, 0.0, 0.24, 0.45, 0.34, "rooftile", 5.6, n=11)
     kit.rotate_z(p, math.pi / 2)
     p += _ceiling("timber", 0.20, -0.15, beam=0.20)
