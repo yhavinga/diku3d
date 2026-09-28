@@ -52,6 +52,32 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Draw calls, interiors and the district finished (wave3-polish)
+
+- **Where the calls went:** one InstancedMesh per chunk per model per
+  material — 2,784 world-wide, 962 holding a single copy. Regions of 64
+  cells now get one multi-draw batch per material; anything repeated 16+
+  times in a region stays instanced, because a batched multi-draw is still
+  one GPU draw per piece (~0.5 µs each) and every tree batched cost 2.6 ms
+  more than instanced. 16- and 32-cell regions were measured and slower.
+- **three gives batched meshes no program variant of their own**, so they
+  swap programs with plain meshes of the same material; opaque batches go
+  first (`renderOrder = -1`).
+- **The AO pass re-walked and re-searched the whole scene graph every
+  frame** (3.3 + 2.2 ms of script at the barn). Both skipped now.
+- **The shader's world-space mottling ignores instance and batch matrices**,
+  so props shade in local space — merging props into world-space geometry
+  changes their look.
+- **Nothing lights shaded faces at dusk but a very weak sky**; a
+  per-material ambient multiplier did nothing. Dark albedos take a per-hour
+  lift (`materials.setShadeLift`, `lift: true`, `shadeLift` per time).
+- **The blue marble indoors was the sky light's blue**, not the texture;
+  indoors it keeps its strength and loses most of its blue.
+- Measure with `diku.quality.setScale(3)` so the auto-scaler holds still.
+- Results: barn 4,217 → 1,379 calls, 23.7 → 13.2 ms; Hector St 4,765 →
+  1,511; graveyard 5,097 → 1,205; Market Square 14–18.6 → 9–11.3 ms. The
+  rest is ~300 figure draws per pass and ~50 dropped items.
+
 ### HUD and melee feedback (game-ui.js, fx.js, main.js vantage)
 
 - **The ways-out panel listed every gate seen all game**, which is how the
