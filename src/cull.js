@@ -298,8 +298,13 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
   function rayAt(faces, q) {
     const f = Math.floor(q / (RES * RES)); const r = q - f * RES * RES;
     const j = Math.floor(r / RES); const i = r - j * RES;
-    const raw = readback[(j * RES * 6 + f * RES + i) * 4];
     _d.copy(rays[j * RES + i]).transformDirection(faces[f]);
+  }
+  /** Texel `q`'s distance, Infinity for nothing hit. */
+  function hitAt(q) {
+    const f = Math.floor(q / (RES * RES)); const r = q - f * RES * RES;
+    const j = Math.floor(r / RES); const i = r - j * RES;
+    const raw = readback[(j * RES * 6 + f * RES + i) * 4];
     return raw >= REACH * 0.999 ? Infinity : raw;
   }
   const RAYS = 6 * RES * RES;
@@ -352,7 +357,8 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     const seen = new Uint16Array(6 * RES * RES);
     const d = _d;
     for (let k = 0; k < RAYS; k++) {
-      const t = rayAt(faces, k);
+      const t = hitAt(k);
+      rayAt(faces, k);
       seen[k] = Math.min(65535, Math.round(t * 100));
       if (t >= exitOf(centre, d, grown)) continue;
       let f = 0; let best = 0;
@@ -407,8 +413,15 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
   function gatherLeaks(cell, faces, eye) {
     const grown = cell.box.clone().expandByScalar(SLACK);
     const d = _d;
+    // No ray leaves the grown box short of its nearest face: a hit nearer
+    // than that is a wall of the cell's own, whichever way the ray went.
+    // (A hair less, for a direction component rounded a hair over 1.)
+    const inner = 0.999999 * Math.min(eye.x - grown.min.x, grown.max.x - eye.x, eye.y - grown.min.y,
+      grown.max.y - eye.y, eye.z - grown.min.z, grown.max.z - eye.z);
     for (let k = 0; k < RAYS; k++) {
-      const t = rayAt(faces, k);
+      const t = hitAt(k);
+      if (t < inner) continue;
+      rayAt(faces, k);
       const out = exitOf(eye, d, grown);
       if (t < out) continue;
       const exit = exitOf(eye, d, cell.box);
