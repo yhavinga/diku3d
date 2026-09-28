@@ -8,6 +8,25 @@ is an opinion.
 
 ## 2026-09-28 — wave 6: what the rooms say they are
 
+### What the rooms say they are (wave6-proseshell)
+
+- **A cloned material keeps its maps but not its `defines` or
+  `onBeforeCompile`.** A tinted stone door lost `DIKU_BURIED`, reflected the
+  sky and came out white underground. Copy defines, shader hooks and
+  `defaultAttributeValues` onto every clone.
+- **Anything on a raised floor needs `platform.base` set to the level it
+  rises from**, or nav marks it blocked and figures stay at level height;
+  `wallNear`/`clearOf` must measure from the raised ground or leaning breaks
+  (the temple leaner went 62/80 → 0 until they did).
+- **Cracks drawn from Worley cell edges read as crazy paving**; threshold a
+  smooth field at its middle for wandering hairlines.
+- **Clutter hung in a rock cave sits on the lining's crowns (5 − 0.86 m).**
+- `readShell` is asked of rooms only; a passage takes
+  `pickMaterials(room, area, true)` or it inherits its end room's walls.
+- The temple stands on a 1.2 m podium and not higher because the cull's eye
+  sample sits at the level's base + 1.72 m. Boot +1.2 s (murals 168 ms,
+  faces and blood ~70 ms, three new bakes ~250 ms).
+
 ### The first minute and the melee (wave6-playfix)
 
 - **Clouds and haze must be scaled to the sky's brightness.** The noon sky
