@@ -854,7 +854,10 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
   const sparks = new Particles(80, true, true);
   const streaks = new Streaks(240);
   const matter = new Particles(260, false, false);
-  scene.add(sparks.points, streaks.lines, matter.points);
+  // Soft-edged light: the glow round a clash. The hard sparks' disc, blown
+  // up to glow size, read as a flat white plate stuck to the shield.
+  const glow = new Particles(16, true, false);
+  scene.add(sparks.points, streaks.lines, matter.points, glow.points);
   const vm = new ViewModel(camera, library, makeMaterials(library));
   // The arms are not in the boot list until the branch that made them brings
   // its assets.js along; load whatever is missing, and re-dress when it lands.
@@ -942,7 +945,8 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
       });
     }
     // Under the bloom's reach at this size and life: a flash, not a flare.
-    sparks.spawn({ x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0, life: 0.09, size: 0.3, grow: 0.6, r: 2.2, g: 2.0, b: 1.6, alpha: 1, fade: 1.6 });
+    sparks.spawn({ x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0, life: 0.07, size: 0.07, r: 3.2, g: 3.0, b: 2.6, alpha: 1, fade: 1.2 });
+    glow.spawn({ x: p.x, y: p.y, z: p.z, vx: 0, vy: 0, vz: 0, life: 0.12, size: 0.34, grow: 0.5, r: 1.4, g: 1.25, b: 0.95, alpha: 0.9, fade: 2 });
     spark(p, away, 1.2);
   }
 
@@ -1201,10 +1205,12 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     sparks.update(dt);
     streaks.update(dt);
     matter.update(dt);
+    glow.update(dt);
     const h = composer.renderTarget1 ? composer.renderTarget1.height : window.innerHeight;
     const scale = h / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
     sparks.material.uniforms.scale.value = scale;
     matter.material.uniforms.scale.value = scale;
+    glow.material.uniforms.scale.value = scale;
 
     // The weapon in your hand, from what you are actually wielding.
     const s = game.state;
@@ -1238,12 +1244,12 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
       kick.t += dt;
       const u = clamp(kick.t / KICK_TIME, 0, 1);
       const e = Math.sin(Math.min(1, u * 4) * Math.PI / 2) * (1 - u) * (1 - u);
-      kick.pitch = 0.022 * kick.amount * e;
+      kick.pitch = 0.03 * kick.amount * e;
       kick.rollNow = 0.008 * kick.roll * e;
       camera.rotation.x += kick.pitch;
       camera.rotation.z += kick.rollNow;
       kick.rollAt = camera.rotation.z;
-      kick.lean = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).setY(0).multiplyScalar(0.09 * kick.amount * e);
+      kick.lean = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).setY(0).multiplyScalar(0.12 * kick.amount * e);
       camera.position.add(kick.lean);
       kick.at = camera.position.clone();
     } else kick.amount = 0;
@@ -1256,7 +1262,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     /** 0 at night to 1 at noon: dark matter (dust, droplets) is lit by the hour. */
     setAmbient(k) { ambient = clamp(0.18 + k * 0.82, 0.18, 1); },
     viewModel: vm,
-    particles: { sparks, streaks, matter },
+    particles: { sparks, streaks, matter, glow },
     pass,
     dispose() { unlisten(); },
   };

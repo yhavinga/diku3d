@@ -346,11 +346,17 @@ function shopSigns(world, layout, built) {
       for (const a of [0.35, 1.15]) parts.push(at(a, -0.09, flat(new THREE.BoxGeometry(0.025, 0.14, 0.025))));
       parts.push(at(0.03, -0.25, flat(new THREE.BoxGeometry(0.06, 0.62, 0.12))));
     } else {
-      // Flat on the inner face of the back wall, and high: above the wall
-      // torches, whose flames stand at about three metres.
+      // Flat on the inner face of the back wall, high, and along it from any
+      // wall torch: a flame licks up past four metres, and the Boar's first
+      // board hung straight over one.
       const inner = ROOM / 2 - 0.04;
+      const tx = -dz; const tz = dx;
+      const wx = plan.cx + dx * inner; const wz = plan.cz + dz * inner;
+      const torches = built.decor.filter((d) => d.kind === 'torch' && Math.abs(d.y - plan.y - 2.9) < 1.5
+        && Math.abs((d.x - wx) * dx + (d.z - wz) * dz) < 1 && Math.abs((d.x - wx) * tx + (d.z - wz) * tz) < ROOM / 2);
+      const slide = [0, 1.7, -1.7, 2.9, -2.9].find((o) => torches.every((d) => Math.abs((d.x - wx) * tx + (d.z - wz) * tz - o) > 1.25)) ?? 0;
       board.applyMatrix4(m4.makeRotationY(Math.atan2(-dx, -dz)));
-      parts.push(board.translate(plan.cx + dx * inner, plan.y + 4.2, plan.cz + dz * inner));
+      parts.push(board.translate(wx + tx * slide, plan.y + 4.2, wz + tz * slide));
     }
   });
 
