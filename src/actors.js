@@ -931,6 +931,7 @@ function buildPerson(library, who, proto, instance) {
     group, headGroup: null, height: heightOf(asset, who.file, who.arch) * scale, scale, mixer, actions, clips,
     stride: { walk: facts.walk * scale, run: facts.run * scale },
     hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
+    indoor: mesh.material.dikuIndoor,
   };
 }
 
@@ -994,10 +995,12 @@ const BEASTS = [
   { test: /\b(homonc?ulus|imps?|quasits?)\b/, asset: 'beast_imp', scale: 1.0, coat: 0x4a5a28, pale: 0x7a8a48, points: 0x283018, glow: 0xffc020, box: [0.45, 0.3, 'quad', 0x4a5a28] },
   { test: /\bnagas?\b/, asset: 'beast_naga', scale: 1.0, stands: 1.9, coat: 0x56662a, pale: 0xc8b25e, points: 0x56662a, patch: 0x8a8a3a, cover: 0.35, glow: 0xf0c040, box: [0.3, 5, 'quad', 0x56662a] },
   { test: /\bbasilisks?\b/, asset: 'beast_basilisk', scale: 1.0, coat: 0x5a4a32, pale: 0xbca264, points: 0x3a3020, patch: 0x4a3c28, cover: 0.3, glow: 0x9cff9c, box: [0.5, 2.5, 'quad', 0x5a4a32] },
+  // Purple in the mud's own words, and it has to stay purple with the sun
+  // behind it: at 0x4c2458 (3.5% albedo) it read black against the sand.
   // The worm stands in a crater of its own sand, which is all the ground it
   // touches: its contact patch is the crater's, not ten metres of body, and
   // sand is thrown up wherever the body goes through the surface.
-  { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, stands: 4.1, coat: 0x4c2458, pale: 0x9a7090, points: 0x22102a, patch: 0x3a1a46, cover: 0.3, footprint: [2.4, 2.4], sand: 0xc9ae84, box: [0.8, 9, 'quad', 0x5c2c68] },
+  { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, stands: 4.1, coat: 0x74428a, pale: 0xb892b0, points: 0x40224e, patch: 0x5a3270, cover: 0.3, footprint: [2.4, 2.4], sand: 0xc9ae84, box: [0.8, 9, 'quad', 0x5c2c68] },
   { test: /\bdustdiggers?\b/, asset: 'beast_dustdigger', scale: 1.0, coat: 0xc2a070, pale: 0x9a7c58, points: 0x7a5a3a, patch: 0xb08c5c, cover: 0.35, box: [0.3, 4, 'quad', 0xc2a070] },
   { test: /\bcamels?\b/, asset: 'beast_camel', scale: 1.0, coat: 0xb48c5c, pale: 0xd6be96, points: 0x8a6a44, box: [1.9, 3, 'quad', 0xb48c5c] },
   // The dracolich lies as a heap of bones until it rises: its idle is the
@@ -1303,6 +1306,30 @@ function sleekFur(library) {
   return m;
 }
 
+/**
+ * The same surface lit as the sewer's own are (textures.js `DIKU_BURIED`): a
+ * fixed fill and the torches, whatever the hour. A creature underground wore
+ * the sky's light, which under the street at dusk and at night is none --
+ * the guardian naga was 88% under luma 8 at night against a tunnel wall
+ * lit at luma 14. One twin per material, shared.
+ */
+const buriedTwins = new WeakMap();
+function buriedTwin(base) {
+  if (!base.onBeforeCompile || base.defines?.DIKU_BURIED) return base;
+  let twin = buriedTwins.get(base);
+  if (!twin) {
+    twin = base.clone();
+    twin.name = `${base.name}-buried`;
+    twin.defines = { ...base.defines, DIKU_BURIED: 1 };
+    twin.defaultAttributeValues = base.defaultAttributeValues;
+    twin.onBeforeCompile = base.onBeforeCompile;
+    const key = base.customProgramCacheKey.bind(base);
+    twin.customProgramCacheKey = () => `${key()}|buried`;
+    buriedTwins.set(base, twin);
+  }
+  return twin;
+}
+
 function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const info = prepareBeast(asset);
   const look = beastLook(spec, proto, options.seed || 0);
@@ -1316,6 +1343,7 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     node.castShadow = false;
     const tag = node.material && node.material.name ? node.material.name.replace(/^MAT:/, '') : '';
     node.material = tag === 'fur' && spec.sleek ? sleekFur(library) : library.materialFor(tag);
+    if (options.buried) node.material = buriedTwin(node.material);
     node.geometry = paintedGeometry(asset, node, tag, look);
   });
   const scale = (spec.scale || 1) * (0.94 + strHash(proto.short, 3) * 0.12);
@@ -1390,9 +1418,12 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   mixer.update(0);
 
   const size = asset.size;
+  // `ahead`: how far forward of the feet's origin the body's middle is -- a
+  // horse is its head and neck in front and only a tail behind, and a
+  // capsule centred on the origin let a cow's head into a horse's flank.
   group.userData.footprint = spec.footprint
-    ? { length: spec.footprint[0] * scale, width: spec.footprint[1] * scale }
-    : { length: size.z * scale, width: size.x * scale * width };
+    ? { length: spec.footprint[0] * scale, width: spec.footprint[1] * scale, ahead: 0 }
+    : { length: size.z * scale, width: size.x * scale * width, ahead: ((asset.bounds.max.z + asset.bounds.min.z) / 2) * scale };
   if (spec.sand) group.add(sandSpray(body, spec.sand));
   // A flier is built on the ground and flown by its clips, `hover` metres up
   // (in the model's units): its name and its examine point go up with it.
@@ -2176,6 +2207,7 @@ export function populate(world, layout, built, options = {}) {
       const made = beast ? buildBeastFigure(beast, proto, assets, {
         seed: strHash(`${vnum}|${mob.proto.vnum}`, index),
         afloat: room.sector === SECTOR.WATER_SWIM || room.sector === SECTOR.WATER_NOSWIM,
+        buried: info.cell.level < 0 || !!(info.materials && info.materials.inRock),
       })
         : (who && assets && assets.has(who.file) ? buildPerson(assets, who, proto, vnum * 31 + index)
           : (person && assets.get(person).animations.length
@@ -2196,8 +2228,13 @@ export function populate(world, layout, built, options = {}) {
       group.add(fig);
       if (made.roost && !info.outdoor) {
         built.group.updateMatrixWorld(true);
+        // No room is taller than CEIL inside, but the ray does not always
+        // meet the roof it is under: from 8 points in every enclosed room,
+        // 525 of 2800 found their first surface over 5.4 m up -- the floor of
+        // the level above, through a sewer junction's vault -- and a bat
+        // roosted there hung inside the rock.
         const up = ceilingAbove(built.group, fig.position);
-        if (up && up > 2.2) made.roost(up);
+        if (up && up > 2.2) made.roost(Math.min(up, CEIL - 0.15));
       }
 
       const aggressive = !!(mob.proto.act & ACT_AGGRESSIVE);
@@ -2218,6 +2255,7 @@ export function populate(world, layout, built, options = {}) {
         // and walk are `float` and `swim`, which ride at the waterline and
         // would sink it into dry ground. The boxed birds keep the old licence.
         swims: !!(beast && (made.afloat || (!made.mixer && beast.box && beast.box[2] === 'bird'))),
+        flies: !!(beast && beast.air),
       };
       figures.push(record);
 
@@ -3464,6 +3502,23 @@ export function populate(world, layout, built, options = {}) {
     }
   }
 
+  /**
+   * Whether each person is indoors, for the person material's light (see
+   * dress.js): the room under their feet, looked up every eighth frame, and
+   * eased over half a second so nobody switches on in a doorway.
+   */
+  let indoorTick = 0;
+  function easeIndoor(fig, i, dt) {
+    if (fig.indoorWant === undefined || (indoorTick + i) % 8 === 0) {
+      const p = fig.object.position;
+      const info = built.rooms.get(nav.roomAt(p.x, p.y, p.z));
+      fig.indoorWant = info && !info.outdoor ? 1 : 0;
+    }
+    if (dt === Infinity) { fig.indoor.value = fig.indoorWant; return; }
+    const u = fig.indoor;
+    u.value += THREE.MathUtils.clamp(fig.indoorWant - u.value, -dt * 2, dt * 2);
+  }
+
   function update(dt, time, camera) {
     if (flameSystem) flameSystem.material.uniforms.time.value = time;
     if (furnished.length) cullFurniture(camera);
@@ -3473,8 +3528,11 @@ export function populate(world, layout, built, options = {}) {
     // a person is a few pixels tall and not worth a skinning pass, so there
     // it only moves the position along.
     motion.update(dt, camera);
-    for (const fig of figures) {
+    indoorTick++;
+    for (let i = 0; i < figures.length; i++) {
+      const fig = figures[i];
       if (!fig.object.visible) continue;
+      if (fig.indoor) easeIndoor(fig, i, dt);
       const dx = camera.position.x - fig.object.position.x;
       const dz = camera.position.z - fig.object.position.z;
       const distSq = dx * dx + dz * dz;
@@ -3558,6 +3616,7 @@ export function populate(world, layout, built, options = {}) {
   const nav = createNav({ layout, built, world });
   if (assets) nav.addInstances([built.group, group], assets, THREE);
   const motion = createMotion({ figures, nav, zones: built.zones || null, spots, furniture });
+  figures.forEach((fig, i) => { if (fig.indoor) easeIndoor(fig, i, Infinity); });
 
   /**
    * Play a clip on a mobile's body -- `target` is a figure, a game slot

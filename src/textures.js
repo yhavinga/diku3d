@@ -2696,6 +2696,9 @@ const shadeLift = { value: 1 };
 const indoorBounce = { value: 1 };
 const skyBleach = { value: 0 };
 const skyBleachTint = { value: new THREE.Color(1.06, 1.0, 0.90) };
+/** The same uniform objects, for the person material (dress.js), so a figure
+ * stands in the light the wall beside it does. */
+export const SHARED_LIGHT = { indoorBounce, skyBleach, skyBleachTint };
 
 const HEMI_LINE = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
 const POINT_LINE = 'getPointLightInfo( pointLight, geometryPosition, directLight );';

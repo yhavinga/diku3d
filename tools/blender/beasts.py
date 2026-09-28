@@ -2526,17 +2526,29 @@ def serpent_clips(arm, spec):
     # segments the rise takes. Zero for every snake that lies flat.
     rear_h = g.get("rear", 0.0)
     rear_n = g.get("rear_n", max(3, n // 3))
+    # The top `upright` segments of a reared body stand straight up over the
+    # rest of the rise: the naga's are a woman's waist, chest and neck, and
+    # laid on the rising curve they leaned forward at 50 degrees.
+    up_k = g.get("upright", 0) if rear_h else 0
 
     def lay(head_arc, xs, arc, lift=None, rear=1.0):
         """Joint positions (Blender space) with the neck at arc `head_arc`."""
         pts = []
         for i in range(n + 1):
-            s = head_arc - i * seg
+            j = max(i, up_k)
+            s = head_arc - (j - up_k) * seg
             y = np.interp(s, arc, ys)
             x = np.interp(s, arc, xs)
             z = heights[i] + (lift(i) if lift else 0.0)
             if rear_h:
-                z += rear * rear_h * max(0.0, 1.0 - i / rear_n) ** 1.6
+                z += rear * (rear_h - up_k * seg) * max(0.0, 1.0 - (j - up_k) / (rear_n - up_k)) ** 1.6
+            if i < up_k:
+                # Straight up from joint up_k when reared; lying ahead of it on
+                # the track when not.
+                flat = head_arc + (up_k - i) * seg
+                y = lerp(np.interp(flat, arc, ys), y, rear)
+                x = lerp(np.interp(flat, arc, xs), x, rear)
+                z += rear * (up_k - i) * seg
             pts.append(V((x, -y, z)))
         return pts
 
