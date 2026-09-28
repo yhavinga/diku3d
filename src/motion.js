@@ -2046,7 +2046,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     const a = fig.actions || {};
     const r = fig.rand();
     if (free > 1.0 && r < 0.26 && a.attack) {
-      const name = a.attack2 && fig.rand() < 0.5 ? 'attack2' : 'attack';
+      const name = bareHanded(fig, a.attack2 && fig.rand() < 0.5 ? 'attack2' : 'attack');
       const dur = fig.clips[name];
       const hit = ((fig.hitFrame && fig.hitFrame[name]) ?? 0.4) * dur;
       playOnce(fig, name, { gain: 0.72, until: (hit * 0.5 + 0.22) / dur });
@@ -2235,6 +2235,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
 
   function strike(fig, name = 'attack', contactIn = 0.35) {
     if (!fig || fig.m.dead) return;
+    name = bareHanded(fig, name);
     const clip = fig.actions && (fig.actions[name] ? name : (fig.actions.attack ? 'attack' : null));
     if (clip) {
       const dur = fig.clips[clip];
@@ -2259,6 +2260,18 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       return;
     }
     fig.m.lunge = { t: 0, dur: Math.max(0.5, contactIn + 0.35), contact: clamp(contactIn / Math.max(0.5, contactIn + 0.35), 0.3, 0.8), reach: fig.legs ? 1 : 0.8 };
+  }
+
+  /**
+   * `attack` is an overhead chop, made round a weapon's haft. With nothing in
+   * the hand it is a bare forearm raised straight up over the head, and on a
+   * rotting zombie in a torn-off sleeve that thin raised arm read as a bow
+   * being carried. Someone with nothing in their hand swings `attack2`, the
+   * low driving blow, which reads as a fist or a claw.
+   */
+  function bareHanded(fig, name) {
+    if (name !== 'attack' || !fig.castPoint || !fig.actions || !fig.actions.attack2) return name;
+    return fig.weapon && fig.weapon.visible ? name : 'attack2';
   }
 
   /** Taking a blow, catching one on the blade, or stepping out of its way. */
