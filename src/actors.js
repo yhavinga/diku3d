@@ -843,9 +843,18 @@ function buildPerson(library, who, proto, instance) {
     const o = new THREE.Object3D();
     o.name = name;
     o.userData.fromResets = fromResets;
+    // `visible` is whether it is held at all (items.js keeps it to the
+    // game's word); `stowed` puts it by while its owner sits or leans, and
+    // only hides it -- motion.js's business, never the game's.
+    let held = show[axis] > 0.5;
+    let stowed = false;
     Object.defineProperty(o, 'visible', {
-      get: () => show[axis] > 0.5,
-      set: (v) => { show[axis] = v ? 1 : 0; },
+      get: () => held,
+      set: (v) => { held = !!v; show[axis] = held && !stowed ? 1 : 0; },
+    });
+    Object.defineProperty(o, 'stowed', {
+      get: () => stowed,
+      set: (v) => { stowed = !!v; show[axis] = held && !stowed ? 1 : 0; },
     });
     body.getObjectByName(bone).add(o);
     return o;
@@ -938,8 +947,8 @@ const BEASTS = [
   // The chreffn: 'head and torso copper-covered, with yellow, glowing eyes,
   // the lower body in an orange shading', crawling -- the drider's build, in
   // copper over orange.
-  { test: /\bchreffns?\b/, asset: 'beast_drider', scale: 0.72, coat: 0xa8521c, pale: 0xb07a44, points: 0x6a4020, glow: 0xffd02a, box: [1.0, 1.6, 'quad', 0xa8521c] },
-  { test: /\bdriders?\b/, asset: 'beast_drider', scale: 1.0, coat: 0x19161a, pale: 0x3d3947, points: 0xe2dfe8, glow: 0xff3a24, box: [1.2, 2.2, 'quad', 0x19161a] },
+  { test: /\bchreffns?\b/, asset: 'beast_drider', scale: 0.72, coat: 0xa8521c, pale: 0xb07a44, points: 0x6a4020, patch: 0xd08a3a, cover: 0.5, glow: 0xffd02a, box: [1.0, 1.6, 'quad', 0xa8521c] },
+  { test: /\bdriders?\b/, asset: 'beast_drider', scale: 1.0, coat: 0x26222c, pale: 0x4a4458, points: 0xe8e4ee, patch: 0x6a5282, cover: 0.5, glow: 0xff3a24, box: [1.2, 2.2, 'quad', 0x19161a] },
   { test: /\b(huge|giant|queen|empress|arachnos)\b.*\bspiders?\b|\bspiders?\b.*\b(huge|giant|queen|empress|arachnos)\b/, asset: 'beast_spider', scale: 2.2, coat: 0x1c1816, pale: 0x7a2a1c, points: 0x0d0b0a, patch: 0x2c2420, cover: 0.3, box: [0.5, 1.6, 'quad', 0x1c1816] },
   { test: /\bspiders?\b/, asset: 'beast_spider', scale: 0.6, coat: 0x2e2621, pale: 0x8f7d66, points: 0x16120f, patch: 0x44382e, cover: 0.35, box: [0.15, 0.5, 'quad', 0x2e2621] },
   { test: /\bscorpions?\b/, asset: 'beast_scorpion', scale: 0.8, coat: 0x7a3218, pale: 0xb0643c, points: 0x2e1409, patch: 0x5a2410, cover: 0.3, box: [0.12, 0.45, 'quad', 0x7a3218] },
@@ -962,9 +971,12 @@ const BEASTS = [
   // the same creature four times over, in stone grey.
   { test: /\bgargoyles?\b/, asset: 'beast_imp', scale: 4.0, coat: 0x6a6964, pale: 0x7c7b76, points: 0x3c3b38, glow: 0xff5a24, box: [1.9, 0.8, 'quad', 0x6a6964] },
   { test: /\b(homonc?ulus|imps?|quasits?)\b/, asset: 'beast_imp', scale: 1.0, coat: 0x4a5a28, pale: 0x7a8a48, points: 0x283018, glow: 0xffc020, box: [0.45, 0.3, 'quad', 0x4a5a28] },
-  { test: /\bnagas?\b/, asset: 'beast_naga', scale: 1.0, stands: 1.9, coat: 0x56662a, pale: 0xc8b25e, points: 0x56662a, patch: 0x8a8a3a, cover: 0.35, box: [0.3, 5, 'quad', 0x56662a] },
+  { test: /\bnagas?\b/, asset: 'beast_naga', scale: 1.0, stands: 1.9, coat: 0x56662a, pale: 0xc8b25e, points: 0x56662a, patch: 0x8a8a3a, cover: 0.35, glow: 0xf0c040, box: [0.3, 5, 'quad', 0x56662a] },
   { test: /\bbasilisks?\b/, asset: 'beast_basilisk', scale: 1.0, coat: 0x5a4a32, pale: 0xbca264, points: 0x3a3020, patch: 0x4a3c28, cover: 0.3, glow: 0x9cff9c, box: [0.5, 2.5, 'quad', 0x5a4a32] },
-  { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, stands: 3.6, coat: 0x5c2c68, pale: 0x8e6096, points: 0x3a1a44, patch: 0x4a2254, cover: 0.3, box: [0.8, 9, 'quad', 0x5c2c68] },
+  // The worm stands in a crater of its own sand, which is all the ground it
+  // touches: its contact patch is the crater's, not ten metres of body, and
+  // sand is thrown up wherever the body goes through the surface.
+  { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, stands: 4.1, coat: 0x4c2458, pale: 0x9a7090, points: 0x22102a, patch: 0x3a1a46, cover: 0.3, footprint: [2.4, 2.4], sand: 0xc9ae84, box: [0.8, 9, 'quad', 0x5c2c68] },
   { test: /\bdustdiggers?\b/, asset: 'beast_dustdigger', scale: 1.0, coat: 0xc2a070, pale: 0x9a7c58, points: 0x7a5a3a, patch: 0xb08c5c, cover: 0.35, box: [0.3, 4, 'quad', 0xc2a070] },
   { test: /\bcamels?\b/, asset: 'beast_camel', scale: 1.0, coat: 0xb48c5c, pale: 0xd6be96, points: 0x8a6a44, box: [1.9, 3, 'quad', 0xb48c5c] },
   // The dracolich lies as a heap of bones until it rises: its idle is the
@@ -975,13 +987,13 @@ const BEASTS = [
   // does not have.
   { test: /\bwargs?\b/, asset: 'beast_canine', scale: 1.6, coat: 0x26221f, pale: 0x3a342e, points: 0x151311, hide: ['flop'], box: [1.0, 1.6, 'quad', 0x2b2724] },
   { test: /\b(guardian|roving) beast\b/, asset: 'beast_canine', scale: 1.7, coat: 0x1b1918, pale: 0x2b2724, points: 0x100f0e, hide: ['flop'], grow: { head: 1.1 }, box: [1.0, 1.6, 'quad', 0x1b1918] },
-  { test: /\b(wolf|wolves)\b/, asset: 'beast_canine', scale: 1.32, coat: 0x807870, pale: 0xd9d2c4, points: 0x4d4841, hide: ['flop'], grow: { tail1: 1.1 }, box: [0.72, 1.15, 'quad', 0x5b5750] },
-  { test: /\bfox(es)?\b/, asset: 'beast_canine', scale: 0.72, coat: 0xa4501e, pale: 0xefe8dc, points: 0x1f1813, hide: ['flop'], grow: { ear: 1.35, tail1: 1.3 }, box: [0.4, 0.7, 'quad', 0xa4501e] },
-  { test: /\b(rottweiler|doberman)\b/, asset: 'beast_canine', scale: 1.08, width: 1.12, coat: 0x1c1917, pale: 0x8a5630, points: 0x8a5630, hide: ['ear'], grow: { flop: 0.7 }, box: [0.62, 1.0, 'quad', 0x2e2622] },
-  { test: /\b(hound|mastiff|cooshee|pitbull)s?\b/, asset: 'beast_canine', scale: 1.15, width: 1.1, coat: 0x5f4d3c, pale: 0xb8a58a, points: 0x3a2f25, hide: ['ear'], box: [0.72, 1.15, 'quad', 0x5b5750] },
-  { test: /\bbeagles?\b/, asset: 'beast_canine', scale: 0.7, coat: 0xa06c38, pale: 0xf1ede4, points: 0xf1ede4, patch: 0x1e1a16, cover: 0.42, hide: ['ear'], grow: { flop: 1.15 }, box: [0.5, 0.85, 'quad', 0x7a6247] },
-  { test: /\b(puppy|puppies|pup)\b/, asset: 'beast_canine', scale: 0.5, coat: 0x8e7152, pale: 0xe2d6c2, points: 0x5a4632, hide: ['ear'], grow: { head: 1.35, flop: 1.1 }, box: [0.26, 0.42, 'quad', 0x8a7355] },
-  { test: /\b(fido|dog|dogs|cur|mutt|mongrel)\b/, asset: 'beast_canine', scale: 0.82, coat: 0x6b5641, pale: 0xa6927a, points: 0x3a3028, patch: 0xcfc6b4, cover: 0.2, hide: ['ear'], box: [0.5, 0.85, 'quad', 0x7a6247] },
+  { test: /\b(wolf|wolves)\b/, asset: 'beast_canine', scale: 1.32, coat: 0x7e7568, pale: 0xdcd4c4, points: 0x9c8a70, patch: 0x45403a, cover: 0.38, hide: ['flop'], grow: { tail1: 1.1 }, box: [0.72, 1.15, 'quad', 0x5b5750] },
+  { test: /\bfox(es)?\b/, asset: 'beast_canine', scale: 0.72, coat: 0xa4501e, pale: 0xefe8dc, points: 0x1f1813, hide: ['flop'], grow: { ear: 1.35, tail1: 1.3, ruff: 0.7 }, box: [0.4, 0.7, 'quad', 0xa4501e] },
+  { test: /\b(rottweiler|doberman)\b/, asset: 'beast_canine', scale: 1.08, width: 1.12, coat: 0x1c1917, pale: 0x8a5630, points: 0x8a5630, hide: ['ear', 'ruff'], grow: { flop: 0.7 }, box: [0.62, 1.0, 'quad', 0x2e2622] },
+  { test: /\b(hound|mastiff|cooshee|pitbull)s?\b/, asset: 'beast_canine', scale: 1.15, width: 1.1, coat: 0x5f4d3c, pale: 0xb8a58a, points: 0x3a2f25, hide: ['ear', 'ruff'], box: [0.72, 1.15, 'quad', 0x5b5750] },
+  { test: /\bbeagles?\b/, asset: 'beast_canine', scale: 0.7, coat: 0xa06c38, pale: 0xf1ede4, points: 0xf1ede4, patch: 0x1e1a16, cover: 0.42, hide: ['ear', 'ruff'], grow: { flop: 1.15 }, box: [0.5, 0.85, 'quad', 0x7a6247] },
+  { test: /\b(puppy|puppies|pup)\b/, asset: 'beast_canine', scale: 0.5, coat: 0x8e7152, pale: 0xe2d6c2, points: 0x5a4632, hide: ['ear', 'ruff'], grow: { head: 1.35, flop: 1.1 }, box: [0.26, 0.42, 'quad', 0x8a7355] },
+  { test: /\b(fido|dog|dogs|cur|mutt|mongrel)\b/, asset: 'beast_canine', scale: 0.82, coat: 0x6b5641, pale: 0xa6927a, points: 0x3a3028, patch: 0xcfc6b4, cover: 0.2, hide: ['ear', 'ruff'], box: [0.5, 0.85, 'quad', 0x7a6247] },
   // --- cats, great and small. The patch channel on the feline is tabby
   // stripes, so `cover` is how striped it is.
   { test: /\btigers?\b/, asset: 'beast_feline', scale: 4.0, coat: 0xc0692a, pale: 0xefe6d6, points: 0xc0692a, patch: 0x1a1512, cover: 0.42, box: [1.0, 1.9, 'quad', 0xc0692a] },
@@ -1000,11 +1012,11 @@ const BEASTS = [
   { test: /\b(rat|rats|rodent|vermin)\b/, asset: 'beast_rodent', scale: 1.2, coat: 0x5e5043, pale: 0x9e9180, points: 0x5e5043, box: [0.14, 0.26, 'quad', 0x4d453c] },
   // --- horses, and the deer, which is a lighter build of the same frame.
   // Horses vary coat by the mobile, so a stable of four is not one horse.
-  { test: /\b(donkey|donkeys)\b/, asset: 'beast_equine', scale: 0.72, coat: 0x756b60, pale: 0xdcd4c8, points: 0x2c2723, grow: { ear: 1.8 }, box: [1.1, 1.6, 'quad', 0x756b60] },
-  { test: /\b(mule|mules)\b/, asset: 'beast_equine', scale: 0.88, coat: 0x5a4636, pale: 0xb7a58e, points: 0x2a221c, grow: { ear: 1.5 }, box: [1.3, 1.9, 'quad', 0x5a4636] },
-  { test: /\b(pony|ponies)\b/, asset: 'beast_equine', scale: 0.72, coats: 'horse', box: [1.1, 1.6, 'quad', 0x6b4f36] },
-  { test: /\bpegasus\b/, asset: 'beast_equine', scale: 1.0, coat: 0xe9e5dd, pale: 0xe9e5dd, points: 0xcfcac2, box: [1.45, 2.1, 'quad', 0xe9e5dd] },
-  { test: /\b(horse|horses|mare|stallion|steed|colt|foal)\b/, asset: 'beast_equine', scale: 1.0, coats: 'horse', box: [1.45, 2.1, 'quad', 0x6b4f36] },
+  { test: /\b(donkey|donkeys)\b/, asset: 'beast_equine', scale: 0.72, sleek: true, coat: 0x756b60, pale: 0xdcd4c8, points: 0x2c2723, grow: { ear: 1.8 }, box: [1.1, 1.6, 'quad', 0x756b60] },
+  { test: /\b(mule|mules)\b/, asset: 'beast_equine', scale: 0.88, sleek: true, coat: 0x5a4636, pale: 0xb7a58e, points: 0x2a221c, grow: { ear: 1.5 }, box: [1.3, 1.9, 'quad', 0x5a4636] },
+  { test: /\b(pony|ponies)\b/, asset: 'beast_equine', scale: 0.72, coats: 'horse', sleek: true, box: [1.1, 1.6, 'quad', 0x6b4f36] },
+  { test: /\bpegasus\b/, asset: 'beast_equine', scale: 1.0, sleek: true, coat: 0xe9e5dd, pale: 0xe9e5dd, points: 0xcfcac2, box: [1.45, 2.1, 'quad', 0xe9e5dd] },
+  { test: /\b(horse|horses|mare|stallion|steed|colt|foal)\b/, asset: 'beast_equine', scale: 1.0, coats: 'horse', sleek: true, box: [1.45, 2.1, 'quad', 0x6b4f36] },
   { test: /\b(stag|stags|elk)\b/, asset: 'beast_cervid', scale: 1.15, coat: 0x8c5c32, pale: 0xefe6d6, points: 0x3a2c20, patch: 0xefe6d6, cover: 0.14, box: [0.95, 1.4, 'quad', 0x8c5c32] },
   { test: /\b(deer|doe|fawn)\b/, asset: 'beast_cervid', scale: 1.0, coat: 0x9c6a3a, pale: 0xefe6d6, points: 0x3a2c20, patch: 0xefe6d6, cover: 0.18, hide: ['antler'], box: [0.85, 1.3, 'quad', 0x9c6a3a] },
   // --- cattle. `\bbull\b` would match hood.are's pitbull, which is why the
@@ -1014,7 +1026,7 @@ const BEASTS = [
   { test: /\b(cow|cows|cattle|heifer)\b/, asset: 'beast_bovine', scale: 1.0, coats: 'cow', grow: { horn: 0.7 }, box: [1.4, 2.15, 'quad', 0x6d5a4a] },
   // --- pigs.
   { test: /\b(boar|boars|warthog)\b/, asset: 'beast_pig', scale: 1.0, coat: 0x3a3029, pale: 0x4a3e34, points: 0x1f1a16, grow: { tusk: 1.2 }, box: [0.62, 1.0, 'quad', 0x3a3029] },
-  { test: /\b(pig|pigs|hog|hogs|sow|swine|piglet)\b/, asset: 'beast_pig', scale: 1.0, coat: 0xd6a494, pale: 0xe8c4b6, points: 0xd6a494, hide: ['tusk'], box: [0.62, 1.0, 'quad', 0x9a7a6c] },
+  { test: /\b(pig|pigs|hog|hogs|sow|swine|piglet)\b/, asset: 'beast_pig', scale: 1.0, sleek: true, coat: 0xd6a494, pale: 0xe8c4b6, points: 0xd6a494, hide: ['tusk'], box: [0.62, 1.0, 'quad', 0x9a7a6c] },
   // --- bears. The marsh's "huge hairy beast" is twenty feet of green-furred
   // claws, and a bear is the nearest thing the library has to one.
   // Its small kin, which 'cringes in terror': the same green-furred thing
@@ -1142,7 +1154,9 @@ const _patch = new THREE.Color();
  * beaks) keep the colour they were modelled with, times `horn` if the look
  * darkens them -- a crow's beak and legs are the duck's, in black.
  */
-const COATED = new Set(['fur', 'feather', 'scales', 'chitin', 'ooze', 'hide', 'bone']);
+// `skin` is the drider's drow half: its face, hair and torso are painted from
+// the masks like any coat, the skin the pale channel and the hair the points.
+const COATED = new Set(['fur', 'feather', 'scales', 'chitin', 'ooze', 'hide', 'bone', 'skin']);
 
 function paintedGeometry(asset, node, tag, look) {
   const key = `${node.name}|${look.key}`;
@@ -1234,6 +1248,30 @@ function beastLook(spec, proto, seed = 0) {
   return look;
 }
 
+/**
+ * A short, groomed coat -- a horse's -- takes a sheen the shaggy ones do not:
+ * the highlight sliding down a flank is what draws the shape of a dark horse
+ * in a dim barn, where the plain fur left a bay as a brown blob.
+ */
+const sleekCache = new WeakMap();
+function sleekFur(library) {
+  let m = sleekCache.get(library);
+  if (!m) {
+    m = library.materialFor('fur').clone();
+    m.name = 'fur-sleek';
+    m.roughness = 0.7;
+    m.envMapIntensity = 1.0;
+    // A groomed coat lies flat: the locks are there in the relief, faintly,
+    // and not in the colour at all -- their light and dark tips, on a horse,
+    // read as the grain of carved wood. The map's mean stands in for it.
+    m.normalScale = new THREE.Vector2(0.1, 0.1);
+    m.map = null;
+    m.color.setScalar(0.4);
+    sleekCache.set(library, m);
+  }
+  return m;
+}
+
 function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const info = prepareBeast(asset);
   const look = beastLook(spec, proto, options.seed || 0);
@@ -1246,7 +1284,7 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     // hand in populate(), and knows how long the animal is.
     node.castShadow = false;
     const tag = node.material && node.material.name ? node.material.name.replace(/^MAT:/, '') : '';
-    node.material = library.materialFor(tag);
+    node.material = tag === 'fur' && spec.sleek ? sleekFur(library) : library.materialFor(tag);
     node.geometry = paintedGeometry(asset, node, tag, look);
   });
   const scale = (spec.scale || 1) * (0.94 + strHash(proto.short, 3) * 0.12);
@@ -1321,18 +1359,176 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   mixer.update(0);
 
   const size = asset.size;
-  group.userData.footprint = { length: size.z * scale, width: size.x * scale * width };
+  group.userData.footprint = spec.footprint
+    ? { length: spec.footprint[0] * scale, width: spec.footprint[1] * scale }
+    : { length: size.z * scale, width: size.x * scale * width };
+  if (spec.sand) group.add(sandSpray(body, spec.sand));
   // A flier is built on the ground and flown by its clips, `hover` metres up
   // (in the model's units): its name and its examine point go up with it.
   const hover = spec.air ? (info.hover || 0) * scale : 0;
   // A body that stands up out of its rest pose -- the reared naga, the worm
   // out of the sand -- says how tall it really is, for the label over it.
   const height = spec.stands ? spec.stands * scale : size.y * scale + hover;
-  return {
+  const record = {
     group, headGroup: null, height, scale, mixer, actions, clips, stride,
     hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
     afloat,
   };
+  // A bat under a roof hangs from it while it is idle: its `roost` clip,
+  // moved up from the height it was authored at (`info.roost`, in the
+  // model's units) to the ceiling of the room it was reset in, `up` metres
+  // over its feet. It drops into flight when it has somewhere to go.
+  if (spec.air && actions.roost && info.roost) {
+    record.roost = (up) => {
+      const lift = up / scale - info.roost;
+      const clip = asset.animations.find((c) => c.name === 'roost').clone();
+      for (const track of clip.tracks) {
+        if (!track.name.endsWith('.position')) continue;
+        for (let i = 1; i < track.values.length; i += 3) track.values[i] += lift;
+      }
+      mixer.uncacheAction(actions.roost.getClip());
+      const roost = mixer.clipAction(clip);
+      roost.setLoop(THREE.LoopRepeat, Infinity);
+      roost.time = start * clip.duration;
+      roost.setEffectiveWeight(1);
+      roost.play();
+      actions.idle.stop();
+      actions.idle = roost;
+      clips.idle = clip.duration;
+      delete actions.roost;
+      mixer.update(0);
+      record.height = up;
+    };
+  }
+  return record;
+}
+
+/**
+ * How far above `at` the underside of whatever roofs it is, or null in the
+ * open or when it is out of a bat's reach: one ray straight up through the
+ * built world.
+ */
+const _ceilRay = new THREE.Raycaster();
+const _up = new THREE.Vector3(0, 1, 0);
+function ceilingAbove(root, at) {
+  _ceilRay.set(new THREE.Vector3(at.x, at.y + 1.2, at.z), _up);
+  _ceilRay.far = 14;
+  const hit = _ceilRay.intersectObject(root, true)[0];
+  return hit ? hit.point.y - at.y : null;
+}
+
+/**
+ * Sand thrown up where a burrowing body goes through the ground: a trickle
+ * off a worm standing still in its hole, a spray where it surfaces or dives.
+ * It finds the crossings itself, from the chain of body bones either side of
+ * the surface, and emits in proportion to how fast each crossing slides --
+ * so it follows the clips without knowing which one is playing.
+ *
+ * Lit, not glowing: each puff is a camera-facing quad whose normal points up,
+ * so it takes exactly the light the sand beneath it does -- an unlit sprite in
+ * the sand's own colour read as dark smudges against sand in full sun. One
+ * instanced draw, updated only while the worm is on screen.
+ */
+function sandSpray(body, colour) {
+  const COUNT = 96;
+  const chain = [];
+  for (let i = 1; ; i++) {
+    const bone = body.getObjectByName(`body${i}`);
+    if (!bone) break;
+    chain.push(bone);
+  }
+  const quad = new THREE.PlaneGeometry(1, 1);
+  const normal = quad.attributes.normal;
+  for (let i = 0; i < normal.count; i++) normal.setXYZ(i, 0, 1, 0);
+  const material = new THREE.MeshStandardMaterial({
+    color: colour, map: wispHaloTexture(), transparent: true, depthWrite: false, roughness: 1, metalness: 0,
+    opacity: 0.6,
+  });
+  const mesh = new THREE.InstancedMesh(quad, material, COUNT);
+  mesh.frustumCulled = false;
+  mesh.name = 'sandSpray';
+  mesh.layers.set(OVERLAY_LAYER); // kept out of the AO prepass, see makeLabel
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  const pos = new Float32Array(COUNT * 3);
+  const vel = new Float32Array(COUNT * 3);
+  const life = new Float32Array(COUNT).fill(1);
+  const age = new Float32Array(COUNT).fill(1e9);
+  const grow = new Float32Array(COUNT);
+  const last = new Map();
+  const _a = new THREE.Vector3();
+  const _b = new THREE.Vector3();
+  const _q = new THREE.Quaternion();
+  const _gq = new THREE.Quaternion();
+  const _s = new THREE.Vector3();
+  const _p = new THREE.Vector3();
+  const _m = new THREE.Matrix4();
+  let next = 0;
+  let before = performance.now();
+  let carry = 0;
+  mesh.onBeforeRender = (renderer, scene, camera) => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - before) / 1000);
+    before = now;
+    const holder = mesh.parent;
+    if (!holder || dt <= 0) return;
+    // Where the body passes through y = 0, in the figure's own frame.
+    for (let i = 0; i < chain.length - 1; i++) {
+      holder.worldToLocal(chain[i].getWorldPosition(_a));
+      holder.worldToLocal(chain[i + 1].getWorldPosition(_b));
+      if ((_a.y > 0) === (_b.y > 0)) { last.delete(i); continue; }
+      const k = _a.y / (_a.y - _b.y);
+      const x = _a.x + (_b.x - _a.x) * k;
+      const z = _a.z + (_b.z - _a.z) * k;
+      const prev = last.get(i);
+      const speed = prev ? Math.min(8, Math.hypot(x - prev[0], z - prev[1]) / dt) : 0;
+      last.set(i, [x, z]);
+      carry += dt * (6 + speed * 36);
+      while (carry >= 1) {
+        carry -= 1;
+        const j = next;
+        next = (next + 1) % COUNT;
+        const a = Math.random() * Math.PI * 2;
+        const r = 0.5 + Math.random() * 0.3;
+        pos[j * 3] = x + Math.cos(a) * r;
+        pos[j * 3 + 1] = 0.25 + Math.random() * 0.25;
+        pos[j * 3 + 2] = z + Math.sin(a) * r;
+        const out = 0.3 + Math.random() * 0.8 + speed * 0.25;
+        vel[j * 3] = Math.cos(a) * out;
+        vel[j * 3 + 1] = 0.7 + Math.random() * 1.5 + speed * 0.45;
+        vel[j * 3 + 2] = Math.sin(a) * out;
+        age[j] = 0;
+        life[j] = 0.9 + Math.random() * 0.9;
+        grow[j] = 0.35 + Math.random() * 0.35;
+      }
+    }
+    holder.getWorldQuaternion(_gq).invert();
+    _q.copy(_gq).multiply(camera.quaternion);
+    for (let j = 0; j < COUNT; j++) {
+      age[j] += dt;
+      const t = age[j] / life[j];
+      if (t >= 1) {
+        _m.makeScale(0, 0, 0);
+        mesh.setMatrixAt(j, _m);
+        continue;
+      }
+      vel[j * 3 + 1] -= 6.5 * dt;
+      // Air drag: the dust a spray raises slows and hangs.
+      const drag = Math.exp(-1.6 * dt);
+      vel[j * 3] *= drag;
+      vel[j * 3 + 2] *= drag;
+      pos[j * 3] += vel[j * 3] * dt;
+      pos[j * 3 + 1] = Math.max(0.08, pos[j * 3 + 1] + vel[j * 3 + 1] * dt);
+      pos[j * 3 + 2] += vel[j * 3 + 2] * dt;
+      // Swells as it spreads, gone by the end of its life.
+      const size = grow[j] * (0.5 + 1.6 * t) * Math.sin(Math.PI * Math.min(1, t * 1.25 + 0.05));
+      _p.set(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2]);
+      _s.set(size, size, size);
+      mesh.setMatrixAt(j, _m.compose(_p, _q, _s));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  };
+  return mesh;
 }
 
 let wispHalo = null;
@@ -1910,6 +2106,12 @@ export function populate(world, layout, built, options = {}) {
   // Where people settle: seats on the benches, places at a bar and a hearth
   // (motion.js `spots`). Filled as the furniture is placed.
   const spots = [];
+  // The furniture those spots belong to, as turned boxes { x, z, yaw, hx, hz,
+  // y0, y1, seat? } in the same frame as `at()`: motion.js lifts a foot over a
+  // bench by it, and a probe can test a settled body against it. The nav
+  // grid's colliders are one box round a whole table and its two benches.
+  const furniture = [];
+  const solid = (x, z, yaw, hx, hz, y0, y1, part) => furniture.push({ x, z, yaw, hx, hz, y0, y1, part });
   // Declared here rather than with the windows: the hearths built below push
   // their fires into it, and those run first.
   const windowLights = [];
@@ -1949,6 +2151,11 @@ export function populate(world, layout, built, options = {}) {
       );
       fig.rotation.y = -angle + Math.PI / 2;
       group.add(fig);
+      if (made.roost && !info.outdoor) {
+        built.group.updateMatrixWorld(true);
+        const up = ceilingAbove(built.group, fig.position);
+        if (up && up > 2.2) made.roost(up);
+      }
 
       const aggressive = !!(mob.proto.act & ACT_AGGRESSIVE);
       // The figure contract: whatever the builder handed back, plus where this
@@ -1956,7 +2163,7 @@ export function populate(world, layout, built, options = {}) {
       // frames off it and fills in what an older rig does not carry.
       const record = {
         ...made,
-        object: fig, head: headGroup, home: fig.position.clone(), height,
+        object: fig, head: headGroup, home: fig.position.clone(), height: made.height,
         mixer: made.mixer || null, actions: made.actions || null, legs: made.legs || null,
         aggressive, walking: false,
         sentinel: !!(mob.proto.act & ACT_SENTINEL),
@@ -1972,7 +2179,7 @@ export function populate(world, layout, built, options = {}) {
       figures.push(record);
 
       record.interactable = {
-        position: fig.position.clone().setY(fig.position.y + height * 0.6),
+        position: fig.position.clone().setY(fig.position.y + record.height * 0.6),
         radius: 2.6,
         // Mobiles walk about, so their examine point moves with them: main.js
         // looks these up by distance each frame instead of from its fixed grid.
@@ -2128,6 +2335,10 @@ export function populate(world, layout, built, options = {}) {
           instances.add(prop, { x: px, y: item.y, z: pz, rotY: spin }, 'props');
           // props.py's bench: 1.85 m long, seat at 0.45, its back to local -Z.
           if (prop === 'bench') {
+            // props.py: seat 1.85 x 0.42 x 0.07 centred 0.45 up, back rails and
+            // uprights 0.16-0.17 behind it.
+            solid(px, pz, spin, 0.925, 0.21, item.y + 0.415, item.y + 0.485, 'seat');
+            solid(px - 0.17 * Math.sin(spin), pz - 0.17 * Math.cos(spin), spin, 0.9, 0.04, item.y + 0.485, item.y + 1.02, 'back');
             for (const lx of [-0.5, 0.5]) {
               spots.push({ kind: 'sit', seat: 0.48, x: px + lx * Math.cos(spin) + 0.06 * Math.sin(spin), y: item.y, z: pz - lx * Math.sin(spin) + 0.06 * Math.cos(spin), yaw: spin });
             }
@@ -2151,20 +2362,32 @@ export function populate(world, layout, built, options = {}) {
       const s2 = Math.sin(spin); const c2 = Math.cos(spin);
       // Two to a bench, facing the table, stepped over from behind.
       for (const side of [-1, 1]) {
-        for (const lx of [-0.36, 0.36]) {
-          const lz = side * 0.74;
-          spots.push({ kind: 'sit', from: 'behind', seat: 0.5, x: item.x + lx * c2 + lz * s2, y: item.y, z: item.z - lx * s2 + lz * c2, yaw: spin + (side > 0 ? Math.PI : 0) });
+        for (const lx of [-0.3, 0.3]) {
+          // The hips a little behind the bench's middle: the hands in a lap
+          // and a cup coming up must clear the table's edge.
+          const lz = side * 0.77;
+          spots.push({ kind: 'sit', from: 'behind', seat: 0.455, x: item.x + lx * c2 + lz * s2, y: item.y, z: item.z - lx * s2 + lz * c2, yaw: spin + (side > 0 ? Math.PI : 0) });
         }
       }
       const set = (lx, y, lz) => at(item.x + lx * c2 + lz * s2, y, item.z - lx * s2 + lz * c2, 0, spin, 0);
-      pushPart(props, G.box(1.5, 0.1, 0.75), 0x93714a, set(0, item.y + 0.78, 0));
+      const part = (lx, lz, hx, hz, y0, y1, name) => solid(item.x + lx * c2 + lz * s2, item.z - lx * s2 + lz * c2, spin, hx, hz, item.y + y0, item.y + y1, name);
+      part(0, 0, 0.75, 0.375, 0.77, 0.83, 'top');
+      for (const [ox, oz] of [[-0.62, -0.28], [0.62, -0.28], [-0.62, 0.28], [0.62, 0.28]]) part(ox, oz, 0.045, 0.045, 0, 0.77, 'leg');
+      for (const s of [-1, 1]) {
+        part(0, s * 0.72, 0.7, 0.17, 0.365, 0.455, 'seat');
+        for (const e of [-0.52, 0.52]) part(e, s * 0.72, 0.045, 0.14, 0, 0.365, 'benchleg');
+      }
+      // A 6 cm top and a 0.455 m bench -- a table and bench at the heights
+      // people sit at. With a 10 cm top over a 0.505 m bench, a seated
+      // body's hands in its lap were 5 cm up inside the table.
+      pushPart(props, G.box(1.5, 0.06, 0.75), 0x93714a, set(0, item.y + 0.80, 0));
       for (const [ox, oz] of [[-0.62, -0.28], [0.62, -0.28], [-0.62, 0.28], [0.62, 0.28]]) {
-        pushPart(props, G.box(0.09, 0.78, 0.09), 0x6b4d31, set(ox, item.y + 0.39, oz));
+        pushPart(props, G.box(0.09, 0.77, 0.09), 0x6b4d31, set(ox, item.y + 0.385, oz));
       }
       for (const s of [-1, 1]) {
-        pushPart(props, G.box(1.4, 0.09, 0.34), 0x84633f, set(0, item.y + 0.46, s * 0.72));
+        pushPart(props, G.box(1.4, 0.09, 0.34), 0x84633f, set(0, item.y + 0.41, s * 0.72));
         for (const e of [-0.52, 0.52]) {
-          pushPart(props, G.box(0.09, 0.46, 0.28), 0x6b4d31, set(e, item.y + 0.23, s * 0.72));
+          pushPart(props, G.box(0.09, 0.365, 0.28), 0x6b4d31, set(e, item.y + 0.1825, s * 0.72));
         }
       }
       // Tankards, because an empty table is furniture and a table with two
@@ -2211,7 +2434,10 @@ export function populate(world, layout, built, options = {}) {
 
       if (item.fitting === 'counter') {
         const L = 4.4; const D = 0.72; const H = 1.06;
-        const front = WALL_Z + 0.45 + D / 2;
+        // A metre out from the wall: room behind it for whoever keeps it,
+        // clear of the shelves. At 0.45 m the keeper's head was in them, so
+        // the bartender stood out in the middle of the floor instead.
+        const front = WALL_Z + 1.0 + D / 2;
         pushPart(props, G.box(L, H - 0.09, D), 0x8a6740, put(shift, item.y + (H - 0.09) / 2, front));
         // The top is what the description is about: "old archaic writing,
         // carvings and symbols cover its top". Darker than the carcase, worn
@@ -2256,11 +2482,25 @@ export function populate(world, layout, built, options = {}) {
           pushPart(props, G.cylinder(0.19, 0.19, 0.07, 10), 0x7a5a38, put(sx, item.y + 0.63, sz, spin));
           pushPart(props, G.cylinder(0.055, 0.075, 0.60, 8), 0x60472c, put(sx, item.y + 0.30, sz, spin));
           pushPart(props, G.cylinder(0.17, 0.17, 0.04, 8), 0x60472c, put(sx, item.y + 0.05, sz, spin));
+          const [cx, cz] = worldOf(sx, sz);
+          furniture.push({ x: cx, z: cz, yaw: ry, hx: 0.19, hz: 0.19, y0: item.y, y1: item.y + 0.665, part: 'stool' });
         }
         solid(shift, front, L / 2, D / 2 + 0.12, 0, H);
+        {
+          const [cx, cz] = worldOf(shift, front);
+          furniture.push({ x: cx, z: cz, yaw: ry, hx: L / 2 + 0.09, hz: D / 2 + 0.12, y0: item.y, y1: item.y + H + 0.045, part: 'counter' });
+        }
         // Somewhere to stand with your elbows on it.
-        for (const lx of [-1.3, 0, 1.3]) {
-          const [wx, wz] = worldOf(shift + lx, front + D / 2 + 0.42);
+        // Behind it, facing the room: the keeper's place (motion.js puts the
+        // room's shopkeeper there).
+        {
+          const [kx, kz] = worldOf(shift, WALL_Z + 0.52);
+          spots.push({ kind: 'keeper', x: kx, y: item.y, z: kz, yaw: ry + Math.PI });
+        }
+        // Between the stools (at -1.575, -0.525, 0.525, 1.575), not on them:
+        // at -1.3 and 1.3 a drinker stood 0.28 m from a stool's centre.
+        for (const lx of [-1.05, 0, 1.05]) {
+          const [wx, wz] = worldOf(shift + lx, front + D / 2 + 0.52);
           spots.push({ kind: 'bar', x: wx, y: item.y, z: wz, yaw: ry + Math.PI });
         }
       } else if (item.fitting === 'hearth') {
@@ -3060,7 +3300,7 @@ export function populate(world, layout, built, options = {}) {
   // collider for the player but a mobile still walks round it.
   const nav = createNav({ layout, built, world });
   if (assets) nav.addInstances([built.group, group], assets, THREE);
-  const motion = createMotion({ figures, nav, zones: built.zones || null, spots });
+  const motion = createMotion({ figures, nav, zones: built.zones || null, spots, furniture });
 
   /**
    * Play a clip on a mobile's body -- `target` is a figure, a game slot
@@ -3103,7 +3343,7 @@ export function populate(world, layout, built, options = {}) {
   }
 
   return {
-    group, interactables, update, doors, figures, nav, motion, perform, respawn,
+    group, interactables, update, doors, figures, nav, motion, perform, respawn, furniture,
     setSun, setDaylight, setSky, lights: windowLights,
   };
 }

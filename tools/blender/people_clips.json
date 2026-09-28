@@ -163,24 +163,24 @@
   "attack": {
    "duration": 0.7916666666666666,
    "frames": 19,
-   "head_gap": 0.0011,
+   "head_gap": 0.0055,
    "hit": 0.5263157894736842
   },
   "attack2": {
    "duration": 0.875,
    "frames": 21,
-   "head_gap": 0.2696,
+   "head_gap": 0.2861,
    "hit": 0.5238095238095238
   },
   "block": {
    "duration": 0.5,
    "frames": 12,
-   "head_gap": 0.19
+   "head_gap": 0.1923
   },
   "cast": {
    "duration": 1.0,
    "frames": 24,
-   "head_gap": 0.3034,
+   "head_gap": 0.3194,
    "hit": 0.5833333333333334
   },
   "death": {
@@ -190,12 +190,12 @@
   "fight": {
    "duration": 1.3333333333333333,
    "frames": 32,
-   "head_gap": 0.2696
+   "head_gap": 0.2861
   },
   "hit": {
    "duration": 0.4166666666666667,
    "frames": 10,
-   "head_gap": 0.2694
+   "head_gap": 0.2853
   },
   "idle": {
    "duration": 2.0,
@@ -204,21 +204,21 @@
   "idle2": {
    "duration": 3.75,
    "frames": 90,
-   "head_gap": 0.0158
+   "head_gap": 0.0339
   },
   "lean": {
    "duration": 4.0,
    "frames": 96,
-   "head_gap": 0.2985
+   "head_gap": 0.329
   },
   "run": {
    "duration": 0.6666666666666666,
    "frames": 16,
-   "sink": -8.779577910900116e-06,
-   "slip": 0.0038386863886484823,
-   "slip_baked": 0.003492684161621795,
+   "sink": -1.665716990828514e-05,
+   "slip": 0.0038239625960106993,
+   "slip_baked": 0.003513843087827928,
    "stance": 0.36,
-   "stride": 2.304029182528789
+   "stride": 2.2338892860170323
   },
   "sit": {
    "duration": 5.0,
@@ -227,16 +227,16 @@
   "talk": {
    "duration": 3.0,
    "frames": 72,
-   "head_gap": 0.4618
+   "head_gap": 0.4922
   },
   "walk": {
    "duration": 1.0833333333333333,
    "frames": 26,
-   "sink": -2.6117078959941864e-05,
-   "slip": 1.2693557736698224e-05,
-   "slip_baked": 1.379901000247985e-05,
+   "sink": -2.1242653019726276e-05,
+   "slip": 8.120431670144423e-06,
+   "slip_baked": 1.1967568213089308e-05,
    "stance": 0.62,
-   "stride": 1.0633980842440562
+   "stride": 1.0310258243155535
   }
  }
 }

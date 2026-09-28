@@ -616,9 +616,31 @@ export function createNav({ layout, built, world }) {
       const nx = px === c.x0 ? -1 : px === c.x1 ? 1 : 0;
       const nz = pz === c.z0 ? -1 : pz === c.z1 ? 1 : 0;
       if (Math.abs(nx) + Math.abs(nz) !== 1) continue;
-      bestD = d; best = { x: px, z: pz, nx, nz };
+      bestD = d; best = { x: px, z: pz, nx, nz, box: c };
     }
     return best;
+  }
+
+  /**
+   * Whether a body of radius `r` standing at (x, z) touches any solid but
+   * `except` -- a lean spot is against its own wall and nothing else. A
+   * counter against that wall made the wall look free to lean on, and the
+   * leaner stood in the counter.
+   */
+  function clearOf(x, z, level, r, except = null) {
+    const y = level * LEVEL_H;
+    for (const c of solids.around(x, z, _near)) {
+      if (c === except || c.y1 < y + 0.1 || c.y0 > y + 1.8) continue;
+      if (c.obb) {
+        const dx = x - c.obb.x; const dz = z - c.obb.z;
+        const u = dx * c.obb.ux + dz * c.obb.uz;
+        const v = -dx * c.obb.uz + dz * c.obb.ux;
+        if (Math.abs(u) < c.obb.hx + r && Math.abs(v) < c.obb.hz + r) return false;
+        continue;
+      }
+      if (x > c.x0 - r && x < c.x1 + r && z > c.z0 - r && z < c.z1 + r) return false;
+    }
+    return true;
   }
 
   /**
@@ -730,7 +752,7 @@ export function createNav({ layout, built, world }) {
   return {
     CELL, LEVEL_H, NAV_RES, levelOf,
     sample, roomAt, territory, randomSpot, findPath, pathInRoom, clearLine, nearestOpen, route, doorOpen,
-    stairY, wallNear, sightBlocked,
+    stairY, wallNear, clearOf, sightBlocked,
     addInstances,
     /** How many cells have been rasterised so far -- the grid is built on demand. */
     get built() { return grids.size; },

@@ -108,8 +108,8 @@ BUDGET = {
     # horn), and far fewer of them than of people: Midgaard has 13, the
     # Shire's farm 19. The big ones get the most because they are the ones
     # seen close and whole -- a horse fills the frame a sparrow never does.
-    "beast_canine": 4600, "beast_feline": 3800, "beast_rodent": 2600, "beast_bear": 5600,
-    "beast_equine": 6000, "beast_cervid": 5200, "beast_bovine": 6000, "beast_pig": 4800,
+    "beast_canine": 5400, "beast_feline": 3800, "beast_rodent": 2600, "beast_bear": 5600,
+    "beast_equine": 6600, "beast_cervid": 5200, "beast_bovine": 6000, "beast_pig": 4800,
     "beast_duck": 3800, "beast_swan": 4500, "beast_hen": 4000, "beast_songbird": 2600,
     "beast_snake": 3600, "beast_worm": 2600,
     # One of it in the default world, and it is nine metres long.
@@ -121,9 +121,15 @@ BUDGET = {
     "tree_fir": 2500, "tree_pine": 2300, "tree_cedar": 2400,
     # monsters.py. The legged ones pay for their legs: eight of them, each a
     # separate little surface, is where a spider's triangles go.
-    "beast_spider": 5000, "beast_beetle": 4600, "beast_scorpion": 4800, "beast_drider": 7200,
-    "beast_bat": 3400, "beast_mud": 5600, "beast_myconoid": 4400, "beast_ratman": 4600,
-    "beast_imp": 4600, "beast_naga": 5600, "beast_sandworm": 5000, "beast_basilisk": 6600,
+    "beast_spider": 5000, "beast_beetle": 4600, "beast_scorpion": 4800,
+    # Two in the world. Sixteen jointed, spined leg segments a side is where
+    # it goes, and a sculpted face with a head of hair on top of that.
+    "beast_drider": 12500,
+    "beast_bat": 3400, "beast_mud": 6800, "beast_myconoid": 4400, "beast_ratman": 4600,
+    "beast_imp": 4600, "beast_naga": 5600,
+    # One in the world, ten metres of it seen whole: rings, plates, spines,
+    # three toothed jaws and the crater it stands in.
+    "beast_sandworm": 9800, "beast_basilisk": 6600,
     "beast_dustdigger": 3000, "beast_camel": 4600,
     # Bones are all edges: a rib cage and a spine of knuckles do not decimate.
     "beast_dracolich": 9600,
@@ -143,7 +149,9 @@ FACE_BUDGET = 3800
 # Hair in locks: the sculpted mass and, for long hair, the fall. A woman's
 # hair to her shoulders is most of what reads of her at twenty metres, so it
 # is paid for; everything else on a head stays under the old cap.
-HAIR_BUDGET = {"hair_long": 8000, "turban": 1200, "face_ettin": 7200, "hair_braid": 3000, "hair_bun": 3000, "hair_tail": 3500,
+# A troll's face carries its own ragged hair, its tusks and pointed ears --
+# there are no head pieces in the troll file -- and an ettin's is two of it.
+HAIR_BUDGET = {"hair_long": 8000, "turban": 1200, "face_troll": 6500, "face_ettin": 13000, "hair_braid": 3000, "hair_bun": 3000, "hair_tail": 3500,
                "hair_short": 2600, "hair_crop": 1600, "hair_fringe": 1400, "beard_full": 1800,
                "beard_short": 1200, "moustache": 400}
 TREE_BUDGET = 1500

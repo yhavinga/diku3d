@@ -324,21 +324,58 @@ FEMALE = dict(
 )
 
 
-# A troll: a head taller than a man before it is scaled, hunched, with a
-# belly, arms that reach its knees, hands and feet half as big again, and a
-# face that is nose and brow. The rig is the same bones with the same names,
-# so every clip plays on it; the hunch is in the rest pose (see `hunch`).
+# A troll: a head taller than a man before it is scaled, and twice his mass:
+# a hump of muscle over the shoulders that the head sinks into, a barrel of a
+# chest over a belly, arms that reach its knees and swell at the forearm,
+# hands and feet half as big again with claws on them, short thick legs. The
+# rig is the same bones with the same names, so every clip plays on it; the
+# hunch is in the rest pose (see `base`). The old one had the canon's girths
+# a fifth up and read, under a judge's eye, as a lanky man in a loincloth.
 TROLL = dict(
     MALE, name="troll",
-    hip=(0.125, 0.0, 0.860), knee=(0.135, -0.022, 0.470), ankle=(0.145, 0.012, 0.095),
-    shoulder=(0.245, 0.020, 1.500), neck_base=1.535, head_joint=1.650, crown=1.860,
-    arm_a=26.0, arm_drop=0.036, upper=0.400, fore=0.380, hand=0.270,
-    hips=(0.205, 0.140, 0.150), waist=(0.215, 0.165, 0.125), chest=(0.232, 0.160, 0.160),
-    lats=0.252, neck=0.090, thigh=0.122, calf=0.092, knee_r=0.072, ankle_r=0.050,
-    upper_r=0.076, elbow_r=0.058, wrist_r=0.046, delt=0.100,
-    head=(0.092, 0.112, 0.122), jaw=0.086, chin=0.034, brow=2.4, nose=2.3,
-    breasts=0.0, belly=1.0,
+    hip=(0.135, 0.0, 0.840), knee=(0.150, -0.030, 0.460), ankle=(0.160, 0.012, 0.100),
+    shoulder=(0.280, 0.030, 1.480), neck_base=1.520, head_joint=1.630, crown=1.910,
+    arm_a=28.0, arm_drop=0.040, upper=0.420, fore=0.400, hand=0.300,
+    hips=(0.225, 0.160, 0.165), waist=(0.255, 0.215, 0.150), chest=(0.290, 0.200, 0.190),
+    lats=0.320, neck=0.118, thigh=0.150, calf=0.118, knee_r=0.088, ankle_r=0.064,
+    upper_r=0.102, elbow_r=0.078, wrist_r=0.064, delt=0.135,
+    head=(0.114, 0.136, 0.146), jaw=0.086, chin=0.034, brow=2.4, nose=2.3,
+    breasts=0.0, belly=1.6, troll=True,
 )
+
+
+def troll_bulk(P):
+    """What a troll carries that the canon has no station for: the hump of
+    trapezius the head sinks into, a belly slung in front, the swell of the
+    forearms, knuckles like walnuts. Plain ellipsoids, fused into the skin
+    with everything else."""
+    out = []
+    sz = P["shoulder"][2]
+    cw, cf, cb = P["chest"]
+    out.append(ellipsoid((0.0, cb * 0.55, sz + 0.035), (0.22, 0.15, 0.13), name="hump",
+                         rot=(math.radians(-18), 0, 0)))
+    out.append(ellipsoid((0.0, cb * 0.2, sz - 0.03), (0.3, 0.13, 0.1), name="traps"))
+    hz = P["hip"][2]
+    out.append(ellipsoid((0.0, -P["waist"][1] * 0.55, hz + 0.25), (0.22, 0.15, 0.2), name="belly"))
+    for sx in (-1, 1):
+        s, e, w, d = arm_axis(P, sx)
+        at = e + d * 0.13
+        fa = ellipsoid(tuple(at), (0.085, 0.16, 0.08), name="forearm_bulk", seg=18, rings=12)
+        _orient(fa, at, d)
+        out.append(fa)
+        at = s + d * 0.17
+        bi = ellipsoid(tuple(at + V((0, -0.02, 0))), (0.092, 0.15, 0.09), name="biceps", seg=18, rings=12)
+        _orient(bi, at, d)
+        out.append(bi)
+        # The pecs of a thing that climbs: broad slabs over the ribs.
+        out.append(ellipsoid((sx * 0.11, -cf + 0.05, sz - 0.14), (0.12, 0.05, 0.08), name="pec",
+                             rot=(math.radians(-12), 0, sx * math.radians(14))))
+        h, kn, a = leg_axis(P, sx)
+        th = ellipsoid(tuple(h.lerp(kn, 0.35) + V((sx * 0.02, -0.02, 0))), (0.13, 0.13, 0.2), name="quad")
+        out.append(th)
+        cf_ = ellipsoid(tuple(kn.lerp(a, 0.3) + V((0, 0.035, 0))), (0.085, 0.085, 0.12), name="calf")
+        out.append(cf_)
+    return out
 
 
 def arm_axis(P, side):
@@ -509,6 +546,8 @@ def hand(P, sx, w, d):
                 (0.0, rr, rr, rr), ((b - a).length + 0.004, rr * 0.9, rr * 0.9, rr * 0.9)],
                 sides=8, name="finger"))
             parts.append(ellipsoid(tuple(b), (rr * 0.92,) * 3, name="knuckle", seg=8, rings=6))
+        if P.get("troll"):
+            parts.append(claw(P, pts[-1], (pts[-1] - pts[-2]).normalized(), palm_n, r * k))
     # The thumb leaves the palm near the wrist, forward and towards the palm.
     tb = w + along * (0.030 * k) + across * (0.024 * k) + palm_n * (0.006 * k)
     tdir = (along * 0.6 + across * 0.55 + palm_n * 0.45).normalized()
@@ -522,7 +561,30 @@ def hand(P, sx, w, d):
                                         (0.032 * k, 0.0085 * k, 0.008 * k, 0.008 * k)],
                            sides=8, name="thumb"))
     parts.append(ellipsoid(tuple(t2), (0.0085 * k,) * 3, seg=8, rings=6, name="thumbtip"))
+    if P.get("troll"):
+        parts.append(claw(P, t2, t2dir, palm_n, 0.0085 * k))
     return parts
+
+
+# Claws, per body: where each one runs, so the skin fused over them can be
+# painted as horn afterwards. Reset by `body_parts`.
+CLAWS = []
+
+
+def claw(P, tip, along, curl, r):
+    """A hooked claw off the end of a digit: a cone that bends towards the
+    palm (or the ground), as long as the last joint."""
+    along = V(along).normalized()
+    curl = V(curl).normalized()
+    a = V(tip) - along * r * 0.4
+    mid = a + along * r * 2.0 + curl * r * 0.35
+    end = mid + (along * 0.6 + curl * 0.8).normalized() * r * 1.6
+    CLAWS.append((a, mid, end, r))
+    one = ring_loft(a, mid - a, [(0.0, r * 0.95, r * 0.8, r * 0.9), ((mid - a).length, r * 0.7, r * 0.55, r * 0.6)],
+                    sides=8, name="claw")
+    two = ring_loft(mid, end - mid, [(-0.002, r * 0.7, r * 0.55, r * 0.6), ((end - mid).length, r * 0.12, r * 0.1, r * 0.1)],
+                    sides=8, name="claw")
+    return join([one, two], "claw")
 
 
 def leg(P, sx):
@@ -559,7 +621,18 @@ def foot(P, sx, a):
     rings = [(t * k, rx * k, rf * k, rb * k, ox, oy * k, pw) for (t, rx, rf, rb, ox, oy, pw) in rings]
     # Along -Y; "front" of the ring (v) is up here, so rf is the instep.
     obj = ring_loft(base, (0, -1, 0), rings, sides=16, side=(1, 0, 0), name="foot")
-    return obj
+    if not P.get("troll"):
+        return obj
+    # Four splayed toes over the front of the sole, each ending in a claw
+    # that bites into the ground.
+    out = [obj]
+    for i, off in enumerate((-0.030, -0.010, 0.010, 0.029)):
+        rt = (0.0125 - 0.0015 * abs(i - 1.2)) * k
+        at = V((a.x + sx * off * k, base.y - 0.236 * k, 0.017 * k))
+        toe = ellipsoid(tuple(at), (rt, rt * 1.7, rt * 0.95), name="toe", seg=10, rings=8)
+        out.append(toe)
+        out.append(claw(P, at + V((0, -rt * 1.4, 0)), (0, -1, -0.35), (0, 0, -1), rt * 0.75))
+    return join(out, "foot")
 
 
 # --- the head -------------------------------------------------------------
@@ -613,7 +686,8 @@ def faces(P):
 # --- assembly -------------------------------------------------------------
 
 def body_parts(P):
-    parts = [torso(P)] + shoulders(P) + breasts(P)
+    CLAWS.clear()
+    parts = [torso(P)] + shoulders(P) + (troll_bulk(P) if P.get("troll") else breasts(P))
     for sx in (-1, 1):
         parts += arm(P, sx)
         parts += leg(P, sx)
@@ -622,8 +696,88 @@ def body_parts(P):
 
 def build_body(P, target=2700):
     parts = body_parts(P)
-    return fuse(parts, "body_" + P["name"], voxel=0.0045, smooth=3, smooth_factor=0.5,
-                target=target)
+    if not P.get("troll"):
+        return fuse(parts, "body_" + P["name"], voxel=0.0045, smooth=3, smooth_factor=0.5,
+                    target=target)
+    body = fuse(parts, "body_" + P["name"], voxel=0.0045, smooth=3, smooth_factor=0.5,
+                target=4400, mat="warthide")
+    drop_islands(body)
+    hide_colours(body, P)
+    return body
+
+
+def drop_islands(obj, keep=200):
+    """Delete loose bits the remesh broke off -- the point of a claw finer
+    than a voxel comes away as a speck -- which bone heat cannot weight."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    seen = set()
+    doomed = []
+    for v in bm.verts:
+        if v.index in seen:
+            continue
+        stack, island = [v], []
+        seen.add(v.index)
+        while stack:
+            x = stack.pop()
+            island.append(x)
+            for e in x.link_edges:
+                o = e.other_vert(x)
+                if o.index not in seen:
+                    seen.add(o.index)
+                    stack.append(o)
+        if len(island) < keep:
+            doomed += island
+    if doomed:
+        bmesh.ops.delete(bm, geom=doomed, context="VERTS")
+    bm.to_mesh(obj.data)
+    bm.free()
+    return len(doomed)
+
+
+def hide_colours(body, P):
+    """A troll's hide in vertex colour, which the per-mobile skin tint
+    multiplies: darker over the back and the tops of the arms, paler down
+    the belly and the insides of the limbs, blotched all over, and the claws
+    horn. Painted in the A-pose the body is fused in, so it rides with the
+    skin through every repose after."""
+    import numpy as np
+    import heads
+    me = body.data
+    co = np.array([v.co[:] for v in me.vertices])
+    n = np.array([v.normal[:] for v in me.vertices])
+    rng = np.random.default_rng(83)
+    lat = rng.random((24, 24, 24))
+
+    def noise(p, cell):
+        q = p / cell
+        i = np.floor(q).astype(int)
+        f = q - i
+        f = f * f * (3 - 2 * f)
+        out = 0.0
+        for dx in (0, 1):
+            for dy in (0, 1):
+                for dz in (0, 1):
+                    w = ((f[:, 0] if dx else 1 - f[:, 0]) * (f[:, 1] if dy else 1 - f[:, 1])
+                         * (f[:, 2] if dz else 1 - f[:, 2]))
+                    out = out + w * lat[(i[:, 0] + dx) % 24, (i[:, 1] + dy) % 24, (i[:, 2] + dz) % 24]
+        return out
+    blotch = noise(co, 0.11) * 0.65 + noise(co + 3.1, 0.035) * 0.35
+    back = np.clip(n[:, 1] * 0.8 + n[:, 2] * 0.35, 0, 1)          # facing back and up
+    belly = np.clip(-n[:, 1] * 0.9, 0, 1) * np.clip((P["shoulder"][2] - 0.1 - co[:, 2]) / 0.3, 0, 1) \
+        * np.clip((co[:, 2] - P["hip"][2] + 0.05) / 0.2, 0, 1) * (np.abs(co[:, 0]) < 0.2)
+    k = 0.97 + 0.2 * (blotch - 0.5) - 0.13 * back + 0.1 * belly
+    col = np.stack([k * 1.0, k * 1.0, k * 0.96], 1)
+    horn = np.array([0.34, 0.28, 0.2])
+    for (a, mid, end, r) in CLAWS:
+        for (p0, p1) in ((a, mid), (mid, end)):
+            p0, p1 = np.array(p0[:]), np.array(p1[:])
+            d = p1 - p0
+            t = np.clip(((co - p0) @ d) / (d @ d), 0, 1)
+            dist = np.linalg.norm(co - (p0 + t[:, None] * d), axis=1)
+            near = np.clip((r * 1.25 - dist) / (r * 0.4), 0, 1) * np.clip((t + 0.2) / 0.4, 0, 1)
+            col = col * (1 - near[:, None]) + horn[None, :] * near[:, None]
+    heads.set_colors(body, np.clip(col, 0, 1))
 
 
 def base(P, target=2700):
@@ -714,6 +868,18 @@ def build_file(fname):
         meshes.append(o)
         report.append("%-16s %5d tris" % ("arch_" + n if fname != "troll" else "arch_troll",
                                           tri_count(o)))
+    if P.get("troll"):
+        # The body carries its hide colours; what was joined onto it from a
+        # piece that had none came in black, and is put back to white.
+        for o in meshes:
+            hide = o.data.materials.find("MAT:warthide")
+            col = o.data.color_attributes.get("Col")
+            if col is None:
+                continue
+            for pl in o.data.polygons:
+                if pl.material_index != hide:
+                    for vi in pl.vertices:
+                        col.data[vi].color = (1.0, 1.0, 1.0, 1.0)
     for f in fs:
         meshes.append(f)
         report.append("%-16s %5d tris" % (f.name, tri_count(f)))
