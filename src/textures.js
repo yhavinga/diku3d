@@ -2098,6 +2098,79 @@ const SURFACES = {
   },
 
   /**
+   * The marsh fortress, "hewn of black stone and heavily fortified": big
+   * dressed blocks of a dark basalt, coursed, 0.6 m to a course and a metre
+   * or more long, with pale lime weeping out of the joints and grey
+   * weathering on the faces. Black stone is not ink -- a basalt ashlar in
+   * sun is a dark slate grey, and the lime and the lichen are what show its
+   * courses from across a lake.
+   */
+  blackstone(u, v, s) {
+    const rows = 6;
+    const row = Math.floor(v * rows);
+    const cols = row % 3 === 0 ? 3 : 4;
+    const gx = u * cols + ((row * 0.37) % 1);
+    const col = Math.floor(gx);
+    const fx = gx - col; const fy = v * rows - row;
+    const w = 3.6 / cols; const h = 3.6 / rows;
+    const jx = 0.01 / w; const jy = 0.01 / h;
+    const inBlock = fx > jx && fx < 1 - jx && fy > jy && fy < 1 - jy;
+    const bevel = clamp01(Math.min((fx - jx) * w, (1 - jx - fx) * w, (fy - jy) * h, (1 - jy - fy) * h) / 0.035);
+    const id = hash2(col + row * 7, row, 64, 1201);
+    const grain = fbm(u * 48 + id * 5, v * 48, 48, 1203, 3);
+    const weather = fbm(u * 5, v * 5, 5, 1207, 4);
+    const lichen = clamp01((fbm(u * 14, v * 14, 14, 1209, 3) - 0.58) * 5);
+    // Albedo goes through the gamma lift, which takes 0x16 to about 0x3a:
+    // the town's stone is 0x8d, so this is under half of it once lit.
+    const block = mix(rgb(0x121113), rgb(0x1f1d1e), id);
+    const face = mix(mix(block, rgb(0x353331), weather * 0.3), rgb(0x0c0b0c), (1 - bevel) * 0.3 + grain * 0.12);
+    // Lime leached out of the joint and run down the face below it.
+    const weep = clamp01(1 - fy * 3.5) * clamp01(fbm(u * 40, v * 3, 40, 1211, 2) * 2 - 0.7);
+    s.color = inBlock
+      ? mix(mix(face, rgb(0x46463e), lichen * 0.5), rgb(0x55524c), weep * 0.3)
+      : mix(rgb(0x2e2c2a), rgb(0x3a3834), grain);
+    s.height = inBlock ? 0.6 + bevel * 0.32 + grain * 0.07 : 0.1;
+    s.rough = inBlock ? 0.66 + grain * 0.2 + lichen * 0.1 : 0.94;
+  },
+
+  /**
+   * "Its black obsidian surface shines darkly": volcanic glass, black in its
+   * body and all reflection on its faces, with the shell-shaped ripples a
+   * conchoidal fracture leaves and a faint grey banding from how it flowed.
+   * The darkness is the albedo's; the shine is the environment's.
+   */
+  obsidian(u, v, s) {
+    const [d1, edge, id] = cellular(u * 3, v * 3, 3, 1301, 0.5);
+    // Ripples running out from each fracture's point of impact, dying away.
+    // Faint: at full strength the rings read as a carved spiral pattern.
+    const ripple = Math.sin(d1 * 22 + id * 6) * Math.exp(-d1 * 3.5);
+    const ridge = clamp01(1 - edge * 22);
+    const band = fbm(u * 2, v * 18, 2, 1303, 3);
+    // The fracture edges only in the gloss, not the colour or the relief: as
+    // lines they tiled into a crackle net across the whole stone.
+    s.color = mix(rgb(0x0f0e12), rgb(0x1a1820), band);
+    s.height = 0.5 + ripple * 0.035;
+    s.rough = 0.07 + ridge * 0.06 + band * 0.05;
+  },
+
+  /**
+   * Cast bronze that has stood a century in the rain: the metal still shows
+   * brown where hands and weather wear it smooth, and verdigris lies in
+   * everything sheltered. The Market Square's worm is cast in it.
+   */
+  bronze(u, v, s) {
+    const patch = fbm(u * 4, v * 4, 4, 1401, 4);
+    const fine = fbm(u * 30, v * 30, 30, 1403, 3);
+    const run = fbm(u * 18, v * 3, 18, 1405, 2);
+    const green = clamp01((patch * 0.7 + run * 0.3 - 0.42) * 3.2);
+    const metal = mix(rgb(0x7a5733), rgb(0x9a7446), fine);
+    s.color = mix(metal, mix(rgb(0x4f8a74), rgb(0x76ad95), fine), green);
+    s.height = 0.5 + fine * 0.08 + green * 0.06;
+    s.rough = 0.38 + green * 0.45 + fine * 0.1;
+    s.metal = 0.85 * (1 - green);
+  },
+
+  /**
    * The floor of a burnt-out room: fine grey ash over whatever the floor was,
    * with charcoal lumps, and here and there a brick or a tile that came down
    * with the roof. Dry and matt all through.
@@ -2489,6 +2562,12 @@ const RECIPES = {
   oldbone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 0.7, wet: 0, detail: 0.3 },
   // Ice Dragon Way's smashed crystal statues: nearly all reflection.
   crystal: { surface: 'crystal', scale: 0.8, normalScale: 0.35, env: 1.7, wet: 0, detail: 0.1 },
+  // Set pieces (tools/blender/setpiece.py): the marsh fortress's black stone,
+  // the monolith's volcanic glass, the Market Square worm's bronze. The two
+  // dark ones take `lift` for the same reason soot does.
+  blackstone: { surface: 'blackstone', scale: 3.6, normalScale: 0.9, env: 0.75, lift: true, wet: 0, detail: 0.5 },
+  obsidian: { surface: 'obsidian', scale: 3.2, normalScale: 0.3, env: 1.5, lift: true, wet: 0, detail: 0.1 },
+  bronze: { surface: 'bronze', scale: 1.2, normalScale: 0.4, env: 1.1, wet: 0, detail: 0.3 },
   // The animals. A 0.4 m tile is a hand's-breadth clump pattern on a dog and
   // still reads as a coat on a horse. `moving` keeps the world-space effects
   // off them: a splash line fixed to the paving and a grain fixed to the world
