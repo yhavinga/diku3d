@@ -52,6 +52,26 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Creatures, second pass (worm, troll, drider, fur)
+
+- **Head shape tables must run in ascending height.** `heads._loft_scale`
+  feeds them to `np.interp`, and a top-down table silently returns the last
+  factor everywhere: the old troll head was 50% wider than intended. The
+  female, wererat and mind-flayer tables are still top-down and were left
+  alone so their faces don't move — fix them deliberately, not in passing.
+- **Joining meshes fills a missing colour attribute with black.**
+- **Bone heat on the troll is fragile**: moving its neck joint 1 cm left
+  1,348 vertices unweighted; remesh specks break it too
+  (`people.drop_islands`).
+- **Transparent effect meshes need `layers.set(OVERLAY_LAYER)`** or the AO
+  pass draws them as hard squares.
+- **Unlit particles in the ground's own colour are dark smudges on sunlit
+  sand**; light them with an upward normal.
+- **`fbm` and `cellular` take one period for both axes**, so stretched
+  noise that tiles needs separate wrapping per axis.
+- Fur UVs now follow the lie of the hair; that, not more relief, is what
+  stopped the wolves reading as grey clay.
+
 ### Draw calls, interiors and the district finished (wave3-polish)
 
 - **Where the calls went:** one InstancedMesh per chunk per model per
