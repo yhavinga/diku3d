@@ -2438,7 +2438,9 @@ export function populate(world, layout, built, options = {}) {
   const assets = options.assets || null;
   // A prop in a room is lit as the room is (see `indoorGeometry` in assets.js).
   const instances = assets ? new InstanceBatch(assets, {
-    indoorAt: (x, y, z) => { const info = roomInfoAt(x, y, z); return !!info && !info.outdoor && !isBuriedRoom(info); },
+    // By the walls, not the mud's INDOORS flag: that means "no sky" and is on
+    // forty-odd of Haon Dor's forest rooms, whose trees are out of doors.
+    indoorAt: (x, y, z) => { const info = roomInfoAt(x, y, z); return info?.openAir === false && !isBuriedRoom(info); },
   }) : null;
   // The rooms' furniture is batched apart from the street's props and never
   // instanced (see the end of `populate`).

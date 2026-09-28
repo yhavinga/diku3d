@@ -2018,7 +2018,9 @@ export function buildScene(world, layout, materials, assets = null) {
       arrive = { x: pos.x + ax * HOLE_CENTRE + bx * 3.45, z: pos.z + az * HOLE_CENTRE + bz * 3.45 };
     }
     rooms.set(room.vnum, {
-      room, cell, center: new THREE.Vector3(arrive.x, pos.y, arrive.z), outdoor,
+      // `openAir` is the geometry's answer (no walls round it), for what is
+      // placed later and must be lit as the room is.
+      room, cell, center: new THREE.Vector3(arrive.x, pos.y, arrive.z), outdoor, openAir,
       chunk, materials: mats, sides,
     });
 
