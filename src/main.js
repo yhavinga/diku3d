@@ -1051,7 +1051,10 @@ async function boot() {
       const link = Math.abs(oy) < 3.2 && layout.links.find((l) => l.kind === 'alley' && l.path && l.to
         && ((l.from.vnum === room.vnum && l.to.vnum === exit.to)
           || (l.to.vnum === room.vnum && l.from.vnum === exit.to)));
-      if (link && link.path.length <= 6) {
+      // Any length: Wall Road is nineteen cells from the East Gate to the
+      // neighborhood, and a step south from #3041 used to cut to black
+      // because of it -- the only route in the nine areas over six cells.
+      if (link) {
         const cells = link.from.vnum === room.vnum ? link.path : [...link.path].reverse();
         const points = cells.map((c) => ({ x: c.x * CELL, y: target.center.y, z: c.z * CELL }));
         points.push(target.center);
