@@ -4861,7 +4861,7 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
       if (!isBuried(endMats, end)) {
         closeCorners({
           batcher, pos: worldOf(end), dir: dirBetween(end, next), chunk: chunkOf(end),
-          material: mats.wallIn, floor: mats.floor, addCollider,
+          material: mats.wallIn, floor: mats.floor, ceiling: mats.ceil, addCollider,
         });
         continue;
       }
@@ -5567,7 +5567,7 @@ function closeDoorway({ batcher, pos, dir, chunk, material, addCollider }) {
  * face -- the temple's columns and windows -- to be seen down the corridor,
  * which a face across the cell edge (`closeDoorway`) would hide.
  */
-function closeCorners({ batcher, pos, dir, chunk, material, floor, addCollider }) {
+function closeCorners({ batcher, pos, dir, chunk, material, floor, ceiling, addCollider }) {
   const y = pos.y;
   const H = CEIL + SLAB;
   // And the strip of floor in front of the room's face, where the grass 0.47 m
@@ -5575,6 +5575,12 @@ function closeCorners({ batcher, pos, dir, chunk, material, floor, addCollider }
   // doorway's own threshold wins wherever the two overlap.
   const f = sewerRect(pos, dir, ROOM / 2, HALF, -HALF, HALF);
   batcher.add(plane(f.x1 - f.x0, f.z1 - f.z0, 2), floor, place((f.x0 + f.x1) / 2, y - 0.01, (f.z0 + f.z1) / 2), { chunk });
+  // And over the same strip the corridor's ceiling carried on to the room's
+  // face: it stopped at the cell edge, and over a low front -- the Cleric's
+  // Bar -- the sky showed between the two.
+  const c = sewerRect(pos, dir, SHELL - 0.05, HALF, -HALF, HALF);
+  batcher.add(box(c.x1 - c.x0, SLAB, c.z1 - c.z0), ceiling,
+    place((c.x0 + c.x1) / 2, y + CEIL + SLAB / 2, (c.z0 + c.z1) / 2), { chunk, ao: () => 0.6 });
   for (const s of [-1, 1]) {
     const r = sewerRect(pos, dir, SHELL - 0.05, HALF, s * (SHELL - 0.05), s * HALF);
     batcher.add(box(r.x1 - r.x0, H, r.z1 - r.z0), material,
