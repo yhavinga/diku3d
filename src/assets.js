@@ -14,6 +14,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { interiorGlass, markPanes } from './windows.js';
 
 const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
@@ -101,6 +102,14 @@ const TAG_MATERIALS = {
     color: 0xd8c48a, roughness: 0.12, metalness: 0,
     transparent: true, opacity: 0.55, emissive: 0x000000,
   },
+  // The glass in a house's windows, as against a lantern's: dark, because
+  // what a window shows is the room behind it (windows.js) and the sky it
+  // mirrors, and the pale lantern glass laid on a facade read by day as a
+  // cream panel and by night as a flat lit one.
+  windowpane: {
+    color: 0x1c222a, roughness: 0.08, metalness: 0.25, envMapIntensity: 1.3,
+    emissive: 0x000000,
+  },
 };
 /** Tags whose flat material wants the shared grain, at this strength. */
 const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6, bone: 0.5, velvet: 0.3, earthenware: 0.3, bread: 0.5, soot: 0.6 };
@@ -131,6 +140,9 @@ export class AssetLibrary {
     if (recipe) {
       const material = new THREE.MeshStandardMaterial({ vertexColors: true, ...recipe });
       material.name = tag;
+      // After dark the panes on the models show a room behind them, and a
+      // share of them an empty one: this glass has no per-house choice made.
+      if (tag === 'windowpane') interiorGlass(material, { allowDark: true, day: 'hour', opaque: true });
       material.userData.uvScale = 1;
       // Flat does not have to mean featureless. Cloth and skin are tinted per
       // person and would look wrong wearing a stone pattern, but with no map
@@ -176,10 +188,12 @@ export class AssetLibrary {
    * has not one window on.
    */
   setWindowLight(colourHex, intensity) {
-    const glass = this.extra.get('glass');
-    if (!glass) return;
-    glass.emissive.setHex(colourHex);
-    glass.emissiveIntensity = Math.max(0, intensity);
+    for (const tag of ['glass', 'windowpane']) {
+      const glass = this.extra.get(tag);
+      if (!glass) continue;
+      glass.emissive.setHex(colourHex);
+      glass.emissiveIntensity = Math.max(0, intensity);
+    }
   }
 
   /**
@@ -233,7 +247,15 @@ export class AssetLibrary {
     gltf.scene.updateMatrixWorld(true);
     gltf.scene.traverse((node) => {
       if (!node.isMesh || !node.geometry) return;
-      const materialName = tagOf(node.material);
+      let materialName = tagOf(node.material);
+      // Glass spanning more than a lantern is a window, and has a room
+      // behind it; a lantern's four small panes keep the plain glow.
+      if (materialName === 'glass') {
+        node.geometry.computeBoundingBox();
+        const size = node.geometry.boundingBox.getSize(new THREE.Vector3()).applyMatrix4(
+          new THREE.Matrix4().extractRotation(node.matrixWorld));
+        if (Math.max(Math.abs(size.x), Math.abs(size.z)) > 0.6) materialName = 'windowpane';
+      }
       const material = this.materialFor(materialName);
 
       takeColour(node.geometry);
@@ -266,6 +288,9 @@ export class AssetLibrary {
         const count = geometry.attributes.position.count;
         geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
       }
+      // Glass samples no texture; its UVs carry where on its own pane each
+      // vertex is, which is what the room behind it is laid out from.
+      if (materialName === 'windowpane') markPanes(geometry);
       geometry.computeBoundingBox();
       bounds.union(geometry.boundingBox);
       primitives.push({ geometry, material, materialName, skinned: !!node.isSkinnedMesh });
@@ -620,14 +645,14 @@ export const ASSET_NAMES = [
   'temple_wall_solid', 'temple_wall_door', 'temple_corner', 'temple_roof',
   'temple_steps', 'temple_column',
   'wall_solid', 'wall_door', 'wall_corner', 'wall_roof',
-  'temple', 'market_stall', 'well', 'fountain', 'lamp_post', 'hanging_sign',
+  'temple', 'market_stall', 'well', 'fountain', 'lamp_post', 'hanging_sign', 'grate_leaf', 'wall_lantern',
   'signpost', 'stone_arch', 'portcullis', 'torch_sconce', 'chimney_pot',
   'door_leaf', 'door_round', 'log_cabin',
   'barrel', 'crate', 'sack', 'hay_bale', 'handcart', 'bench', 'trough',
   'stacked_crates', 'barrel_stack', 'firewood_pile', 'water_butt', 'bucket',
   'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',
   'tree_oak', 'tree_pine', 'bush', 'grass_tuft',
-  'tree_fir', 'tree_snag', 'fern', 'salal_bush', 'moss_rock',
+  'tree_fir', 'tree_cedar', 'tree_snag', 'fern', 'salal_bush', 'moss_rock',
   'reed_clump', 'tussock', 'dead_log',
   'headstone', 'grave_slab', 'iron_fence',
   // the sewer: tools/blender/sewer.py

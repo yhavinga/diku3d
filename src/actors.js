@@ -14,6 +14,7 @@ import { ITEM, SECTOR, ACT_AGGRESSIVE, ACT_SENTINEL } from './are.js';
 import { hash3, ROOM, CEIL, PIECES } from './build.js';
 import { InstanceBatch, FURNITURE_NAMES } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
+import { interiorGlass, markPanes } from './windows.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createNav } from './nav.js';
 import { createMotion } from './motion.js';
@@ -2797,7 +2798,7 @@ export function populate(world, layout, built, options = {}) {
       // repeating a name is how a species gets weighted); everywhere else --
       // parks, field edges -- keeps the broadleaf mix it always had.
       const kind = (t.conifer
-        ? model(['tree_fir', 'tree_fir', 'tree_fir', 'tree_pine', 'tree_oak'], strHash(`${t.x},${t.z}`, 2))
+        ? model(['tree_fir', 'tree_fir', 'tree_cedar', 'tree_pine', 'tree_oak'], strHash(`${t.x},${t.z}`, 2))
         : model(['tree_oak', 'tree_pine'], strHash(`${t.x},${t.z}`, 2))) || treeModel;
       instances.add(kind, {
         x: t.x, y: t.y, z: t.z,
@@ -2945,14 +2946,10 @@ export function populate(world, layout, built, options = {}) {
         color: 0x141a24, roughness: 0.10, metalness: 0.22,
         envMapIntensity: 1.25, transparent: true, opacity: 0.86,
       });
-      glow.onBeforeCompile = (shader) => {
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <emissivemap_fragment>',
-          '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance *= vColor.rgb;',
-        );
-      };
+      // A room behind every lit pane, tinted by the pane's vertex colour.
+      interiorGlass(glow, { tint: true, opaque: true });
       glowMaterial = glow;
-      const mesh = new THREE.Mesh(mergeGeometries(panes, false), glow);
+      const mesh = new THREE.Mesh(markPanes(mergeGeometries(panes, false)), glow);
       group.add(mesh);
     }
     if (dark.length) {
@@ -2984,6 +2981,9 @@ export function populate(world, layout, built, options = {}) {
       // the hour's haze colour by setDaylight(), so it goes out at night and
       // the lit-window glow takes over.
       glass.emissive = new THREE.Color(0x000000);
+      // ...and what that daylight shows is a room, not a flat panel -- nor,
+      // opaque, the masonry of the wall the pane is laid on.
+      interiorGlass(glass, { opaque: true, day: 'day' });
       glassMaterial = glass;
       const mesh = new THREE.Mesh(mergeGeometries(dark, false), glass);
       mesh.receiveShadow = true;
@@ -3086,7 +3086,14 @@ export function populate(world, layout, built, options = {}) {
     }
     return leaf;
   };
-  const makeLeaf = (leafWidth, height) => {
+  // Same hinge and reference size as `door_leaf`, in iron bars: a grate.
+  const grateAsset = assets ? assets.get('grate_leaf') : null;
+  const makeLeaf = (leafWidth, height, grate = false) => {
+    if (grate && grateAsset) {
+      const leaf = primitivesOf(grateAsset);
+      leaf.scale.set(leafWidth / LEAF_W, (height - 0.05) / LEAF_H, 1);
+      return leaf;
+    }
     if (leafAsset) {
       const leaf = primitivesOf(leafAsset);
       leaf.scale.set(leafWidth / LEAF_W, (height - 0.05) / LEAF_H, 1);
@@ -3153,7 +3160,7 @@ export function populate(world, layout, built, options = {}) {
       pivot.rotation.y = spec.rotY;
       const leaf = spec.round
         ? makeRoundLeaf(Math.min(spec.width, spec.height))
-        : makeLeaf(leafWidth, spec.height);
+        : makeLeaf(leafWidth, spec.height, spec.grate);
       // The right-hand leaf is the left one mirrored, so its boards run back
       // toward the middle and its straps still face the street. A negative
       // scale flips the winding; three flips the front face with it.

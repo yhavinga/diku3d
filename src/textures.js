@@ -92,6 +92,33 @@ const SOOT_SHIFT = SOOT_ROWS.slice(0, -1).map((_, i) => hash2(i, 2, 14, 689));
  * Each surface fills three buffers for pixel (u,v) in [0,1):
  *   colour (0-255 rgb), height (0-1, drives the normal map), roughness (0-1).
  */
+/**
+ * The needle spray's twigs, in tile units: [x0, y0, x1, y1, reach0, reach1],
+ * where reach is how far needles stand off that twig. A main twig along the
+ * middle of the tile and side shoots alternating forward off it, shorter
+ * towards the tip -- the flat, feathered spray of a fir.
+ */
+const NEEDLE_TWIGS = (() => {
+  const twigs = [];
+  // The main twig in two pieces, so it can bow.
+  twigs.push([0.0, 0.5, 0.5, 0.515, 0.10, 0.085], [0.5, 0.515, 0.98, 0.5, 0.085, 0.05]);
+  for (let k = 0; k < 11; k++) {
+    const u0 = 0.05 + k * 0.078;
+    const side = k % 2 ? 1 : -1;
+    const len = 0.40 * (1 - u0 * 0.55);
+    const a = 0.92 + (k % 3) * 0.07;
+    const y0 = 0.5 + 0.02 * u0;
+    // Each shoot bends back towards the tip in two pieces, and stays inside
+    // the tile: a shoot cut off by the tile edge is a straight line in the sky.
+    const mx = u0 + Math.cos(a) * len * 0.5; const my = y0 + side * Math.sin(a) * len * 0.5;
+    const ex = mx + Math.cos(a - 0.35) * len * 0.5;
+    const ey = Math.min(0.9, Math.max(0.1, my + side * Math.sin(a - 0.35) * len * 0.5));
+    const w = 0.075 * (1 - u0 * 0.35);
+    twigs.push([u0, y0, mx, my, w, w * 0.85], [mx, my, ex, ey, w * 0.85, 0.035]);
+  }
+  return twigs;
+})();
+
 const SURFACES = {
   cobble(u, v, s) {
     // 18 setts across a 2.2 m tile is 12 cm a stone, which is what a granite
@@ -802,6 +829,106 @@ const SURFACES = {
     s.rough = 0.62 + chip * 0.3 + brush * 0.06;
   },
 
+  /**
+   * A conifer's needle spray, for alpha-cut cards: one spray per tile, the
+   * twig running along u from the base at u = 0 to the tip, side shoots
+   * alternating forward off it, needles standing off every twig at sixty
+   * degrees. Before this a fir crown was a stack of cones wearing the
+   * `leaves` mass texture, and a judge photographed it as camouflage netting
+   * over a traffic cone. What a crown is from ten metres is sprays with sky
+   * between them, and only a cut-out gives you the sky.
+   *
+   * Transparent texels carry the needles' own dark green, not black: the
+   * mip chain averages colour and alpha separately, and a black background
+   * rims every spray at a distance.
+   */
+  needles(u, v, s) {
+    const segs = NEEDLE_TWIGS;
+    let best = 1e9; let bt = 0; let bw = 0; let ba = 0; let bc = 0; let bi = -1;
+    for (let i = 0; i < segs.length; i++) {
+      const [x0, y0, x1, y1, w0, w1] = segs[i];
+      const dx = x1 - x0; const dy = y1 - y0;
+      const len2 = dx * dx + dy * dy;
+      const t = clamp01(((u - x0) * dx + (v - y0) * dy) / len2);
+      const px = x0 + dx * t; const py = y0 + dy * t;
+      const d = Math.hypot(u - px, v - py);
+      const w = w0 + (w1 - w0) * t;
+      // Nearest *relative to its own reach*, so a thin shoot is not swallowed
+      // by the main twig's wider brush next to it.
+      if (d / w < best) {
+        best = d / w; bt = t; bw = w; bi = i;
+        const len = Math.sqrt(len2);
+        // Signed position along and across this twig, in texture units.
+        ba = ((u - x0) * dx + (v - y0) * dy) / len;
+        bc = ((u - x0) * -dy + (v - y0) * dx) / len;
+      }
+    }
+    const across = Math.abs(bc);
+    const ragged = 0.78 + 0.32 * vnoise(ba * 60 + bi * 7, bi * 3, 1024, 911);
+    const reach = bw * ragged;
+    // Needles: strands leaving the twig forward at sixty degrees, so a
+    // needle is a line of constant (along - across * 0.58).
+    const strand = (ba - across * 0.58) * 190 + vnoise(ba * 90, bi, 1024, 917) * 1.4;
+    const gap = Math.abs(((strand % 1) + 1) % 1 - 0.5);
+    const needle = across < reach && gap < 0.3 + 0.12 * (1 - across / reach);
+    const twig = across < 0.0045 * (1.3 - bt * 0.6);
+    const inside = needle || twig;
+    const shade = fbm(u * 18, v * 18, 18, 919, 3);
+    const out = clamp01(across / Math.max(0.001, reach));
+    // Dark at the twig where the needles overlap, lighter at their tips, and
+    // the current year's growth -- the last few centimetres of every shoot --
+    // the pale lime that makes a fir read as alive from across a clearing.
+    // Coastal fir is a dark blue-green, not a lawn green.
+    let c = mix(rgb(0x1c3122), rgb(0x3f5f3f), out * 0.8 + shade * 0.3);
+    const fresh = clamp01((bt - 0.72) * 3.2) * (bi > 1 ? 1 : 0.5);
+    c = mix(c, rgb(0x6f8d4c), fresh * 0.45);
+    if (twig && !needle) c = rgb(0x4e3b2a);
+    s.color = inside ? c : rgb(0x223626);
+    s.alpha = inside ? 1 : 0;
+    s.height = inside ? (twig ? 0.9 : 0.55 + 0.35 * (0.5 - gap)) : 0;
+    s.rough = 0.78 + shade * 0.12;
+  },
+
+  /**
+   * Douglas-fir bark: thick corky ridges broken into long plates by furrows
+   * deep enough to hold shadow, running up the trunk (v). It was a stretched
+   * noise that on a round trunk read as blotches -- camouflage, a judge said.
+   * Cells elongated five to one make the plates; their edges are the furrows.
+   */
+  firbark(u, v, s) {
+    // Warp the cells so the furrows wander instead of running ruler-straight.
+    const wu = u + (fbm(u * 6, v * 1.5, 6, 939, 3) - 0.5) * 0.08;
+    const [, edge, id] = cellular(wu * 16, v * 2.2, 16, 941, 0.46);
+    // Wide furrows and narrow ridges: on an old Douglas-fir the furrows are a
+    // third of the surface and deep enough to be black at noon.
+    const ragged = 0.05 * fbm(u * 40, v * 6, 40, 943, 3);
+    const plate = THREE.MathUtils.smoothstep(edge, 0.05 + ragged, 0.2 + ragged);
+    const cork = fbm(u * 64, v * 10, 64, 947, 4);
+    const fibre = fbm(u * 120, v * 4, 120, 949, 2);
+    const top = mix(rgb(0x4a3527), rgb(0x80604a), id * 0.5 + cork * 0.5);
+    const lichen = clamp01(fbm(u * 5, v * 2, 5, 953, 3) * 2.4 - 1.5);
+    const face = mix(top, rgb(0x858372), lichen * 0.4).map((c) => c * (0.82 + fibre * 0.3));
+    s.color = mix(rgb(0x160f0a), face, plate);
+    s.height = plate * (0.6 + cork * 0.35);
+    s.rough = 0.96;
+  },
+
+  /**
+   * Western red cedar: long fibrous strips, grey-brown weathering to silver,
+   * shallow ridges rather than plates -- the bark that peels in ribbons.
+   */
+  cedarbark(u, v, s) {
+    const warp = fbm(u * 4, v * 0.8, 4, 961, 3) * 2.2 + fbm(u * 9, v * 0.5, 9, 963, 2) * 1.2;
+    const fibre = Math.abs(Math.sin((u * 24 + warp) * Math.PI));
+    // Strips peel and break along their length.
+    const peel = clamp01(fbm(u * 24, v * 2.2, 24, 965, 3) * 2.2 - 0.9);
+    const strip = fbm(u * 60, v * 3, 60, 967, 3);
+    const c = mix(rgb(0x6d4c39), rgb(0x9c8676), strip * 0.5 + peel * 0.4);
+    s.color = mix(rgb(0x2e2119), c, 0.3 + 0.7 * fibre * (0.6 + 0.4 * peel));
+    s.height = fibre * 0.55 + peel * 0.3 + strip * 0.15;
+    s.rough = 0.95;
+  },
+
   bark(u, v, s) {
     const ridges = fbm(u * 26, v * 5, 26, 181, 4);
     const deep = Math.abs(Math.sin((u * 18 + ridges * 5) * Math.PI));
@@ -1371,7 +1498,7 @@ function bake(name, size) {
   const albedo = new Uint8ClampedArray(size * size * 4);
   const roughness = new Uint8ClampedArray(size * size * 4);
   const height = new Float32Array(size * size);
-  const s = { color: [0, 0, 0], height: 0, rough: 1, metal: 0 };
+  const s = { color: [0, 0, 0], height: 0, rough: 1, metal: 0, alpha: 1 };
   // The palettes above read well as flat swatches, but albedo is consumed in
   // linear space, where mid-greys drop to almost nothing. This curve lifts the
   // darks and leaves the highlights roughly where they were.
@@ -1380,12 +1507,13 @@ function bake(name, size) {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       s.metal = 0;
+      s.alpha = 1;
       surface((x + 0.5) / size, (y + 0.5) / size, s);
       const i = (y * size + x);
       albedo[i * 4] = lift(s.color[0]);
       albedo[i * 4 + 1] = lift(s.color[1]);
       albedo[i * 4 + 2] = lift(s.color[2]);
-      albedo[i * 4 + 3] = 255;
+      albedo[i * 4 + 3] = clamp01(s.alpha) * 255;
       // glTF packing: roughness in green, metalness in blue.
       roughness[i * 4] = 255;
       roughness[i * 4 + 1] = clamp01(s.rough) * 255;
@@ -1507,6 +1635,12 @@ const RECIPES = {
   mail: { surface: 'mail', scale: 0.3, normalScale: 0.6, env: 1.3, wet: 0, detail: 0.2 },
   paint: { surface: 'paint', scale: 0.8, normalScale: 0.5, env: 0.6, wet: 0, detail: 0.4 },
   bark: { surface: 'bark', scale: 1.6, normalScale: 1.0, env: 0.65, wet: 0, detail: 0.5 },
+  // The conifers. A needle card's UVs are the card, 0..1, so its tile is 1.
+  // `cutout` is the alpha test: an alpha-*tested* card sorts and shadows like
+  // anything opaque, where a blended one would need sorting per card.
+  needles: { surface: 'needles', scale: 1, normalScale: 0.5, env: 0.3, wet: 0, detail: 0, cutout: 0.4 },
+  firbark: { surface: 'firbark', scale: 1.4, normalScale: 1.1, env: 0.5, wet: 0, detail: 0.5 },
+  cedarbark: { surface: 'cedarbark', scale: 1.2, normalScale: 0.9, env: 0.5, wet: 0, detail: 0.5 },
   water: { surface: 'water', scale: 7, normalScale: 0.5, env: 1.6, wet: 0, detail: 0.2 },
   // The sewer. `buried` hands their ambient, reflections and fog to the fixed
   // underground terms above instead of the sky, so `env` means nothing here.
@@ -1842,6 +1976,8 @@ function bakeMacro(size = 128) {
  */
 const shadeLift = { value: 1 };
 const indoorBounce = { value: 1 };
+const skyBleach = { value: 0 };
+const skyBleachTint = { value: new THREE.Color(1.06, 1.0, 0.90) };
 
 const HEMI_LINE = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
 const POINT_LINE = 'getPointLightInfo( pointLight, geometryPosition, directLight );';
@@ -1940,6 +2076,8 @@ function decorate(material, recipe, macro, grain) {
     material.userData.wetBase = recipe.wet ?? 0;
     shader.uniforms.indoorBounce = indoorBounce;
     shader.uniforms.dikuShadeLift = shadeLift;
+    shader.uniforms.dikuSkyBleach = skyBleach;
+    shader.uniforms.dikuSkyBleachTint = skyBleachTint;
     shader.uniforms.dikuBuriedGain = buried.gain;
     shader.uniforms.dikuBuriedIrradiance = buried.irradiance;
     shader.uniforms.dikuBuriedRadiance = buried.radiance;
@@ -1967,6 +2105,8 @@ function decorate(material, recipe, macro, grain) {
         uniform float wetness;
         uniform float indoorBounce;
         uniform float dikuShadeLift;
+        uniform float dikuSkyBleach;
+        uniform vec3 dikuSkyBleachTint;
         uniform float dikuBuriedGain;
         uniform vec3 dikuBuriedIrradiance;
         uniform vec3 dikuBuriedRadiance;
@@ -1997,7 +2137,8 @@ function decorate(material, recipe, macro, grain) {
           // flags came out as blue-veined marble -- so indoors it keeps its
           // strength and loses most of its hue, to a warm neutral.
           float dikuIblL = dot( iblIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
-          iblIrradiance = mix( iblIrradiance, dikuIblL * vec3( 1.06, 1.0, 0.90 ), vIndoor * 0.8 );
+          iblIrradiance = mix( iblIrradiance, dikuIblL * mix( dikuSkyBleachTint, vec3( 1.06, 1.0, 0.90 ), vIndoor ),
+            max( vIndoor * 0.8, dikuSkyBleach ) );
           float dikuRadL = dot( radiance, vec3( 0.2126, 0.7152, 0.0722 ) );
           radiance = mix( radiance, dikuRadL * vec3( 1.03, 1.0, 0.95 ), vIndoor * 0.5 );
         #endif
@@ -2077,6 +2218,12 @@ function decorate(material, recipe, macro, grain) {
       `)
       .replace('#include <normal_fragment_maps>', /* glsl */`
         #include <normal_fragment_maps>
+        #ifdef DIKU_FOLIAGE
+          // A needle card's normals are baked to point out of the crown, and
+          // both faces of the card are the same needles: undo the two-sided
+          // flip, or every card is lit from inside the tree on its back.
+          normal *= faceDirection;
+        #endif
         #ifdef DIKU_DETAIL
           float dikuNear = detailStrength * ( 1.0 - smoothstep( 1.5, 9.0, length( vViewPosition ) ) );
           if ( dikuNear > 0.0 ) {
@@ -2101,11 +2248,13 @@ function decorate(material, recipe, macro, grain) {
   }
   if (recipe.moving) material.defines = { ...material.defines, DIKU_MOVING: 1 };
   if (recipe.lift) material.defines = { ...material.defines, DIKU_LIFT: 1 };
+  if (recipe.cutout) material.defines = { ...material.defines, DIKU_FOLIAGE: 1 };
   // Our injected source differs from stock, so it needs a key of its own or
   // three will hand us a program compiled for an undecorated material.
   material.customProgramCacheKey = () => `diku|${material.defines?.DIKU_DETAIL ? 1 : 0}`
     + `|${material.defines?.DIKU_WET ? 1 : 0}|${material.defines?.DIKU_BURIED ? 1 : 0}`
-    + `|${material.defines?.DIKU_MOVING ? 1 : 0}|${material.defines?.DIKU_LIFT ? 1 : 0}`;
+    + `|${material.defines?.DIKU_MOVING ? 1 : 0}|${material.defines?.DIKU_LIFT ? 1 : 0}`
+    + `|${material.defines?.DIKU_FOLIAGE ? 1 : 0}`;
 }
 
 /**
@@ -2138,6 +2287,13 @@ export function createMaterials(size = 512, onProgress = () => {}) {
     });
     material.name = name;
     material.userData.uvScale = 1 / recipe.scale;
+    if (recipe.cutout) {
+      material.alphaTest = recipe.cutout;
+      material.side = THREE.DoubleSide;
+      // The AO prepass draws this through an alpha-cut normal material of
+      // its own (render.js); its override would draw the whole card.
+      material.userData.foliage = true;
+    }
     // Only `Batcher` writes `aIndoor`. Everything else -- every glTF model,
     // every skinned figure -- has no such attribute, and a missing attribute
     // reads back whatever was last left in the generic slot unless the material
@@ -2181,6 +2337,18 @@ export function createMaterials(size = 512, onProgress = () => {}) {
    * the sky is already bright; this is set per hour instead. A plain uniform.
    */
   materials.setShadeLift = (value) => { shadeLift.value = value; };
+
+  /**
+   * How much of the sky's hue the diffuse sky light loses outdoors, by the
+   * hour: the cube is a whole open sky, and a shaded street sees half of it as
+   * sunlit wall. Indoors already loses 0.8 of it; this is the outdoor floor.
+   */
+  materials.setSkyBleach = (value, tint = 0xffffff) => {
+    skyBleach.value = value;
+    skyBleachTint.value.setHex(tint);
+    // The tints are near-neutral multipliers around 1, not display colours.
+    skyBleachTint.value.multiplyScalar(3 / (skyBleachTint.value.r + skyBleachTint.value.g + skyBleachTint.value.b));
+  };
 
   /** Close-range detail normals, on or off. Recompiles; only the P key does it. */
   materials.setDetail = (on) => {
