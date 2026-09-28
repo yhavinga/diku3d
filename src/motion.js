@@ -42,7 +42,13 @@ const ACCEL = 1.7;
 const DECEL = 2.4;
 /** A turn larger than this (radians) is made standing, before setting off. */
 const TURN_FIRST = 0.95;
-const TURN_STANDING = 3.0;
+/**
+ * Radians a second. No body comes round faster than TURN_CAP (150 deg/s):
+ * a dog was measured at 174 and a horse at 196, spinning on the spot. A long
+ * body turns slower again (`turnRate`).
+ */
+const TURN_CAP = 2.6;
+const TURN_STANDING = TURN_CAP;
 const TURN_WALKING = 2.0;
 /** Personal space: people keep this much between their centres. */
 const SPACE = 0.72;
@@ -212,9 +218,32 @@ function prepareRig(figure) {
  */
 function bodyOf(fig) {
   const foot = fig.object.userData.footprint;
-  if (!foot) return { r: 0.28, h: 0 };
+  if (!foot) return { r: 0.28, h: 0, ahead: 0 };
   const r = Math.max(0.12, foot.width / 2);
-  return { r, h: Math.max(0, foot.length / 2 - r) };
+  return { r, h: Math.max(0, foot.length / 2 - r), ahead: foot.ahead || 0 };
+}
+
+/**
+ * How fast a body can come round, from the rate its gait allows: a horse is
+ * 2.7 m of animal and turns on the spot by walking its hind legs round its
+ * fore, so at the cap it swept its quarters into whatever stood beside it and
+ * the separation slid both apart. Scaled down by the length of the body.
+ */
+function turnRate(fig, rate) {
+  return Math.min(rate, TURN_CAP) / (1 + 1.4 * fig.body.h);
+}
+
+/**
+ * One frame's turn towards an error of `err`, at most `rate` a second -- with
+ * hysteresis: near a half turn either way is as short, and a target that
+ * wobbles across the line flipped a horse's turn twelve times in twenty
+ * seconds. Once coming round one way it keeps that way until it is there.
+ */
+function turnStep(m, err, rate, dt) {
+  if (m.turnDir && Math.sign(err) !== m.turnDir && Math.abs(err) > 2.2) err += m.turnDir * Math.PI * 2;
+  const step = clamp(err, -rate * dt, rate * dt);
+  m.turnDir = Math.abs(err) > 0.05 ? Math.sign(step) : 0;
+  return step;
 }
 
 /** Closest distance between two segments in the plane, and the closest points. */
@@ -1406,8 +1435,8 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
         // Still coming to a stop: the turn waits on the feet, or the body
         // swings round over a planted foot and drags it (0.3-0.9 m/s,
         // measured, on every guard that stopped to look at the player).
-        const rate = TURN_STANDING * (m.fighting ? 1.4 : 0.7) * (m.speed > 0.05 && !m.fighting ? clamp(m.speed / 1.0, 0.25, 1) * 0.4 : 1);
-        const step = clamp(err, -rate * dt, rate * dt);
+        const rate = turnRate(fig, TURN_STANDING * (m.fighting ? 1.4 : 0.7)) * (m.speed > 0.05 && !m.fighting ? clamp(m.speed / 1.0, 0.25, 1) * 0.4 : 1);
+        const step = turnsInto(fig, yaw + turnStep(m, err, rate, dt)) ? 0 : turnStep(m, err, rate, dt);
         yaw += step;
         m.turning = Math.abs(err) > 0.05 ? Math.sign(err) : 0;
         if (Math.abs(err) < 0.02 && !m.fighting) m.turnTo = null;
@@ -1457,9 +1486,10 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       // Turn first, then walk: setting off while still swinging round reads
       // as sliding, which is the fault this whole file exists to remove.
       m.speed = Math.max(0, m.speed - DECEL * dt);
-      const step = clamp(err, -TURN_STANDING * dt, TURN_STANDING * dt);
+      let step = turnStep(m, err, turnRate(fig, TURN_STANDING), dt);
+      if (turnsInto(fig, yaw + step)) step = 0;
       fig.object.rotation.y = yaw + step;
-      m.turning = Math.sign(err);
+      m.turning = Math.sign(step);
       return;
     }
     m.turning = 0;
@@ -1467,14 +1497,17 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     // shuffle a 2.6 rad/s turn swung the planted foot round the hips at
     // 0.3 m/s. Slow walking turns slowly; a turn wanted faster than that is
     // taken standing, on footwork.
-    const rate = TURN_WALKING * (m.speed > fig.runFrom ? 0.75 : 1) * clamp(m.speed / 1.0, 0.25, 1);
-    yaw += clamp(err, -rate * dt, rate * dt);
+    const rate = turnRate(fig, TURN_WALKING) * (m.speed > fig.runFrom ? 0.75 : 1) * clamp(m.speed / 1.0, 0.25, 1);
+    yaw += turnStep(m, err, rate, dt);
     fig.object.rotation.y = yaw;
 
     // Slow for a sharp bend, and slow in time to stop at the end.
     const bendFactor = clamp(Math.cos(err), 0.15, 1);
     const stopping = Math.sqrt(2 * DECEL * Math.max(0, remaining - 0.1));
-    const target = Math.min(m.want * bendFactor * brake, stopping);
+    // A grazer lifts its head before it walks on: setting off with the
+    // graze still at full weight read as the whole animal sliding.
+    const headUp = m.graze ? clamp(1 - m.graze.w * 1.6, 0, 1) : 1;
+    const target = Math.min(m.want * bendFactor * brake * headUp, stopping);
     if (m.speed < target) m.speed = Math.min(target, m.speed + ACCEL * (m.want > fig.runFrom ? 1.8 : 1) * dt);
     else m.speed = Math.max(target, m.speed - DECEL * 1.4 * dt);
     moveAlong(fig, yaw, dt, player);
@@ -1486,7 +1519,12 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     if (step <= 0) return;
     const nx = fig.at.x + Math.sin(yaw) * step;
     const nz = fig.at.z + Math.cos(yaw) * step;
-    if (nav.sample(nx, nz, fig.level)) {
+    if (walksInto(fig, nx, nz)) {
+      // Not into another body: stop short, and a walk that stays blocked is
+      // given up below. Pushing apart afterwards is a slide.
+      m.speed = Math.max(0, m.speed - DECEL * 2 * dt);
+      m.stuck += dt;
+    } else if (nav.sample(nx, nz, fig.level)) {
       fig.at.x = nx; fig.at.z = nz; m.stuck = Math.max(0, m.stuck - dt);
     } else if (nav.sample(nx, fig.at.z, fig.level)) {
       fig.at.x = nx; m.speed *= 0.7; m.stuck += dt * 0.5;
@@ -1506,15 +1544,55 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     void player;
   }
 
+  /** Whether a step to (x, z) takes fig deeper into someone's body. */
+  function walksInto(fig, x, z) {
+    neighbours(fig, near);
+    const ox = fig.at.x; const oz = fig.at.z;
+    let hit = false;
+    for (const o of near) {
+      if (o.m.gone || o.level !== fig.level) continue;
+      const before = gapBetween(fig, o);
+      if (before > 0.3) continue;
+      fig.at.x = x; fig.at.z = z;
+      const after = gapBetween(fig, o);
+      fig.at.x = ox; fig.at.z = oz;
+      if (after < 0.02 && after < before) { hit = true; break; }
+    }
+    return hit;
+  }
+
+  /**
+   * Whether coming round to `yaw` swings a long body deeper into someone:
+   * a horse turning on the spot swept its quarters through the cow beside it.
+   */
+  function turnsInto(fig, yaw) {
+    if (fig.body.h < 0.15) return false;
+    neighbours(fig, near);
+    const was = fig.object.rotation.y;
+    let hit = false;
+    for (const o of near) {
+      if (o.m.gone || o.level !== fig.level) continue;
+      const before = gapBetween(fig, o);
+      if (before > 0.3) continue;
+      fig.object.rotation.y = yaw;
+      const after = gapBetween(fig, o);
+      fig.object.rotation.y = was;
+      if (after < 0.02 && after < before) { hit = true; break; }
+    }
+    return hit;
+  }
+
   /** The two ends of a figure's body segment on the ground. */
   function spine(fig, out) {
     const h = fig.body.h;
     const yaw = fig.object.rotation.y;
-    const sx = Math.sin(yaw) * h; const sz = Math.cos(yaw) * h;
-    out.ax = fig.at.x - sx; out.az = fig.at.z - sz; out.bx = fig.at.x + sx; out.bz = fig.at.z + sz;
+    const fx = Math.sin(yaw); const fz = Math.cos(yaw);
+    const cx = fig.at.x + fx * fig.body.ahead; const cz = fig.at.z + fz * fig.body.ahead;
+    out.ax = cx - fx * h; out.az = cz - fz * h; out.bx = cx + fx * h; out.bz = cz + fz * h;
     return out;
   }
   const _sa = {}; const _sb = {}; const _cp = {};
+  let separateDt = 1 / 60;
 
   /** How far apart two bodies are, surface to surface (negative: overlapping), and the way out. */
   function gapBetween(a, b) {
@@ -1532,20 +1610,63 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
    * door, a barn with seven beasts reset into it -- are eased apart, each as
    * the capsule it is. The dead are solid too: a live pig walked through a
    * dead one, because a corpse used to be nothing to step round.
+   *
+   * Easing apart is a slide, since no clip is playing to account for it, so
+   * it is spent where it shows least. Whoever is walking gives way, and
+   * someone standing does not -- at 0.25 m a frame the barn's grazing horses
+   * slid backwards at 0.3-0.8 m/s. Two standing bodies still overlapping
+   * drift apart at 4 cm/s and never backwards, and the one of them that is
+   * not busy grazing goes somewhere else on its own feet.
    */
   function separate(fig, player) {
     if (fig.m.settle && fig.m.settle.phase !== 'go' && fig.m.settle.phase !== 'turn') return;
+    const m = fig.m;
     neighbours(fig, near);
+    const standing = (f) => f.m.speed < 0.15 && !f.m.climb;
+    const still = standing(fig);
+    let sx = 0; let sz = 0;
+    let crowded = false;
     for (const o of near) {
       if (o.m.gone || o.level !== fig.level) continue;
       const gap = gapBetween(fig, o);
       if (gap >= 0.04) continue;
-      // Only the living give way, and someone settled on a bench does not.
+      // Someone settled on a bench, the dead and the standing hold their
+      // ground against anyone walking.
       const settled = o.m.settle && o.m.settle.phase !== 'go';
-      const share = o.m.dead || settled ? 1 : 0.5;
+      const firm = o.m.dead || settled || (standing(o) && !still);
+      const share = firm ? 1 : (still && !standing(o) ? 0 : 0.5);
+      if (!share) continue;
+      if (still) crowded = true;
       const push = Math.min(0.25, (0.04 - gap) * share * 0.5);
-      const px = fig.at.x + _cp.nx * push; const pz = fig.at.z + _cp.nz * push;
+      sx += _cp.nx * push; sz += _cp.nz * push;
+    }
+    let d = Math.hypot(sx, sz);
+    if (d > 1e-5) {
+      // Sideways or forwards only: nothing walks backwards. Someone walking
+      // into a body that holds its ground is pushed back instead into the
+      // brake -- measured, cows walking at 0.36 m/s were carried backwards at
+      // 0.5 -- and a walk that stays blocked is given up (moveAlong's stuck).
+      const fx = Math.sin(fig.object.rotation.y); const fz = Math.cos(fig.object.rotation.y);
+      const back = sx * fx + sz * fz;
+      if (back < 0) {
+        sx -= back * fx; sz -= back * fz;
+        if (!still) { m.speed = Math.max(0, m.speed + back * 4); m.stuck += separateDt * 0.5; }
+      }
+      d = Math.hypot(sx, sz);
+      // And at a shuffle's pace -- a walker's deflection a little more, but
+      // not once it is being held up.
+      const most = (still ? 0.04 : (back < 0 ? 0.1 : 0.3)) * separateDt;
+      if (d > most) { sx *= most / d; sz *= most / d; }
+      const px = fig.at.x + sx; const pz = fig.at.z + sz;
       if (nav.sample(px, pz, fig.level)) { fig.at.x = px; fig.at.z = pz; }
+    }
+    // Still pressed against someone after a moment: walk off, if strolling
+    // is all this one was doing -- a grazer after a longer moment.
+    m.pressed = crowded ? (m.pressed || 0) + separateDt : 0;
+    if (m.pressed > 0.4 && !m.path && !m.fighting && !m.dead && orderOf(fig).kind === 'stroll'
+      && (!(m.graze && m.graze.w > 0.2) || m.pressed > 1.0)) {
+      m.pressed = 0;
+      m.wait = Math.min(m.wait, 0);
     }
     if (player) {
       const dx = fig.at.x - player.x; const dz = fig.at.z - player.z;
@@ -2285,6 +2406,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
           portalStep(fig, dt);
           const settling = m.settle && m.settle.phase !== 'go' && tickSettle(fig, dt);
           if (m.stage !== 'out' && (!settling || (m.settle && m.settle.phase === 'turn'))) steer(fig, dt, player);
+          separateDt = dt;
           separate(fig, player);
         }
         // A figure that stopped fading half-way -- turned on while walking
@@ -2598,6 +2720,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       fig.object.rotation.y = fig.m.turnTo;
       o.object.rotation.y = o.m.turnTo;
     }
+    untangle();
     // Posed before anything draws: `state.benchmark` halts the loop before
     // the first update, and a seated body would otherwise be standing in
     // its idle half a metre over the bench.
@@ -2611,6 +2734,40 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       if (fig.m.settle && fig.bones) finishPose(fig, 0, false);
     }
   }
+  /**
+   * Bodies the resets put inside one another -- seven beasts on a barn's
+   * reset ring -- are stood apart before anyone sees them, since doing it in
+   * the frame loop is a slide: a few passes easing each overlapping pair
+   * apart along the way out, onto open ground only. Settled bodies stay put.
+   */
+  function untangle() {
+    rebuildGrid();
+    for (let pass = 0; pass < 12; pass++) {
+      let moved = false;
+      for (const fig of figures) {
+        if (fig.m.settle || fig.m.dead) continue;
+        neighbours(fig, near);
+        for (const o of near) {
+          if (o.level !== fig.level) continue;
+          const gap = gapBetween(fig, o);
+          if (gap >= 0.08) continue;
+          const share = o.m.settle ? 1 : 0.5;
+          const push = (0.08 - gap) * share;
+          const px = fig.at.x + _cp.nx * push; const pz = fig.at.z + _cp.nz * push;
+          if (nav.sample(px, pz, fig.level) === 1) { fig.at.x = px; fig.at.z = pz; moved = true; }
+        }
+      }
+      if (!moved) break;
+      rebuildGrid();
+    }
+    for (const fig of figures) {
+      if (fig.m.settle || fig.m.dead) continue;
+      fig.object.position.set(fig.at.x, fig.at.y, fig.at.z);
+      if (fig.homeSpot) { fig.homeSpot.x = fig.at.x; fig.homeSpot.z = fig.at.z; }
+      if (fig.interactable) fig.interactable.position.set(fig.at.x, fig.at.y + fig.height * 0.6, fig.at.z);
+    }
+  }
+
   openingScene();
 
   /**

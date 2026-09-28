@@ -1372,9 +1372,12 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   mixer.update(0);
 
   const size = asset.size;
+  // `ahead`: how far forward of the feet's origin the body's middle is -- a
+  // horse is its head and neck in front and only a tail behind, and a
+  // capsule centred on the origin let a cow's head into a horse's flank.
   group.userData.footprint = spec.footprint
-    ? { length: spec.footprint[0] * scale, width: spec.footprint[1] * scale }
-    : { length: size.z * scale, width: size.x * scale * width };
+    ? { length: spec.footprint[0] * scale, width: spec.footprint[1] * scale, ahead: 0 }
+    : { length: size.z * scale, width: size.x * scale * width, ahead: ((asset.bounds.max.z + asset.bounds.min.z) / 2) * scale };
   if (spec.sand) group.add(sandSpray(body, spec.sand));
   // A flier is built on the ground and flown by its clips, `hover` metres up
   // (in the model's units): its name and its examine point go up with it.
