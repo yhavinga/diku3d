@@ -2787,6 +2787,18 @@ export function buildScene(world, layout, materials, assets = null) {
     world, rooms, decor, colliders, addCollider, instances, lights, openAir: isOpenAir, ROOM, HALF,
     worldOf: (cell) => { const w = worldOf(cell); w.y += lifts.get(cell.vnum) || 0; return w; },
     BufferAttribute: THREE.BufferAttribute,
+    // A few words cut or painted on something out of doors: "Haon-Dor" in a
+    // tree's bark. The same painted-text material a room's walls get.
+    // `radius`: wrapped round a trunk of that radius, centred on its +z side.
+    words: (texts, seed, x, y, z, rotY, w, h, chunk, radius = 0) => {
+      const name = materials.$writing ? materials.$writing(texts, false, seed) : null;
+      if (!name) return false;
+      const geo = radius ? new THREE.CylinderGeometry(radius, radius, h, 12, 1, true, -w / radius / 2, w / radius)
+        : new THREE.PlaneGeometry(w, h);
+      batcher.add(geo, name, place(x, y, z, rotY), { chunk, normals: true, keepUv: true });
+      geo.dispose();
+      return true;
+    },
   });
 
   // No tree grows through a room's walls. A forest fir is modelled with its

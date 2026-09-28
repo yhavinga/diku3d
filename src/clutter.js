@@ -73,6 +73,46 @@ const RULES = [
     kind: 'wall_faces', at: 'hang', many: 7, indoor: true,
     re: /\bfaces?\b[^.]{0,40}\b(?:from|in|out of|inside)\s+(?:the\s+)?walls\b/i,
   },
+  // Small statues the extra descriptions say what of: "a statue of a imp,
+  // pointing to the west"; "a small statue of a Dragon sleeping", on the table.
+  { kind: 'statue_imp', at: 'floor', many: 1, indoor: true, re: /\bstatue of an? imp\b/i },
+  { kind: 'figurine_dragons', at: 'table', many: 1, indoor: true, re: /\bsmall statue of a dragon\b/i },
+  // "The Watermill", and "the sound of a creaking mill" from its door.
+  { kind: 'millstones', at: 'floor', many: 1, indoor: true, re: /^the (?:water)?mill\.?$/i },
+  // "Small flames sometimes shoot up from the hot mud."
+  { kind: 'ground_flames', at: 'floor', many: 1, re: /\bflames\b[^.]{0,30}\bshoot up\b|\bflames\b[^.]{0,20}\bfrom the (?:hot )?(?:mud|ground|floor)\b/i },
+
+  // Out of doors, what grows and stands beside the way. "An old elm tree
+  // grows here"; "on both sides of the road grow dark evergreen trees".
+  { kind: 'tree', at: 'corner', many: 1, outdoor: true, re: /\b(?:\w+ )?(?:elm|oak|beech|ash|willow|yew|chestnut|apple)? ?tree grows here\b/i },
+  {
+    kind: 'evergreens', at: 'corner', many: 4, outdoor: true,
+    re: /\b(?:grow|between|among|lined with|line the)\b[^.]{0,30}\b(?:evergreen|fir|pine|yew|cypress|spruce) trees\b/i,
+  },
+  // "The strangest plant life you have ever seen, a mixture of tumescent
+  // vegetables, evil-smelling fruit trees, and malignant ferns."
+  { kind: 'hell_plants', at: 'corner', many: 4, outdoor: true, re: /\bstrangest plant life\b|\bmalignant ferns\b/i },
+  // "The trees are quite tall considering most of them appear to be quite
+  // young. On one of the trees, crude letters forming the word "Haon-Dor"
+  // have been carved into the bark."
+  { kind: 'carved_tree', at: 'corner', many: 3, outdoor: true, re: /\bletters\b[^.]{0,60}\bcarved into the bark\b/i },
+  // "Three tents and some camels make up the party": the oasis pavilion
+  // (tools/blender/desert.py) at a third of its size, a nomad's tent.
+  { kind: 'tents', at: 'corner', many: 3, outdoor: true, re: /\b(?:two|three|four|some|several) tents\b/i },
+  // "The stairs leading up to the guest rooms here do not seem advisable to climb."
+  { kind: 'broken_stair', at: 'wall', many: 1, indoor: true, re: /\bstairs?\b[^.]{0,60}\b(?:not (?:seem )?(?:advisable|safe)|broken|collapsed|rotten)\b/i },
+  // "A road sign is here."
+  { kind: 'signpost', at: 'corner', many: 1, outdoor: true, re: /\broad ?sign\b|\bsign ?post\b/i },
+  // "The street is full of garbage here"; the junction under the Dump.
+  {
+    kind: 'refuse', at: 'strew', many: 2,
+    re: /\b(?:full of|piles? of|heaps? of|covered (?:in|with)|strewn with) (?:garbage|refuse|rubbish|trash)\b|\bunder the dump\b/i,
+  },
+  // "Various sorts of debris cover the stone floor."
+  { kind: 'debris', at: 'strew', many: 3, re: /\bdebris\b[^.]{0,30}\b(?:cover|covers|lies|lie|strewn|scattered)\b|\b(?:covered|strewn|littered) with debris\b/i },
+  // "A large room with chairs set in the walls"; "a chair, and that's tight
+  // to the rock floor". buildInteriorProps seats rooms it furnishes itself.
+  { kind: 'chair', at: 'wall', many: 4, indoor: true, re: /\bchairs? (?:set|carved|built|cut) in(?:to)? the walls?\b|\ba chair\b[^.]{0,40}\b(?:floor|fixed|tight)\b/i },
 
   // The dead. A skeleton in chains is not a skeleton lying about, and five
   // round a table are sitting at it.
@@ -322,6 +362,7 @@ export const CLUTTER_NAMES = [
   'clutter_chain_run', 'clutter_chain_anchor', 'clutter_arm',
   // tools/blender/statues.py
   'statue_odin', 'altar_marble', 'altar_faces', 'relief_face', 'fire_bed',
+  'statue_imp', 'figurine_dragons', 'millstones',
 ];
 
 // Only ever indoors, so they carry the `aIndoor` flag the room kits do (no sky
@@ -334,6 +375,7 @@ const INDOOR_ONLY = new Set([
   'clutter_mural', 'clutter_arms', 'clutter_tapestry', 'clutter_cocoon', 'clutter_cages', 'clutter_globe',
   'clutter_pelts', 'clutter_wreckage', 'clutter_hoard', 'clutter_arm',
   'statue_odin', 'altar_marble', 'altar_faces', 'relief_face', 'fire_bed',
+  'statue_imp', 'figurine_dragons', 'millstones',
 ]);
 
 // clutter.py authors bone, iron and stone for a room under the sky; under the
@@ -379,6 +421,11 @@ const KINDS = {
   ruin: { models: ['collapsed_shed', 'rubble_heap', 'charred_beams'], solid: true },
   well: { models: ['well'], solid: true, pad: 0.6 },
   altar: { models: ['altar_faces'], solid: true, pad: 0.5 },
+  refuse: { models: ['refuse_heap'], solid: true },
+  debris: { models: ['debris', 'rubble'] },
+  chair: { models: ['furn_chair'], solid: true },
+  millstones: { models: ['millstones'], solid: true, pad: 0.5 },
+  broken_stair: { models: ['broken_stair'], solid: true },
 };
 
 /** Which painting a sentence is about. */
@@ -474,6 +521,7 @@ export function placeClutter(ctx) {
     // Where you arrive, and a lane in from every way out.
     const arrive = { x0: info.center.x - 1.3, x1: info.center.x + 1.3, z0: info.center.z - 1.3, z1: info.center.z + 1.3 };
     const keep = [arrive];
+    const core = [];
     if (plan) for (const t of plan.taken) keep.push({ x0: pos.x + t.x0, x1: pos.x + t.x1, z0: pos.z + t.z0, z1: pos.z + t.z1 });
     for (let d = 0; d < 4; d++) {
       if (!sides[d]) continue;
@@ -483,6 +531,10 @@ export function placeClutter(ctx) {
       const ax = dx ? [pos.x + dx * near, pos.x + dx * far] : [pos.x - 2.0, pos.x + 2.0];
       const az = dz ? [pos.z + dz * near, pos.z + dz * far] : [pos.z - 2.0, pos.z + 2.0];
       keep.push({ x0: Math.min(...ax), x1: Math.max(...ax), z0: Math.min(...az), z1: Math.max(...az) });
+      // The middle of that lane, which even a heap of garbage leaves open.
+      const cx = dx ? ax : [pos.x - 0.9, pos.x + 0.9];
+      const cz = dz ? az : [pos.z - 0.9, pos.z + 0.9];
+      core.push({ x0: Math.min(...cx), x1: Math.max(...cx), z0: Math.min(...cz), z1: Math.max(...cz) });
     }
     // A dungeon's shell already hangs empty irons on its blank walls, a pair
     // to a wall 2.3 m either side of the middle (build.js `buildShackles`):
@@ -503,7 +555,9 @@ export function placeClutter(ctx) {
     for (const d of here) {
       if (d.kind === 'table') keep.push({ x0: d.x - 1.15, x1: d.x + 1.15, z0: d.z - 1.15, z1: d.z + 1.15 });
     }
-    const clear = (r, floor = true, flat = false) => !(flat ? [arrive] : keep).some((k) => overlaps(r, k))
+    // `flat`: true for what is walked over (only the arrival point is kept),
+    // 'core' for what a street is full of (the middle of each lane is kept).
+    const clear = (r, floor = true, flat = false) => !(flat === 'core' ? [arrive, ...core] : flat ? [arrive] : keep).some((k) => overlaps(r, k))
       && (!floor || !blocked.some((b) => overlaps(r, b, -0.02)));
     const take = (r, solidToo) => { keep.push(r); if (solidToo) blocked.push(r); };
 
@@ -637,6 +691,7 @@ export function placeClutter(ctx) {
     };
 
     const strewn = []; // local rects, for the barrels in actors.js
+    let tableAt = null; // the table `seated` set down, for what stands on it
     for (const ask of asks) {
       if (ask.outdoor && !outside) continue;
       if (ask.indoor && outside) continue;
@@ -647,6 +702,11 @@ export function placeClutter(ctx) {
       if (ask.kind === 'fire_ring') { fireRing(); continue; }
       if (ask.kind === 'statue_odin') { statueBehindAltar('statue_odin'); continue; }
       if (ask.kind === 'wall_faces') { wallFaces(ask); continue; }
+      if (ask.kind === 'ground_flames') { groundFlames(); continue; }
+      if (ask.kind === 'statue_imp') { pointing('statue_imp'); continue; }
+      if (ask.kind === 'figurine_dragons') { onTable('figurine_dragons'); continue; }
+      if (ask.at === 'corner') { corners(ask); continue; }
+      if (ask.kind === 'chair' && here.some((d) => d.kind === 'piece' && /chair/.test(d.piece))) continue;
       if (ask.kind === 'skeleton_seated') { seated(ask); continue; }
       if (ask.kind === 'candles') { candles(); continue; }
       if (!spec) continue;
@@ -683,8 +743,12 @@ export function placeClutter(ctx) {
           }
         } else if (ask.at === 'strew') {
           // What lies flat is walked over: it may lie in a doorway's lane.
-          at = onFloor(name, k + 7, { pad: 0.05, ring: [2.4 + (k % 3) * 0.8], spinAny: true, flat: FLAT.has(ask.kind) });
-          if (at) { put(name, at.x, at.z, at.rotY); keep.push(at.r); }
+          // Garbage heaps up at the sides of a street, into its lanes but
+          // never across the middle of one; a heap is walked round.
+          const heap = !!spec.solid;
+          const scale = heap ? 0.75 : 1;
+          at = onFloor(name, k + 7, { pad: 0.05, ring: [2.4 + (k % 3) * 0.8], spinAny: true, flat: heap ? 'core' : FLAT.has(ask.kind), scale });
+          if (at) { put(name, at.x, at.z, at.rotY, { scale, collide: heap }); keep.push(at.r); if (heap) blocked.push(at.r); }
         } else if (ask.at === 'edge' || ask.kind === 'web') {
           at = edge(name, ask, k);
         }
@@ -756,6 +820,7 @@ export function placeClutter(ctx) {
       if (!spot) return;
       const spin = roll(room.vnum, 1, 17) * 0.4 - 0.2;
       decor.push({ kind: 'table', x: spot.x, y: pos.y, z: spot.z, spin });
+      tableAt = { x: spot.x, z: spot.z, spin };
       take(spot.r, true);
       const c2 = Math.cos(spin); const s2 = Math.sin(spin);
       let n = Math.min(4, ask.count);
@@ -871,6 +936,129 @@ export function placeClutter(ctx) {
         // A face's neighbour is a hand's breadth further along, not on top of it.
         keep.push({ x0: at.r.x0 - 0.5, x1: at.r.x1 + 0.5, z0: at.r.z0 - 0.5, z1: at.r.z1 + 0.5 });
       }
+    }
+
+    // "A statue of a imp, pointing to the west": its arm is its own right,
+    // three's -X at rotY 0, so it stands unturned whatever floor it gets --
+    // facing south, pointing west.
+    function pointing(name) {
+      const b = library.get(name)?.bounds;
+      if (!b) return;
+      const lim = ROOM / 2 - 0.4;
+      let best = null;
+      for (let gx = -lim; gx <= lim; gx += 0.25) {
+        for (let gz = -lim; gz <= lim; gz += 0.25) {
+          const d = Math.hypot(gx, gz);
+          if (d < 1.4) continue;
+          const r = footprint(b, pos.x + gx, pos.z + gz, 0, 1, 0.3);
+          if (!clear(r)) continue;
+          // Towards the middle of the room, with its back to the east wall
+          // side it points away from.
+          const score = Math.abs(d - 2.6) + (gx < 0 ? 0.8 : 0) + roll(room.vnum, gx * 4, gz * 4) * 0.3;
+          if (!best || score < best.score) best = { x: pos.x + gx, z: pos.z + gz, score };
+        }
+      }
+      if (!best) { missed.push(`${vnum} ${name}`); return; }
+      const r = put(name, best.x, best.z, 0, { collide: true });
+      take(r, true);
+      lights.push({ x: best.x + 0.8, y: pos.y + 2.2, z: best.z + 1.2, color: 0xffc890, intensity: 3, radius: 5 });
+    }
+
+    // On the table the room already has: the one its skeletons sit round,
+    // or any other. "It is nailed onto the table", in the middle of it.
+    function onTable(name) {
+      const t = tableAt || here.find((d) => d.kind === 'table');
+      if (!t || !library.get(name)) { missed.push(`${vnum} ${name} (no table)`); return; }
+      put(name, t.x, t.z, (t.spin || 0) + 0.4, { y: pos.y + 0.83 });
+      // "The eyes of the red dragon is glowing pulsating red."
+      lights.push({ x: t.x, y: pos.y + 1.05, z: t.z, color: 0xff2a14, intensity: 0.5, radius: 1.6, flicker: true });
+    }
+
+    // "Small flames sometimes shoot up from the hot mud": a few low fires
+    // scattered over the floor, off the way through, and their light.
+    function groundFlames() {
+      let k = 0;
+      for (let tries = 0; tries < 40 && k < 5; tries++) {
+        const a = roll(room.vnum, tries, 61) * Math.PI * 2;
+        const r = 1.8 + roll(room.vnum, tries, 67) * 2.6;
+        const x = pos.x + Math.cos(a) * r; const z = pos.z + Math.sin(a) * r;
+        const spot = { x0: x - 0.4, x1: x + 0.4, z0: z - 0.4, z1: z + 0.4 };
+        if (!clear(spot)) continue;
+        keep.push(spot);
+        decor.push({ kind: 'torch', bare: true, blaze: 0.7 + roll(room.vnum, tries, 71) * 0.6, x, y: pos.y - 0.05, z });
+        if (k % 2 === 0) lights.push({ x, y: pos.y + 0.7, z, color: 0xff6a2a, intensity: 6, radius: 7, flicker: true });
+        k++;
+      }
+      if (k) placed++;
+    }
+
+    // Out of doors, on whatever ground the room has that is not road: the
+    // angles between the ways out on open ground, the dead end of a street
+    // whose sides are built up to 3.3 m from its middle. Every spot on a
+    // 25 cm grid clear of the lanes and a crown's breadth off any wall, the
+    // nearest to `ideal` from the middle first; a second one as far from the
+    // first as it can be -- "on both sides of the road".
+    function corners(ask) {
+      const models = {
+        tree: ['tree_oak'], evergreens: ['tree_fir', 'tree_cedar', 'tree_fir', 'tree_pine'], signpost: ['signpost'],
+        hell_plants: ['tree_snag', 'bramble', 'fern', 'fungus_cluster'],
+        carved_tree: ['tree_fir', 'tree_pine', 'tree_cedar'],
+        tents: ['tent_roof'],
+      }[ask.kind];
+      const sign = ask.kind === 'signpost';
+      const TENT = 0.34; // of the 10 m pavilion: a 3.4 m tent, 1.5 m to the ridge
+      const tent = ask.kind === 'tents';
+      const trunk = sign ? 0.25 : tent ? 5 * TENT + 0.1 : 0.5;
+      const reachWall = sign ? 0.2 : 0.6;
+      const ideal = sign ? 2.6 : tent ? 3.6 : 4.0;
+      const want = ask.kind === 'evergreens' ? Math.min(4, Math.max(2, ask.count)) : ask.kind === 'hell_plants' ? 4
+        : ask.kind === 'carved_tree' || tent ? 3 : 1;
+      const mine = [];
+      for (let k = 0; k < want; k++) {
+        let best = null;
+        for (let gx = -5.75; gx <= 5.76; gx += 0.25) {
+          for (let gz = -5.75; gz <= 5.76; gz += 0.25) {
+            const x = pos.x + gx; const z = pos.z + gz;
+            const r = { x0: x - trunk, x1: x + trunk, z0: z - trunk, z1: z + trunk };
+            if (keep.some((q) => overlaps(r, q))) continue;
+            if (blocked.some((q) => overlaps(r, q, reachWall))) continue;
+            const apart = mine.length ? Math.min(...mine.map((m) => Math.hypot(m.x - x, m.z - z))) : 0;
+            const score = Math.abs(Math.hypot(gx, gz) - ideal) - apart * 0.6 + roll(room.vnum, gx * 4, gz * 4 + k) * 0.4;
+            if (!best || score < best.score) best = { x, z, r, gx, gz, score };
+          }
+        }
+        if (!best) break;
+        // The first of a carved stand is the fir the words are cut in.
+        const name = ask.kind === 'carved_tree' ? models[k % models.length] : models[(k + room.vnum) % models.length];
+        if (!library.get(name)) break;
+        const { x, z, r, gx, gz } = best;
+        const scale = sign ? 1 : tent ? TENT : 0.8 + roll(room.vnum, k, 79) * 0.35;
+        // A signpost's arms point along the roads, not into a wall.
+        const rotY = sign ? Math.atan2(gx, gz) + Math.PI / 4 : tent ? 0 : roll(room.vnum, k, 83) * Math.PI * 2;
+        instances.add(name, { x, y: pos.y, z, rotY, scale }, chunk);
+        if (tent) {
+          // Walls all round, the one facing the middle of the camp open.
+          const face = Math.abs(gx) > Math.abs(gz) ? (gx > 0 ? 3 : 1) : (gz > 0 ? 0 : 2);
+          for (let d = 0; d < 4; d++) instances.add(d === face ? 'tent_wall_door' : 'tent_wall', { x, y: pos.y, z, rotY: FACE_ROT[d], scale: TENT }, chunk);
+        }
+        where.push({ vnum, name, x: +x.toFixed(2), y: +pos.y.toFixed(2), z: +z.toFixed(2), rotY: +rotY.toFixed(2) });
+        addCollider(r.x0, r.x1, r.z0, r.z1, pos.y, pos.y + 4);
+        take(r, true);
+        mine.push({ x, z });
+        placed++;
+        // The words, on the first tree, cut into the side facing the way
+        // through: a blaze of pale wood at eye height.
+        const words = ask.kind === 'carved_tree' && k === 0 && ask.why.match(/"([^"]+)"/);
+        if (words && ctx.words && name === 'tree_fir') {
+          // tree_fir's bark stands 0.53 m out at eye height (measured off
+          // the model); the words are wrapped round it, a hair proud.
+          const toward = Math.atan2(pos.x - x, pos.z - z);
+          if (ctx.words([words[1]], room.vnum, x, pos.y + 1.55, z, toward, 0.5, 0.22, chunk, 0.51 * scale)) {
+            where.push({ vnum, name: 'words', x: +x.toFixed(2), y: +(pos.y + 1.55).toFixed(2), z: +z.toFixed(2), rotY: +toward.toFixed(2) });
+          }
+        }
+      }
+      if (!mine.length) missed.push(`${vnum} ${ask.kind}`);
     }
 
     // "The chain reaches the clouds high above you."

@@ -137,8 +137,18 @@ def post(r, z0, z1, x, y, m="statuary", verts=16, name="post"):
     return obj
 
 
-def deliver(parts, name):
-    """Apply, bake into asset space, unwrap in metres, join per material, export."""
+def paint(obj, colour):
+    me = obj.data
+    attr = me.color_attributes.new("Col", "FLOAT_COLOR", "POINT")
+    for i in range(len(me.vertices)):
+        attr.data[i].color = (colour[0], colour[1], colour[2], 1.0)
+    return obj
+
+
+def deliver(parts, name, colours=None):
+    """Apply, bake into asset space, unwrap in metres, join per material, export.
+    `colours` maps a material to the vertex colour its parts carry (a glow's
+    hue); it goes out as `_col`, which assets.js takes back."""
     groups = {}
     for obj in parts:
         if obj is None:
@@ -150,12 +160,20 @@ def deliver(parts, name):
         groups.setdefault(key, []).append(obj)
     objs = []
     for key in sorted(groups):
+        if colours and key in colours:
+            for part in groups[key]:
+                paint(part, colours[key])
         obj = lib.join(groups[key], "%s.%s" % (name, key))
         kit.zero_origin(obj)
         obj.data.name = obj.name
+        if colours and key in colours:
+            obj.data.color_attributes["Col"].name = "_col"
         objs.append(obj)
     tris = lib.stats(objs)
-    lib.export(name, objs)
+    if colours:
+        lib.export(name, objs, export_vertex_color="NONE", export_attributes=True)
+    else:
+        lib.export(name, objs)
     lo = [min((o.matrix_world @ V(c))[i] for o in objs for c in o.bound_box) for i in range(3)]
     hi = [max((o.matrix_world @ V(c))[i] for o in objs for c in o.bound_box) for i in range(3)]
     return "%-18s %6d tris  x %.2f..%.2f  y %.2f..%.2f  z %.2f..%.2f" % (
@@ -627,6 +645,166 @@ def build_fire_bed():
     return deliver(parts, "fire_bed")
 
 
+# --- small figures (#7410, #7420) --------------------------------------------------
+
+def build_statue_imp():
+    """#7410: "a small statue ... of a imp, pointing to the west. The imp looks
+    like a man with horns and a tail." 1.25 m of it on a rough pedestal, its
+    right arm out to its right -- three's -X, west, when it is stood facing
+    south (rotY 0) -- the other on its hip."""
+    lib.reset()
+    P = 0.42   # pedestal top
+    S = []
+    leg = [cone((0.07, 0.0, P + 0.42), (0.08, -0.03, P + 0.2), 0.05, 0.038, blend=0.03),
+           cone((0.08, -0.03, P + 0.2), (0.08, 0.02, P + 0.04), 0.036, 0.03, blend=0.02),
+           cone((0.08, 0.02, P + 0.03), (0.09, -0.08, P + 0.02), 0.03, 0.022, blend=0.015, squash=(1.2, 1, 0.7))]
+    S += leg + mirror_x(leg)
+    S += [ell((0, 0.0, P + 0.46), (0.1, 0.075, 0.07), blend=0.04)]
+    S += [cone((0, 0.0, P + 0.48), (0, 0.01, P + 0.66), 0.08, 0.1, blend=0.05, squash=(1, 0.75, 1))]
+    S += [ell((0, 0.0, P + 0.68), (0.12, 0.075, 0.06), blend=0.05)]
+    S += [cone((0, 0.01, P + 0.72), (0, 0.0, P + 0.78), 0.04, 0.035, blend=0.03)]
+    S += [ell((0, -0.01, P + 0.84), (0.06, 0.065, 0.075), blend=0.03)]
+    S += [cone((0, -0.06, P + 0.83), (0, -0.09, P + 0.8), 0.025, 0.018, blend=0.015)]
+    S += [ell((0.025, -0.06, P + 0.855), (0.012, 0.01, 0.009), blend=0.005, neg=True),
+          ell((-0.025, -0.06, P + 0.855), (0.012, 0.01, 0.009), blend=0.005, neg=True)]
+    horn = [cone((0.035, -0.01, P + 0.9), (0.06, 0.0, P + 0.97), 0.016, 0.009, blend=0.01, group="horn"),
+            cone((0.06, 0.0, P + 0.97), (0.05, 0.03, P + 1.02), 0.009, 0.002, blend=0.005, group="horn")]
+    S += horn + mirror_x(horn)
+    ear = [cone((0.055, 0.0, P + 0.85), (0.1, 0.02, P + 0.88), 0.018, 0.003, blend=0.01, squash=(1, 0.4, 1))]
+    S += ear + mirror_x(ear)
+    # Pointing: the right arm straight out to its right, forefinger out.
+    S += [cone((-0.11, 0.0, P + 0.7), (-0.28, -0.02, P + 0.72), 0.032, 0.026, blend=0.02),
+          cone((-0.28, -0.02, P + 0.72), (-0.43, -0.03, P + 0.74), 0.025, 0.02, blend=0.015),
+          ell((-0.46, -0.03, P + 0.74), (0.03, 0.022, 0.022), blend=0.01),
+          cone((-0.47, -0.03, P + 0.745), (-0.53, -0.03, P + 0.75), 0.008, 0.006, blend=0.004)]
+    S += [cone((0.11, 0.0, P + 0.7), (0.17, 0.02, P + 0.58), 0.032, 0.026, blend=0.02),
+          cone((0.17, 0.02, P + 0.58), (0.1, -0.01, P + 0.49), 0.025, 0.02, blend=0.015)]
+    # The tail, down and round on the pedestal, ending in a barb.
+    pts = [(0, 0.06, P + 0.45), (0.02, 0.16, P + 0.3), (0.08, 0.2, P + 0.1), (0.18, 0.12, P + 0.03), (0.2, 0.0, P + 0.03)]
+    for i in range(len(pts) - 1):
+        S += [cone(pts[i], pts[i + 1], 0.018 - i * 0.003, 0.016 - i * 0.003, blend=0.01, group="tail")]
+    S += [cone((0.2, 0.0, P + 0.03), (0.21, -0.06, P + 0.03), 0.025, 0.002, blend=0.008, squash=(1, 1, 0.4))]
+    # Wings folded at the back.
+    wing = [ell((0.06, 0.07, P + 0.64), (0.05, 0.03, 0.14), rot=(15, 0, 20), blend=0.03)]
+    S += wing + mirror_x(wing)
+    parts = [carve(S, 0.004, 9000, "imp", m="ashlar")]
+    parts.append(slab((0.46, 0.42, 0.08), (0, 0, 0.04), m="ashlar", bev=0.02, name="plinth"))
+    parts.append(slab((0.36, 0.32, P - 0.12), (0, 0, 0.08 + (P - 0.12) / 2), m="ashlar", bev=0.015, name="die"))
+    parts.append(slab((0.42, 0.38, 0.05), (0, 0, P - 0.025), m="ashlar", bev=0.015, name="cap"))
+    return deliver(parts, "statue_imp")
+
+
+def build_figurine_dragons():
+    """#7420: "a small statue of a Dragon sleeping ... a silver dragon. It is
+    nailed onto the table. The dragon sits on a red dragon that looks dead.
+    But the eyes of the red dragon is glowing pulsating red." 0.45 m long,
+    to stand on a table top; origin at its base."""
+    lib.reset()
+    R = []
+    # The red one, dead on its side along the base: body, neck out flat,
+    # head on the table, a wing half open under it.
+    R += [ell((0, 0, 0.055), (0.16, 0.07, 0.055), blend=0.03)]
+    R += [cone((-0.14, 0.0, 0.05), (-0.26, -0.04, 0.03), 0.04, 0.03, blend=0.02)]
+    R += [ell((-0.3, -0.05, 0.03), (0.05, 0.035, 0.028), blend=0.015)]
+    R += [cone((-0.33, -0.05, 0.03), (-0.37, -0.06, 0.025), 0.022, 0.012, blend=0.01)]
+    R += [cone((0.15, 0.0, 0.04), (0.26, 0.05, 0.02), 0.035, 0.012, blend=0.02, group="rtail"),
+          cone((0.26, 0.05, 0.02), (0.3, 0.11, 0.012), 0.012, 0.005, blend=0.01, group="rtail")]
+    R += [ell((0.02, 0.1, 0.02), (0.12, 0.06, 0.012), rot=(0, 0, 15), blend=0.02)]
+    for sx in (-1, 1):
+        R += [cone((sx * 0.08, -0.05, 0.03), (sx * 0.1, -0.1, 0.012), 0.018, 0.012, blend=0.012)]
+    red = carve(R, 0.004, 3200, "red", m="paint")
+    eyes = carve([ell((-0.305, -0.08, 0.04), (0.009, 0.006, 0.006), blend=0.0),
+                  ell((-0.305, -0.02, 0.04), (0.009, 0.006, 0.006), blend=0.0)], 0.002, 120, "eyes", m="glow", smooth=0)
+    # The silver one on top, curled asleep: head on its forepaws, tail
+    # wrapped round, wings folded.
+    Sv = []
+    top = 0.1
+    Sv += [ell((0.01, 0.0, top + 0.045), (0.1, 0.065, 0.05), blend=0.03)]
+    Sv += [cone((-0.07, -0.02, top + 0.05), (-0.13, -0.06, top + 0.03), 0.03, 0.022, blend=0.02)]
+    Sv += [ell((-0.15, -0.075, top + 0.025), (0.04, 0.026, 0.022), rot=(0, 0, 30), blend=0.012)]
+    for sx in (-1, 1):
+        Sv += [cone((-0.05, sx * 0.04, top + 0.03), (-0.12, sx * 0.02 - 0.04, top + 0.008), 0.014, 0.01, blend=0.01)]
+    tail = [(0.1, 0.0, top + 0.03), (0.14, -0.06, top + 0.02), (0.08, -0.1, top + 0.012), (-0.02, -0.1, top + 0.01)]
+    for i in range(len(tail) - 1):
+        Sv += [cone(tail[i], tail[i + 1], 0.022 - i * 0.006, 0.018 - i * 0.006, blend=0.01, group="stail")]
+    wing = [ell((0.02, 0.04, top + 0.085), (0.08, 0.03, 0.02), rot=(20, 0, 0), blend=0.02)]
+    Sv += wing + mirror_x(wing)
+    for i, x in enumerate((-0.04, 0.0, 0.04, 0.08)):
+        Sv += [cone((x, 0.0, top + 0.09), (x + 0.01, 0.0, top + 0.115 - i * 0.004), 0.008, 0.002, blend=0.004)]
+    silver = carve(Sv, 0.003, 3200, "silver", m="steel")
+    nail = lib.cylinder(0.006, 0.03, (0.05, 0.02, 0.005), verts=6, name="nail", mat="stonewall")
+    F.tag(nail, "iron")
+    return deliver([red, eyes, silver, nail], "figurine_dragons", colours={"glow": (1.0, 0.08, 0.04)})
+
+
+# --- the watermill (#1124) ------------------------------------------------------
+
+def build_millstones():
+    """#1123-4: "the sound of a creaking mill". A pair of millstones in their
+    wooden tun on a hurst frame, the hopper over them on its horse, the
+    stone spindle up through the floor above, and the great spur wheel of
+    the gearing under the frame, half of it showing. 2.4 m square, 3.2 high;
+    front at -Y."""
+    lib.reset()
+    parts = []
+    # The hurst: a platform on four posts.
+    H = 0.9
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            parts.append(slab((0.18, 0.18, H), (sx * 1.0, sy * 1.0, H / 2), m="wood", bev=0.02, name="post"))
+    parts.append(slab((2.3, 2.3, 0.1), (0, 0, H + 0.05), m="wood", bev=0.02, name="deck"))
+    # Stones in a round wooden tun.
+    tun = lib.cylinder(0.78, 0.36, (0, 0, H + 0.1 + 0.18), verts=24, name="tun", mat="stonewall")
+    F.tag(tun, "wood")
+    parts.append(tun)
+    lid = lib.cylinder(0.8, 0.04, (0, 0, H + 0.1 + 0.38), verts=24, name="tunlid", mat="stonewall")
+    F.tag(lid, "wood")
+    parts.append(lid)
+    # The runner stone showing through the lid's opening would be hidden;
+    # the bedstone's edge shows at the front, where a board is out.
+    stone = lib.cylinder(0.72, 0.22, (0, 0, H + 0.1 + 0.11), verts=28, name="stone", mat="stonewall")
+    F.tag(stone, "flagstone")
+    parts.append(stone)
+    # The horse and hopper.
+    for sx in (-1, 1):
+        parts.append(slab((0.08, 0.08, 0.7), (sx * 0.42, 0.0, H + 0.52 + 0.35), m="wood", bev=0.01, name="horse"))
+    verts = []
+    for z, w in ((H + 0.95, 0.12), (H + 1.5, 0.42)):
+        verts += [(-w, -w, z), (w, -w, z), (w, w, z), (-w, w, z)]
+    faces = [(0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7), (3, 2, 1, 0)]
+    me = bpy.data.meshes.new("hopper")
+    me.from_pydata(verts, [], faces)
+    me.validate()
+    me.update()
+    hop = bpy.data.objects.new("hopper", me)
+    bpy.context.collection.objects.link(hop)
+    F.tag(hop, "wood")
+    lib.solidify(hop, 0.03)
+    parts.append(hop)
+    parts.append(slab((0.9, 0.08, 0.08), (0, 0, H + 1.22), m="wood", bev=0.01, name="bar"))
+    # The spindle, up into the ceiling.
+    spindle = lib.cylinder(0.07, 3.3 - H, (0.0, 0.62, H + (3.3 - H) / 2), verts=8, name="spindle", mat="stonewall")
+    F.tag(spindle, "wood")
+    parts.append(spindle)
+    # The spur wheel under the deck, between the posts: rim, arms, cogs.
+    ring = lib.torus(0.7, 0.06, (0, 0, 0.55), (0, 0, 0), major_seg=28, minor_seg=6, name="rim", mat="stonewall")
+    F.tag(ring, "wood")
+    parts.append(ring)
+    for k in range(4):
+        a = k * math.pi / 4
+        parts.append(slab((1.4, 0.08, 0.08), (0, 0, 0.55), m="wood", bev=0.01, name="arm"))
+        parts[-1].rotation_euler = (0, 0, a)
+    for k in range(24):
+        a = 2 * math.pi * k / 24
+        cog = slab((0.07, 0.05, 0.1), (math.cos(a) * 0.78, math.sin(a) * 0.78, 0.55), m="wood", bev=0.0, name="cog")
+        cog.rotation_euler = (0, 0, a)
+        parts.append(cog)
+    shaft = lib.cylinder(0.1, 0.9, (0, 0, 0.45), verts=10, name="shaft", mat="stonewall")
+    F.tag(shaft, "wood")
+    parts.append(shaft)
+    return deliver(parts, "millstones")
+
+
 # --- looking at it ---------------------------------------------------------------
 
 def preview(names, path="/tmp/statues-preview.png", azim=-24.0, elev=10.0, dist=None, center=None, res=1100, sun=(40.0, 30.0), lens=45.0, pitch=5.0):
@@ -664,6 +842,9 @@ BUILDERS = {
     "relief_face": build_relief_face,
     "altar_faces": build_altar_faces,
     "fire_bed": build_fire_bed,
+    "statue_imp": build_statue_imp,
+    "figurine_dragons": build_figurine_dragons,
+    "millstones": build_millstones,
 }
 
 

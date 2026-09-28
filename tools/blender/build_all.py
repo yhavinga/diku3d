@@ -170,6 +170,9 @@ BUDGET = {
     "statue_odin": 60000, "altar_marble": 1600, "relief_face": 2500, "altar_faces": 6800,
     # The firedeath's fire, a dozen lengths of it round one room.
     "fire_bed": 2500,
+    # One each: the sewer's imp and its dragons on the lair's table, carved
+    # small and seen close; the Shire watermill's stones and gearing.
+    "statue_imp": 9500, "figurine_dragons": 6800, "millstones": 2400,
 }
 PROP_BUDGET = 800
 # people.py: an archetype is a whole dressed person, one skinned draw per

@@ -60,6 +60,12 @@
       : d.kind === 'prop' ? `prop:${d.name}` : d.kind === 'torch' && d.bare ? (d.blaze ? 'fire' : 'flame') : d.kind;
     r.decor[key] = (r.decor[key] || 0) + 1;
   }
+  // What clutter.js says it put down, by the room it put it in -- the
+  // procedural pieces too (carved words), which leave no instance behind.
+  for (const w of (built.stats.clutter && built.stats.clutter.where) || []) {
+    if (!rooms[w.vnum]) rooms[w.vnum] = { models: {}, decor: {} };
+    rooms[w.vnum].models[w.name] = rooms[w.vnum].models[w.name] || 1;
+  }
   const shells = {};
   for (const [vnum, info] of built.rooms) {
     if (info.unbuilt) continue;

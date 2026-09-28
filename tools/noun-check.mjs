@@ -46,12 +46,12 @@ const showRooms = args.includes('--rooms');
 const M = (re) => (names) => names.some((n) => re.test(n));
 const NOUNS = [
   { noun: 'altar', re: /\baltars?\b/, models: M(/^altar_/), decor: /^fitting:altar$/ },
-  { noun: 'statue', re: /\bstatues?\b/, models: M(/^statue_|^crystal_stump$|^khan_memorial$|^dracolich_idol$/),
+  { noun: 'statue', re: /\bstatues?\b/, models: M(/^statue_|^figurine_|^crystal_stump$|^khan_memorial$|^dracolich_idol$/),
     fact: (r) => r.outdoor && /\bstatue\b[^.]{0,60}?\b(?:is|stands|standing|rises|towers)\b|statue here depicting/i.test(r.description) && 'buildStatue (procedural)' },
   { noun: 'throne', re: /\bthrones?\b/, models: M(/^statue_odin$|throne/) },
   { noun: 'fountain', re: /\bfountains?\b/, models: M(/^fountain$/), item: /fountain/ },
   { noun: 'well', re: /\b(?:old|a|the|stone|deep|dry)\s+well\b|\bwell ?house\b/, not: /\bas well\b|\bwell[- ](?:kept|lit|made|built|known|worn|trodden|used)\b/,
-    models: M(/well$/), shell: (a, k) => k === 'well', item: /\bwell\b/ },
+    models: M(/well$/), shell: (a, k) => k === 'well', item: /\bwell\b/, fact: (r) => r.exits[5] && 'the way down, kerbed (build.js buildStair)' },
   { noun: 'table', re: /\btables?\b/, not: /\btable of contents\b/, models: M(/^furn_table|^clutter_feast$|^market_stall$|^clutter_alchemy$/), decor: /^table$|^piece:(worktable|desk)$/ },
   { noun: 'chair/bench/stool', re: /\b(?:chairs?|benches|bench|stools?|armchairs?|settles?)\b/, models: M(/^furn_(chair|armchair|stool|bench|settle)|^bench$/), decor: /^table$|^piece:(chair|armchair)$/ },
   { noun: 'bed', re: /\b(?:beds?|cots?|bunks?|bedrolls?)\b/, not: /\b(?:river|sea|flower|stream|lava) ?beds?\b|\bbedroom\b|\b(?:resembles|like|as in) a bed\b/, models: M(/^furn_bed$/), decor: /^piece:bed$/ },
@@ -80,7 +80,7 @@ const NOUNS = [
   { noun: 'sign', re: /\b(?:signs?|signposts?|notice ?board|placards?)\b/, not: /\bsigns? of\b|\bno signs?\b/, models: M(/sign|plaque/), decor: /^sign$/ },
   { noun: 'plaque', re: /\bplaques?\b/, models: M(/plaque/) },
   { noun: 'blackboard', re: /\b(?:black ?boards?|chalk ?boards?)\b/, models: M(/blackboard/) },
-  { noun: 'pillar/column', re: /\b(?:pillars?|columns?)\b/, not: /\bcolumns? of (?:smoke|light|ants)\b|\blike (?:\w+ )?(?:pillars|columns)\b/, models: M(/column|pillar|pell/) },
+  { noun: 'pillar/column', re: /\b(?:pillars?|columns?)\b/, not: /\bcolumns? of (?:smoke|light|ants)\b|\blike (?:\w+ )?(?:pillars|columns)\b|\bremind\w* you of\b[^.]{0,20}\bpillars\b/, models: M(/column|pillar|pell/) },
   { noun: 'torch/sconce', re: /\b(?:torch(?:es)?|sconces?)\b/, models: M(/sconce/), decor: /^torch$/ },
   { noun: 'candle', re: /\b(?:candles?|candelabr\w*|candlesticks?)\b/, not: /\bcandle ?light\b/, models: M(/candle|altar_marble/), decor: /^flame$/ },
   { noun: 'lamp/lantern', re: /\b(?:lamps?|lanterns?|lamp ?posts?|street ?lights?)\b/, models: M(/lamp|lantern/), decor: /^lamp$/ },
@@ -97,7 +97,7 @@ const NOUNS = [
   { noun: 'fire/flames', re: /\b(?:fires?|flames?|bonfires?|campfires?|embers)\b/, not: /\bfire ?(?:ball|breath|newt|place)\b|\b(?:on|under|open) fire\b|\bcease ?fire\b/, models: M(/brazier|fire_bed|forge|hearth/), decor: /^fire$|^flame$|^fitting:hearth$|^piece:forge$/ },
   { noun: 'smoke', re: /\bsmoke\b/, not: /\bsmoke-stained\b/, decor: /^smoke$/, models: M(/chimney/) },
   { noun: 'writing/graffiti', re: /\b(?:graffiti|writings?|inscriptions?|runes|letters|words)\b[^.]{0,40}\b(?:walls?|carved|written|painted|scratched|sprayed)\b|\b(?:walls?|carved|written|painted|scratched)\b[^.]{0,30}\b(?:graffiti|writings?|inscriptions?|runes|letters)\b/,
-    shell: (a) => a && a.marks && (a.marks.kind === 'writing' || a.marks.kind === 'faces') },
+    models: M(/^words$/), shell: (a) => a && a.marks && (a.marks.kind === 'writing' || a.marks.kind === 'faces') },
   { noun: 'fence', re: /\b(?:fences?|railings?|palisade)\b/, models: M(/fence|stakes/) },
   { noun: 'gate/portcullis', re: /\b(?:gates?|portcullis|gateway)\b/, not: /\bgate(?:house)? (?:is|lies) (?:to|in) the\b/, models: M(/gate|portcullis|stone_arch|fortress/),
     fact: (r) => r.exits.some((e) => e && e.offMap) && 'sealed gate' },
@@ -110,8 +110,10 @@ const NOUNS = [
   { noun: 'rocks/boulders', re: /\b(?:rocks|boulders?)\b/, not: /\b(?:built|made|constructed) (?:from|of)\b[^.]{0,30}\brocks\b/, models: M(/rock|massif|crag|boulder|cave_/) },
   { noun: 'stalagmite', re: /\bstala[cg]\w+\b/, models: M(/stala/) },
   { noun: 'mushroom/fungus', re: /\b(?:mushrooms?|fung(?:us|i)|toadstools?|spores)\b/, models: M(/fungus|myconoid/), mob: /myconoid|fungus|mushroom/ },
+  { noun: 'plants', re: /\b(?:plants?|plant life|vegetation|ferns?|flowers?|weeds)\b/, not: /\bplants? (?:his|her|a|the)\b/,
+    models: M(/fern|bush|bramble|nettles|reed|tussock|tree_|fungus|herb_pots|weeds|planter/) },
   { noun: 'bush/hedge', re: /\b(?:bush(?:es)?|shrubs?|hedges?|brambles?|thorns|undergrowth)\b/, not: /\bivy bush\b/, models: M(/bush|hedge|bramble|salal|fern|nettles/) },
-  { noun: 'tree', re: /\b(?:trees?|trunks?|oaks?|beeches|elms?|pines?|firs?|evergreens?|willows?)\b/, not: /\bpine ?(?:apple|cone)s?\b|\boak(?:en)? (?:table|door|chest|bench|chair|desk|beams?|floor)s?\b|\belm street\b/,
+  { noun: 'tree', re: /\b(?:trees?|trunks?|oaks?|beeches|elms?|pines?|firs?|evergreens?|willows?)\b/, not: /\bpine ?(?:apple|cone)s?\b|\boak(?:en)? (?:table|door|chest|bench|chair|desk|beams?|floor)s?\b|\belm street\b|\b(?:made (?:from|of)|solid) oak\b/,
     models: M(/^tree_|dead_log|crystal_stump|palm_/), decor: /^tree$/, shell: (a) => a && (a.named === 'tree' || a.named === 'root') },
   { noun: 'roots', re: /\broots\b/, models: M(/^tree_/), decor: /^tree$/, shell: (a) => a && (a.named === 'tree' || a.named === 'root') },
   { noun: 'log', re: /\blogs?\b/, not: /\blog ?(?:cabin|house)\b/, models: M(/dead_log|log_cabin|firewood|fire_bed/), shell: (a, k) => k === 'log' },
@@ -123,7 +125,7 @@ const NOUNS = [
   { noun: 'stairs', re: /\b(?:stairs?|staircase|stairway|steps)\b/, not: /\bsteps? (?:back|aside|forward|lightly)\b|\byour steps\b/,
     models: M(/stair|ladder|steps/), fact: (r) => (r.exits[4] || r.exits[5]) && 'exit up or down' },
   { noun: 'window', re: /\bwindows?\b/, models: M(/window|house_/), decor: /^windows$/ },
-  { noun: 'crystal', re: /\bcrystals?\b/, not: /\bcrystal(?:-| )clear\b/, models: M(/crystal|globe/) },
+  { noun: 'crystal', re: /\bcrystals?\b/, not: /\bcrystal(?:-| )clear\b|\bcrystal water\b/, models: M(/crystal|globe/) },
   { noun: 'stall', re: /\b(?:stalls?|booths?)\b/, not: /\bstall(?:s|ed)? (?:for|the)\b/, models: M(/market_stall/) },
   { noun: 'cart/wagon', re: /\b(?:carts?|wagons?|wheelbarrows?)\b/, models: M(/cart/) },
   { noun: 'trough', re: /\btroughs?\b/, models: M(/trough/) },
@@ -133,15 +135,15 @@ const NOUNS = [
   { noun: 'brazier', re: /\bbraziers?\b/, models: M(/brazier/) },
   { noun: 'weapons/armour', re: /\b(?:weapons|swords|axes|spears|armou?rs?|shields|halberds)\b/, not: /\bweapon ?shop\b|\barmou?ry\b/, models: M(/weapon|armour/), decor: /^piece:(weapon_rack|weapon_board|armour_stand)$/ },
   { noun: 'basket/jar', re: /\bbaskets?\b/, models: M(/basket/) },
-  { noun: 'food', re: /\b(?:bread|loaves|meat|fruits?|vegetables|cheeses?|hams?|feast|pies?)\b/, models: M(/bread|feast|produce/) },
+  { noun: 'food', re: /\b(?:bread|loaves|meat|fruits?|vegetables|cheeses?|hams?|feast|pies?)\b/, not: /\bfruit trees\b|\bhave you for a feast\b|\btumescent vegetables\b|\bodou?rs? of\b|\bin there\b/, models: M(/bread|feast|produce/) },
   { noun: 'treasure/coins', re: /\b(?:treasure|coins|jewels|gems|hoard)\b/, not: /\btreasurer?\b/, models: M(/hoard/) },
   { noun: 'blood', re: /\b(?:blood|gore)\b/, not: /\bblood[- ]?(?:red|shot|thirsty|lust|curdling)\b|\bcold blood\b/, shell: (a) => a && !!a.gore },
   { noun: 'faces (carved)', re: /\bfaces\b[^.]{0,40}\b(?:walls?|stone|carved|altar)\b|\bfaces are\b/, models: M(/relief_face|altar_faces/), shell: (a) => a && a.marks && a.marks.kind === 'faces' },
   { noun: 'triangle', re: /\btriangle\b/, models: M(/altar_faces/) },
   { noun: 'chandelier', re: /\bchandeliers?\b/, models: M(/chandelier/) },
   { noun: 'cabinet/wardrobe', re: /\b(?:cabinets?|cupboards?|wardrobes?|dressers?)\b/, models: M(/cabinet|cupboard|wardrobe/) },
-  { noun: 'wheel/mill', re: /\b(?:water ?wheel|mill ?wheel|watermill|mill ?stones?)\b/, models: M(/mill|wheel/) },
-  { noun: 'boat', re: /\b(?:boats?|rafts?|canoes?|ships?)\b/, not: /\bship ?shape\b/, models: M(/boat|raft/) },
+  { noun: 'wheel/mill', re: /\b(?:water ?wheel|mill ?wheel|watermill|mill ?stones?|creaking mill)\b/, not: /\bsound of a creaking mill\b|\brear of watermill\b|\bentrance to watermill\b/, models: M(/mill|wheel/) },
+  { noun: 'boat', re: /\b(?:boats?|rafts?|canoes?|ships?)\b/, not: /\bship ?shape\b|\byour boat\b/, models: M(/boat|raft/) },
   { noun: 'nest', re: /\bnests?\b/, models: M(/nest/) },
   { noun: 'machine/device', re: /\b(?:machines?|machinery|devices?|contraptions?|levers?)\b/, models: M(/machine|lever/) },
 ];
@@ -149,12 +151,12 @@ const NOUNS = [
 // Negation and distance, the same moves clutter.js makes: "no furniture",
 // "the furniture has been stolen", "far below you", "to the north is the
 // fountain" -- named, and not here.
-const NOT_BEFORE = /\b(no|not|without|nothing|never|lacks?|lacking|barren|any)\s+(?:\w+[\s,]+){0,3}$/i;
+const NOT_BEFORE = /\b(no|not|without|nothing|never|lacks?|lacking|barren|any|used to (?:be|have|hold))\s+(?:\w+[\s,]+){0,3}$/i;
 const NOT_AFTER = /^[^.]{0,30}\b(has been stolen|have been stolen|is gone|are gone|has been removed|pulled down)\b/i;
-const FAR = /\b(below you|beneath you|above you|in the distance|far below|far above|far away|through the window|you can see|you see|in front of you lies|leads? (?:to|into|up|down|through)|lead \w+ through|entrance (?:to|of)|towards?|way to|to the (?:north|south|east|west|up|down)|north(?:ward)?s? (?:is|lies)|south(?:ward)?s? (?:is|lies)|east(?:ward)?s? (?:is|lies)|west(?:ward)?s? (?:is|lies))\b[^.]{0,40}$/i;
+const FAR = /\b(below you|beneath you|above you|in the distance|far below|far above|far away|through the window|you can see|you see|in front of you lies|leads? (?:to|into|up|down|through)|lead \w+ through|(?:north|south|east|west) of here (?:is|are|lies)|entrance (?:to|of)|towards?|way to|to the (?:north|south|east|west|up|down)|north(?:ward)?s? (?:is|lies)|south(?:ward)?s? (?:is|lies)|east(?:ward)?s? (?:is|lies)|west(?:ward)?s? (?:is|lies))\b[^.]{0,40}$/i;
 
 // "The bar is to the east", "the bridge is just north of here".
-const THERE = /^\s+(?:is|are|lies|lie|can be (?:found|seen))\s+(?:just\s+|further\s+)?(?:to the\s+)?(?:north|south|east|west|up|down|above|below)\b/i;
+const THERE = /^\s+(?:(?:is|are|lies|lie|can be (?:found|seen))\s+(?:just\s+|further\s+)?)?(?:to the\s+)(?:north|south|east|west)\b|^\s+(?:is|are|lies|lie)\s+(?:just\s+|further\s+)?(?:north|south|east|west|up|down|above|below)\b/i;
 
 function sentencesOf(room) {
   const out = [];
@@ -182,6 +184,8 @@ function nounsOf(room) {
       const where = from !== 'extra' && (FAR.test(before) || THERE.test(after)) ? 'elsewhere' : 'here';
       const prev = found.get(n.noun);
       if (prev && (prev.where === 'here' || where === 'elsewhere')) continue;
+      // What the prose puts elsewhere, an extra only describes more closely.
+      if (prev && prev.where === 'elsewhere' && from === 'extra') continue;
       found.set(n.noun, { noun: n.noun, why: `${from}: ${s}`, where, spec: n });
     }
   }

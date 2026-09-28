@@ -1711,9 +1711,13 @@ async function boot() {
       if (subject) aim = subject.object.position.clone().setY(subject.object.position.y + subject.height * 0.6);
       // A set piece the room's prose names (clutter.js) is what the room is
       // for: the statue of Odin, not the healer standing in front of it.
-      const SHOWPIECE = { statue_odin: 2.6, altar_faces: 0.9, clutter_sign: 1.62 };
-      const piece = (built.stats?.clutter?.where || []).find((w) => w.vnum === place.vnum && SHOWPIECE[w.name]);
-      if (piece) { aim = new THREE.Vector3(piece.x, piece.y + SHOWPIECE[piece.name], piece.z); subject = null; }
+      // With nothing else to look at, whatever the prose put there at all.
+      const SHOWPIECE = {
+        statue_odin: 2.6, altar_faces: 0.9, clutter_sign: 1.62, statue_imp: 1.0, figurine_dragons: 0.12, millstones: 1.4,
+      };
+      const here = (built.stats?.clutter?.where || []).filter((w) => w.vnum === place.vnum);
+      const piece = here.find((w) => SHOWPIECE[w.name]) || (!aim && here[0]);
+      if (piece) { aim = new THREE.Vector3(piece.x, piece.y + (SHOWPIECE[piece.name] ?? 0.9), piece.z); subject = null; }
       // The camera looks down -Z at yaw 0, so its forward is (-sin, 0, -cos).
       // Facing a point therefore needs atan2 of the *negated* offset, and
       // standing back from it means moving along +(sin, cos).
