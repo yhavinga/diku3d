@@ -604,6 +604,10 @@ function pickMaterials(room, area) {
   let ceil = 'planks';
 
   if (cave) { floor = 'rock'; wallIn = 'rock'; wallOut = 'rock'; ceil = 'rock'; }
+  // A tomb or a crypt is built, not dug: coursed stone on the walls and the
+  // vault, where `rock` put crazy paving up them at 60-90 cm a stone. The
+  // floor keeps its flags.
+  if (cave && /crypt|tomb|catacomb/.test(name)) { wallIn = 'rubblewall'; wallOut = 'rubblewall'; ceil = 'rubblewall'; }
   else if (holy) { floor = 'marble'; wallIn = 'marble'; wallOut = 'marble'; roof = 'marble'; ceil = 'marble'; }
   else if (wood) { floor = 'planks'; wallIn = 'plaster'; wallOut = 'timber'; }
 
@@ -4455,7 +4459,9 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
   // bank is the same barrier out of the ground the room is actually made of,
   // and low enough to see the next hollow over.
   const h = room.sector === SECTOR.CITY ? 2.6 : (bog ? 0.9 : 1.4);
-  const material = bog ? 'peat' : (hood ? 'sootwall' : room.sector === SECTOR.CITY ? 'stonewall' : 'rock');
+  // Out of town a boundary is a field wall of coursed rubble; it was `rock`,
+  // crazy paving laid up on edge.
+  const material = bog ? 'peat' : (hood ? 'sootwall' : room.sector === SECTOR.CITY ? 'stonewall' : 'rubblewall');
   // `wallAo` runs 0.58 -> 1.0 over 1.8 m, which on a 0.9 m bank never gets past
   // 0.79 -- the whole face shaded, hard. On rock that survives; on peat, the
   // darkest surface in the world, it was the *only* thing outdoors putting
@@ -6594,7 +6600,11 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
         break;
       }
       const h = 2.2;
-      batcher.add(box(CELL, h, CELL, 2, 2, 2), 'rock', place(x, y + h / 2 - 0.6, z), { chunk, ao: wallAo(y) });
+      // A walled bank of turf: coursed field stone round it, grass on top. As
+      // bare `rock` it was crazy paving 1.6 m high down both sides of the
+      // graveyard's lanes.
+      batcher.add(box(CELL, h, CELL, 2, 2, 2), 'rubblewall', place(x, y + h / 2 - 0.6, z), { chunk, ao: wallAo(y) });
+      batcher.add(plane(CELL, CELL, 2), 'grass', place(x, y + h - 0.6 + 0.01, z), { chunk });
       addCollider(x - HALF, x + HALF, z - HALF, z + HALF, y, y + h - 0.6);
       for (let i = 0; i < 2; i++) {
         if (hash3(x, z, i, 53) < 0.6) continue;

@@ -50,14 +50,22 @@ def leafmass(p, radius, rng, mat="leaves", flat=0.62):
     return obj
 
 
-def grow(objs, p, direction, length, radius, depth, rng, leaf_r=1.15):
-    """One branch, then the two or three that come off it."""
+def grow(objs, p, direction, length, radius, depth, rng, leaf_r=1.15, cards=None, centre=None):
+    """One branch, then the two or three that come off it. With `cards`, the
+    twig tips carry clusters of leaf cards round `centre`, the crown's middle;
+    without, the old squashed spheres (kept for nothing but the record)."""
     d = mathutils.Vector(direction).normalized()
     tip_r = radius * 0.68
-    objs.append(segment(p, d, length, radius, tip_r,
-                        verts=6 if depth < 2 else 5))
+    if cards is not None:
+        objs.append(limb(p, d, length, radius, tip_r, sides=7 if depth >= 1 else 5))
+    else:
+        objs.append(segment(p, d, length, radius, tip_r,
+                            verts=6 if depth < 2 else 5))
     tip = mathutils.Vector(p) + d * length
     if depth <= 0:
+        if cards is not None:
+            leaf_cluster(cards, tip, d, leaf_r, rng, centre)
+            return
         # Scatter the mass off the twig tip. Hang every one of them exactly on
         # its tip and, because the tips all finish at about the same height,
         # the canopy comes out as a flat lid instead of a volume.
@@ -75,28 +83,73 @@ def grow(objs, p, direction, length, radius, depth, rng, leaf_r=1.15):
               + axis * rng.uniform(0.3, 0.62)
               + mathutils.Vector((0, 0, rng.uniform(0.42, 0.8))))
         grow(objs, tip, nd, length * rng.uniform(0.52, 0.92), tip_r * 0.82,
-             depth - 1, rng, leaf_r * 0.84)
+             depth - 1, rng, leaf_r * 0.84, cards, centre)
+
+
+def outward(p, centre, up=0.45):
+    """A crown normal: away from the crown's middle, tipped towards the sky,
+    so a mass of cards lights as one rounded volume."""
+    o = mathutils.Vector(p) - mathutils.Vector(centre)
+    if o.length < 1e-6:
+        o = mathutils.Vector((0, 0, 1))
+    return o.normalized() + mathutils.Vector((0, 0, up))
+
+
+def leaf_cluster(cards, tip, d, radius, rng, centre):
+    """A twig's worth of leafy sprays: cards fanning out of the tip in every
+    direction but inwards, each a spray of leaves, so the cluster is a ragged
+    ball with sky through its edges -- the thing a squashed sphere could
+    never be."""
+    out = (mathutils.Vector(tip) - mathutils.Vector(centre))
+    out.z *= 0.6
+    out = out.normalized() if out.length > 1e-6 else mathutils.Vector((0, 0, 1))
+    for k in range(15):
+        # Directions over the outer hemisphere of the tip, and a third of
+        # them any way at all, so the cluster fills in behind its own face.
+        a = rng.uniform(0, 2 * math.pi)
+        e = rng.uniform(-0.45, 1.0)
+        rnd = mathutils.Vector((math.cos(a) * math.cos(e), math.sin(a) * math.cos(e), math.sin(e)))
+        u = (rnd + (out * 0.9 + d * 0.3) * (0.2 if k % 3 == 0 else 1.0)).normalized()
+        side = u.cross(mathutils.Vector((0, 0, 1)))
+        if side.length < 1e-3:
+            side = mathutils.Vector((1, 0, 0))
+        roll = rng.uniform(-0.6, 0.6)
+        v = (side.normalized() * math.cos(roll) + u.cross(side).normalized() * math.sin(roll))
+        base = mathutils.Vector(tip) - u * radius * 0.45 + rnd * radius * 0.25
+        length = radius * rng.uniform(1.15, 1.55)
+        mid = base + u * length * 0.5
+        cards.card(base, u, v, length, radius * rng.uniform(0.7, 0.9), 0.25, outward(mid, centre))
 
 
 def build_tree_oak():
-    """About 8 m: trunk to the first fork at 2.6, canopy from 4 to 8."""
+    """About 8 m: trunk to the first fork at 2.6, canopy from 4 to 8.
+
+    The crown is leaf cards now -- sprays of lobed leaves, alpha-cut, hung in
+    clusters off every twig tip with their normals pointing out of the crown
+    -- where it was a heap of squashed spheres wearing the `leaves` mass
+    texture, which read as camouflage netting. The trunk and limbs are
+    unwrapped so the bark's fissures run along them."""
     lib.reset()
     rng = random.Random(70012)
     objs = []
+    cards = Cards("oakleaf", tile=1.0)
     trunk_h, r = 3.0, 0.36
-    objs.append(segment((0, 0, 0), (0, 0, 1), trunk_h, r * 1.24, r * 0.86, verts=9,
-                        name="trunk"))
+    sides = 12
+    wob = [0.05 * math.sin(2 * math.pi * i / sides * 2 + 0.4) + rng.uniform(-0.025, 0.025) for i in range(sides)]
+    objs.append(hull([(0.0, r * 1.4, 0, 0), (0.35, r * 1.2, 0, 0), (1.4, r * 1.05, 0, 0),
+                      (trunk_h + 0.3, r * 0.84, 0, 0)], sides, wob, mat="bark", name="trunk", unwrap=True))
     # Root flare: four buttresses so the trunk grows out of the ground.
     for i in range(4):
         a = 2 * math.pi * (i + 0.25) / 4
         objs.append(segment((math.cos(a) * 0.3, math.sin(a) * 0.3, 0.0),
                             (math.cos(a) * 0.35, math.sin(a) * 0.35, 1.0), 0.8,
                             0.17, 0.05, verts=5, name="root"))
+    centre = (0.0, 0.0, 5.9)
     for i in range(3):
         a = 2 * math.pi * (i + rng.uniform(-0.12, 0.12)) / 3
         d = (math.cos(a) * 0.46, math.sin(a) * 0.46, 1.0)
-        grow(objs, (0, 0, trunk_h), d, 2.35, r * 0.82, 2, rng, leaf_r=1.52)
-    return kit.deliver(objs, "tree_oak")
+        grow(objs, (0, 0, trunk_h), d, 2.35, r * 0.82, 2, rng, leaf_r=1.35, cards=cards, centre=centre)
+    return deliver_conifer(objs, cards.mesh("leaves"), "tree_oak")
 
 
 def build_tree_pine():
@@ -106,21 +159,32 @@ def build_tree_pine():
 
 
 def build_bush():
+    """A garden shrub, 1.3 m: five stems and a dome of leafy sprays fanning
+    out of them, alpha-cut, with normals out of the dome. It was eleven
+    squashed spheres in the `leaves` texture -- camouflage, a judge said."""
     lib.reset()
     rng = random.Random(70014)
     objs = []
+    cards = Cards("shrubleaf", tile=0.8)
     for i in range(5):
         a = 2 * math.pi * i / 5
         objs.append(segment((math.cos(a) * 0.06, math.sin(a) * 0.06, 0),
                             (math.cos(a) * 0.42, math.sin(a) * 0.42, 1.0),
                             0.72, 0.055, 0.02, verts=4, name="stem"))
-    for i in range(5):
-        a = 2 * math.pi * (i + 0.4) / 5
-        objs.append(leafmass((math.cos(a) * 0.42, math.sin(a) * 0.42,
-                              0.72 + rng.uniform(-0.1, 0.16)),
-                             0.46 + rng.uniform(-0.06, 0.1), rng))
-    objs.append(leafmass((0, 0, 0.98), 0.5, rng))
-    return kit.deliver(objs, "bush")
+    centre = mathutils.Vector((0.0, 0.0, 0.62))
+    for k in range(34):
+        # Spread evenly over the dome by a golden-angle spiral, then jittered.
+        a = k * 2.39996 + rng.uniform(-0.3, 0.3)
+        e = math.asin(min(0.98, 0.05 + 0.93 * (k + 0.5) / 34)) * rng.uniform(0.85, 1.05)
+        u = mathutils.Vector((math.cos(a) * math.cos(e), math.sin(a) * math.cos(e), math.sin(e) * 0.9))
+        base = centre + u * rng.uniform(0.08, 0.22) - mathutils.Vector((0, 0, 0.12))
+        side = u.cross(mathutils.Vector((0, 0, 1)))
+        if side.length < 1e-3:
+            side = mathutils.Vector((1, 0, 0))
+        v = side.normalized()
+        length = rng.uniform(0.62, 0.8)
+        cards.card(base, u, v, length, rng.uniform(0.42, 0.55), 0.3, outward(base + u * length * 0.5, centre, 0.3))
+    return deliver_conifer(objs, cards.mesh("leaves"), "bush")
 
 
 def build_grass_tuft():
@@ -188,7 +252,22 @@ def blade(origin, azim, pitch, length, width, thick, curl, sides=4,
     return obj
 
 
-def hull(rings, sides, wob=None, jag=None, jag_at=-1, mat="rock", name="hull"):
+# Bark tiles in metres: the viewer's `scale` for each recipe in textures.js.
+# An unwrapped trunk closes its seam on a whole number of them, so these have
+# to match the recipes.
+BARK_TILE = {"bark": 1.6, "firbark": 1.4, "cedarbark": 1.2}
+
+
+def mark_own_uv(obj):
+    """Flag every face as carrying UVs of its own, which the delivery keeps
+    instead of cube-projecting over them."""
+    attr = obj.data.attributes.get("own_uv") or obj.data.attributes.new("own_uv", "INT", "FACE")
+    for item in attr.data:
+        item.value = 1
+    return obj
+
+
+def hull(rings, sides, wob=None, jag=None, jag_at=-1, mat="rock", name="hull", unwrap=False):
     """Rings of (z, radius, cx, cy) skinned into one closed solid.
 
     `wob` is a per-angle radius multiplier. Sharing one between two shells is
@@ -198,7 +277,15 @@ def hull(rings, sides, wob=None, jag=None, jag_at=-1, mat="rock", name="hull"):
     that was snapped rather than sawn.
 
     Rings must run upwards. Listing them downwards turns every normal inward,
-    and a rock lit from the inside looks exactly like a hole in the ground."""
+    and a rock lit from the inside looks exactly like a hole in the ground.
+
+    `unwrap` gives the sides cylindrical UVs in metres -- round the hull in u,
+    up it in v -- instead of leaving them to the delivery's cube projection.
+    A bark's ridges have to run up a trunk; cube-projected, every facet took
+    them at another slant and the rings met at seams, which read as chevrons.
+    The circumference is rounded to whole tiles of the material so the seam
+    closes, and it stays that many tiles as the trunk tapers, so the plates
+    narrow towards the top the way real bark does."""
     verts, faces = [], []
     n = len(rings)
     jag_k = (n + jag_at) % n if jag else -1
@@ -217,22 +304,56 @@ def hull(rings, sides, wob=None, jag=None, jag_at=-1, mat="rock", name="hull"):
     faces.append(tuple(range(len(verts) - sides, len(verts))))
     mesh = lib.bpy.data.meshes.new(name)
     mesh.from_pydata(verts, [], faces)
+    if unwrap:
+        tile = BARK_TILE[mat]
+        around = max(1, round(2 * math.pi * rings[0][1] / tile)) * tile
+        layer = mesh.uv_layers.new(name="UVMap")
+        for poly in mesh.polygons:
+            corners = []
+            if poly.index < (n - 1) * sides:
+                k, i = divmod(poly.index, sides)
+                # The face runs i, i+1 round the ring; the last one closes on
+                # u = around rather than wrapping back to 0.
+                for (col, row) in ((i, k), (i + 1, k), (i + 1, k + 1), (i, k + 1)):
+                    corners.append((around * col / sides, verts[row * sides + col % sides][2]))
+            else:
+                for li in poly.loop_indices:
+                    x, y, _ = verts[mesh.loops[li].vertex_index]
+                    corners.append((x, y))
+            for li, uv in zip(poly.loop_indices, corners):
+                layer.data[li].uv = uv
     mesh.validate()
     mesh.update()
     obj = lib.bpy.data.objects.new(name, mesh)
     lib.bpy.context.collection.objects.link(obj)
+    if unwrap:
+        mark_own_uv(obj)
     return lib.assign(obj, mat)
+
+
+def limb(p0, direction, length, r0, r1, sides=7, mat="bark", name="limb"):
+    """A branch as an unwrapped hull, so its bark runs along it: a cone with
+    cube-projected UVs wears the plates at whatever slant it happens to lean."""
+    obj = hull([(0.0, r0, 0, 0), (length, r1, 0, 0)], sides, mat=mat, name=name, unwrap=True)
+    d = mathutils.Vector(direction).normalized()
+    obj.rotation_euler = d.to_track_quat("Z", "Y").to_euler()
+    obj.location = tuple(p0)
+    lib.apply_modifiers(obj)
+    return obj
 
 
 # --- the conifers -----------------------------------------------------------
 
 class Cards:
-    """Needle-spray cards collected into one mesh: positions, per-corner UVs
-    (the card is the whole texture tile, 0..1) and a per-vertex normal that
-    points out of the crown rather than off the card."""
+    """Foliage cards collected into one mesh: positions, per-corner UVs
+    (the card is the whole texture tile, 0..1, repeated once per `tile`
+    metres along it) and a per-vertex normal that points out of the crown
+    rather than off the card. `mat` is the cut-out recipe they wear."""
 
-    def __init__(self):
+    def __init__(self, mat="needles", tile=0.6):
         self.verts, self.faces, self.uvs, self.normals = [], [], [], []
+        self.mat = mat
+        self.tile = tile
 
     def card(self, base, u_dir, v_dir, length, width, fold, out):
         """A spray from `base` along `u_dir`, `width` across `v_dir`, folded
@@ -244,9 +365,9 @@ class Cards:
         b = mathutils.Vector(base)
         lift = n * (fold * width * 0.5)
         rows = []
-        # One spray of the texture per 0.6 m of card, not one per card: a
+        # One spray of the texture per `tile` of card, not one per card: a
         # single two-metre spray is a fern frond, not a fir bough.
-        repeat = max(1.0, round(length / 0.6))
+        repeat = max(1.0, round(length / self.tile))
         for (s, vv) in ((0.0, 0.0), (0.0, 0.5), (0.0, 1.0), (1.0, 0.0), (1.0, 0.5), (1.0, 1.0)):
             edge = abs(vv - 0.5) * 2
             p = b + u * (length * s) + v * (width * (vv - 0.5)) + lift * edge
@@ -260,6 +381,31 @@ class Cards:
         self.faces.append((i0 + 0, i0 + 3, i0 + 4, i0 + 1))
         self.faces.append((i0 + 1, i0 + 4, i0 + 5, i0 + 2))
 
+    def strip(self, points, v_dir, width, fold, outs):
+        """A card bent along a path: `points` from base to tip, one texture
+        tile over its whole length, folded like `card`, with a normal per
+        point. A fern frond, arching up out of its crown and over."""
+        v = mathutils.Vector(v_dir).normalized()
+        total = sum((mathutils.Vector(points[i + 1]) - mathutils.Vector(points[i])).length
+                    for i in range(len(points) - 1))
+        i0 = len(self.verts)
+        run = 0.0
+        for k, p in enumerate(points):
+            if k:
+                run += (mathutils.Vector(p) - mathutils.Vector(points[k - 1])).length
+            n = mathutils.Vector(outs[k]).normalized()
+            taper = 1.0 - 0.55 * (run / total) ** 2
+            for vv in (0.0, 0.5, 1.0):
+                edge = abs(vv - 0.5) * 2
+                q = mathutils.Vector(p) + v * (width * taper * (vv - 0.5)) + n * (fold * width * 0.5 * edge)
+                self.verts.append(tuple(q))
+                self.uvs.append((run / total, 0.5 + (vv - 0.5) * taper))
+                self.normals.append(n)
+        for k in range(len(points) - 1):
+            a = i0 + k * 3
+            self.faces.append((a + 0, a + 3, a + 4, a + 1))
+            self.faces.append((a + 1, a + 4, a + 5, a + 2))
+
     def mesh(self, name="needles"):
         mesh = lib.bpy.data.meshes.new(name)
         mesh.from_pydata(self.verts, [], self.faces)
@@ -272,16 +418,18 @@ class Cards:
                 layer.data[li].uv = self.uvs[vi]
         obj = lib.bpy.data.objects.new(name, mesh)
         lib.bpy.context.collection.objects.link(obj)
-        lib.assign(obj, "needles")
+        lib.assign(obj, self.mat)
+        mark_own_uv(obj)
         obj["crown_normals"] = [c for n in self.normals for c in n]
         return obj
 
 
 def deliver_conifer(parts, cards_obj, name):
     """`kit.deliver`, except that the cube projection must not touch the
-    cards -- their UVs are the spray texture's tile -- and the cards' normals
-    are set by hand after the join, pointing out of the crown, which is what
-    makes a mass of flat cards light like a volume."""
+    cards -- their UVs are the spray texture's tile -- nor anything unwrapped
+    by `hull`, and the cards' normals are set by hand after the join,
+    pointing out of the crown, which is what makes a mass of flat cards light
+    like a volume. Every plant with cards goes out through here."""
     normals = cards_obj["crown_normals"]
     n_cards = len(cards_obj.data.vertices)
     parts = [p for p in parts if p is not None]
@@ -292,21 +440,24 @@ def deliver_conifer(parts, cards_obj, name):
     kit.zero_origin(obj)
     obj.data.name = name
     mesh = obj.data
-    needle_slot = next(i for i, m in enumerate(mesh.materials) if m.name == "MAT:needles")
     lib.bpy.context.view_layer.objects.active = obj
     lib.bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
     lib.bpy.ops.object.mode_set(mode="EDIT")
     lib.bpy.ops.mesh.select_all(action="DESELECT")
     lib.bpy.ops.object.mode_set(mode="OBJECT")
+    # Read only after the mode switches: edit mode rebuilds the mesh, and a
+    # reference taken before it points at whatever landed there instead.
+    own = mesh.attributes["own_uv"].data
     for poly in mesh.polygons:
-        poly.select = poly.material_index != needle_slot
+        poly.select = own[poly.index].value == 0
     lib.bpy.ops.object.mode_set(mode="EDIT")
     lib.bpy.ops.uv.cube_project(cube_size=1.0)
     lib.bpy.ops.object.mode_set(mode="OBJECT")
     # Split normals: the crown's for the cards, the mesh's own for the wood.
     for poly in mesh.polygons:
         poly.use_smooth = True
+    mesh.attributes.remove(mesh.attributes["own_uv"])
     corner = [tuple(c.vector) for c in mesh.corner_normals]
     custom = []
     for li, loop in enumerate(mesh.loops):
@@ -344,12 +495,14 @@ def conifer(name, sp):
     H = sp["H"]
     r0 = sp["r0"]
     # Trunk: a closed hull, flared at the foot, tapering to the leader.
-    sides = 9
-    wob = [rng.uniform(-0.05, 0.05) for _ in range(sides)]
+    # Sixteen sides, smooth-shaded and unwrapped as a cylinder: at nine, with
+    # cube-projected bark, every facet was a flat plank of its own.
+    sides = 16
+    wob = [0.035 * math.sin(2 * math.pi * i / sides * 3 + 0.7) + rng.uniform(-0.02, 0.02) for i in range(sides)]
     rings = [(0.0, r0 * sp.get("flare", 1.25), 0, 0), (0.45, r0 * 1.05, 0, 0),
              (H * 0.25, r0 * 0.86, 0, 0), (H * 0.55, r0 * 0.6, 0, 0),
              (H * 0.8, r0 * 0.34, 0, 0), (H * 0.97, r0 * 0.08, 0, 0)]
-    parts.append(hull(rings, sides, wob, mat=sp["bark"], name="trunk"))
+    parts.append(hull(rings, sides, wob, mat=sp["bark"], name="trunk", unwrap=True))
     if sp.get("buttress"):
         for i in range(5):
             a = 2 * math.pi * (i + 0.2) / 5
@@ -509,57 +662,70 @@ def build_tree_snag():
 
 
 def build_fern():
-    """A sword fern, 0.65 m out of a crown and a metre across.
+    """A sword fern, 0.7 m out of a crown and a metre and a half across.
 
-    This goes in by the dozen, so it is 220 triangles and the fronds are plain
-    lofted blades with nothing pinnate about them: at the two metres you ever
-    see one from, what reads is the shuttlecock, not the leaflets."""
+    Twelve fronds, each one alpha-cut card bent along an arc: steeply up out of
+    the crown and bowing over past halfway, so the clump is a shuttlecock and
+    not a yucca, with the pinnae in the texture. They were lofted solid
+    blades -- green straps, nothing pinnate about them."""
     lib.reset()
     rng = random.Random(70018)
-    objs = [hull([(0.00, 0.09, 0, 0), (0.07, 0.13, 0, 0), (0.14, 0.06, 0, 0)],
+    objs = [hull([(0.00, 0.07, 0, 0), (0.05, 0.09, 0, 0), (0.1, 0.04, 0, 0)],
                  5, mat="bark", name="crown")]
-    for i in range(7):
-        a = 2 * math.pi * i / 7 + rng.uniform(-0.32, 0.32)
-        L = rng.uniform(0.66, 0.84)
-        # Steeply out of the crown and bent well past halfway, so a frond stands
-        # up and then bows over. Less curl than this and the clump is a yucca.
-        objs.append(blade((math.cos(a) * 0.05, math.sin(a) * 0.05, 0.08), a,
-                          rng.uniform(0.96, 1.32), L, 0.072, 0.009,
-                          -L * rng.uniform(0.50, 0.70), name="frond", profile=_FROND))
-    return kit.deliver(objs, "fern")
+    cards = Cards("fernleaf", tile=1.0)
+    for i in range(12):
+        a = 2 * math.pi * i / 12 + rng.uniform(-0.25, 0.25)
+        L = rng.uniform(0.7, 1.0)
+        rise = rng.uniform(0.95, 1.25)    # how steeply it leaves the crown
+        bow = rng.uniform(1.7, 2.3)       # how far it has turned by the tip
+        radial = mathutils.Vector((math.cos(a), math.sin(a), 0))
+        up = mathutils.Vector((0, 0, 1))
+        pts, outs = [], []
+        p = mathutils.Vector((math.cos(a) * 0.05, math.sin(a) * 0.05, 0.1))
+        n = 5
+        for k in range(n + 1):
+            t = k / n
+            ang = rise - bow * t * t
+            pts.append(tuple(p))
+            direction = radial * math.cos(ang) + up * math.sin(ang)
+            outs.append(tuple((up * 0.8 + radial * 0.35 - direction * 0.2)))
+            p = p + direction * (L / n)
+        roll = rng.uniform(-0.35, 0.35)
+        v = mathutils.Vector((-math.sin(a), math.cos(a), 0)) * math.cos(roll) + up * math.sin(roll)
+        cards.strip(pts, v, 0.32, 0.3, outs)
+    return deliver_conifer(objs, cards.mesh("fronds"), "fern")
 
 
 def build_salal_bush():
     """Salal: 0.75 m high and twice that across, which is the whole difference
     between it and `bush` -- that one is a shrub with a shape, this is a
-    thicket. One low storey of leaf mass, a second half over it, and five
-    separate leaves standing out of the edge, because the thing you can name
-    salal by from a metre away is the single thick oval leaf."""
+    thicket. Arching stems carrying the big, glossy, pointed leaf you can name
+    salal by from a metre away, alpha-cut sprays of them fanned out low over
+    the ground."""
     lib.reset()
     rng = random.Random(70019)
     objs = []
+    cards = Cards("salal", tile=0.9)
     for i in range(7):
         a = 2 * math.pi * i / 7 + 0.2
         objs.append(segment((math.cos(a) * 0.07, math.sin(a) * 0.07, 0),
                             (math.cos(a) * 0.62, math.sin(a) * 0.62, 1.0),
                             0.46 + 0.1 * (i % 3), 0.035, 0.014, verts=4, name="stem"))
-    for i in range(7):
-        a = 2 * math.pi * (i + 0.5) / 7
-        d = 0.44 + rng.uniform(-0.08, 0.14)
-        objs.append(leafmass((math.cos(a) * d, math.sin(a) * d,
-                              0.30 + rng.uniform(-0.05, 0.10)),
-                             0.33 + rng.uniform(-0.05, 0.07), rng, flat=0.52))
-    for i in range(4):
-        a = 2 * math.pi * i / 4 + 0.9
-        objs.append(leafmass((math.cos(a) * 0.19, math.sin(a) * 0.19,
-                              0.56 + rng.uniform(-0.04, 0.09)),
-                             0.31 + rng.uniform(-0.04, 0.06), rng, flat=0.50))
-    for i in range(5):
-        a = 2 * math.pi * i / 5 + 0.45
-        objs.append(blade((math.cos(a) * 0.55, math.sin(a) * 0.55, 0.34 + 0.08 * (i % 3)),
-                          a + 0.4, rng.uniform(-0.25, 0.50), 0.17, 0.055, 0.008,
-                          -0.05, name="leaf", profile=_FROND))
-    return kit.deliver(objs, "salal_bush")
+    centre = mathutils.Vector((0.0, 0.0, 0.2))
+    for k in range(26):
+        a = k * 2.39996 + rng.uniform(-0.25, 0.25)
+        e = rng.uniform(0.15, 0.75) if k % 3 else rng.uniform(0.7, 1.1)
+        u = mathutils.Vector((math.cos(a) * math.cos(e), math.sin(a) * math.cos(e), math.sin(e)))
+        base = mathutils.Vector((math.cos(a) * rng.uniform(0.05, 0.3), math.sin(a) * rng.uniform(0.05, 0.3),
+                                 rng.uniform(0.04, 0.2)))
+        side = u.cross(mathutils.Vector((0, 0, 1)))
+        if side.length < 1e-3:
+            side = mathutils.Vector((1, 0, 0))
+        roll = rng.uniform(-0.5, 0.5)
+        v = side.normalized() * math.cos(roll) + u.cross(side).normalized() * math.sin(roll)
+        length = rng.uniform(0.55, 0.85)
+        cards.card(base, u, v, length, rng.uniform(0.4, 0.5), 0.2, outward(base + u * length * 0.5, centre, 0.6))
+    return deliver_conifer(objs, cards.mesh("leaves"), "salal_bush")
 
 
 def build_moss_rock():

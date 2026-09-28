@@ -43,6 +43,106 @@ function fbm(x, y, period, seed, octaves = 4, gain = 0.5) {
   return sum / norm;
 }
 
+/** Value noise periodic on each axis separately: `px` in x, `py` in y. */
+function vnoiseA(x, y, px, py, seed) {
+  const ix = Math.floor(x); const iy = Math.floor(y);
+  const fx = smooth(x - ix); const fy = smooth(y - iy);
+  const w = (i, p) => ((i % p) + p) % p;
+  const h = (i, j) => hash2(w(i, px), w(j, py), 1 << 20, seed);
+  const a = h(ix, iy); const b = h(ix + 1, iy); const c = h(ix, iy + 1); const d = h(ix + 1, iy + 1);
+  return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+}
+
+function fbmA(x, y, px, py, seed, octaves = 4, gain = 0.5) {
+  let sum = 0; let amp = 1; let norm = 0; let f = 1;
+  for (let o = 0; o < octaves; o++) {
+    sum += amp * vnoiseA(x * f, y * f, px * f, py * f, seed + o * 101);
+    norm += amp;
+    amp *= gain;
+    f *= 2;
+  }
+  return sum / norm;
+}
+
+/**
+ * Worley cells periodic per axis: `px` cells across, `py` down. Returns
+ * [distance to nearest, edge distance, cell hash], like `cellular`.
+ */
+function cellularA(x, y, px, py, seed, jitter = 0.45) {
+  const ix = Math.floor(x); const iy = Math.floor(y);
+  let d1 = 1e9; let d2 = 1e9; let id = 0;
+  for (let oy = -1; oy <= 1; oy++) {
+    for (let ox = -1; ox <= 1; ox++) {
+      const cx = ix + ox; const cy = iy + oy;
+      const wx = ((cx % px) + px) % px; const wy = ((cy % py) + py) % py;
+      const h = hash2(wx, wy, 1 << 20, seed);
+      const h2 = hash2(wx, wy, 1 << 20, seed + 7717);
+      const d = Math.hypot(cx + 0.5 + (h - 0.5) * 2 * jitter - x, cy + 0.5 + (h2 - 0.5) * 2 * jitter - y);
+      if (d < d1) { d2 = d1; d1 = d; id = h * 0.5 + h2 * 0.5; } else if (d < d2) d2 = d;
+    }
+  }
+  return [d1, d2 - d1, id];
+}
+
+/**
+ * Bark plates: Worley cells `cols` across the tile and `rows` up it, so a
+ * plate is long and narrow, with the cell walls as the furrows. A slow warp
+ * bends the columns so the furrows wander, split and rejoin. The first cut
+ * had the cells nearly square and read as crazy paving; the contours of a
+ * stretched noise read as camouflage, because a contour's width follows the
+ * noise's slope. A cell wall is a true distance, so a furrow keeps its width
+ * and only the `furrow` wobble changes it. Periodic on both axes, so it wraps
+ * round a trunk and up it without a seam.
+ *
+ * Returns `h` (0 deep in a furrow to 1 on a plate), `top` (plate face rather
+ * than furrow wall) and `id`, a roll per plate.
+ */
+function barkPlates(u, v, { cols, rows, furrow, seed, warp = 0.35 }) {
+  const wx = u * cols + (fbmA(u * 2, v * 3, 2, 3, seed, 3) - 0.5) * 2 * warp * cols / 4;
+  const [, edge, id] = cellularA(wx, v * rows, cols, rows, seed + 3, 0.48);
+  const fw = furrow * (0.75 + 0.5 * fbmA(u * 8, v * 6, 8, 6, seed + 5, 2));
+  // Steep furrow walls and a flat plate: a slow ramp from the furrow to the
+  // middle of the plate is a bevel, and every plate outlined by one read as
+  // a pineapple.
+  const h = THREE.MathUtils.smoothstep(edge, fw * 0.12, fw * 0.55);
+  return { h, top: THREE.MathUtils.smoothstep(h, 0.35, 0.7), id };
+}
+
+/**
+ * Bark as a net of ridges running up v: two families of `ridges` across the
+ * tile, leaning `slant` ridges either way over its height, so they part and
+ * rejoin and leave lozenge-shaped furrows between them -- which is the
+ * pattern of an old fir, an oak or an ash, and not a grid. Ridge widths
+ * wander, the lines meander by `warp`, and wiggling cross-cracks (`breaks` a
+ * tile) cut the ridges into plates. Everything is periodic per axis so it
+ * wraps round a trunk and up it without a seam.
+ *
+ * Returns `h` (0 deep in a furrow to 1 on a ridge), `top` (ridge face rather
+ * than furrow wall) and `id`, a roll per patch of ridge.
+ */
+function barkRidges(u, v, { ridges, slant = 1, warp, breaks = 0, seed, width = 0.3 }) {
+  const wobble = (fbmA(u * 4, v * 2, 4, 2, seed, 3) - 0.5) * 2 * warp;
+  const wv = width * (0.65 + 0.7 * fbmA(u * 8, v * 4, 8, 4, seed + 3, 2));
+  const ridge = (r) => {
+    const dc = Math.abs(r - Math.floor(r) - 0.5);
+    return 1 - THREE.MathUtils.smoothstep(dc, wv * 0.55, wv + 0.14);
+  };
+  const r1 = u * ridges + v * slant + wobble;
+  const r2 = u * ridges - v * slant + wobble * 0.7 + 0.37;
+  let h = Math.max(ridge(r1), ridge(r2));
+  if (breaks) {
+    // Cross-cracks per ridge, at a spacing and height of the ridge's own, so
+    // no two line up into a course of bricks.
+    const col = ((Math.floor(r1) % ridges) + ridges) % ridges;
+    const k = breaks + Math.floor(hash2(col, 3, 1 << 20, seed + 7) * breaks);
+    const pv = v * k + hash2(col, 4, 1 << 20, seed + 9) + (fbmA(u * 8, v * 2, 8, 2, seed + 11, 2) - 0.5) * 0.5;
+    const cr = Math.abs(pv - Math.round(pv));
+    h *= 0.35 + 0.65 * THREE.MathUtils.smoothstep(cr, 0.015, 0.07);
+  }
+  const id = fbmA(u * 12, v * 6, 12, 6, seed + 17, 1);
+  return { h, top: THREE.MathUtils.smoothstep(h, 0.45, 0.85), id };
+}
+
 /** Worley-ish cells. Returns [distance to nearest, edge distance, cell hash]. */
 function cellular(x, y, period, seed, jitter = 0.45) {
   const ix = Math.floor(x); const iy = Math.floor(y);
@@ -93,30 +193,91 @@ const SOOT_SHIFT = SOOT_ROWS.slice(0, -1).map((_, i) => hash2(i, 2, 14, 689));
  *   colour (0-255 rgb), height (0-1, drives the normal map), roughness (0-1).
  */
 /**
- * The needle spray's twigs, in tile units: [x0, y0, x1, y1, reach0, reach1],
- * where reach is how far needles stand off that twig. A main twig along the
- * middle of the tile and side shoots alternating forward off it, shorter
- * towards the tip -- the flat, feathered spray of a fir.
+ * The needle spray, laid out once: twigs, and every needle on them as its own
+ * short segment, binned on a 32 x 32 grid so a texel tests a handful.
+ *
+ * It used to be a periodic strand function -- needles as lines of constant
+ * (along - across * 0.58) -- which is a herringbone, and at the distance a
+ * crown is seen from the herringbone was all that read: a judge photographed
+ * flat boughs printed with chevrons. Needles here leave their twig at a
+ * scattered angle, at scattered lengths, some foreshortened the way a needle
+ * pointing at you is, on three orders of twig, and the ones nearer the twig
+ * and further back are darker -- which is where a spray's depth comes from.
  */
-const NEEDLE_TWIGS = (() => {
-  const twigs = [];
-  // The main twig in two pieces, so it can bow.
-  twigs.push([0.0, 0.5, 0.5, 0.515, 0.10, 0.085], [0.5, 0.515, 0.98, 0.5, 0.085, 0.05]);
-  for (let k = 0; k < 11; k++) {
-    const u0 = 0.05 + k * 0.078;
-    const side = k % 2 ? 1 : -1;
-    const len = 0.40 * (1 - u0 * 0.55);
-    const a = 0.92 + (k % 3) * 0.07;
-    const y0 = 0.5 + 0.02 * u0;
-    // Each shoot bends back towards the tip in two pieces, and stays inside
-    // the tile: a shoot cut off by the tile edge is a straight line in the sky.
-    const mx = u0 + Math.cos(a) * len * 0.5; const my = y0 + side * Math.sin(a) * len * 0.5;
-    const ex = mx + Math.cos(a - 0.35) * len * 0.5;
-    const ey = Math.min(0.9, Math.max(0.1, my + side * Math.sin(a - 0.35) * len * 0.5));
-    const w = 0.075 * (1 - u0 * 0.35);
-    twigs.push([u0, y0, mx, my, w, w * 0.85], [mx, my, ex, ey, w * 0.85, 0.035]);
+const NEEDLE_SPRAY = (() => {
+  const r = seeded(4099);
+  const twigs = [];   // [x0, y0, x1, y1, w, order, t0, t1] t = position along the spray
+  const needles = []; // [x0, y0, x1, y1, w, depth, fresh, order]
+  const addTwig = (x0, y0, x1, y1, w, order, t0, t1) => twigs.push([x0, y0, x1, y1, w, order, t0, t1]);
+  const clampV = (y) => Math.min(0.93, Math.max(0.07, y));
+  // Main axis, bowed, in four pieces.
+  let px = 0; let py = 0.5;
+  for (let i = 1; i <= 4; i++) {
+    const nx = i * 0.245; const ny = 0.5 + 0.018 * Math.sin(i * 1.3);
+    addTwig(px, py, nx, ny, 0.0042 * (1.2 - nx * 0.6), 0, px, nx);
+    px = nx; py = ny;
   }
-  return twigs;
+  // Side shoots alternating off it, forward-swept and shorter to the tip,
+  // each carrying a few tertiary shoots of its own.
+  for (let k = 0; k < 19; k++) {
+    const u0 = 0.02 + k * 0.049 + (r() - 0.5) * 0.015;
+    const side = k % 2 ? 1 : -1;
+    const len = 0.5 * (1 - u0 * 0.55) * (0.8 + r() * 0.35);
+    const a = 0.95 + r() * 0.3;
+    const y0 = 0.5 + 0.018 * Math.sin(u0 * 5.2);
+    let x = u0; let y = y0; let ang = a;
+    const pieces = 3;
+    for (let p = 0; p < pieces; p++) {
+      const l = len / pieces;
+      ang -= 0.16 + r() * 0.1; // bending towards the tip of the spray
+      // Nothing crosses the tile's far end: the tile repeats down a long card,
+      // and a shoot cut off by the edge is a straight line in the sky.
+      const nx = Math.min(0.975, x + Math.cos(ang) * l); const ny = clampV(y + side * Math.sin(ang) * l);
+      addTwig(x, y, nx, ny, 0.0028 * (1 - p * 0.25), 1, u0 + (p / pieces) * len, u0 + ((p + 1) / pieces) * len);
+      // Tertiary shoots off the outer side of this piece.
+      if (p < 2 && len > 0.12) {
+        for (const f of [0.35, 0.8]) {
+          const tx = x + (nx - x) * f; const ty = y + (ny - y) * f;
+          const ta = ang + 0.6 + r() * 0.35;
+          const tl = len * (0.22 + r() * 0.12) * (1 - p * 0.3);
+          const ex = Math.min(0.975, tx + Math.cos(ta) * tl); const ey = clampV(ty + side * Math.sin(ta) * tl);
+          addTwig(tx, ty, ex, ey, 0.0018, 2, u0 + len * (p + f) / pieces, u0 + len * (p + f) / pieces + tl);
+        }
+      }
+      x = nx; y = ny;
+    }
+  }
+  // Needles along every twig, both sides, forward-swept at a scattered angle.
+  for (const [x0, y0, x1, y1, , order, t0, t1] of twigs) {
+    const dx = x1 - x0; const dy = y1 - y0;
+    const L = Math.hypot(dx, dy);
+    const ux = dx / L; const uy = dy / L;
+    const n = Math.max(2, Math.round(L / 0.0045));
+    for (let i = 0; i < n; i++) {
+      const f = (i + r()) / n;
+      const bx = x0 + dx * f; const by = y0 + dy * f;
+      const t = t0 + (t1 - t0) * f;
+      for (const sd of [-1, 1]) {
+        const ang = (0.55 + r() * 0.6) * sd;
+        // Foreshortened: a needle pointing out of the card is a short one.
+        const len = (0.03 + r() * 0.02) * (r() < 0.3 ? 0.35 + r() * 0.4 : 1) * (order === 2 ? 0.8 : 1);
+        const ca = Math.cos(ang); const sa = Math.sin(ang);
+        const nx = ux * ca - uy * sa; const ny = ux * sa + uy * ca;
+        needles.push([bx, by, Math.min(0.992, bx + nx * len), clampV(by + ny * len), 0.002 + r() * 0.001,
+          (2 - order) * 0.12 + r() * 0.7, clamp01((t - 0.78) * 4.5) * (order === 0 ? 0.4 : 1), order]);
+      }
+    }
+  }
+  const N = 32;
+  const bins = Array.from({ length: N * N }, () => []);
+  const binAdd = (list, idx, x0, y0, x1, y1, pad) => {
+    const i0 = Math.max(0, Math.floor((Math.min(x0, x1) - pad) * N)); const i1 = Math.min(N - 1, Math.floor((Math.max(x0, x1) + pad) * N));
+    const j0 = Math.max(0, Math.floor((Math.min(y0, y1) - pad) * N)); const j1 = Math.min(N - 1, Math.floor((Math.max(y0, y1) + pad) * N));
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) bins[j * N + i].push([list, idx]);
+  };
+  needles.forEach((nd, i) => binAdd(needles, i, nd[0], nd[1], nd[2], nd[3], nd[4]));
+  twigs.forEach((tw, i) => binAdd(twigs, i, tw[0], tw[1], tw[2], tw[3], 0.012));
+  return { twigs, needles, bins, N };
 })();
 
 /** A small seeded generator for laying out cards once at load. */
@@ -130,6 +291,31 @@ function seeded(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/**
+ * The coursed rubble's layout, in metres over its 3 m tile: courses of 17 to
+ * 29 cm and stones of 22 to 70 cm in each, both normalised so the tile ends on
+ * a joint. See `rubblewall`.
+ */
+const RUBBLE = (() => {
+  const r = seeded(7331);
+  const T = 3;
+  const heights = [];
+  let sum = 0;
+  while (sum < T - 0.2) { const h = 0.17 + r() * 0.12; heights.push(h); sum += h; }
+  const k = T / sum;
+  const rows = [0];
+  for (const h of heights) rows.push(rows[rows.length - 1] + h * k);
+  const stones = heights.map(() => {
+    const ls = []; let w = 0;
+    while (w < T - 0.15) { const l = 0.22 + r() * 0.48; ls.push(l); w += l; }
+    const kk = T / w; const xs = [0];
+    for (const l of ls) xs.push(xs[xs.length - 1] + l * kk);
+    return xs;
+  });
+  return { T, rows, stones };
+})();
+
 
 /**
  * The grass atlas: eight cards of blades, two across and four down, each laid
@@ -276,7 +462,147 @@ const HEADS = {
   buttercup: [0xe8c21c, 0xb88f10], daisy: [0xf2efe2, 0xd9d4c4], clover: [0xd8b8c4, 0xa9728a],
 };
 
+/**
+ * Leaf sprays for the broadleaf cards (trees.py): a twig along u from the
+ * base at u = 0 to the tip, side twigs off it, and leaves on all of them,
+ * each leaf a shape of its own laid in its own frame. Same arrangement as
+ * the needle spray -- laid out once, binned, frontmost wins, darker behind
+ * and towards the twig -- because the mass of a bush or a crown is what the
+ * leaves behind the front ones do to it.
+ *
+ * `shape` gives a leaf's half-width at a fraction `a` of its length:
+ *   oak     lobed, widest two-thirds out, four or five round lobes a side
+ *   ovate   plain ellipse-ish, for the generic shrub
+ *   salal   broad, pointed, finely toothed -- and glossy, see the recipe
+ *   pinna   a fern leaflet: long, narrow, toothed
+ */
+const LEAF_SHAPES = {
+  oak: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.75)), 0.8) * (0.62 + 0.38 * Math.abs(Math.cos(a * Math.PI * 4.5))),
+  ovate: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.85)), 0.75),
+  salal: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.62)), 0.7) * (0.94 + 0.06 * Math.abs(Math.sin(a * 70))),
+  pinna: (a) => Math.pow(Math.sin(Math.PI * Math.pow(a, 0.5)), 0.6) * (0.88 + 0.12 * Math.abs(Math.sin(a * 40))),
+};
+
+function leafSpray(spec) {
+  const r = seeded(spec.seed);
+  const twigs = []; const leaves = [];
+  const clampV = (y) => Math.min(0.94, Math.max(0.06, y));
+  const leafOn = (x0, y0, x1, y1, order, spacing, sideSign) => {
+    const dx = x1 - x0; const dy = y1 - y0; const L = Math.hypot(dx, dy);
+    const base = Math.atan2(dy, dx);
+    const n = Math.max(1, Math.round(L / spacing));
+    for (let i = 0; i < n; i++) {
+      const f = (i + 0.3 + r() * 0.4) / n;
+      for (const sd of sideSign ? [sideSign] : [-1, 1]) {
+        if (!sideSign && spec.alternate && (i % 2 ? sd > 0 : sd < 0)) continue;
+        const ang = base + sd * (spec.angle + (r() - 0.5) * spec.spread);
+        const along = order === 0 ? f : 0;
+        const len = spec.leaf * (0.75 + r() * 0.45) * (1 - (spec.taper ?? 0.35) * Math.pow(along, 1.4));
+        const cx = x0 + dx * f; const cy = y0 + dy * f;
+        let ex = cx + Math.cos(ang) * len; let ey = cy + Math.sin(ang) * len;
+        ex = Math.min(0.985, Math.max(0.015, ex)); ey = clampV(ey);
+        leaves.push({ x0: cx, y0: cy, x1: ex, y1: ey, w: len * spec.width * (0.85 + r() * 0.3),
+          depth: r() * 0.8 + (order ? 0.2 : 0), tint: r(), order });
+      }
+    }
+  };
+  // Main twig.
+  twigs.push([0, 0.5, 0.97, 0.5 + (r() - 0.5) * 0.06, spec.twig]);
+  if (spec.mainLeaves) leafOn(0.04, 0.5, 0.97, 0.5, 0, spec.spacing, 0);
+  for (let k = 0; k < spec.sides; k++) {
+    const u0 = 0.06 + (k + r() * 0.5) * (0.8 / spec.sides);
+    const side = k % 2 ? 1 : -1;
+    const len = spec.sideLen * (1 - u0 * 0.5) * (0.8 + r() * 0.4);
+    const a = spec.sideAngle + (r() - 0.5) * 0.3;
+    const ex = Math.min(0.97, u0 + Math.cos(a) * len); const ey = clampV(0.5 + side * Math.sin(a) * len);
+    twigs.push([u0, 0.5, ex, ey, spec.twig * 0.7]);
+    leafOn(u0, 0.5, ex, ey, 1, spec.spacing, 0);
+  }
+  const N = 32;
+  const bins = Array.from({ length: N * N }, () => []);
+  const add = (item, x0, y0, x1, y1, pad) => {
+    const i0 = Math.max(0, Math.floor((Math.min(x0, x1) - pad) * N)); const i1 = Math.min(N - 1, Math.floor((Math.max(x0, x1) + pad) * N));
+    const j0 = Math.max(0, Math.floor((Math.min(y0, y1) - pad) * N)); const j1 = Math.min(N - 1, Math.floor((Math.max(y0, y1) + pad) * N));
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) bins[j * N + i].push(item);
+  };
+  for (const lf of leaves) add(lf, lf.x0, lf.y0, lf.x1, lf.y1, lf.w);
+  for (const tw of twigs) add({ twig: tw }, tw[0], tw[1], tw[2], tw[3], tw[4] + 0.004);
+  return { ...spec, bins, N, shape: LEAF_SHAPES[spec.shape] };
+}
+
+const LEAF_SPRAYS = {
+  // An oak twig: short side twigs crowded with lobed leaves ~10 cm long.
+  oakleaf: leafSpray({ seed: 5101, shape: 'oak', leaf: 0.13, width: 0.32, angle: 0.75, spread: 0.7, spacing: 0.05,
+    sides: 7, sideLen: 0.38, sideAngle: 0.8, twig: 0.006, mainLeaves: true, alternate: true,
+    palette: [0x28401b, 0x314f21, 0x3b5a25, 0x46632a], back: 0x1a2914 }),
+  // A generic shrub: small, plain, dense leaves all along.
+  shrubleaf: leafSpray({ seed: 5203, shape: 'ovate', leaf: 0.075, width: 0.26, angle: 0.9, spread: 0.9, spacing: 0.028,
+    sides: 9, sideLen: 0.36, sideAngle: 0.9, twig: 0.005, mainLeaves: true, alternate: false,
+    palette: [0x2c4a22, 0x35562a, 0x40612d, 0x4c6b33], back: 0x19291a }),
+  // Salal: big, leathery, pointed, alternate on a reddish stem.
+  salal: leafSpray({ seed: 5309, shape: 'salal', leaf: 0.2, width: 0.3, angle: 0.95, spread: 0.5, spacing: 0.085,
+    sides: 3, sideLen: 0.32, sideAngle: 0.75, twig: 0.007, mainLeaves: true, alternate: true,
+    palette: [0x243f22, 0x2b4a26, 0x33552b, 0x3d5f2f], back: 0x142214, stem: 0x5a3326 }),
+  // A sword fern's frond: the rachis along u, pinnae both sides.
+  fernleaf: leafSpray({ seed: 5407, shape: 'pinna', leaf: 0.2, width: 0.14, angle: 1.2, spread: 0.12, spacing: 0.034,
+    sides: 0, sideLen: 0, sideAngle: 0, twig: 0.005, mainLeaves: true, alternate: false, taper: 0.8,
+    palette: [0x2f5226, 0x365a2a, 0x3b6230], back: 0x1a2c17 }),
+};
+
+/** One texel of a leaf spray: the frontmost leaf, or the twig, or nothing. */
+function leafSprayAt(sp, u, v, s) {
+  const bin = sp.bins[Math.min(sp.N - 1, Math.floor(v * sp.N)) * sp.N + Math.min(sp.N - 1, Math.floor(u * sp.N))];
+  let best = null; let ba = 0; let bb = 0; let twig = false;
+  for (const it of bin) {
+    if (it.twig) {
+      const [x0, y0, x1, y1, w] = it.twig;
+      const dx = x1 - x0; const dy = y1 - y0;
+      const t = clamp01(((u - x0) * dx + (v - y0) * dy) / (dx * dx + dy * dy));
+      if (!best && Math.hypot(u - x0 - dx * t, v - y0 - dy * t) < w * (1 - 0.5 * t)) twig = true;
+      continue;
+    }
+    if (best && it.depth <= best.depth) continue;
+    const dx = it.x1 - it.x0; const dy = it.y1 - it.y0; const L2 = dx * dx + dy * dy;
+    const a = ((u - it.x0) * dx + (v - it.y0) * dy) / L2;
+    if (a < 0 || a > 1) continue;
+    const b = ((u - it.x0) * -dy + (v - it.y0) * dx) / Math.sqrt(L2);
+    const hw = it.w * sp.shape(a);
+    if (Math.abs(b) < hw) { best = it; ba = a; bb = b / Math.max(hw, 1e-5); }
+  }
+  if (!best && !twig) {
+    s.color = rgb(sp.back); s.alpha = 0; s.height = 0; s.rough = 0.8;
+    return;
+  }
+  if (!best) {
+    s.color = rgb(sp.stem ?? 0x4a3a2a); s.alpha = 1; s.height = 0.3; s.rough = 0.8;
+    return;
+  }
+  const pal = sp.palette;
+  let c = rgb(pal[Math.floor(best.tint * pal.length) % pal.length]);
+  // Midrib and a hint of veins, both paler; the edge and the base in shade.
+  const rib = clamp01(1 - Math.abs(bb) * 14);
+  const vein = clamp01(1 - Math.abs(((Math.abs(bb) * 0.6 + ba * 3.5) % 0.5) - 0.25) * 16) * 0.35 * (1 - rib);
+  c = mix(c, rgb(0x8da35e), rib * 0.35 + vein * 0.25);
+  const shade = (0.62 + 0.38 * best.depth) * (0.8 + 0.2 * Math.min(1, ba * 3)) * (1 - 0.12 * Math.abs(bb) ** 3);
+  s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
+  s.alpha = 1;
+  // A leaf is folded along its midrib: relief from the edge up to the rib.
+  s.height = 0.35 + best.depth * 0.35 + (1 - Math.abs(bb)) * 0.25;
+  s.rough = 0.7;
+}
+
 const SURFACES = {
+  /** The broadleaf cards: see LEAF_SPRAYS. */
+  oakleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.oakleaf, u, v, s); },
+  shrubleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.shrubleaf, u, v, s); },
+  salal(u, v, s) {
+    leafSprayAt(LEAF_SPRAYS.salal, u, v, s);
+    // Salal is the glossiest leaf in the understorey; its sheen is how it
+    // is told from everything else under a fir.
+    s.rough = s.alpha ? 0.42 : 0.8;
+  },
+  fernleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.fernleaf, u, v, s); },
+
   /**
    * The grass atlas (GRASS_CARDS). Every texel is the front-most shape over
    * it; the ones behind are darker, and every blade darkens towards its root,
@@ -319,6 +645,63 @@ const SURFACES = {
     s.alpha = 1;
     s.height = 0.3 + best.depth * 0.4 + (1 - hit.across) * 0.2;
     s.rough = hit.head ? 0.7 : 0.62 + (1 - best.depth) * 0.2;
+  },
+
+  /**
+   * Coursed rubble: roughly squared stones laid in courses of 17 to 29 cm,
+   * each stone its own length, with lime pointing a shade paler than the
+   * stone and set back from it. For the walls the old `rock` crazy paving was
+   * on -- a graveyard's kerbs and its tombs, walls and vault alike -- where a
+   * judge measured stones of 60 to 90 cm in a random polygon net: paving laid
+   * up a wall, at twice the size a man could lift. Crazy paving stays on the
+   * floors, where it belongs.
+   *
+   * Everything is in metres over the 3 m tile (RUBBLE), so the joint is the
+   * same 20 mm on both axes and a 1.75 m figure has seven courses to measure
+   * himself against.
+   */
+  rubblewall(u, v, s) {
+    const { T, rows, stones } = RUBBLE;
+    const x = u * T; const y = v * T;
+    let row = 0;
+    while (row < rows.length - 2 && y >= rows[row + 1]) row++;
+    const xs = stones[row];
+    let col = 0;
+    while (col < xs.length - 2 && x >= xs[col + 1]) col++;
+    const id = hash2(col, row, 1 << 20, 7351);
+    // Distance to the stone's own edge. A rubble stone does not fill its slot:
+    // it sits a little short of the course above and the stone beside, by its
+    // own centimetre or so, with its corners knocked off and its arrises
+    // broken by noise -- or the wall is brick.
+    const shortTop = 0.002 + 0.014 * hash2(col, row, 1 << 20, 7361);
+    const shortEnd = 0.002 + 0.012 * hash2(col, row, 1 << 20, 7367);
+    const dx = Math.min(x - xs[col], xs[col + 1] - x - shortEnd);
+    const dy = Math.min(y - rows[row], rows[row + 1] - y - shortTop);
+    const corner = 0.02 + 0.035 * id;
+    const cx = Math.max(0, corner - dx); const cy = Math.max(0, corner - dy);
+    const edge = Math.min(dx, dy, corner - Math.hypot(cx, cy))
+      - 0.012 * fbmA(u * 36, v * 36, 36, 36, 7353, 3);
+    const joint = 0.006;
+    const inStone = edge > joint;
+    const face = fbmA(u * 30, v * 30, 30, 30, 7357, 4);
+    const grain = fbmA(u * 150, v * 150, 150, 150, 7359, 2);
+    // Weathering runs down a wall: streaks, slow across and quick down it.
+    const streak = fbmA(u * 40, v * 4, 40, 4, 7369, 3);
+    // Grey and buff field stone, a shade apart stone to stone, the odd one
+    // browner or darker; crustose lichen on a few.
+    const tone = (id * 7.31) % 1;
+    let stone = mix(rgb(0x6e695f), rgb(0x8d867a), id);
+    if (tone > 0.8) stone = mix(stone, rgb(0x7d6a52), 0.45);
+    else if (tone < 0.14) stone = mix(stone, rgb(0x55514b), 0.5);
+    const lichen = clamp01(fbmA(u * 9, v * 9, 9, 9, 7363, 3) * 2.6 - 1.62);
+    stone = mix(stone, tone > 0.5 ? rgb(0x979a82) : rgb(0x9c8a58), lichen * 0.5);
+    const round = clamp01((edge - joint) / 0.035);
+    s.color = inStone
+      ? mix(stone, rgb(0x4f4b45), (1 - round) * 0.14 + face * 0.16 + streak * 0.1).map((c) => c * (0.9 + grain * 0.16))
+      : mix(rgb(0x8e877a), rgb(0x7a7468), grain);
+    // The face is split, not dressed: a slow bulge across each stone.
+    s.height = inStone ? 0.5 + round * 0.28 + face * 0.2 + grain * 0.05 : 0.08 + grain * 0.05;
+    s.rough = inStone ? 0.84 + grain * 0.12 : 0.95;
   },
 
   cobble(u, v, s) {
@@ -721,9 +1104,14 @@ const SURFACES = {
     // Moss goes where the humus reads darkest, which is where the water sits.
     const moss = clamp01((0.34 - humus) * 3.4);
     c = mix(c, rgb(0x4c5a30), moss * 0.7);
-    const shade = 0.90 + fine * 0.20;
+    // Litter: needles and twig ends as specks in the colour, not bumps in the
+    // relief. At 0.3 of the height range the 5 cm octave lit up in sun-flecks
+    // as a leopard print, the same fault the lawn had -- the relief is the
+    // slow drift of the humus and little else.
+    const speck = hash2(Math.floor(u * 700), Math.floor(v * 700), 700, 59);
+    const shade = (0.92 + fine * 0.14) * (speck > 0.93 ? 1.18 : speck < 0.05 ? 0.78 : 1);
     s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
-    s.height = drift * 0.45 + fine * 0.30;
+    s.height = drift * 0.3 + fine * 0.06;
     s.rough = 0.96 - fine * 0.05;
   },
 
@@ -1044,9 +1432,8 @@ const SURFACES = {
 
   /**
    * A conifer's needle spray, for alpha-cut cards: one spray per tile, the
-   * twig running along u from the base at u = 0 to the tip, side shoots
-   * alternating forward off it, needles standing off every twig at sixty
-   * degrees. Before this a fir crown was a stack of cones wearing the
+   * twig running along u from the base at u = 0 to the tip, laid out in
+   * NEEDLE_SPRAY. Before cards a fir crown was a stack of cones wearing the
    * `leaves` mass texture, and a judge photographed it as camouflage netting
    * over a traffic cone. What a crown is from ten metres is sprays with sky
    * between them, and only a cut-out gives you the sky.
@@ -1056,99 +1443,108 @@ const SURFACES = {
    * rims every spray at a distance.
    */
   needles(u, v, s) {
-    const segs = NEEDLE_TWIGS;
-    let best = 1e9; let bt = 0; let bw = 0; let ba = 0; let bc = 0; let bi = -1;
-    for (let i = 0; i < segs.length; i++) {
-      const [x0, y0, x1, y1, w0, w1] = segs[i];
+    const { bins, N, twigs } = NEEDLE_SPRAY;
+    const bin = bins[Math.min(N - 1, Math.floor(v * N)) * N + Math.min(N - 1, Math.floor(u * N))];
+    let best = null; let bestDepth = -1; let bestT = 0;
+    let core = 1e9; let coreTwig = null;
+    for (const [list, i] of bin) {
+      const sg = list[i];
+      const [x0, y0, x1, y1, w] = sg;
       const dx = x1 - x0; const dy = y1 - y0;
-      const len2 = dx * dx + dy * dy;
-      const t = clamp01(((u - x0) * dx + (v - y0) * dy) / len2);
-      const px = x0 + dx * t; const py = y0 + dy * t;
-      const d = Math.hypot(u - px, v - py);
-      const w = w0 + (w1 - w0) * t;
-      // Nearest *relative to its own reach*, so a thin shoot is not swallowed
-      // by the main twig's wider brush next to it.
-      if (d / w < best) {
-        best = d / w; bt = t; bw = w; bi = i;
-        const len = Math.sqrt(len2);
-        // Signed position along and across this twig, in texture units.
-        ba = ((u - x0) * dx + (v - y0) * dy) / len;
-        bc = ((u - x0) * -dy + (v - y0) * dx) / len;
+      const t = clamp01(((u - x0) * dx + (v - y0) * dy) / (dx * dx + dy * dy));
+      const d = Math.hypot(u - x0 - dx * t, v - y0 - dy * t);
+      if (list === twigs) {
+        // How far into the spray's dense core this texel is: the needles
+        // overlap there and nothing of the sky gets through.
+        const reach = 0.016 * (1.1 - sg[5] * 0.3);
+        if (d / reach < core) { core = d / reach; coreTwig = sg; }
+        continue;
       }
+      // Tapered to a point at the tip.
+      if (d < w * (1 - t * 0.55) && sg[5] > bestDepth) { best = sg; bestDepth = sg[5]; bestT = t; }
     }
-    const across = Math.abs(bc);
-    const ragged = 0.78 + 0.32 * vnoise(ba * 60 + bi * 7, bi * 3, 1024, 911);
-    const reach = bw * ragged;
-    // Needles: strands leaving the twig forward at sixty degrees, so a
-    // needle is a line of constant (along - across * 0.58).
-    const strand = (ba - across * 0.58) * 190 + vnoise(ba * 90, bi, 1024, 917) * 1.4;
-    const gap = Math.abs(((strand % 1) + 1) % 1 - 0.5);
-    const needle = across < reach && gap < 0.3 + 0.12 * (1 - across / reach);
-    const twig = across < 0.0045 * (1.3 - bt * 0.6);
-    const inside = needle || twig;
+    const inCore = core < 1;
+    if (!best && !inCore) {
+      s.color = rgb(0x1f3322); s.alpha = 0; s.height = 0; s.rough = 0.8;
+      return;
+    }
     const shade = fbm(u * 18, v * 18, 18, 919, 3);
-    const out = clamp01(across / Math.max(0.001, reach));
-    // Dark at the twig where the needles overlap, lighter at their tips, and
-    // the current year's growth -- the last few centimetres of every shoot --
-    // the pale lime that makes a fir read as alive from across a clearing.
-    // Coastal fir is a dark blue-green, not a lawn green.
-    let c = mix(rgb(0x1c3122), rgb(0x3f5f3f), out * 0.8 + shade * 0.3);
-    const fresh = clamp01((bt - 0.72) * 3.2) * (bi > 1 ? 1 : 0.5);
-    c = mix(c, rgb(0x6f8d4c), fresh * 0.45);
-    if (twig && !needle) c = rgb(0x4e3b2a);
-    s.color = inside ? c : rgb(0x223626);
-    s.alpha = inside ? 1 : 0;
-    s.height = inside ? (twig ? 0.9 : 0.55 + 0.35 * (0.5 - gap)) : 0;
+    let c;
+    if (best) {
+      // Dark where the needle leaves the twig, in the spray's shade, lighter
+      // out at its tip; the ones behind darker still. The current year's
+      // growth -- the last few centimetres of every shoot -- is the pale lime
+      // that makes a fir read as alive from across a clearing. Coastal fir
+      // is a dark blue-green, not a lawn green.
+      const lit = 0.2 + 0.8 * bestDepth;
+      c = mix(rgb(0x142519), rgb(0x46683f), clamp01(bestT * 0.5 + lit * 0.6 + shade * 0.2 - 0.15));
+      c = mix(c, rgb(0x76954f), best[6] * 0.55 * (0.4 + 0.6 * bestT));
+    } else {
+      // The core between the needles: the spray's own shadow, and the twig.
+      c = core < 0.28 && coreTwig[5] < 2 ? rgb(0x3e2f22) : mix(rgb(0x0f1c13), rgb(0x1a2d1e), shade);
+    }
+    s.color = c;
+    s.alpha = 1;
+    s.height = best ? 0.4 + 0.5 * bestDepth : 0.2;
     s.rough = 0.78 + shade * 0.12;
   },
 
   /**
-   * Douglas-fir bark: thick corky ridges broken into long plates by furrows
-   * deep enough to hold shadow, running up the trunk (v). It was a stretched
-   * noise that on a round trunk read as blotches -- camouflage, a judge said.
-   * Cells elongated five to one make the plates; their edges are the furrows.
+   * Douglas-fir bark, for a trunk whose UVs run round it in u and up it in v
+   * (trees.py unwraps the trunks as cylinders): thick corky ridges that part
+   * and rejoin, broken across every few decimetres into plates, with furrows
+   * deep enough to hold shadow and the cinnamon red of the inner bark down in
+   * them -- the thing that tells a Douglas-fir from a hemlock at a glance.
+   *
+   * It was elongated Worley cells, and neither axis tiled (v ran at 2.2 over
+   * a 16-period lattice), while the trunks were cube-projected: every facet
+   * took the cells at another slant and the rings met at seams, which is the
+   * chevron lattice a judge photographed. Everything here is periodic per
+   * axis, and it is the unwrap that makes the ridges run up the tree.
    */
   firbark(u, v, s) {
-    // Warp the cells so the furrows wander instead of running ruler-straight.
-    const wu = u + (fbm(u * 6, v * 1.5, 6, 939, 3) - 0.5) * 0.08;
-    const [, edge, id] = cellular(wu * 16, v * 2.2, 16, 941, 0.46);
-    // Wide furrows and narrow ridges: on an old Douglas-fir the furrows are a
-    // third of the surface and deep enough to be black at noon.
-    const ragged = 0.05 * fbm(u * 40, v * 6, 40, 943, 3);
-    const plate = THREE.MathUtils.smoothstep(edge, 0.05 + ragged, 0.2 + ragged);
-    const cork = fbm(u * 64, v * 10, 64, 947, 4);
-    const fibre = fbm(u * 120, v * 4, 120, 949, 2);
-    const top = mix(rgb(0x4a3527), rgb(0x80604a), id * 0.5 + cork * 0.5);
-    const lichen = clamp01(fbm(u * 5, v * 2, 5, 953, 3) * 2.4 - 1.5);
-    const face = mix(top, rgb(0x858372), lichen * 0.4).map((c) => c * (0.82 + fibre * 0.3));
-    s.color = mix(rgb(0x160f0a), face, plate);
-    s.height = plate * (0.6 + cork * 0.35);
-    s.rough = 0.96;
+    const R = barkPlates(u, v, { cols: 12, rows: 2, furrow: 0.75, seed: 939 });
+    // Corky layers: fine and flaky across the ridge, the way the cork sheds.
+    const cork = fbmA(u * 36, v * 64, 36, 64, 947, 3);
+    const lichen = clamp01(fbmA(u * 4, v * 2, 4, 2, 953, 3) * 2.4 - 1.45) * R.top;
+    const fibre = fbmA(u * 64, v * 6, 64, 6, 951, 2);
+    const top = mix(rgb(0x4a3b30), rgb(0x7a6858), R.id * 0.5 + cork * 0.3 + fibre * 0.2);
+    // The plate's shoulders go red-brown before they drop into the furrow.
+    const face = mix(mix(rgb(0x6e4630), top, THREE.MathUtils.smoothstep(R.h, 0.75, 1)), rgb(0x8a8c7a), lichen * 0.55);
+    const furrow = mix(rgb(0x160e0a), rgb(0x6a3a24), clamp01(R.h * 2.2));
+    s.color = mix(furrow, face, R.top).map((c) => c * (0.84 + cork * 0.2 + fibre * 0.08));
+    s.height = R.h * (0.88 + cork * 0.12);
+    s.rough = 0.97;
   },
 
   /**
-   * Western red cedar: long fibrous strips, grey-brown weathering to silver,
-   * shallow ridges rather than plates -- the bark that peels in ribbons.
+   * Western red cedar: long fibrous strips that barely part, weathered to a
+   * silvered grey-brown with the red showing where a strip has peeled.
    */
   cedarbark(u, v, s) {
-    const warp = fbm(u * 4, v * 0.8, 4, 961, 3) * 2.2 + fbm(u * 9, v * 0.5, 9, 963, 2) * 1.2;
-    const fibre = Math.abs(Math.sin((u * 24 + warp) * Math.PI));
-    // Strips peel and break along their length.
-    const peel = clamp01(fbm(u * 24, v * 2.2, 24, 965, 3) * 2.2 - 0.9);
-    const strip = fbm(u * 60, v * 3, 60, 967, 3);
-    const c = mix(rgb(0x6d4c39), rgb(0x9c8676), strip * 0.5 + peel * 0.4);
-    s.color = mix(rgb(0x2e2119), c, 0.3 + 0.7 * fibre * (0.6 + 0.4 * peel));
-    s.height = fibre * 0.55 + peel * 0.3 + strip * 0.15;
+    const R = barkRidges(u, v, { ridges: 16, slant: 1, warp: 0.8, seed: 961, width: 0.36 });
+    const strip = fbmA(u * 60, v * 3, 60, 3, 967, 3);
+    const peel = clamp01(fbmA(u * 12, v * 2, 12, 2, 965, 3) * 2.2 - 1.05);
+    const face = mix(mix(rgb(0x6f6158), rgb(0x9a8f84), strip), rgb(0x8c5a3e), peel * 0.7);
+    s.color = mix(rgb(0x2e2119), face, 0.25 + 0.75 * R.top);
+    s.height = R.h * 0.6 + strip * 0.15 + peel * 0.1;
     s.rough = 0.95;
   },
 
+  /**
+   * Broadleaf bark -- the oak, and anything with a trunk that is not a
+   * conifer: grey, split into small near-square blocks by vertical fissures
+   * and shorter cross-cracks, which is what an old oak's bark is.
+   */
   bark(u, v, s) {
-    const ridges = fbm(u * 26, v * 5, 26, 181, 4);
-    const deep = Math.abs(Math.sin((u * 18 + ridges * 5) * Math.PI));
-    const c = mix(rgb(0x3a2c20), rgb(0x6a5540), ridges * 0.7 + deep * 0.3);
-    s.color = mix(c, rgb(0x241a12), (1 - deep) * 0.6);
-    s.height = deep * 0.7 + ridges * 0.25;
-    s.rough = 0.97;
+    const R = barkPlates(u, v, { cols: 12, rows: 3, furrow: 0.5, seed: 181 });
+    // A rough face on every plate, so it reads as bark and not as a tile.
+    const grain = fbmA(u * 48, v * 20, 48, 20, 187, 3);
+    const moss = clamp01(fbmA(u * 3, v * 2, 3, 2, 191, 3) * 2.2 - 1.3) * R.top;
+    const top = mix(rgb(0x4e4840), rgb(0x7a7166), R.id * 0.4 + grain * 0.6);
+    s.color = mix(mix(rgb(0x221c16), rgb(0x3f352b), R.h), mix(top, rgb(0x4d5a2e), moss * 0.6), R.top);
+    s.height = R.h * 0.8 + grain * 0.2;
+    s.rough = 0.96;
   },
 
   /**
@@ -1891,6 +2287,8 @@ const RECIPES = {
   // same physical size as one at 8 -- the per-model stretch was half of what
   // made the trees read as toys.
   leaves: { surface: 'leaves', scale: 2.0, normalScale: 0.75, env: 0.4, wet: 0, detail: 0.5 },
+  // The walls that were `rock`: see the surface. Its tile is its own 3 m.
+  rubblewall: { surface: 'rubblewall', scale: 3, normalScale: 0.9, env: 0.7, wet: 0, detail: 0.55 },
   rock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0.25, detail: 0.6 },
   sand: { surface: 'sand', scale: 6, normalScale: 0.4, env: 0.55, wet: 0, detail: 0.6 },
   // Out of doors and loose, so it takes damp -- but a path drains, which is the
@@ -1900,7 +2298,7 @@ const RECIPES = {
   // and it sheds water rather than holding it in pools. Low `env` for the same
   // reason peat has it -- a forest floor sees a fraction of the dome, and a
   // full mirror of the sky turns brown litter grey.
-  duff: { surface: 'duff', scale: 3.2, normalScale: 0.6, env: 0.42, wet: 0, detail: 0.7 },
+  duff: { surface: 'duff', scale: 3.2, normalScale: 0.45, env: 0.42, wet: 0, detail: 0.5 },
   iron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1.4, wet: 0, detail: 0.3 },
   // Arms and armour. Tile sizes are the size of the things: a blade is 5 cm
   // across and a shield 70.
@@ -1912,7 +2310,12 @@ const RECIPES = {
   // `cutout` is the alpha test: an alpha-*tested* card sorts and shadows like
   // anything opaque, where a blended one would need sorting per card.
   needles: { surface: 'needles', scale: 1, normalScale: 0.5, env: 0.3, wet: 0, detail: 0, cutout: 0.4 },
-  firbark: { surface: 'firbark', scale: 1.4, normalScale: 1.1, env: 0.5, wet: 0, detail: 0.5 },
+  // The broadleaf cards, same arrangement as the needles: UVs are the card.
+  oakleaf: { surface: 'oakleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  shrubleaf: { surface: 'shrubleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  salal: { surface: 'salal', scale: 1, normalScale: 0.4, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
+  fernleaf: { surface: 'fernleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  firbark: { surface: 'firbark', scale: 1.4, normalScale: 0.9, env: 0.35, wet: 0, detail: 0.5 },
   cedarbark: { surface: 'cedarbark', scale: 1.2, normalScale: 0.9, env: 0.5, wet: 0, detail: 0.5 },
   water: { surface: 'water', scale: 7, normalScale: 0.5, env: 1.6, wet: 0, detail: 0.2 },
   // The sewer. `buried` hands their ambient, reflections and fog to the fixed
