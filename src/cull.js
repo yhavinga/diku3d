@@ -662,7 +662,20 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
    * round the sphere, which is conservative and costs a handful of flops.
    */
   const e = new Float64Array(16);
+  /**
+   * The same test for a sphere stored at `a[o..o+3]`. Everything hot calls
+   * this one: a double handed to a function that is not inlined is boxed on
+   * the heap, and four of them per sphere -- tens of thousands of spheres a
+   * frame -- was most of the frame's garbage.
+   */
+  const scratch = new Float64Array(4);
   function sphereVisible(x, y, z, r, bound = false) {
+    scratch[0] = x; scratch[1] = y; scratch[2] = z; scratch[3] = r;
+    return visibleAt(scratch, 0, bound);
+  }
+  const rect = new Float64Array(4);
+  function visibleAt(a, o, bound) {
+    const x = a[o]; const y = a[o + 1]; const z = a[o + 2]; const r = a[o + 3];
     // The zones' answer, for what is not under the zones: the actors' trees,
     // lamps and props stand in regions of their own that reach from the
     // street down into the sewer. A single thing goes by its centre; a volume
@@ -685,11 +698,16 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       y1 = proj[5] * Math.max((vy + r) / dn, (vy + r) / df);
       if (x1 < -1 || x0 > 1 || y1 < -1 || y0 > 1) return false;
     }
-    if (state.active && !throughApertures(x, y, z, r, x0, y0, x1, y1)) return false;
-    return !(occluding && occlusion.hidden(x, y, z, r));
+    if (state.active) {
+      rect[0] = x0; rect[1] = y0; rect[2] = x1; rect[3] = y1;
+      if (!throughApertures(a, o)) return false;
+    }
+    return !(occluding && occlusion.hiddenAt(a, o));
   }
 
-  function throughApertures(x, y, z, r, x0, y0, x1, y1) {
+  function throughApertures(a, o) {
+    const x = a[o]; const y = a[o + 1]; const z = a[o + 2]; const r = a[o + 3];
+    const x0 = rect[0]; const y0 = rect[1]; const x1 = rect[2]; const y1 = rect[3];
     const own = state.cell.box;
     if (x + r > own.min.x && x - r < own.max.x && y + r > own.min.y && y - r < own.max.y
       && z + r > own.min.z && z - r < own.max.z) return true;
@@ -705,6 +723,17 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       if (w.sign > 0 ? c + r > w.plane : c - r < w.plane) return true;
     }
     return false;
+  }
+
+  /** Does the sun's camera see the sphere at `a[o]`? Frustum.intersectsSphere, unboxed. */
+  function castAt(a, o) {
+    const x = a[o]; const y = a[o + 1]; const z = a[o + 2]; const negRadius = -a[o + 3];
+    const planes = shadowFrustum.planes;
+    for (let i = 0; i < 6; i++) {
+      const p = planes[i]; const n = p.normal;
+      if (n.x * x + n.y * y + n.z * z + p.constant < negRadius) return false;
+    }
+    return true;
   }
   // Whether the depth of the last frames may hide what is tested: see
   // occlusion.js. Off for figures, which move on their own.
@@ -809,14 +838,18 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       if (!g.boundingSphere) g.computeBoundingSphere();
       const local = g.boundingSphere;
       const m = new THREE.Matrix4();
-      const spheres = new Float32Array(n * 4);
+      // Float32-rounded, as they always were, but held as doubles: every test
+      // reads them as doubles anyway, and one array type keeps visibleAt
+      // monomorphic.
+      const spheres = new Float64Array(n * 4);
       const buckets = new Map();
       o.updateWorldMatrix(true, false);
       for (let i = 0; i < n; i++) {
         o.getMatrixAt(i, m);
         m.premultiply(o.matrixWorld);
         _sphere.copy(local).applyMatrix4(m);
-        spheres.set([_sphere.center.x, _sphere.center.y, _sphere.center.z, _sphere.radius], i * 4);
+        spheres[i * 4] = Math.fround(_sphere.center.x); spheres[i * 4 + 1] = Math.fround(_sphere.center.y);
+        spheres[i * 4 + 2] = Math.fround(_sphere.center.z); spheres[i * 4 + 3] = Math.fround(_sphere.radius);
         const key = `${Math.floor(_sphere.center.x / BUCKET)},${Math.floor(_sphere.center.z / BUCKET)}`;
         let b = buckets.get(key);
         if (!b) { b = { list: [], sphere: null }; buckets.set(key, b); }
@@ -831,8 +864,14 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
         }
         list.push({ ids: Int32Array.from(b.list), sphere: box.getBoundingSphere(new THREE.Sphere()) });
       }
+      // The buckets' spheres side by side, for the same unboxed test.
+      const bucketSpheres = new Float64Array(list.length * 4);
+      list.forEach((b, k) => {
+        bucketSpheres[k * 4] = b.sphere.center.x; bucketSpheres[k * 4 + 1] = b.sphere.center.y;
+        bucketSpheres[k * 4 + 2] = b.sphere.center.z; bucketSpheres[k * 4 + 3] = b.sphere.radius;
+      });
       const entry = {
-        mesh: o, total: n, spheres, buckets: list,
+        mesh: o, total: n, spheres, buckets: list, bucketSpheres,
         source: o.instanceMatrix.array.slice(),
         kept: new Int32Array(n), keptCount: n, full: true,
         lod: o.userData.lod || null, feet: null,
@@ -853,72 +892,208 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     });
   }
 
-  const shadowFrustum = new THREE.Frustum();
-  const everything = () => true;
-  const _m = new THREE.Matrix4();
-
-  const seenOrCast = (x, y, z, r, bound) => sphereVisible(x, y, z, r, bound)
-    || shadowFrustum.intersectsSphere(_sphere.set(_v.set(x, y, z), r));
+  /**
+   * One grid over every static instance and every batch piece in the world,
+   * 26 m a cell, so that a cell out of view is one test for everything in it.
+   * Per mesh, the buckets were ~2.5 instances each at the graveyard -- 7,700
+   * bucket tests a frame for 21,000 instances -- and the batches had none.
+   * A cell's sphere holds every sphere in it, so a cell that cannot be seen
+   * has nothing in it that can: the answer per instance is unchanged.
+   *
+   * The far-drawn trees keep their own buckets (`compact`): the order their
+   * cards are handed over in is the order they are drawn in.
+   */
+  const GRID = 26;
+  let grid = null;
+  function buildGrid() {
+    const owners = [];
+    for (const entry of instanced) {
+      if (entry.lod) continue;
+      owners.push({ entry, mesh: entry.mesh, spheres: entry.spheres, n: entry.total, batch: null, marks: new Int32Array(entry.total), lo: 0, hi: -1, count: 0, nearest: Infinity, shrink: false });
+    }
+    scene.traverse((o) => {
+      if (!o.isBatchedMesh || !o.pieceSpheres || !o.nearestVisible) return;
+      const owner = { entry: null, mesh: o, spheres: o.pieceSpheres(), n: o._instanceInfo.length, batch: o, marks: null, lo: 0, hi: -1, count: 0, nearest: Infinity, shrink: false };
+      o._gridOwner = owner;
+      owners.push(owner);
+    });
+    for (const owner of owners) if (owner.entry) owner.entry.gridOwner = owner;
+    const byCell = new Map();
+    owners.forEach((owner, k) => {
+      const a = owner.spheres;
+      for (let i = 0; i < owner.n; i++) {
+        if (owner.batch && !owner.batch._instanceInfo[i].active) continue;
+        const key = `${Math.floor(a[i * 4] / GRID)},${Math.floor(a[i * 4 + 1] / GRID)},${Math.floor(a[i * 4 + 2] / GRID)}`;
+        let list = byCell.get(key);
+        if (!list) { list = []; byCell.set(key, list); }
+        list.push(k, i);
+      }
+    });
+    const cellCount = byCell.size;
+    const spheres = new Float64Array(cellCount * 4);
+    const starts = new Int32Array(cellCount + 1);
+    let total = 0;
+    for (const list of byCell.values()) total += list.length / 2;
+    const owner = new Int32Array(total); const id = new Int32Array(total);
+    let c = 0; let at = 0;
+    const box = new THREE.Box3(); const one = new THREE.Box3();
+    for (const list of byCell.values()) {
+      // By owner, then id: a run per owner, tested in index order.
+      const pairs = [];
+      for (let q = 0; q < list.length; q += 2) pairs.push([list[q], list[q + 1]]);
+      pairs.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+      box.makeEmpty();
+      starts[c] = at;
+      for (const [k, i] of pairs) {
+        const a = owners[k].spheres;
+        _sphere.set(_v.set(a[i * 4], a[i * 4 + 1], a[i * 4 + 2]), a[i * 4 + 3]);
+        box.union(_sphere.getBoundingBox(one));
+        owner[at] = k; id[at] = i; at++;
+      }
+      box.getBoundingSphere(_sphere);
+      spheres[c * 4] = _sphere.center.x; spheres[c * 4 + 1] = _sphere.center.y;
+      spheres[c * 4 + 2] = _sphere.center.z; spheres[c * 4 + 3] = _sphere.radius;
+      c++;
+    }
+    starts[c] = at;
+    return { owners, spheres, starts, owner, id, cells: cellCount };
+  }
 
   /**
-   * Keep the instances `keep(x, y, z, r)` accepts, in their original order.
-   * A model drawn as a card far off keeps its full copies only short of the
-   * crossfade's far end -- and any the sun's camera needs, on a frame that
-   * redraws the shadows -- and hands the ones past its near end to the cards.
+   * Everything in the grid, tested: instances kept (or cast, on a shadow
+   * frame) marked with this frame's stamp, batch pieces likewise, each
+   * owner's nearest visible distance worked out on the way.
    */
-  function compact(entry, keep, seen = keep, shadow = false) {
-    const { spheres, kept } = entry;
+  function sweepGrid(shadow) {
+    const { owners, spheres: cellSpheres, starts, owner: ownerOf, id: idOf, cells } = grid;
+    const stamp = state.stamp;
+    const ex = camera.position.x; const ey = camera.position.y; const ez = camera.position.z;
+    for (let k = 0; k < owners.length; k++) {
+      const w = owners[k];
+      w.lo = w.n; w.hi = -1; w.count = 0; w.nearest = Infinity;
+      w.shrink = detail > 0 && mayShrink(w.mesh.material);
+      if (w.batch) w.marks = w.batch.seenMarks();
+    }
+    for (let c = 0; c < cells; c++) {
+      // Size is a property of each mesh's material, not of the cell: the cell
+      // is tested without it, which only ever lets more through.
+      sizeCull = false;
+      if (!visibleAt(cellSpheres, c * 4, true) && !(shadow && castAt(cellSpheres, c * 4))) continue;
+      let k = -1; let w = null; let skip = false; let info = null;
+      for (let q = starts[c]; q < starts[c + 1]; q++) {
+        if (ownerOf[q] !== k) {
+          k = ownerOf[q]; w = owners[k];
+          skip = !w.mesh.visible;
+          sizeCull = w.shrink;
+          info = w.batch ? w.batch._instanceInfo : null;
+        }
+        if (skip) continue;
+        const i = idOf[q]; const o = i * 4; const a = w.spheres;
+        let keep;
+        if (info) keep = info[i].visible && info[i].active && visibleAt(a, o, false);
+        else keep = visibleAt(a, o, false) || (shadow && castAt(a, o));
+        if (!keep) continue;
+        w.marks[i] = stamp;
+        w.count++;
+        if (i < w.lo) w.lo = i;
+        if (i > w.hi) w.hi = i;
+        const dx = a[o] - ex; const dy = a[o + 1] - ey; const dz = a[o + 2] - ez;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz) - a[o + 3];
+        if (d < w.nearest) w.nearest = d;
+      }
+    }
+    sizeCull = false;
+    for (let k = 0; k < owners.length; k++) {
+      const w = owners[k];
+      if (w.batch) { w.batch.seenStamp(stamp); continue; }
+      const entry = w.entry;
+      if (!w.mesh.visible) continue;
+      if (state.debugNoCompact) { restoreInstances(entry); continue; }
+      // Swept up in index order: the draw order is kept.
+      const kept = entry.kept; const marks = w.marks;
+      let n = 0;
+      for (let i = w.lo; i <= w.hi; i++) if (marks[i] === stamp) kept[n++] = i;
+      store(entry, n);
+      entry.nearest = w.nearest;
+    }
+  }
+
+  const shadowFrustum = new THREE.Frustum();
+  const _m = new THREE.Matrix4();
+
+  /**
+   * Keep the instances that can be seen -- all of them with `all`, which is
+   * culling switched off -- in their original order. A model drawn as a card
+   * far off keeps its full copies only short of the crossfade's far end -- and
+   * any the sun's camera needs, on a frame that redraws the shadows -- and
+   * hands the ones past its near end to the cards.
+   */
+  function compact(entry, all, shadow = false) {
+    const { spheres, kept, bucketSpheres, buckets } = entry;
     const lod = entry.lod && impostors?.enabled ? entry.lod : null;
     selectOwner(entry.mesh);
     const cards = lod && lod.primary && lod.model.mesh ? lod.model : null;
     const start = lod ? impostors.near : 0; const end = lod ? impostors.far : 0;
+    const feet = entry.feet;
     const eye = camera.position;
+    const ex = eye.x; const ey = eye.y; const ez = eye.z;
     let n = 0;
     let nearest = Infinity;
-    for (const b of entry.buckets) {
-      const s = b.sphere;
-      if (!keep(s.center.x, s.center.y, s.center.z, s.radius, true)) continue;
-      for (const i of b.ids) {
+    for (let b = 0; b < buckets.length; b++) {
+      if (!all && !visibleAt(bucketSpheres, b * 4, true) && !(shadow && castAt(bucketSpheres, b * 4))) continue;
+      const ids = buckets[b].ids;
+      for (let k = 0; k < ids.length; k++) {
+        const i = ids[k];
         const o = i * 4;
         if (!lod) {
-          if (keep(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) {
+          if (all || visibleAt(spheres, o, false) || (shadow && castAt(spheres, o))) {
             kept[n++] = i;
-            nearest = Math.min(nearest, Math.hypot(spheres[o] - eye.x, spheres[o + 1] - eye.y, spheres[o + 2] - eye.z) - spheres[o + 3]);
+            const dx = spheres[o] - ex; const dy = spheres[o + 1] - ey; const dz = spheres[o + 2] - ez;
+            const d = Math.sqrt(dx * dx + dy * dy + dz * dz) - spheres[o + 3];
+            if (d < nearest) nearest = d;
           }
           continue;
         }
-        const f = i * 5; const feet = entry.feet;
-        const d = Math.hypot(feet[f] - eye.x, feet[f + 1] - eye.y, feet[f + 2] - eye.z);
-        const visible = seen(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3]);
-        if ((visible && d < end) || (shadow && shadowFrustum.intersectsSphere(_sphere.set(_v.set(spheres[o], spheres[o + 1], spheres[o + 2]), spheres[o + 3])))) {
+        const f = i * 5;
+        const dx = feet[f] - ex; const dy = feet[f + 1] - ey; const dz = feet[f + 2] - ez;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const visible = all || visibleAt(spheres, o, false);
+        if ((visible && d < end) || (shadow && castAt(spheres, o))) {
           kept[n++] = i;
-          if (visible) nearest = Math.min(nearest, d - spheres[o + 3]);
+          if (visible && d - spheres[o + 3] < nearest) nearest = d - spheres[o + 3];
         }
-        if (cards && visible && d > start) impostors.push(cards, feet[f], feet[f + 1], feet[f + 2], feet[f + 3], feet[f + 4]);
+        if (cards && visible && d > start) impostors.pushFrom(cards, feet, f);
       }
     }
     // Draw order is kept: the ids went in bucket by bucket, so sort them back.
-    const ids = kept.subarray(0, n);
-    ids.sort();
+    kept.subarray(0, n).sort();
+    store(entry, n);
+    sizeCull = false;
+    entry.nearest = nearest;
+    return n;
+  }
+
+  /** Draw the first `n` of `entry.kept`, unless that is what is drawn already. */
+  function store(entry, n) {
+    const ids = entry.kept;
     const mesh = entry.mesh;
     let same = !entry.full && n === entry.keptCount;
     if (same && entry.last) for (let k = 0; k < n && same; k++) same = entry.last[k] === ids[k];
     if (!same) {
       const out = mesh.instanceMatrix.array;
-      for (let k = 0; k < n; k++) out.set(entry.source.subarray(ids[k] * 16, ids[k] * 16 + 16), k * 16);
+      const source = entry.source;
+      for (let k = 0; k < n; k++) out.set(source.subarray(ids[k] * 16, ids[k] * 16 + 16), k * 16);
       mesh.count = n;
       mesh.instanceMatrix.clearUpdateRanges();
       mesh.instanceMatrix.addUpdateRange(0, Math.max(1, n) * 16);
       mesh.instanceMatrix.needsUpdate = true;
-      entry.last = Int32Array.from(ids);
+      entry.last ||= new Int32Array(entry.total);
+      entry.last.set(ids.subarray(0, n));
       entry.keptCount = n;
       entry.full = false;
     }
-    sizeCull = false;
-    entry.nearest = nearest;
     state.stats.instances += entry.total;
     state.stats.instancesKept += n;
-    return n;
   }
 
   function restoreInstances(entry) {
@@ -929,7 +1104,6 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     mesh.instanceMatrix.clearUpdateRanges();
     mesh.instanceMatrix.needsUpdate = true;
     entry.full = true;
-    entry.last = null;
   }
 
   // ------------------------------------------------------ hiding, per frame --
@@ -1003,7 +1177,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
         shadowFrustum.setFromProjectionMatrix(_m.multiplyMatrices(sun.shadow.camera.projectionMatrix, sun.shadow.camera.matrixWorldInverse));
       }
       for (const entry of instanced) {
-        if (entry.lod && impostors?.enabled) compact(entry, everything, everything, shadow);
+        if (entry.lod && impostors?.enabled) compact(entry, true, shadow);
         else restoreInstances(entry);
       }
       if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.finish(model);
@@ -1041,11 +1215,13 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       sun.shadow.updateMatrices(sun);
       shadowFrustum.setFromProjectionMatrix(_m.multiplyMatrices(sun.shadow.camera.projectionMatrix, sun.shadow.camera.matrixWorldInverse));
     }
+    grid ||= buildGrid();
+    sweepGrid(shadow);
     if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.begin(model);
     for (const entry of instanced) {
-      if (!entry.mesh.visible) continue;
+      if (!entry.lod || !entry.mesh.visible) continue;
       if (state.debugNoCompact) { restoreInstances(entry); continue; }
-      compact(entry, shadow ? seenOrCast : sphereVisible, sphereVisible, shadow);
+      compact(entry, false, shadow);
     }
     if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.finish(model);
 
@@ -1065,7 +1241,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       }
       selectOwner(o);
       if (o.isBatchedMesh && o.nearestVisible) {
-        const d = o.nearestVisible(sphereVisible, eye);
+        const d = o._gridOwner ? o._gridOwner.nearest : o.nearestVisible(visibleAt, eye, state.stamp);
         if (d === Infinity) hiddenNow.push(o);
         else if (d > state.aoReach) aoFar.push(o);
       } else if ((state.active || surfaceHidden || deepHidden || sizeCull || occluding) && !objectVisible(o)) {
@@ -1083,7 +1259,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
 
     cullHook.camera = camera;
     cullHook.stamp = state.stamp;
-    cullHook.test = state.active || surfaceHidden || deepHidden || detail > 0 || occluding ? sphereVisible : null;
+    cullHook.test = state.active || surfaceHidden || deepHidden || detail > 0 || occluding ? visibleAt : null;
     cullHook.select = selectOwner;
   }
 

@@ -252,9 +252,34 @@ export function createOcclusion({ renderer, scene, camera, world }) {
    * anything unsure -- off the old screen, across the near plane, over a
    * sky texel -- is visible.
    */
+  const scratch = new Float64Array(4);
   function hidden(x, y, z, r) {
+    scratch[0] = x; scratch[1] = y; scratch[2] = z; scratch[3] = r;
+    return hiddenAt(scratch, 0);
+  }
+
+  // How far the eye has moved since the map was taken, worked out once per
+  // position rather than once per sphere.
+  let movedFrom = NaN; let movedFromY = NaN; let movedFromZ = NaN; let movedMap = null; let moved = 0;
+  function movedSince() {
+    const p = camera.position;
+    if (p.x !== movedFrom || p.y !== movedFromY || p.z !== movedFromZ || movedMap !== map) {
+      movedFrom = p.x; movedFromY = p.y; movedFromZ = p.z; movedMap = map;
+      moved = Math.hypot(p.x - live.eye.x, p.y - live.eye.y, p.z - live.eye.z);
+    }
+    return moved;
+  }
+
+  /**
+   * `hidden` for the sphere at `a[o..o+3]`. What cull.js calls, tens of
+   * thousands of times a frame: nothing in here may box a double, so the
+   * sphere comes in as an array and the extremes go out through `found`.
+   */
+  const found = new Float64Array(1);
+  function hiddenAt(a, o) {
     if (!state.ready || !state.enabled) return false;
     state.tested++;
+    const x = a[o]; const y = a[o + 1]; const z = a[o + 2]; const r = a[o + 3];
     const e = live.view; const p = live.proj;
     const vx = e[0] * x + e[4] * y + e[8] * z + e[12];
     const vy = e[1] * x + e[5] * y + e[9] * z + e[13];
@@ -266,47 +291,59 @@ export function createOcclusion({ renderer, scene, camera, world }) {
     const y0 = p[5] * Math.min((vy - r) / front, (vy - r) / (depth + r));
     const y1 = p[5] * Math.max((vy + r) / front, (vy + r) / (depth + r));
     if (x0 < -1 || y0 < -1 || x1 > 1 || y1 > 1) return false;
+    const W = live.w; const H = live.h;
+    const tx0 = Math.floor((x0 * 0.5 + 0.5) * W); const tx1 = Math.floor((x1 * 0.5 + 0.5) * W);
+    const ty0 = Math.floor((y0 * 0.5 + 0.5) * H); const ty1 = Math.floor((y1 * 0.5 + 0.5) * H);
     // The eye has moved since. Seen past an occluder at depth n, a step of
     // `moved` slides what is behind it across the screen by at most about
     // moved / n radians: grow the rectangle by that, with n the nearest
     // occluder round it -- a doorpost at arm's length grows it to nothing.
-    const moved = Math.hypot(camera.position.x - live.eye.x, camera.position.y - live.eye.y, camera.position.z - live.eye.z);
-    const W = live.w; const H = live.h;
+    const step = movedSince();
     let grow = 1;
-    if (moved > 0) {
-      const nearest = extreme(x0, y0, x1, y1, 2, 'near');
-      const angle = moved / Math.max(0.05, nearest);
+    if (step > 0) {
+      extreme(tx0 - 2, ty0 - 2, tx1 + 2, ty1 + 2, false);
+      const angle = step / Math.max(0.05, found[0]);
       grow += Math.ceil(angle * Math.max(p[0] * W, p[5] * H) / 2);
       if (grow > W / 2) return false;
     }
-    const far = extreme(x0, y0, x1, y1, grow, 'data');
-    const behind = front > far * (1 + SHARE) + MARGIN;
+    extreme(tx0 - grow, ty0 - grow, tx1 + grow, ty1 + grow, true);
+    const behind = front > found[0] * (1 + SHARE) + MARGIN;
     if (behind) state.occluded++;
     return behind;
   }
 
-  /** The farthest (`data`) or nearest (`near`) eye depth over an NDC rectangle grown by `slack` texels. */
-  function extreme(x0, y0, x1, y1, slack, which) {
-    const W = live.w; const H = live.h;
-    let tx0 = Math.floor((x0 * 0.5 + 0.5) * W) - slack; let tx1 = Math.floor((x1 * 0.5 + 0.5) * W) + slack;
-    let ty0 = Math.floor((y0 * 0.5 + 0.5) * H) - slack; let ty1 = Math.floor((y1 * 0.5 + 0.5) * H) + slack;
+  /** The farthest (`far`) or nearest eye depth over a rectangle of texels, into `found[0]`. */
+  function extreme(tx0, ty0, tx1, ty1, far) {
     let level = 0;
     while (level < map.length - 1 && (tx1 - tx0 > 4 || ty1 - ty0 > 4)) {
       level++;
       tx0 >>= 1; ty0 >>= 1; tx1 >>= 1; ty1 >>= 1;
     }
     const layer = map[level];
-    const { w, h } = layer; const data = layer[which];
+    const w = layer.w; const h = layer.h;
     tx0 = Math.max(0, tx0); ty0 = Math.max(0, ty0); tx1 = Math.min(w - 1, tx1); ty1 = Math.min(h - 1, ty1);
-    let v = which === 'data' ? 0 : Infinity;
-    for (let ty = ty0; ty <= ty1; ty++) {
-      for (let tx = tx0; tx <= tx1; tx++) {
-        const d = data[ty * w + tx];
-        if (which === 'data' ? d > v : d < v) v = d;
+    if (far) {
+      const data = layer.data;
+      let v = 0;
+      for (let ty = ty0; ty <= ty1; ty++) {
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const d = data[ty * w + tx];
+          if (d > v) v = d;
+        }
       }
+      found[0] = v;
+    } else {
+      const data = layer.near;
+      let v = Infinity;
+      for (let ty = ty0; ty <= ty1; ty++) {
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const d = data[ty * w + tx];
+          if (d < v) v = d;
+        }
+      }
+      found[0] = v;
     }
-    return v;
   }
 
-  return { state, capture, hidden, sortMovers, sentinel };
+  return { state, capture, hidden, hiddenAt, sortMovers, sentinel };
 }

@@ -525,11 +525,12 @@ function toBatchable(source) {
 }
 
 /**
- * Set by cull.js while a frame is drawn: `test(x, y, z, r)` says whether a
- * sphere can be seen from `camera` at all, walls included. Only the main
- * camera's passes are filtered; the shadow camera culls for itself.
- * `select(mesh)` is told which batch is asking first, so that a piece too
- * small to see is dropped only where its material may be (not a lamp).
+ * Set by cull.js while a frame is drawn: `test(a, o)` says whether the sphere
+ * at `a[o..o+3]` (a Float64Array) can be seen from `camera` at all, walls
+ * included. Only the main camera's passes are filtered; the shadow camera
+ * culls for itself. `select(mesh)` is told which batch is asking first, so
+ * that a piece too small to see is dropped only where its material may be
+ * (not a lamp).
  */
 export const cullHook = { test: null, select: null, camera: null, stamp: 0 };
 
@@ -565,71 +566,77 @@ export class StaticBatch extends THREE.BatchedMesh {
     for (let i = 0; i < 16; i++) { state[i] = view[i]; state[16 + i] = projection[i]; }
     if (hook) {
       hook.select?.(this);
-      this.cullBehindWalls(hook.test);
+      this.cullBehindWalls(hook.test, stamp);
     }
-  }
-
-  /**
-   * Is any piece visible by `test`? A region's batch has one bounding sphere
-   * round the whole region, so three always draws it -- with no pieces, from
-   * most places, but the call and its state changes are still paid.
-   */
-  anyVisible(test) {
-    const spheres = this.pieceSpheres();
-    const info = this._instanceInfo;
-    for (let i = 0; i < info.length; i++) {
-      if (!info[i].visible || !info[i].active) continue;
-      const o = i * 4;
-      if (test(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) return true;
-    }
-    return false;
   }
 
   /**
    * How far off the nearest piece `test` accepts is, from `eye` -- Infinity
    * if none. Tells cull.js both whether to draw the batch and whether it is
-   * near enough to go into the AO prepass.
+   * near enough to go into the AO prepass. Each piece's answer is kept under
+   * `stamp`, so the draw that follows under the same stamp does not ask again.
    */
-  nearestVisible(test, eye) {
+  nearestVisible(test, eye, stamp) {
     const spheres = this.pieceSpheres();
     const info = this._instanceInfo;
+    const seen = this.seenMarks();
+    const ex = eye.x; const ey = eye.y; const ez = eye.z;
     let nearest = Infinity;
     for (let i = 0; i < info.length; i++) {
       if (!info[i].visible || !info[i].active) continue;
       const o = i * 4;
-      if (!test(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) continue;
-      const d = Math.hypot(spheres[o] - eye.x, spheres[o + 1] - eye.y, spheres[o + 2] - eye.z) - spheres[o + 3];
+      if (!test(spheres, o)) continue;
+      seen[i] = stamp;
+      const dx = spheres[o] - ex; const dy = spheres[o + 1] - ey; const dz = spheres[o + 2] - ez;
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz) - spheres[o + 3];
       if (d < nearest) nearest = d;
     }
+    this._seenStamp = stamp;
     return nearest;
   }
 
+  /** Per piece, the last stamp it was seen under. cull.js fills it for the whole world at once. */
+  seenMarks() {
+    const n = this._instanceInfo.length;
+    if (!this._seen || this._seen.length !== n) this._seen = new Int32Array(n).fill(-1);
+    return this._seen;
+  }
+
+  /** Every piece seen under `stamp` has been marked with it. */
+  seenStamp(stamp) { this._seenStamp = stamp; }
+
+  /**
+   * World-space bounding sphere of every piece, rounded to float32 as they
+   * always were but held as doubles, which is what cull.js's test reads.
+   */
   pieceSpheres() {
     if (!this._spheres) {
       const n = this._instanceInfo.length;
-      this._spheres = new Float32Array(n * 4);
+      this._spheres = new Float64Array(n * 4);
       const m = new THREE.Matrix4();
       const s = new THREE.Sphere();
       for (let i = 0; i < n; i++) {
         if (!this._instanceInfo[i].active) continue;
         this.getMatrixAt(i, m);
         this.getBoundingSphereAt(this._instanceInfo[i].geometryIndex, s).applyMatrix4(m).applyMatrix4(this.matrixWorld);
-        this._spheres.set([s.center.x, s.center.y, s.center.z, s.radius], i * 4);
+        this._spheres[i * 4] = Math.fround(s.center.x); this._spheres[i * 4 + 1] = Math.fround(s.center.y);
+        this._spheres[i * 4 + 2] = Math.fround(s.center.z); this._spheres[i * 4 + 3] = Math.fround(s.radius);
       }
     }
     return this._spheres;
   }
 
   /** Drop the pieces three kept that cannot be seen past the walls. Order is kept. */
-  cullBehindWalls(test) {
+  cullBehindWalls(test, stamp) {
     const spheres = this.pieceSpheres();
     const starts = this._multiDrawStarts;
     const counts = this._multiDrawCounts;
     const index = this._indirectTexture.image.data;
+    // cull.js asked about every piece at the start of this frame.
+    const seen = this._seenStamp === stamp ? this._seen : null;
     let n = 0;
     for (let k = 0; k < this._multiDrawCount; k++) {
-      const o = index[k] * 4;
-      if (!test(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) continue;
+      if (seen ? seen[index[k]] !== stamp : !test(spheres, index[k] * 4)) continue;
       starts[n] = starts[k]; counts[n] = counts[k]; index[n] = index[k];
       n++;
     }

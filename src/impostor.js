@@ -563,6 +563,17 @@ export function createImpostors({ renderer, library, range = [80, 95] }) {
       model.changed = true;
     }
   }
+  /** `push` from `feet[f..f+4]`: no doubles boxed for the call. */
+  function pushFrom(model, feet, f) {
+    const at = model.mesh.geometry.attributes.aImpostor.array;
+    const turn = model.mesh.geometry.attributes.aImpostorYaw.array;
+    const i = model.n++;
+    const o = i * 4;
+    if (at[o] !== feet[f] || at[o + 1] !== feet[f + 1] || at[o + 2] !== feet[f + 2] || at[o + 3] !== feet[f + 3] || turn[i] !== feet[f + 4]) {
+      at[o] = feet[f]; at[o + 1] = feet[f + 1]; at[o + 2] = feet[f + 2]; at[o + 3] = feet[f + 3]; turn[i] = feet[f + 4];
+      model.changed = true;
+    }
+  }
   function finish(model) {
     const geometry = model.mesh.geometry;
     if (model.n !== geometry.instanceCount) model.changed = true;
@@ -578,7 +589,7 @@ export function createImpostors({ renderer, library, range = [80, 95] }) {
   }
 
   return {
-    models, group, fade, adopt, begin, push, finish,
+    models, group, fade, adopt, begin, push, pushFrom, finish,
     get enabled() { return enabled; },
     /** `?lod=off`, or a range: where the cards take over, and where they have. */
     setEnabled(on) {
