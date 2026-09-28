@@ -651,6 +651,38 @@ function guardClip(set, clip, carry) {
 }
 
 /**
+ * Bodies that are not a man's at another size. A halfling was the adult rig
+ * scaled to 0.6 -- a small man, with a man's long legs and a man's small
+ * head, which is how the judge read them. Clips carry no scale tracks
+ * (`clipsOf`), so bone scales set here hold through every clip. Uniform
+ * scales only: a non-uniform one on a parent bone shears its children as
+ * they turn. The legs are the thighs (the shin and foot follow), the arms the
+ * upper arms, and the broader trunk is the spine a little up, which also
+ * carries the arms and head with it. The body is lowered by what the legs
+ * lost, measured on the bind pose, so the feet stay on the ground.
+ * Returns the legs' scale, which the stride is timed against.
+ */
+const BUILDS = {
+  halfling: { thigh: 0.8, upperarm: 0.9, spine: 1.08 },
+};
+function shapeBuild(body, build) {
+  const b = BUILDS[build];
+  if (!b) return 1;
+  const foot = body.getObjectByName('footL');
+  const low = () => { body.updateMatrixWorld(true); return foot.getWorldPosition(new THREE.Vector3()).y; };
+  const before = low();
+  for (const side of ['L', 'R']) {
+    body.getObjectByName(`thigh${side}`).scale.setScalar(b.thigh);
+    body.getObjectByName(`upperarm${side}`).scale.setScalar(b.upperarm);
+  }
+  body.getObjectByName('spine').scale.setScalar(b.spine);
+  const drop = low() - before;
+  body.position.y -= drop;
+  body.userData.drop = drop;
+  return b.thigh;
+}
+
+/**
  * A file's rig, once: its bones, and one skinned mesh kept only to carry a
  * skeleton through the clone -- every person then gets the clone and swaps
  * that mesh's geometry for their own merged one (dress.js). The height of
@@ -840,6 +872,7 @@ function buildPerson(library, who, proto, instance) {
     const head = body.getObjectByName('head');
     if (head) head.scale.setScalar(who.headScale);
   }
+  const legK = shapeBuild(body, who.build);
   const group = new THREE.Group();
   group.add(body);
   // The figure contract has always handed back what is held, and items.js
@@ -916,8 +949,9 @@ function buildPerson(library, who, proto, instance) {
   lookWithEyes(body, mixer, group, mesh, dressed.geometry, far.geometry);
   const facts = CLIP_FACTS[who.file];
   return {
-    group, headGroup: null, height: heightOf(asset, who.file, who.arch) * scale, scale, mixer, actions, clips,
-    stride: { walk: facts.walk * scale, run: facts.run * scale },
+    group, headGroup: null, height: heightOf(asset, who.file, who.arch) * scale - (body.userData.drop || 0), scale, mixer, actions, clips,
+    // A leg scaled by legK carries the foot legK as far each stride.
+    stride: { walk: facts.walk * scale * legK, run: facts.run * scale * legK },
     hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
     indoor: mesh.material.dikuIndoor,
   };
