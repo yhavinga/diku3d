@@ -97,7 +97,7 @@ export function readPixelsAsync(renderer, target, width, height, buffer) {
 }
 
 export function createOcclusion({ renderer, scene, camera, world }) {
-  const state = { enabled: true, ready: false, tested: 0, occluded: 0, kept: 0 };
+  const state = { enabled: true, ready: false, tested: 0, occluded: 0, kept: 0, version: 0 };
   let copy = null;         // full-size render target holding the copied depth
   let reduced = null;      // BLOCK-reduced eye depths
   let copied = false;      // this frame's copy was taken
@@ -139,6 +139,7 @@ export function createOcclusion({ renderer, scene, camera, world }) {
     renderer.setRenderTarget(previous);
     state.ready = false;
     map = null;
+    state.version++;
   }
 
   // The copy, taken in the middle of the main pass. An opaque, invisible
@@ -215,7 +216,16 @@ export function createOcclusion({ renderer, scene, camera, world }) {
       // Standing still, the depth that comes back is the depth already held,
       // taken from the same place: keep the map, so that whatever was worked
       // out from it still holds (cull.js keys on it).
-      if (map && map[0].w === w && map[0].h === h && sameAs(taken, buffer)) { state.kept++; return; }
+      if (map && map[0].w === w && map[0].h === h && sameView(taken) && sameFar(buffer)) {
+        // Grass sways: in a field the nearest depths move every frame while
+        // the farthest -- all a sphere is tested against from where the map
+        // was taken -- stay put. Refreshed in place, the map is the one the
+        // readback describes, and it is still the same map unless the eye
+        // has moved off the spot it was taken from.
+        if (refreshNear(buffer) && !camera.position.equals(live.eye)) state.version++;
+        state.kept++;
+        return;
+      }
       // The farthest depth over 1, 2, 4... blocks, so a big rectangle is a
       // few reads at a coarser level.
       // The nearest as well: how near the occluders are decides how far a
@@ -246,6 +256,7 @@ export function createOcclusion({ renderer, scene, camera, world }) {
       }
       spare = map;
       map = levels;
+      state.version++;
       live.view.set(taken.view); live.proj.set(taken.proj); live.eye.copy(taken.eye); live.near = taken.near;
       live.w = w; live.h = h;
       state.ready = true;
@@ -264,12 +275,41 @@ export function createOcclusion({ renderer, scene, camera, world }) {
     return levels;
   }
 
-  /** Was this readback taken from where the held map was, and does it say the same? */
-  function sameAs(taken, buffer) {
+  /** Was this readback taken from where the held map was? */
+  function sameView(taken) {
     if (taken.near !== live.near || !taken.eye.equals(live.eye)) return false;
     for (let i = 0; i < 16; i++) if (taken.view[i] !== live.view[i] || taken.proj[i] !== live.proj[i]) return false;
-    const data = map[0].data; const near = map[0].near;
-    for (let i = 0; i < data.length; i++) if (data[i] !== buffer[i * 4] || near[i] !== buffer[i * 4 + 1]) return false;
+    return true;
+  }
+
+  /** Does it hold the same farthest depths? */
+  function sameFar(buffer) {
+    const data = map[0].data;
+    for (let i = 0; i < data.length; i++) if (data[i] !== buffer[i * 4]) return false;
+    return true;
+  }
+
+  /** Take the readback's nearest depths into the held map; true if any moved. */
+  function refreshNear(buffer) {
+    const near = map[0].near;
+    let changed = false;
+    for (let i = 0; i < near.length; i++) if (near[i] !== buffer[i * 4 + 1]) { near[i] = buffer[i * 4 + 1]; changed = true; }
+    if (!changed) return false;
+    for (let l = 1; l < map.length; l++) {
+      const from = map[l - 1]; const to = map[l];
+      const lw = from.w; const lh = from.h;
+      for (let y = 0; y < to.h; y++) {
+        for (let x = 0; x < to.w; x++) {
+          let n = Infinity;
+          for (let dy = 0; dy < 2; dy++) {
+            for (let dx = 0; dx < 2; dx++) {
+              n = Math.min(n, from.near[Math.min(lh - 1, y * 2 + dy) * lw + Math.min(lw - 1, x * 2 + dx)]);
+            }
+          }
+          to.near[y * to.w + x] = n;
+        }
+      }
+    }
     return true;
   }
 

@@ -143,7 +143,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
 
   const state = {
     enabled: true, active: false, cell: null, windows: [], stamp: 0, shadowFrame: false,
-    stats: { measured: 0, culled: 0, instances: 0, instancesKept: 0 },
+    stats: { measured: 0, culled: 0, instances: 0, instancesKept: 0, reused: 0 },
     // Drawn, but nothing of it within AO_REACH: left out of the AO prepass.
     aoFar: [],
     aoReach: AO_REACH,
@@ -1147,6 +1147,40 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     });
   }
 
+  /**
+   * Is everything the static instances and batch pieces were chosen by just
+   * as it was last frame? The camera to the last bit, the depth map it was
+   * tested against, the zones, the cell's apertures, the cards' range, which
+   * meshes are shown and which pieces switched on. Standing still, that is
+   * every frame -- and the whole sweep is skipped. A shadow frame widens the
+   * sets for the sun's camera, so neither it nor the frame after it counts.
+   */
+  const was = new Float64Array(44);
+  let wasValid = false;
+  const kept = { instances: 0, instancesKept: 0 };
+  function asBefore(shadow) {
+    let same = wasValid && !shadow && !!grid && !state.debugNoCompact;
+    const m = camera.matrixWorld.elements; const p = camera.projectionMatrix.elements;
+    for (let i = 0; i < 16; i++) {
+      if (was[i] !== m[i]) { was[i] = m[i]; same = false; }
+      if (was[16 + i] !== p[i]) { was[16 + i] = p[i]; same = false; }
+    }
+    const now = [
+      occlusion ? occlusion.state.version : 0, occluding ? 1 : 0, surfaceHidden ? 1 : 0, deepHidden ? 1 : 0,
+      state.active ? 1 : 0, state.stats.measured, impostors?.enabled ? 1 : 0, impostors ? impostors.near : 0,
+      impostors ? impostors.far : 0, detail, state.aoReach, cullHook.edits,
+    ];
+    for (let i = 0; i < now.length; i++) if (was[32 + i] !== now[i]) { was[32 + i] = now[i]; same = false; }
+    if (grid) {
+      for (const w of grid.owners) {
+        const on = w.mesh.visible;
+        if (on !== w.wasOn) { w.wasOn = on; same = false; }
+      }
+    }
+    wasValid = !shadow;
+    return same;
+  }
+
   let indexed = false;
   let moverAge = Infinity;
   const candidates = [];
@@ -1171,6 +1205,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     deepHidden = state.enabled && !!zones && !zones.deep.visible;
     if (zones) { zoneLine = zones.groundY - 1; deepLine = zones.groundY - LEVEL_H / 2; }
     if (!state.enabled) {
+      wasValid = false;
       state.active = false;
       // Distance is not visibility: the cards stay on with culling off.
       if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.begin(model);
@@ -1209,23 +1244,31 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     state.cell = cell;
     state.active = eyeInside(cell, camera.position);
     state.windows = state.active ? windowsFor(cell) : [];
-    state.stamp++;
-
-    if (shadow) {
-      sun.updateMatrixWorld();
-      sun.target.updateMatrixWorld();
-      sun.shadow.updateMatrices(sun);
-      shadowFrustum.setFromProjectionMatrix(_m.multiplyMatrices(sun.shadow.camera.projectionMatrix, sun.shadow.camera.matrixWorldInverse));
+    if (asBefore(shadow)) {
+      // Nothing the instances and pieces were chosen by has moved: what was
+      // kept last frame is kept, and under the same stamp the batches keep
+      // their draw lists too.
+      state.stats.instances = kept.instances; state.stats.instancesKept = kept.instancesKept;
+      state.stats.reused++;
+    } else {
+      state.stamp++;
+      if (shadow) {
+        sun.updateMatrixWorld();
+        sun.target.updateMatrixWorld();
+        sun.shadow.updateMatrices(sun);
+        shadowFrustum.setFromProjectionMatrix(_m.multiplyMatrices(sun.shadow.camera.projectionMatrix, sun.shadow.camera.matrixWorldInverse));
+      }
+      grid ||= buildGrid();
+      sweepGrid(shadow);
+      if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.begin(model);
+      for (const entry of instanced) {
+        if (!entry.lod || !entry.mesh.visible) continue;
+        if (state.debugNoCompact) { restoreInstances(entry); continue; }
+        compact(entry, false, shadow);
+      }
+      if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.finish(model);
+      kept.instances = state.stats.instances; kept.instancesKept = state.stats.instancesKept;
     }
-    grid ||= buildGrid();
-    sweepGrid(shadow);
-    if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.begin(model);
-    for (const entry of instanced) {
-      if (!entry.lod || !entry.mesh.visible) continue;
-      if (state.debugNoCompact) { restoreInstances(entry); continue; }
-      compact(entry, false, shadow);
-    }
-    if (impostors) for (const model of impostors.models.values()) if (model.mesh) impostors.finish(model);
 
     // Whole objects. A region's batch or instanced mesh with nothing left in
     // view is hidden whatever the walls, since three would still bind it and

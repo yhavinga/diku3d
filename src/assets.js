@@ -532,7 +532,7 @@ function toBatchable(source) {
  * that a piece too small to see is dropped only where its material may be
  * (not a lamp).
  */
-export const cullHook = { test: null, select: null, camera: null, stamp: 0 };
+export const cullHook = { test: null, select: null, camera: null, stamp: 0, edits: 0 };
 
 /**
  * A BatchedMesh that culls once per camera, not once per pass.
@@ -669,6 +669,12 @@ export class StaticBatch extends THREE.BatchedMesh {
       }
     }
     return this._local;
+  }
+
+  /** Counted, so that cull.js knows a piece was switched on or off since it last looked. */
+  setVisibleAt(instanceId, visible) {
+    if (this.getVisibleAt(instanceId) !== visible) cullHook.edits++;
+    return super.setVisibleAt(instanceId, visible);
   }
 
   /**
