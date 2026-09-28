@@ -770,6 +770,30 @@ const EYE_RANGE = 9;          // metres inside which someone meets your eye
  */
 const LOD_FROM = 15;           // metres past which a person wears their far copy
 
+/**
+ * three walks every node under the scene each frame, drawn or not, and
+ * recomposes its matrix. The people are ~15k of the town's ~17k nodes -- a
+ * skeleton each -- and nearly all of them belong to figures motion.js has
+ * hidden past RANGE, whose bones nobody draws or animates. That walk was the
+ * single largest item on the main thread: 64 ms a second on the Market
+ * Square. A hidden figure keeps its own matrix current (it still coasts, and
+ * a ray or a label may ask where it is) but not its descendants'; the flag
+ * is left raised so the first frame it is shown again brings them all up to
+ * date before anything draws them.
+ */
+const updateSubtree = THREE.Object3D.prototype.updateMatrixWorld;
+function holdWhileHidden(root) {
+  root.updateMatrixWorld = function updateMatrixWorld(force) {
+    if (this.visible) { updateSubtree.call(this, force); return; }
+    if (this.matrixAutoUpdate) this.updateMatrix();
+    if (this.matrixWorldNeedsUpdate || force) {
+      if (this.parent) this.matrixWorld.multiplyMatrices(this.parent.matrixWorld, this.matrix);
+      else this.matrixWorld.copy(this.matrix);
+      this.matrixWorldNeedsUpdate = true;
+    }
+  };
+}
+
 function lookWithEyes(body, mixer, group, mesh, nearGeometry, farGeometry) {
   const eyes = ['eyeL', 'eyeR'].map((n) => body.getObjectByName(n)).filter(Boolean);
   const rest = eyes.map((e) => e.quaternion.clone());
@@ -2494,6 +2518,7 @@ export function populate(world, layout, built, options = {}) {
       );
       fig.rotation.y = -angle + Math.PI / 2;
       group.add(fig);
+      holdWhileHidden(fig);
       if (made.roost && !info.outdoor) {
         built.group.updateMatrixWorld(true);
         // No room is taller than CEIL inside, but the ray does not always

@@ -8,6 +8,21 @@
 
 import * as THREE from 'three';
 
+// three r185's `setProgram` asks a BatchedMesh for `colorTexture`, a property
+// that does not exist -- the texture is `_colorsTexture`, which is what the
+// program key is built from. `undefined !== null`, so every draw of every
+// batch without per-instance colour was taken for a program change: a full
+// `getProgram` (parameters object, cache-key string) about 160 times a frame
+// between the main pass and the AO prepass, for the same program every time.
+// Measured at 31 ms of main thread a second on the Market Square and most of
+// the ~20 MB/s the frame allocated. The name it reads is given the value it
+// meant; the program chosen is unchanged.
+if (!('colorTexture' in THREE.BatchedMesh.prototype)) {
+  Object.defineProperty(THREE.BatchedMesh.prototype, 'colorTexture', {
+    get() { return this._colorsTexture; },
+  });
+}
+
 /**
  * `shadow` is the map size and `span` the half-width of the sun's frustum in
  * metres -- together they set how many centimetres a shadow texel covers. The
