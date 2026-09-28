@@ -304,6 +304,11 @@ choose.
   vertex count (a log wall's vertices sit only at the ends) and a roof prism
   reported "0 cells affected" (six vertices, none mid-span). Sample triangle
   surfaces or raycast; never count corners.
+- **Outdoor shade needs its blue taken out, and night needs a moon above
+  the horizon.** The sky term is pure open sky, so shade read B/R 1.7 until
+  `setSkyBleach` took part of the hue out; and the night light used to be
+  the sun at −8°, lighting nothing. Both are time-preset keys now
+  (`skyBleach`, `moon`) — keep them when adding a preset.
 - **A HemisphereLight has no occlusion, and three.js filters lights by the
   *camera's* layers, not the object's.** The noon ground-bounce hemisphere lit
   the temple's inside like the street; a layers split needs a second render

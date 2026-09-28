@@ -52,6 +52,33 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Atmosphere: shade, conifers, moon, windows, horizons (wave4-atmos)
+
+- **Outdoor shade was blue because nothing took the sky's colour out of it
+  outdoors** — the diffuse sky term was pure open sky with no warm share
+  from sunlit walls. Bleaching part of the hue (`setSkyBleach`, 0.55 at
+  noon) is enough; lowering its strength is not. #2159 shade B/R 1.71 →
+  1.15, reflections keep their blue.
+- **A sun below the horizon is not a moon.** At −8° the night light came
+  from under the world and no field got any of it. A moon 34° up: graveyard
+  #3604 under-8 55% → 8.8%, forest 94.5% → 38.6%.
+- **An unlit horizon colour still passes through exposure**; far slopes
+  with a colour of their own need a radiance per hour or they are four
+  times too bright at night.
+- **The AO pre-pass override ignores alpha.** Hiding foliage from it is
+  worse (a near bough takes the occlusion of what stands behind); give it
+  an alpha-cut normal material with `allowOverride = false`. Text injected
+  at `#include <common>` in MeshNormalMaterial's fragment shader is silently
+  lost — inject after `uniform float opacity;`.
+- **Glass on a solid wall must be opaque**, or the masonry shows through
+  the "room behind it". A pane's own offset travels in its UVs, which
+  survives batching and instancing; the shader recovers pane centre and a
+  per-window seed from it. The day-to-lamp crossover must be gradual or
+  every pane is a black room at dusk.
+- Conifers: whorls of drooping boughs with folded alpha-cut needle cards
+  whose normals point out of the crown, so the tree lights as one volume.
+  +1.4–2.4 M triangles in forest and town views, +0.2–0.4 ms.
+
 ### Life: sitting, leaning, talking (motion.js)
 
 - **Skinned vertices from `getVertexPosition` are wrong unless
