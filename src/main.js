@@ -29,6 +29,7 @@ import { createKick } from './kick.js';
 import { setPaneDaylight } from './windows.js';
 import { createVisibility } from './cull.js';
 import { createTitleReel } from './title.js';
+import { OUTDOOR_FILL } from './dress.js';
 
 const params = new URLSearchParams(location.search);
 // The default world is no longer one town. Midgaard plus the five areas
@@ -823,6 +824,8 @@ async function boot() {
     const daylight = THREE.MathUtils.clamp(preset.elevation / 22, 0, 1) * 0.75;
     actors.setDaylight(preset.haze, daylight);
     fx.setAmbient(daylight / 0.75);
+    // Figures out of doors take the indoor fill as the sun goes (dress.js).
+    OUTDOOR_FILL.value = 1 - daylight / 0.75;
     spellfx.setDaylight(daylight / 0.75);
     // Whether it is day, for things that are lit *because* it is dark. Fully
     // out above twelve degrees of sun, fully lit below two, so the lamps are a

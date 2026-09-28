@@ -218,8 +218,8 @@ const LIGHTS_BEGIN = 'vec3 dikuTorch = vec3( 0.0 );\n' + THREE.ShaderChunk.light
     + ' * mix( 1.0, indoorBounce, dikuIndoor ) * ( 1.0 - dikuBuried );')
   // What the torches deliver here whichever way the surface faces: the fill
   // below is a share of it.
-  .replace(POINT_LINE, `${POINT_LINE}\n\t\tdirectLight.color *= mix( 1.0, dikuBuriedGain, dikuBuried );`
-    + '\n\t\tdikuTorch += directLight.visible ? directLight.color : vec3( 0.0 );')
+  .replace(POINT_LINE, `${POINT_LINE}\n\t\tdirectLight.color *= mix( 1.0, dikuBuriedGain, dikuBuried )`
+    + ' * dikuTorchGain;\n\t\tdikuTorch += directLight.visible ? directLight.color : vec3( 0.0 );')
   .replace(SUN_LINE, `${SUN_LINE}\n\t\tdirectLight.color *= mix( 1.0,`
     + ' smoothstep( 0.02, 0.12, dot( directionalLight.direction, viewMatrix[ 1 ].xyz ) ), dikuBuried );');
 if (!LIGHTS_BEGIN.includes('dikuIndoor') || !LIGHTS_BEGIN.includes('dikuTorch +=')
@@ -246,6 +246,14 @@ if (!LIGHTS_BEGIN.includes('dikuIndoor') || !LIGHTS_BEGIN.includes('dikuTorch +=
  *    and out), because out of doors the sun and the open sky already do it.
  */
 export const FIGURE_FILL = { value: 2.4 };
+/**
+ * The same fill out of doors, by how dark the hour is: 0 by day, 1 at night.
+ * After dark the street is lit by lamps and a weak moon, and a guard under a
+ * lamp at the Market Square was 53% under luma 12 against paving at 84 --
+ * the sun that does this job by day is gone, and the fill is still only a
+ * share of the lamplight and sky already at the spot (main.js applyTime).
+ */
+export const OUTDOOR_FILL = { value: 0 };
 
 const LIGHTS_END = `
   {
@@ -264,7 +272,7 @@ const LIGHTS_END = `
     // The fill: view space, so +z is towards the camera and +y up.
     float dikuAmbient = dot( iblIrradiance + irradiance + 0.5 * dikuTorch, vec3( 0.2126, 0.7152, 0.0722 ) );
     float dikuWrap = clamp( ( dot( geometryNormal, normalize( vec3( 0.25, 0.45, 1.0 ) ) ) + 0.3 ) / 1.3, 0.0, 1.0 );
-    irradiance += vec3( 1.04, 1.0, 0.94 ) * ( dikuFill * dikuIndoor * dikuAmbient * dikuWrap );
+    irradiance += vec3( 1.04, 1.0, 0.94 ) * ( dikuFill * max( dikuIndoor, dikuOutdoorFill ) * dikuAmbient * dikuWrap );
   }
   #include <lights_fragment_end>`;
 
@@ -277,7 +285,7 @@ const FOG = `
     gl_FragColor.rgb = mix( gl_FragColor.rgb, mix( dikuClear, dikuMurk, dikuMurkF ), dikuBuried );
   #endif`;
 
-function inject(shader, set, tints, show, indoor, buried) {
+function inject(shader, set, tints, show, indoor, buried, light) {
   shader.uniforms.heldShow = { value: show };
   shader.uniforms.dikuIndoor = indoor;
   shader.uniforms.dikuBuried = buried;
@@ -285,7 +293,9 @@ function inject(shader, set, tints, show, indoor, buried) {
   shader.uniforms.indoorBounce = SHARED_LIGHT.indoorBounce;
   shader.uniforms.dikuSkyBleach = SHARED_LIGHT.skyBleach;
   shader.uniforms.dikuSkyBleachTint = SHARED_LIGHT.skyBleachTint;
-  shader.uniforms.dikuFill = FIGURE_FILL;
+  shader.uniforms.dikuFill = light.fill || FIGURE_FILL;
+  shader.uniforms.dikuTorchGain = light.torch || { value: 1 };
+  shader.uniforms.dikuOutdoorFill = OUTDOOR_FILL;
   shader.uniforms.slotAlbedo = { value: set.albedo };
   shader.uniforms.slotNormal = { value: set.normal };
   shader.uniforms.slotOrm = { value: set.orm };
@@ -315,7 +325,9 @@ function inject(shader, set, tints, show, indoor, buried) {
       uniform float indoorBounce;
       uniform float dikuSkyBleach;
       uniform vec3 dikuSkyBleachTint;
-      uniform float dikuFill;`)
+      uniform float dikuFill;
+      uniform float dikuOutdoorFill;
+      uniform float dikuTorchGain;`)
     .replace('#include <lights_fragment_begin>', LIGHTS_BEGIN)
     .replace('#include <lights_fragment_end>', LIGHTS_END)
     .replace('#include <fog_fragment>', FOG)
@@ -346,8 +358,10 @@ function inject(shader, set, tints, show, indoor, buried) {
 /**
  * One person's material: their colours per surface, `tint` by tag, over the
  * surfaces' own base colour. A ghost is see-through and lit from inside.
+ * `light` may give the material a fill and a torch gain of its own
+ * (`{ value }` uniforms): the first-person hands (fx.js) take both.
  */
-export function personMaterial(library, tint, ghost, show = new THREE.Vector2(1, 1)) {
+export function personMaterial(library, tint, ghost, show = new THREE.Vector2(1, 1), light = {}) {
   const set = surfaces(library);
   const tints = new Float32Array(MAX_SLOTS * 3);
   const c = new THREE.Color();
@@ -375,7 +389,7 @@ export function personMaterial(library, tint, ghost, show = new THREE.Vector2(1,
   const indoor = { value: 0 };
   // And how far underground, the same way.
   const buried = { value: 0 };
-  m.onBeforeCompile = (shader) => inject(shader, set, tints, show, indoor, buried);
+  m.onBeforeCompile = (shader) => inject(shader, set, tints, show, indoor, buried, light);
   m.customProgramCacheKey = () => 'diku-person-4';
   m.onBeforeRender = BURIED_LIGHT.sync;
   m.dikuIndoor = indoor;
