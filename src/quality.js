@@ -284,19 +284,35 @@ export class LightPool {
     this.resize(count);
   }
 
+  /**
+   * How many lights are switched on, in steps. The number of lights is part
+   * of every lit material's program, so every change in the count of lamps
+   * nearby used to recompile everything in view -- 50-500 ms stalls walking
+   * between the desert, the town and the sewer (10 programs rebuilt in one
+   * frame at #5028). Holding all of them on instead cost 5 ms a frame on
+   * grass at noon, when there are none to light. So the count moves in a few
+   * steps, and main.js compiles every step behind the loading screen.
+   */
+  get levels() {
+    const n = this.lights.length;
+    return [...new Set([0, 2, 4, 8, n].filter((l) => l <= n))];
+  }
+
+  /** Switch on the first `n` lights (and only them), for compiling. */
+  setLevel(n) {
+    this.lights.forEach((light, i) => { light.visible = i < n; });
+  }
+
   resize(count) {
+    this.level = -1;
     while (this.lights.length > count) {
       const light = this.lights.pop();
       this.scene.remove(light);
       light.dispose();
     }
     while (this.lights.length < count) {
-      // Always visible, dark when unused. The number of lights is part of
-      // every lit material's program, so switching one off by `visible`
-      // recompiled everything in view each time the count of lamps nearby
-      // changed -- 50-500 ms stalls walking between the desert, the town and
-      // the sewer (measured: 10 programs rebuilt in one frame at #5028).
       const light = new THREE.PointLight(0xffffff, 0, 20, 2);
+      light.visible = false;
       this.scene.add(light);
       this.lights.push(light);
     }
@@ -328,12 +344,14 @@ export class LightPool {
     // lamp on the kerb that was carrying the street. Distance over intensity
     // is a crude irradiance, and crude is enough to keep the lamp lit.
     this.near.sort((a, b) => a._d / (a.intensity || 1) - b._d / (b.intensity || 1));
+    let active = 0;
     for (let i = 0; i < this.lights.length; i++) {
       const light = this.lights[i];
       const candidate = this.near[i];
       if (!candidate) { light.intensity = 0; continue; }
       const lit = candidate.outdoor ? 1 - this.daylight : 1;
       if (lit <= 0.01) { light.intensity = 0; continue; }
+      active = i + 1;
       light.position.set(candidate.x, candidate.y, candidate.z);
       light.color.setHex(candidate.color);
       light.distance = candidate.radius || 16;
@@ -345,6 +363,11 @@ export class LightPool {
       // it the night boost blew the temple out at 2.7% of the frame clipped.
       const afterDark = candidate.outdoor ? 1 + (1 - this.daylight) * 1.6 : 1;
       light.intensity = (candidate.intensity || 10) * flicker * lit * afterDark;
+    }
+    const level = this.levels.find((l) => l >= active);
+    if (level !== this.level) {
+      this.level = level;
+      this.setLevel(level);
     }
   }
 

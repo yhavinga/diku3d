@@ -1812,9 +1812,16 @@ async function boot() {
     // the canvas every one of these came out a variant nothing ever uses.
     const previous = renderer.getRenderTarget();
     renderer.setRenderTarget(composer.renderTarget1);
+    // Once for each step the light pool's count moves in (quality.js).
     try {
-      await renderer.compileAsync(scene, camera);
+      for (const level of lightPool.levels) {
+        lightPool.setLevel(level);
+        // Again each time: frames drawn while this waits move the target.
+        renderer.setRenderTarget(composer.renderTarget1);
+        await renderer.compileAsync(scene, camera);
+      }
     } finally {
+      lightPool.level = -1;
       renderer.setRenderTarget(previous);
       for (const o of hidden) o.visible = false;
     }
