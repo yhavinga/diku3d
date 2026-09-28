@@ -52,6 +52,25 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Room shells by kind (src/shells.js)
+
+- **three puts only a front-sided material's back faces in the shadow map**,
+  so a 3 cm ledge on the inside of a stone-kit wall was "shaded" by the
+  wall's own inner face — inside the shadow bias — and came out lit: the
+  judge's white streaks along the mortar, and at dusk whole courses of the
+  Park Cafe lit by the sun through a closed room. `shadowSide = DoubleSide`
+  on every baked surface. Find such leaks by setting `sun.intensity = 0`.
+- **A forest fir's crown reaches 3.6 m × its scale** (up to 2.6×), so a tree
+  a whole cell away grew through the cabin's logs. Check planted trees
+  against walled rooms' boxes, not cell edges.
+- The shell is chosen from name and prose, never the sector (the sector
+  lies — LEARNINGS' sewer round); rooms off Bag End inherit the smial shell
+  through the door they share. `tools/shell-check.mjs [--table]`.
+- New hooks: a surface generator may set `s.emit` and a recipe `glow` for
+  an emissive map (the lair's glowing floor cracks); `Batcher.add(…,
+  { keepUv: true })` for curved surfaces with their own UVs;
+  `ceilingOf(room, cell, layout)`.
+
 ### Text that is never cut, and a title that shows the world (hud3)
 
 - **Text typed out over time is laid out over time**, so every still and
