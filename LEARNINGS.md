@@ -157,6 +157,18 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
   scene at intensity 0; ~0.12 ms each at 720p.
 - **Aura shells on every mesh stack rims and turn a figure to glass.** Only
   skinned meshes over 150 vertices, lit on the silhouette.
+- **A ribbon has to be capped in angle, not only in metres.** A 1 m glow
+  half a metre from the lens covers the frame and reads as a flat pasted
+  strip — the second judge's "flat camera-facing ribbon".
+- **One broad soft glow sprite over a volumetric shape erases its surface.**
+  The fireball read as a peach-coloured egg, and hid its target at night,
+  until that sprite went; the point light does the lighting.
+- **The runtime fbm noise is mostly mid-grey.** Stretch it around 0.5
+  (×2.4–2.6) or every flame edge comes out as cotton wool.
+- **A particle stream needs a hold phase, and spawns spread along one
+  frame's travel**, or it dies before crossing the room and reads as beads.
+- **Measure frame time with base and branch alternated, each against its
+  own idle.** With other agents on the GPU idle moved from 7.4 to 12 ms.
 - Aim things that fly at the player 0.8 m ahead of the face, burst them at
   2.6 m, or the frame blows out.
 - Fireball at night 6.4 → 7.7 ms median; sanctuary on the target costs
