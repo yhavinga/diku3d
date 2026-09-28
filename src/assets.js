@@ -581,6 +581,25 @@ export class StaticBatch extends THREE.BatchedMesh {
     return false;
   }
 
+  /**
+   * How far off the nearest piece `test` accepts is, from `eye` -- Infinity
+   * if none. Tells cull.js both whether to draw the batch and whether it is
+   * near enough to go into the AO prepass.
+   */
+  nearestVisible(test, eye) {
+    const spheres = this.pieceSpheres();
+    const info = this._instanceInfo;
+    let nearest = Infinity;
+    for (let i = 0; i < info.length; i++) {
+      if (!info[i].visible || !info[i].active) continue;
+      const o = i * 4;
+      if (!test(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) continue;
+      const d = Math.hypot(spheres[o] - eye.x, spheres[o + 1] - eye.y, spheres[o + 2] - eye.z) - spheres[o + 3];
+      if (d < nearest) nearest = d;
+    }
+    return nearest;
+  }
+
   pieceSpheres() {
     if (!this._spheres) {
       const n = this._instanceInfo.length;

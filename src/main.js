@@ -29,6 +29,7 @@ import { createKick } from './kick.js';
 import { setPaneDaylight } from './windows.js';
 import { createVisibility } from './cull.js';
 import { createImpostors } from './impostor.js';
+import { createOcclusion } from './occlusion.js';
 import { createTitleReel } from './title.js';
 
 const params = new URLSearchParams(location.search);
@@ -523,11 +524,15 @@ async function boot() {
     impostors.adopt(scene);
     impostors.setEnabled(params.get('lod') !== 'off');
   }
+  // Out in the open, what the last frames' depth says is behind a hill.
+  const occlusion = createOcclusion({ renderer, scene, camera, world: built.group });
+  occlusion.state.enabled = params.get('occlusion') !== 'off';
   const visibility = createVisibility({
-    renderer, scene, camera, world: built.group, sun, zones: built.zones, impostors,
+    renderer, scene, camera, world: built.group, sun, zones: built.zones, impostors, occlusion,
     sky: [sky, stars, ...built.group.children.filter((o) => o.name.startsWith('horizon-'))],
   });
   visibility.state.enabled = params.get('cull') !== 'off';
+  pipeline.gtao.distant = () => (visibility.state.enabled ? visibility.state.aoFar : null);
   {
     const render = composer.render.bind(composer);
     composer.render = (...args) => {
@@ -1420,7 +1425,7 @@ async function boot() {
     // `wetness` is exposed because it is a slow-moving number nothing on screen
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
-    pipeline, environment, materials, wetness, assets, impostors,
+    pipeline, environment, materials, wetness, assets, impostors, occlusion,
     player, hud, layout, built, actors, world, applyTime, applyWeather, state, audio, visibility,
     times: TIMES, overcast: OVERCAST, rain,
     /**
