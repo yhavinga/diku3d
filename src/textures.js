@@ -2178,11 +2178,17 @@ const SURFACES = {
     // 0x221e1b -- nothing under a sky reads zero, and burnt stone is not ink).
     const greyed = mix(base, rgb(0x3b3733), 0.66 + grime * 0.2);
     s.color = mix(greyed, rgb(0x221e1b), clamp01(soot * 1.3));
-    // A shallower recess than the town's stone. The bed joint's lower lip is
-    // a strip of normals facing straight up, and in the shade the only light
-    // there is is the sky's: at 0.12 every course in the district wore a blue
-    // line along its foot, which a judge read as blue mortar.
-    s.height = inBlock ? 0.62 + bevel * 0.3 + grain * 0.08 : 0.42;
+    // Relief at the perpends only. The bake's Sobel is steep -- a step of a
+    // few hundredths already tips a normal past forty-five degrees -- so the
+    // top arris of every course was a strip facing straight up, and in the
+    // shade what lights and what it mirrors is the sky: every course in the
+    // district wore a blue line along it, which a judge read as blue mortar.
+    // With the normal map off the lines were gone. The bed joint keeps its
+    // colour and a whisper of recess; the perpends, facing sideways, a
+    // little more -- at full depth a dusk sun raked them into a comb.
+    const perpBevel = clamp01(Math.min((fx - jx) * w, (1 - jx - fx) * w) / 0.03);
+    const bedBevel = clamp01(Math.min((fy - jy) * h, (1 - jy - fy) * h) / 0.03);
+    s.height = 0.6 + perpBevel * 0.06 + bedBevel * 0.015 + grain * 0.03;
     s.rough = Math.min(1, (inBlock ? 0.72 + grain * 0.2 : 0.94) + soot * 0.12);
   },
 
@@ -2722,7 +2728,7 @@ const RECIPES = {
   // dark grey read as plain grey stone in the sun and went under 8 in the
   // shade at dusk (51% of a No Man's Land frame); streaked, it reads as soot
   // in the sun and the grime holds the shade up. Mean albedo 0.14, and the dusk and night shade held up by `lift`.
-  sootwall: { surface: 'sootwall', scale: 3.6, normalScale: 1.0, env: 0.6, lift: true, wet: 0, detail: 0.55 },
+  sootwall: { surface: 'sootwall', scale: 3.6, normalScale: 0.8, env: 0.6, lift: true, wet: 0, detail: 0.55 },
   rubble: { surface: 'rubble', scale: 2.4, normalScale: 1.1, env: 0.8, lift: true, wet: 0, detail: 0.6 },
   charred: { surface: 'charred', scale: 1.4, normalScale: 0.55, env: 0.5, lift: true, wet: 0, detail: 0.5 },
   boards: { surface: 'boards', scale: 2.0, normalScale: 0.7, env: 0.7, wet: 0, detail: 0.45 },
