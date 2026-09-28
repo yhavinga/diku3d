@@ -399,7 +399,7 @@ def build_door_leaf():
         # A few millimetres of face jitter, so the leaf is not one plane.
         jitter = ((i * 2654435761) % 7 - 3) * 0.002
         p.append(kit.timber((bw, 0.055, H), (bx, jitter, H / 2),
-                            (0, 0, 0), "planks", 0.012, "board%d" % i))
+                            (0, 0, 0), "doorboard", 0.012, "board%d" % i))
     for z in (0.42, H / 2, H - 0.40):
         p.append(kit.timber((W - 0.06, 0.05, 0.17), (W / 2, 0.052, z),
                             (0, 0, 0), "oak", 0.012, "ledge"))

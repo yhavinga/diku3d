@@ -655,14 +655,14 @@ function pickMaterials(room, area) {
     if (burrow) {
       // Trodden earth, all of it, because a burrow is dug out of one substance.
       // Not the bare rock the `tunnel` branch above hands out: these are cut
-      // through a hillside, not mined. `dirt` and not `peat` on the walls --
-      // peat is the darkest surface in the world and a torch-lit room made of
-      // it measured 14% of the frame under luminance 4; and `dirt` carries the
-      // damp in its low patches that the prose asks for ("the air is musty and
-      // damp"). Peat stays overhead, where nothing lights it anyway.
+      // through a hillside, not mined. Not `peat` on the walls -- peat is the
+      // darkest surface in the world and a torch-lit room made of it measured
+      // 14% of the frame under luminance 4 -- and not `dirt` either, whose
+      // floor relief up a torch-lit wall read as an orange swirl: `earthwall`
+      // is a spade-cut face. Peat stays overhead, where nothing lights it.
       smial = SMIAL.test(room.name);
       cave = true;              // whatever else, no dressed-masonry kit in a hole
-      floor = 'dirt'; wallIn = 'dirt'; wallOut = 'dirt'; ceil = 'peat'; roof = 'grass';
+      floor = 'dirt'; wallIn = 'earthwall'; wallOut = 'earthwall'; ceil = 'peat'; roof = 'grass';
       // A smial's outside is the hill, so its outer skin is turf and not the
       // earth face it is cut from: `dirt` carries a `wet` term, and shaded by
       // `wallAo` a six-metre wall of it read as wet black cobble under a green
@@ -743,7 +743,10 @@ function pickMaterials(room, area) {
     cave = true;
     floor = 'sewerflag'; wallIn = 'ashlar'; wallOut = 'ashlar'; ceil = 'ashlar';
   } else if (kind === 'lair') {
-    floor = 'emberstone'; wallIn = 'scorched'; ceil = 'scorched';
+    // Only a floor the prose says is still hot glows (#7428's "floorstones
+    // are fiery red"); a room that "once had been quite burned" is cold.
+    floor = /\b(fiery|glow\w*|red-hot|red hot|smoulder\w*|lava|embers)\b/i.test(room.description) ? 'emberstone' : 'charstone';
+    wallIn = 'scorched'; ceil = 'scorched';
     if (!deep) wallOut = 'sootwall';
   } else if (kind === 'dungeon') {
     if (deep) { floor = 'sewerflag'; wallIn = 'ashlar'; ceil = 'ashlar'; } else { floor = 'flagstone'; wallIn = 'stonewall'; ceil = 'stonewall'; }
@@ -3737,16 +3740,18 @@ function buildClearing({ batcher, chunk, room, pos, sides, addCollider }) {
     if (wantsPile && Math.hypot(lx - Math.cos(anchor) * 4.3, lz - Math.sin(anchor) * 4.3) < 2.8) continue;
     const r = 0.2 + hash3(room.vnum, i, 2, 216) * 0.34;
     const h = 0.22 + hash3(room.vnum, i, 3, 217) * 0.5;
+    // The sawn face on top: pale end grain, or moss on the older ones, which
+    // is what the room's own extra description says separates them. The moss
+    // is `mossbark`'s, over the cut and down the bark with a soft edge; it
+    // was a disc of lawn laid on the stump.
+    const mossy = hash3(room.vnum, i, 4, 218) < 0.38;
     const trunk = new THREE.CylinderGeometry(r * 0.96, r, h, 10);
     trunk.translate(0, h / 2, 0);
-    batcher.add(trunk, 'bark', place(pos.x + lx, pos.y, pos.z + lz), { chunk });
+    batcher.add(trunk, mossy ? 'mossbark' : 'bark', place(pos.x + lx, pos.y, pos.z + lz), { chunk });
     trunk.dispose();
-    // The sawn face on top: pale end grain, or moss on the older ones, which
-    // is what the room's own extra description says separates them.
-    const mossy = hash3(room.vnum, i, 4, 218) < 0.38;
     const cut = new THREE.CircleGeometry(r * 0.96, 10);
     cut.rotateX(-Math.PI / 2);
-    batcher.add(cut, mossy ? 'grass' : 'planks',
+    batcher.add(cut, mossy ? 'mossbark' : 'planks',
       place(pos.x + lx, pos.y + h + 0.012, pos.z + lz), { chunk });
     cut.dispose();
   }
@@ -6516,8 +6521,8 @@ function buildShell({ kind, batcher, instances, chunk, room, cell, pos, sides, a
     }
   } else if (kind === 'lair') {
     // The heat is in the floor: a low red light out of the cracks, which is
-    // what the scorch on the walls is lit by.
-    for (const [ox, oz] of [[-2.4, 1.8], [2.2, -2.0], [1.6, 2.6]]) {
+    // what the scorch on the walls is lit by -- where the floor is still hot.
+    if (mats.floor === 'emberstone') for (const [ox, oz] of [[-2.4, 1.8], [2.2, -2.0], [1.6, 2.6]]) {
       lights.push({ x: pos.x + ox, y: pos.y + 0.6, z: pos.z + oz, color: 0xff5a20, intensity: 12, radius: 10, flicker: true });
     }
   } else if (kind === 'log') {

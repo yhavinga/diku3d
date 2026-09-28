@@ -259,7 +259,7 @@ def blade(origin, azim, pitch, length, width, thick, curl, sides=4,
 # Bark tiles in metres: the viewer's `scale` for each recipe in textures.js.
 # An unwrapped trunk closes its seam on a whole number of them, so these have
 # to match the recipes.
-BARK_TILE = {"bark": 1.6, "firbark": 1.4, "cedarbark": 1.2}
+BARK_TILE = {"bark": 1.6, "mossbark": 1.6, "firbark": 1.4, "cedarbark": 1.2}
 
 
 def mark_own_uv(obj):
@@ -733,38 +733,28 @@ def build_salal_bush():
 
 
 def build_moss_rock():
-    """A boulder 0.9 m over, with a moss cap.
+    """A boulder 0.9 m over, mossed in the shader.
 
-    The cap is a second shell built from the *same* per-angle wobble as the
-    stone under it, so it lies parallel to the rock and laps over the shoulder
-    instead of intersecting it in four tidy places. Its hem is jagged and runs
-    lower on one side, and where that hem crosses back inside the rock is where
-    the moss line falls -- so the edge is uneven and one-sided, which is how
-    moss actually grows, rather than a green hat put on a grey ball."""
+    The moss used to be a second shell over the top of the stone, and however
+    ragged its hem, a shell has an edge: a judge saw a flat green lid on every
+    boulder in Haon Dor. The `mossrock` material grows moss over whatever
+    faces the sky and the north instead, with a soft wandering edge, so the
+    stone only has to be a stone: a rounded, lopsided hull, smooth-shaded,
+    with a few flatter fracture faces knocked into it."""
     lib.reset()
     rng = random.Random(70020)
-    sides = 8
-    wob = [rng.uniform(-0.11, 0.13) for _ in range(sides)]
-    rock = [(0.00, 0.42, 0.00, 0.00), (0.22, 0.55, 0.02, 0.01),
-            (0.52, 0.52, 0.05, -0.02), (0.76, 0.36, 0.08, -0.03),
-            (0.90, 0.16, 0.09, -0.02)]
-    # The hem, deepest on the far side of the boulder from the sun.
-    hem = [0.17 * math.cos(2 * math.pi * i / sides - 2.1) + rng.uniform(-0.08, 0.08)
-           for i in range(sides)]
-    # The top ring has to sit above the rock's own summit ring, not level with
-    # it, or the stone pokes through the cap as a bright disc on the crown --
-    # which is exactly what the first render showed.
-    moss = [(0.50, 0.46, 0.04, -0.01), (0.62, 0.475, 0.06, -0.02),
-            (0.80, 0.350, 0.08, -0.03), (0.94, 0.200, 0.09, -0.02)]
-    # Flat-shaded, and there is no shade_smooth here on purpose: measured, it
-    # changes not one normal on an eight-sided ring, because those facets meet
-    # at 45 degrees and the smooth-by-angle threshold is 30. It rounds off a
-    # leafmass sphere well enough -- 72 vertices against 98 -- but on this it
-    # would be decoration. Raise `sides` past twelve and it starts to earn its
-    # place.
-    objs = [hull(rock, sides, wob, mat="rock", name="boulder"),
-            hull(moss, sides, wob, hem, jag_at=0, mat="grass", name="moss")]
-    return kit.deliver(objs, "moss_rock")
+    sides = 14
+    wob = [rng.uniform(-0.09, 0.11) for _ in range(sides)]
+    # Two flats round the side, where a face split off along a joint.
+    for k in (rng.randrange(sides), rng.randrange(sides)):
+        for d in (-1, 0, 1):
+            wob[(k + d) % sides] = min(wob[(k + d) % sides], -0.12 + 0.03 * abs(d))
+    rock = [(0.00, 0.44, 0.00, 0.00), (0.10, 0.53, 0.01, 0.00), (0.26, 0.57, 0.02, 0.01),
+            (0.44, 0.54, 0.04, -0.01), (0.62, 0.45, 0.06, -0.02), (0.78, 0.31, 0.08, -0.03),
+            (0.88, 0.16, 0.09, -0.02), (0.92, 0.04, 0.09, -0.02)]
+    stone = hull(rock, sides, wob, mat="mossrock", name="boulder")
+    lib.shade_smooth(stone)
+    return kit.deliver([stone], "moss_rock")
 
 
 ASSETS = [build_tree_oak, build_tree_pine, build_tree_fir, build_tree_cedar, build_tree_snag,
