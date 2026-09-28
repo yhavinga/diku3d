@@ -351,10 +351,15 @@ choose.
 - **Cloning a material drops its `defines` and `onBeforeCompile`.** A
   clone of a buried surface loses `DIKU_BURIED` and reflects the sky
   underground. Copy defines, hooks and `defaultAttributeValues` explicitly.
-- **`env` in a recipe is not only shine.** It scales the diffuse sky light
-  too, so a low-`env` cloth is a dark cloth indoors. Figures take the same
-  sky share and indoor treatment as the walls (`SHARED_LIGHT`); check a
-  figure's torso against the wall behind it after any material change.
+- **`env` in a recipe does nothing on world materials under three r185**
+  (it overwrites `envMapIntensity` with `scene.environmentIntensity` for
+  any material without its own envMap); only dress.js honours it, for
+  figures. Figures take the same sky share and indoor treatment as the
+  walls (`SHARED_LIGHT`); check a figure's torso against the wall behind it
+  after any material change.
+- **"Indoor" for a placed model comes from the walls (`openAir`), not the
+  mud's INDOORS flag**, and indoor reflections lose the sky's hue — or
+  metal reads blue.
 - Figures are kept out of the sun's shadow map, so their contact shadows are
   placed by hand in `actors.js` and have to be told where the sun is:
   `applyTime()` calls `actors.setSun()`. Miss that and every person in the town

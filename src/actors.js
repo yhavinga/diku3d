@@ -2436,7 +2436,12 @@ export function populate(world, layout, built, options = {}) {
   // Modelled props are used where they exist and quietly skipped where they
   // don't, so the library can be finished asset by asset.
   const assets = options.assets || null;
-  const instances = assets ? new InstanceBatch(assets) : null;
+  // A prop in a room is lit as the room is (see `indoorGeometry` in assets.js).
+  const instances = assets ? new InstanceBatch(assets, {
+    // By the walls, not the mud's INDOORS flag: that means "no sky" and is on
+    // forty-odd of Haon Dor's forest rooms, whose trees are out of doors.
+    indoorAt: (x, y, z) => { const info = roomInfoAt(x, y, z); return info?.openAir === false && !isBuriedRoom(info); },
+  }) : null;
   // The rooms' furniture is batched apart from the street's props and never
   // instanced (see the end of `populate`).
   const furnishing = assets ? new InstanceBatch(assets) : null;
@@ -2448,7 +2453,7 @@ export function populate(world, layout, built, options = {}) {
   // the sky (textures.js `buriedTwin`) -- by the room's own cell or the nearer
   // end of a passage, as nav.roomAt decides. What is placed there is filed
   // under a chunk that says so, and StaticBatches dresses it accordingly.
-  const buriedAt = (x, y, z) => {
+  const roomInfoAt = (x, y, z) => {
     const level = Math.round(y / LEVEL_H); const cx = Math.round(x / GRID); const cz = Math.round(z / GRID);
     let vnum = layout.at(level, cx, cz);
     if (vnum === undefined) {
@@ -2459,8 +2464,9 @@ export function populate(world, layout, built, options = {}) {
         vnum = da <= db ? passage.from.vnum : passage.to.vnum;
       }
     }
-    return isBuriedRoom(built.rooms.get(vnum));
+    return built.rooms.get(vnum);
   };
+  const buriedAt = (x, y, z) => isBuriedRoom(roomInfoAt(x, y, z));
   const chunkAt = (chunk, x, y, z) => (buriedAt(x, y, z) ? `${chunk}${BURIED_MARK}` : chunk);
 
   const trees = [];
@@ -2622,6 +2628,9 @@ export function populate(world, layout, built, options = {}) {
           x0: mesh.position.x - solid, x1: mesh.position.x + solid,
           z0: mesh.position.z - solid, z1: mesh.position.z + solid,
           y0: mesh.position.y, y1: mesh.position.y + 1.6,
+          // A fountain is a drum: round, so you walk round it (player.js).
+          // The modelled one's drum is 1.26 m in radius (props.py).
+          r: item.proto.itemType === ITEM.FOUNTAIN ? (modelled && instances ? 1.3 : solid) : undefined,
         });
       }
       if (item.proto.itemType === ITEM.FOUNTAIN) {
@@ -3082,6 +3091,20 @@ export function populate(world, layout, built, options = {}) {
       } else if (item.fitting === 'altar') {
         const W = 2.2; const D = 1.0; const H = 1.05;
         const front = WALL_Z + 0.55 + D / 2;
+        // A marble altar is the modelled block (tools/blender/statues.py):
+        // 3.3 m on a low step, its candles lit. A wooden one keeps the boxes.
+        const marble = !item.wooden && furn(['altar_marble']);
+        if (marble) {
+          const [ax, az] = worldOf(shift, front);
+          place(marble, ax, item.y, az, ry);
+          for (const s of [-1, 1]) {
+            const [cx, cz] = worldOf(shift + s * 1.25, front - 0.05);
+            flames.push({ x: cx, y: item.y + 1.55, z: cz, bare: true, candle: true });
+          }
+          solid(shift, front, 1.72, 0.58, 0, 1.12);
+          solid(shift, front, 2.0, 0.72, 0, 0.16);
+          continue;
+        }
         for (let s = 0; s < 2; s++) {
           pushPart(props, G.box(W + 1.1 - s * 0.55, 0.17, D + 1.1 - s * 0.55),
             0xb3ab99, put(shift, item.y + 0.085 + s * 0.17, front));
@@ -3209,6 +3232,10 @@ export function populate(world, layout, built, options = {}) {
       dummy.position.set(f.x, f.y + (f.hearth ? 0 : f.lamp ? 0.05 : 0.12), f.z);
       // A forge's fire is a bed of coals under the blast, not logs.
       if (f.forge) dummy.scale.set(1.5, 0.55, 1.5);
+      // A fire the room is full of (clutter.js `fireRing`): tall, and each its own height.
+      // The shader takes one scale (the matrix's first column), so a fire's
+      // tongues differ by size, not by shape.
+      else if (f.blaze) dummy.scale.setScalar(f.blaze);
       else if (f.hearth) dummy.scale.set(1.9, 1.15, 1.9);
       else if (f.candle) dummy.scale.setScalar(0.14);
       else dummy.scale.setScalar(f.lamp ? 1.15 : 1.28);

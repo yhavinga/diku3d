@@ -20,7 +20,7 @@ import { InstanceBatch, StaticBatches } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
 import { buildGrass } from './grass.js';
 import { classifyShells, shellFor, shellAttrs } from './shells.js';
-import { placeClutter } from './clutter.js';
+import { placeClutter, ALTAR_MIDDLE, STATUE_OF_ODIN, STATUE_DEPTH } from './clutter.js';
 import { MURAL_REGIONS, faceRegion, bloodRegion } from './textures.js';
 
 export const CELL = 13;         // grid pitch; rooms sit two cells apart
@@ -919,7 +919,7 @@ function pickMaterials(room, area, passage = false) {
   } else if (kind === 'lair') {
     // Only a floor the prose says is still hot glows (#7428's "floorstones
     // are fiery red"); a room that "once had been quite burned" is cold.
-    floor = /\b(fiery|glow\w*|red-hot|red hot|smoulder\w*|lava|embers)\b/i.test(room.description) ? 'emberstone' : 'charstone';
+    floor = /\b(fiery|glow\w*|red-hot|red hot|smoulder\w*|lava|embers|flames surrounding)\b/i.test(room.description) ? 'emberstone' : 'charstone';
     wallIn = 'scorched'; ceil = 'scorched';
     if (!deep) wallOut = 'sootwall';
   } else if (kind === 'dungeon') {
@@ -2018,7 +2018,9 @@ export function buildScene(world, layout, materials, assets = null) {
       arrive = { x: pos.x + ax * HOLE_CENTRE + bx * 3.45, z: pos.z + az * HOLE_CENTRE + bz * 3.45 };
     }
     rooms.set(room.vnum, {
-      room, cell, center: new THREE.Vector3(arrive.x, pos.y, arrive.z), outdoor,
+      // `openAir` is the geometry's answer (no walls round it), for what is
+      // placed later and must be lit as the room is.
+      room, cell, center: new THREE.Vector3(arrive.x, pos.y, arrive.z), outdoor, openAir,
       chunk, materials: mats, sides,
     });
 
@@ -2787,6 +2789,18 @@ export function buildScene(world, layout, materials, assets = null) {
     world, rooms, decor, colliders, addCollider, instances, lights, openAir: isOpenAir, ROOM, HALF,
     worldOf: (cell) => { const w = worldOf(cell); w.y += lifts.get(cell.vnum) || 0; return w; },
     BufferAttribute: THREE.BufferAttribute,
+    // A few words cut or painted on something out of doors: "Haon-Dor" in a
+    // tree's bark. The same painted-text material a room's walls get.
+    // `radius`: wrapped round a trunk of that radius, centred on its +z side.
+    words: (texts, seed, x, y, z, rotY, w, h, chunk, radius = 0) => {
+      const name = materials.$writing ? materials.$writing(texts, false, seed) : null;
+      if (!name) return false;
+      const geo = radius ? new THREE.CylinderGeometry(radius, radius, h, 12, 1, true, -w / radius / 2, w / radius)
+        : new THREE.PlaneGeometry(w, h);
+      batcher.add(geo, name, place(x, y, z, rotY), { chunk, normals: true, keepUv: true });
+      geo.dispose();
+      return true;
+    },
   });
 
   // No tree grows through a room's walls. A forest fir is modelled with its
@@ -5802,8 +5816,11 @@ function buildGreatTree({ batcher, instances, chunk, room, pos, sides, addCollid
           const slope = (radius(v[3], v[4] + 0.05) - radius(v[3], v[4] - 0.05)) / 0.1;
           const len = Math.hypot(1, slope);
           N.push((Math.cos(v[3]) / len) * n, (-slope / len) * n, (Math.sin(v[3]) / len) * n);
-          // Round the trunk and up it, in metres of the tile.
-          U.push((v[3] * 5.5) * uvScale, v[4] * uvScale);
+          // Round the trunk and up it, in metres of the tile -- and the
+          // outside at twice the size: bark sized for an ordinary trunk
+          // knitted this twelve-metre one in fine lozenges.
+          const tile = facingIn ? uvScale : uvScale * 0.5;
+          U.push((v[3] * 5.5) * tile, v[4] * tile);
         }
       }
     }
@@ -7950,7 +7967,8 @@ function readFittings(room, sides) {
   loose(/\bcounter\b/i, 'counter');
   loose(/\b(fireplace|hearth|forge)\b/i, 'hearth');
   loose(/\bshelves\b/i, 'shelves');
-  loose(/\baltar\b/i, 'altar');
+  // "In the middle of the room there is a small altar" is clutter.js's.
+  if (!ALTAR_MIDDLE.test(text)) loose(/\baltar\b/i, 'altar');
 
   return [...found].map(([kind, dir]) => ({ kind, dir }));
 }
@@ -8185,9 +8203,18 @@ function buildInteriorProps({ room, pos, sides, decor, mats, holes = [], lights 
     // out. Slide the fitting along until it clears the opening rather than
     // moving it to a wall the mud did not choose.
     const blocked = !!sides[f.dir];
-    const { shift, out } = plan.settle(f.kind, blocked);
+    let { shift, out } = plan.settle(f.kind, blocked);
+    // "Behind it is a ten foot tall sitting statue": the altar stands out
+    // from its wall by the statue's plinth (clutter.js puts the statue there).
+    const statue = f.kind === 'altar' && STATUE_OF_ODIN.test(room.description);
+    if (statue) {
+      out = STATUE_DEPTH - 0.35;
+      plan.take(plan.rect(f.dir, shift - 2.2, shift + 2.2, -ROOM / 2, -ROOM / 2 + STATUE_DEPTH));
+      plan.tall[f.dir].push([shift - 2.3, shift + 2.3]);
+    }
     decor.push({
       kind: 'fitting', fitting: f.kind, dir: f.dir, blocked, trade, shift, out, face: plan.face,
+      wooden: f.kind === 'altar' && /\bwooden altar\b/i.test(room.description),
       // "In the crackling fireplace hangs a big iron pot with boiling water."
       pot: f.kind === 'hearth' && /\b(iron pot|cauldron|kettle)\b/i.test(room.description),
       x: pos.x, y: pos.y, z: pos.z, seed: hash3(room.vnum, f.dir, 0, 71),

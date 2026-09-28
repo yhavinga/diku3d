@@ -42,6 +42,7 @@ MODULES = [
     "furniture",
     "clutter",
     "setpiece",
+    "statues",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a
@@ -163,6 +164,15 @@ BUDGET = {
     # setpiece.py: one of each in the world, or four gatehouses. The fortress
     # is a whole castle seen from a hundred metres.
     "gatehouse": 6000, "fortress": 20000, "monolith": 400, "statue_worm": 7000,
+    # statues.py. One Odin in the world (two with the mirror Midgaard), seen
+    # from three metres at the altar: the face and beard are carved on a 5 mm
+    # grid of their own, and a pair each of wolves and ravens sit on it.
+    "statue_odin": 60000, "altar_marble": 1600, "relief_face": 2500, "altar_faces": 6800,
+    # The firedeath's fire, a dozen lengths of it round one room.
+    "fire_bed": 2500,
+    # One each: the sewer's imp and its dragons on the lair's table, carved
+    # small and seen close; the Shire watermill's stones and gearing.
+    "statue_imp": 9500, "figurine_dragons": 6800, "millstones": 2400,
 }
 PROP_BUDGET = 800
 # people.py: an archetype is a whole dressed person, one skinned draw per

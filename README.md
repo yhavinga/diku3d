@@ -77,6 +77,7 @@ and steal, the janitor, the fido, the thief and the mayor walking his route
 opening the gates, and a character saved to the browser to continue from.
 
     node tools/people-check.mjs [--all]   # who every mobile is dressed as
+    node tools/noun-check.mjs --placed f  # which nouns in the prose are built
 
 The default world is nine areas and 579 rooms: Midgaard, Haon Dor, the Shire,
 the marsh, the troll den, the graveyard, the sewer under the town (down
