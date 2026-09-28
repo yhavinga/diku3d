@@ -52,6 +52,27 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Life: sitting, leaning, talking (motion.js)
+
+- **Skinned vertices from `getVertexPosition` are wrong unless
+  `skeleton.update()` runs first**; otherwise they use the last render's
+  bone matrices.
+- **A clip's intended seat height is not the dressed mesh's contact
+  height.** The hip joint sits 5 cm above the seat but dressed thighs reach
+  11 cm below it; measure the thighs. Sampling every other vertex misses
+  armour plates (a knight 4.6 cm into the bench).
+- **IK targets must start at the real feet** — the frame that sets up the
+  transition is already running; otherwise both legs reach a metre towards
+  the world origin on the first frame of sitting.
+- **A walk weight that fades in behind the speed slides the planted foot by
+  the missing share.** Drive walk/run weights directly from the speed.
+- **`items.js` rewrites weapon visibility every frame**; anything else that
+  hides a weapon needs its own flag (`stowed`).
+- Measured: turning-in-place foot slide 0.35 → 0.00 m/s; seat error −1.9 to
+  +0.7 cm over 26 body/seat combinations; figures doing something: Boar
+  47% → 97%, Market Square 9% → 50%, 116 of 377 Green Dragon samples
+  talking.
+
 ### Creatures, second pass (worm, troll, drider, fur)
 
 - **Head shape tables must run in ascending height.** `heads._loft_scale`
