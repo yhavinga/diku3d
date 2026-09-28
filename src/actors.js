@@ -3082,6 +3082,20 @@ export function populate(world, layout, built, options = {}) {
       } else if (item.fitting === 'altar') {
         const W = 2.2; const D = 1.0; const H = 1.05;
         const front = WALL_Z + 0.55 + D / 2;
+        // A marble altar is the modelled block (tools/blender/statues.py):
+        // 3.3 m on a low step, its candles lit. A wooden one keeps the boxes.
+        const marble = !item.wooden && furn(['altar_marble']);
+        if (marble) {
+          const [ax, az] = worldOf(shift, front);
+          place(marble, ax, item.y, az, ry);
+          for (const s of [-1, 1]) {
+            const [cx, cz] = worldOf(shift + s * 1.25, front - 0.05);
+            flames.push({ x: cx, y: item.y + 1.55, z: cz, bare: true, candle: true });
+          }
+          solid(shift, front, 1.72, 0.58, 0, 1.12);
+          solid(shift, front, 2.0, 0.72, 0, 0.16);
+          continue;
+        }
         for (let s = 0; s < 2; s++) {
           pushPart(props, G.box(W + 1.1 - s * 0.55, 0.17, D + 1.1 - s * 0.55),
             0xb3ab99, put(shift, item.y + 0.085 + s * 0.17, front));
@@ -3209,6 +3223,10 @@ export function populate(world, layout, built, options = {}) {
       dummy.position.set(f.x, f.y + (f.hearth ? 0 : f.lamp ? 0.05 : 0.12), f.z);
       // A forge's fire is a bed of coals under the blast, not logs.
       if (f.forge) dummy.scale.set(1.5, 0.55, 1.5);
+      // A fire the room is full of (clutter.js `fireRing`): tall, and each its own height.
+      // The shader takes one scale (the matrix's first column), so a fire's
+      // tongues differ by size, not by shape.
+      else if (f.blaze) dummy.scale.setScalar(f.blaze);
       else if (f.hearth) dummy.scale.set(1.9, 1.15, 1.9);
       else if (f.candle) dummy.scale.setScalar(0.14);
       else dummy.scale.setScalar(f.lamp ? 1.15 : 1.28);

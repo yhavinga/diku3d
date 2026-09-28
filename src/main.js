@@ -1709,6 +1709,11 @@ async function boot() {
       }
       // A mobile walks: aim at where it is now, not where it was reset.
       if (subject) aim = subject.object.position.clone().setY(subject.object.position.y + subject.height * 0.6);
+      // A set piece the room's prose names (clutter.js) is what the room is
+      // for: the statue of Odin, not the healer standing in front of it.
+      const SHOWPIECE = { statue_odin: 2.6, altar_faces: 0.9, clutter_sign: 1.62 };
+      const piece = (built.stats?.clutter?.where || []).find((w) => w.vnum === place.vnum && SHOWPIECE[w.name]);
+      if (piece) { aim = new THREE.Vector3(piece.x, piece.y + SHOWPIECE[piece.name], piece.z); subject = null; }
       // The camera looks down -Z at yaw 0, so its forward is (-sin, 0, -cos).
       // Facing a point therefore needs atan2 of the *negated* offset, and
       // standing back from it means moving along +(sin, cos).
@@ -1782,6 +1787,36 @@ async function boot() {
       // a temple column has none, and stood square in front of the
       // guildmaster. So the survivors are checked against the built world
       // itself, best first, and the first clear one wins.
+      // Under a roof, a stand outside the room is outside its walls: the
+      // camera stood in the forest facing the great tree's door (#6153) --
+      // still inside the room's 13 m cell, outside its trunk -- because every
+      // stand in the hollow was cramped by the stairwell. Indoors a stand has
+      // to be one the room's own middle can see; failing all of them, the
+      // farthest such floor from the subject, uncramped or not.
+      // Neither the cell lookup nor the colliders' sight test knows a trunk
+      // from a forest, so "inside" is also within the walls' own reach.
+      const inside = (x, z) => Math.hypot(x - info.center.x, z - info.center.z) < 4.2
+        && nav.roomAt(x, info.center.y, z) === vnum
+        && !nav.sightBlocked(info.center.x, eye, info.center.z, x, eye, z);
+      if (!info.outdoor) {
+        for (let i = stands.length - 1; i >= 0; i--) if (!inside(stands[i].x, stands[i].z)) stands.splice(i, 1);
+      }
+      if (!info.outdoor && !stands.length) {
+        let best = null;
+        for (let gx = -4.5; gx <= 4.5; gx += 0.25) {
+          for (let gz = -4.5; gz <= 4.5; gz += 0.25) {
+            const x = info.center.x + gx; const z = info.center.z + gz;
+            if (!nav.sample(x, z, level) || !inside(x, z)) continue;
+            const d = Math.hypot(aim.x - x, aim.z - z);
+            if (d < reach + 0.8) continue;
+            const near = Math.max(0.1, (d - (subject ? reach : 1.0)) / d);
+            if (nav.sightBlocked(x, eye, z, x + (aim.x - x) * near, eye + (aim.y - eye) * near, z + (aim.z - z) * near)) continue;
+            const score = Math.abs(d - ideal) + Math.hypot(gx, gz) * 0.15;
+            if (!best || score < best.score) best = { x, z, yaw: Math.atan2(x - aim.x, z - aim.z), score };
+          }
+        }
+        if (best) return best;
+      }
       stands.sort((a, b) => a.score - b.score);
       const ray = new THREE.Raycaster();
       const from = new THREE.Vector3();

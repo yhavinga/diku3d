@@ -23,6 +23,12 @@ import { DIR_STEP } from './are.js';
 // ------------------------------------------------------------ reading ----
 
 const WALL_WORD = { north: 0, east: 1, south: 2, west: 3 };
+
+/** build.js asks these too: the altar a statue stands behind is brought out from its wall. */
+export const STATUE_OF_ODIN = /\bstatue of odin\b/i;
+export const ALTAR_MIDDLE = /\b(?:in the (?:middle|centre|center) of the room[^.]{0,30}\baltar|altar[^.]{0,30}\bin the (?:middle|centre|center) of the room)\b/i;
+/** How deep the Odin statue's plinth is, wall to front (tools/blender/statues.py). */
+export const STATUE_DEPTH = 2.2;
 const NUMBER = { a: 1, an: 1, one: 1, single: 1, another: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, ten: 10 };
 // Words in front of a noun that say there are a lot of it, as against one.
 const MANY = /\b(numerous|many|lots? of|a lot of|several|all kinds of|all sorts of|various|along the walls|all around|piles and piles|piles of|heaps of|rows of|full of|filled with|covered (?:with|in|by)|scattered|strewn|littered|spread|all over|everywhere|countless)\b/i;
@@ -50,6 +56,24 @@ const TOWARDS = /\b(?:to|towards?|into|entrance to|way to|door to|path to|leads?
  *     'edge'   out of doors, beside the way through: ruins
  */
 const RULES = [
+  // Set pieces, before anything that might take their floor. "There are
+  // flames surrounding you": a fire all round the walls.
+  {
+    kind: 'fire_ring', at: 'walls', many: 1, indoor: true,
+    re: /\bflames surround\w*\b|\bsurrounded by (?:flames|fire)\b|\b(?:wall|ring) of (?:fire|flames)\b/i,
+  },
+  // "Behind it is a ten foot tall sitting statue of Odin": stood behind the
+  // altar the same sentence names (build.js stands the altar out for it).
+  { kind: 'statue_odin', at: 'behind', many: 1, indoor: true, re: STATUE_OF_ODIN },
+  // "In the middle of the room there is a small altar" -- out on the floor,
+  // not against a wall; build.js's readFittings leaves this one alone.
+  { kind: 'altar', at: 'centre', many: 1, indoor: true, re: ALTAR_MIDDLE },
+  // "Some faces are staring at you from inside the walls."
+  {
+    kind: 'wall_faces', at: 'hang', many: 7, indoor: true,
+    re: /\bfaces?\b[^.]{0,40}\b(?:from|in|out of|inside)\s+(?:the\s+)?walls\b/i,
+  },
+
   // The dead. A skeleton in chains is not a skeleton lying about, and five
   // round a table are sitting at it.
   {
@@ -296,6 +320,8 @@ export const CLUTTER_NAMES = [
   'clutter_arms', 'clutter_tapestry', 'clutter_web', 'clutter_cocoon', 'clutter_cages', 'clutter_globe',
   'clutter_feast', 'clutter_carcass', 'clutter_pelts', 'clutter_hay', 'clutter_wreckage',
   'clutter_chain_run', 'clutter_chain_anchor', 'clutter_arm',
+  // tools/blender/statues.py
+  'statue_odin', 'altar_marble', 'altar_faces', 'relief_face', 'fire_bed',
 ];
 
 // Only ever indoors, so they carry the `aIndoor` flag the room kits do (no sky
@@ -307,6 +333,7 @@ const INDOOR_ONLY = new Set([
   'clutter_sign', 'clutter_painting_portrait', 'clutter_painting_landscape', 'clutter_painting_gathering',
   'clutter_mural', 'clutter_arms', 'clutter_tapestry', 'clutter_cocoon', 'clutter_cages', 'clutter_globe',
   'clutter_pelts', 'clutter_wreckage', 'clutter_hoard', 'clutter_arm',
+  'statue_odin', 'altar_marble', 'altar_faces', 'relief_face', 'fire_bed',
 ]);
 
 // clutter.py authors bone, iron and stone for a room under the sky; under the
@@ -351,6 +378,7 @@ const KINDS = {
   web: { models: ['clutter_web'] },
   ruin: { models: ['collapsed_shed', 'rubble_heap', 'charred_beams'], solid: true },
   well: { models: ['well'], solid: true, pad: 0.6 },
+  altar: { models: ['altar_faces'], solid: true, pad: 0.5 },
 };
 
 /** Which painting a sentence is about. */
@@ -616,6 +644,9 @@ export function placeClutter(ctx) {
       if (ask.kind === 'shackles' && shellKind === 'dungeon') continue;
       const spec = KINDS[ask.kind];
       if (ask.kind === 'giant_chain') { placeChain(); continue; }
+      if (ask.kind === 'fire_ring') { fireRing(); continue; }
+      if (ask.kind === 'statue_odin') { statueBehindAltar('statue_odin'); continue; }
+      if (ask.kind === 'wall_faces') { wallFaces(ask); continue; }
       if (ask.kind === 'skeleton_seated') { seated(ask); continue; }
       if (ask.kind === 'candles') { candles(); continue; }
       if (!spec) continue;
@@ -761,6 +792,85 @@ export function placeClutter(ctx) {
       instances.add('furn_candle', { x: x + 0.3, y: pos.y + top, z: z + 0.15, rotY: 0 }, chunk);
       lights.push({ x: x + 0.3, y: pos.y + top + 0.4, z: z + 0.15, color: 0xffb35a, intensity: 3, radius: 6, flicker: true });
       placed++;
+    }
+
+    // "There are flames surrounding you": a bed of embers and burning logs
+    // along every wall, flames standing out of it, and the room lit by them.
+    // Nothing in the doorway lanes -- a way out is kept whatever the prose
+    // says about it -- and nothing at the arrival point.
+    function fireRing() {
+      const bed = library.get('fire_bed');
+      for (let d = 0; d < 4; d++) {
+        const [dx, , dz] = DIR_STEP[d];
+        const face = wallAt(d, 0) - 0.02;
+        const rotY = FACE_ROT[d];
+        for (const along of [-3.2, 0, 3.2]) {
+          if (sides[d] && Math.abs(along) < 2.4) continue;
+          const x = pos.x + dx * face + (dz ? along : 0); const z = pos.z + dz * face + (dx ? along : 0);
+          if (bed) {
+            const r = put('fire_bed', x, z, rotY, { collide: true });
+            if (r) take(r, true);
+          }
+        }
+        // The flames: tall tongues out of the back of the bed, close enough to
+        // run together, and short ones licking along its front.
+        for (const [step, back, lo, hi] of [[0.42, 0.45, 1.6, 2.9], [0.6, 0.78, 0.7, 1.4]]) {
+          for (let a = -4.5; a <= 4.51; a += step) {
+            if (sides[d] && Math.abs(a) < 2.4) continue;
+            const j = roll(room.vnum, d * 131 + Math.round(a * 100), Math.round(step * 100));
+            const out = face - back - j * 0.12;
+            const along = a + (j - 0.5) * step * 0.6;
+            decor.push({
+              kind: 'torch', bare: true, blaze: lo + (hi - lo) * roll(room.vnum, d * 7 + Math.round(a * 100), 29),
+              x: pos.x + dx * out + (dz ? along : 0), y: pos.y - 0.02, z: pos.z + dz * out + (dx ? along : 0),
+            });
+          }
+        }
+        lights.push({
+          x: pos.x + dx * (face - 1.1), y: pos.y + 1.1, z: pos.z + dz * (face - 1.1),
+          color: 0xff6424, intensity: 12, radius: 11, flicker: true,
+        });
+      }
+      placed++;
+    }
+
+    // "Behind it is a ten foot tall sitting statue": against the altar's own
+    // wall, centred on it, facing out over it. Its plinth is STATUE_DEPTH deep
+    // and build.js brought the altar that far out.
+    function statueBehindAltar(name) {
+      const altar = here.find((d) => d.kind === 'fitting' && d.fitting === 'altar');
+      const asset = library.get(name);
+      if (!altar || !asset) { missed.push(`${vnum} ${name} (no altar to stand behind)`); return; }
+      const dir = altar.dir;
+      const [dx, , dz] = DIR_STEP[dir];
+      // The fitting frame's `along` runs against the world axis on the south
+      // and west walls.
+      const along = (dir === 2 || dir === 3 ? -1 : 1) * (altar.shift || 0);
+      const back = STATUE_DEPTH / 2;
+      const face = wallAt(dir, along) - back - 0.01;
+      const x = pos.x + dx * face + (dz ? along : 0); const z = pos.z + dz * face + (dx ? along : 0);
+      const rotY = FACE_ROT[dir];
+      put(name, x, z, rotY, { collide: true });
+      take(footprint(asset.bounds, x, z, rotY), true);
+      // Lit from in front and above, the way a cult statue is: a warm light
+      // over the altar, clear of the figure, so the face is not only lit by
+      // the wall torches at its sides.
+      lights.push({ x: x - dx * 3.2, y: pos.y + 4.2, z: z - dz * 3.2, color: 0xffd6a0, intensity: 7, radius: 9 });
+    }
+
+    // "Faces are staring at you from inside the walls": carved heads pushing
+    // out of the masonry, scattered along every wall at uneven heights.
+    function wallFaces(ask) {
+      const n = Math.max(ask.count, 7);
+      for (let k = 0; k < n; k++) {
+        const at = onWall('relief_face', ask, k * 3 + 1, { hang: true, depthPad: 0.02 });
+        if (!at) { missed.push(`${vnum} wall_faces relief_face`); continue; }
+        const lift = (roll(room.vnum, k, 41) - 0.35) * 1.1;
+        const scale = 0.9 + roll(room.vnum, k, 43) * 0.3;
+        put('relief_face', at.x, at.z, at.rotY + (roll(room.vnum, k, 47) - 0.5) * 0.25, { y: at.y + lift, scale });
+        // A face's neighbour is a hand's breadth further along, not on top of it.
+        keep.push({ x0: at.r.x0 - 0.5, x1: at.r.x1 + 0.5, z0: at.r.z0 - 0.5, z1: at.r.z1 + 0.5 });
+      }
     }
 
     // "The chain reaches the clouds high above you."

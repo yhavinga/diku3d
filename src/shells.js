@@ -55,7 +55,8 @@ const DUNGEON = /\b(jail|gaol|prison|dungeons?|cell ?block|torture ?room|torture
 // "the jail is to the north" is a guard room; a name decides first.
 const DUNGEON_PROSE = /\b(rusty chains|in chains|shackles|manacles|damp and humid jail|dark and humid jail)\b/i;
 
-const SCORCHED = /\b(burned walls|burnt walls|scorched|charred walls|fiery red|walls are blackened|burned room|burnt room)\b/i;
+// "There are flames surrounding you": a room on fire now is one the fire has scorched.
+const SCORCHED = /\b(burned walls|burnt walls|scorched|charred walls|fiery red|walls are blackened|burned room|burnt room|flames surrounding)\b/i;
 
 const LOGS = /\b(built (?:from|of) (?:large |heavy |huge |rough )?logs|made (?:entirely )?(?:from|of) (?:heavy |large |huge |rough )?logs|log cabin|log house|log walls)\b/i;
 
@@ -191,7 +192,9 @@ const GORE_NOT = /\bresembl\w*|\baltar\b|\bblood[- ]?(?:red|shot|thirsty|lust|cu
 const MURAL = /\bwall paintings\b|\bmurals?\b|\bfrescoe?s?\b|\bwalls (?:are|is) (?:covered|painted) (?:in|with|by) (?:\w+ )?paintings\b/i;
 const MURAL_NOT = /\bhang\w*\b|\bframed?\b/i;
 const FACES = /\bdrawings? of faces\b|\bfaces? (?:drawn|painted|scratched) (?:on|into) the walls?\b/i;
-const WRITING = /\b(?:writing|words|letters|runes)\s+(?:on|in|at|upon)\s+the\s+wall\b|\bspray-painted on the wall\b|\bscrawled on the wall\b/i;
+// "Some letters have been written on the wall here"; "one of them looks like
+// he has written something at the wall" (an extra description, #7284).
+const WRITING = /\b(?:writing|words|letters|runes)\s+(?:on|in|at|upon)\s+the\s+wall\b|\bspray-painted on the wall\b|\bscrawled on the wall\b|\b(?:letters|words|runes)\b[^.]{0,30}\b(?:written|painted|carved|scratched)\s+(?:on|into|at)\s+the\s+wall\b|\bwritten something (?:at|on) the wall\b/i;
 
 const TREE = /\b(?:inside (?:of )?(?:the|this|a) (?:great |huge |hollow(?:ed)? |giant |old )?tree|hollow(?:ed)? (?:out )?(?:tree|trunk))\b/i;
 const ROOT = /\broots? of the tree hollowed\b|\bhollowed(?:-| )out roots?\b/i;
@@ -305,10 +308,17 @@ export function readShell(room) {
     if (MOUND.test(s)) { out.mound = true; note('mound', s); }
   }
 
+  // Writing the room only mentions when you look at something in it.
+  if (!out.marks) {
+    for (const e of room.extra || []) {
+      const s = sentences(e.description).find((x) => WRITING.test(x));
+      if (s) { out.marks = { kind: 'writing', subject: '', texts: [] }; note('marks', s); break; }
+    }
+  }
   // What the writing says, if the room lets you read it.
   if (out.marks && out.marks.kind === 'writing') {
     for (const e of room.extra || []) {
-      if (!/\b(writing|wall|words|runes)\b/i.test(e.keyword)) continue;
+      if (!/\b(writing|wall|words|runes|letters)\b/i.test(e.keyword)) continue;
       const quoted = String(e.description).match(/'([^']+)'/g);
       if (quoted) out.marks.texts.push(...quoted.map((q) => q.slice(1, -1)));
     }

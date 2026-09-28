@@ -891,6 +891,21 @@ const SURFACES = {
     s.rough = 0.72 - t * 0.14 + fine * 0.12;
   },
 
+  statuary(u, v, s) {
+    // A carved figure's marble, as against the temple's walls: whiter, finer,
+    // the veins thin and few, and polished -- "white polished marble" -- so a
+    // face turns from the light by its sheen as well as its shade. On the
+    // walls' 4 m tile the veins crossed a 3 m statue as three stripes.
+    const turb = fbm(u * 4, v * 4, 4, 131, 4);
+    const vein = Math.abs(Math.sin((u * 0.9 - v * 1.4 + turb * 2.2) * Math.PI));
+    const fine = fbm(u * 18, v * 18, 18, 17, 3);
+    const t = clamp01(Math.pow(1 - vein, 40)) * 0.35;
+    const base = mix(rgb(0xebe7df), rgb(0xdcd6cb), fine * 0.5);
+    s.color = mix(base, rgb(0xa8a399), t);
+    s.height = 0.5 + fine * 0.015;
+    s.rough = 0.42 + fine * 0.1 - t * 0.08;
+  },
+
   plaster(u, v, s) {
     const coarse = fbm(u * 10, v * 10, 10, 13, 4);
     // The fine octave was 60 cycles across a 3 m tile at a quarter of the
@@ -2674,6 +2689,8 @@ const RECIPES = {
   cobble: { surface: 'cobble', scale: 2.2, normalScale: 1.0, env: 1.15, wet: 0.5, detail: 0.5 },
   flagstone: { surface: 'flagstone', scale: 2.6, normalScale: 0.85, env: 1.1, wet: 0.16, detail: 0.5 },
   marble: { surface: 'marble', scale: 4, normalScale: 0.35, env: 0.8, wet: 0, detail: 0.3 },
+  // tools/blender/statues.py: the Odin statue and the temple's altar.
+  statuary: { surface: 'statuary', scale: 1.8, normalScale: 0.15, env: 0.85, wet: 0, detail: 0.15 },
   // A person is 1.75 m, so a 0.7 m tile puts two and a half repeats down a
   // sleeve -- close enough that nothing reads as a pattern.
   cloth: { surface: 'cloth', scale: 0.7, normalScale: 0.55, env: 0.35, wet: 0, detail: 0.5 },

@@ -20,7 +20,7 @@ import { InstanceBatch, StaticBatches } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
 import { buildGrass } from './grass.js';
 import { classifyShells, shellFor, shellAttrs } from './shells.js';
-import { placeClutter } from './clutter.js';
+import { placeClutter, ALTAR_MIDDLE, STATUE_OF_ODIN, STATUE_DEPTH } from './clutter.js';
 import { MURAL_REGIONS, faceRegion, bloodRegion } from './textures.js';
 
 export const CELL = 13;         // grid pitch; rooms sit two cells apart
@@ -919,7 +919,7 @@ function pickMaterials(room, area, passage = false) {
   } else if (kind === 'lair') {
     // Only a floor the prose says is still hot glows (#7428's "floorstones
     // are fiery red"); a room that "once had been quite burned" is cold.
-    floor = /\b(fiery|glow\w*|red-hot|red hot|smoulder\w*|lava|embers)\b/i.test(room.description) ? 'emberstone' : 'charstone';
+    floor = /\b(fiery|glow\w*|red-hot|red hot|smoulder\w*|lava|embers|flames surrounding)\b/i.test(room.description) ? 'emberstone' : 'charstone';
     wallIn = 'scorched'; ceil = 'scorched';
     if (!deep) wallOut = 'sootwall';
   } else if (kind === 'dungeon') {
@@ -7950,7 +7950,8 @@ function readFittings(room, sides) {
   loose(/\bcounter\b/i, 'counter');
   loose(/\b(fireplace|hearth|forge)\b/i, 'hearth');
   loose(/\bshelves\b/i, 'shelves');
-  loose(/\baltar\b/i, 'altar');
+  // "In the middle of the room there is a small altar" is clutter.js's.
+  if (!ALTAR_MIDDLE.test(text)) loose(/\baltar\b/i, 'altar');
 
   return [...found].map(([kind, dir]) => ({ kind, dir }));
 }
@@ -8185,9 +8186,18 @@ function buildInteriorProps({ room, pos, sides, decor, mats, holes = [], lights 
     // out. Slide the fitting along until it clears the opening rather than
     // moving it to a wall the mud did not choose.
     const blocked = !!sides[f.dir];
-    const { shift, out } = plan.settle(f.kind, blocked);
+    let { shift, out } = plan.settle(f.kind, blocked);
+    // "Behind it is a ten foot tall sitting statue": the altar stands out
+    // from its wall by the statue's plinth (clutter.js puts the statue there).
+    const statue = f.kind === 'altar' && STATUE_OF_ODIN.test(room.description);
+    if (statue) {
+      out = STATUE_DEPTH - 0.35;
+      plan.take(plan.rect(f.dir, shift - 2.2, shift + 2.2, -ROOM / 2, -ROOM / 2 + STATUE_DEPTH));
+      plan.tall[f.dir].push([shift - 2.3, shift + 2.3]);
+    }
     decor.push({
       kind: 'fitting', fitting: f.kind, dir: f.dir, blocked, trade, shift, out, face: plan.face,
+      wooden: f.kind === 'altar' && /\bwooden altar\b/i.test(room.description),
       // "In the crackling fireplace hangs a big iron pot with boiling water."
       pot: f.kind === 'hearth' && /\b(iron pot|cauldron|kettle)\b/i.test(room.description),
       x: pos.x, y: pos.y, z: pos.z, seed: hash3(room.vnum, f.dir, 0, 71),
