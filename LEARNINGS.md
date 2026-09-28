@@ -52,6 +52,27 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Rigs: grazing, skirts, giants, faces (wave4-rigs)
+
+- **The beast rigs face −Y.** Face angles need `atan2(y.z, -y.y)`, and a
+  positive turn about X tips the front down.
+- **Neck skinning has to cover every joint.** A neck graded straight from
+  chest to top bone folds at the joint it skips — that was why horses could
+  not graze. `("chain", …)` weights in `beasts.Solid`.
+- **A thigh-twin skirt bone must take over from the hips within ~12 cm below
+  the hip joint**; lower, sitting drags cloth half into the seat.
+- **Reposing a parent bone moves everything below it.** The troll's hunch
+  tipped its feet 3.6 cm × scale into the floor; check foot flatness after
+  any repose.
+- **`_loft_scale` now refuses a descending table.** The female, wererat,
+  mind-flayer and skull tables were top-down and built with one width all
+  the way up — the female face had the chin's width to the crown.
+- **Cloned textures start at version 0**, which three treats as nothing to
+  upload; set `needsUpdate` on the clone.
+- Where a planted foot cannot reach, the body dips to meet it rather than
+  the foot sliding: every one of the 30 beasts now reports zero walk and run
+  slip.
+
 ### Furniture by trade (tools/blender/furniture.py)
 
 - **`bmesh … uv.verify()` names a new UV layer `Float2`, and `join()` keeps
