@@ -822,60 +822,90 @@ def build_bramble():
     """A bramble thicket: a lumpy mound of dark leaf chest high on a man and
     two and a half metres across, and the bare arching canes that stand up
     out of it, some well over head height, and bow back down to root at the
-    tips -- which is the thing that says bramble rather than bush. The first
-    version was a knee-high cushion of leaf with a few thin canes lost in it,
-    and a review read it as a low bush."""
+    tips -- which is the thing that says bramble rather than bush.
+
+    The leaf is cut-out sprays of toothed leaflets on purple cane, laid over
+    the mound with their normals out of it, and a few along each cane; it was
+    squashed spheres in the generic `leaves` texture, which read as green
+    blobs however they were heaped."""
     lib.reset()
     rng = rng_for(92301)
     p = []
+    cards = trees.Cards("brambleleaf", tile=0.5)
+    centre = mathutils.Vector((0, 0, 0.35))
+    # The mound: lumps of leaf, each a cluster of sprays round its own middle.
     for i in range(11):
         a = rng.uniform(0, 2 * math.pi)
         r = rng.uniform(0.0, 0.9) if i else 0.0
-        w = rng.uniform(0.6, 1.0) * (1.3 if i == 0 else 1.0)
+        w = rng.uniform(0.75, 1.15) * (1.3 if i == 0 else 1.0)
         h = rng.uniform(0.8, 1.3) * (1.25 if i == 0 else 1.0)
-        mass = lib.sphere(0.5, (math.cos(a) * r * 1.2, math.sin(a) * r * 0.95, h * 0.3), segments=9, rings=6,
-                          name="mass", mat="leaves")
-        mass.scale = (w, w * rng.uniform(0.7, 1.0), h)
-        mass.rotation_euler = (rng.uniform(-0.2, 0.2), rng.uniform(-0.2, 0.2), rng.uniform(0, 3))
-        p.append(mass)
-    for i in range(18):
+        mid = mathutils.Vector((math.cos(a) * r * 1.2, math.sin(a) * r * 0.95, h * 0.3))
+        for k in range(10):
+            ta = k * 2.39996 + rng.uniform(-0.3, 0.3)
+            e = math.asin(min(0.95, -0.2 + 1.1 * (k + 0.5) / 10))
+            u = mathutils.Vector((math.cos(ta) * math.cos(e) * w, math.sin(ta) * math.cos(e) * w, math.sin(e) * h * 0.6))
+            if u.length < 1e-4:
+                continue
+            base = mid + u * 0.35
+            if base.z < 0.05:
+                continue
+            d = u.normalized()
+            side = d.cross(mathutils.Vector((0, 0, 1)))
+            if side.length < 1e-3:
+                side = mathutils.Vector((1, 0, 0))
+            cards.card(base, d, side.normalized(), rng.uniform(0.45, 0.65), rng.uniform(0.38, 0.5), 0.3,
+                       trees.outward(base, centre, 0.4))
+    for i in range(12):
         # Each cane leaves the crown of the mound, arches outward over it and
         # comes down to root well beyond its edge.
-        a = 2 * math.pi * i / 18 + rng.uniform(-0.15, 0.15)
+        # Out of the flank of the mound at every height, not all from its
+        # crown -- from one point they stood round it like the ribs of a cage.
+        a = 2 * math.pi * i / 12 + rng.uniform(-0.5, 0.5)
         out = mathutils.Vector((math.cos(a), math.sin(a), 0))
-        root = out * rng.uniform(0.1, 0.5) + mathutils.Vector((0, 0, 0.6))
-        reach = rng.uniform(1.4, 2.3)
-        rise = rng.uniform(0.7, 1.25)
-        n = 7
+        root = out * rng.uniform(0.3, 0.9) + mathutils.Vector((0, 0, rng.uniform(0.25, 0.75)))
+        reach = rng.uniform(0.8, 1.5)
+        rise = rng.uniform(0.1, 0.5)
+        n = 5
         pts = []
         for k in range(n):
             t = k / (n - 1)
             # Up fast, over, and down to the ground at the tip.
-            h = 0.6 + rise * math.sin(t * math.pi * 0.92) * (1 - t) ** 0.25 - 0.6 * t ** 3
-            pts.append(root * (1 - t) + out * reach * t + mathutils.Vector((0, 0, h - root.z * (1 - t) + root.z * (1 - t))))
-        r0 = rng.uniform(0.022, 0.03)
+            h = root.z + rise * math.sin(t * math.pi * 0.92) * (1 - t) ** 0.25 - root.z * t ** 3
+            q = root * (1 - t) + out * reach * t
+            pts.append(mathutils.Vector((q.x, q.y, h)))
+        r0 = rng.uniform(0.012, 0.018)
         for k in range(n - 1):
             vec = pts[k + 1] - pts[k]
             rot = vec.to_track_quat("Z", "Y").to_euler()
             w = r0 * (1.0 - 0.45 * k / (n - 1))
-            p.append(kit.timber((w, w, vec.length + 0.02), tuple((pts[k] + pts[k + 1]) / 2), tuple(rot),
-                                "bark", 0.005, "cane"))
-            if 1 <= k <= 4 and rng.random() < 0.8:
-                leaf = lib.sphere(rng.uniform(0.13, 0.24), tuple(pts[k + 1]), segments=7, rings=5, name="leaf",
-                                  mat="leaves")
-                leaf.scale = (1.3, 0.8, 0.5)
-                leaf.rotation_euler = (rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5), rng.uniform(0, 3))
-                p.append(leaf)
-    return deliver(p, "bramble")
+            # Four-sided and open-ended: eighteen canes of chamfered timber
+            # were three thousand triangles of a bramble's budget.
+            p.append(trees.segment(tuple(pts[k]), tuple(vec), vec.length + 0.02, w, w * 0.85, verts=4,
+                                   mat="cedarbark", name="cane"))
+            # Leaf the whole way along, two sprays crossed, so an arching
+            # cane is a green arch and not a bare pole.
+            d = vec.normalized()
+            side = d.cross(mathutils.Vector((0, 0, 1)))
+            if side.length < 1e-3:
+                continue
+            side.normalize()
+            for twist in (0.5, -0.5):
+                v = (side * math.cos(twist) + mathutils.Vector((0, 0, 1)) * math.sin(twist)).normalized()
+                cards.card(pts[k] - d * 0.05, d, v, vec.length * 1.25, 0.46, 0.3,
+                           mathutils.Vector((0, 0, 1)) + out * 0.5)
+    return trees.deliver_conifer(p, cards.mesh("leaves"), "bramble")
 
 
 def build_tall_weeds():
     """Dock and thistle gone to seed: a clump of stiff dead stalks a metre
-    and a half high, dried to the colour of straw, with rosettes at the
-    foot that are still green."""
+    and a half high, dried to the colour of straw, with leaves still green at
+    the foot -- long, plain, some yellowing -- as cut-out sprays fanning out
+    of the ground and up the lower stalks, where they were squashed spheres."""
     lib.reset()
     rng = rng_for(92311)
     p = []
+    cards = trees.Cards("weedleaf", tile=0.5)
+    centre = mathutils.Vector((0, 0, 0.25))
     for i in range(14):
         a = rng.uniform(0, 2 * math.pi)
         r = rng.uniform(0, 0.45)
@@ -889,14 +919,20 @@ def build_tall_weeds():
                           mat="thatch")
         head.scale = (0.8, 0.8, 2.6)
         p.append(head)
-    for i in range(5):
-        a = rng.uniform(0, 2 * math.pi)
-        leaf = lib.sphere(0.2, (math.cos(a) * 0.3, math.sin(a) * 0.3, 0.08), segments=6, rings=4, name="rosette",
-                          mat="leaves")
-        leaf.scale = (1.5, 0.8, 0.35)
-        leaf.rotation_euler = (0, 0, a)
-        p.append(leaf)
-    return deliver(p, "tall_weeds")
+        if i % 2 == 0:
+            up = mathutils.Vector((0, 0, 1))
+            up.rotate(mathutils.Euler(lean))
+            v = mathutils.Vector((math.cos(a + 1.3), math.sin(a + 1.3), 0))
+            cards.card(mathutils.Vector((x, y, 0.1)), up, v, h * 0.5, 0.34, 0.25,
+                       trees.outward(mathutils.Vector((x, y, 0.4)), centre, 0.5))
+    for i in range(10):
+        # The rosette: leaves lying out from the foot, arching over.
+        a = 2 * math.pi * i / 10 + rng.uniform(-0.2, 0.2)
+        u = mathutils.Vector((math.cos(a), math.sin(a), rng.uniform(0.25, 0.6))).normalized()
+        side = u.cross(mathutils.Vector((0, 0, 1))).normalized()
+        base = mathutils.Vector((math.cos(a) * 0.08, math.sin(a) * 0.08, 0.02))
+        cards.card(base, u, side, rng.uniform(0.45, 0.6), 0.3, 0.3, trees.outward(base + u * 0.3, centre, 0.8))
+    return trees.deliver_conifer(p, cards.mesh("leaves"), "tall_weeds")
 
 
 def build_collapsed_shed():

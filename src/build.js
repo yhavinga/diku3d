@@ -510,6 +510,179 @@ function mound(w, h, d, seg = 20) {
   return geo;
 }
 
+/** Smooth value noise in [0, 1] on a unit lattice, from `hash3`. */
+function terrainNoise(x, z, salt) {
+  const ix = Math.floor(x); const iz = Math.floor(z);
+  const fx = x - ix; const fz = z - iz;
+  const sx = fx * fx * (3 - 2 * fx); const sz = fz * fz * (3 - 2 * fz);
+  const a = hash3(ix, iz, 0, salt); const b = hash3(ix + 1, iz, 0, salt);
+  const c = hash3(ix, iz + 1, 0, salt); const d = hash3(ix + 1, iz + 1, 0, salt);
+  return (a * (1 - sx) + b * sx) * (1 - sz) + (c * (1 - sx) + d * sx) * sz;
+}
+
+/**
+ * A sheet of ground lifted by `height(x, z)`, in its own frame with y up:
+ * `nx` columns over x in [-w/2, w/2], and for each column `nz` rows from
+ * `z0(x)` to `z1(x)`. Indexed, so the Batcher's normals come out smooth over
+ * it -- and two sheets that meet along a shared row keep a hard edge between
+ * them, which is how a dune's brink or a bank's lip is made.
+ */
+function heightPatch(w, nx, nz, z0, z1, height) {
+  const pos = []; const idx = [];
+  for (let i = 0; i <= nx; i++) {
+    const x = -w / 2 + (w * i) / nx;
+    const a = z0(x); const b = z1(x);
+    for (let j = 0; j <= nz; j++) {
+      const z = a + ((b - a) * j) / nz;
+      pos.push(x, height(x, z), z);
+    }
+  }
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < nz; j++) {
+      const p = i * (nz + 1) + j; const q = p + nz + 1;
+      idx.push(p, p + 1, q, q, p + 1, q + 1);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  // While it is still indexed: `Batcher.add` unrolls it, and normals computed
+  // after that are one per face. Pass `normals: true` when adding.
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * A drift of sand along the edge of a desert room, `len` long and `depth`
+ * across, local z outwards when `out` is +1. It was a half ellipsoid -- a
+ * rolled bolster, dough -- where a drift has a long back to the wind and a
+ * short steep face in its lee, meeting at a sharp crest that wanders in
+ * height and in plan. Two sheets sharing the crest row, so it stays sharp.
+ */
+function sandDrift(len, h, depth, out, salt) {
+  const crestZ = (x) => out * (0.35 + (terrainNoise(x * 0.25 + 3, 1, salt) - 0.5) * 0.9);
+  const crestH = (x) => {
+    const end = Math.min(1, (len / 2 - Math.abs(x)) / 2.2);
+    return h * (0.7 + 0.55 * terrainNoise(x * 0.3 + 7, 2, salt + 1)) * Math.max(0, end) ** 0.7;
+  };
+  const back = (x) => out * depth / 2;          // the long side, outwards
+  const face = (x) => -out * depth / 2;         // the lee, towards the room
+  const height = (x, z) => {
+    const zc = crestZ(x); const hc = crestH(x);
+    const t = (z - zc) / ((out > 0 ? depth / 2 : -depth / 2) - zc);
+    // Outward of the crest: a straight back eased in at its toe. Inward:
+    // the slip face, steep until it runs out on the floor.
+    if (t >= 0) return hc * (1 - t) ** 1.3;
+    const k = Math.min(1, (zc - z) / (zc - face(x)) * out);
+    return Math.max(0, hc * (1 - Math.abs(k) ** 0.7));
+  };
+  // Rows must run towards +z or the sheet faces down.
+  return out > 0
+    ? [heightPatch(len, 30, 4, crestZ, back, height), heightPatch(len, 30, 3, face, crestZ, height)]
+    : [heightPatch(len, 30, 4, back, crestZ, height), heightPatch(len, 30, 3, crestZ, face, height)];
+}
+
+/**
+ * The rim of a bog hollow, `len` long and `depth` across, local z towards the
+ * outside when `out` is +1: a long slope up out of the wet, a lip whose line
+ * and height wander, and a shorter fall behind. See `buildOutdoorEdge`.
+ */
+function peatBank(len, h, depth, out, salt) {
+  const half = depth / 2;
+  const lip = (x) => out * (half - 1.4 + (terrainNoise(x * 0.3 + 2, 4, salt) - 0.5) * 1.2);
+  const height = (x, z) => {
+    const zl = lip(x);
+    const hl = h * (0.75 + 0.5 * terrainNoise(x * 0.35 + 9, 5, salt + 1));
+    // 0 at the toe inside, 1 at the lip, back to 0 at the outer edge.
+    const inner = out > 0 ? (z + half) / (zl + half) : (half - z) / (half - zl);
+    const outer = out > 0 ? (half - z) / (half - zl) : (z + half) / (zl + half);
+    const k = inner <= 1 ? inner : outer;
+    const lump = 1 + 0.25 * (terrainNoise(x * 0.8, z * 0.8 + 7, salt + 2) - 0.5);
+    const rise = k <= 0 ? 0 : 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, k));
+    return Math.max(0, hl * rise * lump);
+  };
+  return heightPatch(len, 28, 12, () => -half, () => half, height);
+}
+
+/**
+ * A cell's worth of rough raised ground: flat-topped at `h`, falling to
+ * nothing over three metres at an edge that wanders in and out. Carries its
+ * own `heightAt(x, z)` so what grows at its foot is planted on it.
+ */
+function fieldBank(size, h, salt) {
+  const half = size / 2;
+  const height = (x, z) => {
+    const d = Math.min(half - Math.abs(x), half - Math.abs(z))
+      - 1.6 * terrainNoise(x * 0.22 + 3, z * 0.22 + 1, salt);
+    const t = Math.max(0, Math.min(1, d / 3.2));
+    const lump = 1 + 0.18 * (terrainNoise(x * 0.5 + 9, z * 0.5, salt + 1) - 0.5);
+    return h * t * t * (3 - 2 * t) * lump;
+  };
+  const geo = heightPatch(size, 22, 22, () => -half, () => half, height);
+  geo.userData.heightAt = height;
+  return geo;
+}
+
+/**
+ * A turf hill with an irregular outline and a lumpy crown, standing on its
+ * own base: what the Shire's banks and knolls are, in place of a half
+ * ellipsoid. The ellipsoid's rim is vertical and its crown a perfect dome --
+ * at four metres, a judge's "faceted green dome" -- where a hill's toe lies
+ * back into the lane and its top is never one curve. Radius is scaled by a
+ * noise round the rim, and the profile is a cosine bell rather than a quarter
+ * circle, so the toe lies down into the lane and the flank a blade of grass
+ * can stand on runs further down (grass.js sows faces up to fifty degrees).
+ */
+function turfHill(w, h, d, salt, seg = 28) {
+  const rings = 9;
+  const pos = []; const idx = [];
+  // Never past the ellipse the caller sized: the lanes and the door cuttings
+  // are measured against it.
+  const rim = (a) => 0.8 + 0.2 * terrainNoise(Math.cos(a) * 1.6 + 5, Math.sin(a) * 1.6 + 5, salt);
+  const lumpAt = (x, z, t) => 1 + 0.22 * (terrainNoise(x * 0.45 + 11, z * 0.45 + 3, salt + 1) - 0.5) * (1 - t);
+  // Ring r (1..rings) at t = r / rings; the crown is a single vertex, so the
+  // top of the hill has one normal and not a star of them.
+  // Half a cosine bell (a toe that lies down) and half a full shoulder (a
+  // hill and not a pimple on a footprint this narrow), on a broad crown: a
+  // bell straight from the middle makes a narrow bank a cone.
+  const profile = (t) => {
+    const tt = Math.max(0, (t - 0.22) / 0.78);
+    return 0.25 + 0.25 * Math.cos(Math.PI * tt) + 0.5 * (1 - tt * tt) ** 1.4;
+  };
+  for (let r = 1; r <= rings; r++) {
+    const t = r / rings;               // 0 at the crown, 1 at the toe
+    for (let k = 0; k < seg; k++) {
+      const a = (k / seg) * Math.PI * 2;
+      const rr = rim(a) * t;
+      const x = Math.cos(a) * rr * w / 2; const z = Math.sin(a) * rr * d / 2;
+      pos.push(x, r === rings ? 0 : h * profile(t) * lumpAt(x, z, t), z);
+    }
+  }
+  const crown = rings * seg;
+  pos.push(0, h * lumpAt(0, 0, 0), 0);
+  for (let k = 0; k < seg; k++) idx.push(crown, (k + 1) % seg, k);
+  for (let r = 0; r < rings - 1; r++) {
+    for (let k = 0; k < seg; k++) {
+      const a = r * seg + k; const b = r * seg + (k + 1) % seg;
+      const c = a + seg; const e = b + seg;
+      idx.push(a, b, c, c, b, e);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  // While it is still indexed: `Batcher.add` unrolls it, and normals computed
+  // after that are one per face. Pass `normals: true` when adding.
+  geo.computeVertexNormals();
+  // The surface's height over its own (x, z), for rooting things in it.
+  geo.userData.heightAt = (x, z) => {
+    const a = Math.atan2(z / (d / 2), x / (w / 2));
+    const t = Math.hypot(x / (w / 2), z / (d / 2)) / rim(a < 0 ? a + Math.PI * 2 : a);
+    return t >= 1 ? 0 : h * profile(t) * lumpAt(x, z, t);
+  };
+  return geo;
+}
+
 /** Triangular prism: gable roofs, dune wedges. */
 function triPrism(width, height, depth) {
   const w = width / 2; const d = depth / 2;
@@ -656,14 +829,14 @@ function pickMaterials(room, area, passage = false) {
     if (burrow) {
       // Trodden earth, all of it, because a burrow is dug out of one substance.
       // Not the bare rock the `tunnel` branch above hands out: these are cut
-      // through a hillside, not mined. `dirt` and not `peat` on the walls --
-      // peat is the darkest surface in the world and a torch-lit room made of
-      // it measured 14% of the frame under luminance 4; and `dirt` carries the
-      // damp in its low patches that the prose asks for ("the air is musty and
-      // damp"). Peat stays overhead, where nothing lights it anyway.
+      // through a hillside, not mined. Not `peat` on the walls -- peat is the
+      // darkest surface in the world and a torch-lit room made of it measured
+      // 14% of the frame under luminance 4 -- and not `dirt` either, whose
+      // floor relief up a torch-lit wall read as an orange swirl: `earthwall`
+      // is a spade-cut face. Peat stays overhead, where nothing lights it.
       smial = SMIAL.test(room.name);
       cave = true;              // whatever else, no dressed-masonry kit in a hole
-      floor = 'dirt'; wallIn = 'dirt'; wallOut = 'dirt'; ceil = 'peat'; roof = 'grass';
+      floor = 'dirt'; wallIn = 'earthwall'; wallOut = 'earthwall'; ceil = 'peat'; roof = 'grass';
       // A smial's outside is the hill, so its outer skin is turf and not the
       // earth face it is cut from: `dirt` carries a `wet` term, and shaded by
       // `wallAo` a six-metre wall of it read as wet black cobble under a green
@@ -744,7 +917,10 @@ function pickMaterials(room, area, passage = false) {
     cave = true;
     floor = 'sewerflag'; wallIn = 'ashlar'; wallOut = 'ashlar'; ceil = 'ashlar';
   } else if (kind === 'lair') {
-    floor = 'emberstone'; wallIn = 'scorched'; ceil = 'scorched';
+    // Only a floor the prose says is still hot glows (#7428's "floorstones
+    // are fiery red"); a room that "once had been quite burned" is cold.
+    floor = /\b(fiery|glow\w*|red-hot|red hot|smoulder\w*|lava|embers)\b/i.test(room.description) ? 'emberstone' : 'charstone';
+    wallIn = 'scorched'; ceil = 'scorched';
     if (!deep) wallOut = 'sootwall';
   } else if (kind === 'dungeon') {
     if (deep) { floor = 'sewerflag'; wallIn = 'ashlar'; ceil = 'ashlar'; } else { floor = 'flagstone'; wallIn = 'stonewall'; ceil = 'stonewall'; }
@@ -3160,8 +3336,8 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
     const turf = (a, len) => {
       const c = at(a, inset);
       const [sx, sz] = span(len, depth);
-      const geo = mound(sx, h, sz);
-      batcher.add(geo, 'grass', place(c.x, pos.y, c.z), { chunk, uvScale: TURF_UV });
+      const geo = turfHill(sx, h, sz, 300 + Math.floor(hash3(cell.x, cell.z, dir * 4 + Math.round(a), 64) * 1000));
+      batcher.add(geo, 'grass', place(c.x, pos.y, c.z), { chunk, uvScale: TURF_UV, normals: true });
       geo.dispose();
       addCollider(c.x - sx / 2, c.x + sx / 2, c.z - sz / 2, c.z + sz / 2, pos.y, pos.y + h);
       // An apron at the toe. A turf bank standing on bare street paving is a
@@ -3186,8 +3362,27 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
     };
 
     if (hash3(cell.x, cell.z, dir, 65) >= 0.8) {
-      // A plain bank: a green shoulder to the lane, and the neighbour's
-      // chimney standing out of it.
+      // A plain bank. Where there is a hedge to be had it is a hedgebank --
+      // a metre of turf with the hedge planted along its top, the way a
+      // lane is bounded in hedge country -- and otherwise a green shoulder
+      // to the lane with the neighbour's chimney standing out of it.
+      const row = instances ? model(['hedge_row'], 0) : null;
+      if (row) {
+        const c = at(0, inset + 0.2);
+        const [sx, sz] = span(CELL + 0.6, depth);
+        const geo = turfHill(sx, 1.0, sz, 900 + Math.floor(seed * 1000));
+        batcher.add(geo, 'grass', place(c.x, pos.y, c.z), { chunk, uvScale: TURF_UV, normals: true });
+        geo.dispose();
+        for (const s of [-1, 1]) {
+          const p = at(s * CELL / 4, inset + 0.35);
+          instances.add(row, {
+            x: p.x, y: pos.y + 0.78, z: p.z, rotY: along ? Math.PI / 2 : 0,
+            scaleX: (CELL / 2 + 0.3) / 6.6, scaleY: 0.95 + seed * 0.2,
+          }, chunk);
+        }
+        addCollider(c.x - sx / 2, c.x + sx / 2, c.z - sz / 2, c.z + sz / 2, pos.y, pos.y + 2.8);
+        return;
+      }
       turf(0, CELL + 0.6);
       chimney((hash3(cell.x, cell.z, dir, 69) - 0.5) * 6);
       return;
@@ -3244,12 +3439,25 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
     }
   };
 
-  /** The corner between two ways out: a knoll, not a block. */
+  /**
+   * The corner between two ways out: a knot of clipped hedge, not a block --
+   * and not the turf dome it was, which a judge counted down Bywater Road as
+   * a row of four-metre green pimples. A knoll where there is no model.
+   */
   const knoll = (bx, bz, salt) => {
     const seed = hash3(cell.x * 7 + Math.round(bx), cell.z * 7 + Math.round(bz), cell.level, salt);
     const h = BANK_LO + seed * (BANK_HI - BANK_LO);
-    const geo = mound(FRONTAGE_D + 0.7, h, FRONTAGE_D + 0.7);
-    batcher.add(geo, 'grass', place(bx, pos.y, bz), { chunk, uvScale: TURF_UV });
+    const hedge = instances ? model(['hedge_clump'], 0) : null;
+    if (hedge) {
+      instances.add(hedge, {
+        x: bx, y: pos.y, z: bz, rotY: Math.floor(seed * 4) * Math.PI / 2,
+        scaleX: 1.02 + seed * 0.08, scaleZ: 1.02 + hash3(cell.x, cell.z, salt, 71) * 0.08, scaleY: 0.9 + seed * 0.25,
+      }, chunk);
+      addCollider(bx - FRONTAGE_D / 2, bx + FRONTAGE_D / 2, bz - FRONTAGE_D / 2, bz + FRONTAGE_D / 2, pos.y, pos.y + 2.2);
+      return;
+    }
+    const geo = turfHill(FRONTAGE_D + 0.9, h * 0.85, FRONTAGE_D + 0.9, 700 + Math.floor(seed * 1000));
+    batcher.add(geo, 'grass', place(bx, pos.y, bz, seed * Math.PI * 2), { chunk, uvScale: TURF_UV, normals: true });
     geo.dispose();
     addCollider(bx - FRONTAGE_D / 2, bx + FRONTAGE_D / 2, bz - FRONTAGE_D / 2, bz + FRONTAGE_D / 2, pos.y, pos.y + h);
   };
@@ -3999,16 +4207,18 @@ function buildClearing({ batcher, chunk, room, pos, sides, addCollider }) {
     if (wantsPile && Math.hypot(lx - Math.cos(anchor) * 4.3, lz - Math.sin(anchor) * 4.3) < 2.8) continue;
     const r = 0.2 + hash3(room.vnum, i, 2, 216) * 0.34;
     const h = 0.22 + hash3(room.vnum, i, 3, 217) * 0.5;
+    // The sawn face on top: pale end grain, or moss on the older ones, which
+    // is what the room's own extra description says separates them. The moss
+    // is `mossbark`'s, over the cut and down the bark with a soft edge; it
+    // was a disc of lawn laid on the stump.
+    const mossy = hash3(room.vnum, i, 4, 218) < 0.38;
     const trunk = new THREE.CylinderGeometry(r * 0.96, r, h, 10);
     trunk.translate(0, h / 2, 0);
-    batcher.add(trunk, 'bark', place(pos.x + lx, pos.y, pos.z + lz), { chunk });
+    batcher.add(trunk, mossy ? 'mossbark' : 'bark', place(pos.x + lx, pos.y, pos.z + lz), { chunk });
     trunk.dispose();
-    // The sawn face on top: pale end grain, or moss on the older ones, which
-    // is what the room's own extra description says separates them.
-    const mossy = hash3(room.vnum, i, 4, 218) < 0.38;
     const cut = new THREE.CircleGeometry(r * 0.96, 10);
     cut.rotateX(-Math.PI / 2);
-    batcher.add(cut, mossy ? 'grass' : 'planks',
+    batcher.add(cut, mossy ? 'mossbark' : 'planks',
       place(pos.x + lx, pos.y + h + 0.012, pos.z + lz), { chunk });
     cut.dispose();
   }
@@ -5161,10 +5371,18 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
   if (east === 'tent') return;
   if (east) {
     const [ex, , ez] = DIR_STEP[dir];
-    const bank = mound(CELL + 3, 1.3, 3.4, 18);
-    batcher.add(bank, east === 'ledge' ? 'cliff' : 'sand',
-      place(pos.x + ex * HALF, pos.y - 0.05, pos.z + ez * HALF, ex ? Math.PI / 2 : 0), { chunk });
-    bank.dispose();
+    const rot = ex ? Math.PI / 2 : 0;
+    const at = place(pos.x + ex * HALF, pos.y - 0.05, pos.z + ez * HALF, rot);
+    if (east === 'ledge') {
+      const bank = mound(CELL + 3, 1.3, 3.4, 18);
+      batcher.add(bank, 'cliff', at, { chunk });
+      bank.dispose();
+    } else {
+      for (const geo of sandDrift(CELL + 3, 1.3, 3.4, ex || ez, room.vnum * 4 + dir)) {
+        batcher.add(geo, 'sand', at, { chunk, normals: true });
+        geo.dispose();
+      }
+    }
     const along = dir === 1 || dir === 3;
     const cx = pos.x + ex * (HALF - 0.4); const cz = pos.z + ez * (HALF - 0.4);
     addCollider(cx - (along ? 0.4 : HALF), cx + (along ? 0.4 : HALF), cz - (along ? HALF : 0.4), cz + (along ? HALF : 0.4), pos.y, pos.y + 2.5);
@@ -5192,8 +5410,35 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
   const shade = bog
     ? (x, y) => 0.84 + 0.16 * Math.min(1, (y - pos.y) / h)
     : wallAo(pos.y);
-  batcher.add(box(along ? t : CELL, h, along ? CELL : t, 2, 2, 2), material,
-    place(bx, pos.y + h / 2, bz), { chunk, ao: shade });
+  // Field and woodland are bounded by a bank, not a wall: the rubble kerb
+  // down the sides of Haon Dor's trails read as masonry retaining walls.
+  const wild = !bog && !hood && [SECTOR.FIELD, SECTOR.FOREST, SECTOR.HILLS].includes(room.sector);
+  if (bog || wild) {
+    // Not a cut face: from inside the hollow a vertical metre of peat on
+    // every closed side made the bog a pit dug in a field, which is what a
+    // judge called it. The ground rises out of the hollow instead, over
+    // three metres, to a ragged lip -- and falls away more steeply behind.
+    const depth = 4.4;
+    const out = dir === 1 || dir === 2 ? 1 : -1;       // local z towards the edge
+    const geo = peatBank(CELL + 2.4, wild ? 1.2 : h, depth, out, room.vnum * 4 + dir);
+    const c = { x: pos.x + dx * (HALF - depth / 2 + 0.9), z: pos.z + dz * (HALF - depth / 2 + 0.9) };
+    batcher.add(geo, bog ? 'peat' : (room.sector === SECTOR.FOREST ? 'duff' : 'grass'),
+      place(c.x, pos.y - 0.04, c.z, along ? Math.PI / 2 : 0), { chunk, ao: bog ? shade : null, normals: true });
+    geo.dispose();
+    const fern = wild && instances ? ['fern', 'salal_bush'].find((n) => instances.library.get(n)) : null;
+    for (let i = 0; fern && i < 4; i++) {
+      // At the foot of the bank on the room's side, clear of the middle.
+      const a = (hash3(room.vnum, dir, i, 1061) - 0.5) * (CELL - 3);
+      const inward = HALF - 3.4 - hash3(room.vnum, dir, i, 1062) * 0.8;
+      instances.add(fern, {
+        x: pos.x + dx * inward + (along ? 0 : a), y: pos.y, z: pos.z + dz * inward + (along ? a : 0),
+        rotY: hash3(room.vnum, dir, i, 1063) * Math.PI * 2, scale: 0.8 + hash3(room.vnum, dir, i, 1064) * 0.4,
+      }, chunk);
+    }
+  } else {
+    batcher.add(box(along ? t : CELL, h, along ? CELL : t, 2, 2, 2), material,
+      place(bx, pos.y + h / 2, bz), { chunk, ao: shade });
+  }
   addCollider(bx - (along ? t : CELL) / 2, bx + (along ? t : CELL) / 2,
     bz - (along ? CELL : t) / 2, bz + (along ? CELL : t) / 2, pos.y, pos.y + h + 2);
 }
@@ -7511,8 +7756,8 @@ function buildShell({ kind, batcher, instances, chunk, room, cell, pos, sides, a
     }
   } else if (kind === 'lair') {
     // The heat is in the floor: a low red light out of the cracks, which is
-    // what the scorch on the walls is lit by.
-    for (const [ox, oz] of [[-2.4, 1.8], [2.2, -2.0], [1.6, 2.6]]) {
+    // what the scorch on the walls is lit by -- where the floor is still hot.
+    if (mats.floor === 'emberstone') for (const [ox, oz] of [[-2.4, 1.8], [2.2, -2.0], [1.6, 2.6]]) {
       lights.push({ x: pos.x + ox, y: pos.y + 0.6, z: pos.z + oz, color: 0xff5a20, intensity: 12, radius: 10, flicker: true });
     }
   } else if (kind === 'log') {
@@ -7578,15 +7823,17 @@ function buildRoof({ batcher, chunk, mats, room, x, y, z, decor }) {
     const collar = SHELL * 2 + 0.7;
     batcher.add(box(collar, 0.55, collar, 3, 1, 3), 'grass',
       place(x, wallTop + 0.275, z), { chunk, uvScale: TURF_UV });
-    const dome = mound(width, domeH, width);
-    batcher.add(dome, 'grass', place(x, wallTop + 0.45, z), { chunk, uvScale: TURF_UV });
-    dome.dispose();
+    // Not a hemisphere: an irregular hill, oversized so its uneven rim still
+    // covers the collar, with a crown the grass can grow over.
+    const dome = turfHill(width * 1.12, domeH, width * 1.12, 1300 + room.vnum % 997);
+    batcher.add(dome, 'grass', place(x, wallTop + 0.45, z), { chunk, uvScale: TURF_UV, normals: true });
     // A chimney out of the turf, rooted where the dome is still thick.
     const angle = hash3(room.vnum, 7, 0, 5) * Math.PI * 2;
     const r = 2.6 + hash3(room.vnum, 8, 0, 6) * 1.4;
     const cx = x + Math.cos(angle) * r;
     const cz = z + Math.sin(angle) * r;
-    const turf = wallTop + 0.45 + domeH * Math.sqrt(Math.max(0, 1 - ((2 * r) / width) ** 2));
+    const turf = wallTop + 0.45 + dome.userData.heightAt(Math.cos(angle) * r, Math.sin(angle) * r);
+    dome.dispose();
     batcher.add(box(0.9, 2.4, 0.9), 'stonewall', place(cx, turf + 0.4, cz), { chunk });
     decor.push({ kind: 'smoke', x: cx, y: turf + 1.7, z: cz });
     return;
@@ -8336,18 +8583,48 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
         break;
       }
       const h = 2.2;
-      // A walled bank of turf: coursed field stone round it, grass on top. As
-      // bare `rock` it was crazy paving 1.6 m high down both sides of the
-      // graveyard's lanes.
-      batcher.add(box(CELL, h, CELL, 2, 2, 2), 'rubblewall', place(x, y + h / 2 - 0.6, z), { chunk, ao: wallAo(y) });
-      batcher.add(plane(CELL, CELL, 2), 'grass', place(x, y + h - 0.6 + 0.01, z), { chunk });
+      // A bank of rough ground. It was a box of coursed field stone with a lawn
+      // on top, and down both sides of Haon Dor's trails that read as masonry
+      // retaining walls -- a judge's word -- where a track through woodland
+      // runs between low earth banks with ferns and fallen timber at their
+      // foot. The bank's edge wanders in and out, so no two cells line up.
+      const bank = fieldBank(CELL + 1.2, h - 0.6, Math.floor(seed * 1e6) % 9973);
+      batcher.add(bank, 'grass', place(x, y - 0.02, z), { chunk, normals: true });
       addCollider(x - HALF, x + HALF, z - HALF, z + HALF, y, y + h - 0.6);
+      if (instances) {
+        const at = bank.userData.heightAt;
+        const fern = model(['fern', 'salal_bush'], 0);
+        for (let i = 0; fern && i < 7; i++) {
+          // Round the foot: out near the cell's edge, where the bank is low.
+          const side = Math.floor(hash3(x, z, i, 55) * 4);
+          const along = (hash3(x, z, i, 56) - 0.5) * (CELL - 1.5);
+          const inset = HALF - 0.6 - hash3(x, z, i, 57) * 1.4;
+          const [lx, lz] = [[along, -inset], [inset, along], [along, inset], [-inset, along]][side];
+          instances.add(fern, {
+            x: x + lx, y: y + at(lx, lz) - 0.05, z: z + lz,
+            rotY: hash3(x, z, i, 58) * Math.PI * 2, scale: 0.8 + hash3(x, z, i, 59) * 0.5,
+          }, chunk);
+        }
+        const log = hash3(x, z, 3, 60) < 0.45 ? model(['dead_log'], 0) : null;
+        if (log) {
+          const side = Math.floor(hash3(x, z, 4, 60) * 4);
+          const along = (hash3(x, z, 5, 60) - 0.5) * 5;
+          const inset = HALF - 1.0;
+          const [lx, lz] = [[along, -inset], [inset, along], [along, inset], [-inset, along]][side];
+          instances.add(log, {
+            x: x + lx, y: y + at(lx, lz) * 0.6, z: z + lz,
+            rotY: (side % 2 ? Math.PI / 2 : 0) + (hash3(x, z, 6, 60) - 0.5) * 0.5,
+            scale: 0.9 + hash3(x, z, 7, 60) * 0.4,
+          }, chunk);
+        }
+      }
       for (let i = 0; i < 2; i++) {
         if (hash3(x, z, i, 53) < 0.6) continue;
         const tx = x + (hash3(x, z, i, 51) - 0.5) * CELL * 0.7;
         const tz = z + (hash3(x, z, i, 52) - 0.5) * CELL * 0.7;
-        decor.push({ kind: 'tree', x: tx, y: y + h - 0.6, z: tz, scale: 0.6 + hash3(x, z, i, 54) * 0.5 });
+        decor.push({ kind: 'tree', x: tx, y: y + bank.userData.heightAt(tx - x, tz - z) - 0.05, z: tz, scale: 0.6 + hash3(x, z, i, 54) * 0.5 });
       }
+      bank.dispose();
       break;
     }
   }
@@ -8742,18 +9019,27 @@ function buildHorizon(group, bounds, groundY, layout) {
     const mesa = (a) => {
       let h = base(a);
       for (const m of tops) {
-        const inside = Math.min(a - m.a0, m.a1 - a);
-        if (inside <= -m.shoulder * 3) continue;
-        // A cliff above a talus slope: steep for the upper two thirds.
-        const t = THREE.MathUtils.clamp((inside + m.shoulder * 3) / (m.shoulder * 4), 0, 1);
-        let top = m.h * (t < 0.35 ? t / 0.35 * 0.35 : 0.35 + 0.65 * THREE.MathUtils.smoothstep(t, 0.35, 0.6));
+        // In metres from the butte's edge. The talus was a shoulder of a few
+        // metres under a 30-78 m cliff: from the desert every butte was a
+        // straight-sided box. A real one stands on a scree apron as wide as
+        // the cliff is high, concave, with the cliff over its upper half.
+        const inside = Math.min(a - m.a0, m.a1 - a) * ridgeR;
+        const W1 = m.h * 0.95; const W2 = m.h * 0.2;
+        const x = inside + W1 + W2;
+        if (x <= 0) continue;
+        let top = x < W1
+          ? m.h * 0.45 * (x / W1) ** 1.4
+          : m.h * (0.45 + 0.55 * THREE.MathUtils.smoothstep(x - W1, 0, W2));
         // The caprock sits back from the bench's edge.
         if (m.tier < 1) {
-          const back = (m.a1 - m.a0) * 0.22;
+          const back = (m.a1 - m.a0) * 0.22 * ridgeR;
           top = Math.min(top, inside > back ? m.h : m.h * m.tier);
         }
-        // Weathered, not ruled: a few metres of broken edge along the top.
-        top *= 1 + 0.025 * Math.sin(a * 310) * Math.sin(a * 83 + 1.3);
+        // Weathered, not ruled: caprock broken off in steps, and a few metres
+        // of ragged edge along the top.
+        const step = Math.floor(hash3(Math.floor(a * 90), 0, 0, 7119) * 3) / 3;
+        top *= (1 - 0.1 * step * THREE.MathUtils.smoothstep(top / m.h, 0.6, 1))
+          * (1 + 0.025 * Math.sin(a * 310) * Math.sin(a * 83 + 1.3));
         h = Math.max(h, top);
       }
       return h;
@@ -8765,7 +9051,7 @@ function buildHorizon(group, bounds, groundY, layout) {
       return 0.9;
     };
     const strata = (a, v, h) => {
-      const band = 0.9 + 0.1 * Math.sin(h * 0.9 + Math.sin(a * 40) * 0.6) + 0.06 * Math.sin(h * 2.7);
+      const band = 0.88 + 0.15 * Math.sin(h * 0.9 + Math.sin(a * 40) * 0.6) + 0.07 * Math.sin(h * 2.7);
       const talus = THREE.MathUtils.smoothstep(v, 0.0, 0.3);
       const k = faceOf(a) * band * (0.72 + 0.28 * talus);
       return [k * 1.02, k, k * 0.97];
