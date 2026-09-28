@@ -9255,7 +9255,9 @@ function buildLooseProps({ room, pos, sides, decor, mats, plan = null, trade = n
   for (let d = 0; d < 4; d++) if (!sides[d]) blank.push(d);
   // Not over a painted wall: the paintings are what the room says is there.
   const painted = mats.said && mats.said.marks && mats.said.marks.kind === 'mural';
-  if (blank.length && !painted && /temple|altar|sanctum|hall|throne/i.test(room.name)) {
+  // Whole words: "Hallway" in the neighborhood is a passage in an abandoned
+  // house, and it was hung with a temple's banner. Nobody hangs one there.
+  if (blank.length && !painted && !isHood(room) && /\b(temple|altar|sanctum|hall|throne)\b/i.test(room.name)) {
     decor.push({ kind: 'banner', x: pos.x, y: pos.y, z: pos.z, dir: blank[0] });
   }
   // An inn with a named landlord was a bare stone box: eighteen prop models
