@@ -52,6 +52,33 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Measured visibility (src/cull.js)
+
+- **Visibility is measured, not declared.** For the camera's cell the solid
+  world is rendered as distance cubes from 11 points; every sight line that
+  leaves the cell unobstructed marks an opening, and outside things draw
+  only through those openings. A shell with a gap in it only ever culls
+  less, so nothing else has to cooperate. ~38 ms per cell, spread 1.5 ms a
+  frame. 408-view sweep: 766 → 373 calls, 10.7 → 3.6 M triangles, 90 → 0
+  views over 1,200; 136 composited-frame diffs 0 pixels apart from 1–4
+  pixels through hairline sewer cracks.
+- **A view-dependent cull must never drop shadow casters**: the shadow map
+  is reused while you turn. three builds the main draw list before the
+  shadow pass, which is what lets hidden objects be put back for it alone.
+- **An instanced mesh's bounding sphere spans a whole 832 m region**, so
+  three never frustum-culls it and it draws every instance into the shadow
+  map; cull per instance.
+- **The GPU here waits on draw calls, not triangles**: hiding all foliage in
+  the heaviest forest view saved 0–2 ms of 15–17. No foliage LOD yet.
+- Measure cubes against the cell and its neighbours only (32 → 8.8 M tris);
+  they must see 40 m or they cut rays short and invent leaks. Disposing a
+  geometry that shares buffers with a batch frees the batch's too. three
+  picks winding per object, so mirrored instances need their own mesh.
+- The #3005 archway was the "up" exit to "In the air…", which is never
+  built; it is gone. Dusk bloom veiled half the bog because the whole sky
+  quarter round a low sun was over threshold; the visible sky is capped
+  below it at dawn and dusk except the disc and a thin ring.
+
 ### Figures that read indoors (dress.js, motion.js)
 
 - **A recipe's `env` scales the diffuse sky light as well as reflections**
