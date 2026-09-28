@@ -1116,73 +1116,106 @@ def mudmonster():
         bones += [("arm1" + tag, P(*a[0]), P(*a[1]), "spine3"), ("arm2" + tag, P(*a[1]), P(*a[2]), "arm1" + tag),
                   ("hand" + tag, P(*a[2]), P(*a[3]), "arm2" + tag)]
     grad = lambda b0, b1, z0, z1: ("grad", b0, b1, P(0, 0, z0), P(0, 0, z1))
+    # A heap first and a figure hardly at all: a wide puddle, a mass that
+    # slumps down onto it in tiers, shoulders that are only where the heap
+    # hunches, a head sunk into the top of it, and arms that are two long
+    # slumps of the same stuff. It read, standing up out of a small puddle
+    # with a head and two arms, as a man made of mud.
     body = [
-        ell(P(0, 0.05, 0.03), (0.8, 0.8, 0.07), "base", blend=0.12, mask=(0, 0.8)),
-        ell(P(0, 0.02, 0.4), (0.5, 0.46, 0.42), grad("base", "spine1", 0.1, 0.7), blend=0.25, mask=(0, 0.4)),
-        ell(P(0, 0.05, 1.08), (0.4, 0.34, 0.45), grad("spine1", "spine2", 0.8, 1.3), blend=0.2),
-        ell(P(0, 0.08, 1.55), (0.5, 0.36, 0.26), grad("spine2", "spine3", 1.35, 1.7), blend=0.18),
-        ell(P(0, 0.2, 2.02), (0.26, 0.27, 0.3), "head", blend=0.14),
-        ell(P(0, 0.34, 2.12), (0.19, 0.14, 0.12), "head", blend=0.08),
+        ell(P(0, 0.05, 0.03), (1.05, 1.0, 0.08), "base", blend=0.14, mask=(0, 0.8)),
+        ell(P(0, 0.0, 0.42), (0.78, 0.7, 0.5), grad("base", "spine1", 0.1, 0.7), blend=0.3, mask=(0, 0.45)),
+        ell(P(0, 0.04, 1.0), (0.56, 0.48, 0.48), grad("spine1", "spine2", 0.75, 1.3), blend=0.26),
+        ell(P(0, 0.1, 1.46), (0.52, 0.42, 0.3), grad("spine2", "spine3", 1.35, 1.7), blend=0.22),
+        ell(P(0, 0.22, 1.86), (0.28, 0.28, 0.27), "head", blend=0.2),
+        ell(P(0, 0.34, 1.98), (0.18, 0.13, 0.11), "head", blend=0.1),
         # The maw: cut into the front of the head, wider than it is tall.
-        ell(P(0, 0.42, 1.98), (0.16, 0.14, 0.075), "head", blend=0.05, neg=True),
+        ell(P(0, 0.4, 1.9), (0.16, 0.13, 0.07), "head", blend=0.05, neg=True),
     ]
     for side, tag in ((1, ".L"), (-1, ".R")):
         a = [B.apply_side(p, side) for p in arm]
-        body += [cone(P(*a[0]), P(*a[1]), 0.19, 0.15, "arm1" + tag, blend=0.08, group="arm" + tag),
-                 cone(P(*a[1]), P(*a[2]), 0.15, 0.13, "arm2" + tag, blend=0.08, group="arm" + tag),
-                 ell(P(*a[3]), (0.17, 0.17, 0.22), "hand" + tag, blend=0.1)]
-    # Lumps: the surface is not a solid's, it is mud settling.
-    for i in range(22):
-        z = rng.uniform(0.3, 1.9)
+        body += [cone(P(*a[0]), P(*a[1]), 0.24, 0.19, "arm1" + tag, blend=0.16, group="arm" + tag),
+                 cone(P(*a[1]), P(*a[2]), 0.19, 0.16, "arm2" + tag, blend=0.12, group="arm" + tag),
+                 ell(P(*a[3]), (0.2, 0.2, 0.24), "hand" + tag, blend=0.14)]
+    # Lumps: the surface is not a solid's, it is mud settling -- bigger and
+    # more of them low down, where it has slumped.
+    for i in range(34):
+        z = rng.uniform(0.15, 1.8)
         ang = rng.uniform(0, 2 * math.pi)
-        rr = 0.44 * (1.0 - 0.3 * (z > 1.5)) - 0.1 * (z > 0.8)
-        c = (math.cos(ang) * rr, 0.05 + math.sin(ang) * rr * 0.8, z)
+        rr = (0.72 if z < 0.7 else 0.5 if z < 1.3 else 0.42) * rng.uniform(0.85, 1.05)
+        c = (math.cos(ang) * rr, 0.05 + math.sin(ang) * rr * 0.85, z)
         bone = "spine1" if z < 0.75 else "spine2" if z < 1.35 else "spine3"
-        r = rng.uniform(0.1, 0.2)
-        body.append(ell(P(*c), (r, r, r * 0.75), bone, blend=0.07))
+        r = rng.uniform(0.12, 0.24) * (1.25 if z < 0.7 else 1.0)
+        body.append(ell(P(*c), (r, r, r * 0.7), bone, blend=0.09))
 
     def masks(co, n, pale, dark):
         u = co[:, 2]
-        wet = np.clip((0.5 - u) / 0.45, 0, 1)
-        return pale, np.maximum(dark, wet * 0.55)
+        wet = np.clip((0.55 - u) / 0.5, 0, 1)
+        # Wetter in the hollows between the lumps, which face down.
+        under = np.clip(-n[:, 2] * 0.8, 0, 1)
+        return pale, np.maximum(dark, np.maximum(wet * 0.55, under * 0.35))
 
     def parts(body_solids):
         out = []
         # The lower lip on the jaw, so the maw opens.
-        jaw = [ell(P(0, 0.34, 1.88), (0.2, 0.14, 0.07), "jaw", blend=0.04)]
+        jaw = [ell(P(0, 0.34, 1.8), (0.2, 0.14, 0.07), "jaw", blend=0.04)]
         out.append(B.sdf_part(jaw, 0.012, 260, "jaw", "ooze", smooth=1))
-        mouth = [ell(P(0, 0.32, 1.96), (0.15, 0.1, 0.06), {"head": 0.5, "jaw": 0.5}, blend=0.02)]
+        mouth = [ell(P(0, 0.32, 1.88), (0.15, 0.1, 0.06), {"head": 0.5, "jaw": 0.5}, blend=0.02)]
         out.append(B.solid_part(mouth, 0.01, 120, "mouth", "horn", (0.2, 0.06, 0.05)))
         # Stones caught in the mud for teeth.
         teeth = []
         for i in range(7):
             x = -0.12 + i * 0.04
-            teeth.append(cone(P(x, 0.43 - abs(x) * 0.5, 2.03), P(x * 1.05, 0.44 - abs(x) * 0.5, 1.975), 0.018, 0.005, "head",
+            teeth.append(cone(P(x, 0.41 - abs(x) * 0.5, 1.95), P(x * 1.05, 0.42 - abs(x) * 0.5, 1.895), 0.018, 0.005, "head",
                               blend=0.004, group="t%d" % i))
         for i in range(6):
             x = -0.1 + i * 0.04
-            teeth.append(cone(P(x, 0.4 - abs(x) * 0.5, 1.9), P(x * 1.05, 0.41 - abs(x) * 0.5, 1.95), 0.016, 0.004, "jaw",
+            teeth.append(cone(P(x, 0.38 - abs(x) * 0.5, 1.82), P(x * 1.05, 0.39 - abs(x) * 0.5, 1.87), 0.016, 0.004, "jaw",
                               blend=0.004, group="b%d" % i))
         out.append(B.solid_part(teeth, 0.004, 400, "teeth", "horn", (0.5, 0.45, 0.34), smooth=0))
         # Eyes: embers sunk in the head over the maw.
         for side in (1, -1):
-            at = B.surface_point(body_solids, P(side * 0.1, 0.8, 2.16), P(0, -1, 0), sink=0.03)
+            at = B.surface_point(body_solids, P(side * 0.1, 0.8, 2.06), P(0, -1, 0), sink=0.03)
             out.append(B.solid_part([ell(tuple(at), (0.026, 0.018, 0.02), "head", blend=0.004)], 0.004, 60,
                                     "eye", "glow", (1.0, 1.0, 1.0), smooth=0))
-        # Strands hanging off the arms and the jaw -- mud dripping, or weed.
-        drips = []
-        for i in range(10):
+        # Everything that hangs off it: mud dripping off the arms and the
+        # heap in strings that end in a drop, and weed -- flat ribbons draped
+        # over the top of it and down its sides. The weed carries the patch
+        # channel, so a shambling mound is green with it and a mudmonster
+        # only darker.
+        drips, weed = [], []
+        for i in range(16):
             side = 1 if i % 2 else -1
             tag = ".L" if side > 0 else ".R"
             k = rng.uniform(0.1, 0.9)
             a = [V(B.apply_side(p, side)) for p in arm]
-            top = a[0].lerp(a[2], k) + V((side * 0.04, rng.uniform(-0.08, 0.02), -0.16))
+            top = a[0].lerp(a[2], k) + V((side * 0.06, rng.uniform(-0.1, 0.04), -0.18))
             length = rng.uniform(0.25, 0.6)
             bone = "arm1" + tag if k < 0.5 else "arm2" + tag
-            drips.append(cone(P(*top), P(top.x * 1.02, top.y + 0.02, top.z - length), 0.05, 0.018, bone,
+            drips.append(cone(P(*top), P(top.x * 1.02, top.y + 0.02, top.z - length), 0.05, 0.016, bone,
                               blend=0.03, group="d%d" % i))
-            drips.append(ell(P(top.x * 1.02, top.y + 0.02, top.z - length), (0.03, 0.03, 0.04), bone, blend=0.02))
-        out.append(B.sdf_part(drips, 0.012, 900, "strands", "ooze", smooth=1, mask_fn=lambda co, n, p, d: (p, d + 0.25)))
+            drips.append(ell(P(top.x * 1.02, top.y + 0.02, top.z - length), (0.03, 0.03, 0.042), bone, blend=0.02))
+        for i in range(22):
+            ang = rng.uniform(-math.pi, math.pi)
+            z0 = rng.uniform(1.25, 1.75)
+            out_ = V((math.cos(ang), math.sin(ang) * 0.85, 0)).normalized()
+            # On the skin, found by marching in, and a little proud of it.
+            top = V(B.surface_point(body_solids, P(*(out_ * 1.5 + V((0, 0.08, z0)))), P(*(-out_)), sink=-0.02))
+            top = V((top.x, -top.y, top.z))
+            length = rng.uniform(0.5, 1.0)
+            pts = [top, top + out_ * 0.1 + V((0, 0, -length * 0.35)), top + out_ * 0.16 + V((0, 0, -length * 0.7)),
+                   top + out_ * 0.2 + V((rng.uniform(-0.05, 0.05), 0, -length))]
+            bone = "spine3" if z0 > 1.35 else "spine2"
+            w = rng.uniform(0.05, 0.08)
+            # A ribbon: wide across the heap's surface, thin out of it.
+            tang = V((-out_.y, out_.x, 0))
+            for j in range(3):
+                mid = (pts[j] + pts[j + 1]) * 0.5
+                ax = (V(P(*tang)), V(P(*(pts[j + 1] - pts[j]).normalized())), V(P(*out_)))
+                weed.append(oell(P(*mid), (w * (1 - 0.25 * j), (pts[j + 1] - pts[j]).length * 0.62, 0.018), ax, bone,
+                                 blend=0.02))
+        out.append(B.sdf_part(drips, 0.012, 800, "strands", "ooze", smooth=1, mask_fn=lambda co, n, p, d: (p, d + 0.25)))
+        out.append(B.sdf_part(weed, 0.012, 1300, "weed", "ooze", smooth=1,
+                              patch_fn=lambda co: np.ones(len(co)), mask_fn=lambda co, n, p, d: (p, d * 0.3)))
         return out
 
     return dict(name="beast_mud", archetype="blob", bones=bones, body=body, masks=masks, parts=parts,

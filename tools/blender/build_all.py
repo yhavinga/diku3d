@@ -120,7 +120,7 @@ BUDGET = {
     # Two in the world. Sixteen jointed, spined leg segments a side is where
     # it goes, and a sculpted face with a head of hair on top of that.
     "beast_drider": 12500,
-    "beast_bat": 3400, "beast_mud": 5600, "beast_myconoid": 4400, "beast_ratman": 4600,
+    "beast_bat": 3400, "beast_mud": 6800, "beast_myconoid": 4400, "beast_ratman": 4600,
     "beast_imp": 4600, "beast_naga": 5600,
     # One in the world, ten metres of it seen whole: rings, plates, spines,
     # three toothed jaws and the crater it stands in.
