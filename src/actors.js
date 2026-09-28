@@ -2420,7 +2420,7 @@ export function populate(world, layout, built, options = {}) {
       // repeating a name is how a species gets weighted); everywhere else --
       // parks, field edges -- keeps the broadleaf mix it always had.
       const kind = (t.conifer
-        ? model(['tree_fir', 'tree_fir', 'tree_fir', 'tree_pine', 'tree_oak'], strHash(`${t.x},${t.z}`, 2))
+        ? model(['tree_fir', 'tree_fir', 'tree_cedar', 'tree_pine', 'tree_oak'], strHash(`${t.x},${t.z}`, 2))
         : model(['tree_oak', 'tree_pine'], strHash(`${t.x},${t.z}`, 2))) || treeModel;
       instances.add(kind, {
         x: t.x, y: t.y, z: t.z,

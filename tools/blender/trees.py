@@ -100,29 +100,9 @@ def build_tree_oak():
 
 
 def build_tree_pine():
-    """About 9 m and narrow: a straight leader with five whorls hung off it."""
-    lib.reset()
-    rng = random.Random(70013)
-    objs = []
-    H = 9.0
-    objs.append(segment((0, 0, 0), (0, 0, 1), H * 0.92, 0.3, 0.06, verts=8, name="trunk"))
-    whorls = 5
-    for w in range(whorls):
-        t = w / float(whorls)
-        z = 1.5 + (H - 3.0) * t
-        reach = 2.5 * (1.0 - t) + 0.55
-        n = 6 if w < 3 else 5
-        for i in range(n):
-            a = 2 * math.pi * (i + rng.uniform(-0.15, 0.15)) / n + w * 0.5
-            d = (math.cos(a), math.sin(a), -0.34 + t * 0.2)
-            objs.append(segment((0, 0, z), d, reach, 0.075, 0.02, verts=4, name="limb"))
-            tip = (math.cos(a) * reach * 0.55, math.sin(a) * reach * 0.55,
-                   z + (-0.34 + t * 0.2) * reach * 0.55)
-            objs.append(lib.cone(reach * 0.44, 0.0, reach * 0.5,
-                                 (tip[0], tip[1], tip[2] + reach * 0.16),
-                                 verts=7, name="needles", mat="leaves"))
-    objs.append(lib.cone(0.5, 0.0, 1.9, (0, 0, H - 0.7), verts=8, name="spire", mat="leaves"))
-    return kit.deliver(objs, "tree_pine")
+    """A western hemlock, 12 m: see `conifer`. The name is the library's, from
+    when this was a pine; parks and forests both place it."""
+    return conifer("tree_pine", HEMLOCK)
 
 
 def build_bush():
@@ -244,65 +224,258 @@ def hull(rings, sides, wob=None, jag=None, jag_at=-1, mat="rock", name="hull"):
     return lib.assign(obj, mat)
 
 
-def build_tree_fir():
-    """A Douglas-fir, 16 m to the nodding tip.
+# --- the conifers -----------------------------------------------------------
 
-    Set it against tree_pine and the species is the proportion: the pine is 9 m
-    and two thirds as wide as it is tall, this is a third, which is the shape
-    of a tree that grew in a forest. Eleven close tiers rather than five widely
-    spaced ones, so the crown overlaps itself and reads dark instead of reading
-    as separate branches with sky between them; a bare lower trunk with dead
-    stubs on it; and a leader that nods over at the top, which is a hemlock's
-    signature and the cheapest thing here that says which coast this is."""
+class Cards:
+    """Needle-spray cards collected into one mesh: positions, per-corner UVs
+    (the card is the whole texture tile, 0..1) and a per-vertex normal that
+    points out of the crown rather than off the card."""
+
+    def __init__(self):
+        self.verts, self.faces, self.uvs, self.normals = [], [], [], []
+
+    def card(self, base, u_dir, v_dir, length, width, fold, out):
+        """A spray from `base` along `u_dir`, `width` across `v_dir`, folded
+        along its midrib by `fold` (the edges lifted along `out`), so it has
+        body when seen edge-on. Two quads, four triangles."""
+        u = mathutils.Vector(u_dir).normalized()
+        v = mathutils.Vector(v_dir).normalized()
+        n = mathutils.Vector(out).normalized()
+        b = mathutils.Vector(base)
+        lift = n * (fold * width * 0.5)
+        rows = []
+        # One spray of the texture per 0.6 m of card, not one per card: a
+        # single two-metre spray is a fern frond, not a fir bough.
+        repeat = max(1.0, round(length / 0.6))
+        for (s, vv) in ((0.0, 0.0), (0.0, 0.5), (0.0, 1.0), (1.0, 0.0), (1.0, 0.5), (1.0, 1.0)):
+            edge = abs(vv - 0.5) * 2
+            p = b + u * (length * s) + v * (width * (vv - 0.5)) + lift * edge
+            rows.append((p, (s * repeat, vv)))
+        i0 = len(self.verts)
+        for p, uv in rows:
+            self.verts.append(tuple(p))
+            self.uvs.append(uv)
+            self.normals.append(n)
+        # 0 1 2 at the base, 3 4 5 at the tip.
+        self.faces.append((i0 + 0, i0 + 3, i0 + 4, i0 + 1))
+        self.faces.append((i0 + 1, i0 + 4, i0 + 5, i0 + 2))
+
+    def mesh(self, name="needles"):
+        mesh = lib.bpy.data.meshes.new(name)
+        mesh.from_pydata(self.verts, [], self.faces)
+        mesh.validate()
+        mesh.update()
+        layer = mesh.uv_layers.new(name="UVMap")
+        for poly in mesh.polygons:
+            for li in poly.loop_indices:
+                vi = mesh.loops[li].vertex_index
+                layer.data[li].uv = self.uvs[vi]
+        obj = lib.bpy.data.objects.new(name, mesh)
+        lib.bpy.context.collection.objects.link(obj)
+        lib.assign(obj, "needles")
+        obj["crown_normals"] = [c for n in self.normals for c in n]
+        return obj
+
+
+def deliver_conifer(parts, cards_obj, name):
+    """`kit.deliver`, except that the cube projection must not touch the
+    cards -- their UVs are the spray texture's tile -- and the cards' normals
+    are set by hand after the join, pointing out of the crown, which is what
+    makes a mass of flat cards light like a volume."""
+    normals = cards_obj["crown_normals"]
+    n_cards = len(cards_obj.data.vertices)
+    parts = [p for p in parts if p is not None]
+    for obj in parts:
+        lib.apply_modifiers(obj)
+    # The cards go first so their vertices keep indices 0..n_cards-1.
+    obj = lib.join([cards_obj] + parts, name)
+    kit.zero_origin(obj)
+    obj.data.name = name
+    mesh = obj.data
+    needle_slot = next(i for i, m in enumerate(mesh.materials) if m.name == "MAT:needles")
+    lib.bpy.context.view_layer.objects.active = obj
+    lib.bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    lib.bpy.ops.object.mode_set(mode="EDIT")
+    lib.bpy.ops.mesh.select_all(action="DESELECT")
+    lib.bpy.ops.object.mode_set(mode="OBJECT")
+    for poly in mesh.polygons:
+        poly.select = poly.material_index != needle_slot
+    lib.bpy.ops.object.mode_set(mode="EDIT")
+    lib.bpy.ops.uv.cube_project(cube_size=1.0)
+    lib.bpy.ops.object.mode_set(mode="OBJECT")
+    # Split normals: the crown's for the cards, the mesh's own for the wood.
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    corner = [tuple(c.vector) for c in mesh.corner_normals]
+    custom = []
+    for li, loop in enumerate(mesh.loops):
+        vi = loop.vertex_index
+        if vi < n_cards:
+            custom.append(tuple(normals[vi * 3:vi * 3 + 3]))
+        else:
+            custom.append(corner[li])
+    mesh.normals_split_custom_set(custom)
+    tris = lib.stats([obj])
+    lib.export(name, [obj])
+    return "%-16s %5d tris" % (name, tris)
+
+
+def conifer(name, sp):
+    """A coastal conifer, as layered bough whorls carrying needle cards.
+
+    Each bough is a thin branch that leaves the trunk, droops and turns its
+    tip up again, and along it lie two to four folded cards of the needle
+    spray -- alpha-cut, so there is sky between the sprays and the crown has a
+    ragged edge instead of a faceted one. The tiers overlap enough that the
+    crown reads dark from outside and its edge reads as foliage. Every spray
+    gets a normal pointing out of the crown from the trunk axis, so the tree
+    is lit as one soft volume with a sunlit side and a shaded side, not as
+    two hundred flat plates catching the sun one by one.
+
+    What separates the species is the numbers: the Douglas-fir's straight
+    spire and upturned bough tips, the hemlock's nodding leader and fine,
+    pendulous sprays, the cedar's buttressed base, J-shaped limbs and
+    curtains of spray hanging off them."""
     lib.reset()
-    rng = random.Random(70016)
-    objs = []
-    trunk_h = 14.6
-    objs.append(segment((0, 0, 0), (0, 0, 1), trunk_h, 0.44, 0.09, verts=8, name="trunk"))
-    for i in range(4):
-        a = 2 * math.pi * (i + 0.3) / 4
-        objs.append(segment((math.cos(a) * 0.26, math.sin(a) * 0.26, 0.0),
-                            (math.cos(a) * 0.4, math.sin(a) * 0.4, 1.0), 1.1,
-                            0.16, 0.04, verts=4, name="root"))
-    # Dead stubs under the first live tier. A fir in the woods loses its lower
-    # limbs and keeps the sockets, and that bare storey is most of why the
-    # silhouette is a spar with a crown on it rather than a cone on the ground.
-    for i in range(3):
+    rng = random.Random(sp["seed"])
+    parts = []
+    cards = Cards()
+    H = sp["H"]
+    r0 = sp["r0"]
+    # Trunk: a closed hull, flared at the foot, tapering to the leader.
+    sides = 9
+    wob = [rng.uniform(-0.05, 0.05) for _ in range(sides)]
+    rings = [(0.0, r0 * sp.get("flare", 1.25), 0, 0), (0.45, r0 * 1.05, 0, 0),
+             (H * 0.25, r0 * 0.86, 0, 0), (H * 0.55, r0 * 0.6, 0, 0),
+             (H * 0.8, r0 * 0.34, 0, 0), (H * 0.97, r0 * 0.08, 0, 0)]
+    parts.append(hull(rings, sides, wob, mat=sp["bark"], name="trunk"))
+    if sp.get("buttress"):
+        for i in range(5):
+            a = 2 * math.pi * (i + 0.2) / 5
+            parts.append(segment((math.cos(a) * r0 * 0.7, math.sin(a) * r0 * 0.7, 0.0),
+                                 (math.cos(a) * 0.55, math.sin(a) * 0.55, 1.0), 1.5,
+                                 r0 * 0.45, 0.05, verts=4, name="buttress", mat=sp["bark"]))
+    # Dead stubs on the bare lower bole.
+    z_crown = H * sp["crown_base"]
+    for i in range(sp.get("stubs", 3)):
         a = 2.1 * i + 0.6
-        objs.append(segment((0, 0, 1.5 + 0.8 * i), (math.cos(a), math.sin(a), -0.35),
-                            0.5 + 0.12 * (i % 2), 0.07, 0.015, verts=4, name="stub"))
-    tiers = 11
+        z = 1.4 + (z_crown - 1.8) * (i + 0.5) / max(1, sp.get("stubs", 3))
+        parts.append(segment((0, 0, z), (math.cos(a), math.sin(a), -0.3), 0.55 + 0.15 * (i % 2),
+                             0.06, 0.012, verts=3, name="stub", mat=sp["bark"]))
+
+    tiers = sp["tiers"]
+    spray_w = sp["spray_w"]
     for w in range(tiers):
-        t = w / (tiers - 1.0)
-        z = 2.9 + 11.2 * t + rng.uniform(-0.14, 0.14)
-        reach = 2.2 * (1.0 - t) ** 0.75 + 0.40
-        # The mass of the crown, not the sprays. Six blades on a stick is a
-        # bottlebrush -- what makes a fir dark is that you cannot see through
-        # it, so each tier gets a needle cone tall enough to close the gap to
-        # the tier above, and the sprays are only the ragged edge on it.
-        cone_h = reach * 1.05 + 0.75
-        objs.append(lib.cone(reach * 0.60, 0.0, cone_h, (0, 0, z - 0.3 + cone_h / 2),
-                             verts=7, name="needles", mat="leaves"))
-        n = int(round(6.2 - 2.4 * t))
+        t = w / (tiers - 1.0)                       # 0 at the lowest live tier
+        z = z_crown + (H * 0.94 - z_crown) * t ** sp.get("tier_power", 1.0) + rng.uniform(-0.12, 0.12)
+        reach = sp["R"] * sp["profile"](t) + 0.25
+        n = max(3, int(round(sp["n0"] + (sp["n1"] - sp["n0"]) * t)))
         for i in range(n):
-            # A dropped branch here and there. Whorls that are all complete are
-            # what makes a conifer read as a lathe-turned Christmas tree.
-            if 1 < w < tiers - 2 and rng.random() < 0.11:
+            if 0 < w < tiers - 2 and rng.random() < 0.06:
                 continue
-            a = 2 * math.pi * (i + rng.uniform(-0.16, 0.16)) / n + w * 1.13
-            L = reach * rng.uniform(0.82, 1.12)
-            objs.append(blade((0, 0, z + rng.uniform(-0.1, 0.1)), a, 0.20 + 0.30 * t,
-                              L, 0.07 + L * 0.055, 0.04 + L * 0.028,
-                              L * (-0.34 + 0.40 * t), sides=3, name="spray"))
-    lean = (0.36, 0.14, 1.0)
-    objs.append(segment((0, 0, trunk_h - 0.2), lean, 1.6, 0.10, 0.015, verts=6,
-                        name="leader"))
-    for i in range(3):
-        objs.append(blade((0.28, 0.11, trunk_h + 0.45), 2.09 * i + 0.9, 0.30, 0.66,
-                          0.13, 0.055, -0.30, sides=3, name="spray"))
-    objs.append(blade((0.5, 0.19, trunk_h + 1.15), 0.7, 0.10, 0.5, 0.10, 0.045,
-                      -0.22, sides=3, name="spray"))
-    return kit.deliver(objs, "tree_fir")
+            a = 2 * math.pi * (i + rng.uniform(-0.2, 0.2)) / n + w * 2.39996
+            L = reach * rng.uniform(0.85, 1.1)
+            c, s_ = math.cos(a), math.sin(a)
+            radial = mathutils.Vector((c, s_, 0.0))
+            up = mathutils.Vector((0, 0, 1))
+            side = mathutils.Vector((-s_, c, 0.0))
+            droop = sp["droop"] * (1.0 - 0.6 * t)
+            upturn = sp["upturn"]
+
+            def at(q):
+                # Out along the radial, falling with the square of the
+                # distance, turning up again near the tip.
+                return (radial * (L * q)
+                        + up * (L * (sp["rise"] * q - droop * q * q + upturn * max(0.0, q - 0.55) ** 2 * 2.2))
+                        + mathutils.Vector((0, 0, z)))
+
+            p0, p1, p2 = at(0.0), at(0.5), at(1.0)
+            if L > 0.9:
+                parts.append(segment(tuple(p0), tuple(p1 - p0), (p1 - p0).length, 0.05 + L * 0.012, 0.02,
+                                     verts=3, name="bough", mat=sp["bark"]))
+                parts.append(segment(tuple(p1), tuple(p2 - p1), (p2 - p1).length, 0.02, 0.006,
+                                     verts=3, name="bough", mat=sp["bark"]))
+            k_cards = 2 if L < 1.1 else (3 if L < 2.2 else 4)
+            for k in range(k_cards):
+                q0 = 0.08 + k * (0.86 / k_cards) + rng.uniform(-0.04, 0.04)
+                q1 = min(1.08, q0 + 0.86 / k_cards + 0.2)
+                a0, a1 = at(q0), at(q1)
+                length = (a1 - a0).length * 1.05
+                width = spray_w * (1.0 - 0.35 * q0) * (0.75 + 0.5 * min(1.0, L / 2.5)) * rng.uniform(0.85, 1.15)
+                # Roll each spray a little about the bough, so no two lie flat
+                # in the same plane.
+                roll = rng.uniform(-0.45, 0.45)
+                v_dir = side * math.cos(roll) + up * math.sin(roll)
+                u_dir = (a1 - a0)
+                mid = (a0 + a1) * 0.5
+                out = (mathutils.Vector((mid.x, mid.y, 0)).normalized() * 0.8
+                       + up * (0.55 + 0.3 * (mid.z - H * 0.5) / H))
+                cards.card(a0, u_dir, v_dir, length, width, sp["fold"], out)
+            # Curtains: sprays hanging straight down off the bough, the cedar's
+            # lace and the hemlock's weeping tips.
+            if rng.random() < sp.get("curtains", 0.0) and L > 0.8:
+                for q in (0.45, 0.8):
+                    hp = at(q)
+                    hang = sp.get("hang", 1.0) * (0.7 + 0.5 * rng.random()) * min(1.0, L / 2.0)
+                    face = side * math.cos(0.3) + radial * math.sin(0.3)
+                    out = radial * 0.9 + up * 0.2
+                    cards.card(hp + up * 0.05, (0, 0, -1), face, hang, spray_w * 0.75, 0.25, out)
+
+    # The leader: a spire of short sprays, and for the hemlock a tip that nods.
+    top = mathutils.Vector((0, 0, H * 0.94))
+    lean = mathutils.Vector(sp.get("nod", (0.0, 0.0, 1.0))).normalized()
+    parts.append(segment(tuple(top), tuple(lean), H * 0.08, r0 * 0.1, 0.01, verts=4, name="leader", mat=sp["bark"]))
+    for i in range(4):
+        a = 2 * math.pi * i / 4 + 0.4
+        d = mathutils.Vector((math.cos(a), math.sin(a), 0))
+        base = top + lean * (H * 0.03 * (i % 2))
+        cards.card(base, d * 0.7 + lean * 0.7, (-math.sin(a), math.cos(a), 0), H * 0.07, spray_w * 0.6, 0.3,
+                   d * 0.6 + mathutils.Vector((0, 0, 0.8)))
+    tip = top + lean * (H * 0.08)
+    cards.card(top + lean * (H * 0.02), lean, (1, 0, 0), H * 0.07, spray_w * 0.45, 0.2, (0.3, 0.3, 1.0))
+    cards.card(top + lean * (H * 0.02), lean, (0, 1, 0), H * 0.07, spray_w * 0.45, 0.2, (0.3, -0.3, 1.0))
+    del tip
+    return deliver_conifer(parts, cards.mesh(), name)
+
+
+# Crown profiles: reach as a function of height up the live crown (0..1).
+def _fir_profile(t):
+    # Widest a fifth of the way up, the lowest tier a little shorter (shaded
+    # out), then a long straight taper to the spire.
+    return (0.82 + 0.9 * t if t < 0.2 else 1.0) * (1.0 - t) ** 0.9 + 0.05
+
+
+def _hemlock_profile(t):
+    return (1.0 - t) ** 0.8 * (0.85 + 0.15 * math.sin(t * 7.0)) + 0.06
+
+
+def _cedar_profile(t):
+    # Broad, irregular, with a rounded shoulder high up.
+    return (1.0 - t ** 1.6) * (0.9 + 0.1 * math.sin(t * 11.0)) + 0.05
+
+
+DOUGLAS = dict(seed=70016, H=17.0, r0=0.46, bark="firbark", crown_base=0.24, R=3.3,
+               profile=_fir_profile, tiers=15, n0=7, n1=4, droop=0.34, upturn=0.28,
+               rise=0.06, spray_w=0.85, fold=0.32, curtains=0.0, stubs=4)
+HEMLOCK = dict(seed=70013, H=12.5, r0=0.3, bark="firbark", crown_base=0.14, R=2.7,
+               profile=_hemlock_profile, tiers=13, n0=7, n1=4, droop=0.5, upturn=0.08,
+               rise=0.0, spray_w=0.8, fold=0.22, curtains=0.35, hang=0.9, stubs=2,
+               nod=(0.55, 0.2, 0.7))
+CEDAR = dict(seed=70021, H=15.0, r0=0.58, bark="cedarbark", crown_base=0.18, R=3.6,
+             profile=_cedar_profile, tiers=12, n0=7, n1=4, droop=0.62, upturn=0.34,
+             rise=0.1, spray_w=0.95, fold=0.18, curtains=0.6, hang=1.4, stubs=2,
+             buttress=True, flare=1.6, tier_power=0.9)
+
+
+def build_tree_fir():
+    """A Douglas-fir, 17 m: see `conifer`."""
+    return conifer("tree_fir", DOUGLAS)
+
+
+def build_tree_cedar():
+    """A western red cedar, 15 m: see `conifer`."""
+    return conifer("tree_cedar", CEDAR)
 
 
 def build_tree_snag():
@@ -426,7 +599,7 @@ def build_moss_rock():
     return kit.deliver(objs, "moss_rock")
 
 
-ASSETS = [build_tree_oak, build_tree_pine, build_tree_fir, build_tree_snag,
+ASSETS = [build_tree_oak, build_tree_pine, build_tree_fir, build_tree_cedar, build_tree_snag,
           build_bush, build_salal_bush, build_fern, build_moss_rock,
           build_grass_tuft]
 
