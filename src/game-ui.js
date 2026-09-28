@@ -177,7 +177,10 @@ const CSS = `
 #g-sheet .stats b { color: var(--ink); font-weight: 400; }
 
 /* ------------------------------------------------------------ prompts -- */
-#g-hint { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+/* Centred in the gap between the description and the vitals (placeLog), not
+   on the screen: at 1280x720 the screen's centre put the prompt's first
+   letter on the description panel's edge. */
+#g-hint { position: absolute; left: var(--g-mid, 50%); bottom: 22px; transform: translateX(-50%); white-space: nowrap;
   font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--gold); opacity: 0; transition: opacity 150ms ease;
   text-shadow: 0 0 1px rgba(0,0,0,0.9), 0 1px 2px rgba(0,0,0,0.85),
@@ -1014,6 +1017,8 @@ export function createGameUi(game) {
     const title = document.getElementById('room-block');
     if (!desc) return;
     const d = desc.getBoundingClientRect();
+    const v = vitals.getBoundingClientRect();
+    if (d.width && v.width) document.body.style.setProperty('--g-mid', `${Math.round((d.right + v.left) / 2)}px`);
     let top = title ? title.getBoundingClientRect().bottom : 0;
     if (gatesPanel.classList.contains('on')) top = Math.max(top, gatesPanel.getBoundingClientRect().bottom);
     const bottom = window.innerHeight - d.top + 10;
