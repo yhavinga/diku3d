@@ -136,51 +136,6 @@ export function makeLabel(text, height = 0.5, options) {
 }
 
 /**
- * The board over a sealed gate: the way it points, and that the map ends
- * there, painted on planks. Lit like everything else (it is wood, not a
- * label), and seen only from the side it faces.
- */
-function gateBoard(dirName) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512; canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  const grad = ctx.createLinearGradient(0, 0, 0, 128);
-  grad.addColorStop(0, '#6a4a2e'); grad.addColorStop(1, '#4e3520');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 512, 128);
-  // Three planks, and the grain along them.
-  ctx.strokeStyle = 'rgba(20,12,6,0.55)';
-  ctx.lineWidth = 3;
-  for (const y of [43, 86]) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(512, y); ctx.stroke(); }
-  ctx.lineWidth = 1;
-  for (let i = 0; i < 40; i++) {
-    const y = (i * 37) % 128; ctx.strokeStyle = `rgba(30,18,8,${0.08 + (i % 5) * 0.03})`;
-    ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.bezierCurveTo(170, y + 3, 340, y - 3, 512, y + 1.5); ctx.stroke();
-  }
-  ctx.strokeStyle = '#24170c'; ctx.lineWidth = 10; ctx.strokeRect(5, 5, 502, 118);
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#ead9b2';
-  ctx.font = '600 36px "Iowan Old Style", "Palatino Linotype", Georgia, serif';
-  ctx.fillText(`The way ${dirName} lies beyond the map`, 256, 66, 470);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
-  // One material, so one draw: the edges and the back take their colour
-  // from the painted frame in the canvas's corner.
-  const geometry = new THREE.BoxGeometry(2.2, 0.55, 0.06);
-  const uv = geometry.attributes.uv;
-  const front = geometry.groups[4];
-  for (let i = 0; i < uv.count; i++) {
-    if (i >= front.start / 1.5 && i < (front.start + front.count) / 1.5) continue;
-    uv.setXY(i, 0.004, 0.98);
-  }
-  geometry.clearGroups();
-  const board = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: texture, roughness: 0.85 }));
-  board.castShadow = false;
-  return board;
-}
-
-/**
  * The shop's name, painted on its sign: "The Grunting Boar", "The Weapon
  * Shop" -- what a real one says. It replaced a two-metre serif word floating
  * over the keeper's head ("Bartender"), which made his bounds 3.2 m tall and
@@ -2628,16 +2583,9 @@ export function populate(world, layout, built, options = {}) {
       // with the furniture, so it is switched off past FURNITURE_REACH
       // instead of drawing behind the walls from the street.
       case 'prop': if (furnishing) furnishing.add(item.name, item, 'furniture'); break;
-      case 'gateSign': {
-        // A painted board over the sealed arch, not words hanging in the air:
-        // it was a two-metre floating "up · #3700 — outside the loaded world"
-        // across the temple's nave.
-        const sign = gateBoard(item.text);
-        sign.position.set(item.x + item.dx * 0.42, item.y + 0.78, item.z + item.dz * 0.42);
-        sign.rotation.y = Math.atan2(-item.dx, -item.dz);
-        group.add(sign);
-        break;
-      }
+      // A sealed gate gets no placard. "The way up lies beyond the map" is
+      // the interface talking, and painted on planks it read as a prop the
+      // mud never had; the ways-out panel says it, when you look that way.
       default: break;
     }
   }

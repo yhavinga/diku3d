@@ -144,6 +144,7 @@ const CSS = `
 #g-gates li { list-style: none; font-size: 13px; line-height: 1.45; color: var(--dim);
   display: flex; justify-content: space-between; gap: 10px; }
 #g-gates ul { margin: 0; padding: 0; }
+#g-gates li[hidden] { display: none; }
 #g-gates li em { font-style: normal; font-family: var(--mono); font-size: 10px;
   letter-spacing: 0.08em; opacity: 0.75; white-space: nowrap; }
 #g-gates li.open { color: var(--gold); text-decoration: line-through; text-decoration-thickness: 1px; }
@@ -314,7 +315,7 @@ const el = (tag, className, html) => {
   return node;
 };
 
-export function createGameUi(game) {
+export function createGameUi(game, { built = null } = {}) {
   const style = el('style');
   style.textContent = CSS;
   document.head.appendChild(style);
@@ -1135,7 +1136,7 @@ export function createGameUi(game) {
           drawGates();
           break;
         case 'gate-seen':
-          say(event.text, 'faint', true);
+          heldNotes.set(event.gate.warden, event.text);
           drawGates();
           break;
         case 'ending':
@@ -1207,8 +1208,8 @@ export function createGameUi(game) {
       if (!byWarden.has(gate.warden)) byWarden.set(gate.warden, []);
       byWarden.get(gate.warden).push(gate);
     }
-    gatesPanel.classList.toggle('on', byWarden.size > 0);
     gatesList.textContent = '';
+    gateRows.length = 0;
     let count = 0;
     for (const list of byWarden.values()) {
       const open = list.every((gate) => gate.open);
@@ -1220,9 +1221,76 @@ export function createGameUi(game) {
         el('em', null, open ? 'open' : `${list[0].wardenName} · ${list[0].wardenLevel}`),
       );
       gatesList.appendChild(li);
+      gateRows.push({ li, list, room, shownUntil: -1 });
     }
     gatesTitle.textContent = count > 1 ? 'the ways out' : 'the way out';
-    placeLog();
+    showGates(true);
+  }
+
+  /**
+   * The board is for the gate you are at, not the room you are in. It used
+   * to go up the moment you entered a gate's room, so a new player's first
+   * frame in the temple said "Up, beyond the map -- the executioner · 50"
+   * about a stair behind them. A row now shows while you face its arch (from
+   * build.js's sealed-gate marker) within 16 m or stand by it, or -- in the
+   * warden's own room -- while you look at the warden; and for a second and
+   * a half after, so a glance away does not flicker it. What the log says
+   * about the gate waits for the same moment.
+   */
+  const gateRows = [];
+  const gateSpots = new Map();
+  const heldNotes = new Map();
+  function gateSpot(gate) {
+    if (gateSpots.has(gate)) return gateSpots.get(gate);
+    let best = null;
+    const info = built && built.rooms.get(gate.vnum);
+    if (info) {
+      let bd = 16;
+      for (const d of built.decor) {
+        if (d.kind !== 'gateSign' || d.text !== gate.way) continue;
+        const dd = Math.hypot(d.x - info.center.x, d.z - info.center.z);
+        if (dd < bd) { bd = dd; best = d; }
+      }
+    }
+    gateSpots.set(gate, best);
+    return best;
+  }
+  function gateInView(row) {
+    const eye = game.eye; const face = game.facing;
+    if (!eye || !face) return true;
+    const gate = row.list[0];
+    if (row.room !== gate.vnum) {
+      const f = game.focused();
+      if (f && f.slot && f.slot.record === gate.warden) return true;
+      const slot = game.mobs && game.mobs.find((m) => m.record === gate.warden && !m.dead);
+      return !!(slot && slot.pos && Math.hypot(slot.pos.x - eye.x, slot.pos.z - eye.z) < 4);
+    }
+    return row.list.some((g) => {
+      const spot = gateSpot(g);
+      // No arch to point at (a sewer grating): the room is the gate.
+      if (!spot) return true;
+      const dx = spot.x - eye.x; const dz = spot.z - eye.z;
+      const d = Math.hypot(dx, dz);
+      return d < 3.5 || (d < 16 && (dx * face.x + dz * face.z) / d > 0.82);
+    });
+  }
+  function showGates(force = false) {
+    const now = performance.now();
+    let any = false;
+    for (const row of gateRows) {
+      if (gateInView(row)) row.shownUntil = now + 1500;
+      const on = row.shownUntil > now;
+      if (on !== !row.li.hidden || force) row.li.hidden = !on;
+      if (on) {
+        any = true;
+        const note = heldNotes.get(row.list[0].warden);
+        if (note) { heldNotes.delete(row.list[0].warden); say(note, 'faint', true); }
+      }
+    }
+    if (any !== gatesPanel.classList.contains('on') || force) {
+      gatesPanel.classList.toggle('on', any);
+      placeLog();
+    }
   }
 
   // -- the spell bar ---------------------------------------------------------
@@ -1508,6 +1576,7 @@ export function createGameUi(game) {
     xpFill.style.width = width(span - Math.min(span, s.expToLevel), span);
     if (s.level !== lastLevel) { lastLevel = s.level; drawGates(); }
     if (s.roomVnum !== gatesRoom) drawGates();
+    else if (gateRows.length) showGates();
     if (s.roomVnum !== logRoom) {
       // One step through an exit, either way round, is a walk; anything
       // else is being carried there.
