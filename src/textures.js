@@ -1531,11 +1531,14 @@ const SURFACES = {
     const fine = fbm(u * 40, v * 40, 40, 463, 2);
     const [d1] = cellular(u * 18, v * 18, 18, 467, 0.5);
     const blister = clamp01(0.3 - d1) * 2.2;
-    const base = mix(rgb(0x969696), rgb(0xb2b2b2), lump);
-    const shade = 0.93 + lump * 0.1 + blister * 0.05;
+    // Near white: the coat is the colour (actors.js BEASTS). At 0x969696 to
+    // 0xb2b2b2 the texture averaged 0.37 in linear light, so a mud coat of
+    // 0x5e4a34 came out at 3% albedo and the Mudmonster was a black blob.
+    const base = mix(rgb(0xe2e2e2), rgb(0xf2f2f2), lump);
+    const shade = 0.93 + lump * 0.06 + blister * 0.04;
     s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
     s.height = 0.5 + lump * 0.09 + blister * 0.03 + fine * 0.012;
-    s.rough = 0.18 + fine * 0.22 + (1 - lump) * 0.18;
+    s.rough = 0.12 + fine * 0.18 + (1 - lump) * 0.14;
   },
 
   /**
@@ -2873,7 +2876,7 @@ const RECIPES = {
   // The monsters (tools/blender/monsters.py): shell, living mud and reptile
   // skin, all coloured per creature in its vertices like the fur.
   chitin: { surface: 'chitin', scale: 0.35, normalScale: 0.35, env: 0.9, wet: 0, detail: 0, moving: true },
-  ooze: { surface: 'ooze', scale: 0.6, normalScale: 0.5, env: 1.1, wet: 0, detail: 0, moving: true },
+  ooze: { surface: 'ooze', scale: 0.6, normalScale: 0.5, env: 1.1, wet: 0, detail: 0, moving: true, glisten: true },
   hide: { surface: 'hide', scale: 0.25, normalScale: 0.4, env: 0.5, wet: 0, detail: 0, moving: true },
   // A troll's skin, one of the surfaces a person is made of (dress.js).
   warthide: { surface: 'warthide', scale: 0.3, normalScale: 0.6, env: 0.45, wet: 0, detail: 0, moving: true },
@@ -4066,6 +4069,14 @@ function decorate(material, recipe, macro, grain) {
       .replace('#include <lights_fragment_end>', /* glsl */`
         #ifdef DIKU_BURIED
           ${BURIED_AMBIENT}
+          #ifdef DIKU_GLISTEN
+            // Something wet in a lightless room shows what little light
+            // there is as a sheen along its upper curves; the fixed dark
+            // it otherwise mirrors from every side left a mud creature
+            // with no highlight at all unless a torch stood beside it.
+            float dikuUpR = dot( reflect( - geometryViewDir, geometryNormal ), viewMatrix[ 1 ].xyz );
+            radiance *= 0.5 + 10.0 * smoothstep( 0.35, 0.95, dikuUpR );
+          #endif
         #else
           #ifdef DIKU_LIFT
             // The burnt district's sky light, by the hour: see setShadeLift.
@@ -4256,13 +4267,14 @@ function decorate(material, recipe, macro, grain) {
   if (recipe.cutout) material.defines = { ...material.defines, DIKU_FOLIAGE: 1 };
   if (recipe.triplanar) material.defines = { ...material.defines, DIKU_TRIPLANAR: 1 };
   if (recipe.moss) material.defines = { ...material.defines, DIKU_MOSS: 1 };
+  if (recipe.glisten) material.defines = { ...material.defines, DIKU_GLISTEN: 1 };
   // Our injected source differs from stock, so it needs a key of its own or
   // three will hand us a program compiled for an undecorated material.
   material.customProgramCacheKey = () => `diku|${material.defines?.DIKU_DETAIL ? 1 : 0}`
     + `|${material.defines?.DIKU_WET ? 1 : 0}|${material.defines?.DIKU_BURIED ? 1 : 0}`
     + `|${material.defines?.DIKU_MOVING ? 1 : 0}|${material.defines?.DIKU_LIFT ? 1 : 0}`
     + `|${material.defines?.DIKU_FOLIAGE ? 1 : 0}|${material.defines?.DIKU_TRIPLANAR ? 1 : 0}`
-    + `|${material.defines?.DIKU_MOSS ? 1 : 0}`;
+    + `|${material.defines?.DIKU_MOSS ? 1 : 0}|${material.defines?.DIKU_GLISTEN ? 1 : 0}`;
 }
 
 /**
