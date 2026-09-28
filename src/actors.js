@@ -910,6 +910,7 @@ function buildPerson(library, who, proto, instance) {
     group, headGroup: null, height: heightOf(asset, who.file, who.arch) * scale, scale, mixer, actions, clips,
     stride: { walk: facts.walk * scale, run: facts.run * scale },
     hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
+    indoor: mesh.material.dikuIndoor,
   };
 }
 
@@ -3421,6 +3422,23 @@ export function populate(world, layout, built, options = {}) {
     }
   }
 
+  /**
+   * Whether each person is indoors, for the person material's light (see
+   * dress.js): the room under their feet, looked up every eighth frame, and
+   * eased over half a second so nobody switches on in a doorway.
+   */
+  let indoorTick = 0;
+  function easeIndoor(fig, i, dt) {
+    if (fig.indoorWant === undefined || (indoorTick + i) % 8 === 0) {
+      const p = fig.object.position;
+      const info = built.rooms.get(nav.roomAt(p.x, p.y, p.z));
+      fig.indoorWant = info && !info.outdoor ? 1 : 0;
+    }
+    if (dt === Infinity) { fig.indoor.value = fig.indoorWant; return; }
+    const u = fig.indoor;
+    u.value += THREE.MathUtils.clamp(fig.indoorWant - u.value, -dt * 2, dt * 2);
+  }
+
   function update(dt, time, camera) {
     if (flameSystem) flameSystem.material.uniforms.time.value = time;
     if (furnished.length) cullFurniture(camera);
@@ -3430,8 +3448,11 @@ export function populate(world, layout, built, options = {}) {
     // a person is a few pixels tall and not worth a skinning pass, so there
     // it only moves the position along.
     motion.update(dt, camera);
-    for (const fig of figures) {
+    indoorTick++;
+    for (let i = 0; i < figures.length; i++) {
+      const fig = figures[i];
       if (!fig.object.visible) continue;
+      if (fig.indoor) easeIndoor(fig, i, dt);
       const dx = camera.position.x - fig.object.position.x;
       const dz = camera.position.z - fig.object.position.z;
       const distSq = dx * dx + dz * dz;
@@ -3515,6 +3536,7 @@ export function populate(world, layout, built, options = {}) {
   const nav = createNav({ layout, built, world });
   if (assets) nav.addInstances([built.group, group], assets, THREE);
   const motion = createMotion({ figures, nav, zones: built.zones || null, spots, furniture });
+  figures.forEach((fig, i) => { if (fig.indoor) easeIndoor(fig, i, Infinity); });
 
   /**
    * Play a clip on a mobile's body -- `target` is a figure, a game slot
