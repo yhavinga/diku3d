@@ -59,14 +59,16 @@ const FACE_UP = [
 
 /** Texels per cube face. A 3.2 m doorway five metres off is ~25 of them. */
 const RES = 64;
-/** Far enough to see out of the cell from any corner of it; nothing hit by then is a leak. */
-const REACH = 24;
+/** Far enough to see out of a cell and its neighbour from any corner; nothing hit by then is a leak. */
+const REACH = 40;
 /**
  * A hit this far outside the cell's box still counts as the cell's own wall:
  * the kit walls stand 5.35 m out with buttresses proud of them, and the rock
  * of a cave is lumpy.
  */
 const SLACK = 0.35;
+/** How deep an aperture's box reaches in from the cell's face, at least. */
+const DEPTH_OF_APERTURE = 2.5;
 /** Grown on every side of a measured aperture. */
 const MARGIN = 0.3;
 /** How far into the cell's measured inside the samples are spread. */
@@ -107,7 +109,7 @@ const DIST_FRAG = `
 
 const cellKey = (level, x, z) => `${level}:${x},${z}`;
 
-export function createVisibility({ renderer, scene, camera, world, sun, zones = null }) {
+export function createVisibility({ renderer, scene, camera, world, sun, zones = null, sky = [] }) {
   const cells = new Map();
   const queue = [];
   const target = new THREE.WebGLRenderTarget(RES * 6, RES, {
@@ -145,56 +147,131 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     return true;
   }
 
-  /** Render the world's opaque geometry as distances from `eye`, six faces into one target. */
-  function renderCube(eye) {
-    const saved = [];
-    // The zones hide half the world from wherever the eye happens to be; a
-    // measurement must not depend on that, or a cell measured from underground
-    // would be cached with its whole surface missing.
-    world.traverse((o) => {
-      saved.push(o, o.visible);
-      if (o.isMesh || o.isPoints || o.isLine || o.isSprite) o.visible = o.visible && occluder(o);
-      else if (o.parent === world || o.parent?.name === 'underground' || o.name === 'district') o.visible = o.name !== 'placements';
-    });
-    const hidden = [];
-    for (const child of scene.children) {
-      if (child !== world && child.visible) { hidden.push(child); child.visible = false; }
-    }
-    const background = scene.background; const fog = scene.fog; const override = scene.overrideMaterial;
-    scene.background = null; scene.fog = null; scene.overrideMaterial = distance;
+  /**
+   * What a cell is measured against: the world's opaque geometry in the cell
+   * and its neighbours -- a hit further off is a leak either way -- as a small
+   * scene of its own. Drawing the real world from a probe walked every object
+   * in it six times a cube and drew every rock in the region and the sewer
+   * three levels down; this is a few dozen stand-ins sharing the real
+   * buffers. A region's batch becomes one plain mesh per piece, drawing its
+   * own range of the batch's index.
+   */
+  const pieceGeometry = new WeakMap(); // batch -> geometryId -> geometry; kept, never disposed:
+  // disposing a geometry frees its attributes, and these share the batch's.
+  function proxiesFor(cell) {
+    const region = cell.box.clone();
+    region.min.x -= CELL; region.max.x += CELL; region.min.z -= CELL; region.max.z += CELL;
+    region.min.y -= LEVEL_H; region.max.y += LEVEL_H;
+    region.expandByScalar(SLACK);
+    const within = (x, y, z, r) => x + r > region.min.x && x - r < region.max.x && y + r > region.min.y
+      && y - r < region.max.y && z + r > region.min.z && z - r < region.max.z;
+    const group = new THREE.Scene();
+    group.matrixWorldAutoUpdate = false;
+    const owned = [];
+    const m = new THREE.Matrix4();
+    const put = (mesh, matrix) => {
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.copy(matrix);
+      mesh.matrixWorld.copy(matrix);
+      group.add(mesh);
+    };
+    const walk = (o) => {
+      // The zones hide half the world from wherever the eye happens to be; a
+      // measurement must not depend on that, or a cell measured from
+      // underground would be cached with its whole surface missing.
+      const zone = o.parent === world || o.parent?.name === 'underground' || o.name === 'district';
+      if (o.name === 'placements' || (!o.visible && !zone)) return;
+      if (o.isMesh && occluder(o)) {
+        if (o.isInstancedMesh) {
+          const entry = instancedBy.get(o);
+          const keep = [];
+          if (entry) {
+            for (const bucket of entry.buckets) {
+              const c = bucket.sphere.center;
+              if (!within(c.x, c.y, c.z, bucket.sphere.radius)) continue;
+              for (const i of bucket.ids) {
+                const q = i * 4;
+                if (within(entry.spheres[q], entry.spheres[q + 1], entry.spheres[q + 2], entry.spheres[q + 3])) keep.push(i);
+              }
+            }
+            keep.sort((x, y) => x - y);
+          } else {
+            if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+            for (let i = 0; i < o.count; i++) {
+              o.getMatrixAt(i, m);
+              _sphere.copy(o.geometry.boundingSphere).applyMatrix4(m.premultiply(o.matrixWorld));
+              if (within(_sphere.center.x, _sphere.center.y, _sphere.center.z, _sphere.radius)) keep.push(i);
+            }
+          }
+          if (keep.length) {
+            const proxy = new THREE.InstancedMesh(o.geometry, distance, keep.length);
+            const source = entry ? entry.source : o.instanceMatrix.array;
+            for (let k = 0; k < keep.length; k++) proxy.instanceMatrix.array.set(source.subarray(keep[k] * 16, keep[k] * 16 + 16), k * 16);
+            proxy.computeBoundingSphere();
+            put(proxy, o.matrixWorld);
+            owned.push(proxy);
+          }
+        } else if (o.isBatchedMesh) {
+          const spheres = o.pieceSpheres();
+          let byId = pieceGeometry.get(o);
+          if (!byId) { byId = []; pieceGeometry.set(o, byId); }
+          for (let i = 0; i < o._instanceInfo.length; i++) {
+            const info = o._instanceInfo[i];
+            const q = i * 4;
+            if (!info.active || !info.visible || !within(spheres[q], spheres[q + 1], spheres[q + 2], spheres[q + 3])) continue;
+            let geometry = byId[info.geometryIndex];
+            if (!geometry) {
+              const range = o._geometryInfo[info.geometryIndex];
+              geometry = new THREE.BufferGeometry();
+              geometry.setAttribute('position', o.geometry.attributes.position);
+              geometry.setIndex(o.geometry.index);
+              geometry.setDrawRange(range.start, range.count);
+              geometry.boundingSphere = o.getBoundingSphereAt(info.geometryIndex, new THREE.Sphere());
+              byId[info.geometryIndex] = geometry;
+            }
+            o.getMatrixAt(i, m);
+            put(new THREE.Mesh(geometry, distance), m.premultiply(o.matrixWorld));
+          }
+        } else if (objectWithin(o, within)) {
+          put(new THREE.Mesh(o.geometry, distance), o.matrixWorld);
+        }
+      }
+      for (const child of o.children) walk(child);
+    };
+    walk(world);
+    return { scene: group, owned };
+  }
+
+  /** Render one face of the cube round `eye` into its slot of the target. */
+  function renderFace(scene, eye, f) {
     const previous = renderer.getRenderTarget();
-    const clear = renderer.getClearColor(new THREE.Color()); const alpha = renderer.getClearAlpha();
+    const clear = renderer.getClearColor(_clear); const alpha = renderer.getClearAlpha();
     const autoClear = renderer.autoClear;
     const shadows = renderer.shadowMap.needsUpdate;
     renderer.shadowMap.needsUpdate = false;
     renderer.autoClear = false;
-    renderer.setClearColor(new THREE.Color(1e4, 0, 0), 1);
+    renderer.setClearColor(FAR_AWAY, 1);
     distance.uniforms.eye.value.copy(eye);
     probe.position.copy(eye);
+    probe.up.copy(FACE_UP[f]);
+    probe.lookAt(eye.x + FACE_DIR[f].x, eye.y + FACE_DIR[f].y, eye.z + FACE_DIR[f].z);
+    probe.updateMatrixWorld();
     target.scissorTest = true;
-    const faces = [];
-    for (let f = 0; f < 6; f++) {
-      probe.up.copy(FACE_UP[f]);
-      probe.lookAt(eye.x + FACE_DIR[f].x, eye.y + FACE_DIR[f].y, eye.z + FACE_DIR[f].z);
-      probe.updateMatrixWorld();
-      target.viewport.set(f * RES, 0, RES, RES);
-      target.scissor.set(f * RES, 0, RES, RES);
-      renderer.setRenderTarget(target);
-      renderer.clear(true, true, false);
-      renderer.render(scene, probe);
-      faces.push(probe.matrixWorld.clone());
-    }
+    target.viewport.set(f * RES, 0, RES, RES);
+    target.scissor.set(f * RES, 0, RES, RES);
+    renderer.setRenderTarget(target);
+    renderer.clear(true, true, false);
+    renderer.render(scene, probe);
     target.scissorTest = false;
-    renderer.readRenderTargetPixels(target, 0, 0, RES * 6, RES, readback);
     renderer.setRenderTarget(previous);
     renderer.setClearColor(clear, alpha);
     renderer.autoClear = autoClear;
     renderer.shadowMap.needsUpdate = shadows;
-    scene.background = background; scene.fog = fog; scene.overrideMaterial = override;
-    for (const child of hidden) child.visible = true;
-    for (let i = 0; i < saved.length; i += 2) saved[i].visible = saved[i + 1];
-    return faces;
+    return probe.matrixWorld.clone();
   }
+  const _clear = new THREE.Color();
+  // Written as-is into a float target: nothing hit means "further than REACH".
+  const FAR_AWAY = new THREE.Color(1e4, 0, 0);
 
   const _d = new THREE.Vector3();
   const _p = new THREE.Vector3();
@@ -259,23 +336,32 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
   function measureInside(cell, faces, centre) {
     const reach = [[], [], [], [], [], []];
     const grown = cell.box.clone().expandByScalar(SLACK);
+    // What the centre sees, kept: the eye counts as inside only where the
+    // centre could see it, which a pillar or a partition can prevent.
+    const seen = new Uint16Array(6 * RES * RES);
+    let k = 0;
     forEachRay(faces, (d, t) => {
+      seen[k++] = Math.min(65535, Math.round(t * 100));
       if (t >= exitOf(centre, d, grown)) return;
       let f = 0; let best = 0;
-      for (let k = 0; k < 6; k++) {
-        const v = d.getComponent(FACE_AXIS[k]) * FACE_SIGN[k];
-        if (v > best) { best = v; f = k; }
+      for (let q = 0; q < 6; q++) {
+        const v = d.getComponent(FACE_AXIS[q]) * FACE_SIGN[q];
+        if (v > best) { best = v; f = q; }
       }
-      if (best < 0.8) return;
+      if (best < 0.9) return;
       reach[f].push(t * best);
     });
+    cell.seen = seen;
+    // The walls, as the middle of what the rays near each axis hit: a low
+    // percentile finds the bar counter instead, and the eye standing at the
+    // bar would count as outside the inn.
     const extent = reach.map((list, f) => {
       // Never out to the cell's edge: between a room's wall and its cell edge
       // is outside the room, where none of its apertures hold.
       const limit = FACE_AXIS[f] === 1 ? (FACE_SIGN[f] > 0 ? LEVEL_H - BELOW - 1.72 : 1.72) : HALF - 0.7;
       if (list.length < 40) return limit;
       list.sort((a, b) => a - b);
-      return Math.min(limit, list[Math.floor(list.length * 0.1)]);
+      return Math.min(limit, list[Math.floor(list.length * 0.5)]);
     });
     const inside = new THREE.Box3(
       new THREE.Vector3(centre.x - extent[1], centre.y - extent[3], centre.z - extent[5]),
@@ -301,7 +387,9 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       const out = exitOf(eye, d, grown);
       if (t < out) return;
       const exit = exitOf(eye, d, cell.box);
-      const from = cell.inside.containsPoint(eye) ? Math.min(exitOf(eye, d, cell.inside), exit) : 0;
+      // From the inner face at the latest, and never less than a slab deep:
+      // a cave's mouth is not a hole in a plane, and the box has to hold it.
+      const from = Math.max(0, Math.min(exitOf(eye, d, cell.inside), exit - DEPTH_OF_APERTURE));
       const f = faceOf(eye, d, cell.box, exit);
       let box = cell.apertures[f];
       if (!box) { box = new THREE.Box3(); cell.apertures[f] = box; }
@@ -380,22 +468,33 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     state.stats.measured++;
   }
 
-  /** One cube's worth of measuring. Returns false when there is nothing left to do. */
+  /**
+   * One face's worth of measuring. Returns false when there is nothing left
+   * to do. A cell is 11 cubes of 6 faces, each face a small draw; spread over
+   * frames by `work`, which keeps to a budget.
+   */
   function step() {
     while (queue.length && queue[0].done) queue.shift();
     const cell = queue[0];
     if (!cell) return false;
-    if (!cell.inside) {
-      const centre = new THREE.Vector3(cell.x * CELL, cell.base + 1.72, cell.z * CELL);
-      const faces = renderCube(centre);
-      measureInside(cell, faces, centre);
-      gatherLeaks(cell, faces, centre);
-      cell.next = 1;
+    if (!cell.job) {
+      if (!indexed) { indexInstances(); indexed = true; }
+      cell.job = { ...proxiesFor(cell), sample: 0, face: 0, faces: [] };
+      cell.centre = new THREE.Vector3(cell.x * CELL, cell.base + 1.72, cell.z * CELL);
       return true;
     }
-    const eye = cell.samples[cell.next++];
-    gatherLeaks(cell, renderCube(eye), eye);
-    if (cell.next >= cell.samples.length) finishCell(cell);
+    const job = cell.job;
+    const eye = job.sample === 0 ? cell.centre : cell.samples[job.sample];
+    job.faces[job.face] = renderFace(job.scene, eye, job.face);
+    if (++job.face < 6) return true;
+    renderer.readRenderTargetPixels(target, 0, 0, RES * 6, RES, readback);
+    if (job.sample === 0) measureInside(cell, job.faces, eye);
+    gatherLeaks(cell, job.faces, eye);
+    job.face = 0;
+    if (++job.sample < cell.samples.length) return true;
+    finishCell(cell);
+    for (const proxy of job.owned) proxy.dispose();
+    cell.job = null;
     return true;
   }
 
@@ -408,6 +507,44 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     }
     if (enqueue && !cell.done && !queue.includes(cell)) queue.push(cell);
     return cell;
+  }
+
+  /** Rotation into each cube face's camera, for looking up what the centre saw. */
+  const FACE_INV = FACE_DIR.map((dir, f) => {
+    const c = new THREE.PerspectiveCamera(90, 1, 0.05, 1);
+    c.up.copy(FACE_UP[f]);
+    c.lookAt(dir);
+    c.updateMatrixWorld();
+    return c.matrixWorld.clone().invert();
+  });
+
+  /**
+   * Is the eye in the part of the cell its apertures hold for: inside the
+   * walls, not in a doorway, and in plain sight of the centre?
+   */
+  function eyeInside(cell, p) {
+    if (!cell.done || cell.open || !cell.inside.containsPoint(p)) return false;
+    for (const box of cell.apertures) if (box && box.containsPoint(p)) return false;
+    const cx = cell.x * CELL; const cy = cell.base + 1.72; const cz = cell.z * CELL;
+    _v.set(p.x - cx, p.y - cy, p.z - cz);
+    const length = _v.length();
+    if (length < 0.3) return true;
+    let f = 0; let best = -1;
+    for (let q = 0; q < 6; q++) {
+      const v = _v.getComponent(FACE_AXIS[q]) * FACE_SIGN[q];
+      if (v > best) { best = v; f = q; }
+    }
+    _v.transformDirection(FACE_INV[f]);
+    const i = Math.floor(((_v.x / -_v.z) + 1) / 2 * RES);
+    const j = Math.floor(((_v.y / -_v.z) + 1) / 2 * RES);
+    // The nearest texels round it too: one texel is 1.4 degrees.
+    for (let dj = -1; dj <= 1; dj++) {
+      for (let di = -1; di <= 1; di++) {
+        const ii = Math.min(RES - 1, Math.max(0, i + di)); const jj = Math.min(RES - 1, Math.max(0, j + dj));
+        if (cell.seen[f * RES * RES + jj * RES + ii] / 100 < length + 0.3) return false;
+      }
+    }
+    return true;
   }
 
   function locate(position) {
@@ -500,6 +637,13 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
   let farPlane = 900;
 
   const _sphere = new THREE.Sphere();
+  function objectWithin(o, test) {
+    const g = o.geometry;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    _sphere.copy(g.boundingSphere).applyMatrix4(o.matrixWorld);
+    return test(_sphere.center.x, _sphere.center.y, _sphere.center.z, _sphere.radius);
+  }
+
   function objectVisible(o) {
     const g = o.geometry;
     if (o.isSkinnedMesh) {
@@ -551,6 +695,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
 
   /** Static instanced meshes, indexed once: per-instance spheres in buckets of about a chunk. */
   const instanced = [];
+  const instancedBy = new Map();
   const BUCKET = 26;
   function indexInstances() {
     scene.traverse((o) => {
@@ -583,31 +728,32 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
         }
         list.push({ ids: Int32Array.from(b.list), sphere: box.getBoundingSphere(new THREE.Sphere()) });
       }
-      instanced.push({
+      const entry = {
         mesh: o, total: n, spheres, buckets: list,
         source: o.instanceMatrix.array.slice(),
         kept: new Int32Array(n), keptCount: n, full: true,
-      });
+      };
+      instanced.push(entry);
+      instancedBy.set(o, entry);
     });
   }
 
   const shadowFrustum = new THREE.Frustum();
   const _m = new THREE.Matrix4();
 
-  function compact(entry, shadow) {
+  const seenOrCast = (x, y, z, r) => sphereVisible(x, y, z, r)
+    || shadowFrustum.intersectsSphere(_sphere.set(_v.set(x, y, z), r));
+
+  /** Keep the instances `keep(x, y, z, r)` accepts, in their original order. */
+  function compact(entry, keep) {
     const { spheres, kept } = entry;
     let n = 0;
     for (const b of entry.buckets) {
       const s = b.sphere;
-      const seen = sphereVisible(s.center.x, s.center.y, s.center.z, s.radius);
-      const cast = shadow && shadowFrustum.intersectsSphere(s);
-      if (!seen && !cast) continue;
+      if (!keep(s.center.x, s.center.y, s.center.z, s.radius)) continue;
       for (const i of b.ids) {
         const o = i * 4;
-        if (sphereVisible(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])
-          || (cast && shadowFrustum.intersectsSphere(_sphere.set(_v.set(spheres[o], spheres[o + 1], spheres[o + 2]), spheres[o + 3])))) {
-          kept[n++] = i;
-        }
+        if (keep(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) kept[n++] = i;
       }
     }
     // Draw order is kept: the ids went in bucket by bucket, so sort them back.
@@ -691,10 +837,20 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     if (!indexed) { indexInstances(); indexed = true; }
     const shadow = renderer.shadowMap.needsUpdate;
     state.shadowFrame = shadow;
+    hiddenNow.length = 0;
+    // Underground, the sky is part of the surface the zones already hide: it
+    // only ever showed through hairline cracks in the vaults, as bright dots
+    // in a dark sewer. Not a cull -- the picture it changes is a defect -- so
+    // it holds with culling off too.
+    if (zones) {
+      zones.update(camera.position);
+      if (!zones.surface.visible) for (const o of sky) if (o.visible) hiddenNow.push(o);
+    }
     if (!state.enabled) {
       state.active = false;
       for (const entry of instanced) restoreInstances(entry);
       cullHook.test = null;
+      if (hiddenNow.length) hideAll();
       return;
     }
     camera.updateMatrixWorld();
@@ -707,7 +863,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     const at = locate(camera.position);
     const cell = cellAt(at.level, at.x, at.z, true);
     state.cell = cell;
-    state.active = cell.done && !cell.open && cell.inside.containsPoint(camera.position);
+    state.active = eyeInside(cell, camera.position);
     state.windows = state.active ? windowsFor(cell) : [];
     state.stamp++;
 
@@ -719,13 +875,13 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     }
     for (const entry of instanced) {
       if (!entry.mesh.visible) continue;
-      compact(entry, shadow);
+      if (state.debugNoCompact) { restoreInstances(entry); continue; }
+      compact(entry, shadow ? seenOrCast : sphereVisible);
     }
 
     // Whole objects. A region's batch or instanced mesh with nothing left in
     // view is hidden whatever the walls, since three would still bind it and
     // issue an empty draw; anything else only where there are walls.
-    hiddenNow.length = 0;
     candidates.length = 0;
     collectCullable(scene, candidates);
     for (const o of candidates) {
@@ -738,6 +894,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       }
     }
     state.stats.culled = hiddenNow.length;
+    if (state.debugNoHide) hiddenNow.length = 0;
     if (hiddenNow.length) hideAll();
 
     cullHook.camera = camera;
@@ -752,16 +909,25 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     cullHook.test = null;
   }
 
-  /** Measure a little, between frames. */
-  function work(budget = 1) {
-    for (let i = 0; i < budget; i++) if (!step()) break;
-    // The neighbours next, so a cell is ready by the time the eye walks in.
-    if (!queue.length && state.cell) {
+  /**
+   * Measure a little, between frames: faces until `budget` ms are spent. A
+   * face costs about a millisecond, so a new cell is ready within a second or
+   * so of walking into it, and until then it is simply not culled.
+   */
+  function work(budget = 1.5) {
+    const start = performance.now();
+    while (performance.now() - start < budget) {
+      if (step()) continue;
+      // The neighbours next, so a cell is ready by the time the eye walks in.
       const c = state.cell;
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const n = cellAt(c.level, c.x + dx, c.z + dz, false);
-        if (!n.done) { queue.push(n); break; }
+      if (!c) break;
+      let queued = false;
+      for (let f = 0; f < 6 && !queued; f++) {
+        if (!c.done || !c.apertures[f]) continue;
+        const n = neighbour(c, f);
+        if (!n.done) { queue.push(n); queued = true; }
       }
+      if (!queued) break;
     }
   }
 
@@ -771,7 +937,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     const cell = cellAt(at.level, at.x, at.z, true);
     for (let round = 0; round < 64; round++) {
       while (step());
-      if (cell.open || !cell.inside.containsPoint(camera.position)) break;
+      if (!eyeInside(cell, camera.position)) break;
       camera.updateMatrixWorld();
       view.copy(camera.matrixWorld).invert();
       proj = camera.projectionMatrix.elements;

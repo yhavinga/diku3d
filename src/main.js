@@ -507,7 +507,10 @@ async function boot() {
   // Every draw of the frame goes through here, the console's and the probes'
   // included, so what is culled is decided in one place: see cull.js.
   // `?cull=off` draws everything, for A/B.
-  const visibility = createVisibility({ renderer, scene, camera, world: built.group, sun });
+  const visibility = createVisibility({
+    renderer, scene, camera, world: built.group, sun, zones: built.zones,
+    sky: [sky, stars, ...built.group.children.filter((o) => o.name.startsWith('horizon-'))],
+  });
   visibility.state.enabled = params.get('cull') !== 'off';
   {
     const render = composer.render.bind(composer);
