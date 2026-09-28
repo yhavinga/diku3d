@@ -77,7 +77,7 @@ const SPREAD = 0.8;
 const DEPTH = 4;
 const MAX_WINDOWS = 32;
 /** Escaping rays kept per face to check the next cell against; past it, the face is not followed. */
-const ESCAPES = 20000;
+const ESCAPES = 6000;
 /** Past this share of its faces open, a cell is open ground and not worth the arithmetic. */
 const OPEN_SHARE = 0.55;
 
@@ -324,7 +324,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       inside: null, apertures: null, open: false, samples: null, done: false, next: 0,
       // Rays that left through each face and got clear of the next cell too,
       // kept to check that cell's apertures against: see `sealedInto`.
-      escapes: [[], [], [], [], [], []], links: [], overflow: [false, false, false, false, false, false],
+      escapes: [null, null, null, null, null, null], links: [], overflow: [false, false, false, false, false, false],
     };
   }
 
@@ -351,7 +351,18 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       if (best < 0.9) return;
       reach[f].push(t * best);
     });
-    cell.seen = seen;
+    // Kept at half resolution, the nearest hit of each 2x2: a thousand cells
+    // at full size is 50 MB, and the nearer hit only ever says "outside" more.
+    const half = RES / 2;
+    cell.seen = new Uint16Array(6 * half * half);
+    for (let f = 0; f < 6; f++) {
+      for (let j = 0; j < half; j++) {
+        for (let i = 0; i < half; i++) {
+          const at = f * RES * RES + j * 2 * RES + i * 2;
+          cell.seen[f * half * half + j * half + i] = Math.min(seen[at], seen[at + 1], seen[at + RES], seen[at + RES + 1]);
+        }
+      }
+    }
     // The walls, as the middle of what the rays near each axis hit: a low
     // percentile finds the bar counter instead, and the eye standing at the
     // bar would count as outside the inn.
@@ -396,9 +407,16 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       box.expandByPoint(_p.copy(eye).addScaledVector(d, from));
       box.expandByPoint(_p.copy(eye).addScaledVector(d, exit));
       if (t < exitOf(eye, d, pairBox(cell, f).expandByScalar(SLACK))) return;
-      const list = cell.escapes[f];
-      if (list.length >= ESCAPES * 6) { cell.overflow[f] = true; return; }
-      list.push(eye.x, eye.y, eye.z, d.x, d.y, d.z);
+      if (cell.overflow[f]) return;
+      let list = cell.escapes[f];
+      if (!list || list.n * 6 >= list.data.length) {
+        if (list && list.data.length >= ESCAPES * 6) { cell.overflow[f] = true; cell.escapes[f] = null; return; }
+        const data = new Float32Array(Math.min(ESCAPES, list ? list.data.length / 3 : 256) * 6);
+        if (list) data.set(list.data);
+        list = cell.escapes[f] = { data, n: list ? list.n : 0 };
+      }
+      list.data.set([eye.x, eye.y, eye.z, d.x, d.y, d.z], list.n * 6);
+      list.n++;
     });
   }
 
@@ -431,10 +449,11 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     const next = neighbour(cell, f, true);
     if (!next.done) return false;
     let sealed = !next.open && !cell.overflow[f];
-    const list = cell.escapes[f];
-    for (let i = 0; i < list.length && sealed; i += 6) {
-      _o.set(list[i], list[i + 1], list[i + 2]);
-      _ray.set(_o, _d.set(list[i + 3], list[i + 4], list[i + 5]));
+    const list = cell.escapes[f] || { data: null, n: 0 };
+    for (let k = 0; k < list.n && sealed; k++) {
+      const i = k * 6; const a = list.data;
+      _o.set(a[i], a[i + 1], a[i + 2]);
+      _ray.set(_o, _d.set(a[i + 3], a[i + 4], a[i + 5]));
       let through = false;
       for (let g = 0; g < 6 && !through; g++) {
         if (g === (f ^ 1) || !next.apertures[g]) continue;
@@ -537,13 +556,14 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
       if (v > best) { best = v; f = q; }
     }
     _v.transformDirection(FACE_INV[f]);
-    const i = Math.floor(((_v.x / -_v.z) + 1) / 2 * RES);
-    const j = Math.floor(((_v.y / -_v.z) + 1) / 2 * RES);
-    // The nearest texels round it too: one texel is 1.4 degrees.
+    const half = RES / 2;
+    const i = Math.floor(((_v.x / -_v.z) + 1) / 2 * half);
+    const j = Math.floor(((_v.y / -_v.z) + 1) / 2 * half);
+    // The nearest texels round it too: one texel is 2.8 degrees.
     for (let dj = -1; dj <= 1; dj++) {
       for (let di = -1; di <= 1; di++) {
-        const ii = Math.min(RES - 1, Math.max(0, i + di)); const jj = Math.min(RES - 1, Math.max(0, j + dj));
-        if (cell.seen[f * RES * RES + jj * RES + ii] / 100 < length + 0.3) return false;
+        const ii = Math.min(half - 1, Math.max(0, i + di)); const jj = Math.min(half - 1, Math.max(0, j + dj));
+        if (cell.seen[f * half * half + jj * half + ii] / 100 < length + 0.3) return false;
       }
     }
     return true;
