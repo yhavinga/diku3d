@@ -532,6 +532,44 @@ export function createGameUi(game) {
     return y;
   }
 
+  /**
+   * Out from under the HUD. A blow's number is put beside the body or over
+   * the health bar and stepped up clear of the others, and both of those
+   * walked it onto the minimap: a MISS off a guard's shoulder at the right
+   * of the frame, a -31 climbing out of the vitals. The box it will sweep
+   * -- its rise and drift included -- is moved the shortest way off every
+   * panel that is showing, and kept on the screen.
+   */
+  const PANELS = ['#room-block', '#desc-block', '#minimap-block', '#g-vitals', '#g-log', '#g-spells', '#g-gates', '#g-skills'];
+  function offPanels(node, x, y, side, rise, drift) {
+    const w = node.offsetWidth; const h = node.offsetHeight;
+    const W = window.innerWidth; const H = window.innerHeight;
+    const rects = [];
+    for (const sel of PANELS) {
+      const e = document.querySelector(sel);
+      if (!e) continue;
+      const cs = getComputedStyle(e);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.2) continue;
+      const r = e.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) rects.push(r);
+    }
+    for (let pass = 0; pass < 4; pass++) {
+      const left = (side > 0 ? x : side < 0 ? x - w : x - w / 2) - Math.abs(drift) - 6;
+      const right = left + w + Math.abs(drift) * 2 + 12;
+      const top = y - h / 2 - rise - 6; const bottom = y + h / 2 + 6;
+      const r = rects.find((o) => o.left < right && o.right > left && o.top < bottom && o.bottom > top);
+      if (!r) break;
+      const moves = [
+        { dx: r.left - right, dy: 0 }, { dx: r.right - left, dy: 0 },
+        { dx: 0, dy: r.top - bottom }, { dx: 0, dy: r.bottom - top },
+      ].filter((m) => left + m.dx >= 0 && right + m.dx <= W && top + m.dy >= 0 && bottom + m.dy <= H);
+      if (!moves.length) break;
+      moves.sort((a, b) => Math.abs(a.dx) + Math.abs(a.dy) - Math.abs(b.dx) - Math.abs(b.dy));
+      x += moves[0].dx; y += moves[0].dy;
+    }
+    return { x, y };
+  }
+
   /** Experience, gold: a note that rises over the crosshair and goes. */
   function float(text, colour) {
     const node = el('span', 'note', text);
@@ -627,10 +665,12 @@ export function createGameUi(game) {
     node.style.top = `${y.toFixed(1)}px`;
     floats.appendChild(node);
     y = clearOf(node, x, y, side);
-    node.style.top = `${y.toFixed(1)}px`;
     const ax = side > 0 ? '0%' : '-100%';
     const drift = side * (10 + Math.random() * 8);
     const rise = onYou ? 34 : 58;
+    ({ x, y } = offPanels(node, x, y, side, rise, drift));
+    node.style.left = `${x.toFixed(1)}px`;
+    node.style.top = `${y.toFixed(1)}px`;
     const frames = crit
       ? [
         { transform: `translate(${ax}, -50%) scale(1.75)`, opacity: 0 },

@@ -1323,13 +1323,23 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
         const d = Math.hypot(dx, dz);
         m.fighting = d < 4.5;
         m.faceYaw = Math.atan2(dx, dz);
-        if (order.kind === 'face' || d <= (order.stop ?? CLOSE) + 0.15) { m.path = null; m.want = 0; return; }
+        // Crowded inside the standoff -- you walked up to them, or they were
+        // already that close when it started -- a fighter gives ground, a
+        // half step back at a time, still facing you. Without it a guard
+        // stayed wherever the fight found him: 1.1 m from your eye, measured,
+        // with his shield filling the frame.
+        const stop = order.stop ?? CLOSE;
+        if (m.fighting && order.kind === 'chase' && d < stop - 0.3 && !m.step && (fig.actions?.walk || fig.legs)) {
+          m.path = null; m.want = 0;
+          m.step = { t: 0, dur: 0.55, along: 0, side: 0, back: Math.min(0.55, stop - d), dx: -dx / d, dz: -dz / d };
+          return;
+        }
+        if (order.kind === 'face' || d <= stop + 0.15) { m.path = null; m.want = 0; return; }
         m.want = d > 4 ? fig.runPace : fig.pace * 1.25;
         m.repath -= dt;
         if (m.repath <= 0 || !m.path) {
           m.repath = 0.35;
           // Stop short of them, on the near side.
-          const stop = order.stop ?? CLOSE;
           const goal = { x: target.x - (dx / d) * stop, z: target.z - (dz / d) * stop };
           if (nav.clearLine(fig.level, fig.at.x, fig.at.z, goal.x, goal.z)) {
             m.path = [{ x: goal.x, y: fig.at.y, z: goal.z }]; m.pi = 0;
@@ -2021,6 +2031,11 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       const yaw = fig.object.rotation.y;
       const v = (m.step.side / m.step.dur) * dt;
       const nx = fig.at.x + Math.cos(yaw) * v; const nz = fig.at.z - Math.sin(yaw) * v;
+      if (nav.sample(nx, nz, fig.level)) { fig.at.x = nx; fig.at.z = nz; }
+    }
+    if (m.step && m.step.back) {
+      const v = (m.step.back / m.step.dur) * dt;
+      const nx = fig.at.x + m.step.dx * v; const nz = fig.at.z + m.step.dz * v;
       if (nav.sample(nx, nz, fig.level)) { fig.at.x = nx; fig.at.z = nz; }
     }
     if (m.overlay || m.pending || m.lunge || m.step || m.sway || m.recoil || m.speed > 0.05) return;

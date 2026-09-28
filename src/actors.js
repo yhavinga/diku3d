@@ -642,6 +642,7 @@ function carriedClip(asset, name, carry) {
   const set = clipsOf(asset);
   const clip = set.base.get(name);
   if (!clip || (!carry.right && !carry.left)) return clip;
+  if (name === 'fight') return guardClip(set, clip, carry);
   if (!['idle', 'idle2', 'walk', 'run'].includes(name)) return clip;
   const key = `${name}|${carry.right}|${carry.left}`;
   if (set.carried.has(key)) return set.carried.get(key);
@@ -658,6 +659,38 @@ function carriedClip(asset, name, carry) {
   out.name = `${name}+${carry.right || ''}+${carry.left || ''}`;
   out.tracks = out.tracks.map((t) => (swap.has(t.name)
     ? new THREE.QuaternionKeyframeTrack(t.name, [0], swap.get(t.name)) : t));
+  set.carried.set(key, out);
+  return out;
+}
+
+/**
+ * The fighting guard with the shield opened out to the side. The clip holds
+ * it square across the chest, and from the player's eye two metres off that
+ * is a disc covering the whole torso and the sword arm -- judged as "the
+ * shield fills the frame, you can't see his body or his swings". Each key of
+ * the left arm is turned most of the way to the carry pose, so the guard
+ * still bobs; the `block` clip, which is when a shield should be in the way,
+ * is left alone.
+ */
+const GUARD_OPEN = 0.7;
+function guardClip(set, clip, carry) {
+  const src = carry.left && set.base.get(carry.left);
+  if (!src) return clip;
+  const key = `fight|${carry.left}`;
+  if (set.carried.has(key)) return set.carried.get(key);
+  const qa = new THREE.Quaternion(); const qb = new THREE.Quaternion();
+  const out = clip.clone();
+  out.name = `fight+${carry.left}`;
+  out.tracks = out.tracks.map((t) => {
+    const bone = t.name.replace(/\.quaternion$/, '');
+    if (bone === t.name || !LEFT_ARM.includes(bone)) return t;
+    const to = src.tracks.find((s) => s.name === t.name);
+    if (!to) return t;
+    qb.fromArray(to.values, 0);
+    const values = t.values.slice();
+    for (let i = 0; i < values.length; i += 4) qa.fromArray(values, i).slerp(qb, GUARD_OPEN).toArray(values, i);
+    return new THREE.QuaternionKeyframeTrack(t.name, t.times.slice(), values);
+  });
   set.carried.set(key, out);
   return out;
 }
