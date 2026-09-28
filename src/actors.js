@@ -2922,7 +2922,20 @@ export function populate(world, layout, built, options = {}) {
         // Behind it, facing the room: the keeper's place (motion.js puts the
         // room's shopkeeper there).
         {
-          const [kx, kz] = worldOf(shift, WALL_Z + 0.52);
+          // Not under a wall torch: the sconce is centred on the back wall
+          // as often as the counter is, and from the shop floor the flame
+          // grew out of the weaponsmith's head. Along the counter a step,
+          // away from it.
+          let along = shift;
+          const [tx, tz] = worldOf(shift, WALL_Z + 0.52);
+          const torch = flames.find((f) => !f.candle && !f.lamp && f.y > item.y + 1.2 && f.y < item.y + 3.4
+            && Math.hypot(f.x - tx, f.z - tz) < 0.9);
+          if (torch) {
+            const [px1, pz1] = worldOf(shift + 1, WALL_Z + 0.52);
+            const side = (px1 - tx) * (torch.x - tx) + (pz1 - tz) * (torch.z - tz) > 0 ? -1 : 1;
+            along = shift + side * 1.15;
+          }
+          const [kx, kz] = worldOf(along, WALL_Z + 0.52);
           spots.push({ kind: 'keeper', x: kx, y: item.y, z: kz, yaw: ry + Math.PI });
         }
         // Between the stools (at -1.575, -0.525, 0.525, 1.575), not on them:
