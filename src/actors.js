@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ITEM, SECTOR, ACT_AGGRESSIVE, ACT_SENTINEL } from './are.js';
 import { hash3, ROOM, CEIL, PIECES } from './build.js';
-import { InstanceBatch, FURNITURE_NAMES } from './assets.js';
+import { InstanceBatch, StaticBatches, FURNITURE_NAMES } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
 import { interiorGlass, markPanes } from './windows.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
@@ -2083,6 +2083,13 @@ function smokeTexture() {
 
 // ------------------------------------------------------------------- main ----
 
+/**
+ * How far off the rooms' furniture is drawn. It stands indoors: past a street
+ * and a doorway it is a few pixels through an opening, when it can be seen at
+ * all. Figures go at 46 m; a table is smaller than a person.
+ */
+const FURNITURE_REACH = 32;
+
 export function populate(world, layout, built, options = {}) {
   const group = new THREE.Group();
   group.name = 'actors';
@@ -2090,6 +2097,10 @@ export function populate(world, layout, built, options = {}) {
   // don't, so the library can be finished asset by asset.
   const assets = options.assets || null;
   const instances = assets ? new InstanceBatch(assets) : null;
+  // The rooms' furniture is batched apart from the street's props and never
+  // instanced (see the end of `populate`).
+  const furnishing = assets ? new InstanceBatch(assets) : null;
+  const furnished = [];
   const model = (names, seed = 0) => (assets ? assets.choose(names, seed) : null);
   const interactables = [];
   const updaters = [];
@@ -2312,7 +2323,9 @@ export function populate(world, layout, built, options = {}) {
     // The modelled furniture (tools/blender/furniture.py), or null where the
     // library has none -- `?assets=off` -- and the boxes below stand in.
     const furn = (names, seed = 0) => (instances ? model(names, seed) : null);
-    const place = (name, x, y, z, rotY) => instances.add(name, { x, y, z, rotY }, 'props');
+    const place = (name, x, y, z, rotY, scale = null) => furnishing.add(name, {
+      x, y, z, rotY, ...(scale && { scaleX: scale[0], scaleY: scale[1], scaleZ: scale[2] }),
+    }, 'furniture');
     const WALL_VEC = [[0, -1], [1, 0], [0, 1], [-1, 0]];
     for (const item of clutter) {
       const kinds = Math.floor(item.seed * 3);
@@ -2345,7 +2358,8 @@ export function populate(world, layout, built, options = {}) {
           // Indoors a wall bench is a high-backed settle, sat on exactly the
           // same way: furniture.py builds it to props.py's bench's seat.
           const settle = prop === 'bench' && item.indoor ? furn(['furn_settle']) : null;
-          instances.add(settle || prop, { x: px, y: item.y, z: pz, rotY: spin }, 'props');
+          if (settle) place(settle, px, item.y, pz, spin);
+          else instances.add(prop, { x: px, y: item.y, z: pz, rotY: spin }, 'props');
           // props.py's bench: 1.85 m long, seat at 0.45, its back to local -Z.
           if (prop === 'bench') {
             // props.py: seat 1.85 x 0.42 x 0.07 centred 0.45 up, back rails and
@@ -2682,7 +2696,7 @@ export function populate(world, layout, built, options = {}) {
       const toWorld = (a, b) => [wx + a * c + b * sn, wz - a * sn + b * c];
       const name = furn([spec.model]);
       if (name) {
-        place(name, wx, item.y, wz, ry);
+        place(name, wx, item.y, wz, ry, spec.scale);
       } else if (spec.h > 0) {
         const [bx, bz] = toWorld((spec.x0 + spec.x1) / 2, (spec.z0 + spec.z1) / 2);
         pushPart(props, G.box(spec.x1 - spec.x0, spec.h, spec.z1 - spec.z0), 0x6b4d31, at(bx, item.y + spec.h / 2, bz, 0, ry, 0));
@@ -3382,8 +3396,24 @@ export function populate(world, layout, built, options = {}) {
   }
 
   const _look = new THREE.Vector3();
+  let culledFrom = null;
+  function cullFurniture(camera) {
+    const p = camera.position;
+    if (culledFrom && culledFrom.distanceToSquared(p) < 1) return;
+    culledFrom = (culledFrom || new THREE.Vector3()).copy(p);
+    const r2 = FURNITURE_REACH * FURNITURE_REACH;
+    for (const { batch, at, on } of furnished) {
+      for (let i = 0; i < on.length; i++) {
+        const dx = at[i * 3] - p.x; const dy = at[i * 3 + 1] - p.y; const dz = at[i * 3 + 2] - p.z;
+        const want = dx * dx + dy * dy + dz * dz < r2 ? 1 : 0;
+        if (want !== on[i]) { on[i] = want; batch.setVisibleAt(i, !!want); }
+      }
+    }
+  }
+
   function update(dt, time, camera) {
     if (flameSystem) flameSystem.material.uniforms.time.value = time;
+    if (furnished.length) cullFurniture(camera);
     for (const material of waterMaterials) material.uniforms.time.value = time;
 
     // Where everyone walks, and what their bodies do: motion.js. Beyond 46 m
@@ -3444,6 +3474,30 @@ export function populate(world, layout, built, options = {}) {
       }
     }
     instances.finish(group);
+    // Instanced, a region's two dozen tankards or stools are one mesh with one
+    // bounding sphere round the whole town, never culled: the furniture cost
+    // ~120 draws in the Market Square, where none of it can be seen. In the
+    // multi-draw batches each piece is culled on its own, and a batch with
+    // nothing in view issues no draw at all.
+    const batches = new StaticBatches(Infinity);
+    furnishing.finish(group, batches, () => 'furniture');
+    batches.finish(() => group);
+    // Frustum culling is not occlusion culling: from the Market Square every
+    // shop to the north is in view, walls and all, and its furniture was
+    // drawn behind them -- 116 draws where none of it could be seen. Pieces
+    // past FURNITURE_REACH are switched off; a batch with nothing left on
+    // issues no draw.
+    const m = new THREE.Matrix4();
+    group.traverse((o) => {
+      if (!o.isBatchedMesh || !/^batch furniture/.test(o.name)) return;
+      const n = o._instanceInfo.length;
+      const at = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        o.getMatrixAt(i, m);
+        at[i * 3] = m.elements[12]; at[i * 3 + 1] = m.elements[13]; at[i * 3 + 2] = m.elements[14];
+      }
+      furnished.push({ batch: o, at, on: new Uint8Array(n).fill(1) });
+    });
   }
 
   // The walkable grid, once every prop is placed: modelled clutter has no

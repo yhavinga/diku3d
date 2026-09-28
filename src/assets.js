@@ -89,9 +89,9 @@ const TAG_MATERIALS = {
   // The furniture's small things (tools/blender/furniture.py): too small to
   // wear a baked surface, and read by colour and sheen. `soot` is the inside
   // of a fireplace -- dark, and never RGB 0.
-  // Half metal: fully metallic, a tankard mirrored the blue sky light and
-  // read as blue glass across the room.
-  pewter: { color: 0x8a8a84, roughness: 0.5, metalness: 0.45 },
+  // Half metal, and a dim reflection: fully metallic, a tankard mirrored the
+  // blue sky light and read as blue glass across the room.
+  pewter: { color: 0x8e8b82, roughness: 0.45, metalness: 0.15, envMapIntensity: 0.3 },
   brass: { color: 0xb08a4a, roughness: 0.38, metalness: 0.85 },
   bottle: { color: 0x2f4a32, roughness: 0.12, metalness: 0 },
   earthenware: { color: 0x9a6444, roughness: 0.66, metalness: 0 },

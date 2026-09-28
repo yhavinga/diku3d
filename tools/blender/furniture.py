@@ -123,6 +123,13 @@ def unwrap(obj):
     grained = bool(names) and names[0] in GRAINED
     g = _grain_axis([v.co for v in me.vertices]) if grained else None
     off = (rng.random() * 3.0, rng.random() * 3.0)
+    # One layer, one name. bmesh's verify() calls a layer it has to create
+    # 'Float2', and join() keeps only the layers the active part has by name:
+    # every timber, prism and loft joined onto a primitive box came out with
+    # all its UVs at (0, 0) -- one texel of wood, flat as paint.
+    if not me.uv_layers:
+        me.uv_layers.new(name="UVMap")
+    me.uv_layers[0].name = "UVMap"
     bm = bmesh.new()
     bm.from_mesh(me)
     uvl = bm.loops.layers.uv.verify()
@@ -935,30 +942,27 @@ def build_forge():
     # the hood stands on two iron posts off the forge's front corners
     for s in (-1, 1):
         p.append(beam((0.05, 0.05, hz0 - H), (s * 0.84, -1.06, (H + hz0) / 2), m="iron", cham=0.008, name="post"))
-    # tuyere: the bellows' pipe coming in low on the left
-    p.append(rod((-1.05, -0.55, 0.9), (-0.25, -0.55, H - 0.02), 0.035, verts=8, name="tuyere"))
-    # the bellows: two boards and the leather between, on a frame
-    bx = -1.45
+    # The great bellows: a pear of two boards with the leather gathered
+    # between them in folds, lying on a trestle with its nozzle into the
+    # tuyere, and the lever above it on a chain.
+    bx, by = -1.42, -0.55
     for s in (-1, 1):
-        for sy in (-1, 1):
-            p.append(beam((0.07, 0.07, 0.72), (bx + s * 0.3, -0.55 + sy * 0.28, 0.36), name="leg"))
-    p.append(beam((0.8, 0.07, 0.07), (bx, -0.55 - 0.28, 0.68), name="rail"))
-    p.append(beam((0.8, 0.07, 0.07), (bx, -0.55 + 0.28, 0.68), name="rail"))
-    outline = [(-0.55, 0.0), (-0.45, -0.24), (0.1, -0.3), (0.42, -0.08), (0.46, 0.0),
-               (0.42, 0.08), (0.1, 0.3), (-0.45, 0.24)]
-    for z in (0.74, 1.0):
-        b = prism([(y, x) for (x, y) in outline], z, z + 0.04, name="board", axis="z")
-        b.location = (bx, -0.55, 0)
-        p.append(b)
-    body = lib.loft([(0.78, 0.44, 0.24, 0, 0), (0.88, 0.47, 0.27, 0, 0), (0.99, 0.43, 0.23, 0, 0)],
-                    sides=10, name="bag", mat="stonewall")
-    body.location = (bx - 0.05, -0.55, 0)
-    tag(body, "leather")
-    lib.shade_smooth(body)
-    p.append(body)
-    p.append(rod((bx + 0.42, -0.55, 0.88), (-1.05, -0.55, 0.9), 0.03, m="iron", verts=6, name="nozzle"))
-    p.append(strut((bx - 0.5, -0.55, 1.05), (bx - 0.7, -0.55, 1.8), 0.05, name="lever"))
-    p.append(rod((bx - 0.62, -0.55, 1.5), (bx - 0.2, -0.55, 1.04), 0.008, verts=4, name="chain"))
+        p.append(strut((bx + s * 0.28, by - 0.3, 0.0), (bx + s * 0.22, by, 0.7), 0.06, name="leg"))
+        p.append(strut((bx + s * 0.28, by + 0.3, 0.0), (bx + s * 0.22, by, 0.7), 0.06, name="leg"))
+        p.append(beam((0.08, 0.1, 0.08), (bx + s * 0.22, by, 0.72), name="saddle"))
+    pear = [(-0.52, 0.0), (-0.46, -0.2), (-0.3, -0.3), (-0.05, -0.31), (0.2, -0.22), (0.4, -0.1), (0.5, -0.05),
+            (0.5, 0.05), (0.4, 0.1), (0.2, 0.22), (-0.05, 0.31), (-0.3, 0.3), (-0.46, 0.2)]
+    bel = []
+    for (z0, z1, k, m) in ((0.76, 0.8, 1.0, "wood"), (0.8, 0.86, 0.93, "leather"), (0.86, 0.9, 1.0, "leather"),
+                           (0.9, 0.96, 0.93, "leather"), (0.96, 1.0, 1.0, "wood")):
+        bel.append(prism([(x * k, y * k) for (x, y) in pear], z0, z1, m=m, name="bellows", axis="z"))
+    bel.append(rod((0.48, 0, 0.88), (0.78, 0, 0.84), 0.03, m="iron", verts=6, name="nozzle"))
+    # nose down a little, towards the fire, turning about its own middle
+    kit.place(bel, (bx, by, 0), (0, math.radians(4), 0))
+    p += bel
+    p.append(rod((bx + 0.8, by, 0.86), (-0.25, by, H - 0.02), 0.035, verts=8, name="tuyere"))
+    p.append(strut((bx - 0.45, by, 1.0), (bx - 0.75, by, 1.85), 0.05, name="lever"))
+    p.append(rod((bx - 0.66, by, 1.6), (bx - 0.35, by, 1.0), 0.008, verts=4, name="chain"))
     # quench tub to the right, a slack tub cut from a cask, and water in it
     tx, ty = 1.2, -0.75
     p.append(lathe([(0, 0.28), (0.05, 0.3), (0.5, 0.33), (0.52, 0.33)], tx, ty, 0, sides=11, m="planks",

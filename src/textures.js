@@ -326,7 +326,7 @@ const SURFACES = {
     const ray = clamp01(1 - cellular(u * 9, v * 36, 9, 713, 0.5)[0] * 6) * 0.15;
     const wear = clamp01(fbm(u * 4, v * 4, 4, 719, 3) * 1.6 - 0.6);
     const base = mix(rgb(0x62442a), rgb(0x86613d), figure);
-    const grained = mix(base, rgb(0x46301d), late * 0.22 + (1 - pore) * 0.06);
+    const grained = mix(base, rgb(0x46301d), late * 0.16 + (1 - pore) * 0.06);
     s.color = mix(mix(grained, rgb(0x9a7a55), ray), rgb(0x8a6a48), wear * 0.2);
     // Shallow: planed and waxed, the grain is a colour more than a relief --
     // deeper, and a fire's raking light drew it as corduroy.

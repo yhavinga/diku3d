@@ -5978,7 +5978,8 @@ export const PIECES = {
   desk: { model: 'furn_desk', x0: -0.91, x1: 0.91, z0: -0.44, z1: 0.44, h: 0.8 },
   chair: { model: 'furn_chair', x0: -0.24, x1: 0.24, z0: -0.25, z1: 0.23, h: 0.97 },
   armchair: { model: 'furn_armchair', x0: -0.42, x1: 0.42, z0: -0.56, z1: 0.42, h: 0.7 },
-  worktable: { model: 'furn_table_board', x0: -0.76, x1: 0.76, z0: -0.39, z1: 0.39, h: 0.83 },
+  // "A large oak table": the board table drawn out to 2.1 x 1.05, not taller.
+  worktable: { model: 'furn_table_board', x0: -1.07, x1: 1.07, z0: -0.55, z1: 0.55, h: 0.83, scale: [1.4, 1, 1.4] },
 };
 
 // "A bed, a chair and a table", "two beds to the side" -- a bed the text puts
@@ -6086,6 +6087,7 @@ function floorPlan(sides, holes, style = {}) {
  * of anything that tall.
  */
 function clearTorches(plan, pos, decor, lights) {
+  const FACE = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
   for (let dir = 0; dir < 4; dir++) {
     const spans = plan.tall[dir];
     if (!spans.length) continue;
@@ -6094,20 +6096,22 @@ function clearTorches(plan, pos, decor, lights) {
       && Math.abs(dz * (o.x - pos.x) - dx * (o.z - pos.z)) < 0.3 && Math.abs(o.y - pos.y) < 4;
     const torch = decor.find((d) => d.kind === 'torch' && !d.bare && onWall(d));
     if (!torch) continue;
+    // Spans are in the fitting frame, whose `along` runs against the world
+    // axis on the south and west walls: measure the torch in the same frame.
+    const c = Math.cos(FACE[dir]); const s = Math.sin(FACE[dir]);
+    const at = (torch.x - pos.x) * c - (torch.z - pos.z) * s;
     const blocked = (a) => spans.some(([a0, a1]) => a > a0 - 0.35 && a < a1 + 0.35);
-    if (!blocked(0)) continue;
+    if (!blocked(at)) continue;
     let to = null;
     for (let k = 1; k <= 38 && to === null; k++) {
-      for (const a of [k * 0.1, -k * 0.1]) if (to === null && !blocked(a)) to = a;
+      for (const a of [at + k * 0.1, at - k * 0.1]) if (to === null && Math.abs(a) < 4.4 && !blocked(a)) to = a;
     }
     if (to === null) continue;
-    // Along the wall is +x for a north or south wall and +z for east or west.
-    const ax = dz !== 0 ? 1 : 0; const az = dx !== 0 ? 1 : 0;
     const light = lights.find((l) => Math.abs(l.x - (torch.x - dx * 0.4)) < 0.05 && Math.abs(l.z - (torch.z - dz * 0.4)) < 0.05);
     for (const o of [torch, light]) {
       if (!o) continue;
-      o.x += ax * to;
-      o.z += az * to;
+      o.x += (to - at) * c;
+      o.z -= (to - at) * s;
     }
   }
 }
