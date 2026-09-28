@@ -1655,6 +1655,12 @@ export function buildScene(world, layout, materials, assets = null) {
         shaft: stairPlans.some((plan) => plan.lower === cell),
         addCollider, addPlatform, lights, decor, portals, skyHoles,
       });
+      // "An old and worn well from before this century": the stair down is
+      // its shaft, and a windlass stands over it.
+      const shaftTop = roomHoles.filter((h) => !h.ceiling);
+      if (mats.shell && mats.shell.kind === 'well' && shaftTop.length) {
+        buildWellhead({ batcher, instances, chunk, pos, hole: unionRect(shaftTop), wood: 'sewerwood' });
+      }
       continue;
     }
 
@@ -1870,10 +1876,10 @@ export function buildScene(world, layout, materials, assets = null) {
       const ceilHoles = roomHoles.filter((h) => h.ceiling);
       // "The walls and ceiling seem miles away": the lining goes up, and the
       // flat ceiling that would hide it does not go in.
-      const vast = !!mats.shell && mats.shell.vast && roomsAbove(layout, cell) === 0;
-      if (!ruin && !vast) {
+      const top = ceilingOf(room, cell, layout);
+      if (!ruin && top !== VAST_CEIL) {
         buildCeiling({
-          batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + CEIL, z: pos.z,
+          batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + top, z: pos.z,
           half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
         });
       }
@@ -1894,7 +1900,7 @@ export function buildScene(world, layout, materials, assets = null) {
       if (instances && (deepStyle(room) === 'cave' || mats.rockCave)) {
         buildCaveLining({
           instances, chunk, room, pos, sides, roofed: !roomHoles.some((h) => h.ceiling), addCollider,
-          height: vast ? VAST_CEIL : CEIL,
+          height: top,
         });
       }
       // ...and a room with earth over it has no roof either. Same family as the
@@ -2081,6 +2087,7 @@ export function buildScene(world, layout, materials, assets = null) {
     buildStair({
       batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
       materials: lowerMats,
+      lowerCeil: ceilingOf(plan.lower.room, plan.lower, layout),
       // Going down into the ground rather than up a storey: the opening wants
       // a parapet round it, and a lining through the earth between the room
       // below's ceiling and this floor -- unless the room below is a sewer
@@ -2336,17 +2343,25 @@ export function buildScene(world, layout, materials, assets = null) {
 
   buildVerges({ batcher, instances, model, groundAt, chunkOf });
 
-  // No tree grows through a room's walls. The forest's pickets and fillers
-  // plant within a stride of their cell's edge, and a fir's crown is three
-  // metres across: next to a walled room -- Haon Dor's cabin, its caves --
-  // the boughs came through the logs.
+  // No tree grows through a room's walls. A forest fir is modelled with its
+  // lowest boughs 3.6 m out and planted at up to 2.6x, so one standing a
+  // whole cell away from Haon Dor's cabin still put its crown through the
+  // logs. A tree near a walled room is kept to the size its crown has room
+  // for, and one with no room left is not planted.
   const walledRooms = [...rooms.values()].filter((i) => !i.unbuilt && !isOpenAir(i.room))
     .map((i) => ({ x: i.cell.x * CELL, y: i.cell.level * LEVEL_H, z: i.cell.z * CELL }));
+  const CROWN = 3.2; // bough reach per unit of scale, at the height of a wall
   for (let i = decor.length - 1; i >= 0; i--) {
     const d = decor[i];
     if (d.kind !== 'tree') continue;
-    const reach = SHELL + 1.4 * (d.scale || 1);
-    if (walledRooms.some((b) => Math.abs(d.y - b.y) < 2 && Math.abs(d.x - b.x) < reach && Math.abs(d.z - b.z) < reach)) decor.splice(i, 1);
+    let room = Infinity;
+    for (const b of walledRooms) {
+      if (Math.abs(d.y - b.y) > 2) continue;
+      room = Math.min(room, Math.max(Math.abs(d.x - b.x), Math.abs(d.z - b.z)) - SHELL - 0.2);
+    }
+    const fits = room / CROWN;
+    if (fits < 0.7) decor.splice(i, 1);
+    else if ((d.scale || 1) > fits) d.scale = fits;
   }
 
   const mist = buildMist(group, mistCells);
@@ -5462,8 +5477,7 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
   const inside = [];            // {level, x, z, swap} cells that are cave or cave corridor
   for (const cell of layout.order) {
     if (cell.level < 0 || !rocky(cell.room)) continue;
-    const shell = shellFor(cell.room);
-    const top = shell && shell.vast && roomsAbove(layout, cell) === 0 ? VAST_CEIL : CEIL;
+    const top = ceilingOf(cell.room, cell, layout);
     inside.push({ level: cell.level, x: cell.x, z: cell.z, swap: skin(cell.room), top });
   }
   for (const link of layout.links) {
@@ -5585,7 +5599,7 @@ function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed }) 
 }
 
 /** Straight flight from the lower room up through the opening in its ceiling. */
-function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform, materials, buried = false, shaftWalls = false, kerb = 'stonewall' }) {
+function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform, materials, buried = false, shaftWalls = false, kerb = 'stonewall', lowerCeil = CEIL }) {
   const lower = worldOf(plan.lower);
   const chunk = chunkOf(plan.lower);
   const [dx, , dz] = DIR_STEP[plan.dir];
@@ -5693,7 +5707,7 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
   }
   // And the lining: the room below stops at its ceiling, this floor starts a
   // metre and a half higher, and between the two there was nothing at all.
-  const y0 = lower.y + CEIL + SLAB; const y1 = upper.y - SLAB;
+  const y0 = lower.y + lowerCeil + SLAB; const y1 = upper.y - SLAB;
   if (y1 - y0 < 0.05) return;
   for (const [p, q] of [
     [at(a0, c0 - 0.25), at(a1, c0)], [at(a0, c1), at(a1, c1 + 0.25)],
@@ -6200,6 +6214,16 @@ const LOG_FACE = 0.2;
 /** Rooms and passages on the cell above this one: a vast cavern needs none. */
 const roomsAbove = (layout, cell) => (layout.at(cell.level + 1, cell.x, cell.z) !== undefined ? 1 : 0)
   + (layout.isPath(cell.level + 1, cell.x, cell.z) ? 1 : 0);
+/**
+ * How high a room's ceiling is. A vast cavern goes to twice the storey with
+ * nothing over it, and otherwise right up under the floor of the room above --
+ * #5011's way out is a stair up, so "miles away" has to fit in one level.
+ */
+const ceilingOf = (room, cell, layout) => {
+  const shell = shellFor(room);
+  if (!shell || !shell.vast || isOpenAir(room)) return CEIL;
+  return roomsAbove(layout, cell) ? LEVEL_H - 2 * SLAB - 0.02 : VAST_CEIL;
+};
 
 /**
  * The lining a room's shell puts inside its walls (src/shells.js for which
@@ -6613,8 +6637,10 @@ function buildInteriorProps({ room, pos, sides, decor, mats, holes = [], lights 
   // Where the walls' inner faces really are: the stone and temple kits stand
   // at 5.10 from the middle, not the 5.00 the procedural walls do, and a
   // Shire room's chair rail stands 0.1 m proud of its plaster.
+  // A shell's lining stands proud of the wall too: a log's round, panelling.
+  const lining = { log: -LOG_R * 1.5, panelled: -0.09, inn: -0.1 }[mats.shell && mats.shell.kind] ?? 0;
   const plan = floorPlan(sides, holes, {
-    face: kit === '' || kit === 'temple_' ? 0.1 : (mats.shire && mats.shire !== 'barn' ? -0.1 : 0),
+    face: kit === '' || kit === 'temple_' ? 0.1 : Math.min(lining, mats.shire && mats.shire !== 'barn' ? -0.1 : 0),
     buttress: kit === '', smial: !!mats.smial,
   });
   const piece = (kind, at, spin = 0, extra = null) => decor.push({
