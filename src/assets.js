@@ -504,6 +504,13 @@ function toBatchable(source) {
 }
 
 /**
+ * Set by cull.js while a frame is drawn: `test(x, y, z, r)` says whether a
+ * sphere can be seen from `camera` at all, walls included. Only the main
+ * camera's passes are filtered; the shadow camera culls for itself.
+ */
+export const cullHook = { test: null, camera: null, stamp: 0 };
+
+/**
  * A BatchedMesh that culls once per camera, not once per pass.
  *
  * Culling and sorting the pieces runs on the CPU before every draw of the
@@ -522,14 +529,69 @@ export class StaticBatch extends THREE.BatchedMesh {
     const view = camera.matrixWorldInverse.elements;
     const projection = camera.projectionMatrix.elements;
     const state = this._cullState;
-    if (this._cullCamera === camera && !this._visibilityChanged) {
+    const hook = cullHook.test && camera === cullHook.camera ? cullHook : null;
+    const stamp = hook ? hook.stamp : -1;
+    if (this._cullCamera === camera && !this._visibilityChanged && this._cullStamp === stamp) {
       let same = true;
       for (let i = 0; i < 16 && same; i++) same = state[i] === view[i] && state[16 + i] === projection[i];
       if (same) return;
     }
     super.onBeforeRender(renderer, scene, camera, geometry, material, group);
     this._cullCamera = camera;
+    this._cullStamp = stamp;
     for (let i = 0; i < 16; i++) { state[i] = view[i]; state[16 + i] = projection[i]; }
+    if (hook) this.cullBehindWalls(hook.test);
+  }
+
+  /**
+   * Is any piece visible by `test`? A region's batch has one bounding sphere
+   * round the whole region, so three always draws it -- with no pieces, from
+   * most places, but the call and its state changes are still paid.
+   */
+  anyVisible(test) {
+    const spheres = this.pieceSpheres();
+    const info = this._instanceInfo;
+    for (let i = 0; i < info.length; i++) {
+      if (!info[i].visible || !info[i].active) continue;
+      const o = i * 4;
+      if (test(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) return true;
+    }
+    return false;
+  }
+
+  pieceSpheres() {
+    if (!this._spheres) {
+      const n = this._instanceInfo.length;
+      this._spheres = new Float32Array(n * 4);
+      const m = new THREE.Matrix4();
+      const s = new THREE.Sphere();
+      for (let i = 0; i < n; i++) {
+        if (!this._instanceInfo[i].active) continue;
+        this.getMatrixAt(i, m);
+        this.getBoundingSphereAt(this._instanceInfo[i].geometryIndex, s).applyMatrix4(m).applyMatrix4(this.matrixWorld);
+        this._spheres.set([s.center.x, s.center.y, s.center.z, s.radius], i * 4);
+      }
+    }
+    return this._spheres;
+  }
+
+  /** Drop the pieces three kept that cannot be seen past the walls. Order is kept. */
+  cullBehindWalls(test) {
+    const spheres = this.pieceSpheres();
+    const starts = this._multiDrawStarts;
+    const counts = this._multiDrawCounts;
+    const index = this._indirectTexture.image.data;
+    let n = 0;
+    for (let k = 0; k < this._multiDrawCount; k++) {
+      const o = index[k] * 4;
+      if (!test(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) continue;
+      starts[n] = starts[k]; counts[n] = counts[k]; index[n] = index[k];
+      n++;
+    }
+    if (n !== this._multiDrawCount) {
+      this._multiDrawCount = n;
+      this._indirectTexture.needsUpdate = true;
+    }
   }
 }
 
@@ -592,6 +654,8 @@ export class StaticBatches {
         }
         const mesh = new THREE.InstancedMesh(slot.geometry, material, slot.matrices.length);
         mesh.name = `instances ${region} ${material.name}`;
+        // Static and in world space: cull.js may cull it instance by instance.
+        mesh.userData.cullable = true;
         slot.matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
         mesh.computeBoundingSphere();
         shade(mesh, region);

@@ -27,6 +27,7 @@ import { createItems } from './items.js';
 import { installSave } from './save.js';
 import { createKick } from './kick.js';
 import { setPaneDaylight } from './windows.js';
+import { createVisibility } from './cull.js';
 
 const params = new URLSearchParams(location.search);
 // The default world is no longer one town. Midgaard plus the five areas
@@ -503,6 +504,18 @@ async function boot() {
     renderer, scene, camera, width: window.innerWidth, height: window.innerHeight,
   });
   const { composer, bloom, shafts } = pipeline;
+  // Every draw of the frame goes through here, the console's and the probes'
+  // included, so what is culled is decided in one place: see cull.js.
+  // `?cull=off` draws everything, for A/B.
+  const visibility = createVisibility({ renderer, scene, camera, world: built.group, sun });
+  visibility.state.enabled = params.get('cull') !== 'off';
+  {
+    const render = composer.render.bind(composer);
+    composer.render = (...args) => {
+      visibility.begin();
+      try { render(...args); } finally { visibility.end(); }
+    };
+  }
   const environment = new SkyEnvironment(renderer);
   const rain = createRain(scene);
 
@@ -1338,6 +1351,7 @@ async function boot() {
     quality.begin(now);
     composer.render();
     quality.end();
+    visibility.work();
   }
 
   // Handy from the console, and how the screenshots for this were framed.
@@ -1347,7 +1361,7 @@ async function boot() {
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
     pipeline, environment, materials, wetness,
-    player, hud, layout, built, actors, world, applyTime, applyWeather, state, audio,
+    player, hud, layout, built, actors, world, applyTime, applyWeather, state, audio, visibility,
     times: TIMES, overcast: OVERCAST, rain,
     /**
      * Make it rain now, whatever the mud's barometer says.
