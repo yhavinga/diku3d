@@ -1843,6 +1843,10 @@ export function buildScene(world, layout, materials, assets = null) {
       if (link.from !== cell || link.side !== null || link.kind === 'alley' || link.kind === 'stairs') continue;
       if (deadExit(link.exit)) continue;
       if (airborne) continue;
+      // Up out of the Temple Square is "In the air...", which is never built:
+      // the arch stood in the middle of the square leading nowhere, a portal
+      // to a room the game refuses to enter.
+      if (link.to && link.to.room.sector === SECTOR.AIR) continue;
       const angle = hash3(room.vnum, 5, 0, 1) * Math.PI * 2;
       const ax = pos.x + Math.cos(angle) * half * 0.4;
       const az = pos.z + Math.sin(angle) * half * 0.4;
