@@ -594,6 +594,29 @@ export function buildGrass({ groups, instances, colliders, layout, rooms, materi
     }
   }
 
+  // A modelled grass tuft on turf that now grows blades is a stiff, dark
+  // starburst in the middle of a meadow: it was the only grass there was.
+  // It stays where nothing is sown -- the burnt lots, the dust.
+  if (instances) {
+    const turf = new Buckets(8);
+    for (const { tri } of sown) {
+      const [ax, , az, bx, , bz, cx, , cz] = tri;
+      turf.add(tri, Math.min(ax, bx, cx), Math.max(ax, bx, cx), Math.min(az, bz, cz), Math.max(az, bz, cz));
+    }
+    const onTurf = (t) => turf.at(t.x, t.z).some((tri) => {
+      const h = heightIn(tri, t.x, t.z);
+      return h !== null && Math.abs(h - t.y) < 0.35;
+    });
+    counts.tuftsDropped = 0;
+    for (const [key, bucket] of instances.buckets) {
+      if (bucket.asset.name !== 'grass_tuft') continue;
+      const before = bucket.transforms.length;
+      bucket.transforms = bucket.transforms.filter((t) => !onTurf(t));
+      counts.tuftsDropped += before - bucket.transforms.length;
+      if (!bucket.transforms.length) instances.buckets.delete(key);
+    }
+  }
+
   // --- draw ---------------------------------------------------------------------
   dressLit(lit);
   lit.userData.aoMaterial = aoMaterial(lit);

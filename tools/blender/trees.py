@@ -62,6 +62,10 @@ def grow(objs, p, direction, length, radius, depth, rng, leaf_r=1.15, cards=None
         objs.append(segment(p, d, length, radius, tip_r,
                             verts=6 if depth < 2 else 5))
     tip = mathutils.Vector(p) + d * length
+    if cards is not None and depth == 1:
+        # Leaves on the fork as well as the twigs, or the crown is a ring of
+        # clusters round an empty middle.
+        leaf_cluster(cards, tip, d, leaf_r * 0.8, rng, centre, count=9)
     if depth <= 0:
         if cards is not None:
             leaf_cluster(cards, tip, d, leaf_r, rng, centre)
@@ -95,7 +99,7 @@ def outward(p, centre, up=0.45):
     return o.normalized() + mathutils.Vector((0, 0, up))
 
 
-def leaf_cluster(cards, tip, d, radius, rng, centre):
+def leaf_cluster(cards, tip, d, radius, rng, centre, count=18):
     """A twig's worth of leafy sprays: cards fanning out of the tip in every
     direction but inwards, each a spray of leaves, so the cluster is a ragged
     ball with sky through its edges -- the thing a squashed sphere could
@@ -103,11 +107,11 @@ def leaf_cluster(cards, tip, d, radius, rng, centre):
     out = (mathutils.Vector(tip) - mathutils.Vector(centre))
     out.z *= 0.6
     out = out.normalized() if out.length > 1e-6 else mathutils.Vector((0, 0, 1))
-    for k in range(15):
+    for k in range(count):
         # Directions over the outer hemisphere of the tip, and a third of
         # them any way at all, so the cluster fills in behind its own face.
         a = rng.uniform(0, 2 * math.pi)
-        e = rng.uniform(-0.45, 1.0)
+        e = rng.uniform(-0.6, 0.9)
         rnd = mathutils.Vector((math.cos(a) * math.cos(e), math.sin(a) * math.cos(e), math.sin(e)))
         u = (rnd + (out * 0.9 + d * 0.3) * (0.2 if k % 3 == 0 else 1.0)).normalized()
         side = u.cross(mathutils.Vector((0, 0, 1)))
@@ -148,7 +152,7 @@ def build_tree_oak():
     for i in range(3):
         a = 2 * math.pi * (i + rng.uniform(-0.12, 0.12)) / 3
         d = (math.cos(a) * 0.46, math.sin(a) * 0.46, 1.0)
-        grow(objs, (0, 0, trunk_h), d, 2.35, r * 0.82, 2, rng, leaf_r=1.35, cards=cards, centre=centre)
+        grow(objs, (0, 0, trunk_h), d, 2.35, r * 0.82, 2, rng, leaf_r=1.75, cards=cards, centre=centre)
     return deliver_conifer(objs, cards.mesh("leaves"), "tree_oak")
 
 
