@@ -41,6 +41,7 @@ MODULES = [
     "monsters",
     "furniture",
     "clutter",
+    "setpiece",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a
@@ -159,6 +160,9 @@ BUDGET = {
     "clutter_mural": 4000, "clutter_arms": 2000, "clutter_tapestry": 3100, "clutter_web": 2600,
     "clutter_cages": 1600, "clutter_globe": 900, "clutter_feast": 4100, "clutter_carcass": 2500,
     "clutter_pelts": 2000,
+    # setpiece.py: one of each in the world, or four gatehouses. The fortress
+    # is a whole castle seen from a hundred metres.
+    "gatehouse": 6000, "fortress": 20000, "monolith": 400, "statue_worm": 7000,
 }
 PROP_BUDGET = 800
 # people.py: an archetype is a whole dressed person, one skinned draw per

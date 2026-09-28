@@ -6,6 +6,26 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-09-28 — wave 6: what the rooms say they are
+
+### Set pieces from the prose (tools/blender/setpiece.py)
+
+- **Blender's front is three's +Z.** The glTF exporter maps Blender −Y to
+  three +Z, so kit.py's old comment ("front at −Y becomes three's −Z") was
+  wrong; `FACE_ROT[d]` turns Blender +Y toward d. `localBox()` in build.js
+  converts Blender-frame boxes to world colliders.
+- **Seen from a fortress's gate, east is the viewer's left** (Blender −X);
+  the "northeast" tower first went up on the west.
+- **A raised drawbridge must be shorter than its arch**, or it hides the
+  lowered portcullis the prose also asks for.
+- **The albedo lift takes a raw 0x2f to ~0x59**, so a "black" stone needs
+  block colours of 0x12–0x1f. Cellular ridge lines in a glossy material's
+  colour or relief tile into a crackle net; keep them in roughness only.
+- **The underground `caverock` renders as a dark slab in daylight**; outdoor
+  reuse of cave pieces swaps it for `crag`.
+- The Market Square statue is what its own description says it is: the
+  Midgaard Worm coiled round the Palace of Midgaard.
+
 ## 2026-09-27 — people, animals, and a town that walks
 
 Five agents in parallel, each in its own worktree with its own port and a

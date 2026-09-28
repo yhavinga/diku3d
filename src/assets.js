@@ -763,6 +763,8 @@ export const ASSET_NAMES = [
   'beast_spider', 'beast_beetle', 'beast_scorpion', 'beast_drider', 'beast_bat', 'beast_mud',
   'beast_myconoid', 'beast_ratman', 'beast_imp', 'beast_naga', 'beast_sandworm', 'beast_basilisk',
   'beast_dustdigger', 'beast_camel', 'beast_dracolich',
+  // Landmarks the prose names out of doors: tools/blender/setpiece.py.
+  'gatehouse', 'fortress', 'monolith', 'statue_worm',
   // The rooms' furniture: tools/blender/furniture.py.
   ...FURNITURE_NAMES,
   // What the rooms' prose puts in them: tools/blender/clutter.py.
