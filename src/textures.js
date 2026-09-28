@@ -343,7 +343,7 @@ export const GRASS_ATLAS = { cols: 2, rows: 4, size: 1024 };
 // Blade palettes: a coastal meadow is a deep, slightly blue green with the odd
 // blade gone yellow or dead, not one lawn colour -- and the spread is per
 // blade, which at a card's distance averages out instead of blotching.
-const GREENS = [0x3b5a24, 0x456629, 0x4f6f2d, 0x3f5f2f, 0x5a7631, 0x6b8237];
+const GREENS = [0x365a27, 0x40652c, 0x4a6e31, 0x3a5e33, 0x547535, 0x62803a];
 const STRAW = [0x8e8150, 0x9d8c58, 0x7f7447, 0xa89a66];
 
 /**
@@ -1030,7 +1030,7 @@ const SURFACES = {
     const patch = fbm(u * 3, v * 3, 3, 137, 3);
     const fine = fbm(u * 44, v * 44, 44, 131, 2);
     const dry = clamp01(fbm(u * 2, v * 2, 2, 149, 3) * 1.6 - 0.62);
-    const green = mix(rgb(0x2a3e18), rgb(0x364b1f), patch * 0.75 + fine * 0.25);
+    const green = mix(rgb(0x283e1a), rgb(0x334b22), patch * 0.75 + fine * 0.25);
     const c = mix(green, rgb(0x514f2d), dry * 0.35);
     const shade = 0.95 + fine * 0.1;
     s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
@@ -1055,7 +1055,9 @@ const SURFACES = {
     const lit = mix(rgb(0x435c3b), rgb(0x6d8256), mass * 0.7 + fine * 0.3);
     const cool = mix(lit, rgb(0x3d5548), clump[2] * 0.5);
     s.color = mix(rgb(0x1c2717), cool, clamp01(1.05 - depth));
-    s.height = (1 - depth) * 0.5 + fine * 0.25;
+    // The fine octave stays out of the relief: the same fault as the lawn's,
+    // lit blotches a hand across. The clumps carry the shape.
+    s.height = (1 - depth) * 0.45 + fine * 0.08;
     // Needles scatter, they do not sheen: keep it matt right through.
     s.rough = 0.86 + fine * 0.1;
   },
@@ -2269,7 +2271,7 @@ const RECIPES = {
   rooftile: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0.35, detail: 0.5 },
   thatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7 },
   dirt: { surface: 'dirt', scale: 4.5, normalScale: 0.9, env: 0.7, wet: 0.3, detail: 0.6 },
-  grass: { surface: 'grass', scale: 5.5, normalScale: 0.35, env: 0.6, wet: 0, detail: 0.5 },
+  grass: { surface: 'grass', scale: 5.5, normalScale: 0.25, env: 0.6, wet: 0, detail: 0.3 },
   // The blades over it: an atlas of cards, not a tile (GRASS_CARDS), baked at
   // twice the usual size because a blade is a few millimetres wide.
   grassblades: { surface: 'grassblades', size: 1024, scale: 1, normalScale: 0.15, env: 0.45, wet: 0, detail: 0, cutout: 0.5 },
@@ -2286,7 +2288,7 @@ const RECIPES = {
   // World-unit tile like everything else, so a crown at 80 m repeats at the
   // same physical size as one at 8 -- the per-model stretch was half of what
   // made the trees read as toys.
-  leaves: { surface: 'leaves', scale: 2.0, normalScale: 0.75, env: 0.4, wet: 0, detail: 0.5 },
+  leaves: { surface: 'leaves', scale: 2.0, normalScale: 0.5, env: 0.4, wet: 0, detail: 0.35 },
   // The walls that were `rock`: see the surface. Its tile is its own 3 m.
   rubblewall: { surface: 'rubblewall', scale: 3, normalScale: 0.9, env: 0.7, wet: 0, detail: 0.55 },
   rock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0.25, detail: 0.6 },

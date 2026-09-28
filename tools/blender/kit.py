@@ -755,6 +755,28 @@ def zero_origin(obj):
     return obj
 
 
+def project_unowned(obj):
+    """Cube-project only the faces that carry no UVs of their own -- the
+    ones `trees.hull(..., unwrap=True)` flagged `own_uv` keep theirs, which is
+    how a log's bark runs along the log -- then drop the flag, which is not
+    for export."""
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="DESELECT")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    # Read only after the mode switches, which rebuild the mesh.
+    own = obj.data.attributes["own_uv"].data
+    for poly in obj.data.polygons:
+        poly.select = own[poly.index].value == 0
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.uv.cube_project(cube_size=1.0)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    obj.data.attributes.remove(obj.data.attributes["own_uv"])
+    return obj
+
+
 def deliver(parts, name):
     """Apply, join, re-origin, unwrap, export -- and say what it cost."""
     parts = [p for p in parts if p is not None]
@@ -763,7 +785,10 @@ def deliver(parts, name):
     obj = lib.join(parts, name)
     zero_origin(obj)
     obj.data.name = name
-    lib.uv_project(obj)
+    if "own_uv" in obj.data.attributes:
+        project_unowned(obj)
+    else:
+        lib.uv_project(obj)
     tris = lib.stats([obj])
     lib.export(name, [obj])
     return "%-16s %5d tris" % (name, tris)

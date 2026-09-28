@@ -142,7 +142,9 @@ def build_dead_log():
              (1.20, 0.26, 0.08, 0.03), (1.90, 0.24, 0.08, 0.01),
              (2.55, 0.22, 0.05, -0.02), (3.05, 0.20, 0.02, -0.03),
              (L, 0.17, 0.00, -0.03)]
-    log = trees.hull(rings, sides, wob, jag, mat="bark", name="log")
+    # Unwrapped, so the bark runs along the log rather than across it in
+    # facets (see `trees.hull`).
+    log = trees.hull(rings, sides, wob, jag, mat="bark", name="log", unwrap=True)
     # Ry(90) sends (x, y, z) to (z, y, -x): the log's length becomes X and each
     # ring's bow becomes its height. Then slide it back to centre on X.
     kit.place([log], (-L / 2, 0, 0), (0, math.pi / 2, 0))
