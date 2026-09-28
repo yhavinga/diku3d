@@ -3889,7 +3889,10 @@ const syncBuried = (renderer) => updateBuried(renderer.toneMappingExposure);
  * A material with a shader of someone else's (glass, water, glow) or no
  * lighting at all comes back as it is: none of those takes the sky's light.
  */
+// By hook, not by material: a copy that carries decorate()'s hook over --
+// actors.js tints a door slab that way -- is decorated all the same.
 const decorated = new WeakSet();
+const isDecorated = (m) => decorated.has(m.onBeforeCompile);
 const twins = new Map(); // base -> { plain, sunless }
 const twinOf = new WeakMap(); // twin -> the material it was made from
 export function buriedTwin(material, { sunless = false } = {}) {
@@ -3898,7 +3901,7 @@ export function buriedTwin(material, { sunless = false } = {}) {
   const base = twinOf.get(material) || material;
   if (!base || !base.isMeshStandardMaterial) return base;
   const own = Object.prototype.hasOwnProperty.call(base, 'onBeforeCompile');
-  if (own && !decorated.has(base)) return base;
+  if (own && !isDecorated(base)) return base;
   if (base.defines?.DIKU_BURIED && !sunless) return base;
   let pair = twins.get(base);
   if (!pair) { pair = {}; twins.set(base, pair); }
@@ -3909,7 +3912,7 @@ export function buriedTwin(material, { sunless = false } = {}) {
   twin.defines = { ...base.defines, DIKU_BURIED: 1, ...(sunless ? { DIKU_SUNLESS: 1 } : {}) };
   twin.defaultAttributeValues = base.defaultAttributeValues;
   twin.onBeforeRender = syncBuried;
-  if (decorated.has(base)) {
+  if (isDecorated(base)) {
     // decorate() closes over the base material and files its wetness uniform
     // there; a twin compiling must not take the base's rain away from it.
     twin.onBeforeCompile = (shader, renderer) => {
@@ -3955,7 +3958,6 @@ export const BURIED_LIGHT = { declarations: BURIED_DECLS, uniforms: buriedUnifor
  *    at golden hour is doing.
  */
 function decorate(material, recipe, macro, grain) {
-  decorated.add(material);
   material.userData.detailStrength = recipe.detail ?? 0.5;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.macroMap = { value: macro };
@@ -4199,6 +4201,7 @@ function decorate(material, recipe, macro, grain) {
         #endif
       `);
   };
+  decorated.add(material.onBeforeCompile);
   if (recipe.wet) material.defines = { ...material.defines, DIKU_WET: 1 };
   if (recipe.buried) {
     material.defines = { ...material.defines, DIKU_BURIED: 1 };
@@ -4328,7 +4331,7 @@ export function createMaterials(size = 512, onProgress = () => {}) {
 
   /** Close-range detail normals, on or off. Recompiles; only the P key does it. */
   materials.setDetail = (on) => {
-    const buriedCopies = [...twins.keys()].filter((b) => decorated.has(b)).flatMap((b) => Object.values(twins.get(b)));
+    const buriedCopies = [...twins.keys()].filter(isDecorated).flatMap((b) => Object.values(twins.get(b)));
     for (const material of [...surfaced, ...buriedCopies]) {
       const has = !!material.defines?.DIKU_DETAIL;
       if (has === !!on) continue;
