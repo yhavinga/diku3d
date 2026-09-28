@@ -4304,8 +4304,8 @@ function buildClearing({ batcher, chunk, room, pos, sides, addCollider }) {
       for (const a of [-len / 2 + 0.3, len / 2 - 0.3]) {
         for (const b of [-1.12, 1.12]) {
           const p = at(a, b);
-          batcher.add(box(0.14, 2.0, 0.14), 'timber',
-            place(p.x, pos.y + 0.9, p.z, spin), { chunk });
+          batcher.add(box(0.14, 2.0, 0.14), 'wood',
+            place(p.x, pos.y + 0.9, p.z, spin), { chunk, tint: FRAME_OAK });
         }
       }
       // A stack of green timber is something you walk round. The box is the
@@ -5585,12 +5585,12 @@ function buildRailFence({ batcher, chunk, pos, dir, addCollider }) {
   const H = 1.3;
   for (let i = 0; i < 6; i++) {
     const p = at((i / 5 - 0.5) * (CELL - 0.7));
-    batcher.add(box(0.2, H, 0.2), 'timber', place(p.x, pos.y + H / 2, p.z), { chunk });
+    batcher.add(box(0.2, H, 0.2), 'wood', place(p.x, pos.y + H / 2, p.z), { chunk, tint: FRAME_OAK });
   }
   const c = at(0);
   for (const ry of [0.46, 1.02]) {
     const [rw, rd] = along ? [0.11, CELL] : [CELL, 0.11];
-    batcher.add(box(rw, 0.16, rd), 'timber', place(c.x, pos.y + ry, c.z), { chunk });
+    batcher.add(box(rw, 0.16, rd), 'wood', place(c.x, pos.y + ry, c.z), { chunk, tint: FRAME_OAK });
   }
   const [cw, cd] = along ? [0.6, CELL] : [CELL, 0.6];
   addCollider(c.x - cw / 2, c.x + cw / 2, c.z - cd / 2, c.z + cd / 2, pos.y, pos.y + H + 1.2);
@@ -7537,13 +7537,17 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
  * as the stone box it replaced, repainted.
  */
 const FRAME_POST = 0.26;
+const FRAME_OAK = [0.62, 0.56, 0.5];
 const FRAME_PLATE = 0.24;
 
 function buildTimberFrame({ batcher, chunk, pos, sides, addCollider, holes, barn, rail = true }) {
   const post = barn ? 0.34 : FRAME_POST;
   const inner = ROOM / 2;
   const y = pos.y;
-  const add = (w, h, d, x, yy, z, rotY = 0) => batcher.add(box(w, h, d), 'timber', place(x, yy, z, rotY), { chunk });
+  // Oak, and darkened with age and smoke. It was `timber`, the half-timbered
+  // facade -- lime-wash with braces on it -- so every post in the Shire's
+  // rooms came out striped white and brown like a barber's pole.
+  const add = (w, h, d, x, yy, z, rotY = 0) => batcher.add(box(w, h, d), 'wood', place(x, yy, z, rotY), { chunk, tint: FRAME_OAK });
   // Corners.
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
@@ -7606,7 +7610,7 @@ function buildSmialVault({ batcher, chunk, pos, sides, addCollider }) {
     batcher, chunk, pos, sides, addCollider,
     spring: VAULT_SPRING, corner: VAULT_CORNER,
     surface: (h) => (h <= VAULT_BOARDS + 1e-6 ? 'planks' : 'plaster'),
-    rib: 'timber',
+    rib: 'wood',
   });
 }
 
@@ -8487,12 +8491,12 @@ function buildLogWalls({ batcher, chunk, pos, sides, addCollider, windows, mater
       }
       if (f.inside) {
         // A squared wall plate along the top, which the joists sit on.
-        wallBox(batcher, chunk, 'timber', pos, dir, -ROOM / 2, ROOM / 2, CEIL - 0.34, CEIL, 0, 0.3);
+        wallBox(batcher, chunk, 'wood', pos, dir, -ROOM / 2, ROOM / 2, CEIL - 0.34, CEIL, 0, 0.3);
         // A log cut at a doorway shows a cylinder's end; a board each side and
         // over the head closes it, as `log_cabin` trims its own openings.
         if (openSide(sides[dir])) {
-          for (const sgn of [-1, 1]) wallBox(batcher, chunk, 'timber', pos, dir, sgn * (DOOR_W / 2) - 0.11, sgn * (DOOR_W / 2) + 0.11, 0, DOOR_H + 0.1, -0.02, 0.3);
-          wallBox(batcher, chunk, 'timber', pos, dir, -DOOR_W / 2 - 0.11, DOOR_W / 2 + 0.11, DOOR_H, DOOR_H + 0.26, -0.02, 0.3);
+          for (const sgn of [-1, 1]) wallBox(batcher, chunk, 'wood', pos, dir, sgn * (DOOR_W / 2) - 0.11, sgn * (DOOR_W / 2) + 0.11, 0, DOOR_H + 0.1, -0.02, 0.3);
+          wallBox(batcher, chunk, 'wood', pos, dir, -DOOR_W / 2 - 0.11, DOOR_W / 2 + 0.11, DOOR_H, DOOR_H + 0.26, -0.02, 0.3);
         }
         for (const [r0, r1] of wallRuns(sides[dir], 0.12)) {
           const p0 = onWall(pos, dir, r0, 0); const p1 = onWall(pos, dir, r1, LOG_R * 1.1);
@@ -8528,7 +8532,7 @@ function buildWainscot({ batcher, chunk, pos, sides, tint = null, beams = false,
   const hole = holes.length ? unionRect(holes) : null;
   for (const off of [-3.0, 0, 3.0]) {
     if (hole && off + 0.2 > hole.z0 && off - 0.2 < hole.z1) continue;
-    batcher.add(box(ROOM, 0.28, 0.24), 'timber', place(pos.x, pos.y + CEIL - 0.14, pos.z + off), { chunk });
+    batcher.add(box(ROOM, 0.28, 0.24), 'wood', place(pos.x, pos.y + CEIL - 0.14, pos.z + off), { chunk, tint: FRAME_OAK });
   }
 }
 
