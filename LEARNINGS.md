@@ -52,6 +52,24 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Text that is never cut, and a title that shows the world (hud3)
+
+- **Text typed out over time is laid out over time**, so every still and
+  every layout measurement caught the room description half-written — the
+  judge's "cut mid-word". Lay text out whole; animate only how it is shown
+  (a CSS mask sweep that runs even with the render loop halted).
+- **Combat events wait for their beat**, so after a teleport they appear in
+  the wrong room. Clear the queue on a jump, and end a fight when the foe is
+  beyond 14 m and neither in your room nor the next (`loseTouch`, Merc's
+  stop_fighting without the penalty).
+- **`nav.sightBlocked` tests collision boxes, not what is drawn**; to judge
+  a framing, raycast `built.group`.
+- **The judge's harness hides `#title` and unpauses by hand**; anything that
+  runs during the title must stop itself then, or it pulls the camera away
+  from every `goto()`.
+- Floating combat text: 54 of 81 overlapping pairs over a 15 s fight → 0 of
+  80, by moving each new number up until it touches nothing on screen.
+
 ### Rigs: grazing, skirts, giants, faces (wave4-rigs)
 
 - **The beast rigs face −Y.** Face angles need `atan2(y.z, -y.y)`, and a
