@@ -109,7 +109,7 @@ function relax(world, cells, occupied, order, passes = 12) {
  * in the direction the exit claims to go, and refusing walls already spoken for
  * at either end.
  */
-function routePath(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Set(), forbidLast = new Set(), avoid = null) {
+function routePath(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Set(), forbidLast = new Set()) {
   const first = [nominalDir, ...[0, 1, 2, 3].filter((d) => d !== nominalDir)]
     .filter((d) => !forbidFirst.has(d));
   const queue = [{ x: from.x, z: from.z, cells: [], entryDir: null }];
@@ -129,7 +129,6 @@ function routePath(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Se
       const seenKey = `${x},${z}`;
       if (seen.has(seenKey)) continue;
       if (occupied.has(key(from.level, x, z))) continue;
-      if (avoid && avoid.has(key(from.level, x, z))) continue;
       seen.add(seenKey);
       queue.push({ x, z, cells: [...node.cells, { x, z }], entryDir: node.entryDir ?? dir });
     }
@@ -159,15 +158,6 @@ function routePath(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Se
  * every other area's placement is identical to the world without it.
  */
 const LAID_WHOLE = new Set(['hood.are']);
-
-/**
- * Whether a room is open to the sky, as far as its passages go: the same
- * test build.js makes before it walls and roofs a corridor, reduced to what
- * the mud's flags and sector say (build.js also reads the prose).
- */
-const OPEN_SECTORS = new Set([SECTOR.CITY, SECTOR.FIELD, SECTOR.FOREST, SECTOR.HILLS, SECTOR.MOUNTAIN,
-  SECTOR.WATER_SWIM, SECTOR.WATER_NOSWIM, SECTOR.DESERT]);
-const openAir = (room) => OPEN_SECTORS.has(room.sector) && !(room.flags & ROOM_INDOORS);
 
 export function layoutWorld(world, options = {}) {
   const {
@@ -373,23 +363,14 @@ export function layoutWorld(world, options = {}) {
 
   const pathCells = new Set();
   const pathOwner = new Map(); // which passage runs through this cell
-  // Two passages may share a cell, but not a street and a corridor: the
-  // corridor between two buildings is walled and roofed, and where it
-  // crossed an open street it stood a wall across it -- ten cells in the
-  // nine default areas, nine of them in Midgaard. Each kind keeps off the
-  // other's cells where it can, and shares where there is no other way.
-  const walled = { true: new Set(), false: new Set() };
   for (const link of links) {
     if (link.kind !== 'portal' || !link.to) continue;
     if (link.from.level !== link.to.level) continue;
     const forbidFirst = new Set([0, 1, 2, 3].filter((d) => !free(link.from.vnum, d)));
     const forbidLast = new Set([0, 1, 2, 3].filter((d) => !free(link.to.vnum, REVERSE_DIR[d])));
-    const enclosed = !openAir(link.from.room) && !openAir(link.to.room);
-    const reachOf = reach.get(pair(link.from.vnum, link.to.vnum)) || 6;
-    const route = routePath(link.from, link.to, link.dir, occupied, reachOf, forbidFirst, forbidLast, walled[!enclosed])
-      || routePath(link.from, link.to, link.dir, occupied, reachOf, forbidFirst, forbidLast);
+    const route = routePath(link.from, link.to, link.dir, occupied,
+      reach.get(pair(link.from.vnum, link.to.vnum)) || 6, forbidFirst, forbidLast);
     if (!route) continue;
-    for (const c of route.cells) walled[enclosed].add(key(link.from.level, c.x, c.z));
     link.kind = 'alley';
     link.path = route.cells;
     link.entryDir = route.entryDir;
