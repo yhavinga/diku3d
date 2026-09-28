@@ -2287,6 +2287,13 @@ export function createMaterials(size = 512, onProgress = () => {}) {
     });
     material.name = name;
     material.userData.uvScale = 1 / recipe.scale;
+    // three draws a front-sided material's *back* faces into the shadow map,
+    // so what shades a ledge in a wall is the wall's own inner face a few
+    // centimetres away -- inside the bias. Every 3 cm course step in the
+    // stone kit caught the noon sun through a closed room as a white streak
+    // along the mortar, and at dusk whole courses of the Park Cafe lit up.
+    // Both faces put the wall's sunward face in the map, half a metre off.
+    material.shadowSide = THREE.DoubleSide;
     if (recipe.cutout) {
       material.alphaTest = recipe.cutout;
       material.side = THREE.DoubleSide;
