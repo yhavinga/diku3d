@@ -156,7 +156,7 @@ def heap(rng, w, d, h, sides=16, mat="ash", name="heap"):
     return obj
 
 
-def rubble_spill(rng, cx, cy, w, d, h, stones=14, mat="sootwall", core="ash", timber=2):
+def rubble_spill(rng, cx, cy, w, d, h, stones=14, mat="rubble", core="rubble", timber=2):
     """Masonry come down in a heap: a core of broken stuff and ash with
     squared stones lying on it and at its foot, and a charred stick or two."""
     objs = [heap(rng, w, d, h, mat=core)]
@@ -700,9 +700,14 @@ def build_dracolich_idol():
     for sx in (-1, 1):
         p.append(kit.timber((0.14, 0.14, 1.5), (sx * 0.5, 0.08, arm_z - 0.6), (0, sx * math.radians(38), 0), "charred",
                             0.02, "brace"))
-    # The skull sits on the post head, facing down the plaza and a little down.
+    # The skull sits on the post head glaring down the plaza. It was turned
+    # -12 degrees about X, which *raises* a snout that points down -Y: from
+    # the plaza floor it was its own underside, a long pale cone standing up
+    # off the post, and it read as a skull turned along the crossbar. Tipped
+    # the other way, a man at its foot sees the brow, the sockets and the
+    # horns: a face looking down at him.
     skull = dragon_skull(0.0, 1.7)
-    kit.place(skull, (0, -0.35, H + 0.28), (math.radians(-12), 0, 0))
+    kit.place(skull, (0, -0.3, H + 0.3), (math.radians(22), 0, 0))
     p += skull
     # The wings: a fan of spars from each end of the arm, a rag between each
     # pair of spars, torn short of the tips.
@@ -814,36 +819,53 @@ def build_khan_memorial():
 # --- the lot, the park, the courtyards -----------------------------------------
 
 def build_bramble():
-    """A bramble patch: a spreading, lumpy mound of dark leaf a couple of
-    metres across and under a metre high, and the bare arching canes that
-    stand up out of it and bow back down into it -- which is the thing that
-    says bramble rather than bush."""
+    """A bramble thicket: a lumpy mound of dark leaf chest high on a man and
+    two and a half metres across, and the bare arching canes that stand up
+    out of it, some well over head height, and bow back down to root at the
+    tips -- which is the thing that says bramble rather than bush. The first
+    version was a knee-high cushion of leaf with a few thin canes lost in it,
+    and a review read it as a low bush."""
     lib.reset()
     rng = rng_for(92301)
     p = []
-    for i in range(9):
+    for i in range(11):
         a = rng.uniform(0, 2 * math.pi)
-        r = rng.uniform(0.0, 0.8) if i else 0.0
-        w = rng.uniform(0.7, 1.2) * (1.4 if i == 0 else 1.0)
-        h = rng.uniform(0.45, 0.75) * (1.2 if i == 0 else 1.0)
-        mass = lib.sphere(0.5, (math.cos(a) * r * 1.2, math.sin(a) * r * 0.9, h * 0.2), segments=9, rings=6,
+        r = rng.uniform(0.0, 0.9) if i else 0.0
+        w = rng.uniform(0.6, 1.0) * (1.3 if i == 0 else 1.0)
+        h = rng.uniform(0.8, 1.3) * (1.25 if i == 0 else 1.0)
+        mass = lib.sphere(0.5, (math.cos(a) * r * 1.2, math.sin(a) * r * 0.95, h * 0.3), segments=9, rings=6,
                           name="mass", mat="leaves")
-        mass.scale = (w, w * rng.uniform(0.75, 1.0), h)
-        mass.rotation_euler = (0, 0, rng.uniform(0, 3))
+        mass.scale = (w, w * rng.uniform(0.7, 1.0), h)
+        mass.rotation_euler = (rng.uniform(-0.2, 0.2), rng.uniform(-0.2, 0.2), rng.uniform(0, 3))
         p.append(mass)
-    for i in range(7):
-        a = rng.uniform(0, 2 * math.pi)
-        c = mathutils.Vector((math.cos(a) * rng.uniform(0.2, 0.6), math.sin(a) * rng.uniform(0.2, 0.5), 0))
-        d = mathutils.Vector((math.cos(a + 1.2), math.sin(a + 1.2), 0))
-        span = rng.uniform(1.3, 1.9)
-        rise = rng.uniform(0.45, 0.7)
-        pts = [c - d * span / 2 + mathutils.Vector((0, 0, 0.2 + rise * math.sin(t * math.pi) + 0.1 * (t - 0.5)))
-               + d * span * t for t in (0, 0.25, 0.5, 0.75, 1.0)]
-        for k in range(4):
+    for i in range(18):
+        # Each cane leaves the crown of the mound, arches outward over it and
+        # comes down to root well beyond its edge.
+        a = 2 * math.pi * i / 18 + rng.uniform(-0.15, 0.15)
+        out = mathutils.Vector((math.cos(a), math.sin(a), 0))
+        root = out * rng.uniform(0.1, 0.5) + mathutils.Vector((0, 0, 0.6))
+        reach = rng.uniform(1.4, 2.3)
+        rise = rng.uniform(0.7, 1.25)
+        n = 7
+        pts = []
+        for k in range(n):
+            t = k / (n - 1)
+            # Up fast, over, and down to the ground at the tip.
+            h = 0.6 + rise * math.sin(t * math.pi * 0.92) * (1 - t) ** 0.25 - 0.6 * t ** 3
+            pts.append(root * (1 - t) + out * reach * t + mathutils.Vector((0, 0, h - root.z * (1 - t) + root.z * (1 - t))))
+        r0 = rng.uniform(0.022, 0.03)
+        for k in range(n - 1):
             vec = pts[k + 1] - pts[k]
             rot = vec.to_track_quat("Z", "Y").to_euler()
-            p.append(kit.timber((0.022, 0.022, vec.length + 0.02), tuple((pts[k] + pts[k + 1]) / 2), tuple(rot),
+            w = r0 * (1.0 - 0.45 * k / (n - 1))
+            p.append(kit.timber((w, w, vec.length + 0.02), tuple((pts[k] + pts[k + 1]) / 2), tuple(rot),
                                 "bark", 0.005, "cane"))
+            if 1 <= k <= 4 and rng.random() < 0.8:
+                leaf = lib.sphere(rng.uniform(0.13, 0.24), tuple(pts[k + 1]), segments=7, rings=5, name="leaf",
+                                  mat="leaves")
+                leaf.scale = (1.3, 0.8, 0.5)
+                leaf.rotation_euler = (rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5), rng.uniform(0, 3))
+                p.append(leaf)
     return deliver(p, "bramble")
 
 

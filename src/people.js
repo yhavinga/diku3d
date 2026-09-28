@@ -27,7 +27,7 @@
 export const CLIP_FACTS = {
   person_male: { walk: 1.200, run: 2.600 },
   person_female: { walk: 1.137, run: 2.464 },
-  troll: { walk: 1.063, run: 2.304 },
+  troll: { walk: 1.031, run: 2.234 },
 };
 export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21, cast: 14 / 24 };
 // sit (5 s), lean (4 s) and talk (3 s) are loops for motion.js's settling:

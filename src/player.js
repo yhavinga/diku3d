@@ -168,7 +168,9 @@ export class Player {
     // A single cell in just over a second; the long way round Poor Alley --
     // seven legs, four corners, ~90 m -- caps out near three, which is what
     // one press costing a detour should feel like.
-    const move = THREE.MathUtils.clamp(total / 24, 0.55, 2.9);
+    // Past that, 40 m/s: Wall Road's 250 m in six seconds, travelled rather
+    // than flashed past.
+    const move = THREE.MathUtils.clamp(total / 24, 0.55, Math.max(2.9, total / 40));
     this.velocity.set(0, 0, 0);
     this._glide = { pts, cum, total, fromYaw, toYaw: fromYaw + d, finalYaw, turn, move, t: 0, onArrive };
   }

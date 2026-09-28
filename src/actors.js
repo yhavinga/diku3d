@@ -179,6 +179,202 @@ function gateBoard(dirName) {
   return board;
 }
 
+/**
+ * The shop's name, painted on its sign: "The Grunting Boar", "The Weapon
+ * Shop" -- what a real one says. It replaced a two-metre serif word floating
+ * over the keeper's head ("Bartender"), which made his bounds 3.2 m tall and
+ * read as a debug label.
+ *
+ * build.js hangs the modelled `hanging_sign` beside a shop's street door and
+ * reports where (`shopSign` decor); the name goes on both faces of that
+ * board, between its battens. A shop with no sign out -- a bar reached through
+ * another room -- gets a flat board high on its back wall instead, the first
+ * thing seen coming in; and if the model is missing, the street door gets a
+ * procedural bracket and board. A dealer in the open air has no wall to hang
+ * anything from and gets nothing: his trade is on his look-plate.
+ *
+ * Every name is in one canvas and every board in one merged mesh: one draw
+ * for the whole town.
+ */
+const SIGN_SLOT = [512, 352];
+const SIGN_COLS = 4;
+/** The panel between the model's battens, in its own frame: out along +z, up y. */
+const SIGN_PANEL = { z0: 0.245, z1: 1.135, y0: 2.855, y1: 3.465, face: 0.034 };
+
+function paintSign(ctx, x0, y0, text) {
+  const [w, h] = SIGN_SLOT;
+  // Dark paint fills the whole slot first, so a mip that bleeds across the
+  // slot edge bleeds border, not the neighbour's lettering.
+  ctx.fillStyle = '#1c130b';
+  ctx.fillRect(x0, y0, w, h);
+  const grad = ctx.createLinearGradient(0, y0, 0, y0 + h);
+  grad.addColorStop(0, '#40291a'); grad.addColorStop(1, '#2b1b10');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x0 + 8, y0 + 8, w - 16, h - 16);
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 40; i++) {
+    const y = y0 + 10 + ((i * 53) % (h - 20));
+    ctx.strokeStyle = `rgba(14,8,3,${0.10 + (i % 4) * 0.04})`;
+    ctx.beginPath(); ctx.moveTo(x0 + 8, y + 0.5);
+    ctx.bezierCurveTo(x0 + 170, y + 3, x0 + 340, y - 3, x0 + w - 8, y + 1); ctx.stroke();
+  }
+  // A gilt rule inset from the edge, the way a signwriter lines a board.
+  ctx.strokeStyle = 'rgba(214,176,98,0.85)'; ctx.lineWidth = 4;
+  ctx.strokeRect(x0 + 30, y0 + 30, w - 60, h - 60);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#efd59c';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowOffsetY = 2; ctx.shadowBlur = 3;
+  const font = (px) => `600 ${px}px "Iowan Old Style", "Palatino Linotype", Georgia, serif`;
+  const fit = (line, px, maxW) => {
+    ctx.font = font(px);
+    return Math.floor(px * Math.min(1, maxW / Math.max(1, ctx.measureText(line).width)));
+  };
+  // Two lines where there is an article, so the name gets the big letters;
+  // otherwise one line, or two at a word break if one would be too small.
+  const m = /^(the|ye)\s+(.+)$/i.exec(text.trim());
+  let lines = m ? [m[2]] : [text.trim()];
+  if (fit(lines[0], 76, w - 90) < 50 && / /.test(lines[0])) {
+    const words = lines[0].split(' ');
+    const cut = Math.ceil(words.length / 2);
+    lines = [words.slice(0, cut).join(' '), words.slice(cut).join(' ')];
+  }
+  const px = Math.min(...lines.map((line) => fit(line, 76, w - 90)));
+  const top = m ? 44 : 0;
+  if (m) {
+    ctx.font = font(34);
+    ctx.fillText(m[1].toUpperCase(), x0 + w / 2, y0 + 88);
+  }
+  ctx.font = font(px);
+  const mid = y0 + h / 2 + top / 2 + 4;
+  lines.forEach((line, k) => ctx.fillText(line, x0 + w / 2, mid + (k - (lines.length - 1) / 2) * px * 1.05));
+  ctx.shadowColor = 'transparent';
+}
+
+function shopSigns(world, layout, built) {
+  const CELL = 13;
+  const SHELL = ROOM / 2 + 0.7;   // the wall's outer face, as build.js lays it
+  const DOOR_W = 3.2;
+  const DOOR_H = 3.1;
+  const plans = [];
+  const hung = new Set();
+  for (const item of built.decor) {
+    if (item.kind !== 'shopSign') continue;
+    hung.add(item.vnum);
+    plans.push({ text: item.name, kind: 'model', at: item });
+  }
+  for (const [vnum, info] of built.rooms) {
+    if (hung.has(vnum) || info.unbuilt || info.outdoor) continue;
+    const room = world.rooms.get(vnum);
+    if (!room || !room.mobs.some((m) => m.shop)) continue;
+    const sides = layout.sides.get(vnum) || [];
+    const doors = [0, 1, 2, 3].filter((d) => sides[d] && sides[d].kind === 'alley' && sides[d].exit);
+    const street = doors.find((d) => {
+      const next = built.rooms.get(sides[d].exit.to);
+      return next && next.outdoor;
+    });
+    const cx = info.cell.x * CELL; const cz = info.cell.z * CELL; const y = info.center.y;
+    if (street !== undefined) {
+      plans.push({ text: room.name, kind: 'blade', dir: street, cx, cz, y });
+    } else if (doors.length) {
+      const across = (doors[0] + 2) % 4;
+      const wall = !sides[across] ? across : [0, 1, 2, 3].find((d) => !sides[d]);
+      if (wall !== undefined) plans.push({ text: room.name, kind: 'wall', dir: wall, cx, cz, y });
+    }
+  }
+  if (!plans.length) return null;
+
+  const rows = Math.ceil(plans.length / SIGN_COLS);
+  const canvas = document.createElement('canvas');
+  canvas.width = SIGN_SLOT[0] * SIGN_COLS; canvas.height = SIGN_SLOT[1] * rows;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width; const H = canvas.height;
+  plans.forEach((plan, i) => paintSign(ctx, (i % SIGN_COLS) * SIGN_SLOT[0], Math.floor(i / SIGN_COLS) * SIGN_SLOT[1], plan.text));
+
+  const iron = [(SIGN_SLOT[0] * 0.5) / W, 1 - 3 / H];   // inside slot 0's dark border
+  const flat = (geo) => {
+    const uv = geo.attributes.uv;
+    for (let k = 0; k < uv.count; k++) uv.setXY(k, iron[0], iron[1]);
+    return geo;
+  };
+  const m4 = new THREE.Matrix4();
+  const parts = [];
+  plans.forEach((plan, i) => {
+    const u0 = ((i % SIGN_COLS) * SIGN_SLOT[0]) / W; const u1 = u0 + SIGN_SLOT[0] / W;
+    const v1 = 1 - (Math.floor(i / SIGN_COLS) * SIGN_SLOT[1]) / H; const v0 = v1 - SIGN_SLOT[1] / H;
+    const slot = (geo, keep = () => true) => {
+      const uv = geo.attributes.uv;
+      for (let k = 0; k < uv.count; k++) {
+        if (keep(k)) uv.setXY(k, u0 + uv.getX(k) * (u1 - u0), v0 + uv.getY(k) * (v1 - v0));
+        else uv.setXY(k, iron[0], iron[1]);
+      }
+      return geo;
+    };
+    if (plan.kind === 'model') {
+      // Both faces of the modelled board, a few millimetres proud of it. A
+      // plane turned a quarter to +x reads left to right from +x, and the
+      // other quarter from -x, so neither face is mirrored.
+      const p = SIGN_PANEL; const a = plan.at;
+      const frame = new THREE.Matrix4().makeRotationY(a.rotY || 0).setPosition(a.x, a.y, a.z);
+      for (const s of [1, -1]) {
+        const panel = slot(new THREE.PlaneGeometry(p.z1 - p.z0, p.y1 - p.y0));
+        panel.applyMatrix4(m4.makeRotationY(s * Math.PI / 2))
+          .translate(s * p.face, (p.y0 + p.y1) / 2, (p.z0 + p.z1) / 2).applyMatrix4(frame);
+        parts.push(panel);
+      }
+      return;
+    }
+    const board = new THREE.BoxGeometry(1.0, 0.69, 0.05);
+    const painted = board.groups.slice(4);
+    slot(board, (k) => painted.some((g) => k >= g.start / 1.5 && k < (g.start + g.count) / 1.5));
+    board.clearGroups();
+    const [dx, , dz] = DIR_STEP4[plan.dir];
+    if (plan.kind === 'blade') {
+      // No model: an iron arm out of the wall beside the door, and the board
+      // under it square to the wall, so it reads from up and down the street.
+      const tx = -dz; const tz = dx;
+      const side = DOOR_W / 2 + 0.75;
+      const bx = plan.cx + dx * SHELL + tx * side; const bz = plan.cz + dz * SHELL + tz * side;
+      const top = plan.y + DOOR_H + 0.75;
+      const yaw = Math.atan2(-dz, dx);   // turns local +x out of the wall
+      const at = (along, up, geo) => geo.applyMatrix4(m4.makeRotationY(yaw))
+        .translate(bx + dx * along, top + up, bz + dz * along);
+      parts.push(at(0.75, -0.52, board));
+      parts.push(at(0.7, 0, flat(new THREE.BoxGeometry(1.4, 0.05, 0.05))));
+      const brace = flat(new THREE.BoxGeometry(0.95, 0.04, 0.04));
+      brace.applyMatrix4(m4.makeRotationZ(0.62));
+      parts.push(at(0.38, -0.27, brace));
+      for (const a of [0.35, 1.15]) parts.push(at(a, -0.09, flat(new THREE.BoxGeometry(0.025, 0.14, 0.025))));
+      parts.push(at(0.03, -0.25, flat(new THREE.BoxGeometry(0.06, 0.62, 0.12))));
+    } else {
+      // Flat on the inner face of the back wall, high, and along it from any
+      // wall torch: a flame licks up past four metres, and the Boar's first
+      // board hung straight over one.
+      const inner = ROOM / 2 - 0.04;
+      const tx = -dz; const tz = dx;
+      const wx = plan.cx + dx * inner; const wz = plan.cz + dz * inner;
+      const torches = built.decor.filter((d) => d.kind === 'torch' && Math.abs(d.y - plan.y - 2.9) < 1.5
+        && Math.abs((d.x - wx) * dx + (d.z - wz) * dz) < 1 && Math.abs((d.x - wx) * tx + (d.z - wz) * tz) < ROOM / 2);
+      const slide = [0, 1.7, -1.7, 2.9, -2.9].find((o) => torches.every((d) => Math.abs((d.x - wx) * tx + (d.z - wz) * tz - o) > 1.25)) ?? 0;
+      board.applyMatrix4(m4.makeRotationY(Math.atan2(-dx, -dz)));
+      parts.push(board.translate(wx + tx * slide, plan.y + 4.2, wz + tz * slide));
+    }
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  const merged = mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
+  const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ map: texture, roughness: 0.78, metalness: 0.05 }));
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.name = 'shop-signs';
+  mesh.userData.signs = plans.map((p) => ({ text: p.text, kind: p.kind }));
+  return mesh;
+}
+
+/** north, east, south, west -- are.js's DIR_STEP, the four that lie flat. */
+const DIR_STEP4 = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]];
+
 // ---------------------------------------------------------------- figures ----
 
 function pushPart(parts, geometry, colour, matrix) {
@@ -750,8 +946,8 @@ const BEASTS = [
   // The chreffn: 'head and torso copper-covered, with yellow, glowing eyes,
   // the lower body in an orange shading', crawling -- the drider's build, in
   // copper over orange.
-  { test: /\bchreffns?\b/, asset: 'beast_drider', scale: 0.72, coat: 0xa8521c, pale: 0xb07a44, points: 0x6a4020, glow: 0xffd02a, box: [1.0, 1.6, 'quad', 0xa8521c] },
-  { test: /\bdriders?\b/, asset: 'beast_drider', scale: 1.0, coat: 0x19161a, pale: 0x3d3947, points: 0xe2dfe8, glow: 0xff3a24, box: [1.2, 2.2, 'quad', 0x19161a] },
+  { test: /\bchreffns?\b/, asset: 'beast_drider', scale: 0.72, coat: 0xa8521c, pale: 0xb07a44, points: 0x6a4020, patch: 0xd08a3a, cover: 0.5, glow: 0xffd02a, box: [1.0, 1.6, 'quad', 0xa8521c] },
+  { test: /\bdriders?\b/, asset: 'beast_drider', scale: 1.0, coat: 0x26222c, pale: 0x4a4458, points: 0xe8e4ee, patch: 0x6a5282, cover: 0.5, glow: 0xff3a24, box: [1.2, 2.2, 'quad', 0x19161a] },
   { test: /\b(huge|giant|queen|empress|arachnos)\b.*\bspiders?\b|\bspiders?\b.*\b(huge|giant|queen|empress|arachnos)\b/, asset: 'beast_spider', scale: 2.2, coat: 0x1c1816, pale: 0x7a2a1c, points: 0x0d0b0a, patch: 0x2c2420, cover: 0.3, box: [0.5, 1.6, 'quad', 0x1c1816] },
   { test: /\bspiders?\b/, asset: 'beast_spider', scale: 0.6, coat: 0x2e2621, pale: 0x8f7d66, points: 0x16120f, patch: 0x44382e, cover: 0.35, box: [0.15, 0.5, 'quad', 0x2e2621] },
   { test: /\bscorpions?\b/, asset: 'beast_scorpion', scale: 0.8, coat: 0x7a3218, pale: 0xb0643c, points: 0x2e1409, patch: 0x5a2410, cover: 0.3, box: [0.12, 0.45, 'quad', 0x7a3218] },
@@ -774,9 +970,12 @@ const BEASTS = [
   // the same creature four times over, in stone grey.
   { test: /\bgargoyles?\b/, asset: 'beast_imp', scale: 4.0, coat: 0x6a6964, pale: 0x7c7b76, points: 0x3c3b38, glow: 0xff5a24, box: [1.9, 0.8, 'quad', 0x6a6964] },
   { test: /\b(homonc?ulus|imps?|quasits?)\b/, asset: 'beast_imp', scale: 1.0, coat: 0x4a5a28, pale: 0x7a8a48, points: 0x283018, glow: 0xffc020, box: [0.45, 0.3, 'quad', 0x4a5a28] },
-  { test: /\bnagas?\b/, asset: 'beast_naga', scale: 1.0, stands: 1.9, coat: 0x56662a, pale: 0xc8b25e, points: 0x56662a, patch: 0x8a8a3a, cover: 0.35, box: [0.3, 5, 'quad', 0x56662a] },
+  { test: /\bnagas?\b/, asset: 'beast_naga', scale: 1.0, stands: 1.9, coat: 0x56662a, pale: 0xc8b25e, points: 0x56662a, patch: 0x8a8a3a, cover: 0.35, glow: 0xf0c040, box: [0.3, 5, 'quad', 0x56662a] },
   { test: /\bbasilisks?\b/, asset: 'beast_basilisk', scale: 1.0, coat: 0x5a4a32, pale: 0xbca264, points: 0x3a3020, patch: 0x4a3c28, cover: 0.3, glow: 0x9cff9c, box: [0.5, 2.5, 'quad', 0x5a4a32] },
-  { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, stands: 3.6, coat: 0x5c2c68, pale: 0x8e6096, points: 0x3a1a44, patch: 0x4a2254, cover: 0.3, box: [0.8, 9, 'quad', 0x5c2c68] },
+  // The worm stands in a crater of its own sand, which is all the ground it
+  // touches: its contact patch is the crater's, not ten metres of body, and
+  // sand is thrown up wherever the body goes through the surface.
+  { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, stands: 4.1, coat: 0x4c2458, pale: 0x9a7090, points: 0x22102a, patch: 0x3a1a46, cover: 0.3, footprint: [2.4, 2.4], sand: 0xc9ae84, box: [0.8, 9, 'quad', 0x5c2c68] },
   { test: /\bdustdiggers?\b/, asset: 'beast_dustdigger', scale: 1.0, coat: 0xc2a070, pale: 0x9a7c58, points: 0x7a5a3a, patch: 0xb08c5c, cover: 0.35, box: [0.3, 4, 'quad', 0xc2a070] },
   { test: /\bcamels?\b/, asset: 'beast_camel', scale: 1.0, coat: 0xb48c5c, pale: 0xd6be96, points: 0x8a6a44, box: [1.9, 3, 'quad', 0xb48c5c] },
   // The dracolich lies as a heap of bones until it rises: its idle is the
@@ -787,13 +986,13 @@ const BEASTS = [
   // does not have.
   { test: /\bwargs?\b/, asset: 'beast_canine', scale: 1.6, coat: 0x26221f, pale: 0x3a342e, points: 0x151311, hide: ['flop'], box: [1.0, 1.6, 'quad', 0x2b2724] },
   { test: /\b(guardian|roving) beast\b/, asset: 'beast_canine', scale: 1.7, coat: 0x1b1918, pale: 0x2b2724, points: 0x100f0e, hide: ['flop'], grow: { head: 1.1 }, box: [1.0, 1.6, 'quad', 0x1b1918] },
-  { test: /\b(wolf|wolves)\b/, asset: 'beast_canine', scale: 1.32, coat: 0x807870, pale: 0xd9d2c4, points: 0x4d4841, hide: ['flop'], grow: { tail1: 1.1 }, box: [0.72, 1.15, 'quad', 0x5b5750] },
-  { test: /\bfox(es)?\b/, asset: 'beast_canine', scale: 0.72, coat: 0xa4501e, pale: 0xefe8dc, points: 0x1f1813, hide: ['flop'], grow: { ear: 1.35, tail1: 1.3 }, box: [0.4, 0.7, 'quad', 0xa4501e] },
-  { test: /\b(rottweiler|doberman)\b/, asset: 'beast_canine', scale: 1.08, width: 1.12, coat: 0x1c1917, pale: 0x8a5630, points: 0x8a5630, hide: ['ear'], grow: { flop: 0.7 }, box: [0.62, 1.0, 'quad', 0x2e2622] },
-  { test: /\b(hound|mastiff|cooshee|pitbull)s?\b/, asset: 'beast_canine', scale: 1.15, width: 1.1, coat: 0x5f4d3c, pale: 0xb8a58a, points: 0x3a2f25, hide: ['ear'], box: [0.72, 1.15, 'quad', 0x5b5750] },
-  { test: /\bbeagles?\b/, asset: 'beast_canine', scale: 0.7, coat: 0xa06c38, pale: 0xf1ede4, points: 0xf1ede4, patch: 0x1e1a16, cover: 0.42, hide: ['ear'], grow: { flop: 1.15 }, box: [0.5, 0.85, 'quad', 0x7a6247] },
-  { test: /\b(puppy|puppies|pup)\b/, asset: 'beast_canine', scale: 0.5, coat: 0x8e7152, pale: 0xe2d6c2, points: 0x5a4632, hide: ['ear'], grow: { head: 1.35, flop: 1.1 }, box: [0.26, 0.42, 'quad', 0x8a7355] },
-  { test: /\b(fido|dog|dogs|cur|mutt|mongrel)\b/, asset: 'beast_canine', scale: 0.82, coat: 0x6b5641, pale: 0xa6927a, points: 0x3a3028, patch: 0xcfc6b4, cover: 0.2, hide: ['ear'], box: [0.5, 0.85, 'quad', 0x7a6247] },
+  { test: /\b(wolf|wolves)\b/, asset: 'beast_canine', scale: 1.32, coat: 0x7e7568, pale: 0xdcd4c4, points: 0x9c8a70, patch: 0x45403a, cover: 0.38, hide: ['flop'], grow: { tail1: 1.1 }, box: [0.72, 1.15, 'quad', 0x5b5750] },
+  { test: /\bfox(es)?\b/, asset: 'beast_canine', scale: 0.72, coat: 0xa4501e, pale: 0xefe8dc, points: 0x1f1813, hide: ['flop'], grow: { ear: 1.35, tail1: 1.3, ruff: 0.7 }, box: [0.4, 0.7, 'quad', 0xa4501e] },
+  { test: /\b(rottweiler|doberman)\b/, asset: 'beast_canine', scale: 1.08, width: 1.12, coat: 0x1c1917, pale: 0x8a5630, points: 0x8a5630, hide: ['ear', 'ruff'], grow: { flop: 0.7 }, box: [0.62, 1.0, 'quad', 0x2e2622] },
+  { test: /\b(hound|mastiff|cooshee|pitbull)s?\b/, asset: 'beast_canine', scale: 1.15, width: 1.1, coat: 0x5f4d3c, pale: 0xb8a58a, points: 0x3a2f25, hide: ['ear', 'ruff'], box: [0.72, 1.15, 'quad', 0x5b5750] },
+  { test: /\bbeagles?\b/, asset: 'beast_canine', scale: 0.7, coat: 0xa06c38, pale: 0xf1ede4, points: 0xf1ede4, patch: 0x1e1a16, cover: 0.42, hide: ['ear', 'ruff'], grow: { flop: 1.15 }, box: [0.5, 0.85, 'quad', 0x7a6247] },
+  { test: /\b(puppy|puppies|pup)\b/, asset: 'beast_canine', scale: 0.5, coat: 0x8e7152, pale: 0xe2d6c2, points: 0x5a4632, hide: ['ear', 'ruff'], grow: { head: 1.35, flop: 1.1 }, box: [0.26, 0.42, 'quad', 0x8a7355] },
+  { test: /\b(fido|dog|dogs|cur|mutt|mongrel)\b/, asset: 'beast_canine', scale: 0.82, coat: 0x6b5641, pale: 0xa6927a, points: 0x3a3028, patch: 0xcfc6b4, cover: 0.2, hide: ['ear', 'ruff'], box: [0.5, 0.85, 'quad', 0x7a6247] },
   // --- cats, great and small. The patch channel on the feline is tabby
   // stripes, so `cover` is how striped it is.
   { test: /\btigers?\b/, asset: 'beast_feline', scale: 4.0, coat: 0xc0692a, pale: 0xefe6d6, points: 0xc0692a, patch: 0x1a1512, cover: 0.42, box: [1.0, 1.9, 'quad', 0xc0692a] },
@@ -812,11 +1011,11 @@ const BEASTS = [
   { test: /\b(rat|rats|rodent|vermin)\b/, asset: 'beast_rodent', scale: 1.2, coat: 0x5e5043, pale: 0x9e9180, points: 0x5e5043, box: [0.14, 0.26, 'quad', 0x4d453c] },
   // --- horses, and the deer, which is a lighter build of the same frame.
   // Horses vary coat by the mobile, so a stable of four is not one horse.
-  { test: /\b(donkey|donkeys)\b/, asset: 'beast_equine', scale: 0.72, coat: 0x756b60, pale: 0xdcd4c8, points: 0x2c2723, grow: { ear: 1.8 }, box: [1.1, 1.6, 'quad', 0x756b60] },
-  { test: /\b(mule|mules)\b/, asset: 'beast_equine', scale: 0.88, coat: 0x5a4636, pale: 0xb7a58e, points: 0x2a221c, grow: { ear: 1.5 }, box: [1.3, 1.9, 'quad', 0x5a4636] },
-  { test: /\b(pony|ponies)\b/, asset: 'beast_equine', scale: 0.72, coats: 'horse', box: [1.1, 1.6, 'quad', 0x6b4f36] },
-  { test: /\bpegasus\b/, asset: 'beast_equine', scale: 1.0, coat: 0xe9e5dd, pale: 0xe9e5dd, points: 0xcfcac2, box: [1.45, 2.1, 'quad', 0xe9e5dd] },
-  { test: /\b(horse|horses|mare|stallion|steed|colt|foal)\b/, asset: 'beast_equine', scale: 1.0, coats: 'horse', box: [1.45, 2.1, 'quad', 0x6b4f36] },
+  { test: /\b(donkey|donkeys)\b/, asset: 'beast_equine', scale: 0.72, sleek: true, coat: 0x756b60, pale: 0xdcd4c8, points: 0x2c2723, grow: { ear: 1.8 }, box: [1.1, 1.6, 'quad', 0x756b60] },
+  { test: /\b(mule|mules)\b/, asset: 'beast_equine', scale: 0.88, sleek: true, coat: 0x5a4636, pale: 0xb7a58e, points: 0x2a221c, grow: { ear: 1.5 }, box: [1.3, 1.9, 'quad', 0x5a4636] },
+  { test: /\b(pony|ponies)\b/, asset: 'beast_equine', scale: 0.72, coats: 'horse', sleek: true, box: [1.1, 1.6, 'quad', 0x6b4f36] },
+  { test: /\bpegasus\b/, asset: 'beast_equine', scale: 1.0, sleek: true, coat: 0xe9e5dd, pale: 0xe9e5dd, points: 0xcfcac2, box: [1.45, 2.1, 'quad', 0xe9e5dd] },
+  { test: /\b(horse|horses|mare|stallion|steed|colt|foal)\b/, asset: 'beast_equine', scale: 1.0, coats: 'horse', sleek: true, box: [1.45, 2.1, 'quad', 0x6b4f36] },
   { test: /\b(stag|stags|elk)\b/, asset: 'beast_cervid', scale: 1.15, coat: 0x8c5c32, pale: 0xefe6d6, points: 0x3a2c20, patch: 0xefe6d6, cover: 0.14, box: [0.95, 1.4, 'quad', 0x8c5c32] },
   { test: /\b(deer|doe|fawn)\b/, asset: 'beast_cervid', scale: 1.0, coat: 0x9c6a3a, pale: 0xefe6d6, points: 0x3a2c20, patch: 0xefe6d6, cover: 0.18, hide: ['antler'], box: [0.85, 1.3, 'quad', 0x9c6a3a] },
   // --- cattle. `\bbull\b` would match hood.are's pitbull, which is why the
@@ -826,7 +1025,7 @@ const BEASTS = [
   { test: /\b(cow|cows|cattle|heifer)\b/, asset: 'beast_bovine', scale: 1.0, coats: 'cow', grow: { horn: 0.7 }, box: [1.4, 2.15, 'quad', 0x6d5a4a] },
   // --- pigs.
   { test: /\b(boar|boars|warthog)\b/, asset: 'beast_pig', scale: 1.0, coat: 0x3a3029, pale: 0x4a3e34, points: 0x1f1a16, grow: { tusk: 1.2 }, box: [0.62, 1.0, 'quad', 0x3a3029] },
-  { test: /\b(pig|pigs|hog|hogs|sow|swine|piglet)\b/, asset: 'beast_pig', scale: 1.0, coat: 0xd6a494, pale: 0xe8c4b6, points: 0xd6a494, hide: ['tusk'], box: [0.62, 1.0, 'quad', 0x9a7a6c] },
+  { test: /\b(pig|pigs|hog|hogs|sow|swine|piglet)\b/, asset: 'beast_pig', scale: 1.0, sleek: true, coat: 0xd6a494, pale: 0xe8c4b6, points: 0xd6a494, hide: ['tusk'], box: [0.62, 1.0, 'quad', 0x9a7a6c] },
   // --- bears. The marsh's "huge hairy beast" is twenty feet of green-furred
   // claws, and a bear is the nearest thing the library has to one.
   // Its small kin, which 'cringes in terror': the same green-furred thing
@@ -954,7 +1153,9 @@ const _patch = new THREE.Color();
  * beaks) keep the colour they were modelled with, times `horn` if the look
  * darkens them -- a crow's beak and legs are the duck's, in black.
  */
-const COATED = new Set(['fur', 'feather', 'scales', 'chitin', 'ooze', 'hide', 'bone']);
+// `skin` is the drider's drow half: its face, hair and torso are painted from
+// the masks like any coat, the skin the pale channel and the hair the points.
+const COATED = new Set(['fur', 'feather', 'scales', 'chitin', 'ooze', 'hide', 'bone', 'skin']);
 
 function paintedGeometry(asset, node, tag, look) {
   const key = `${node.name}|${look.key}`;
@@ -1046,6 +1247,30 @@ function beastLook(spec, proto, seed = 0) {
   return look;
 }
 
+/**
+ * A short, groomed coat -- a horse's -- takes a sheen the shaggy ones do not:
+ * the highlight sliding down a flank is what draws the shape of a dark horse
+ * in a dim barn, where the plain fur left a bay as a brown blob.
+ */
+const sleekCache = new WeakMap();
+function sleekFur(library) {
+  let m = sleekCache.get(library);
+  if (!m) {
+    m = library.materialFor('fur').clone();
+    m.name = 'fur-sleek';
+    m.roughness = 0.7;
+    m.envMapIntensity = 1.0;
+    // A groomed coat lies flat: the locks are there in the relief, faintly,
+    // and not in the colour at all -- their light and dark tips, on a horse,
+    // read as the grain of carved wood. The map's mean stands in for it.
+    m.normalScale = new THREE.Vector2(0.1, 0.1);
+    m.map = null;
+    m.color.setScalar(0.4);
+    sleekCache.set(library, m);
+  }
+  return m;
+}
+
 function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const info = prepareBeast(asset);
   const look = beastLook(spec, proto, options.seed || 0);
@@ -1058,7 +1283,7 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     // hand in populate(), and knows how long the animal is.
     node.castShadow = false;
     const tag = node.material && node.material.name ? node.material.name.replace(/^MAT:/, '') : '';
-    node.material = library.materialFor(tag);
+    node.material = tag === 'fur' && spec.sleek ? sleekFur(library) : library.materialFor(tag);
     node.geometry = paintedGeometry(asset, node, tag, look);
   });
   const scale = (spec.scale || 1) * (0.94 + strHash(proto.short, 3) * 0.12);
@@ -1133,18 +1358,176 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   mixer.update(0);
 
   const size = asset.size;
-  group.userData.footprint = { length: size.z * scale, width: size.x * scale * width };
+  group.userData.footprint = spec.footprint
+    ? { length: spec.footprint[0] * scale, width: spec.footprint[1] * scale }
+    : { length: size.z * scale, width: size.x * scale * width };
+  if (spec.sand) group.add(sandSpray(body, spec.sand));
   // A flier is built on the ground and flown by its clips, `hover` metres up
   // (in the model's units): its name and its examine point go up with it.
   const hover = spec.air ? (info.hover || 0) * scale : 0;
   // A body that stands up out of its rest pose -- the reared naga, the worm
   // out of the sand -- says how tall it really is, for the label over it.
   const height = spec.stands ? spec.stands * scale : size.y * scale + hover;
-  return {
+  const record = {
     group, headGroup: null, height, scale, mixer, actions, clips, stride,
     hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
     afloat,
   };
+  // A bat under a roof hangs from it while it is idle: its `roost` clip,
+  // moved up from the height it was authored at (`info.roost`, in the
+  // model's units) to the ceiling of the room it was reset in, `up` metres
+  // over its feet. It drops into flight when it has somewhere to go.
+  if (spec.air && actions.roost && info.roost) {
+    record.roost = (up) => {
+      const lift = up / scale - info.roost;
+      const clip = asset.animations.find((c) => c.name === 'roost').clone();
+      for (const track of clip.tracks) {
+        if (!track.name.endsWith('.position')) continue;
+        for (let i = 1; i < track.values.length; i += 3) track.values[i] += lift;
+      }
+      mixer.uncacheAction(actions.roost.getClip());
+      const roost = mixer.clipAction(clip);
+      roost.setLoop(THREE.LoopRepeat, Infinity);
+      roost.time = start * clip.duration;
+      roost.setEffectiveWeight(1);
+      roost.play();
+      actions.idle.stop();
+      actions.idle = roost;
+      clips.idle = clip.duration;
+      delete actions.roost;
+      mixer.update(0);
+      record.height = up;
+    };
+  }
+  return record;
+}
+
+/**
+ * How far above `at` the underside of whatever roofs it is, or null in the
+ * open or when it is out of a bat's reach: one ray straight up through the
+ * built world.
+ */
+const _ceilRay = new THREE.Raycaster();
+const _up = new THREE.Vector3(0, 1, 0);
+function ceilingAbove(root, at) {
+  _ceilRay.set(new THREE.Vector3(at.x, at.y + 1.2, at.z), _up);
+  _ceilRay.far = 14;
+  const hit = _ceilRay.intersectObject(root, true)[0];
+  return hit ? hit.point.y - at.y : null;
+}
+
+/**
+ * Sand thrown up where a burrowing body goes through the ground: a trickle
+ * off a worm standing still in its hole, a spray where it surfaces or dives.
+ * It finds the crossings itself, from the chain of body bones either side of
+ * the surface, and emits in proportion to how fast each crossing slides --
+ * so it follows the clips without knowing which one is playing.
+ *
+ * Lit, not glowing: each puff is a camera-facing quad whose normal points up,
+ * so it takes exactly the light the sand beneath it does -- an unlit sprite in
+ * the sand's own colour read as dark smudges against sand in full sun. One
+ * instanced draw, updated only while the worm is on screen.
+ */
+function sandSpray(body, colour) {
+  const COUNT = 96;
+  const chain = [];
+  for (let i = 1; ; i++) {
+    const bone = body.getObjectByName(`body${i}`);
+    if (!bone) break;
+    chain.push(bone);
+  }
+  const quad = new THREE.PlaneGeometry(1, 1);
+  const normal = quad.attributes.normal;
+  for (let i = 0; i < normal.count; i++) normal.setXYZ(i, 0, 1, 0);
+  const material = new THREE.MeshStandardMaterial({
+    color: colour, map: wispHaloTexture(), transparent: true, depthWrite: false, roughness: 1, metalness: 0,
+    opacity: 0.6,
+  });
+  const mesh = new THREE.InstancedMesh(quad, material, COUNT);
+  mesh.frustumCulled = false;
+  mesh.name = 'sandSpray';
+  mesh.layers.set(OVERLAY_LAYER); // kept out of the AO prepass, see makeLabel
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  const pos = new Float32Array(COUNT * 3);
+  const vel = new Float32Array(COUNT * 3);
+  const life = new Float32Array(COUNT).fill(1);
+  const age = new Float32Array(COUNT).fill(1e9);
+  const grow = new Float32Array(COUNT);
+  const last = new Map();
+  const _a = new THREE.Vector3();
+  const _b = new THREE.Vector3();
+  const _q = new THREE.Quaternion();
+  const _gq = new THREE.Quaternion();
+  const _s = new THREE.Vector3();
+  const _p = new THREE.Vector3();
+  const _m = new THREE.Matrix4();
+  let next = 0;
+  let before = performance.now();
+  let carry = 0;
+  mesh.onBeforeRender = (renderer, scene, camera) => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - before) / 1000);
+    before = now;
+    const holder = mesh.parent;
+    if (!holder || dt <= 0) return;
+    // Where the body passes through y = 0, in the figure's own frame.
+    for (let i = 0; i < chain.length - 1; i++) {
+      holder.worldToLocal(chain[i].getWorldPosition(_a));
+      holder.worldToLocal(chain[i + 1].getWorldPosition(_b));
+      if ((_a.y > 0) === (_b.y > 0)) { last.delete(i); continue; }
+      const k = _a.y / (_a.y - _b.y);
+      const x = _a.x + (_b.x - _a.x) * k;
+      const z = _a.z + (_b.z - _a.z) * k;
+      const prev = last.get(i);
+      const speed = prev ? Math.min(8, Math.hypot(x - prev[0], z - prev[1]) / dt) : 0;
+      last.set(i, [x, z]);
+      carry += dt * (6 + speed * 36);
+      while (carry >= 1) {
+        carry -= 1;
+        const j = next;
+        next = (next + 1) % COUNT;
+        const a = Math.random() * Math.PI * 2;
+        const r = 0.5 + Math.random() * 0.3;
+        pos[j * 3] = x + Math.cos(a) * r;
+        pos[j * 3 + 1] = 0.25 + Math.random() * 0.25;
+        pos[j * 3 + 2] = z + Math.sin(a) * r;
+        const out = 0.3 + Math.random() * 0.8 + speed * 0.25;
+        vel[j * 3] = Math.cos(a) * out;
+        vel[j * 3 + 1] = 0.7 + Math.random() * 1.5 + speed * 0.45;
+        vel[j * 3 + 2] = Math.sin(a) * out;
+        age[j] = 0;
+        life[j] = 0.9 + Math.random() * 0.9;
+        grow[j] = 0.35 + Math.random() * 0.35;
+      }
+    }
+    holder.getWorldQuaternion(_gq).invert();
+    _q.copy(_gq).multiply(camera.quaternion);
+    for (let j = 0; j < COUNT; j++) {
+      age[j] += dt;
+      const t = age[j] / life[j];
+      if (t >= 1) {
+        _m.makeScale(0, 0, 0);
+        mesh.setMatrixAt(j, _m);
+        continue;
+      }
+      vel[j * 3 + 1] -= 6.5 * dt;
+      // Air drag: the dust a spray raises slows and hangs.
+      const drag = Math.exp(-1.6 * dt);
+      vel[j * 3] *= drag;
+      vel[j * 3 + 2] *= drag;
+      pos[j * 3] += vel[j * 3] * dt;
+      pos[j * 3 + 1] = Math.max(0.08, pos[j * 3 + 1] + vel[j * 3 + 1] * dt);
+      pos[j * 3 + 2] += vel[j * 3 + 2] * dt;
+      // Swells as it spreads, gone by the end of its life.
+      const size = grow[j] * (0.5 + 1.6 * t) * Math.sin(Math.PI * Math.min(1, t * 1.25 + 0.05));
+      _p.set(pos[j * 3], pos[j * 3 + 1], pos[j * 3 + 2]);
+      _s.set(size, size, size);
+      mesh.setMatrixAt(j, _m.compose(_p, _q, _s));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  };
+  return mesh;
 }
 
 let wispHalo = null;
@@ -1767,6 +2150,11 @@ export function populate(world, layout, built, options = {}) {
       );
       fig.rotation.y = -angle + Math.PI / 2;
       group.add(fig);
+      if (made.roost && !info.outdoor) {
+        built.group.updateMatrixWorld(true);
+        const up = ceilingAbove(built.group, fig.position);
+        if (up && up > 2.2) made.roost(up);
+      }
 
       const aggressive = !!(mob.proto.act & ACT_AGGRESSIVE);
       // The figure contract: whatever the builder handed back, plus where this
@@ -1774,7 +2162,7 @@ export function populate(world, layout, built, options = {}) {
       // frames off it and fills in what an older rig does not carry.
       const record = {
         ...made,
-        object: fig, head: headGroup, home: fig.position.clone(), height,
+        object: fig, head: headGroup, home: fig.position.clone(), height: made.height,
         mixer: made.mixer || null, actions: made.actions || null, legs: made.legs || null,
         aggressive, walking: false,
         sentinel: !!(mob.proto.act & ACT_SENTINEL),
@@ -1790,7 +2178,7 @@ export function populate(world, layout, built, options = {}) {
       figures.push(record);
 
       record.interactable = {
-        position: fig.position.clone().setY(fig.position.y + height * 0.6),
+        position: fig.position.clone().setY(fig.position.y + record.height * 0.6),
         radius: 2.6,
         // Mobiles walk about, so their examine point moves with them: main.js
         // looks these up by distance each frame instead of from its fixed grid.
@@ -1802,13 +2190,12 @@ export function populate(world, layout, built, options = {}) {
       };
       interactables.push(record.interactable);
 
-      if (mob.shop) {
-        const sign = makeLabel(shopSign(mob.proto.short), 0.6, { colour: '#f0d9a8' });
-        sign.position.set(0, height + 1.15, 0);
-        fig.add(sign);
-      }
     });
   }
+
+  // --- shop signs -----------------------------------------------------------
+  const signs = shopSigns(world, layout, built);
+  if (signs) group.add(signs);
 
   // --- objects on the ground ---------------------------------------------
 
@@ -2954,7 +3341,4 @@ export function populate(world, layout, built, options = {}) {
   };
 }
 
-function shopSign(short) {
-  const clean = short.replace(/^(the|a|an)\s+/i, '');
-  return clean.charAt(0).toUpperCase() + clean.slice(1);
-}
+

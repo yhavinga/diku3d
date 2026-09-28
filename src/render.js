@@ -460,6 +460,30 @@ class ScaledGTAOPass extends GTAOPass {
   constructor(scene, camera, width, height, scale) {
     super(scene, camera, Math.round(width * scale), Math.round(height * scale));
     this.scale = scale;
+    this.unshaded = [];
+    this.unshadedAge = Infinity;
+  }
+
+  /**
+   * The stock pass walks the whole scene every frame to find the points and
+   * lines it must hide from the prepass -- eighteen thousand objects, ten
+   * thousand of them bones, for eight that qualify: 2.2 ms of script a frame,
+   * measured at the Shire barn. The eight are created once and toggled, so
+   * the list is found again only now and then.
+   */
+  _overrideVisibility() {
+    if (++this.unshadedAge > 90) {
+      this.unshadedAge = 0;
+      this.unshaded.length = 0;
+      this.scene.traverse((object) => {
+        if (object.isPoints || object.isLine || object.isLine2) this.unshaded.push(object);
+      });
+    }
+    for (const object of this.unshaded) {
+      if (!object.visible) continue;
+      object.visible = false;
+      this._visibilityCache.push(object);
+    }
   }
 
   setSize(width, height) {
@@ -474,9 +498,16 @@ class ScaledGTAOPass extends GTAOPass {
     // overlay layer off around it is the whole of the fix -- no per-frame
     // traversal, and nothing to keep in step with what is in the scene.
     this.camera.layers.disable(OVERLAY_LAYER);
+    // The render pass just before this one brought every matrix in the scene
+    // up to date, and nothing moves between the two. Walking the whole graph
+    // again -- every bone of every figure -- was 3.3 ms of script a frame at
+    // the Shire barn, the largest single item in the profile.
+    const autoUpdate = this.scene.matrixWorldAutoUpdate;
+    this.scene.matrixWorldAutoUpdate = false;
     try {
       super.render(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
     } finally {
+      this.scene.matrixWorldAutoUpdate = autoUpdate;
       this.camera.layers.enable(OVERLAY_LAYER);
     }
   }

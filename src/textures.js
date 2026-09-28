@@ -73,6 +73,19 @@ function mix(c1, c2, t) {
   return [lerp(c1[0], c2[0], t), lerp(c1[1], c2[1], t), lerp(c1[2], c2[2], t)];
 }
 
+// The random rubble of the neighborhood's walls, laid out once for its tile:
+// fourteen courses whose heights wander a quarter either way, and a number of
+// stones in each that changes row to row. See `sootwall`.
+const SOOT_ROWS = (() => {
+  const n = 14;
+  const rows = [0];
+  for (let i = 1; i < n; i++) rows.push((i + (hash2(i, 0, n, 683) - 0.5) * 0.5) / n);
+  rows.push(1);
+  return rows;
+})();
+const SOOT_COLS = SOOT_ROWS.slice(0, -1).map((_, i) => 4 + Math.floor(hash2(i, 1, 14, 687) * 5));
+const SOOT_SHIFT = SOOT_ROWS.slice(0, -1).map((_, i) => hash2(i, 2, 14, 689));
+
 // ------------------------------------------------------------- surfaces ----
 
 /**
@@ -542,26 +555,43 @@ const SURFACES = {
   },
 
   /**
-   * Fur and hide, for the animals. Near-neutral, like cloth, because every
-   * beast carries its coat, its pale belly and its dark points in vertex colour
-   * and the map must not fight them. What the map does carry is the one thing
-   * that tells a pelt from a painted shell at a few metres: the coat lies in
-   * clumps that each catch the light a little differently, and the gaps
-   * between them are shadowed. Isotropic on purpose -- the UVs are cube
-   * projected, so a strand direction would change at every projection seam.
+   * Fur, for the animals. Near-neutral, like cloth, because every beast
+   * carries its coat, its pale belly and its dark points in vertex colour and
+   * the map must not fight them. What the map carries is what tells a pelt
+   * from a painted shell: the hair lies in one direction -- down V, which
+   * beasts.py lays along the body and down the legs -- in locks that each end
+   * in lighter guard-hair tips over a darker undercoat showing between them.
+   * An isotropic clump map on cube-projected UVs, at 0.3 normal strength, read
+   * on a grey wolf as grey clay.
    */
   fur(u, v, s) {
-    const [d1, edge, id] = cellular(u * 16, v * 16, 16, 401, 0.5);
-    const fine = fbm(u * 64, v * 64, 64, 409, 2);
+    // Noise stretched along V that still tiles: each axis wraps on its own.
+    const aniso = (x, y, px, py, seed) => {
+      const ix = Math.floor(x); const iy = Math.floor(y);
+      const fx = x - ix; const fy = y - iy;
+      const h = (a, b) => hash2(((a % px) + px) % px, ((b % py) + py) % py, 65536, seed);
+      const sx = fx * fx * (3 - 2 * fx); const sy = fy * fy * (3 - 2 * fy);
+      return lerp(lerp(h(ix, iy), h(ix + 1, iy), sx), lerp(h(ix, iy + 1), h(ix + 1, iy + 1), sx), sy);
+    };
+    // Locks: a row of them across U, each offset along V so their tips do
+    // not line up, and each a sawtooth along V -- root low, tip proud.
+    const lockU = u * 18;
+    const li = Math.floor(lockU);
+    const within = lockU - li;
+    const offset = hash2(((li % 18) + 18) % 18, 0, 18, 401);
+    const along = v * 6 + offset * 6;
+    const saw = along - Math.floor(along);
+    const lock = Math.sin(Math.PI * within) ** 0.6 * (0.35 + 0.65 * saw);
+    const strand = aniso(u * 160, v * 10, 160, 10, 409);
+    const strand2 = aniso(u * 90, v * 6, 90, 6, 411);
     const tone = fbm(u * 4, v * 4, 4, 419, 3);
-    const clump = clamp01(edge * 3.2);
-    const base = mix(rgb(0x9e9e9e), rgb(0xb4b4b4), tone);
-    // Kept low: at 0.16 of tone and 0.07 of relief a horse's short coat read
-    // as a fleece at two metres.
-    const shade = (0.95 + id * 0.08) * (0.95 + clump * 0.05) * (0.95 + fine * 0.08);
+    const height = lock * 0.7 + strand * 0.2 + strand2 * 0.1;
+    const base = mix(rgb(0xa2a2a2), rgb(0xb6b6b6), tone);
+    // Undercoat dark where the locks part, guard hair light at the tips.
+    const shade = 0.8 + 0.3 * height;
     s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
-    s.height = 0.5 + clump * 0.035 + fine * 0.025 - d1 * 0.01;
-    s.rough = 0.86 + fine * 0.1;
+    s.height = 0.5 + height * 0.1;
+    s.rough = 0.72 + (1 - height) * 0.2;
   },
 
   /**
@@ -635,6 +665,30 @@ const SURFACES = {
     s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
     s.height = 0.5 + (1 - groove) * 0.05 - d1 * 0.02;
     s.rough = 0.55 + groove * 0.2 + id * 0.08;
+  },
+
+  /**
+   * A troll's hide: thick and leathery, creased in a net of fine folds,
+   * pebbled, and studded here and there with warts that stand well proud --
+   * the one surface on a troll that says, at arm's length, that it is not a
+   * man painted green. Neutral like the skin, because the tint is per mobile.
+   */
+  warthide(u, v, s) {
+    const [d1, , id] = cellular(u * 11, v * 11, 11, 601, 0.8);
+    const [d2] = cellular(u * 34, v * 34, 34, 607, 0.6);
+    const crease = fbm(u * 8, v * 8, 8, 611, 4);
+    const blotch = fbm(u * 3, v * 3, 3, 613, 3);
+    // Warts in about one cell in three, each its own size.
+    const wart = id > 0.62 ? clamp01(1 - d1 * (2.6 + (1 - id) * 5)) ** 0.7 : 0;
+    const pebble = clamp01(1 - d2 * 2.2);
+    const fold = clamp01(1 - Math.abs(crease - 0.5) * 11);
+    // As bright as the human skin recipe, which it stands in for: the tint
+    // and the body's own colours do the darkening.
+    const base = mix(rgb(0xaeaeaa), rgb(0xc0bdb6), blotch);
+    const shade = (1 - fold * 0.16) * (0.98 + pebble * 0.02) * (1 + wart * 0.06);
+    s.color = [base[0] * shade, base[1] * shade * (1 + wart * 0.02), base[2] * shade * (1 - wart * 0.06)];
+    s.height = 0.5 + wart * 0.16 + pebble * 0.035 - fold * 0.05;
+    s.rough = 0.74 + fold * 0.12 - wart * 0.14;
   },
 
   iron(u, v, s) {
@@ -1051,7 +1105,29 @@ const SURFACES = {
    * matt; between the tongues the wall is grimed, never clean.
    */
   sootwall(u, v, s) {
-    SURFACES.stonewall(u, v, s);
+    // Random rubble, not coursed: courses of 19 to 32 cm and stones of 40 to
+    // 90, no two rows alike. The ruins wore the town's coursed stone -- every
+    // block 60 x 30, two to one -- and on a broken wall with a man in front of
+    // it that proportion read as brick blown up four times, which is what a
+    // review called it. Same 3.6 m tile, so the model UVs are untouched.
+    let row = 0;
+    while (row < SOOT_ROWS.length - 2 && v >= SOOT_ROWS[row + 1]) row++;
+    const v0 = SOOT_ROWS[row]; const v1 = SOOT_ROWS[row + 1];
+    const n = SOOT_COLS[row];
+    const gx = (((u + SOOT_SHIFT[row]) % 1) + 1) % 1 * n;
+    const col = Math.floor(gx);
+    const fx = gx - col; const fy = (v - v0) / (v1 - v0);
+    // Joints and arrises in metres, converted per axis by the stone's size.
+    const w = 3.6 / n; const h = (v1 - v0) * 3.6;
+    const jx = 0.012 / w; const jy = 0.012 / h;
+    const inBlock = fx > jx && fx < 1 - jx && fy > jy && fy < 1 - jy;
+    const bevel = clamp01(Math.min((fx - jx) * w, (1 - jx - fx) * w, (fy - jy) * h, (1 - jy - fy) * h) / 0.03);
+    const id = hash2(col, row, 64, 691);
+    const grain = fbm(u * 62 + id * 7, v * 62, 62, 23, 3);
+    const block = mix(rgb(0x8a8171), rgb(0x9f9687), id);
+    const base = inBlock
+      ? mix(block, rgb(0x706758), grain * 0.12 + (1 - bevel) * 0.08)
+      : mix(rgb(0x9e9585), rgb(0xada595), grain);
     // Blotches for where the fire was, streaked six to one up the wall for
     // how the smoke climbed it. Periods chosen so the tile still wraps.
     const blotch = fbm(u * 4, v * 4, 4, 701, 4);
@@ -1062,15 +1138,40 @@ const SURFACES = {
     // anywhere near it -- and the tongues go darker again over that. Clean
     // stone with black blotches on it read as a dalmatian, not as a fire.
     const grime = fbm(u * 8, v * 8, 8, 707, 3);
-    // Measured, not guessed: at 0.10 mean albedo the district's walls went to
-    // RGB 0 in their own shade after dusk (0.76% of a night street, 3.3% of a
-    // ruin at dusk, against 0.01% anywhere in Midgaard). 0.16 keeps the soot
-    // and loses the holes.
-    const greyed = mix(s.color, rgb(0x3a3632), 0.72 + grime * 0.15);
-    // Floor at 0x221e1b: nothing under a sky reads zero, and burnt stone is a
-    // warm charcoal, not ink.
-    s.color = mix(greyed, rgb(0x2c2825), clamp01(soot * 0.7));
-    s.rough = Math.min(1, s.rough + soot * 0.12);
+    // Streaked, not uniformly dark: see the recipe. The grime between the
+    // tongues keeps a mid grey; the tongues go to a warm charcoal (floor
+    // 0x221e1b -- nothing under a sky reads zero, and burnt stone is not ink).
+    const greyed = mix(base, rgb(0x3b3733), 0.66 + grime * 0.2);
+    s.color = mix(greyed, rgb(0x221e1b), clamp01(soot * 1.3));
+    s.height = inBlock ? 0.62 + bevel * 0.3 + grain * 0.08 : 0.12;
+    s.rough = Math.min(1, (inBlock ? 0.72 + grain * 0.2 : 0.94) + soot * 0.12);
+  },
+
+  /**
+   * A house front come down: broken stone of every size in a bed of grit and
+   * mortar dust, a sherd of roof tile here and there and the black of a
+   * charred stick. The heaps wore the street's own setts and the walls'
+   * coursed stone, and read as a paved hump.
+   */
+  rubble(u, v, s) {
+    const [d1, edge, id] = cellular(u * 11, v * 11, 11, 911, 0.42);
+    const [, edge2, id2] = cellular(u * 29, v * 29, 29, 917, 0.45);
+    const dust = fbm(u * 18, v * 18, 18, 919, 3);
+    const fine = fbm(u * 70, v * 70, 70, 923, 2);
+    // Big stones where a cell is well inside its edge, grit between them.
+    const big = clamp01((edge - 0.08) * 7) * (((id * 5.1) % 1) > 0.25 ? 1 : 0);
+    const small = clamp01((edge2 - 0.1) * 9) * (1 - big);
+    const kind = (id * 13.7) % 1;
+    let stone = mix(rgb(0x4d4842), rgb(0x655f55), (id2 * 3.1) % 1);
+    if (kind > 0.9) stone = rgb(0x5f3a2b);             // roof tile
+    else if (kind > 0.78) stone = rgb(0x1e1b18);       // char
+    const grit = mix(rgb(0x3f3b36), rgb(0x5b564e), dust * 0.7 + fine * 0.3);
+    let c = mix(grit, stone, Math.max(big, small * 0.85));
+    // Soot on the upper faces of the big stones, dust settled on the rest.
+    c = mix(c, rgb(0x2e2a26), big * clamp01(fbm(u * 5, v * 5, 5, 929, 2) * 1.6 - 0.6) * 0.6);
+    s.color = mix(c, rgb(0x6e685f), (1 - big) * clamp01(dust * 1.4 - 0.7) * 0.35);
+    s.height = 0.15 + big * (0.5 + (1 - d1) * 0.3) + small * 0.25 + fine * 0.06;
+    s.rough = 0.9 + fine * 0.08 - big * 0.06;
   },
 
   /**
@@ -1382,6 +1483,10 @@ const RECIPES = {
   sewerwood: { surface: 'bark', scale: 1.6, normalScale: 0.6, env: 1, wet: 0, detail: 0.4, buried: true },
   // The eastern mountains, outside and in.
   cliff: { surface: 'sandstone', scale: 9, normalScale: 0.35, env: 0.3, wet: 0, detail: 0.6 },
+  // The cave rock again, out under the sky: the crag heaped over the troll
+  // den. Not `rock`, which is crazy paving, and not `cliff`, which is the
+  // desert's sandstone and read as a mesa in a fir forest.
+  crag: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0.2, detail: 0.6 },
   // A full `env`: cloth this open lets the sky through, and at 0.4 a tent's
   // corners went to RGB 0 after dark however hard the lantern burned.
   tentcloth: { surface: 'tentcloth', scale: 4, normalScale: 0.5, env: 1.0, wet: 0, detail: 0.4 },
@@ -1393,12 +1498,21 @@ const RECIPES = {
   // holes are where the water stands -- and `ash` has none, being indoors
   // under no roof and dry as the fire left it. `oldbone` is the sewer's bone
   // out in the daylight, for the gang's idol.
-  sootwall: { surface: 'sootwall', scale: 3.6, normalScale: 1.0, env: 0.6, wet: 0, detail: 0.55 },
-  charred: { surface: 'charred', scale: 1.4, normalScale: 0.55, env: 0.5, wet: 0, detail: 0.5 },
+  // `env` well over the town's: the soot is dark, and a dark albedo in the
+  // shade after dusk is RGB 0 (57% of a No Man's Land frame at dusk under 8).
+  // The sky term is the one that lights the shaded faces, so it carries them.
+  // A sooty wall is darker than the town's stone, but not uniformly: the
+  // tongues are near black and the grime between them a mid grey. A uniform
+  // dark grey read as plain grey stone in the sun and went under 8 in the
+  // shade at dusk (51% of a No Man's Land frame); streaked, it reads as soot
+  // in the sun and the grime holds the shade up. Mean albedo 0.14, and the dusk and night shade held up by `lift`.
+  sootwall: { surface: 'sootwall', scale: 3.6, normalScale: 1.0, env: 0.6, lift: true, wet: 0, detail: 0.55 },
+  rubble: { surface: 'rubble', scale: 2.4, normalScale: 1.1, env: 0.8, lift: true, wet: 0, detail: 0.6 },
+  charred: { surface: 'charred', scale: 1.4, normalScale: 0.55, env: 0.5, lift: true, wet: 0, detail: 0.5 },
   boards: { surface: 'boards', scale: 2.0, normalScale: 0.7, env: 0.7, wet: 0, detail: 0.45 },
-  brokencobble: { surface: 'brokencobble', scale: 2.2, normalScale: 1.0, env: 1.05, wet: 0.55, detail: 0.5 },
-  ash: { surface: 'ash', scale: 3.0, normalScale: 0.6, env: 0.6, wet: 0, detail: 0.6 },
-  wasteground: { surface: 'wasteground', scale: 4.0, normalScale: 0.7, env: 0.45, wet: 0, detail: 0.6 },
+  brokencobble: { surface: 'brokencobble', scale: 2.2, normalScale: 1.0, env: 1.05, lift: true, wet: 0.55, detail: 0.5 },
+  ash: { surface: 'ash', scale: 3.0, normalScale: 0.6, env: 0.6, lift: true, wet: 0, detail: 0.6 },
+  wasteground: { surface: 'wasteground', scale: 4.0, normalScale: 0.7, env: 0.45, lift: true, wet: 0, detail: 0.6 },
   oldbone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 0.7, wet: 0, detail: 0.3 },
   // Ice Dragon Way's smashed crystal statues: nearly all reflection.
   crystal: { surface: 'crystal', scale: 0.8, normalScale: 0.35, env: 1.7, wet: 0, detail: 0.1 },
@@ -1406,13 +1520,15 @@ const RECIPES = {
   // still reads as a coat on a horse. `moving` keeps the world-space effects
   // off them: a splash line fixed to the paving and a grain fixed to the world
   // both slide over anything that walks through them.
-  fur: { surface: 'fur', scale: 0.4, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, moving: true },
+  fur: { surface: 'fur', scale: 0.3, normalScale: 0.5, env: 0.4, wet: 0, detail: 0, moving: true },
   feather: { surface: 'feather', scale: 0.3, normalScale: 0.3, env: 0.5, wet: 0, detail: 0, moving: true },
   // The monsters (tools/blender/monsters.py): shell, living mud and reptile
   // skin, all coloured per creature in its vertices like the fur.
   chitin: { surface: 'chitin', scale: 0.35, normalScale: 0.35, env: 0.9, wet: 0, detail: 0, moving: true },
   ooze: { surface: 'ooze', scale: 0.6, normalScale: 0.5, env: 1.1, wet: 0, detail: 0, moving: true },
   hide: { surface: 'hide', scale: 0.25, normalScale: 0.4, env: 0.5, wet: 0, detail: 0, moving: true },
+  // A troll's skin, one of the surfaces a person is made of (dress.js).
+  warthide: { surface: 'warthide', scale: 0.3, normalScale: 0.6, env: 0.45, wet: 0, detail: 0, moving: true },
 };
 
 // --------------------------------------------------------------- decals ----
@@ -1674,6 +1790,7 @@ function bakeMacro(size = 128) {
  * every skinned figure) reads the default 0 and keeps the full bounce, which is
  * what an outdoor prop wants.
  */
+const shadeLift = { value: 1 };
 const indoorBounce = { value: 1 };
 
 const HEMI_LINE = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
@@ -1772,6 +1889,7 @@ function decorate(material, recipe, macro, grain) {
     material.userData.wetnessUniform = shader.uniforms.wetness;
     material.userData.wetBase = recipe.wet ?? 0;
     shader.uniforms.indoorBounce = indoorBounce;
+    shader.uniforms.dikuShadeLift = shadeLift;
     shader.uniforms.dikuBuriedGain = buried.gain;
     shader.uniforms.dikuBuriedIrradiance = buried.irradiance;
     shader.uniforms.dikuBuriedRadiance = buried.radiance;
@@ -1798,6 +1916,7 @@ function decorate(material, recipe, macro, grain) {
         uniform float detailStrength;
         uniform float wetness;
         uniform float indoorBounce;
+        uniform float dikuShadeLift;
         uniform float dikuBuriedGain;
         uniform vec3 dikuBuriedIrradiance;
         uniform vec3 dikuBuriedRadiance;
@@ -1816,6 +1935,21 @@ function decorate(material, recipe, macro, grain) {
           irradiance = dikuBuriedIrradiance * dikuUpFill;
           iblIrradiance = irradiance;
           radiance = dikuBuriedRadiance;
+        #else
+          #ifdef DIKU_LIFT
+            // The burnt district's sky light, by the hour: see setShadeLift.
+            iblIrradiance *= dikuShadeLift;
+          #endif
+          // Inside a room the sky arrives through a door and a window or two,
+          // off plaster and floorboards and lamplit walls, and it is no longer
+          // blue by then. Taken straight from the cube it lit every interior
+          // in the world the colour of the sky outside -- the Green Dragon's
+          // flags came out as blue-veined marble -- so indoors it keeps its
+          // strength and loses most of its hue, to a warm neutral.
+          float dikuIblL = dot( iblIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
+          iblIrradiance = mix( iblIrradiance, dikuIblL * vec3( 1.06, 1.0, 0.90 ), vIndoor * 0.8 );
+          float dikuRadL = dot( radiance, vec3( 0.2126, 0.7152, 0.0722 ) );
+          radiance = mix( radiance, dikuRadL * vec3( 1.03, 1.0, 0.95 ), vIndoor * 0.5 );
         #endif
         #include <lights_fragment_end>
       `)
@@ -1916,11 +2050,12 @@ function decorate(material, recipe, macro, grain) {
     material.onBeforeRender = (renderer) => updateBuried(renderer.toneMappingExposure);
   }
   if (recipe.moving) material.defines = { ...material.defines, DIKU_MOVING: 1 };
+  if (recipe.lift) material.defines = { ...material.defines, DIKU_LIFT: 1 };
   // Our injected source differs from stock, so it needs a key of its own or
   // three will hand us a program compiled for an undecorated material.
   material.customProgramCacheKey = () => `diku|${material.defines?.DIKU_DETAIL ? 1 : 0}`
     + `|${material.defines?.DIKU_WET ? 1 : 0}|${material.defines?.DIKU_BURIED ? 1 : 0}`
-    + `|${material.defines?.DIKU_MOVING ? 1 : 0}`;
+    + `|${material.defines?.DIKU_MOVING ? 1 : 0}|${material.defines?.DIKU_LIFT ? 1 : 0}`;
 }
 
 /**
@@ -1985,6 +2120,17 @@ export function createMaterials(size = 512, onProgress = () => {}) {
    * A plain uniform write shared by every material, so no recompile.
    */
   materials.setIndoorBounce = (value) => { indoorBounce.value = value; };
+
+  /**
+   * How much the sky lights the burnt district's surfaces (the recipes with
+   * `lift`), by the hour. Soot, ash and char are a third of the albedo of
+   * the town's stone, and at dusk -- env 0.35, a hemisphere of 0.08 -- the
+   * shade on them fell under the toe of the tone curve: 45% of a No Man's
+   * Land frame under luma 8, against 6-13% on Midgaard's streets. No static
+   * recipe setting can lift that without also lifting the noon shade, where
+   * the sky is already bright; this is set per hour instead. A plain uniform.
+   */
+  materials.setShadeLift = (value) => { shadeLift.value = value; };
 
   /** Close-range detail normals, on or off. Recompiles; only the P key does it. */
   materials.setDetail = (on) => {

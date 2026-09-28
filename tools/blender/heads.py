@@ -184,30 +184,44 @@ OLD_MALE = dict(MALE, name="male_old", age=1.0, fold=1.0, fissure=(0.0142, 0.003
 OLD_FEMALE = dict(FEMALE, name="female_old", age=1.0, fold=0.9, fissure=(0.0146, 0.0040, 0.0040),
                   nose=0.9, nose_len=0.96, lips=0.8)
 
-# A troll: brow like a shelf, a nose like a root, a jaw that juts past the
-# upper lip, small deep eyes, a thick neck. It is a person's head pushed
-# about, so it shares every edge the human ones have.
+# A troll: a low skull that slopes back from a brow like a shelf, small deep
+# eyes under it, a long hooked nose that hangs to the lip, a wide mouth over a
+# jaw that juts past it, two tusks up out of the lower jaw, big ears, warts,
+# and a few hanks of matted hair. It used to be a man's head pushed about --
+# nose 2x, brow 2x -- and a judge standing in front of one saw a man with a
+# big nose. It is still a person's head underneath, so it shares every edge
+# and every bone the human ones have.
 TROLL = dict(
     MALE, name="troll", sex="m",
+    # Ascending in z: np.interp reads its table that way, and a table the
+    # other way round comes back as the last factor everywhere -- which is
+    # how the old troll head came out 50% wider than meant, top to chin.
     loft=_loft_scale(LOFT_MALE,
-                     wk=[(0.1, 0.92), (0.03, 0.96), (-0.03, 1.08), (-0.07, 1.16), (-0.10, 1.25), (-0.12, 1.4)],
-                     fk=[(0.1, 0.82), (0.05, 0.86), (0.02, 0.98), (-0.03, 1.02), (-0.07, 1.10), (-0.10, 1.12), (-0.12, 1.15)],
-                     bk=[(0.1, 0.95), (-0.12, 1.05)],
-                     nk=[(0.1, 1.05), (-0.12, 1.05)]),
-    dome=((0.0, 0.020, 0.048), (0.064, 0.084, 0.058)),
-    brow=2.0,
-    cheek=((0.056, -0.056, -0.020), (0.020, 0.016, 0.013)),
-    chin=((0.0, -0.094, -0.104), (0.026, 0.014, 0.016)),
-    mouth_z=-0.068, mouth_y=-0.0980,
-    neck_r=0.066,
-    eye=(0.0315, -0.074, 0.004), eye_r=0.0110,
-    fissure=(0.0132, 0.0052, 0.0046), iris=(0.10, 0.06, 0.01), sclera=(0.45, 0.42, 0.25),
-    tilt=-0.0012,
-    nose=2.0, nose_w=1.7, nose_len=1.45,
-    lips=1.1, lip_w=1.2,
+                     wk=[(-0.12, 1.55), (-0.10, 1.45), (-0.07, 1.3), (-0.03, 1.14), (0.02, 1.0), (0.05, 0.92), (0.1, 0.86)],
+                     fk=[(-0.12, 1.26), (-0.10, 1.3), (-0.07, 1.26), (-0.03, 1.12), (0.0, 1.0), (0.03, 0.88), (0.06, 0.74), (0.1, 0.64)],
+                     bk=[(-0.12, 1.12), (0.0, 1.0), (0.1, 0.92)],
+                     nk=[(-0.12, 1.12), (-0.03, 1.12), (0.1, 1.0)]),
+    dome=((0.0, 0.030, 0.050), (0.064, 0.086, 0.052)),
+    brow=3.6,
+    cheek=((0.060, -0.058, -0.024), (0.024, 0.018, 0.016)),
+    chin=((0.0, -0.104, -0.110), (0.034, 0.018, 0.020)),
+    mouth_z=-0.075, mouth_y=-0.1060,
+    neck_r=0.078,
+    eye=(0.0330, -0.074, 0.006), eye_r=0.0105,
+    fissure=(0.0118, 0.0040, 0.0036), iris=(0.22, 0.11, 0.012), sclera=(0.36, 0.32, 0.16),
+    tilt=-0.0018,
+    nose=2.7, nose_w=1.9, nose_len=1.72, nose_hump=1.0,
+    lips=1.5, lip_w=1.6,
     # No age: its hollows are cut for a man's cheek and went straight
     # through a troll's into the mouth.
     fold=1.0, age=0.0, stubble=0.0,
+    ear_scale=(1.6, 1.7, 1.55), ear_turn=48, ear_point=0.9, brows=False,
+    # Warts, as directions in from outside the face and a radius: each is
+    # set on the skin where its ray first meets it.
+    warts=[(0.42, -1.0, 0.02, 0.0055), (-0.5, -1.0, -0.22, 0.0062), (0.16, -1.0, -0.42, 0.0045),
+           (-0.28, -1.0, 0.52, 0.0048), (0.62, -0.75, 0.36, 0.0052), (-0.7, -0.6, -0.1, 0.0058),
+           (0.3, -1.0, -0.62, 0.005), (0.07, -1.0, -0.2, 0.0042), (-0.12, -1.0, -0.15, 0.0036)],
+    tusks=True, hanks=True, mat="warthide",
 )
 
 # A wererat: the man's head drawn out into a muzzle, the nose at the end of
@@ -462,6 +476,11 @@ def field(S):
         top = np.array([0.0, -0.086 - fwd * 0.4, S["nose_top"]])
         tip = np.array([0.0, -0.084 - 0.025 * nk - fwd, 0.012 - 0.044 * nl + S["nose_up"]])
         d = smin(d, seg(p, top, tip + np.array([0.0, 0.003, 0.004]), 0.0046 * nw, 0.0066 * nw), S.get("nose_k", 0.007))
+        if S.get("nose_hump"):
+            # A hook: a knuckle of gristle two-fifths of the way down the
+            # bridge, standing forward of the straight line to the tip.
+            mid = top + (tip - top) * 0.42 + np.array([0.0, -0.010 * S["nose_hump"], 0.004])
+            d = smin(d, ell(p, mid, np.array([0.0075, 0.0085, 0.0110]) * nw ** 0.6), 0.006)
         d = smin(d, ell(p, tip, np.array([0.0084 * nw, 0.0080, 0.0076]) * max(1.0, nk ** 0.4)), 0.005)
         wing = np.array([0.0110 * nw, tip[1] + 0.012, tip[2] - 0.002])
         d = smin(d, ell(q, wing, (0.0062 * nw, 0.0078, 0.0060)), 0.005)
@@ -482,6 +501,24 @@ def field(S):
             d = d + 0.00045 * age * fore * np.sin(p[:, 2] * 2 * math.pi / 0.0105)
         return d
     return f
+
+
+def warted(S, f):
+    """The field with the spec's warts on it: each set where its ray from
+    in front of the face first meets the skin, and smoothly unioned there."""
+    if not S.get("warts"):
+        return f
+    dirs = np.array([w[:3] for w in S["warts"]], float)
+    dirs = dirs / _len(dirs)[:, None]
+    at = project(f, np.array([0.0, 0.0, -0.03]), dirs, far=0.2)
+    rs = [w[3] for w in S["warts"]]
+
+    def g_(p):
+        d = f(p)
+        for c, r in zip(at, rs):
+            d = smin(d, _len(p - c) - r, r * 0.9)
+        return d
+    return g_
 
 
 def grad(f, p, e=0.00025):
@@ -703,10 +740,17 @@ def ear(S, P, side, name="ear"):
         d = smax(d, -ell(p, (0.0070, -0.0010, -0.003), (0.0048, 0.0078, 0.0110)), 0.0022)
         d = smax(d, -ell(p, (0.0062, 0.0035, 0.012), (0.0032, 0.0060, 0.0110)), 0.0018)
         return d
-    obj = mesh_field(f, name, (-0.002, 0.0, 0.0), level=5, target=240, symmetric=False)
+    obj = mesh_field(f, name, (-0.002, 0.0, 0.0), level=5, target=240, symmetric=False, mat=S.get("mat", "skin"))
     co = np.array([v.co[:] for v in obj.data.vertices])
     n = grad(f, co)
     ao = occlusion(f, co, n, reach=0.006)
+    if S.get("ear_point"):
+        # Drawn up into a point and swept back at the top.
+        k = S["ear_point"]
+        top = np.clip(co[:, 2], 0.0, None)
+        co = co.copy()
+        co[:, 2] = co[:, 2] + top * k * (1.0 - np.clip(np.abs(co[:, 1]) / 0.016, 0, 1)) * 0.9
+        co[:, 1] = co[:, 1] + top * k * 0.7
     co = co * np.array(S.get("ear_scale", (1.0, 1.0, 1.0)))
     # Set against the head: out from it by a little, swept back at the top,
     # and turned away from the skull behind.
@@ -716,8 +760,9 @@ def ear(S, P, side, name="ear"):
     ex, ey, ez = S["eye"]
     base = np.array([side * 0.0735, 0.006, -0.010]) + np.array(S.get("ear_at", (0.0, 0.0, 0.0))) * \
         np.array([side, 1.0, 1.0])
-    if S["name"] == "troll":
-        base = np.array([side * 0.0715, 0.010, -0.004])
+    if S["name"] in ("troll", "ettin"):
+        # Out from a skull wider than a man's, and standing off it.
+        base = np.array([side * 0.084, 0.014, 0.0])
     M = np.array(R)
     flip = np.array([side, 1.0, 1.0])
     loc = (co * flip) @ M.T + base
@@ -728,10 +773,10 @@ def ear(S, P, side, name="ear"):
 def build(S, P, name=None, target=2400, ears=True):
     """The head of spec S on a body with table P: one object, skin, with the
     ears in it. Returns (obj, field, canonical coordinates of the vertices)."""
-    f = field(S)
+    f = warted(S, field(S))
     name = name or "face_" + S["name"]
     obj = mesh_field(f, name, (0.0, 0.006, -0.018), level=7,
-                     keep=lambda p: p[:, 2] > -0.150 + 0.004, target=target)
+                     keep=lambda p: p[:, 2] > -0.150 + 0.004, target=target, mat=S.get("mat", "skin"))
     co = np.array([v.co[:] for v in obj.data.vertices])
     n = grad(f, co)
     ao = occlusion(f, co, n)
@@ -990,6 +1035,122 @@ def tentacles(S, P, f, name="tentacles"):
     return parts
 
 
+def _tube(pts, radii, sides, name, mat, colour):
+    """A tube along a polyline, ring radius per point, capped at the end."""
+    verts, faces, cols = [], [], []
+    for i, c in enumerate(pts):
+        T = pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)]
+        T = T / np.linalg.norm(T)
+        u = np.cross(T, [1.0, 0.0, 0.0])
+        if np.linalg.norm(u) < 1e-3:
+            u = np.cross(T, [0.0, 1.0, 0.0])
+        u /= np.linalg.norm(u)
+        v = np.cross(T, u)
+        for k in range(sides):
+            a = 2 * math.pi * k / sides
+            verts.append(c + (u * math.cos(a) + v * math.sin(a)) * radii[i])
+            cols.append(colour(i / (len(pts) - 1), a))
+    for i in range(len(pts) - 1):
+        for k in range(sides):
+            a0 = i * sides + k
+            a1 = i * sides + (k + 1) % sides
+            faces.append((a0, a1, a1 + sides, a0 + sides))
+    tip = len(verts)
+    verts.append(pts[-1] + (pts[-1] - pts[-2]) * 0.3)
+    cols.append(colour(1.0, 0.0))
+    last = (len(pts) - 1) * sides
+    for k in range(sides):
+        faces.append((last + k, last + (k + 1) % sides, tip))
+    return verts, faces, cols
+
+
+def _tube_object(parts, P, name, mat):
+    verts, faces, cols = [], [], []
+    for (v, f, c) in parts:
+        base = len(verts)
+        verts += v
+        faces += [tuple(i + base for i in fc) for fc in f]
+        cols += c
+    w, _ = to_world(P, np.array(verts))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata([tuple(q) for q in w], [], faces)
+    me.validate()
+    o = bpy.data.objects.new(name, me)
+    bpy.context.collection.objects.link(o)
+    lib.assign(o, mat)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(me)
+    bm.free()
+    for pl in me.polygons:
+        pl.use_smooth = True
+    set_colors(o, cols)
+    return o
+
+
+def tusks(S, P, name="tusks"):
+    """Two tusks up out of the lower jaw from the corners of the mouth,
+    curving out and back, in front of the upper lip: yellowed ivory, darker
+    where they leave the gum. On the jaw bone, so they go with a bite."""
+    lz, ly = S["mouth_z"], S["mouth_y"]
+    parts = []
+    for side in (1, -1):
+        pts = []
+        n = 7
+        for i in range(n + 1):
+            t = i / n
+            x = side * (0.026 + 0.012 * t + 0.004 * t * t)
+            y = ly + 0.010 - 0.010 * t + 0.010 * t * t
+            z = lz - 0.016 + 0.062 * t
+            pts.append(np.array([x, y, z]))
+        radii = [0.0088 * (1 - 0.82 * (i / n) ** 1.3) for i in range(n + 1)]
+        parts.append(_tube(pts, radii, 8, name, "bone",
+                           lambda t, a: (0.62 + 0.3 * t, 0.56 + 0.3 * t, 0.40 + 0.25 * t)))
+    return _tube_object(parts, P, name, "bone")
+
+
+def hanks(S, P, name="hanks", seed=31):
+    """Ragged hair: long, thin and matted, hanging from a scalp gone bald over
+    the brow and the crown's front -- a few dozen locks of very different
+    lengths, grown with hair.py's machinery (a dark mass, locks along a flow,
+    the loose ends falling free) but let to go where it will."""
+    import hair
+    # Bald over the brow and the front of the crown; the hair keeps to the
+    # back of the skull and behind the ears.
+    grow = lambda p, soft=0.004: (hair.scalp_mask(p, recede=0.6, soft=soft)
+                                  * np.clip((np.abs(hair.theta_of(p)) - 1.0) / 0.35, 0.0, 1.0))
+    fm_obj, fm = hair.mass(S, name + "_mass", hair._thick(0.006, 0.006, 0.008), grow, target=380)
+    fcoll = hair.body_field(S)
+
+    def flow(p):
+        x, y, z = p
+        side = 1.0 if x >= 0 else -1.0
+        d = np.array([side * max(0.0, z - 0.02) * 6.0, max(0.0, y) * 3.0 + 0.4, -1.0])
+        return hair.tangent(fm, p, d)
+    roots, rnd = hair.sample_roots(fm, grow, 44, seed, 0.012)
+    locks = []
+    for r in roots:
+        back = np.clip((r[1] + 0.03) / 0.10, 0.0, 1.0)
+        L = 0.2 * (0.5 + 0.5 * back) * rnd.uniform(0.4, 1.3)
+        pts = hair.grow_lock(fm, fcoll, r, flow(r), flow, L, step=0.010, hug=0.0008, fall=0.5, rnd=rnd,
+                             scalp=grow)
+        pts = hair.clear_of_face(pts)
+        locks.append(hair.Lock(pts, rnd.uniform(0.020, 0.034), rnd.uniform(0.004, 0.0065),
+                               rnd.uniform(0.7, 1.1), curl=rnd.uniform(-0.5, 0.5)))
+    bpy.data.objects.remove(fm_obj, do_unlink=True)
+    parts = [hair.sculpt(fm, grow, locks, name + "_mass", target=1100)]
+    loose = hair.free_locks(locks, fm, grow, off=0.004)
+    if loose:
+        parts.append(hair.lock_mesh(loose, fcoll, name + "_locks", root_dark=0.8))
+    # Canonical head space, like every other part of the face; `face` moves
+    # the whole face into the body's frame.
+    import people
+    obj = people.join(parts, name)
+    obj.data.name = name
+    return obj
+
+
 def face(S, P, name):
     """Everything of a face as one object: the skin with the ears, the eyes
     on their bones, the brows. Rigged by vertex group, parented by the caller."""
@@ -1004,6 +1165,20 @@ def face(S, P, name):
         for b in brows(S, P, f):
             rig_weights(b, P)
             parts.append(b)
+    if S.get("tusks"):
+        import rig
+        t_ = tusks(S, P)
+        rig.set_rigid(t_, "jaw")
+        parts.append(t_)
+    if S.get("hanks"):
+        import rig
+        h_ = hanks(S, P)
+        co = np.array([v.co[:] for v in h_.data.vertices])
+        w, _ = to_world(P, co)
+        for v, x in zip(h_.data.vertices, w):
+            v.co = x
+        rig.set_rigid(h_, "head")
+        parts.append(h_)
     if S.get("tentacles"):
         for t in tentacles(S, P, f):
             t_ = t

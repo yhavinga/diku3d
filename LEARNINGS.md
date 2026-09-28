@@ -52,6 +52,67 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Creatures, second pass (worm, troll, drider, fur)
+
+- **Head shape tables must run in ascending height.** `heads._loft_scale`
+  feeds them to `np.interp`, and a top-down table silently returns the last
+  factor everywhere: the old troll head was 50% wider than intended. The
+  female, wererat and mind-flayer tables are still top-down and were left
+  alone so their faces don't move — fix them deliberately, not in passing.
+- **Joining meshes fills a missing colour attribute with black.**
+- **Bone heat on the troll is fragile**: moving its neck joint 1 cm left
+  1,348 vertices unweighted; remesh specks break it too
+  (`people.drop_islands`).
+- **Transparent effect meshes need `layers.set(OVERLAY_LAYER)`** or the AO
+  pass draws them as hard squares.
+- **Unlit particles in the ground's own colour are dark smudges on sunlit
+  sand**; light them with an upward normal.
+- **`fbm` and `cellular` take one period for both axes**, so stretched
+  noise that tiles needs separate wrapping per axis.
+- Fur UVs now follow the lie of the hair; that, not more relief, is what
+  stopped the wolves reading as grey clay.
+
+### Draw calls, interiors and the district finished (wave3-polish)
+
+- **Where the calls went:** one InstancedMesh per chunk per model per
+  material — 2,784 world-wide, 962 holding a single copy. Regions of 64
+  cells now get one multi-draw batch per material; anything repeated 16+
+  times in a region stays instanced, because a batched multi-draw is still
+  one GPU draw per piece (~0.5 µs each) and every tree batched cost 2.6 ms
+  more than instanced. 16- and 32-cell regions were measured and slower.
+- **three gives batched meshes no program variant of their own**, so they
+  swap programs with plain meshes of the same material; opaque batches go
+  first (`renderOrder = -1`).
+- **The AO pass re-walked and re-searched the whole scene graph every
+  frame** (3.3 + 2.2 ms of script at the barn). Both skipped now.
+- **The shader's world-space mottling ignores instance and batch matrices**,
+  so props shade in local space — merging props into world-space geometry
+  changes their look.
+- **Nothing lights shaded faces at dusk but a very weak sky**; a
+  per-material ambient multiplier did nothing. Dark albedos take a per-hour
+  lift (`materials.setShadeLift`, `lift: true`, `shadeLift` per time).
+- **The blue marble indoors was the sky light's blue**, not the texture;
+  indoors it keeps its strength and loses most of its blue.
+- Measure with `diku.quality.setScale(3)` so the auto-scaler holds still.
+- Results: barn 4,217 → 1,379 calls, 23.7 → 13.2 ms; Hector St 4,765 →
+  1,511; graveyard 5,097 → 1,205; Market Square 14–18.6 → 9–11.3 ms. The
+  rest is ~300 figure draws per pass and ~50 dropped items.
+
+### HUD and melee feedback (game-ui.js, fx.js, main.js vantage)
+
+- **The ways-out panel listed every gate seen all game**, which is how the
+  West Gate showed at the East Gate. A gate counts only in its own room or
+  its warden's; the old 18 m radius fired the executioner's line from the
+  room next door.
+- **Collision boxes do not cover everything you can see** — a temple column
+  has none — so a camera's line of sight is ray-tested against the built
+  world, and a sight line to a prop stops short of it (the fountain's box
+  ends 1.7 m from its centre).
+- **Headless timing tests can slow the game** by patching
+  `performance.now` in the page; the render loop reads it.
+- The shop signs were already modelled beside every shop door, blank; they
+  carry the shop's own room name now, 21 signs on one texture, +3 calls.
+
 ### Faces and one draw per person (heads.py, hair.py, src/dress.js)
 
 - **Blender 5.2's glTF vertex colour survives only in a mesh's first
@@ -157,6 +218,18 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
   scene at intensity 0; ~0.12 ms each at 720p.
 - **Aura shells on every mesh stack rims and turn a figure to glass.** Only
   skinned meshes over 150 vertices, lit on the silhouette.
+- **A ribbon has to be capped in angle, not only in metres.** A 1 m glow
+  half a metre from the lens covers the frame and reads as a flat pasted
+  strip — the second judge's "flat camera-facing ribbon".
+- **One broad soft glow sprite over a volumetric shape erases its surface.**
+  The fireball read as a peach-coloured egg, and hid its target at night,
+  until that sprite went; the point light does the lighting.
+- **The runtime fbm noise is mostly mid-grey.** Stretch it around 0.5
+  (×2.4–2.6) or every flame edge comes out as cotton wool.
+- **A particle stream needs a hold phase, and spawns spread along one
+  frame's travel**, or it dies before crossing the room and reads as beads.
+- **Measure frame time with base and branch alternated, each against its
+  own idle.** With other agents on the GPU idle moved from 7.4 to 12 ms.
 - Aim things that fly at the player 0.8 m ahead of the face, burst them at
   2.6 m, or the frame blows out.
 - Fireball at night 6.4 → 7.7 ms median; sanctuary on the target costs
