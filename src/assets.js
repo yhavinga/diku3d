@@ -622,7 +622,7 @@ export const ASSET_NAMES = [
   'temple_wall_solid', 'temple_wall_door', 'temple_corner', 'temple_roof',
   'temple_steps', 'temple_column',
   'wall_solid', 'wall_door', 'wall_corner', 'wall_roof',
-  'temple', 'market_stall', 'well', 'fountain', 'lamp_post', 'hanging_sign', 'grate_leaf',
+  'temple', 'market_stall', 'well', 'fountain', 'lamp_post', 'hanging_sign', 'grate_leaf', 'wall_lantern',
   'signpost', 'stone_arch', 'portcullis', 'torch_sconce', 'chimney_pot',
   'door_leaf', 'door_round', 'log_cabin',
   'barrel', 'crate', 'sack', 'hay_bale', 'handcart', 'bench', 'trough',

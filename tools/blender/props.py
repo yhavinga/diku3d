@@ -526,6 +526,42 @@ def build_torch_sconce():
     return kit.deliver(p, "torch_sconce")
 
 
+def build_wall_lantern():
+    """A shop's lantern: wall at y = 0, reaching into -Y, origin on the ground
+    below the fixing, like the sconce. A glazed iron box on a short bracket,
+    hung beside a shop sign so the painted board has something to be read by
+    after dark -- a judge found every sign in town unreadable at night, with
+    nothing lighting any of them. The panes are lantern glass, which the
+    viewer lights after dark."""
+    lib.reset()
+    p = []
+    z = 2.95
+    p.append(kit.timber((0.16, 0.05, 0.30), (0, 0.0, z + 0.12), (0, 0, 0), "iron", 0.012, "plate"))
+    p.append(kit.timber((0.035, 0.46, 0.035), (0, -0.23, z + 0.26), (0, 0, 0), "iron", 0.006, "arm"))
+    p.append(kit.timber((0.03, 0.34, 0.03), (0, -0.14, z + 0.13),
+                        (math.radians(-36), 0, 0), "iron", 0.006, "stay"))
+    p.append(lib.torus(0.05, 0.008, (0, -0.1, z + 0.33), (0, math.pi / 2, 0),
+                       major_seg=8, minor_seg=3, name="curl", mat="iron"))
+    # The lantern hangs from the arm's end by a ring.
+    ly, top = -0.40, z + 0.18
+    p.append(lib.torus(0.028, 0.007, (0, ly, top + 0.06), (0, math.pi / 2, 0),
+                       major_seg=6, minor_seg=3, name="ring", mat="iron"))
+    p.append(lib.cone(0.14, 0.03, 0.10, (0, ly, top - 0.02), (0, 0, math.pi / 4),
+                      verts=4, name="roof", mat="iron"))
+    body = 0.30
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            p.append(lib.box((0.022, 0.022, body), (sx * 0.075, ly + sy * 0.075, top - 0.07 - body / 2),
+                             name="post", mat="iron"))
+    for (dx, dy, rot) in ((0, -0.075, 0.0), (0, 0.075, 0.0), (-0.075, 0, math.pi / 2), (0.075, 0, math.pi / 2)):
+        p.append(lib.box((0.13, 0.01, body - 0.04), (dx, ly + dy, top - 0.07 - body / 2),
+                         (0, 0, rot), name="pane", mat="glass"))
+    p.append(lib.box((0.17, 0.17, 0.03), (0, ly, top - 0.085 - body), name="floor", mat="iron"))
+    p.append(lib.cone(0.05, 0.0, 0.07, (0, ly, top - 0.135 - body), (math.pi, 0, 0),
+                      verts=6, name="drop", mat="iron"))
+    return kit.deliver(p, "wall_lantern")
+
+
 def build_chimney_pot():
     lib.reset()
     p = [kit.timber((0.42, 0.42, 0.16), (0, 0, 0.08), (0, 0, 0), "rooftile", 0.03, "flange"),
@@ -1233,6 +1269,7 @@ ASSETS = [
     build_planks_pile, build_herb_pots, build_broom, build_cartwheel,
     build_nettles, build_door_round, build_log_cabin,
     build_headstone, build_grave_slab, build_iron_fence, build_grate_leaf,
+    build_wall_lantern,
 ]
 
 

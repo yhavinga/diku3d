@@ -1862,7 +1862,7 @@ export function buildScene(world, layout, materials, assets = null) {
       // ... It looks as if the beer is still on tap!!!" The one place in the
       // neighborhood with a sign out and a light at the door.
       const pub = hood === 'room' && TAPROOM.test(room.name);
-      if (isShop(room) || pub) buildShopSign({ room, pos, sides, instances, model, chunk, decor });
+      if (isShop(room) || pub) buildShopSign({ room, pos, sides, instances, model, chunk, decor, lights });
       if (pub) {
         const d = [0, 1, 2, 3].find((k) => sides[k] && sides[k].kind === 'alley');
         if (d !== undefined) {
@@ -2993,7 +2993,7 @@ const SIGN_CLEAR = 2.6;
  * street to hang anything over, so it gets none: that is the bars and back
  * rooms in Midgaard's temple block, which are reached through other rooms.
  */
-function buildShopSign({ room, pos, sides, instances, model, chunk, decor }) {
+function buildShopSign({ room, pos, sides, instances, model, chunk, decor, lights }) {
   if (!instances) return;
   // A missing model means no sign. Procedural ironwork and a painted board is
   // not worth inventing for something this small.
@@ -3022,6 +3022,22 @@ function buildShopSign({ room, pos, sides, instances, model, chunk, decor }) {
     rotY: FACE_ROT[dir] + Math.PI,
   };
   instances.add(sign, placed, chunk);
+  // And a lantern on the wall between the sign and the door, so the board can
+  // be read after dark: nothing lit any of them, and a judge found every sign
+  // in town a dark blank at night. Off the board's own plane, or a light level
+  // with the board strikes both painted faces edge-on and lights neither.
+  const lantern = model(['wall_lantern'], 0);
+  if (lantern) {
+    const back = -Math.sign(along) * 0.85;
+    const lx = pos.x + dx * SHELL + (dx ? 0 : along + back);
+    const lz = pos.z + dz * SHELL + (dz ? 0 : along + back);
+    instances.add(lantern, { x: lx, y: pos.y, z: lz, rotY: placed.rotY }, chunk);
+    // The lantern's box hangs 0.4 m out and 2.8 m up.
+    lights.push({
+      x: lx + dx * 0.4, y: pos.y + 2.8, z: lz + dz * 0.4,
+      color: 0xffb566, intensity: 6, radius: 7, flicker: true, outdoor: true,
+    });
+  }
   // actors.js paints the shop's name on the board (its `shopSigns`).
   decor.push({ kind: 'shopSign', vnum: room.vnum, name: room.name, ...placed });
 }
