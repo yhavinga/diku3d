@@ -1730,6 +1730,14 @@ export function buildScene(world, layout, materials, assets = null) {
     // mud already hangs on that side.
     const gated = openAir && !airborne
       && GATE_ROOM.test(room.name) && GATE_TOWERS.test(room.description);
+    // The side a modelled gatehouse stands on: its towers take the corners.
+    const gateSide = gated && instances && instances.library.get('gatehouse')
+      ? sides.findIndex((sd, d) => d < 4 && !!sd && !!sd.exit && !!(sd.exit.locks & EX_ISDOOR)) : -1;
+    // A fortress across a sealed way out: it owns that side of the room.
+    const fort = openAir && !airborne && instances && model(['fortress']) ? fortressSide(room, sides) : -1;
+    const fortKeep = fort >= 0 ? buildFortress({
+      instances, batcher, chunk, cell, pos, dir: fort, layout, reserved, cellKey, addCollider, lights, groundAt,
+    }) : null;
 
     for (let dir = 0; dir < 4; dir++) {
       const side = sides[dir];
@@ -1757,16 +1765,16 @@ export function buildScene(world, layout, materials, assets = null) {
         // Nothing walls a room under the canopy: `buildForest` stands a picket
         // of trees along every side there is no way out of, and a rock kerb
         // behind that is the level editor showing through.
-        if (!canopy) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog, instances });
+        if (!canopy && dir !== fort) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog, instances });
         // Once, for the whole cell -- the corners need to know about all four
         // sides, not one at a time.
         // Outside a gate is outside the wall: no houses. See `townEdges`.
         if (dir === 3 && gateOf(room) >= 0) {
-          buildGateFlanks({ batcher, chunk, pos, dir: gateOf(room), addCollider });
+          buildGateFlanks({ batcher, instances, chunk, pos, dir: gateOf(room), addCollider });
         } else if (dir === 3) {
           buildCityFrontage({
             batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors,
-            lights, decals, turf: hood ? turfAt(cell.z) : null,
+            lights, decals, turf: hood ? turfAt(cell.z) : null, gateSide,
           });
         }
       }
@@ -1801,7 +1809,7 @@ export function buildScene(world, layout, materials, assets = null) {
         }
       }
 
-      if (side && side.exit && (side.exit.locks & EX_ISDOOR)) {
+      if (side && side.exit && (side.exit.locks & EX_ISDOOR) && dir !== fort) {
         // A cabin standing on this side owns the opening: the model has a
         // 1.00 x 1.99 m void and one leaf fills it, because a one-room cabin
         // does not have double doors.
@@ -1824,7 +1832,7 @@ export function buildScene(world, layout, materials, assets = null) {
           grate: GRATE.test(side.exit.keyword || ''),
           room: room.vnum,
         });
-        if (gated) buildGatehouse({ batcher, chunk, pos, dir, addCollider });
+        if (gated) buildGatehouse({ batcher, instances, chunk, pos, dir, addCollider });
         // Out in the open a grate hangs in a railing, not on its own: iron
         // runs from each jamb to the corner of the cell, on the line the
         // graveyard's own railing takes.
@@ -1970,7 +1978,7 @@ export function buildScene(world, layout, materials, assets = null) {
           // Nothing grows through the cabin. The shell sits at the cell edge and
           // the planting ring stops short of it here, but a fern inside a wall
           // is the kind of thing that only turns up in a screenshot.
-          keepOut: cabin ? cabin.rect : null,
+          keepOut: cabin ? cabin.rect : fortKeep,
         });
       }
       // What has been *done* to the ground, as against what grows on it: a
@@ -1999,8 +2007,9 @@ export function buildScene(world, layout, materials, assets = null) {
           addCollider(x - 1.1, x + 1.1, z - 0.9, z + 0.9, pos.y, pos.y + 0.6);
         });
       }
+      if (MONOLITH.test(room.name) && instances && model(['monolith'])) buildMonolith({ instances, chunk, room, pos, sides, addCollider });
       if (STATUE.test(room.description) || (hood && /statue here depicting/i.test(room.description))) {
-        buildStatue({ batcher, chunk, room, pos, sides, addCollider });
+        buildStatue({ batcher, instances, model, chunk, room, pos, sides, addCollider });
       }
       // Out of doors the same thing, against the sides with no way out of
       // them, so a square reads as somewhere people keep their things rather
@@ -2787,7 +2796,7 @@ const wantsFrontage = (room) => room.sector === SECTOR.CITY && !SQUARE.test(room
  * inside the 5-9 m a real town street runs to, and the buildings now touch
  * their neighbours in the cells behind instead of standing free on paving.
  */
-function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors, lights = [], decals = null, turf = null }) {
+function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors, lights = [], decals = null, turf = null, gateSide = -1 }) {
   if (!wantsFrontage(room)) return;
   const isOpen = (d) => {
     const side = sides[d];
@@ -3019,6 +3028,8 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
   // full-width block on the closed side already covers them.
   for (const [dirA, dirB, sx, sz] of [[0, 1, 1, -1], [1, 2, 1, 1], [2, 3, -1, 1], [3, 0, -1, -1]]) {
     if (!isOpen(dirA) || !isOpen(dirB)) continue;
+    // A gatehouse's drum towers stand in these two corners.
+    if (dirA === gateSide || dirB === gateSide) continue;
     const bx = pos.x + sx * inset;
     const bz = pos.z + sz * inset;
     if (shire) knoll(bx, bz, 70 + dirA);
@@ -3787,12 +3798,28 @@ const MERLON = 0.62;
 /** Deck height: clear of the 3.1 m opening, and out of reach from the road. */
 const BRIDGE_Y = 5.8;
 
-function buildGatehouse({ batcher, chunk, pos, dir, addCollider }) {
+function buildGatehouse({ batcher, instances, chunk, pos, dir, addCollider }) {
   const [dx, , dz] = DIR_STEP[dir];
   const along = dir === 1 || dir === 3;      // the wall line runs along z
   const out = HALF - 0.3;                    // the plane the door hangs in
   const gx = pos.x + dx * out;
   const gz = pos.z + dz * out;
+  // The modelled gatehouse (setpiece.py `build_gatehouse`): drum towers
+  // standing out in front of the gate, the footbridge between them, the
+  // curtain carried to the cell's edge. Its front faces the room.
+  if (instances && instances.library.get('gatehouse')) {
+    const rotY = FACE_ROT[dir];
+    instances.add('gatehouse', { x: gx, y: pos.y, z: gz, rotY }, chunk);
+    for (const s of [-1, 1]) {
+      const [a, b] = s < 0 ? [-6.5, -1.9] : [1.9, 6.5];
+      localBox(addCollider, gx, pos.y, gz, rotY, a, b, -3.3, 1.3, 0, 12);
+      const [c, d] = s < 0 ? [-4.2, -DOOR_W / 2] : [DOOR_W / 2, 4.2];
+      localBox(addCollider, gx, pos.y, gz, rotY, c, d, -0.35, 2.75, 0, 9);
+      const [e, f] = s < 0 ? [-6.5, -4.2] : [4.2, 6.5];
+      localBox(addCollider, gx, pos.y, gz, rotY, e, f, 0.35, 2.75, 0, 8.4);
+    }
+    return;
+  }
   // Local frame: `a` runs along the wall, `o` across it. Same convention the
   // Shire's `bank` uses, for the same reason.
   const at = (a, o) => (along
@@ -3914,7 +3941,7 @@ function buildShore({ batcher, instances, model, chunk, room, pos, half, wet }) 
  */
 const STATUE = /\bstatue\b[^.]{0,60}?\b(?:is|stands|standing|rises|towers)\b/i;
 
-function buildStatue({ batcher, chunk, room, pos, sides, addCollider }) {
+function buildStatue({ batcher, instances, model, chunk, room, pos, sides, addCollider }) {
   // Away from the ways out, the same anchor the tomb's lid uses; on a square
   // with a way out on every side there is no such direction, so the room's own
   // number picks one and picks the same one every time.
@@ -3929,6 +3956,20 @@ function buildStatue({ batcher, chunk, room, pos, sides, addCollider }) {
   const sz = pos.z + Math.sin(anchor) * 2.6;
   const spin = anchor + Math.PI; // facing back across the square
   const y = pos.y;
+  // What the statue *is* is in its extra description: "the Midgaard Worm,
+  // stretching around the Palace of Midgaard" (tools/blender/setpiece.py).
+  if (instances && model(['statue_worm']) && room.extra.some((e) => /\bstatue\b/i.test(e.keyword) && WORM.test(e.description))) {
+    // The model's front is its +z; turn it to face the middle of the square.
+    // A quarter up on the model: "large", and at 1:1 a man's head came to
+    // the top of its plinth and the worm read as a garden ornament.
+    // Its plinth is 3.9 m across, so it stands further off the arrival point.
+    const mx = pos.x + Math.cos(anchor) * 3.4;
+    const mz = pos.z + Math.sin(anchor) * 3.4;
+    instances.add('statue_worm', { x: mx, y, z: mz, rotY: Math.atan2(pos.x - mx, pos.z - mz), scale: STATUE_SCALE }, chunk);
+    const r = 1.55 * STATUE_SCALE;
+    addCollider(mx - r, mx + r, mz - r, mz + r, y, y + 1.84 * STATUE_SCALE);
+    return;
+  }
   const put = (h) => place(sx, y + h, sz, spin);
 
   // Plinth: base, die, cap. 1.73 m of it, which is what a figure has to stand
@@ -3960,6 +4001,108 @@ function buildStatue({ batcher, chunk, room, pos, sides, addCollider }) {
       sz - Math.sin(spin - Math.PI / 2) * 0.62, spin), { chunk });
 
   addCollider(sx - 1.0, sx + 1.0, sz - 1.0, sz + 1.0, y, y + 1.73);
+}
+
+// ------------------------------------------------------------ set pieces ----
+
+/**
+ * Landmarks the rooms name out of doors, modelled in tools/blender/setpiece.py:
+ * the marsh fortress, the monolith, the Market Square's worm and the town's
+ * gatehouses. Each model's origin is on the ground, its front (Blender -Y) is
+ * three's +z, and `localBox` turns a box given in that frame into a world
+ * collider, so the numbers here can be read against setpiece.py's.
+ */
+const WORM = /\bworm\b/i;
+const STATUE_SCALE = 1.25;
+const MONOLITH = /\bmonolith\b/i;
+const FORTRESS = /\bfortress\b/i;
+const DRAWBRIDGE = /\bdrawbridge\b/i;
+
+function localBox(addCollider, ox, y, oz, rotY, x0, x1, y0, y1, h0, h1) {
+  const c = Math.cos(rotY); const s = Math.sin(rotY);
+  let ax = Infinity; let bx = -Infinity; let az = Infinity; let bz = -Infinity;
+  for (const bxl of [x0, x1]) {
+    for (const byl of [y0, y1]) {
+      // Blender (x, y) is three's (x, -y) before the turn.
+      const lx = bxl; const lz = -byl;
+      const wx = ox + lx * c + lz * s; const wz = oz - lx * s + lz * c;
+      ax = Math.min(ax, wx); bx = Math.max(bx, wx); az = Math.min(az, wz); bz = Math.max(bz, wz);
+    }
+  }
+  addCollider(ax, bx, az, bz, y + h0, y + h1);
+}
+
+/**
+ * "You are standing near a monolith which protrudes some 20 feet from the
+ * marsh into the air. Its black obsidian surface shines darkly." Keyed on the
+ * room's name ("By the Monolith."), not the prose: the bog next door says it
+ * can see the stone too, and it is one stone. Off the arrival point, away
+ * from the ways out, the same anchor the statue takes.
+ */
+function buildMonolith({ instances, chunk, room, pos, sides, addCollider }) {
+  let ax = 0; let az = 0;
+  for (let d = 0; d < 4; d++) {
+    if (!sides[d]) continue;
+    ax += DIR_STEP[d][0]; az += DIR_STEP[d][2];
+  }
+  const anchor = (ax || az) ? Math.atan2(-az, -ax) : hash3(room.vnum, 3, 0, 231) * Math.PI * 2;
+  const x = pos.x + Math.cos(anchor) * 3.4;
+  const z = pos.z + Math.sin(anchor) * 3.4;
+  instances.add('monolith', { x, y: pos.y, z, rotY: hash3(room.vnum, 4, 0, 232) * Math.PI * 2 }, chunk);
+  addCollider(x - 1.15, x + 1.15, z - 1.15, z + 1.15, pos.y, pos.y + 6.2);
+}
+
+/** The side a fortress stands across: a sealed way out of a room that says so. */
+function fortressSide(room, sides) {
+  if (!FORTRESS.test(room.description) || !DRAWBRIDGE.test(room.description)) return -1;
+  return sides.findIndex((s, d) => d < 4 && !!s && !!s.exit && !!(s.exit.locks & EX_ISDOOR) && deadExit(s.exit));
+}
+
+/** Footprint, in cells either side of the gate's axis and out from the room. */
+const FORT_ALONG = 2;
+const FORT_DEEP = 4;
+
+/**
+ * "You stand before the gates of a huge fortress. The drawbridge is up, the
+ * gates closed, and the portcullis down." #8318's south exit is a door to
+ * nowhere (room -1), so the stock build hung a pair of town gate leaves on
+ * the edge of a forest room and stood firs behind them. The fortress takes
+ * the cells beyond that side instead -- nothing else is built there -- with
+ * its moat's near bank on the room's edge, so the player looks across the
+ * water at the raised drawbridge from where the mud puts them. Closed as the
+ * prose has it: no door, nothing to open, and the bank is a wall.
+ *
+ * Returns the strip of the room in front of it, which the forest keeps clear.
+ */
+function buildFortress({ instances, batcher, chunk, cell, pos, dir, layout, reserved, cellKey, addCollider, lights, groundAt }) {
+  const [dx, , dz] = DIR_STEP[dir];
+  const ox = pos.x + dx * HALF; const oz = pos.z + dz * HALF;
+  const rotY = FACE_ROT[dir];
+  instances.add('fortress', { x: ox, y: pos.y, z: oz, rotY }, chunk);
+  const ax = dz ? 1 : 0; const az = dx ? 1 : 0;
+  for (let a = -FORT_ALONG; a <= FORT_ALONG; a++) {
+    for (let depth = 1; depth <= FORT_DEEP; depth++) {
+      const x = cell.x + dx * depth + ax * a; const z = cell.z + dz * depth + az * a;
+      if (layout.at(cell.level, x, z) !== undefined || layout.isPath(cell.level, x, z)) continue;
+      const key = cellKey(cell.level, x, z);
+      if (reserved.has(key)) continue;
+      reserved.add(key);
+      groundAt.set(key, 'peat');
+      batcher.add(plane(CELL, CELL, 3), 'peat', place(x * CELL, pos.y, z * CELL), { chunk });
+    }
+  }
+  // The quay along the near bank, and the fortress itself.
+  localBox(addCollider, ox, pos.y, oz, rotY, -33, 33, -0.35, 0.45, 0, 1.6);
+  localBox(addCollider, ox, pos.y, oz, rotY, -33, 33, 2.8, 46, 0, 22);
+  // "A window glows blue with magical energy", 33 m up the northeast tower.
+  const c = Math.cos(rotY); const s = Math.sin(rotY);
+  const wx = -29.2; const wy = 6.6;
+  lights.push({ x: ox + wx * c - wy * s, y: pos.y + 33.4, z: oz - wx * s - wy * c, color: 0x5a8cff, intensity: 6, radius: 14 });
+  const x0 = Math.min(pos.x + dx * (HALF - 4), pos.x + dx * HALF) - (dz ? HALF : 0);
+  const x1 = Math.max(pos.x + dx * (HALF - 4), pos.x + dx * HALF) + (dz ? HALF : 0);
+  const z0 = Math.min(pos.z + dz * (HALF - 4), pos.z + dz * HALF) - (dx ? HALF : 0);
+  const z1 = Math.max(pos.z + dz * (HALF - 4), pos.z + dz * HALF) + (dx ? HALF : 0);
+  return { x0, x1, z0, z1 };
 }
 
 // ------------------------------------------------------------ graveyard ----
@@ -4350,7 +4493,9 @@ function buildTownEdge({ edge, spot, pos, batcher, instances, model, chunk, addC
  * next length of wall takes over: 1.5 m each side that otherwise showed
  * straight through the wall.
  */
-function buildGateFlanks({ batcher, chunk, pos, dir, addCollider }) {
+function buildGateFlanks({ batcher, instances, chunk, pos, dir, addCollider }) {
+  // The modelled gatehouse carries the curtain out to the cell's edge itself.
+  if (instances && instances.library.get('gatehouse')) return;
   const [dx, , dz] = DIR_STEP[dir];
   const out = HALF - 0.3;
   const from = DOOR_W / 2 + TOWER_W;
@@ -5799,6 +5944,28 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
       const [ox, , oz] = DIR_STEP[out];
       instances.add('cave_wall_long_door', { x: room.x + ox * HALF, y: 0, z: room.z + oz * HALF, rotY: FACE_ROT[inDir] }, chunkOf(cave), skin(cave.room));
       closeDoorway({ batcher, pos: room, dir: out, chunk: chunkOf(cave), material: 'caverock', addCollider });
+    }
+  }
+  // A cave room's side that faces open ground it has no way out to, where
+  // no crag could go because the ground is walked: a street or a trail runs
+  // past it. That face was the room's shell -- a flat 13 m slab of crag with
+  // the cap's edge along its top, the "flat box" a judge photographed from
+  // the marsh at #8308. The same rock lining the mouths use goes over it.
+  for (const cell of layout.order) {
+    if (cell.level !== 0 || !rocky(cell.room)) continue;
+    const sides = layout.sides.get(cell.vnum) || [];
+    for (let dir = 0; dir < 4; dir++) {
+      if (sides[dir]) continue;
+      const [ox, , oz] = DIR_STEP[dir];
+      const nx = cell.x + ox; const nz = cell.z + oz;
+      const v = layout.at(0, nx, nz);
+      const link = v === undefined ? layout.passageAt(0, nx, nz) : null;
+      const open = v !== undefined ? isOpenAir(layout.cells.get(v).room)
+        : !!link && !(rocky(link.from.room) && rocky(link.to.room));
+      if (!open) continue;
+      instances.add('cave_wall_long', {
+        x: cell.x * CELL + ox * HALF, y: 0, z: cell.z * CELL + oz * HALF, rotY: FACE_ROT[(dir + 2) % 4], scaleY: 1.35,
+      }, chunkOf(cell), { ...(skin(cell.room) || {}), caverock: 'crag' });
     }
   }
   for (const c of inside) {
