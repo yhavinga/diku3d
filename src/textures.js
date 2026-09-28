@@ -1694,6 +1694,9 @@ const RECIPES = {
   wood: { surface: 'wood', scale: 1.2, normalScale: 0.3, env: 0.75, wet: 0, detail: 0.2 },
   blanket: { surface: 'blanket', scale: 0.6, normalScale: 0.4, env: 0.3, wet: 0, detail: 0 },
   firebrick: { surface: 'brick', scale: 2.25, normalScale: 0.5, env: 0.8, wet: 0, detail: 0.5 },
+  // The sewer's ashlar in daylight: the dressed stone round a window in a
+  // masonry wall, which is finer and paler work than the wall it stands in.
+  dressing: { surface: 'ashlar', scale: 3.0, normalScale: 0.6, env: 0.8, wet: 0, detail: 0.5 },
   brokencobble: { surface: 'brokencobble', scale: 2.2, normalScale: 1.0, env: 1.05, lift: true, wet: 0.55, detail: 0.5 },
   ash: { surface: 'ash', scale: 3.0, normalScale: 0.6, env: 0.6, lift: true, wet: 0, detail: 0.6 },
   wasteground: { surface: 'wasteground', scale: 4.0, normalScale: 0.7, env: 0.45, lift: true, wet: 0, detail: 0.6 },

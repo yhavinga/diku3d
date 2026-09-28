@@ -159,6 +159,9 @@ const WATER_LAP = 0.7;
  * written here because the rule is about being underground, not about the
  * Shire, and the next buried area with a door should not have to find it again.
  */
+/** Outer skins a window is dressed in stone for, rather than framed in oak. */
+const MASONRY = new Set(['stonewall', 'sootwall', 'brick', 'marble', 'crag', 'cliff', 'rock', 'caverock']);
+
 const isBuried = (mats, cell) => mats.cave && (cell.level < 0 || !!mats.inRock);
 
 /**
@@ -1854,6 +1857,7 @@ export function buildScene(world, layout, materials, assets = null) {
         decor.push({
           kind: 'windows', x: pos.x, y: pos.y, z: pos.z,
           w: SHELL * 2, d: SHELL * 2, h: CEIL + 1.1, seed: hash3(room.vnum, 2, 0, 11), doorSides: sides,
+          frame: (kit !== null || MASONRY.has(mats.wallOut)) ? 'stone' : 'timber',
         });
       }
       if (isDeep(room)) buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider });
@@ -2694,7 +2698,7 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
       return;
     }
     // A blank three-storey wall along the street was reported; give it openings.
-    decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed });
+    decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed, frame: stone || marble ? 'stone' : 'timber' });
   };
 
   /**
@@ -2716,7 +2720,7 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
       seed > 0.38 ? 'thatch' : 'rooftile',
       place(bx, pos.y + h, bz, wide ? Math.PI / 2 : 0), { chunk });
     addCollider(bx - sx / 2, bx + sx / 2, bz - sz / 2, bz + sz / 2, pos.y, pos.y + h);
-    decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed });
+    decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed, frame: 'timber' });
     if (hash3(Math.round(bx), Math.round(bz), cell.level, 71) > 0.5) {
       decor.push({ kind: 'smoke', x: bx, y: pos.y + h + roofH, z: bz });
     }
@@ -6420,7 +6424,7 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
         batcher.add(triPrism(w + 1.0, cRoof, d + 1.0), hash3(x, z, 0, 24) > 0.35 ? 'thatch' : 'rooftile',
           place(x, y + ch, z, hash3(x, z, 0, 25) > 0.5 ? Math.PI / 2 : 0), { chunk });
         addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2, y, y + ch);
-        decor.push({ kind: 'windows', x, y, z, w, d, h: ch, seed: hash3(x, z, 0, 26) });
+        decor.push({ kind: 'windows', x, y, z, w, d, h: ch, seed: hash3(x, z, 0, 26), frame: 'timber' });
         if (hash3(x, z, 0, 27) > 0.45) decor.push({ kind: 'smoke', x, y: y + ch + cRoof, z });
         break;
       }
@@ -6449,7 +6453,7 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
       batcher.add(triPrism(w + 0.9, roofH, d + 0.9), hash3(x, z, 0, 24) > 0.82 ? 'thatch' : 'rooftile',
         place(x, y + h, z, hash3(x, z, 0, 25) > 0.5 ? Math.PI / 2 : 0), { chunk });
       addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2, y, y + h);
-      decor.push({ kind: 'windows', x, y, z, w, d, h, seed: hash3(x, z, 0, 26) });
+      decor.push({ kind: 'windows', x, y, z, w, d, h, seed: hash3(x, z, 0, 26), frame: stone ? 'stone' : 'timber' });
       if (hash3(x, z, 0, 27) > 0.55) decor.push({ kind: 'smoke', x, y: y + h + roofH, z });
       break;
     }
