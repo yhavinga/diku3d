@@ -794,6 +794,9 @@ export const ASSET_NAMES = [
   'beast_spider', 'beast_beetle', 'beast_scorpion', 'beast_drider', 'beast_bat', 'beast_mud',
   'beast_myconoid', 'beast_ratman', 'beast_imp', 'beast_naga', 'beast_sandworm', 'beast_basilisk',
   'beast_dustdigger', 'beast_camel', 'beast_dracolich',
+  // What a hobbit builds: tools/blender/shire.py.
+  'shire_door_ring', 'shire_door_leaf', 'shire_fence', 'shire_flowerbed', 'shire_window_box',
+  'shire_lantern_post', 'shire_waterwheel',
   // Landmarks the prose names out of doors: tools/blender/setpiece.py.
   'gatehouse', 'fortress', 'monolith', 'statue_worm',
   // The rooms' furniture: tools/blender/furniture.py.

@@ -656,6 +656,11 @@ const LEAF_SPRAYS = {
   herbleaf: leafSpray({ seed: 5901, shape: 'ovate', leaf: 0.045, width: 0.3, angle: 0.8, spread: 0.7, spacing: 0.02,
     sides: 8, sideLen: 0.34, sideAngle: 0.8, twig: 0.004, mainLeaves: true, alternate: false,
     palette: [0x4a5a3a, 0x566648, 0x60704f, 0x3f5232], back: 0x1e2618, stem: 0x4f4a36 }),
+  // A cottage-garden spray for the Shire's beds and window boxes: small
+  // rounded leaves, and near half of them read as petals (`blooms`).
+  blooms: leafSpray({ seed: 6101, shape: 'ovate', leaf: 0.05, width: 0.46, angle: 0.95, spread: 0.9, spacing: 0.026,
+    sides: 9, sideLen: 0.36, sideAngle: 0.9, twig: 0.004, mainLeaves: true, alternate: false,
+    palette: [0x2f4a24, 0x3a5a2b, 0x46662f, 0x33502a], back: 0x1c2a17, stem: 0x3e4a2c }),
   // A sword fern's frond: the rachis along u, pinnae both sides.
   fernleaf: leafSpray({ seed: 5407, shape: 'pinna', leaf: 0.2, width: 0.14, angle: 1.2, spread: 0.12, spacing: 0.034,
     sides: 0, sideLen: 0, sideAngle: 0, twig: 0.005, mainLeaves: true, alternate: false, taper: 0.8,
@@ -702,6 +707,26 @@ function leafSprayAt(sp, u, v, s) {
   // A leaf is folded along its midrib: relief from the edge up to the rib.
   s.height = 0.35 + best.depth * 0.35 + (1 - Math.abs(bb)) * 0.25;
   s.rough = 0.7;
+  return { leaf: best, along: ba, across: bb };
+}
+
+/** What a cottage garden is in flower with: geranium, marigold, daisy, lavender, pinks. */
+const BLOOMS = [[0xb8313f, 0x7d1f2a], [0xe0a82e, 0xa8741c], [0xe9e4d6, 0xb9b2a0], [0x8663a8, 0x5a4078], [0xd77a9a, 0x9c4d68]];
+
+/**
+ * Painted boards for a hobbit's door and its window frames: a colour laid on
+ * with a brush along the board, worn back to grey oak at the edges of the
+ * brush strokes and where hands go. The colour is the recipe's; the boards'
+ * seams are the model's.
+ */
+function hobbitPaint(hex, u, v, s) {
+  const brush = fbm(u * 5, v * 34, 5, 1331, 3);
+  const chip = clamp01(fbm(u * 12, v * 12, 12, 1337, 4) * 2.3 - 1.42);
+  const fade = fbm(u * 2, v * 2, 2, 1339, 3);
+  const base = mix(rgb(hex), mix(rgb(hex), rgb(0xd8d2c0), 0.22), fade * 0.8 + brush * 0.2);
+  s.color = mix(base, rgb(0x6a5a48), chip);
+  s.height = 0.5 + brush * 0.03 - chip * 0.18;
+  s.rough = 0.55 + chip * 0.3 + brush * 0.08;
 }
 
 const SURFACES = {
@@ -720,6 +745,22 @@ const SURFACES = {
   brambleleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.brambleleaf, u, v, s); },
   weedleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.weedleaf, u, v, s); },
   herbleaf(u, v, s) { leafSprayAt(LEAF_SPRAYS.herbleaf, u, v, s); },
+  blooms(u, v, s) {
+    const hit = leafSprayAt(LEAF_SPRAYS.blooms, u, v, s);
+    if (!hit || hit.leaf.tint < 0.46) return;
+    // A petal: the leaf's own outline in a flower's colour, pale at the tip
+    // and dark at the heart, with a spot of pollen where it joins the stem.
+    const [lit, dark] = BLOOMS[Math.floor(((hit.leaf.tint - 0.46) / 0.54) * BLOOMS.length) % BLOOMS.length];
+    let c = mix(rgb(dark), rgb(lit), clamp01(hit.along * 1.6));
+    if (hit.along < 0.14) c = rgb(0xd9a93a);
+    const shade = 0.72 + 0.28 * hit.leaf.depth;
+    s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
+    s.rough = 0.62;
+  },
+  doorgreen(u, v, s) { hobbitPaint(0x355f38, u, v, s); },
+  doorblue(u, v, s) { hobbitPaint(0x35557a, u, v, s); },
+  dooryellow(u, v, s) { hobbitPaint(0xc29a2e, u, v, s); },
+  doorred(u, v, s) { hobbitPaint(0x86362c, u, v, s); },
 
   /**
    * The grass atlas (GRASS_CARDS). Every texel is the front-most shape over
@@ -2745,6 +2786,12 @@ const RECIPES = {
   brambleleaf: { surface: 'brambleleaf', scale: 1, normalScale: 0.4, env: 0.45, wet: 0, detail: 0, cutout: 0.5 },
   weedleaf: { surface: 'weedleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   herbleaf: { surface: 'herbleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  blooms: { surface: 'blooms', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  // A hobbit's door and window frames, in the four colours they are painted.
+  doorgreen: { surface: 'doorgreen', scale: 1.1, normalScale: 0.45, env: 0.75, wet: 0, detail: 0.3 },
+  doorblue: { surface: 'doorblue', scale: 1.1, normalScale: 0.45, env: 0.75, wet: 0, detail: 0.3 },
+  dooryellow: { surface: 'dooryellow', scale: 1.1, normalScale: 0.45, env: 0.75, wet: 0, detail: 0.3 },
+  doorred: { surface: 'doorred', scale: 1.1, normalScale: 0.45, env: 0.75, wet: 0, detail: 0.3 },
   fernleaf: { surface: 'fernleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
   firbark: { surface: 'firbark', scale: 1.4, normalScale: 0.9, env: 0.35, wet: 0, detail: 0.5 },
   cedarbark: { surface: 'cedarbark', scale: 1.2, normalScale: 0.9, env: 0.5, wet: 0, detail: 0.5 },
