@@ -70,21 +70,44 @@ def broken_run(x0, x1, y, t, heights, mat="sootwall", holes=(), step=0.36, cours
     only what is under the sill and what is over the head, if the wall stands
     that high there."""
     objs = []
-    n = max(1, int(round((x1 - x0) / step)))
-    w = (x1 - x0) / n
-    # A ragged head: each column's own few stones more or less, so the
-    # silhouette is broken masonry and not a staircase.
-    # A random walk that is pulled towards the profile rather than a fresh
-    # roll per column: independent rolls came out as crenellation.
     r = rng_for(seed * 7919 + int((x0 + 100) * 13))
-    cur = heights(x0 + w / 2)
-    for i in range(n):
-        xa = x0 + i * w
-        xc = xa + w / 2
+    # Stones of their own lengths, not a fixed pitch: equal columns stepping
+    # one course up and down are merlons, and the burnt weaponshop's walls
+    # came out as a castle's battlements -- reported. A mason's run has long
+    # stones and short ones.
+    edges = [x0]
+    while edges[-1] < x1 - 1e-6:
+        edges.append(min(x1, edges[-1] + step * r.uniform(0.7, 2.1)))
+    if len(edges) > 2 and edges[-1] - edges[-2] < step * 0.5:
+        edges.pop(-2)
+    # The head wanders slowly -- a walk on knots a metre or two apart, eased
+    # between them -- so where it steps it steps down a slope, a run of
+    # stones at one height and then the next course, never alternating.
+    knots = []
+    kx = x0 - 1.0
+    while kx < x1 + 2.0:
+        knots.append((kx, r.uniform(-1.0, 1.0) * jag * 2.2))
+        kx += r.uniform(0.9, 2.2)
+
+    def wander(x):
+        for (ka, va), (kb, vb) in zip(knots, knots[1:]):
+            if ka <= x <= kb:
+                f = (x - ka) / (kb - ka)
+                f = f * f * (3 - 2 * f)
+                return va + (vb - va) * f
+        return 0.0
+    capped = False
+    for i in range(len(edges) - 1):
+        xa, xb = edges[i], edges[i + 1]
+        w = xb - xa
+        xc = (xa + xb) / 2
         want = heights(xc)
-        # Less noise near the ground: a wall down to its footings is a line of
-        # stones, and single courses alternating there read as battlements.
-        cur += max(-1.4, min(1.4, want - cur)) * 0.75 + r.uniform(-jag, jag) * min(1.0, max(0.2, cur / 2.4))
+        # Mostly lower than the profile, rarely above it: a wall loses stones.
+        wv = wander(xc)
+        cur = want + (wv if wv < 0 else wv * 0.3) * min(1.0, max(0.2, want / 2.4))
+        # Now and then a stone is missing from the top course, singly.
+        if r.random() < 0.14 and cur > course * 3:
+            cur -= course
         h = max(course, math.floor(cur / course) * course)
         if least:
             h = max(h, least(xc))
@@ -100,6 +123,17 @@ def broken_run(x0, x1, y, t, heights, mat="sootwall", holes=(), step=0.36, cours
             if zb - za < 0.05:
                 continue
             objs.append(lib.box((w + 0.002, t, zb - za), (xc, y, z0 + (za + zb) / 2), name=name, mat=mat))
+            # The last stone on a broken head sits where it was left: shorter
+            # than the run under it, a little proud or back, a little canted.
+            # Never two side by side: a row of loose stones on a level head
+            # is the crenellation again.
+            capped = not capped and zb == h and h > course * 2 and w > 0.3 and r.random() < 0.3
+            if capped:
+                sw = w * r.uniform(0.45, 0.9)
+                objs.append(lib.box((sw, t * r.uniform(0.7, 0.95), course * r.uniform(0.55, 0.9)),
+                                    (xa + r.uniform(0, w - sw) + sw / 2, y + r.uniform(-0.05, 0.05), z0 + h + course * 0.3),
+                                    (r.uniform(-0.06, 0.06), r.uniform(-0.1, 0.1), r.uniform(-0.05, 0.05)),
+                                    name=name, mat=mat))
     return objs
 
 

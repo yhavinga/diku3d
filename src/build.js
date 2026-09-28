@@ -1274,12 +1274,33 @@ function hoodProp({ instances, chunk, addCollider, name, x, y, z, rotY = 0, scal
   return true;
 }
 
+/**
+ * A fire the gangs keep: flames, the embers going up off it and a thread of
+ * smoke, with its own light from the pool. A night in the neighborhood was
+ * one flat blue value with nothing burning in it, though No Man's Land is
+ * described by the fires across it; a fire here is what it is lit by.
+ * `bed` is the height of the burning fuel above `y`, `spread` how wide it is.
+ */
+function hoodFire({ decor, lights, x, y, z, bed, spread = 0.2, intensity = 18, radius = 14, salt = 0 }) {
+  // A knot of tongues of different heights, the tallest in the middle: three
+  // equal ones round a ring stood apart as three torch flames.
+  for (let i = 0; i < 6; i++) {
+    const a = i * 2.4 + salt;
+    const r = i ? spread * (0.45 + 0.55 * ((i * 0.618) % 1)) : 0;
+    decor.push({
+      kind: 'torch', bare: true, fire: true, embers: i === 0, size: i ? 1.1 + ((i * 0.37 + salt) % 1) * 0.6 : 2.1,
+      x: x + Math.cos(a) * r, y: y + bed - (i ? 0.05 : 0), z: z + Math.sin(a) * r,
+    });
+  }
+  decor.push({ kind: 'smoke', x, y: y + bed + 1.2, z, thin: true });
+  lights.push({ x, y: y + bed + 0.6, z, color: 0xff8a3a, intensity, radius, flicker: true, outdoor: true });
+}
+
 /** A fire in an iron basket, burning day and night where a gang keeps watch. */
 function hoodBrazier({ instances, chunk, decor, lights, addCollider, x, y, z }) {
   const top = instances.library.get('brazier')?.bounds?.max.y;
   if (top === undefined || !hoodProp({ instances, chunk, addCollider, name: 'brazier', x, y, z, half: [0.42, 0.42], height: 1.1 })) return;
-  decor.push({ kind: 'torch', bare: true, x, y: y + top - 0.12, z });
-  lights.push({ x, y: y + top + 0.5, z, color: 0xff8a3a, intensity: 18, radius: 14, flicker: true, outdoor: true });
+  hoodFire({ decor, lights, x, y, z, bed: top - 0.14, spread: 0.14, salt: x * 0.37 + z });
 }
 
 /**
@@ -1425,7 +1446,7 @@ function buildHoodRoom({ room, pos, sides, instances, model, chunk, decor, light
 
   // Blood where the mud says there is some. The weaponshop's is "splattered
   // and dried all over the walls", which is handled with the ruins below.
-  if (HOOD_BLOOD.test(room.description) && style !== 'ruin') blood(/everywhere/i.test(text) ? 6 : 3, 941);
+  if (HOOD_BLOOD.test(room.description) && style !== 'ruin') blood(/everywhere/i.test(text) ? 4 : 2, 941);
 
   switch (style) {
     case 'nml': {
@@ -1433,11 +1454,17 @@ function buildHoodRoom({ room, pos, sides, instances, model, chunk, decor, light
       // down, the charred bones of their roofs, whatever was thrown, and the
       // crows that come for what is left after a fight.
       const heaps = put('rubble_heap', 1 + Math.floor(hash3(room.vnum, 0, 0, 951) * 2), 1.7, 952, { height: 1.1 });
-      put('charred_beams', 1, 2.4, 953, { height: 0.9 });
+      const beams = put('charred_beams', 1, 2.4, 953, { height: 0.9 });
+      // "Usually where the violence starts": the wreckage somebody set light
+      // to is still going in about half of it, which is what lights the strip
+      // at night between the two gangs' watch fires.
+      if (beams.length && hash3(room.vnum, 3, 0, 951) < 0.5) {
+        hoodFire({ decor, lights, x: beams[0].x, y, z: beams[0].z, bed: 0.3, spread: 0.5, intensity: 14, radius: 12, salt: room.vnum });
+      }
       if (hash3(room.vnum, 1, 0, 951) < 0.4) put('burnt_cart', 1, 1.9, 954, { height: 1.4 });
       put('tall_weeds', 2, 0.5, 955, { solid: false });
       put('debris', 2, 1.0, 956, { solid: false });
-      blood(2 + Math.floor(hash3(room.vnum, 2, 0, 951) * 3), 957);
+      blood(1 + Math.floor(hash3(room.vnum, 2, 0, 951) * 2), 957);
       for (const h of heaps) if (hash3(room.vnum, Math.round(h.x), 0, 958) < 0.6) crow(h.x + 0.2, h.z - 0.1, 1.08);
       for (let i = 0; i < 2; i++) {
         if (hash3(room.vnum, i, 0, 959) < 0.5) continue;
@@ -1458,18 +1485,20 @@ function buildHoodRoom({ room, pos, sides, instances, model, chunk, decor, light
       const bz = pos.z - (corner & 2 ? 1 : -1) * (reach - 0.4);
       hoodProp({ instances, chunk, addCollider, name: 'charred_beams', x: bx, y, z: bz, rotY: (corner & 1) * 0.3, half: [2.6, 1.0], height: 0.9 });
       instances.add('debris', { x: pos.x + 2.2, y, z: pos.z - 2.6, rotY: 2.1 }, chunk);
+      // "Blood is splattered and dried all over the walls here": the walls
+      // are `paintRoom`'s (the prose's gore), low and dragged to the floor.
+      // What this adds is where it ran out across the ash from them.
       if (HOOD_BLOOD.test(room.description)) {
-        // "Blood is splattered and dried all over the walls here."
-        for (let d = 0; d < 4; d++) {
-          if (sides[d]) continue;
+        const walls = [0, 1, 2, 3].filter((d) => !sides[d]);
+        walls.slice(0, 2).forEach((d, i) => {
           const [dx, , dz] = DIR_STEP[d];
           const a = (hash3(room.vnum, d, 0, 963) - 0.5) * 5;
           decals.push({
-            material: 'decal_blood', x: pos.x + dx * (ROOM / 2 - 0.25) + (dx ? 0 : a), y: y + 1.3 + hash3(room.vnum, d, 1, 963),
-            z: pos.z + dz * (ROOM / 2 - 0.25) + (dz ? 0 : a), nx: -dx, nz: -dz, w: 1.6, h: 1.6,
+            material: 'decal_blood', ground: true,
+            x: pos.x + dx * (ROOM / 2 - 0.9) + (dx ? 0 : a), y, z: pos.z + dz * (ROOM / 2 - 0.9) + (dz ? 0 : a),
+            w: 1.3 + hash3(room.vnum, d, 1, 963) * 0.6, spin: hash3(room.vnum, i, 2, 963) * Math.PI * 2,
           });
-        }
-        blood(4, 964);
+        });
       }
       break;
     }
@@ -1712,7 +1741,7 @@ function buildHoodFiller({ batcher, instances, chunk, addCollider, addPlatform, 
  * through. The stakes are always on the street's side of it, the cart and
  * crates on No Man's Land's -- a gang holds its end.
  */
-function buildHoodBarricade({ instances, chunk, addCollider, cell, dir, y, seed }) {
+function buildHoodBarricade({ instances, chunk, addCollider, cell, dir, y, seed, decor, lights, nmlDir }) {
   if (!instances) return;
   const [dx, , dz] = DIR_STEP[dir];
   const across = dir === 0 || dir === 2 ? [1, 0] : [0, 1];
@@ -1730,6 +1759,13 @@ function buildHoodBarricade({ instances, chunk, addCollider, cell, dir, y, seed 
     });
   }
   instances.add('debris', { x: x + dx * 2.6, y, z: z + dz * 2.6, rotY: seed * 6 }, chunk);
+  // The watch fire, on the gang's side of its own line and to one side of
+  // the gap, where whoever holds it stands warming his hands.
+  const [nx, , nz] = DIR_STEP[nmlDir];
+  const side = seed > 0.5 ? 1 : -1;
+  const fx = x - nx * 2.0 + across[0] * side * 2.3;
+  const fz = z - nz * 2.0 + across[1] * side * 2.3;
+  hoodBrazier({ instances, chunk, decor, lights, addCollider, x: fx, y, z: fz });
 }
 
 /**
@@ -2044,7 +2080,10 @@ export function buildScene(world, layout, materials, assets = null) {
     // A doorway has nothing under it, and underground you can see that: see
     // `isBuried`. Paving these rooms to their cell edge closes it.
     const buried = !openAir && isBuried(mats, cell);
-    const half = airborne ? ROOM / 2 : (openAir || buried ? HALF : ROOM / 2);
+    // A roofless ruin is looked down into, and between a floor stopping at
+    // the wall line and the ruin kit's inner face the world's grass showed as
+    // a green seam along the foot of every wall. Its ash runs under them.
+    const half = airborne ? ROOM / 2 : (openAir || buried || ruin ? HALF : ROOM / 2);
     if (openAir) groundAt.set(cellKey(cell.level, cell.x, cell.z), mats.floor);
     buildFloor({
       batcher, chunk, material: mats.floor, x: pos.x, y: pos.y, z: pos.z,
@@ -2504,12 +2543,17 @@ export function buildScene(world, layout, materials, assets = null) {
     if (!!fromHood !== !!toHood) {
       buildHoodWallRoad({ batcher, instances, link, layout, chunkOf, addCollider, addPlatform, reserved, cellKey });
     } else if (fromHood && toHood && (fromHood === 'nml') !== (toHood === 'nml') && link.path.length) {
-      const mid = link.path[Math.floor(link.path.length / 2)];
-      const next = link.path[Math.floor(link.path.length / 2) + 1] || link.to;
+      const k = Math.floor(link.path.length / 2);
+      const mid = link.path[k];
+      const next = link.path[k + 1] || link.to;
+      const prev = link.path[k - 1] || link.from;
       buildHoodBarricade({
         instances, chunk: chunkOf({ ...mid, level: link.from.level }), addCollider,
         cell: mid, dir: dirBetween(mid, next), y: link.from.level * LEVEL_H,
-        seed: hash3(mid.x, mid.z, 0, 1071),
+        seed: hash3(mid.x, mid.z, 0, 1071), decor, lights,
+        // Which way No Man's Land lies from the line: the fire is kept on
+        // the street's side of it, by the gang that holds the street.
+        nmlDir: fromHood === 'nml' ? dirBetween(mid, prev) : dirBetween(mid, next),
       });
     }
   }
@@ -6119,14 +6163,16 @@ function paintRoom({ room, said, pos, sides, batcher, chunk, instances, kit, mat
     return true;
   };
 
-  // Blood: thrown at every wall, heaviest on the ones with nothing in them.
+  // Blood: where bodies went against the walls and down them. Every cell of
+  // the atlas collects at its foot, so each is stood on the floor; it was
+  // nine splashes at eye height, which read as stickers.
   if (said.gore && said.gore.walls) {
-    for (let k = 0; k < 9; k++) {
+    for (let k = 0; k < 5; k++) {
       const dir = Math.floor(rand(k, 1) * 4);
-      const hw = 0.7 + rand(k, 2) * 0.6;
+      const hw = 0.45 + rand(k, 2) * 0.35;
       const along = (rand(k, 3) - 0.5) * (ROOM - 2 * hw - 0.6);
       if (!clear(dir, along, hw)) continue;
-      lay(name('bloodwall'), dir, along, 0.8 + rand(k, 4) * 1.3, hw, hw, bloodRegion(k), rand(k, 5) > 0.5);
+      lay(name('bloodwall'), dir, along, hw * 1.15 + 0.01, hw, hw * 1.15, bloodRegion(k), rand(k, 5) > 0.5);
     }
   }
   const marks = said.marks;

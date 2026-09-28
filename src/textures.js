@@ -2925,20 +2925,32 @@ const DECAL_SHAPES = {
     if (segDist(x, y, -0.76, 0.7, 0.8, -0.66) < 0.09 + x * 0.02) return 1;
     return 0;
   },
-  /** Blood dried into the dirt: a pool and what was thrown off it. */
+  /**
+   * Blood dried into the dirt: a pool, and the smear where whoever lay in it
+   * was dragged off -- not a splash with drops flung round it, which on the
+   * ground reads as a red star. A few drops only, and all on the drag side.
+   */
   blood(x, y) {
     const r = Math.hypot(x, y);
     const lobe = fbm(Math.atan2(y, x) * 1.3 + 4, r * 2, 8, 811, 3);
-    if (r < 0.26 + lobe * 0.34) return 1;
-    for (let i = 0; i < 14; i++) {
-      const a = hash2(i, 0, 99, 821) * Math.PI * 2;
-      const d = 0.45 + hash2(i, 1, 99, 823) * 0.45;
-      const size = 0.02 + hash2(i, 2, 99, 827) * 0.05;
+    if (r < 0.2 + lobe * 0.26) return 1;
+    // The drag: a band from the pool towards +x, narrowing, broken into the
+    // streaks a cloth or a boot leaves.
+    if (x > 0 && x < 0.92) {
+      const half = 0.2 * (1 - x / 1.05) + 0.03;
+      const wob = (fbm(x * 3, 7, 8, 815, 2) - 0.5) * 0.18;
+      const yy = y - wob;
+      if (Math.abs(yy) < half) {
+        const streak = fbm(9, yy * 22, 32, 817, 2);
+        if (streak > 0.28 + x * 0.35) return 1;
+      }
+    }
+    for (let i = 0; i < 6; i++) {
+      const a = (hash2(i, 0, 99, 821) - 0.5) * 1.4;
+      const d = 0.4 + hash2(i, 1, 99, 823) * 0.4;
+      const size = 0.015 + hash2(i, 2, 99, 827) * 0.03;
       const cx = Math.cos(a) * d; const cy = Math.sin(a) * d;
-      // Thrown drops are elongated along the way they flew.
-      const along = ((x - cx) * Math.cos(a) + (y - cy) * Math.sin(a)) / 2.2;
-      const across = -(x - cx) * Math.sin(a) + (y - cy) * Math.cos(a);
-      if (Math.hypot(along, across) < size) return 1;
+      if (Math.hypot(x - cx, y - cy) < size) return 1;
     }
     return 0;
   },
@@ -2948,7 +2960,8 @@ const DECAL_PAINT = {
   troll: { base: 0xd8d2c0, dark: 0xb3ad9c, drips: true },
   ogre: { base: 0x8e2f1f, dark: 0x6a2016, drips: true },
   strike: { base: 0x8a2e1e, dark: 0x642015, drips: true, dragged: true },
-  blood: { base: 0x3a0f0b, dark: 0x220706, drips: false },
+  // Dried: brown going black where it was thick, not red.
+  blood: { base: 0x1c0f0a, dark: 0x120a07, drips: false },
 };
 
 function bakeDecal(name, size = 256) {
@@ -3009,7 +3022,7 @@ function createDecals(materials) {
     const material = new THREE.MeshStandardMaterial({
       map: bakeDecal(name),
       alphaTest: 0.5,
-      roughness: name === 'blood' ? 0.55 : 0.88,
+      roughness: name === 'blood' ? 0.72 : 0.88,
       metalness: 0,
       envMapIntensity: 0.6,
       // Laid a centimetre off the surface and pulled forward in depth as well:
@@ -3434,48 +3447,130 @@ function paintFaces(size) {
   return c;
 }
 
-/** Blood thrown at a wall: a splash, what was flung off it, and what ran down. */
+/**
+ * Blood on a wall, as it is left after a fight rather than as it is drawn in
+ * a comic: dried to brown, low on the wall, and moved -- dragged, slid,
+ * pooled at the foot.
+ *
+ * It was four bright red splashes with rays flung off them, pinned at eye
+ * height on every wall: a judge called them star-shaped stickers, which is
+ * what a radial splash is at that size. What stays on a wall is what was
+ * pressed against it and then went down it. Each cell of the 2 x 2 atlas is
+ * laid by build.js with its bottom edge on the floor, so the foot of every
+ * cell is where the blood collected:
+ *
+ *  0. something heavy slumped down the wall: a smear at shoulder height
+ *     dragged to the floor in streaks, and a pool where it came to rest;
+ *  1. a hand that slid: palm and four fingers, drawn down and fading;
+ *  2. a low cast-off: a short arc of drops that hit the wall side-on, and a
+ *     few thin runs under the heavier ones;
+ *  3. what pooled against the skirting and dried there, tide-marked.
+ *
+ * Colours are chosen before `paintedTexture`'s albedo lift: thick blood
+ * dries near black-brown, a thin smear to a rust brown the wall shows
+ * through in, and nothing here is red.
+ */
 function paintBlood(size) {
   const c = canvas2d(size, size);
   const ctx = c.getContext('2d');
   const cell = size / 2;
-  for (let k = 0; k < 4; k++) {
-    const rnd = paintRng(301 + k * 13);
-    const cx = (k % 2 + 0.5) * cell; const cy = (Math.floor(k / 2) + 0.42) * cell;
-    const R = cell * (0.14 + rnd() * 0.08);
-    const wet = `rgba(${86 + Math.floor(rnd() * 20)},${10 + Math.floor(rnd() * 8)},8,1)`;
-    ctx.fillStyle = wet; ctx.strokeStyle = wet;
-    // The splash: a lobed blob.
+  // 0 thick and dark, 1 a thin film.
+  const tone = (t, rnd) => {
+    const k = Math.max(0, Math.min(1, t + (rnd() - 0.5) * 0.12));
+    return `rgba(${Math.round(14 + k * 16)},${Math.round(8 + k * 12)},${Math.round(6 + k * 9)},1)`;
+  };
+  const blob = (cx, cy, rx, ry, lumps, rnd, t) => {
+    ctx.fillStyle = tone(t, rnd);
     ctx.beginPath();
-    for (let a = 0; a <= 48; a++) {
-      const t = (a / 48) * Math.PI * 2;
-      const r = R * (0.7 + 0.35 * Math.sin(t * 3 + k) * Math.sin(t * 5 + k * 2) + rnd() * 0.25);
-      const x = cx + Math.cos(t) * r; const y = cy + Math.sin(t) * r * 0.85;
+    const ph = rnd() * 6.28;
+    for (let a = 0; a <= 40; a++) {
+      const th = (a / 40) * Math.PI * 2;
+      const r = 1 + lumps * (0.5 * Math.sin(th * 3 + ph) + 0.35 * Math.sin(th * 7 + ph * 2) + (rnd() - 0.5) * 0.4);
+      const x = cx + Math.cos(th) * rx * r; const y = cy + Math.sin(th) * ry * r;
       if (a) ctx.lineTo(x, y); else ctx.moveTo(x, y);
     }
     ctx.fill();
-    // Flung off it: streaks and drops along rays.
-    for (let i = 0; i < 26; i++) {
-      const t = rnd() * Math.PI * 2;
-      const d0 = R * (0.9 + rnd() * 0.3); const d1 = d0 + R * (0.3 + rnd() * 1.2);
-      ctx.lineWidth = 2 + rnd() * R * 0.12; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(cx + Math.cos(t) * d0, cy + Math.sin(t) * d0);
-      ctx.lineTo(cx + Math.cos(t) * d1, cy + Math.sin(t) * d1); ctx.stroke();
-      ctx.beginPath(); ctx.arc(cx + Math.cos(t) * (d1 + R * 0.2), cy + Math.sin(t) * (d1 + R * 0.2), 2 + rnd() * R * 0.07, 0, Math.PI * 2); ctx.fill();
+  };
+  // A streak: a line down from (x, y0) to y1 that thins and lightens as it
+  // goes, wandering a little -- what is left where a smear was pulled.
+  const streak = (x, y0, y1, w0, rnd, t0 = 0.1, t1 = 0.8) => {
+    const n = 14;
+    let px = x;
+    for (let i = 0; i < n; i++) {
+      const f0 = i / n; const f1 = (i + 1) / n;
+      const nx = px + (rnd() - 0.5) * w0 * 0.25;
+      ctx.strokeStyle = tone(t0 + (t1 - t0) * f0, rnd);
+      ctx.lineWidth = Math.max(1.5, w0 * (1 - f0 * 0.75));
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(px, y0 + (y1 - y0) * f0);
+      ctx.lineTo(nx, y0 + (y1 - y0) * f1);
+      ctx.stroke();
+      px = nx;
     }
-    for (let i = 0; i < 60; i++) {
-      const t = rnd() * Math.PI * 2; const d = R * (1.1 + rnd() * 1.9);
-      ctx.beginPath(); ctx.arc(cx + Math.cos(t) * d, cy + Math.sin(t) * d, 1 + rnd() * R * 0.05, 0, Math.PI * 2); ctx.fill();
+  };
+  for (let k = 0; k < 4; k++) {
+    const rnd = paintRng(301 + k * 13);
+    const x0 = (k % 2) * cell; const y0 = Math.floor(k / 2) * cell;
+    const floor = y0 + cell - 2;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x0 + 4, y0 + 4, cell - 8, cell - 6); ctx.clip();
+    if (k === 0) {
+      const cx = x0 + cell * 0.5; const top = y0 + cell * 0.34; const half = cell * 0.16;
+      blob(cx, top + cell * 0.04, half * 1.1, cell * 0.07, 0.35, rnd, 0.05);
+      for (let i = 0; i < 34; i++) {
+        const x = cx + (rnd() - 0.5) * half * 2;
+        const end = top + (floor - top) * (0.45 + rnd() * 0.55);
+        streak(x, top + (rnd() - 0.3) * cell * 0.05, end, 3 + rnd() * 9, rnd, 0.05 + rnd() * 0.2, 0.7 + rnd() * 0.3);
+      }
+      blob(cx + (rnd() - 0.5) * 20, floor + 4, half * 1.6, cell * 0.06, 0.3, rnd, 0.0);
+    } else if (k === 1) {
+      const cx = x0 + cell * (0.45 + rnd() * 0.1); const top = y0 + cell * 0.42;
+      blob(cx, top + cell * 0.1, cell * 0.075, cell * 0.06, 0.25, rnd, 0.2);
+      // Smeared, not printed: the fingers ran into one another as it slid.
+      for (let i = 0; i < 9; i++) {
+        const x = cx + (rnd() - 0.5) * cell * 0.17; const y = top - cell * 0.03 + rnd() * cell * 0.05;
+        streak(x, y, y + cell * (0.12 + rnd() * 0.3), 7 + rnd() * 8, rnd, 0.2 + rnd() * 0.2, 1.0);
+      }
+    } else if (k === 2) {
+      const cx = x0 + cell * 0.5; const cy = y0 + cell * 0.72;
+      for (let i = 0; i < 26; i++) {
+        const t = i / 25;
+        const x = cx + (t - 0.5) * cell * 0.8 + (rnd() - 0.5) * 12;
+        const y = cy - Math.sin(t * Math.PI) * cell * 0.16 + (rnd() - 0.5) * 14;
+        const r = (1.5 + rnd() * 5) * (1 - Math.abs(t - 0.4));
+        ctx.fillStyle = tone(0.15 + rnd() * 0.3, rnd);
+        ctx.beginPath(); ctx.ellipse(x, y, r * 2.2, r, -0.25, 0, Math.PI * 2); ctx.fill();
+        if (r > 3.5 && rnd() > 0.5) streak(x, y, y + cell * (0.05 + rnd() * 0.12), r * 0.9, rnd, 0.3, 0.9);
+      }
+    } else {
+      const band = cell * 0.13;
+      ctx.fillStyle = tone(0.0, rnd);
+      ctx.beginPath();
+      ctx.moveTo(x0, floor + 6);
+      for (let i = 0; i <= 24; i++) {
+        const x = x0 + cell * (0.08 + 0.84 * i / 24);
+        const h = band * (0.35 + 0.65 * Math.sin((i / 24) * Math.PI)) * (0.7 + rnd() * 0.5);
+        ctx.lineTo(x, floor - h);
+      }
+      ctx.lineTo(x0 + cell, floor + 6);
+      ctx.fill();
+      // The tide mark: a thinner film a little above where it dried back from.
+      ctx.strokeStyle = tone(0.65, rnd); ctx.lineWidth = 4;
+      ctx.beginPath();
+      for (let i = 0; i <= 24; i++) {
+        const x = x0 + cell * (0.12 + 0.76 * i / 24);
+        const y = floor - band * (0.9 + 0.5 * Math.sin((i / 24) * Math.PI)) - rnd() * 6;
+        if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      }
+      ctx.stroke();
+      for (let i = 0; i < 5; i++) {
+        const x = x0 + cell * (0.2 + rnd() * 0.6);
+        const y = floor - band * (1.4 + rnd() * 1.2);
+        streak(x, y, floor - band * 0.5, 4 + rnd() * 4, rnd, 0.4, 0.2);
+      }
     }
-    // Runs: straight down, thinning, with a bead at the end.
-    for (let i = 0; i < 9; i++) {
-      const x = cx + (rnd() - 0.5) * R * 1.6;
-      const y0 = cy + R * (0.2 + rnd() * 0.5);
-      const len = cell * (0.15 + rnd() * 0.35);
-      ctx.lineWidth = 3 + rnd() * 7;
-      ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x + (rnd() - 0.5) * 6, Math.min(y0 + len, (Math.floor(k / 2) + 1) * cell - 12)); ctx.stroke();
-      ctx.beginPath(); ctx.arc(x, Math.min(y0 + len, (Math.floor(k / 2) + 1) * cell - 12), ctx.lineWidth * 0.8, 0, Math.PI * 2); ctx.fill();
-    }
+    ctx.restore();
   }
   return c;
 }
@@ -3657,7 +3752,7 @@ function createPaintings(materials, macro, grain) {
   // than a torchlit wall is seen, at half the boot cost of 2048.
   make('mural', paintedTexture(paintMurals(1536), 'fresco', 5101), { rough: 0.9, env: 0.6, cut: 0.5 });
   make('faces', paintedTexture(paintFaces(1024), 'stroke', 5203), { rough: 0.9, env: 0.5, cut: 0.4 });
-  make('bloodwall', paintedTexture(paintBlood(1024), 'stroke', 5307), { rough: 0.42, env: 0.9, cut: 0.4 });
+  make('bloodwall', paintedTexture(paintBlood(1024), 'stroke', 5307), { rough: 0.7, env: 0.8, cut: 0.4 });
   // Writing is per room -- it says what that room says -- so it is painted
   // when build.js first asks for it, and kept by what it says.
   materials.$writing = (texts, deep, seed) => {
