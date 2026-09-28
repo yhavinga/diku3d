@@ -1730,6 +1730,9 @@ export function buildScene(world, layout, materials, assets = null) {
     // mud already hangs on that side.
     const gated = openAir && !airborne
       && GATE_ROOM.test(room.name) && GATE_TOWERS.test(room.description);
+    // The side a modelled gatehouse stands on: its towers take the corners.
+    const gateSide = gated && instances && instances.library.get('gatehouse')
+      ? sides.findIndex((sd, d) => d < 4 && !!sd && !!sd.exit && !!(sd.exit.locks & EX_ISDOOR)) : -1;
     // A fortress across a sealed way out: it owns that side of the room.
     const fort = openAir && !airborne && instances && model(['fortress']) ? fortressSide(room, sides) : -1;
     const fortKeep = fort >= 0 ? buildFortress({
@@ -1771,7 +1774,7 @@ export function buildScene(world, layout, materials, assets = null) {
         } else if (dir === 3) {
           buildCityFrontage({
             batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors,
-            lights, decals, turf: hood ? turfAt(cell.z) : null,
+            lights, decals, turf: hood ? turfAt(cell.z) : null, gateSide,
           });
         }
       }
@@ -2791,7 +2794,7 @@ const wantsFrontage = (room) => room.sector === SECTOR.CITY && !SQUARE.test(room
  * inside the 5-9 m a real town street runs to, and the buildings now touch
  * their neighbours in the cells behind instead of standing free on paving.
  */
-function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors, lights = [], decals = null, turf = null }) {
+function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors, lights = [], decals = null, turf = null, gateSide = -1 }) {
   if (!wantsFrontage(room)) return;
   const isOpen = (d) => {
     const side = sides[d];
@@ -3023,6 +3026,8 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
   // full-width block on the closed side already covers them.
   for (const [dirA, dirB, sx, sz] of [[0, 1, 1, -1], [1, 2, 1, 1], [2, 3, -1, 1], [3, 0, -1, -1]]) {
     if (!isOpen(dirA) || !isOpen(dirB)) continue;
+    // A gatehouse's drum towers stand in these two corners.
+    if (dirA === gateSide || dirB === gateSide) continue;
     const bx = pos.x + sx * inset;
     const bz = pos.z + sz * inset;
     if (shire) knoll(bx, bz, 70 + dirA);
@@ -5937,6 +5942,28 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
       const [ox, , oz] = DIR_STEP[out];
       instances.add('cave_wall_long_door', { x: room.x + ox * HALF, y: 0, z: room.z + oz * HALF, rotY: FACE_ROT[inDir] }, chunkOf(cave), skin(cave.room));
       closeDoorway({ batcher, pos: room, dir: out, chunk: chunkOf(cave), material: 'caverock', addCollider });
+    }
+  }
+  // A cave room's side that faces open ground it has no way out to, where
+  // no crag could go because the ground is walked: a street or a trail runs
+  // past it. That face was the room's shell -- a flat 13 m slab of crag with
+  // the cap's edge along its top, the "flat box" a judge photographed from
+  // the marsh at #8308. The same rock lining the mouths use goes over it.
+  for (const cell of layout.order) {
+    if (cell.level !== 0 || !rocky(cell.room)) continue;
+    const sides = layout.sides.get(cell.vnum) || [];
+    for (let dir = 0; dir < 4; dir++) {
+      if (sides[dir]) continue;
+      const [ox, , oz] = DIR_STEP[dir];
+      const nx = cell.x + ox; const nz = cell.z + oz;
+      const v = layout.at(0, nx, nz);
+      const link = v === undefined ? layout.passageAt(0, nx, nz) : null;
+      const open = v !== undefined ? isOpenAir(layout.cells.get(v).room)
+        : !!link && !(rocky(link.from.room) && rocky(link.to.room));
+      if (!open) continue;
+      instances.add('cave_wall_long', {
+        x: cell.x * CELL + ox * HALF, y: 0, z: cell.z * CELL + oz * HALF, rotY: FACE_ROT[(dir + 2) % 4], scaleY: 1.35,
+      }, chunkOf(cell), { ...(skin(cell.room) || {}), caverock: 'crag' });
     }
   }
   for (const c of inside) {

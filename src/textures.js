@@ -2146,9 +2146,11 @@ const SURFACES = {
     const ripple = Math.sin(d1 * 22 + id * 6) * Math.exp(-d1 * 3.5);
     const ridge = clamp01(1 - edge * 22);
     const band = fbm(u * 2, v * 18, 2, 1303, 3);
-    s.color = mix(mix(rgb(0x0f0e12), rgb(0x1a1820), band), rgb(0x2c2a32), ridge * 0.4);
-    s.height = 0.5 + ripple * 0.035 - ridge * 0.05;
-    s.rough = 0.07 + ridge * 0.18 + band * 0.05;
+    // The fracture edges only in the gloss, not the colour or the relief: as
+    // lines they tiled into a crackle net across the whole stone.
+    s.color = mix(rgb(0x0f0e12), rgb(0x1a1820), band);
+    s.height = 0.5 + ripple * 0.035;
+    s.rough = 0.07 + ridge * 0.06 + band * 0.05;
   },
 
   /**
