@@ -103,6 +103,8 @@ export const PRESETS = {
 
 export const SCALES = [0.55, 0.7, 0.85, 1.0];
 const IDLE_FPS = 10;
+/** How long the idle loop sleeps between frames: a vsync short of the idle rate. */
+export const IDLE_SLEEP_MS = 1000 / IDLE_FPS - 12;
 
 export class Quality {
   constructor({ renderer, pipeline, sun, lightPool, materials, name = 'high' }) {

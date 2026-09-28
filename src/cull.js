@@ -868,6 +868,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
    */
   function compact(entry, keep, seen = keep, shadow = false) {
     const { spheres, kept } = entry;
+    const marks = entry.marks || (entry.marks = new Uint8Array(entry.total));
     const lod = entry.lod && impostors?.enabled ? entry.lod : null;
     selectOwner(entry.mesh);
     const cards = lod && lod.primary && lod.model.mesh ? lod.model : null;
@@ -882,7 +883,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
         const o = i * 4;
         if (!lod) {
           if (keep(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3])) {
-            kept[n++] = i;
+            marks[i] = 1; n++;
             nearest = Math.min(nearest, Math.hypot(spheres[o] - eye.x, spheres[o + 1] - eye.y, spheres[o + 2] - eye.z) - spheres[o + 3]);
           }
           continue;
@@ -891,26 +892,34 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
         const d = Math.hypot(feet[f] - eye.x, feet[f + 1] - eye.y, feet[f + 2] - eye.z);
         const visible = seen(spheres[o], spheres[o + 1], spheres[o + 2], spheres[o + 3]);
         if ((visible && d < end) || (shadow && shadowFrustum.intersectsSphere(_sphere.set(_v.set(spheres[o], spheres[o + 1], spheres[o + 2]), spheres[o + 3])))) {
-          kept[n++] = i;
+          marks[i] = 1; n++;
           if (visible) nearest = Math.min(nearest, d - spheres[o + 3]);
         }
         if (cards && visible && d > start) impostors.push(cards, feet[f], feet[f + 1], feet[f + 2], feet[f + 3], feet[f + 4]);
       }
     }
-    // Draw order is kept: the ids went in bucket by bucket, so sort them back.
-    const ids = kept.subarray(0, n);
-    ids.sort();
+    // Draw order is kept: the ids were marked bucket by bucket and are swept
+    // up in index order. Sorting them back allocated a work copy of the array
+    // on every call -- TypedArray.sort does -- 557 meshes a frame, and that was
+    // ~16 MB/s of the frame's garbage.
+    for (let i = 0, k = 0; k < n; i++) if (marks[i]) { marks[i] = 0; kept[k++] = i; }
     const mesh = entry.mesh;
     let same = !entry.full && n === entry.keptCount;
-    if (same && entry.last) for (let k = 0; k < n && same; k++) same = entry.last[k] === ids[k];
+    if (same && entry.last) for (let k = 0; k < n && same; k++) same = entry.last[k] === kept[k];
     if (!same) {
       const out = mesh.instanceMatrix.array;
-      for (let k = 0; k < n; k++) out.set(entry.source.subarray(ids[k] * 16, ids[k] * 16 + 16), k * 16);
+      const source = entry.source;
+      for (let k = 0; k < n; k++) {
+        const from = kept[k] * 16; const to = k * 16;
+        for (let j = 0; j < 16; j++) out[to + j] = source[from + j];
+      }
       mesh.count = n;
       mesh.instanceMatrix.clearUpdateRanges();
       mesh.instanceMatrix.addUpdateRange(0, Math.max(1, n) * 16);
       mesh.instanceMatrix.needsUpdate = true;
-      entry.last = Int32Array.from(ids);
+      if (!entry.lastIds) entry.lastIds = new Int32Array(entry.total);
+      for (let k = 0; k < n; k++) entry.lastIds[k] = kept[k];
+      entry.last = entry.lastIds;
       entry.keptCount = n;
       entry.full = false;
     }

@@ -15,7 +15,7 @@ import { populate } from './actors.js';
 import { Player } from './player.js';
 import { Hud } from './hud.js';
 import { Audio } from './audio.js';
-import { Quality, LightPool, PRESETS } from './quality.js';
+import { Quality, LightPool, PRESETS, IDLE_SLEEP_MS } from './quality.js';
 import { createOptions } from './options.js';
 import { AssetLibrary, ASSET_NAMES } from './assets.js';
 import { createGame, SKY } from './game.js';
@@ -1311,8 +1311,7 @@ async function boot() {
   let fps = 60;
 
   function frame() {
-    requestAnimationFrame(frame);
-    if (state.benchmark) return; // measuring: nobody else draws
+    if (state.benchmark) { requestAnimationFrame(frame); return; } // measuring: nobody else draws
     const now = performance.now();
     // Nothing here needs to run faster than the frame cap, and when the mouse
     // is released or the tab is in the background it barely needs to run at all.
@@ -1327,7 +1326,13 @@ async function boot() {
     // The title reel is for someone looking at it: left up in a window behind
     // other work, it drops to the same crawl as a released mouse.
     const idle = reeling ? !document.hasFocus() : state.paused;
-    if (!quality.shouldRender(now, idle)) return;
+    if (!quality.shouldRender(now, idle)) { requestAnimationFrame(frame); return; }
+    // Idle, the next frame is a tenth of a second off. Asking for every vsync
+    // in between only to decline it kept the page and the compositor awake at
+    // the display's rate -- 120 times a second on a ProMotion screen -- so the
+    // loop sleeps until just short of it instead.
+    if (idle) setTimeout(() => requestAnimationFrame(frame), IDLE_SLEEP_MS);
+    else requestAnimationFrame(frame);
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     elapsed += dt;
