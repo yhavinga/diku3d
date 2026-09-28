@@ -8,6 +8,27 @@ is an opinion.
 
 ## 2026-09-28 — wave 7: below and inside
 
+### The Shire, stairs and the district's blood (wave7-fittings)
+
+- **`timber` is a wall pattern, not a wood.** On a beam or post it shows a
+  random crop of plaster and braces — white-and-brown barber poles on every
+  stone doorway in Midgaard. Anything smaller than a wall is `oak`/`wood`.
+- **grass.js grows blades on every upward grass surface not marked indoor**,
+  so turf running over a room grew through Bag End's ceiling (`addTurf`
+  splits and marks those triangles). It treats a surface as covering the
+  lawn only above 8 mm: lay floors 12 mm up.
+- **An outdoor roof built inside a walled-room loop inherits the indoor
+  flag**; clear it for roofs and hills.
+- **Every single-cell corridor between rooms is a 13 m shed** with walls on
+  the cell edges; hills and roofs can't cover it, so Shire passages are
+  narrowed to tunnels under turf or thatched walks.
+- Indoor rooms without a trade drew from the outdoor clutter list — the
+  cartwheel in the Shiriff Post, nettles on floorboards. They get a
+  household list now.
+- The Shire: thatch-and-turf roofs, round painted doors, round windows with
+  flower boxes, smials as hills with stone faces, fenced gardens, the mill's
+  wheel. No Man's Land has its watch fires lit at night.
+
 ### Every named noun (wave7-nouns)
 
 - Noun coverage in the nine areas 346/386 → 369/386 (`tools/noun-check.mjs`

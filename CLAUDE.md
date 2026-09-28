@@ -304,6 +304,9 @@ choose.
   a front-sided material's back faces into the shadow map, so anything
   within the shadow bias of that face is lit. Baked surfaces use
   `shadowSide = DoubleSide`; keep it on new ones.
+- **`timber` is the half-timbered wall pattern, not a wood.** Posts,
+  beams, frames and fences are `oak` or `wood`, or they come out as
+  barber-pole stripes.
 - **A vertex census lies about surfaces.** A log-cabin gable read "open" by
   vertex count (a log wall's vertices sit only at the ends) and a roof prism
   reported "0 cells affected" (six vertices, none mid-span). Sample triangle
