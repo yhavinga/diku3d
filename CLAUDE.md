@@ -374,6 +374,9 @@ choose.
   walk playback rate from the rig's `stride` (m per cycle) and the clip
   length. Change a walk cycle and re-measure it as the median backward speed
   of the foot that is low *and* moving back, or every figure skates.
+- **Never toggle a light's `visible` per frame.** The visible-light count
+  is part of every shader's program key; the pool moves in precompiled
+  steps (0/2/4/8/all) for that reason.
 - **Visibility is measured per cell (`src/cull.js`)** and hidden objects are
   put back for the shadow pass. Anything new that renders must survive
   `?cull=off` vs on with a zero-pixel diff; a new mesh that should never be
