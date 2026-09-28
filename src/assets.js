@@ -110,6 +110,10 @@ const TAG_MATERIALS = {
   slate: { color: 0x2d3133, roughness: 0.82, metalness: 0 },
   // Meat and what it bled: dark, and wet enough to catch a torch.
   flesh: { color: 0x5a2019, roughness: 0.42, metalness: 0 },
+  // A hoard's coin. The holy symbol's gilt is a mirror, and heaped in a dark
+  // lair a mirror of nothing came out black: this is half as metallic and
+  // rougher, so it reads as gold by the colour of the light it scatters.
+  coin: { color: 0xcf9f42, roughness: 0.42, metalness: 0.4, envMapIntensity: 0.6 },
   soot: { color: 0x2c2723, roughness: 0.95, metalness: 0 },
   glass: {
     color: 0xd8c48a, roughness: 0.12, metalness: 0,

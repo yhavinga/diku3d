@@ -2312,6 +2312,10 @@ export function populate(world, layout, built, options = {}) {
       case 'table': tables.push(item); break;
       case 'fitting': fittings.push(item); break;
       case 'piece': pieces.push(item); break;
+      // What the prose puts in a room above ground (src/clutter.js): drawn
+      // with the furniture, so it is switched off past FURNITURE_REACH
+      // instead of drawing behind the walls from the street.
+      case 'prop': if (furnishing) furnishing.add(item.name, item, 'furniture'); break;
       case 'gateSign': {
         // A painted board over the sealed arch, not words hanging in the air:
         // it was a two-metre floating "up · #3700 — outside the loaded world"

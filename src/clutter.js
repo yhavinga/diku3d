@@ -145,6 +145,8 @@ const RULES = [
     not: /\bweb of (?:lies|intrigue|deceit|roads|streets|paths|tunnels|corridors)\b|\bwebbed (?:feet|toes)\b/i,
   },
 
+  { kind: 'cocoon', at: 'hang', many: 3, re: /\bcocoons\b|\ba cocoon\b/i, not: /\bcocoon of (?:blankets|warmth|silence)\b/i },
+
   // Things kept.
   { kind: 'cage', at: 'wall', many: 3, re: /\bcages?\b/i, not: /\brib ?cage\b|\bcage of (?:bones|ribs)\b/i },
   {
@@ -393,7 +395,7 @@ export function placeClutter(ctx) {
     for (const t of bucket.transforms) {
       const key = cellOf(t.x, t.z);
       if (!small.has(key)) small.set(key, []);
-      small.get(key).push({ ...footprint(b, t.x, t.z, t.rotY || 0, t.scale ?? 1), y: t.y });
+      small.get(key).push({ ...footprint(b, t.x, t.z, t.rotY || 0, t.scale ?? 1), y: t.y, h: b.max.y * (t.scaleY ?? t.scale ?? 1) });
     }
   }
   const byCell = new Map();
@@ -452,8 +454,14 @@ export function placeClutter(ctx) {
     const wallAt = (dir, along) => {
       const [dx, , dz] = DIR_STEP[dir];
       const px = pos.x + (dz ? along : 0); const pz = pos.z + (dx ? along : 0);
-      if (plan && !outside) return ROOM / 2 + (plan.face || 0);
-      for (let s = 1.5; s < 7.2; s += 0.05) {
+      // The stone and temple kits' inner face is at 5.13 (raycast), the
+      // procedural walls' and a Shire room's plaster at 5.0; the plan's
+      // `face` says which, but is measured for the floor, not the wall.
+      if (plan && !outside) return ROOM / 2 + ((plan.face || 0) > 0 ? 0.13 : 0);
+      // A walled room's wall is never further out than ROOM / 2: a wall with
+      // a doorway in it has had no collider past the opening's jambs.
+      const most = outside ? 7.2 : ROOM / 2 + 0.01;
+      for (let s = 1.5; s < most; s += 0.05) {
         const x = px + dx * s; const z = pz + dz * s;
         if (solid.some((c) => x > c.x0 && x < c.x1 && z > c.z0 && z < c.z1)) return s;
       }
@@ -462,7 +470,12 @@ export function placeClutter(ctx) {
 
     const put = (name, x, z, rotY, { scale = 1, collide = false, y = pos.y } = {}) => {
       if (!library.get(name)) return null;
-      instances.add(name, { x, y, z, rotY, scale }, chunk, swap);
+      // Indoors above ground it goes with the furniture (actors.js), which
+      // is switched off past 32 m: from the Market Square every room to the
+      // north is in the frustum, walls and all. Underground the zones hide
+      // it whole, and out of doors it is seen from afar.
+      if (!outside && info.cell.level >= 0) decor.push({ kind: 'prop', name, x, y, z, rotY, scale });
+      else instances.add(name, { x, y, z, rotY, scale }, chunk, swap);
       where.push({ vnum, name, x: +x.toFixed(2), y: +y.toFixed(2), z: +z.toFixed(2), rotY: +rotY.toFixed(2) });
       const b = library.get(name).bounds;
       const r = footprint(b, x, z, rotY, scale);
@@ -474,6 +487,8 @@ export function placeClutter(ctx) {
     // Against a wall: the named one first, then walls with no way through
     // them, then the rest. Slides along the wall until it is clear.
     const onWall = (name, ask, k, { depthPad = 0.05, hang = false, scale = 1 } = {}) => {
+      // Silk hangs over everything; reeds and barrels do not get in its way.
+      const high = ask.kind === 'web' || ask.kind === 'cocoon';
       const b = library.get(name)?.bounds;
       if (!b) return null;
       const blank = [0, 1, 2, 3].filter((d) => !sides[d]);
@@ -482,12 +497,25 @@ export function placeClutter(ctx) {
         : [...blank, ...doors];
       const start = Math.floor(roll(room.vnum, k, 5) * order.length);
       const walls = ask.dir !== null ? order : [...order.slice(start % Math.max(1, blank.length)), ...order.slice(0, start % Math.max(1, blank.length))];
-      const corner = /\bcorner\b/i.test(ask.why);
-      const alongs = corner ? [3.3, -3.3, 2.6, -2.6, 1.6, -1.6, 0] : [0, 1.6, -1.6, 3.0, -3.0, 0.8, -0.8, 2.3, -2.3, 3.6, -3.6];
+      const alongs = /\bcorner\b/i.test(ask.why) ? [3.3, -3.3, 2.6, -2.6, 1.6, -1.6, 0] : [0, 1.6, -1.6, 3.0, -3.0, 0.8, -0.8, 2.3, -2.3, 3.6, -3.6];
       for (let a = -4.2; a <= 4.21; a += 0.3) alongs.push(Math.round(a * 10) / 10);
+      // "A picture ... hanging on the wall, just above the altar": over the
+      // fitting, on its wall, where the floor below it is the fitting's own.
+      const overWhat = ask.why.match(/\babove the (altar|fireplace|hearth|bar|counter|shelves)\b/i);
+      const FIT = { altar: 'altar', fireplace: 'hearth', hearth: 'hearth', bar: 'counter', counter: 'counter', shelves: 'shelves' };
+      const fitting = overWhat && here.find((d) => d.kind === 'fitting' && d.fitting === FIT[overWhat[1].toLowerCase()]);
+      const above = hang && !!fitting;
+      // The fitting frame's `along` runs against the world axis on the
+      // south and west walls; a chimney breast and a gantry stand proud and
+      // tall, so what hangs over them goes higher and further out.
+      const lift = above ? { altar: [0.25, 0], hearth: [0.95, 0.5], counter: [1.0, 0.25], shelves: [1.0, 0.3] }[fitting.fitting] : [0, 0];
+      if (above) {
+        walls.unshift(fitting.dir);
+        alongs.unshift((fitting.dir === 2 || fitting.dir === 3 ? -1 : 1) * (fitting.shift || 0));
+      }
       for (const dir of walls) {
         for (const along of alongs) {
-          const face = wallAt(dir, along) - 0.02;
+          const face = wallAt(dir, along) - 0.02 - (above && dir === fitting.dir ? lift[1] : 0);
           const [dx, , dz] = DIR_STEP[dir];
           const x = pos.x + dx * face + (dz ? along : 0);
           const z = pos.z + dz * face + (dx ? along : 0);
@@ -496,10 +524,22 @@ export function placeClutter(ctx) {
           // The whole of it has to be on this side of the wall's ends.
           const span = Math.abs(dz ? along : along) + (b.max.x - b.min.x) * scale / 2;
           if (span > (outside ? HALF : ROOM / 2) - 0.25) continue;
-          if (hang ? (!clear(r, false) || torches.some((t) => overlaps(r, { x0: t.x - 0.6, x1: t.x + 0.6, z0: t.z - 0.6, z1: t.z + 0.6 })))
-            : !clear(r)) continue;
-          if (hang && blocked.some((q) => overlaps(r, q, -0.05) && !solid.includes(q))) continue;
-          return { x, z, rotY, dir, r };
+          // A torch's bracket stands 0.7 m off its wall: test the whole
+          // depth, and a hand's breadth either side of the flame.
+          const reach = { x0: r.x0 - Math.abs(dz) * 0.3 - Math.abs(dx) * 1.2, x1: r.x1 + Math.abs(dz) * 0.3 + Math.abs(dx) * 1.2,
+            z0: r.z0 - Math.abs(dx) * 0.3 - Math.abs(dz) * 1.2, z1: r.z1 + Math.abs(dx) * 0.3 + Math.abs(dz) * 1.2 };
+          if (torches.some((t) => t.x > reach.x0 && t.x < reach.x1 && t.z > reach.z0 && t.z < reach.z1)) continue;
+          if (hang ? (!above && !clear(r, false)) : !clear(r)) continue;
+          // A barrel under a painting is where barrels go; a cupboard in
+          // front of one is not.
+          if (hang && !high && blocked.some((q) => overlaps(r, q, -0.05) && !solid.includes(q) && (q.h ?? 9) > 1.2)) continue;
+          // Nothing tall between it and the room: a temple's columns stand
+          // 2.5 m off the wall, and a picture behind one is no picture.
+          if (hang && !high) {
+            const view = { x0: Math.min(r.x0, x - dx * 3), x1: Math.max(r.x1, x - dx * 3), z0: Math.min(r.z0, z - dz * 3), z1: Math.max(r.z1, z - dz * 3) };
+            if ((small.get(cellOf(pos.x, pos.z)) || []).some((q) => q.h > 1.6 && Math.abs(q.y - pos.y) < 2 && overlaps(view, q, -0.05))) continue;
+          }
+          return { x, z, rotY, dir, r, y: pos.y + (above && dir === fitting.dir ? lift[0] : 0) };
         }
       }
       return null;
@@ -555,13 +595,19 @@ export function placeClutter(ctx) {
           const scale = ask.kind === 'web' ? 0.42 : 1;
           at = onWall(name, ask, k, { hang: !spec.solid, depthPad: 0.02, scale });
           if (at) {
-            put(name, at.x, at.z, at.rotY, { scale, collide: !!spec.solid });
+            put(name, at.x, at.z, at.rotY, { scale, collide: !!spec.solid, y: at.y });
             take(at.r, !!spec.solid);
             if (ask.kind === 'cocoon' || ask.kind === 'web') ask.dir = null;
           }
         } else if (ask.at === 'wall') {
           at = onWall(name, ask, k, { depthPad: 0.1 }) || onFloor(name, k, { pad: 0.2, ring: [3.2] });
           if (at) { put(name, at.x, at.z, at.rotY, { collide: true }); take(at.r, true); }
+          // Gold is a mirror, and in a dark lair a mirror of nothing is
+          // black: it needs a light of its own to glint by.
+          if (at && ask.kind === 'treasure') {
+            const f = [Math.sin(at.rotY), Math.cos(at.rotY)];
+            lights.push({ x: at.x + f[0] * 1.6, y: pos.y + 1.4, z: at.z + f[1] * 1.6, color: 0xffc46a, intensity: 7, radius: 8 });
+          }
         } else if (ask.at === 'floor' || ask.at === 'centre' || ask.at === 'mark') {
           const ring = ask.at === 'mark' ? [1.9, 2.4, 1.5] : ask.at === 'centre' ? [2.0, 2.5, 3.0] : [2.4, 3.0, 1.9, 3.4];
           at = onFloor(name, k, { pad: ask.at === 'mark' ? -0.3 : (spec.pad ?? 0.3), ring });

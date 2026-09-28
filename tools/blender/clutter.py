@@ -45,7 +45,7 @@ PAL.update({
     "chalk": (0.88, 0.86, 0.80, 1.0), "slate": (0.17, 0.19, 0.20, 1.0),
     "canvas": (1.0, 1.0, 1.0, 1.0), "weave": (1.0, 1.0, 1.0, 1.0),
     "produce": (1.0, 1.0, 1.0, 1.0), "flesh": (0.40, 0.14, 0.11, 1.0),
-    "gold": (0.83, 0.65, 0.29, 1.0), "glow": (0.8, 0.8, 1.0, 1.0),
+    "gold": (0.83, 0.65, 0.29, 1.0), "coin": (0.80, 0.62, 0.26, 1.0), "glow": (0.8, 0.8, 1.0, 1.0),
     "flagstone": (0.52, 0.50, 0.46, 1.0), "thatch": (0.66, 0.55, 0.30, 1.0),
     "fur": (1.0, 1.0, 1.0, 1.0), "phial": (1.0, 1.0, 1.0, 1.0),
 })
@@ -694,7 +694,7 @@ def coin(c, tilt, turn, r=0.019):
     o = lib.cylinder(r, 0.004, (0, 0, 0), verts=8, name="coin", mat="iron")
     o.rotation_euler = (tilt, 0, turn)
     o.location = c
-    return tag(o, "gold")
+    return tag(o, "coin")
 
 
 def build_hoard():
@@ -724,7 +724,7 @@ def build_hoard():
     heap = bpy.data.objects.new("heap", me)
     bpy.context.collection.objects.link(heap)
     lib.shade_smooth(heap, angle=60)
-    p.append(tag(heap, "gold"))
+    p.append(tag(heap, "coin"))
     # Coins lying on the drift and spilled round its foot.
     for i in range(46):
         a = rng.uniform(0, 2 * math.pi)
@@ -742,21 +742,21 @@ def build_hoard():
     kit.place(box, (0, 0, 0))
     kit.rotate_z(box, 0.0)
     p += box
-    fill = blob((0.95, -0.36, 0.28), 0.25, "gold", seg=8, rings=4, scale=(1.0, 0.62, 0.22), name="fill")
+    fill = blob((0.95, -0.36, 0.28), 0.25, "coin", seg=8, rings=4, scale=(1.0, 0.62, 0.22), name="fill")
     p.append(fill)
     # Two cups and a crown.
     for (x, y, z, tilt) in ((-0.55, -0.55, 0.1, 0.0), (0.35, -1.25, 0.0, 1.3)):
         cup = F.lathe([(0, 0.045), (0.012, 0.045), (0.02, 0.012), (0.1, 0.01), (0.11, 0.035), (0.17, 0.05),
-                       (0.2, 0.052)], 0, 0, 0, sides=10, m="gold", name="cup")
+                       (0.2, 0.052)], 0, 0, 0, sides=10, m="coin", name="cup")
         cup.rotation_euler = (tilt, 0, rng.uniform(0, 6.28))
         cup.location = (x, y, z)
         p.append(cup)
     crown = [lib.torus(0.085, 0.012, (0, 0, 0.03), (0, 0, 0), major_seg=12, minor_seg=4, name="crown", mat="iron")]
-    tag(crown[0], "gold")
+    tag(crown[0], "coin")
     for k in range(6):
         a = 2 * math.pi * k / 6
         crown.append(tag(lib.cone(0.018, 0.0, 0.07, (math.cos(a) * 0.085, math.sin(a) * 0.085, 0.07), verts=4,
-                                  name="point", mat="iron"), "gold"))
+                                  name="point", mat="iron"), "coin"))
     kit.place(crown, (-0.2, -0.95, 0.22), (0.35, 0.2, 0.5))
     p += crown
     # Stones, in the colours a stone is.
@@ -1318,7 +1318,7 @@ def gathering(u, v):
 
 def sun_mural(u, v):
     """"Some persons dancing around a huge sun": ochre and red on limewash."""
-    c = mix((0.72, 0.66, 0.52), (0.64, 0.58, 0.45), grain(u, v, 0.4) + 0.5)
+    c = mix((0.56, 0.5, 0.39), (0.48, 0.43, 0.33), grain(u, v, 0.4) + 0.5)
     du, dv = u - 0.5, (v - 0.56) * 1.1
     d = math.hypot(du, dv)
     ang = math.atan2(dv, du)
@@ -1341,7 +1341,7 @@ def sun_mural(u, v):
             if 0 < t < 0.03 and abs(v - (cy - 0.07 - t * 1.4)) < 0.008:
                 c = (0.42, 0.14, 0.08)
     fade = smooth(0.0, 0.12, min(u, 1 - u, v, 1 - v))
-    base = (0.66, 0.6, 0.48)
+    base = (0.5, 0.45, 0.36)
     return mix(base, c, 0.35 + 0.65 * fade)
 
 
@@ -1473,11 +1473,11 @@ def tapestry(u, v):
     if h > 0.82:
         c = [(0.7, 0.62, 0.3), (0.62, 0.18, 0.15), (0.75, 0.72, 0.62)][int(abs(h * 97)) % 3]
     # The tree.
-    if abs(u - 0.5) < 0.03 and 0.14 < v < 0.52:
-        c = (0.3, 0.2, 0.1)
+    if abs(u - 0.5) < 0.04 and 0.14 < v < 0.52:
+        c = (0.36, 0.23, 0.11)
     td = ((u - 0.5) / 0.26) ** 2 + ((v - 0.62) / 0.2) ** 2
     if td < 1:
-        c = mix((0.18, 0.34, 0.14), (0.1, 0.22, 0.09), td)
+        c = mix((0.46, 0.52, 0.18), (0.3, 0.4, 0.12), td)
         if math.sin(u * 60) * math.sin(v * 50) > 0.7:
             c = (0.72, 0.3, 0.12)
     for s in (-1, 1):
