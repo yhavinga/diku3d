@@ -43,7 +43,7 @@ const DECEL = 2.4;
 /** A turn larger than this (radians) is made standing, before setting off. */
 const TURN_FIRST = 0.95;
 const TURN_STANDING = 3.0;
-const TURN_WALKING = 2.6;
+const TURN_WALKING = 2.0;
 /** Personal space: people keep this much between their centres. */
 const SPACE = 0.72;
 const LOOK_AHEAD = 1.8;
