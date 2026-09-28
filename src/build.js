@@ -604,6 +604,25 @@ function peatBank(len, h, depth, out, salt) {
 }
 
 /**
+ * A cell's worth of rough raised ground: flat-topped at `h`, falling to
+ * nothing over three metres at an edge that wanders in and out. Carries its
+ * own `heightAt(x, z)` so what grows at its foot is planted on it.
+ */
+function fieldBank(size, h, salt) {
+  const half = size / 2;
+  const height = (x, z) => {
+    const d = Math.min(half - Math.abs(x), half - Math.abs(z))
+      - 1.6 * terrainNoise(x * 0.22 + 3, z * 0.22 + 1, salt);
+    const t = Math.max(0, Math.min(1, d / 3.2));
+    const lump = 1 + 0.18 * (terrainNoise(x * 0.5 + 9, z * 0.5, salt + 1) - 0.5);
+    return h * t * t * (3 - 2 * t) * lump;
+  };
+  const geo = heightPatch(size, 22, 22, () => -half, () => half, height);
+  geo.userData.heightAt = height;
+  return geo;
+}
+
+/**
  * A turf hill with an irregular outline and a lumpy crown, standing on its
  * own base: what the Shire's banks and knolls are, in place of a half
  * ellipsoid. The ellipsoid's rim is vertical and its crown a perfect dome --
@@ -4995,17 +5014,31 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
   const shade = bog
     ? (x, y) => 0.84 + 0.16 * Math.min(1, (y - pos.y) / h)
     : wallAo(pos.y);
-  if (bog) {
+  // Field and woodland are bounded by a bank, not a wall: the rubble kerb
+  // down the sides of Haon Dor's trails read as masonry retaining walls.
+  const wild = !bog && !hood && [SECTOR.FIELD, SECTOR.FOREST, SECTOR.HILLS].includes(room.sector);
+  if (bog || wild) {
     // Not a cut face: from inside the hollow a vertical metre of peat on
     // every closed side made the bog a pit dug in a field, which is what a
     // judge called it. The ground rises out of the hollow instead, over
     // three metres, to a ragged lip -- and falls away more steeply behind.
     const depth = 4.4;
     const out = dir === 1 || dir === 2 ? 1 : -1;       // local z towards the edge
-    const geo = peatBank(CELL + 2.4, h, depth, out, room.vnum * 4 + dir);
+    const geo = peatBank(CELL + 2.4, wild ? 1.2 : h, depth, out, room.vnum * 4 + dir);
     const c = { x: pos.x + dx * (HALF - depth / 2 + 0.9), z: pos.z + dz * (HALF - depth / 2 + 0.9) };
-    batcher.add(geo, 'peat', place(c.x, pos.y - 0.04, c.z, along ? Math.PI / 2 : 0), { chunk, ao: shade, normals: true });
+    batcher.add(geo, bog ? 'peat' : (room.sector === SECTOR.FOREST ? 'duff' : 'grass'),
+      place(c.x, pos.y - 0.04, c.z, along ? Math.PI / 2 : 0), { chunk, ao: bog ? shade : null, normals: true });
     geo.dispose();
+    const fern = wild && instances ? ['fern', 'salal_bush'].find((n) => instances.library.get(n)) : null;
+    for (let i = 0; fern && i < 4; i++) {
+      // At the foot of the bank on the room's side, clear of the middle.
+      const a = (hash3(room.vnum, dir, i, 1061) - 0.5) * (CELL - 3);
+      const inward = HALF - 3.4 - hash3(room.vnum, dir, i, 1062) * 0.8;
+      instances.add(fern, {
+        x: pos.x + dx * inward + (along ? 0 : a), y: pos.y, z: pos.z + dz * inward + (along ? a : 0),
+        rotY: hash3(room.vnum, dir, i, 1063) * Math.PI * 2, scale: 0.8 + hash3(room.vnum, dir, i, 1064) * 0.4,
+      }, chunk);
+    }
   } else {
     batcher.add(box(along ? t : CELL, h, along ? CELL : t, 2, 2, 2), material,
       place(bx, pos.y + h / 2, bz), { chunk, ao: shade });
@@ -7553,18 +7586,48 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
         break;
       }
       const h = 2.2;
-      // A walled bank of turf: coursed field stone round it, grass on top. As
-      // bare `rock` it was crazy paving 1.6 m high down both sides of the
-      // graveyard's lanes.
-      batcher.add(box(CELL, h, CELL, 2, 2, 2), 'rubblewall', place(x, y + h / 2 - 0.6, z), { chunk, ao: wallAo(y) });
-      batcher.add(plane(CELL, CELL, 2), 'grass', place(x, y + h - 0.6 + 0.01, z), { chunk });
+      // A bank of rough ground. It was a box of coursed field stone with a lawn
+      // on top, and down both sides of Haon Dor's trails that read as masonry
+      // retaining walls -- a judge's word -- where a track through woodland
+      // runs between low earth banks with ferns and fallen timber at their
+      // foot. The bank's edge wanders in and out, so no two cells line up.
+      const bank = fieldBank(CELL + 1.2, h - 0.6, Math.floor(seed * 1e6) % 9973);
+      batcher.add(bank, 'grass', place(x, y - 0.02, z), { chunk, normals: true });
       addCollider(x - HALF, x + HALF, z - HALF, z + HALF, y, y + h - 0.6);
+      if (instances) {
+        const at = bank.userData.heightAt;
+        const fern = model(['fern', 'salal_bush'], 0);
+        for (let i = 0; fern && i < 7; i++) {
+          // Round the foot: out near the cell's edge, where the bank is low.
+          const side = Math.floor(hash3(x, z, i, 55) * 4);
+          const along = (hash3(x, z, i, 56) - 0.5) * (CELL - 1.5);
+          const inset = HALF - 0.6 - hash3(x, z, i, 57) * 1.4;
+          const [lx, lz] = [[along, -inset], [inset, along], [along, inset], [-inset, along]][side];
+          instances.add(fern, {
+            x: x + lx, y: y + at(lx, lz) - 0.05, z: z + lz,
+            rotY: hash3(x, z, i, 58) * Math.PI * 2, scale: 0.8 + hash3(x, z, i, 59) * 0.5,
+          }, chunk);
+        }
+        const log = hash3(x, z, 3, 60) < 0.45 ? model(['dead_log'], 0) : null;
+        if (log) {
+          const side = Math.floor(hash3(x, z, 4, 60) * 4);
+          const along = (hash3(x, z, 5, 60) - 0.5) * 5;
+          const inset = HALF - 1.0;
+          const [lx, lz] = [[along, -inset], [inset, along], [along, inset], [-inset, along]][side];
+          instances.add(log, {
+            x: x + lx, y: y + at(lx, lz) * 0.6, z: z + lz,
+            rotY: (side % 2 ? Math.PI / 2 : 0) + (hash3(x, z, 6, 60) - 0.5) * 0.5,
+            scale: 0.9 + hash3(x, z, 7, 60) * 0.4,
+          }, chunk);
+        }
+      }
       for (let i = 0; i < 2; i++) {
         if (hash3(x, z, i, 53) < 0.6) continue;
         const tx = x + (hash3(x, z, i, 51) - 0.5) * CELL * 0.7;
         const tz = z + (hash3(x, z, i, 52) - 0.5) * CELL * 0.7;
-        decor.push({ kind: 'tree', x: tx, y: y + h - 0.6, z: tz, scale: 0.6 + hash3(x, z, i, 54) * 0.5 });
+        decor.push({ kind: 'tree', x: tx, y: y + bank.userData.heightAt(tx - x, tz - z) - 0.05, z: tz, scale: 0.6 + hash3(x, z, i, 54) * 0.5 });
       }
+      bank.dispose();
       break;
     }
   }
