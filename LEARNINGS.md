@@ -8,6 +8,27 @@ is an opinion.
 
 ## 2026-09-28 — wave 7: below and inside
 
+### Outdoor script time (wave7-cpu2)
+
+- **V8 boxes a double passed to a function it doesn't inline.** Every sphere
+  test passing four numbers allocated; hot tests now take `(array, offset)`.
+  Graveyard allocation at the cap 79 → 34 MB/s.
+- **One 26 m grid over all static instances and batch pieces** (~1,470
+  cells) replaced 7,700 per-mesh buckets of ~2.5 instances each; standing
+  still skips the sweep when nothing it depends on changed.
+- **Draw order decides which coplanar surface wins.** Merging regions per
+  zone would have cut graveyard calls 521 → ~457 but moved 350–1,800 pixels,
+  with every cull decision identical; rejected by the zero-pixel rule.
+- **A cull-order A/B must restore full instance buffers first** and clear
+  each batch's `_seenStamp`, `_cullCamera` and `_indirectMine`, or stale
+  state hides real differences.
+- **Headless rAF runs at 120 Hz**; script per frame at the 30 fps cap is
+  ~1.4× the uncapped figure — always say which was measured.
+- Script time −25 to −45% outdoors (graveyard 9.4 → 7.0 ms at the cap,
+  Market 8.9 → 5.8), frame interval p90 33.5 ms at the 30 fps cap, 0 pixels
+  changed over 27 cameras. Left: ~70 program switches a frame where one
+  material is drawn by batched, instanced and plain meshes.
+
 ### The Shire, stairs and the district's blood (wave7-fittings)
 
 - **`timber` is a wall pattern, not a wood.** On a beam or post it shows a
