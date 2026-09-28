@@ -1534,7 +1534,11 @@ export function createGameUi(game) {
     const head = foeT ? plateAt(foeT.slot, 0) : null;
     foe.classList.toggle('on', !!head);
     if (head) {
-      foe.style.transform = `translate(${head.x.toFixed(1)}px, ${head.y.toFixed(1)}px) translate(-50%, -100%)`;
+      // A foe beside you puts its head at the frame's edge, and the plate
+      // went up over the minimap with it: held off the panels the same way.
+      const ph = foe.offsetHeight;
+      const at = offPanels(foe, head.x, head.y - ph / 2, 0, 0, 0);
+      foe.style.transform = `translate(${at.x.toFixed(1)}px, ${(at.y + ph / 2).toFixed(1)}px) translate(-50%, -100%)`;
       if (foeName.textContent !== t.name) foeName.textContent = t.name;
       foeNow.style.width = `${percent}%`;
       foeLag.style.width = `${percent}%`;
@@ -1558,7 +1562,9 @@ export function createGameUi(game) {
     const fhead = f && (!foeT || f.slot !== foeT.slot) ? plateAt(f.slot, 0) : null;
     focusPlate.classList.toggle('on', !!fhead);
     if (fhead) {
-      focusPlate.style.transform = `translate(${fhead.x.toFixed(1)}px, ${fhead.y.toFixed(1)}px) translate(-50%, -100%)`;
+      const ph = focusPlate.offsetHeight;
+      const at = offPanels(focusPlate, fhead.x, fhead.y - ph / 2, 0, 0, 0);
+      focusPlate.style.transform = `translate(${at.x.toFixed(1)}px, ${(at.y + ph / 2).toFixed(1)}px) translate(-50%, -100%)`;
       if (focusName.textContent !== f.name) focusName.textContent = f.name;
       const sub = f.warden ? `level ${f.level} · holds ${f.holds}`
         : `level ${f.level}${f.shop ? ' · shopkeeper' : ''}${f.aggressive ? ' · aggressive' : ''}`;
