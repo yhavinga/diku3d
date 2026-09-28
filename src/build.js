@@ -1061,7 +1061,7 @@ function buildHoodRoom({ room, pos, sides, instances, model, chunk, decor, light
       // weed-strewn plot of land"; its east end "just a dusty square".
       const dusty = /dusty/i.test(room.description);
       put('tall_weeds', dusty ? 3 : 7, 0.6, 971, { solid: false });
-      put('bramble', dusty ? 1 : 3, 1.0, 972, { height: 0.8, scale: 0.75 });
+      put('bramble', dusty ? 1 : 3, 1.6, 972, { height: 1.6 });
       put('nettles', dusty ? 2 : 5, 0.3, 973, { solid: false });
       put('grass_tuft', dusty ? 3 : 6, 0.3, 974, { solid: false });
       if (!dusty) put('collapsed_shed', 1, 2.0, 975, { height: 2.0, face: true });
@@ -1099,7 +1099,7 @@ function buildHoodRoom({ room, pos, sides, instances, model, chunk, decor, light
         decor.push({ kind: 'tree', x: s.x, y, z: s.z, scale: 0.8 + hash3(room.vnum, i, 0, 995) * 0.4 });
         addCollider(s.x - 0.7, s.x + 0.7, s.z - 0.7, s.z + 0.7, y, y + 8);
       }
-      put('bramble', 3, 1.0, 996, { height: 0.8, scale: 0.75 });
+      put('bramble', 3, 1.6, 996, { height: 1.6 });
       put('tall_weeds', 4, 0.5, 997, { solid: false });
       put('grass_tuft', 8, 0.3, 998, { solid: false });
       break;

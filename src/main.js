@@ -108,7 +108,7 @@ const TIMES = {
   dawn: {
     elevation: 8, azimuth: 95, exposure: 0.50, fog: 0xbaa089, density: 0.0016,
     sun: 0xffc089, sunIntensity: 23, sky: 0x9fb6d2, ground: 0x5f5142, ambient: 0.082,
-    env: 0.35, bounce: 0x5e4f3d, haze: 0xc9a586,
+    env: 0.35, bounce: 0x5e4f3d, haze: 0xc9a586, shadeLift: 2.8,
     bloom: 0.16, bloomThreshold: 22, stars: 0.22, turbidity: 5.5, rayleigh: 2.6,
     shafts: 0.5, shaftTint: 0xffd2a0,
     // cover threshold, how much to believe, gain over the sky behind, drift
@@ -176,7 +176,7 @@ const TIMES = {
     // this elevation the haze genuinely is.
     elevation: 9.5, azimuth: 258, exposure: 0.55, fog: 0xb68c6b, density: 0.0016,
     sun: 0xff9448, sunIntensity: 26, sky: 0x7b8ea8, ground: 0x50412f, ambient: 0.082,
-    env: 0.35, bounce: 0x574433, haze: 0xb87b4e,
+    env: 0.35, bounce: 0x574433, haze: 0xb87b4e, shadeLift: 2.8,
     bloom: 0.16, bloomThreshold: 22, stars: 0.32, turbidity: 6.5, rayleigh: 3.0,
     shafts: 0.55, shaftTint: 0xffb469,
     cloud: [0.55, 0.95, 1.6, 27.1],
@@ -192,7 +192,7 @@ const TIMES = {
     // lighting anything.
     elevation: -8, azimuth: 300, exposure: 0.62, fog: 0x1a2340, density: 0.024,
     sun: 0x8ea6d6, sunIntensity: 6.2, sky: 0x2b3a5c, ground: 0x171a22, ambient: 1.2,
-    env: 1.0, bounce: 0x1a1e28, haze: 0x2c3c62,
+    env: 1.0, bounce: 0x1a1e28, haze: 0x2c3c62, shadeLift: 3.5,
     // Rayleigh does the work a black sky cannot: a night sky is deep
     // blue-violet with a brighter band at the horizon, and that band is the
     // only thing giving a roofline a silhouette to be cut against.
@@ -713,6 +713,7 @@ async function boot() {
     // dial: it is 1 wherever the hemisphere is a sky floor and less only where
     // it stands in for the sunlit ground.
     materials.setIndoorBounce(preset.hemiIndoor ?? 1);
+    materials.setShadeLift(preset.shadeLift ?? 1);
     scene.fog = new THREE.FogExp2(preset.fog, preset.density);
     // Rain-damp on everything outdoors that keeps a wet recipe; identity for
     // clear weather. It is a material global and there is no per-room copy, so
