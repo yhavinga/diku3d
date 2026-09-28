@@ -18,6 +18,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SECTOR, ROOM_INDOORS, EX_ISDOOR, EX_CLOSED, EX_LOCKED, DIR_STEP, DIR_NAME } from './are.js';
 import { InstanceBatch, StaticBatches } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
+import { placeClutter } from './clutter.js';
 
 export const CELL = 13;         // grid pitch; rooms sit two cells apart
 export const ROOM = 10;         // interior span of an indoor room
@@ -1857,7 +1858,7 @@ export function buildScene(world, layout, materials, assets = null) {
         });
       }
       if (isDeep(room)) buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider });
-      else if (!ruin) buildInteriorProps({ room, pos, sides, decor, mats, holes: roomHoles.filter((h) => !h.ceiling), lights, kit });
+      else if (!ruin) rooms.get(room.vnum).plan = buildInteriorProps({ room, pos, sides, decor, mats, holes: roomHoles.filter((h) => !h.ceiling), lights, kit });
       // "The inn actually looks fairly functional despite its lack of repair
       // ... It looks as if the beer is still on tap!!!" The one place in the
       // neighborhood with a sign out and a light at the door.
@@ -2261,6 +2262,12 @@ export function buildScene(world, layout, materials, assets = null) {
   }
 
   buildVerges({ batcher, instances, model, groundAt, chunkOf });
+  // What each room's own words put in it (src/clutter.js), once everything
+  // it has to find a clear place among is standing.
+  const clutter = placeClutter({
+    world, rooms, decor, colliders, addCollider, instances, lights, worldOf, openAir: isOpenAir, ROOM, HALF,
+    BufferAttribute: THREE.BufferAttribute,
+  });
 
   const mist = buildMist(group, mistCells);
 
@@ -2279,6 +2286,7 @@ export function buildScene(world, layout, materials, assets = null) {
     stats.instanced = placed.triangles;
   }
   stats.meshes = batches.finish(zones.route);
+  stats.clutter = clutter;
   return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones };
 }
 
@@ -6250,6 +6258,7 @@ function buildInteriorProps({ room, pos, sides, decor, mats, holes = [], lights 
   }
   clearTorches(plan, pos, decor, lights);
   buildLooseProps({ room, pos, sides, decor, mats, plan, trade });
+  return plan;
 }
 
 /**
