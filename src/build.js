@@ -4154,6 +4154,8 @@ function buildIronFence({ instances, model, chunk, x, y, z, dir, addCollider }) 
  * dark evergreen trees" -- which also stand between it and the town.
  */
 const OUTSIDE_GATE = /\boutside\b[^.]*\bgate\b/i;
+/** A MOUNTAIN room that says so. The rest are mis-sectored lowland. */
+const MOUNTAINOUS = /\b(mountains?|cliffs?|crags?|ledges?|canyon|peaks?|ridge|gorge|ravine|rocks?|rocky|pass|summit|slopes?)\b/i;
 /** How far along the wall and out from it a gate's surroundings are taken as outside the town. */
 const GATE_REACH = 2;
 const CHURCHYARD_H = 1.25;
@@ -4213,6 +4215,19 @@ function townEdges(layout, world) {
       }
     }
   }
+  // A room the mud sectors MOUNTAIN that its own name calls a beach, a bog's
+  // edge or a forest -- half the Old Marsh -- handed every empty cell round it
+  // an eleven-metre cube of rock: the "large featureless slabs" standing in
+  // the reeds at #8315. They take the marsh's own ground instead.
+  for (const cell of layout.order) {
+    const room = cell.room;
+    if (room.sector !== SECTOR.MOUNTAIN || !isOpenAir(room) || isHood(room) || MOUNTAINOUS.test(room.name)) continue;
+    for (let dir = 0; dir < 4; dir++) {
+      const x = cell.x + DIR_STEP[dir][0]; const z = cell.z + DIR_STEP[dir][2];
+      if (walkable(cell.level, x, z) || edges.has(key(cell.level, x, z))) continue;
+      edges.set(key(cell.level, x, z), { kind: 'lowland', forest: /\bforest\b/i.test(room.name) });
+    }
+  }
   const grave = (level, x, z) => {
     const v = layout.at(level, x, z);
     if (v !== undefined) return GRAVEYARD.test(world.rooms.get(v).name);
@@ -4246,6 +4261,14 @@ function townEdges(layout, world) {
  */
 function buildTownEdge({ edge, spot, pos, batcher, instances, model, chunk, addCollider, decor, groundAt, townWalls, key }) {
   const { x, y, z } = pos;
+  if (edge.kind === 'lowland') {
+    // Built as usual, as what the room says it is.
+    if (spot.sector === SECTOR.MOUNTAIN) {
+      if (edge.forest) spot.sector = SECTOR.FOREST;
+      else spot.bog = true;
+    }
+    return false;
+  }
   if (edge.kind === 'wall') {
     if (!instances || !instances.library.get('city_wall')) return false;
     groundAt.set(key, 'cobble');
