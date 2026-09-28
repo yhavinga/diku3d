@@ -8,6 +8,28 @@ is an opinion.
 
 ## 2026-09-28 — wave 6: what the rooms say they are
 
+### Impostors, occlusion and the stutter (wave6-perf)
+
+- **The number of visible lights is part of every shader's key.** Toggling
+  a pooled lamp's `visible` recompiled everything in view — a 517 ms first
+  step at #5028. The light count now moves in steps (0/2/4/8/all), each
+  compiled at load; keeping all lights on costs ~5 ms on grass.
+- **`compileAsync` must run with the composer's render target bound**, or
+  every program comes out in the wrong colour space and none is reused.
+- **three's `readRenderTargetPixelsAsync` leaves its pixel-pack buffer
+  bound while waiting**, and every other `readPixels` in that window fails
+  silently. Use `occlusion.js`'s `readPixelsAsync`.
+- **Leave a card's averaged normal unnormalised**; renormalised it lit 9%
+  too bright.
+- **p90 right after an idle pause is the GPU clocking up**: the first frame
+  after 100 ms idle ran 22–41 ms against 9 steady. Discard ~20 frames.
+- The sewer drew the forest overhead because the actors' trees weren't
+  under the zone groups; #7201 1,008 → 244 calls. Far trees are cards baked
+  at load from 8 bearings × 2 elevations, dithered 80–95 m (`?lod=off`);
+  whatever a depth pyramid of the static world hides is skipped
+  (`?occlusion=off`). Market 751 → 420 calls, 6.44 → 1.84 M tris; Haon Dor
+  1,119 → 348, 13.4 → 3.5 M.
+
 ### Rendering correctness (wave6-renderfix)
 
 - **Anything below ground must be dressed as buried, not only the sewer's

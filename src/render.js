@@ -503,6 +503,12 @@ class ScaledGTAOPass extends GTAOPass {
       object.visible = false;
       this._visibilityCache.push(object);
     }
+    // What cull.js found drawn but wholly out past its AO reach.
+    for (const object of this.distant?.() || []) {
+      if (!object.visible) continue;
+      object.visible = false;
+      this._visibilityCache.push(object);
+    }
     // Alpha-cut foliage draws its own cut-out into the normal buffer. Under
     // the override material a needle card is the whole rectangle it is: the
     // sky between the sprays took the card's occlusion. Left out of the pass

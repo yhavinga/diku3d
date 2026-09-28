@@ -2992,7 +2992,9 @@ function buildZones(group, groundY, openings, district = null) {
   group.children.unshift(sensor);
   sensor.parent = group;
   return {
-    surface, deep, update,
+    // cull.js holds whatever is not under these two groups -- the actors'
+    // trees and props -- to the same answer, by which side of this it is on.
+    surface, deep, update, groundY,
     route: (region) => (region.startsWith('d:') ? deepRegion(region) : region.startsWith('h:') && district ? hood : surface),
   };
 }

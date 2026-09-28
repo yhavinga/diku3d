@@ -58,6 +58,9 @@ export function opaqueSort(a, b) {
  * with texels instead: 2048 over a 44 m span is 4 cm a texel, against the 11 cm
  * it used to be.
  *
+ * `trees` is where the far trees turn into cards (impostor.js): the crossfade's
+ * near and far ends, in metres.
+ *
  * `ao` and `shafts` are `{ scale, samples }`, where scale is the fraction of
  * the render resolution the effect runs at. Remeasured at 1600x900 with the
  * frame cap at 30: light shafts are the expensive item, about 4.3 ms of
@@ -77,20 +80,24 @@ export const PRESETS = {
   low: {
     dpr: 1.0, bloom: false, aa: 'none', shadow: 0, span: 55,
     ao: false, shafts: false, detail: false, lights: 6, fps: 60,
+    trees: [50, 62],
   },
   medium: {
     dpr: 1.25, bloom: 'half', aa: 'none', shadow: 2048, span: 44,
     ao: false, shafts: false, detail: false, lights: 10, fps: 60,
+    trees: [65, 80],
   },
   high: {
     dpr: 1.75, bloom: 'half', aa: 'smaa', shadow: 3072, span: 38,
     ao: { scale: 0.4, samples: 9, denoise: 4 },
     shafts: false, detail: true, lights: 14, fps: 30,
+    trees: [80, 95],
   },
   max: {
     dpr: 2.0, bloom: 'full', aa: 'smaa', shadow: 4096, span: 34,
     ao: { scale: 0.5, samples: 12, denoise: 8 },
     shafts: { scale: 0.4, samples: 24 }, detail: true, lights: 16, fps: 0,
+    trees: [110, 130],
   },
 };
 
@@ -159,6 +166,7 @@ export class Quality {
       this.sun.shadow.map = null;
     }
     this.setDetail(preset.detail);
+    this.impostors?.setRange(...preset.trees);
     // Grass thickness and reach follow the preset's name (grass.js).
     this.materials?.setGrass?.(this.name);
     this.renderer.shadowMap.needsUpdate = true;
@@ -171,6 +179,7 @@ export class Quality {
   setDetail(on) {
     if (!this.materials || !this.materials.setDetail) return;
     this.materials.setDetail(on);
+    this.impostors?.sync();
   }
 
   /** Effective device pixel ratio: the preset, scaled down if we're struggling. */
@@ -311,7 +320,27 @@ export class LightPool {
     this.resize(count);
   }
 
+  /**
+   * How many lights are switched on, in steps. The number of lights is part
+   * of every lit material's program, so every change in the count of lamps
+   * nearby used to recompile everything in view -- 50-500 ms stalls walking
+   * between the desert, the town and the sewer (10 programs rebuilt in one
+   * frame at #5028). Holding all of them on instead cost 5 ms a frame on
+   * grass at noon, when there are none to light. So the count moves in a few
+   * steps, and main.js compiles every step behind the loading screen.
+   */
+  get levels() {
+    const n = this.lights.length;
+    return [...new Set([0, 2, 4, 8, n].filter((l) => l <= n))];
+  }
+
+  /** Switch on the first `n` lights (and only them), for compiling. */
+  setLevel(n) {
+    this.lights.forEach((light, i) => { light.visible = i < n; });
+  }
+
   resize(count) {
+    this.level = -1;
     while (this.lights.length > count) {
       const light = this.lights.pop();
       this.scene.remove(light);
@@ -351,13 +380,14 @@ export class LightPool {
     // lamp on the kerb that was carrying the street. Distance over intensity
     // is a crude irradiance, and crude is enough to keep the lamp lit.
     this.near.sort((a, b) => a._d / (a.intensity || 1) - b._d / (b.intensity || 1));
+    let active = 0;
     for (let i = 0; i < this.lights.length; i++) {
       const light = this.lights[i];
       const candidate = this.near[i];
-      if (!candidate) { light.visible = false; continue; }
+      if (!candidate) { light.intensity = 0; continue; }
       const lit = candidate.outdoor ? 1 - this.daylight : 1;
-      if (lit <= 0.01) { light.visible = false; continue; }
-      light.visible = true;
+      if (lit <= 0.01) { light.intensity = 0; continue; }
+      active = i + 1;
       light.position.set(candidate.x, candidate.y, candidate.z);
       light.color.setHex(candidate.color);
       light.distance = candidate.radius || 16;
@@ -369,6 +399,11 @@ export class LightPool {
       // it the night boost blew the temple out at 2.7% of the frame clipped.
       const afterDark = candidate.outdoor ? 1 + (1 - this.daylight) * 1.6 : 1;
       light.intensity = (candidate.intensity || 10) * flicker * lit * afterDark;
+    }
+    const level = this.levels.find((l) => l >= active);
+    if (level !== this.level) {
+      this.level = level;
+      this.setLevel(level);
     }
   }
 

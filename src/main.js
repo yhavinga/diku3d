@@ -28,6 +28,8 @@ import { installSave } from './save.js';
 import { createKick } from './kick.js';
 import { setPaneDaylight } from './windows.js';
 import { createVisibility } from './cull.js';
+import { createImpostors } from './impostor.js';
+import { createOcclusion } from './occlusion.js';
 import { createTitleReel } from './title.js';
 import { OUTDOOR_FILL } from './dress.js';
 
@@ -516,11 +518,22 @@ async function boot() {
   // Every draw of the frame goes through here, the console's and the probes'
   // included, so what is culled is decided in one place: see cull.js.
   // `?cull=off` draws everything, for A/B.
+  // Far trees as cards, baked from their own models; `?lod=off` keeps every
+  // tree whole, for A/B. cull.js decides which copies are which each frame.
+  const impostors = assets ? createImpostors({ renderer, library: assets }) : null;
+  if (impostors) {
+    impostors.adopt(scene);
+    impostors.setEnabled(params.get('lod') !== 'off');
+  }
+  // Out in the open, what the last frames' depth says is behind a hill.
+  const occlusion = createOcclusion({ renderer, scene, camera, world: built.group });
+  occlusion.state.enabled = params.get('occlusion') !== 'off';
   const visibility = createVisibility({
-    renderer, scene, camera, world: built.group, sun, zones: built.zones,
+    renderer, scene, camera, world: built.group, sun, zones: built.zones, impostors, occlusion,
     sky: [sky, stars, ...built.group.children.filter((o) => o.name.startsWith('horizon-'))],
   });
   visibility.state.enabled = params.get('cull') !== 'off';
+  pipeline.gtao.distant = () => (visibility.state.enabled ? visibility.state.aoFar : null);
   {
     const render = composer.render.bind(composer);
     composer.render = (...args) => {
@@ -547,6 +560,10 @@ async function boot() {
     name: params.get('quality') || 'high',
   });
   if (params.get('fps')) quality.preset.fps = Number(params.get('fps'));
+  if (impostors) {
+    quality.impostors = impostors;
+    impostors.setRange(...quality.preset.trees);
+  }
 
   // --------------------------------------------------------------- player --
 
@@ -1426,7 +1443,7 @@ async function boot() {
     // `wetness` is exposed because it is a slow-moving number nothing on screen
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
-    pipeline, environment, materials, wetness,
+    pipeline, environment, materials, wetness, assets, impostors, occlusion,
     player, hud, layout, built, actors, world, applyTime, applyWeather, state, audio, visibility,
     times: TIMES, overcast: OVERCAST, rain,
     /**
@@ -1792,6 +1809,42 @@ async function boot() {
   };
 
   options.start();
+
+  // Every material's program, now, behind the loading screen. three compiles
+  // a program the first time something wearing it is drawn, so walking
+  // into the desert or the sewer for the first time stalled a frame for the
+  // sand, the rock and the vaults -- 517 ms measured at #5028 -- and the
+  // far-tree cards stall the first time the forest is far enough off.
+  // Hidden things too: the zone that is not in view, the cards, the doors.
+  {
+    const hidden = [];
+    scene.traverse((o) => {
+      // `placements` is a record for nav.js, never drawn.
+      if (o.visible || o.name === 'placements' || o.parent?.name === 'placements') return;
+      o.visible = true;
+      hidden.push(o);
+    });
+    const started = performance.now();
+    // Compiled for the composer's own target: a program's key carries the
+    // output colour space and tone mapping of wherever it draws, and against
+    // the canvas every one of these came out a variant nothing ever uses.
+    const previous = renderer.getRenderTarget();
+    renderer.setRenderTarget(composer.renderTarget1);
+    // Once for each step the light pool's count moves in (quality.js).
+    try {
+      for (const level of lightPool.levels) {
+        lightPool.setLevel(level);
+        // Again each time: frames drawn while this waits move the target.
+        renderer.setRenderTarget(composer.renderTarget1);
+        await renderer.compileAsync(scene, camera);
+      }
+    } finally {
+      lightPool.level = -1;
+      renderer.setRenderTarget(previous);
+      for (const o of hidden) o.visible = false;
+    }
+    console.info(`precompiled in ${(performance.now() - started).toFixed(0)} ms`);
+  }
 
   await progress(1, 'ready');
   dom.loading.classList.add('hidden');
