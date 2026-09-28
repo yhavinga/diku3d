@@ -1163,11 +1163,52 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   // A body that stands up out of its rest pose -- the reared naga, the worm
   // out of the sand -- says how tall it really is, for the label over it.
   const height = spec.stands ? spec.stands * scale : size.y * scale + hover;
-  return {
+  const record = {
     group, headGroup: null, height, scale, mixer, actions, clips, stride,
     hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
     afloat,
   };
+  // A bat under a roof hangs from it while it is idle: its `roost` clip,
+  // moved up from the height it was authored at (`info.roost`, in the
+  // model's units) to the ceiling of the room it was reset in, `up` metres
+  // over its feet. It drops into flight when it has somewhere to go.
+  if (spec.air && actions.roost && info.roost) {
+    record.roost = (up) => {
+      const lift = up / scale - info.roost;
+      const clip = asset.animations.find((c) => c.name === 'roost').clone();
+      for (const track of clip.tracks) {
+        if (!track.name.endsWith('.position')) continue;
+        for (let i = 1; i < track.values.length; i += 3) track.values[i] += lift;
+      }
+      mixer.uncacheAction(actions.roost.getClip());
+      const roost = mixer.clipAction(clip);
+      roost.setLoop(THREE.LoopRepeat, Infinity);
+      roost.time = start * clip.duration;
+      roost.setEffectiveWeight(1);
+      roost.play();
+      actions.idle.stop();
+      actions.idle = roost;
+      clips.idle = clip.duration;
+      delete actions.roost;
+      mixer.update(0);
+      record.height = up;
+    };
+  }
+  return record;
+}
+
+/**
+ * How far above `at` the underside of whatever roofs it is, or null in the
+ * open or when it is out of a bat's reach: one ray straight up through the
+ * built world.
+ */
+const _ceilRay = new THREE.Raycaster();
+const _up = new THREE.Vector3(0, 1, 0);
+function ceilingAbove(root, at) {
+  _ceilRay.set(new THREE.Vector3(at.x, at.y + 1.2, at.z), _up);
+  _ceilRay.far = 14;
+  const hit = _ceilRay.intersectObject(root, true)[0];
+  return hit ? hit.point.y - at.y : null;
 }
 
 /**
@@ -1898,6 +1939,11 @@ export function populate(world, layout, built, options = {}) {
       );
       fig.rotation.y = -angle + Math.PI / 2;
       group.add(fig);
+      if (made.roost && !info.outdoor) {
+        built.group.updateMatrixWorld(true);
+        const up = ceilingAbove(built.group, fig.position);
+        if (up && up > 2.2) made.roost(up);
+      }
 
       const aggressive = !!(mob.proto.act & ACT_AGGRESSIVE);
       // The figure contract: whatever the builder handed back, plus where this
@@ -1905,7 +1951,7 @@ export function populate(world, layout, built, options = {}) {
       // frames off it and fills in what an older rig does not carry.
       const record = {
         ...made,
-        object: fig, head: headGroup, home: fig.position.clone(), height,
+        object: fig, head: headGroup, home: fig.position.clone(), height: made.height,
         mixer: made.mixer || null, actions: made.actions || null, legs: made.legs || null,
         aggressive, walking: false,
         sentinel: !!(mob.proto.act & ACT_SENTINEL),
@@ -1921,7 +1967,7 @@ export function populate(world, layout, built, options = {}) {
       figures.push(record);
 
       record.interactable = {
-        position: fig.position.clone().setY(fig.position.y + height * 0.6),
+        position: fig.position.clone().setY(fig.position.y + record.height * 0.6),
         radius: 2.6,
         // Mobiles walk about, so their examine point moves with them: main.js
         // looks these up by distance each frame instead of from its fixed grid.

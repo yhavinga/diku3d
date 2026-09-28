@@ -1015,7 +1015,7 @@ def bat():
 
     return dict(name="beast_bat", archetype="bat", bones=bones, body=body, masks=masks, parts=parts,
                 patch=lambda co: np.zeros(len(co)), h=0.0014, tris=1200, mat="fur",
-                clips=bat_clips, hover=1.2, extras={"hover": 1.2},
+                clips=bat_clips, hover=1.2, extras={"hover": 1.2, "roost": ROOST},
                 gait=dict(flap=10, walk_stride=0.5, run_stride=0.8, run_frames=7))
 
 
@@ -1087,10 +1087,32 @@ def bat_clips(arm, spec):
         return d
     clip.run("death", 36, death)
 
+    # roost: hung by the feet from a ceiling, head down, the wings wrapped
+    # round the body, now and then shifting and turning its head. The feet
+    # are at ROOST in the model's own units; the viewer moves the clip to
+    # wherever a room's ceiling is.
+    def roost_pose(t):
+        fk = {"body": (92 + 3 * wave(t, 0.2), 4 * wave(t), 0), "head": (-18 + 6 * wave(2 * t, 0.3), 25 * wave(t, 0.1), 0)}
+        for tag in (".L", ".R"):
+            s_ = 1 if tag == ".L" else -1
+            breath = 3 * wave(2 * t)
+            fk["wing1" + tag] = (-62 + breath, s_ * 38, 0)
+            fk["wing2" + tag] = (-40, 0, 0)
+            fk["wing3" + tag] = (-10, -s_ * 150, 0)
+            fk["foot" + tag] = (-70, 0, 0)
+        return fk
+    poser.solve(roost_pose(0.0), V((0, 0, 0)))
+    top = max(poser.world_of("foot.L").z, poser.world_of("foot.R").z)
+    lift = ROOST - top
+    clip.run("roost", 90, lambda t: dict(fk=roost_pose(t), loc=V((0, 0, lift))), step=2)
+
     report["clips"] = clip.report
     report["stride"] = {"walk": g["walk_stride"], "run": g["run_stride"]}
     report["hit"] = 0.5
     return report
+
+
+ROOST = 2.4
 
 
 # ============================================================ the mud thing
