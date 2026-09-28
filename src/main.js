@@ -113,6 +113,9 @@ const TIMES = {
     sun: 0xffc089, sunIntensity: 23, sky: 0x9fb6d2, ground: 0x5f5142, ambient: 0.082,
     env: 0.35, bounce: 0x5e4f3d, haze: 0xc9a586, shadeLift: 2.8,
     bloom: 0.16, bloomThreshold: 22, stars: 0.22, turbidity: 5.5, rayleigh: 2.6,
+    // Below the bloom threshold: the low sun's quarter of sky bloomed into a
+    // veil over half the frame. See `broad` in render.js.
+    skyBroad: 18,
     shafts: 0.5, shaftTint: 0xffd2a0,
     // cover threshold, how much to believe, gain over the sky behind, drift
     cloud: [0.58, 0.9, 1.5, 11.3],
@@ -188,6 +191,9 @@ const TIMES = {
     sun: 0xff9448, sunIntensity: 26, sky: 0x7b8ea8, ground: 0x50412f, ambient: 0.082,
     env: 0.35, bounce: 0x574433, haze: 0xb87b4e, shadeLift: 2.8,
     bloom: 0.16, bloomThreshold: 22, stars: 0.32, turbidity: 6.5, rayleigh: 3.0,
+    // Below the bloom threshold: the low sun's quarter of sky bloomed into a
+    // veil over half the frame. See `broad` in render.js.
+    skyBroad: 18,
     shafts: 0.55, shaftTint: 0xffb469,
     cloud: [0.55, 0.95, 1.6, 27.1],
   },
@@ -751,6 +757,7 @@ async function boot() {
     sky.material.uniforms.cloudDensity.value = preset.stockCloud?.[1] ?? 0.4;
     skyRange.setFloor(preset.skyFloor ?? 0x000000, preset.skyFloorGain ?? 0);
     skyRange.setCloud(...preset.cloud);
+    skyRange.setBroad(preset.skyBroad ?? 60);
     sun.position.copy(lightPosition).multiplyScalar(120);
     sun.color.setHex(preset.sun);
     sun.intensity = preset.sunIntensity;
