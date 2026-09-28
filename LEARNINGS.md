@@ -8,6 +8,27 @@ is an opinion.
 
 ## 2026-09-28 — wave 6: what the rooms say they are
 
+### The first minute and the melee (wave6-playfix)
+
+- **Clouds and haze must be scaled to the sky's brightness.** The noon sky
+  is ~3 in linear units before tone mapping, so a white of 1.0 is a grey
+  smudge; lighting a cloud by the sun makes it black against the light at
+  dusk.
+- **Floating text must be clamped against the panels**, not only kept apart
+  from itself — pushing numbers upward to avoid overlaps is what walked them
+  onto the minimap. Samples on a panel: 18 → 0; foe plates 75/135 → 0.
+- **An empty-handed overhead chop reads as a held object**: the zombie's
+  "bow" was its raised bare forearm. Unarmed figures use the low blow.
+- **Scale body parts with uniform bone scales only**; a non-uniform parent
+  scale shears its children as they rotate. After shortening legs, lower
+  the body and shorten the stride by the same factor (halflings 1.06–1.11 m
+  with their own proportions).
+- Two judge findings were timing, not bugs: the "misplaced" fireball was
+  still in flight, and the "faint" spells were still in their 0.62 s
+  wind-up. Check a frame's time against the event before chasing it.
+- Melee standoff 2.0 m from the camera, the shield held 70% to the side
+  outside `block`; you start facing the first exit that leads outdoors.
+
 ### Nature and terrain (wave6-nature)
 
 - **The height-to-normal bake is steep**: a height step of 0.04 already
