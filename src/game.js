@@ -23,7 +23,7 @@
 
 import {
   ACT_SENTINEL, ACT_AGGRESSIVE, ACT_PRACTICE, ACT_SCAVENGER, ITEM,
-  ROOM_NO_MOB, ROOM_PRIVATE, ROOM_SOLITARY,
+  ROOM_NO_MOB, ROOM_PRIVATE, ROOM_SOLITARY, DIR_NAME,
 } from './are.js';
 import { createNav } from './nav.js';
 import {
@@ -980,6 +980,20 @@ export const MIN_BLOW_GAP = 0.45;  // one attacker's blows are never shown close
 /** A gate is only *held* if something that could stop a novice stands at it. */
 const WARDEN_MIN_LEVEL = 5;
 
+/**
+ * "the way north", "the ways north and east": what a warden holds, said by the
+ * direction and not by the room. The room is where you are standing already,
+ * and room names are not noun phrases -- "holds the way out of Outside the West
+ * Gate of Midgaard" is what reading them as one produced.
+ */
+export function waysPhrase(gates) {
+  const ways = [...new Set(gates.map((g) => g.way))];
+  if (!ways.length) return '';
+  const list = ways.length === 1 ? ways[0] : `${ways.slice(0, -1).join(', ')} and ${ways[ways.length - 1]}`;
+  return `the way${ways.length > 1 ? 's' : ''} ${list}`;
+}
+const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
 const dist2 = (a, b) => {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
@@ -1287,9 +1301,11 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       vnum: fromVnum,
       name: room.name,
       dir: link.dir,
+      way: DIR_NAME[link.dir],
       to: link.exit.to,
       outdoor: !!(info && info.outdoor),
       warden: warden.record,
+      wardenRoom: warden.record.room ? warden.record.room.vnum : fromVnum,
       wardenName: warden.record.proto.short,
       wardenLevel: warden.record.proto.level,
       open: false,
@@ -1492,13 +1508,17 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     }
 
     let firstRoad = false;
-    for (const gate of gates) {
-      if (gate.open || gate.warden !== slot.record) continue;
+    const opened = gates.filter((gate) => !gate.open && gate.warden === slot.record);
+    for (const gate of opened) {
       gate.open = true;
+      gate.openedAt = ctx.clock;
       if (gate.outdoor && !roads.some((g) => g !== gate && g.open)) firstRoad = true;
+    }
+    if (opened.length) {
+      const ways = waysPhrase(opened);
       emit({
-        kind: 'gate', vnum: gate.vnum, to: gate.to, name: gate.name,
-        text: `The way out of ${gate.name} is no longer held.`,
+        kind: 'gate', vnum: opened[0].vnum, to: opened[0].to, name: opened[0].name, gates: opened,
+        text: `${capital(ways)} ${opened.length > 1 && ways.startsWith('the ways') ? 'are' : 'is'} no longer held.`,
       });
     }
     // One road out is the ending. Every road out is not: the gear this city
@@ -2465,18 +2485,21 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
     // You learn a gate is held by walking up to it and finding someone in it.
     // Nothing announces the list; it fills in as you cross the city.
+    // Seen from the gate's own room or the warden's, which is where the guard
+    // is standing -- and once per warden, however many exits it holds.
     for (const gate of gates) {
-      if (gate.seen) continue;
-      const info = built.rooms.get(gate.vnum);
-      if (info && dist2(info.center, position) < 18 * 18) {
-        gate.seen = true;
-        // The level of the one actually standing there -- db.c fuzzes it at
-        // reset -- and not the prototype's, which is what the board used to
-        // show beside a plate that said something else.
-        const warden = mobs.find((slot) => slot.record === gate.warden && !slot.dead);
-        if (warden) gate.wardenLevel = wake(warden).level;
-        emit({ kind: 'gate-seen', gate, text: `${gate.wardenName} holds the way out of ${gate.name}.` });
-      }
+      if (gate.seen || gate.open) continue;
+      // Not by distance: eighteen metres from the temple's stair reaches into
+      // the Cleric's sanctum next door, which then announced the executioner.
+      if (state.roomVnum !== gate.vnum && state.roomVnum !== gate.wardenRoom) continue;
+      const held = gates.filter((g) => !g.open && g.warden === gate.warden);
+      // The level of the one actually standing there -- db.c fuzzes it at
+      // reset -- and not the prototype's, which is what the board used to
+      // show beside a plate that said something else.
+      const warden = mobs.find((slot) => slot.record === gate.warden && !slot.dead);
+      const level = warden ? wake(warden).level : gate.wardenLevel;
+      for (const g of held) { g.seen = true; g.wardenLevel = level; }
+      emit({ kind: 'gate-seen', gate, gates: held, text: `${capital(gate.wardenName)} holds ${waysPhrase(held)}.` });
     }
 
     // db.c rolls a mobile the moment it is reset into the world; here it waits
@@ -2609,6 +2632,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
         fighting: state.fighting === mob,
         aggressive: !!(mob.act & ACT_AGGRESSIVE),
         warden: gates.find((g) => !g.open && g.warden === mob.slot.record) || null,
+        holds: waysPhrase(gates.filter((g) => !g.open && g.warden === mob.slot.record)),
         shop: !!mob.slot.record.shop,
         focused: mob.slot === focusSlot,
         slot: mob.slot,
@@ -2633,6 +2657,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
         name: mob.name, level: mob.level, aggressive: !!(mob.act & ACT_AGGRESSIVE),
         shop: !!slot.record.shop, fighting: state.fighting === mob,
         warden: gates.find((g) => !g.open && g.warden === slot.record) || null, slot,
+        holds: waysPhrase(gates.filter((g) => !g.open && g.warden === slot.record)),
       };
     },
 

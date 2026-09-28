@@ -73,6 +73,19 @@ function mix(c1, c2, t) {
   return [lerp(c1[0], c2[0], t), lerp(c1[1], c2[1], t), lerp(c1[2], c2[2], t)];
 }
 
+// The random rubble of the neighborhood's walls, laid out once for its tile:
+// fourteen courses whose heights wander a quarter either way, and a number of
+// stones in each that changes row to row. See `sootwall`.
+const SOOT_ROWS = (() => {
+  const n = 14;
+  const rows = [0];
+  for (let i = 1; i < n; i++) rows.push((i + (hash2(i, 0, n, 683) - 0.5) * 0.5) / n);
+  rows.push(1);
+  return rows;
+})();
+const SOOT_COLS = SOOT_ROWS.slice(0, -1).map((_, i) => 4 + Math.floor(hash2(i, 1, 14, 687) * 5));
+const SOOT_SHIFT = SOOT_ROWS.slice(0, -1).map((_, i) => hash2(i, 2, 14, 689));
+
 // ------------------------------------------------------------- surfaces ----
 
 /**
@@ -1092,7 +1105,29 @@ const SURFACES = {
    * matt; between the tongues the wall is grimed, never clean.
    */
   sootwall(u, v, s) {
-    SURFACES.stonewall(u, v, s);
+    // Random rubble, not coursed: courses of 19 to 32 cm and stones of 40 to
+    // 90, no two rows alike. The ruins wore the town's coursed stone -- every
+    // block 60 x 30, two to one -- and on a broken wall with a man in front of
+    // it that proportion read as brick blown up four times, which is what a
+    // review called it. Same 3.6 m tile, so the model UVs are untouched.
+    let row = 0;
+    while (row < SOOT_ROWS.length - 2 && v >= SOOT_ROWS[row + 1]) row++;
+    const v0 = SOOT_ROWS[row]; const v1 = SOOT_ROWS[row + 1];
+    const n = SOOT_COLS[row];
+    const gx = (((u + SOOT_SHIFT[row]) % 1) + 1) % 1 * n;
+    const col = Math.floor(gx);
+    const fx = gx - col; const fy = (v - v0) / (v1 - v0);
+    // Joints and arrises in metres, converted per axis by the stone's size.
+    const w = 3.6 / n; const h = (v1 - v0) * 3.6;
+    const jx = 0.012 / w; const jy = 0.012 / h;
+    const inBlock = fx > jx && fx < 1 - jx && fy > jy && fy < 1 - jy;
+    const bevel = clamp01(Math.min((fx - jx) * w, (1 - jx - fx) * w, (fy - jy) * h, (1 - jy - fy) * h) / 0.03);
+    const id = hash2(col, row, 64, 691);
+    const grain = fbm(u * 62 + id * 7, v * 62, 62, 23, 3);
+    const block = mix(rgb(0x8a8171), rgb(0x9f9687), id);
+    const base = inBlock
+      ? mix(block, rgb(0x706758), grain * 0.12 + (1 - bevel) * 0.08)
+      : mix(rgb(0x9e9585), rgb(0xada595), grain);
     // Blotches for where the fire was, streaked six to one up the wall for
     // how the smoke climbed it. Periods chosen so the tile still wraps.
     const blotch = fbm(u * 4, v * 4, 4, 701, 4);
@@ -1103,15 +1138,40 @@ const SURFACES = {
     // anywhere near it -- and the tongues go darker again over that. Clean
     // stone with black blotches on it read as a dalmatian, not as a fire.
     const grime = fbm(u * 8, v * 8, 8, 707, 3);
-    // Measured, not guessed: at 0.10 mean albedo the district's walls went to
-    // RGB 0 in their own shade after dusk (0.76% of a night street, 3.3% of a
-    // ruin at dusk, against 0.01% anywhere in Midgaard). 0.16 keeps the soot
-    // and loses the holes.
-    const greyed = mix(s.color, rgb(0x3a3632), 0.72 + grime * 0.15);
-    // Floor at 0x221e1b: nothing under a sky reads zero, and burnt stone is a
-    // warm charcoal, not ink.
-    s.color = mix(greyed, rgb(0x2c2825), clamp01(soot * 0.7));
-    s.rough = Math.min(1, s.rough + soot * 0.12);
+    // Streaked, not uniformly dark: see the recipe. The grime between the
+    // tongues keeps a mid grey; the tongues go to a warm charcoal (floor
+    // 0x221e1b -- nothing under a sky reads zero, and burnt stone is not ink).
+    const greyed = mix(base, rgb(0x3b3733), 0.66 + grime * 0.2);
+    s.color = mix(greyed, rgb(0x221e1b), clamp01(soot * 1.3));
+    s.height = inBlock ? 0.62 + bevel * 0.3 + grain * 0.08 : 0.12;
+    s.rough = Math.min(1, (inBlock ? 0.72 + grain * 0.2 : 0.94) + soot * 0.12);
+  },
+
+  /**
+   * A house front come down: broken stone of every size in a bed of grit and
+   * mortar dust, a sherd of roof tile here and there and the black of a
+   * charred stick. The heaps wore the street's own setts and the walls'
+   * coursed stone, and read as a paved hump.
+   */
+  rubble(u, v, s) {
+    const [d1, edge, id] = cellular(u * 11, v * 11, 11, 911, 0.42);
+    const [, edge2, id2] = cellular(u * 29, v * 29, 29, 917, 0.45);
+    const dust = fbm(u * 18, v * 18, 18, 919, 3);
+    const fine = fbm(u * 70, v * 70, 70, 923, 2);
+    // Big stones where a cell is well inside its edge, grit between them.
+    const big = clamp01((edge - 0.08) * 7) * (((id * 5.1) % 1) > 0.25 ? 1 : 0);
+    const small = clamp01((edge2 - 0.1) * 9) * (1 - big);
+    const kind = (id * 13.7) % 1;
+    let stone = mix(rgb(0x4d4842), rgb(0x655f55), (id2 * 3.1) % 1);
+    if (kind > 0.9) stone = rgb(0x5f3a2b);             // roof tile
+    else if (kind > 0.78) stone = rgb(0x1e1b18);       // char
+    const grit = mix(rgb(0x3f3b36), rgb(0x5b564e), dust * 0.7 + fine * 0.3);
+    let c = mix(grit, stone, Math.max(big, small * 0.85));
+    // Soot on the upper faces of the big stones, dust settled on the rest.
+    c = mix(c, rgb(0x2e2a26), big * clamp01(fbm(u * 5, v * 5, 5, 929, 2) * 1.6 - 0.6) * 0.6);
+    s.color = mix(c, rgb(0x6e685f), (1 - big) * clamp01(dust * 1.4 - 0.7) * 0.35);
+    s.height = 0.15 + big * (0.5 + (1 - d1) * 0.3) + small * 0.25 + fine * 0.06;
+    s.rough = 0.9 + fine * 0.08 - big * 0.06;
   },
 
   /**
@@ -1423,6 +1483,10 @@ const RECIPES = {
   sewerwood: { surface: 'bark', scale: 1.6, normalScale: 0.6, env: 1, wet: 0, detail: 0.4, buried: true },
   // The eastern mountains, outside and in.
   cliff: { surface: 'sandstone', scale: 9, normalScale: 0.35, env: 0.3, wet: 0, detail: 0.6 },
+  // The cave rock again, out under the sky: the crag heaped over the troll
+  // den. Not `rock`, which is crazy paving, and not `cliff`, which is the
+  // desert's sandstone and read as a mesa in a fir forest.
+  crag: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0.2, detail: 0.6 },
   // A full `env`: cloth this open lets the sky through, and at 0.4 a tent's
   // corners went to RGB 0 after dark however hard the lantern burned.
   tentcloth: { surface: 'tentcloth', scale: 4, normalScale: 0.5, env: 1.0, wet: 0, detail: 0.4 },
@@ -1434,12 +1498,21 @@ const RECIPES = {
   // holes are where the water stands -- and `ash` has none, being indoors
   // under no roof and dry as the fire left it. `oldbone` is the sewer's bone
   // out in the daylight, for the gang's idol.
-  sootwall: { surface: 'sootwall', scale: 3.6, normalScale: 1.0, env: 0.6, wet: 0, detail: 0.55 },
-  charred: { surface: 'charred', scale: 1.4, normalScale: 0.55, env: 0.5, wet: 0, detail: 0.5 },
+  // `env` well over the town's: the soot is dark, and a dark albedo in the
+  // shade after dusk is RGB 0 (57% of a No Man's Land frame at dusk under 8).
+  // The sky term is the one that lights the shaded faces, so it carries them.
+  // A sooty wall is darker than the town's stone, but not uniformly: the
+  // tongues are near black and the grime between them a mid grey. A uniform
+  // dark grey read as plain grey stone in the sun and went under 8 in the
+  // shade at dusk (51% of a No Man's Land frame); streaked, it reads as soot
+  // in the sun and the grime holds the shade up. Mean albedo 0.14, and the dusk and night shade held up by `lift`.
+  sootwall: { surface: 'sootwall', scale: 3.6, normalScale: 1.0, env: 0.6, lift: true, wet: 0, detail: 0.55 },
+  rubble: { surface: 'rubble', scale: 2.4, normalScale: 1.1, env: 0.8, lift: true, wet: 0, detail: 0.6 },
+  charred: { surface: 'charred', scale: 1.4, normalScale: 0.55, env: 0.5, lift: true, wet: 0, detail: 0.5 },
   boards: { surface: 'boards', scale: 2.0, normalScale: 0.7, env: 0.7, wet: 0, detail: 0.45 },
-  brokencobble: { surface: 'brokencobble', scale: 2.2, normalScale: 1.0, env: 1.05, wet: 0.55, detail: 0.5 },
-  ash: { surface: 'ash', scale: 3.0, normalScale: 0.6, env: 0.6, wet: 0, detail: 0.6 },
-  wasteground: { surface: 'wasteground', scale: 4.0, normalScale: 0.7, env: 0.45, wet: 0, detail: 0.6 },
+  brokencobble: { surface: 'brokencobble', scale: 2.2, normalScale: 1.0, env: 1.05, lift: true, wet: 0.55, detail: 0.5 },
+  ash: { surface: 'ash', scale: 3.0, normalScale: 0.6, env: 0.6, lift: true, wet: 0, detail: 0.6 },
+  wasteground: { surface: 'wasteground', scale: 4.0, normalScale: 0.7, env: 0.45, lift: true, wet: 0, detail: 0.6 },
   oldbone: { surface: 'bone', scale: 0.6, normalScale: 0.4, env: 0.7, wet: 0, detail: 0.3 },
   // Ice Dragon Way's smashed crystal statues: nearly all reflection.
   crystal: { surface: 'crystal', scale: 0.8, normalScale: 0.35, env: 1.7, wet: 0, detail: 0.1 },
@@ -1717,6 +1790,7 @@ function bakeMacro(size = 128) {
  * every skinned figure) reads the default 0 and keeps the full bounce, which is
  * what an outdoor prop wants.
  */
+const shadeLift = { value: 1 };
 const indoorBounce = { value: 1 };
 
 const HEMI_LINE = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
@@ -1815,6 +1889,7 @@ function decorate(material, recipe, macro, grain) {
     material.userData.wetnessUniform = shader.uniforms.wetness;
     material.userData.wetBase = recipe.wet ?? 0;
     shader.uniforms.indoorBounce = indoorBounce;
+    shader.uniforms.dikuShadeLift = shadeLift;
     shader.uniforms.dikuBuriedGain = buried.gain;
     shader.uniforms.dikuBuriedIrradiance = buried.irradiance;
     shader.uniforms.dikuBuriedRadiance = buried.radiance;
@@ -1841,6 +1916,7 @@ function decorate(material, recipe, macro, grain) {
         uniform float detailStrength;
         uniform float wetness;
         uniform float indoorBounce;
+        uniform float dikuShadeLift;
         uniform float dikuBuriedGain;
         uniform vec3 dikuBuriedIrradiance;
         uniform vec3 dikuBuriedRadiance;
@@ -1859,6 +1935,21 @@ function decorate(material, recipe, macro, grain) {
           irradiance = dikuBuriedIrradiance * dikuUpFill;
           iblIrradiance = irradiance;
           radiance = dikuBuriedRadiance;
+        #else
+          #ifdef DIKU_LIFT
+            // The burnt district's sky light, by the hour: see setShadeLift.
+            iblIrradiance *= dikuShadeLift;
+          #endif
+          // Inside a room the sky arrives through a door and a window or two,
+          // off plaster and floorboards and lamplit walls, and it is no longer
+          // blue by then. Taken straight from the cube it lit every interior
+          // in the world the colour of the sky outside -- the Green Dragon's
+          // flags came out as blue-veined marble -- so indoors it keeps its
+          // strength and loses most of its hue, to a warm neutral.
+          float dikuIblL = dot( iblIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
+          iblIrradiance = mix( iblIrradiance, dikuIblL * vec3( 1.06, 1.0, 0.90 ), vIndoor * 0.8 );
+          float dikuRadL = dot( radiance, vec3( 0.2126, 0.7152, 0.0722 ) );
+          radiance = mix( radiance, dikuRadL * vec3( 1.03, 1.0, 0.95 ), vIndoor * 0.5 );
         #endif
         #include <lights_fragment_end>
       `)
@@ -1959,11 +2050,12 @@ function decorate(material, recipe, macro, grain) {
     material.onBeforeRender = (renderer) => updateBuried(renderer.toneMappingExposure);
   }
   if (recipe.moving) material.defines = { ...material.defines, DIKU_MOVING: 1 };
+  if (recipe.lift) material.defines = { ...material.defines, DIKU_LIFT: 1 };
   // Our injected source differs from stock, so it needs a key of its own or
   // three will hand us a program compiled for an undecorated material.
   material.customProgramCacheKey = () => `diku|${material.defines?.DIKU_DETAIL ? 1 : 0}`
     + `|${material.defines?.DIKU_WET ? 1 : 0}|${material.defines?.DIKU_BURIED ? 1 : 0}`
-    + `|${material.defines?.DIKU_MOVING ? 1 : 0}`;
+    + `|${material.defines?.DIKU_MOVING ? 1 : 0}|${material.defines?.DIKU_LIFT ? 1 : 0}`;
 }
 
 /**
@@ -2028,6 +2120,17 @@ export function createMaterials(size = 512, onProgress = () => {}) {
    * A plain uniform write shared by every material, so no recompile.
    */
   materials.setIndoorBounce = (value) => { indoorBounce.value = value; };
+
+  /**
+   * How much the sky lights the burnt district's surfaces (the recipes with
+   * `lift`), by the hour. Soot, ash and char are a third of the albedo of
+   * the town's stone, and at dusk -- env 0.35, a hemisphere of 0.08 -- the
+   * shade on them fell under the toe of the tone curve: 45% of a No Man's
+   * Land frame under luma 8, against 6-13% on Midgaard's streets. No static
+   * recipe setting can lift that without also lifting the noon shade, where
+   * the sky is already bright; this is set per hour instead. A plain uniform.
+   */
+  materials.setShadeLift = (value) => { shadeLift.value = value; };
 
   /** Close-range detail normals, on or off. Recompiles; only the P key does it. */
   materials.setDetail = (on) => {

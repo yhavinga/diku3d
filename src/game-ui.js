@@ -16,7 +16,7 @@
  * and this only decides what colour they are and how long they stay.
  */
 
-import { WEAR_NAME, MERC, armourWord } from './game.js';
+import { WEAR_NAME, MERC, armourWord, waysPhrase } from './game.js';
 import { createConsole } from './console.js';
 
 const CSS = `
@@ -95,8 +95,13 @@ const CSS = `
   font-size: 30px; font-weight: 700; line-height: 1; white-space: nowrap; letter-spacing: 0.01em;
   -webkit-text-stroke: 5px rgba(12,8,5,0.92); paint-order: stroke fill;
   text-shadow: 0 2px 10px rgba(0,0,0,0.55); will-change: transform, opacity; }
-#g-floats span.word { font-weight: 600; font-style: italic; letter-spacing: 0.04em;
-  -webkit-text-stroke: 4px rgba(12,8,5,0.9); }
+/* A blow that did not land is a word: upright small capitals, heavy ink round
+   them, set off the shoulder and clear of the body and whatever it holds up.
+   Italic light-blue over a raised shield was the first thing a review said it
+   could not read. */
+#g-floats span.word { font-weight: 700; font-style: normal; font-variant: small-caps;
+  letter-spacing: 0.09em; -webkit-text-stroke: 6px rgba(8,6,4,0.96);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 2px 12px rgba(0,0,0,0.6); }
 #g-floats span.crit { text-shadow: 0 0 18px rgba(255,120,40,0.55), 0 2px 10px rgba(0,0,0,0.6); }
 #g-floats span.note { font-size: 19px; font-weight: 600; -webkit-text-stroke: 3.5px rgba(12,8,5,0.85); }
 #g-hurt { position: absolute; inset: 0; opacity: 0; pointer-events: none;
@@ -386,7 +391,8 @@ export function createGameUi(game) {
   // -- gates ----------------------------------------------------------------
   const gatesPanel = el('div', 'panel');
   gatesPanel.id = 'g-gates';
-  gatesPanel.appendChild(el('h3', null, 'the ways out'));
+  const gatesTitle = el('h3', null, 'the way out');
+  gatesPanel.appendChild(gatesTitle);
   const gatesList = el('ul');
   gatesPanel.appendChild(gatesList);
   root.appendChild(gatesPanel);
@@ -495,7 +501,7 @@ export function createGameUi(game) {
     if (!chest || !above) return null;
     const perMetre = Math.max(12, Math.abs(chest.y - above.y) * 2);
     const reach = fig.body ? fig.body.r + fig.body.h * 0.6 : 0.3;
-    return { x: chest.x, y: chest.y, half: Math.max(0.24, reach) * perMetre };
+    return { x: chest.x, y: chest.y, perMetre, half: Math.max(0.24, reach) * perMetre };
   }
 
   /**
@@ -518,8 +524,8 @@ export function createGameUi(game) {
       if (crit) cls = 'crit';
     } else {
       text = event.kind === 'miss' ? 'miss' : (onYou ? event.kind : (event.kind === 'parry' ? 'parried' : 'dodged'));
-      colour = event.kind === 'miss' ? '#e4ddcd' : '#cfe3ff';
-      size = 23;
+      colour = event.kind === 'miss' ? '#efe8d8' : event.kind === 'parry' ? '#eef5ff' : '#fff0c8';
+      size = 27;
       cls = 'word';
     }
     let x; let y; let side;
@@ -531,8 +537,15 @@ export function createGameUi(game) {
       side = -last.side;
       const n = now - last.t < 700 ? last.n + 1 : 0;
       recent.set(key, { side, t: now, n });
-      x = body.x + side * (body.half + 14);
-      y = body.y - 8 - (n % 3) * 20;
+      if (cls === 'word') {
+        // Off the shoulder and past anything carried: a shield or a guard
+        // reaches half a metre either side of the body.
+        x = body.x + side * (Math.max(body.half, 0.5 * body.perMetre) + 20);
+        y = body.y - 0.42 * body.perMetre - (n % 3) * 24;
+      } else {
+        x = body.x + side * (body.half + 14);
+        y = body.y - 8 - (n % 3) * 20;
+      }
     } else if (onYou) {
       // Off your own health bar, where it is being taken from: in the middle
       // of the frame it sat on whoever was hitting you.
@@ -1054,18 +1067,35 @@ export function createGameUi(game) {
   }
 
   // -- the gate board -------------------------------------------------------
+  // Only the gate you are standing at: the room it leaves from or the one its
+  // warden stands in. A running list of every gate seen so far put "Outside the
+  // West Gate" on the panel at the East Gate, and the executioner's stair over
+  // the Grunting Boar's fireplace.
+  let gatesRoom;
   function drawGates() {
-    const seen = game.gates.filter((gate) => gate.seen || gate.open);
-    gatesPanel.classList.toggle('on', seen.length > 0);
+    const room = game.state.roomVnum;
+    gatesRoom = room;
+    const byWarden = new Map();
+    for (const gate of game.gates) {
+      if (gate.vnum !== room && gate.wardenRoom !== room) continue;
+      if (!byWarden.has(gate.warden)) byWarden.set(gate.warden, []);
+      byWarden.get(gate.warden).push(gate);
+    }
+    gatesPanel.classList.toggle('on', byWarden.size > 0);
     gatesList.textContent = '';
-    for (const gate of seen) {
-      const li = el('li', gate.open ? 'open' : '');
+    let count = 0;
+    for (const list of byWarden.values()) {
+      const open = list.every((gate) => gate.open);
+      const ways = waysPhrase(list).replace(/^the ways? /, '');
+      count += new Set(list.map((gate) => gate.way)).size;
+      const li = el('li', open ? 'open' : '');
       li.append(
-        el('span', null, gate.name),
-        el('em', null, gate.open ? 'open' : `${gate.wardenName} · ${gate.wardenLevel}`),
+        el('span', null, `${ways.charAt(0).toUpperCase()}${ways.slice(1)}, beyond the map`),
+        el('em', null, open ? 'open' : `${list[0].wardenName} · ${list[0].wardenLevel}`),
       );
       gatesList.appendChild(li);
     }
+    gatesTitle.textContent = count > 1 ? 'the ways out' : 'the way out';
   }
 
   // -- the spell bar ---------------------------------------------------------
@@ -1342,6 +1372,7 @@ export function createGameUi(game) {
     const span = 1000;
     xpFill.style.width = width(span - Math.min(span, s.expToLevel), span);
     if (s.level !== lastLevel) { lastLevel = s.level; drawGates(); }
+    if (s.roomVnum !== gatesRoom) drawGates();
 
     let t = game.target();
     // The killing blow is still on its way when the rules already have the
@@ -1385,7 +1416,7 @@ export function createGameUi(game) {
     if (fhead) {
       focusPlate.style.transform = `translate(${fhead.x.toFixed(1)}px, ${fhead.y.toFixed(1)}px) translate(-50%, -100%)`;
       if (focusName.textContent !== f.name) focusName.textContent = f.name;
-      const sub = f.warden ? `level ${f.level} · warden of ${f.warden.name}`
+      const sub = f.warden ? `level ${f.level} · holds ${f.holds}`
         : `level ${f.level}${f.shop ? ' · shopkeeper' : ''}${f.aggressive ? ' · aggressive' : ''}`;
       if (focusSub.textContent !== sub) focusSub.textContent = sub;
       focusSub.classList.toggle('warden', !!f.warden);

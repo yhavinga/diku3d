@@ -179,6 +179,202 @@ function gateBoard(dirName) {
   return board;
 }
 
+/**
+ * The shop's name, painted on its sign: "The Grunting Boar", "The Weapon
+ * Shop" -- what a real one says. It replaced a two-metre serif word floating
+ * over the keeper's head ("Bartender"), which made his bounds 3.2 m tall and
+ * read as a debug label.
+ *
+ * build.js hangs the modelled `hanging_sign` beside a shop's street door and
+ * reports where (`shopSign` decor); the name goes on both faces of that
+ * board, between its battens. A shop with no sign out -- a bar reached through
+ * another room -- gets a flat board high on its back wall instead, the first
+ * thing seen coming in; and if the model is missing, the street door gets a
+ * procedural bracket and board. A dealer in the open air has no wall to hang
+ * anything from and gets nothing: his trade is on his look-plate.
+ *
+ * Every name is in one canvas and every board in one merged mesh: one draw
+ * for the whole town.
+ */
+const SIGN_SLOT = [512, 352];
+const SIGN_COLS = 4;
+/** The panel between the model's battens, in its own frame: out along +z, up y. */
+const SIGN_PANEL = { z0: 0.245, z1: 1.135, y0: 2.855, y1: 3.465, face: 0.034 };
+
+function paintSign(ctx, x0, y0, text) {
+  const [w, h] = SIGN_SLOT;
+  // Dark paint fills the whole slot first, so a mip that bleeds across the
+  // slot edge bleeds border, not the neighbour's lettering.
+  ctx.fillStyle = '#1c130b';
+  ctx.fillRect(x0, y0, w, h);
+  const grad = ctx.createLinearGradient(0, y0, 0, y0 + h);
+  grad.addColorStop(0, '#40291a'); grad.addColorStop(1, '#2b1b10');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x0 + 8, y0 + 8, w - 16, h - 16);
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 40; i++) {
+    const y = y0 + 10 + ((i * 53) % (h - 20));
+    ctx.strokeStyle = `rgba(14,8,3,${0.10 + (i % 4) * 0.04})`;
+    ctx.beginPath(); ctx.moveTo(x0 + 8, y + 0.5);
+    ctx.bezierCurveTo(x0 + 170, y + 3, x0 + 340, y - 3, x0 + w - 8, y + 1); ctx.stroke();
+  }
+  // A gilt rule inset from the edge, the way a signwriter lines a board.
+  ctx.strokeStyle = 'rgba(214,176,98,0.85)'; ctx.lineWidth = 4;
+  ctx.strokeRect(x0 + 30, y0 + 30, w - 60, h - 60);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#efd59c';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowOffsetY = 2; ctx.shadowBlur = 3;
+  const font = (px) => `600 ${px}px "Iowan Old Style", "Palatino Linotype", Georgia, serif`;
+  const fit = (line, px, maxW) => {
+    ctx.font = font(px);
+    return Math.floor(px * Math.min(1, maxW / Math.max(1, ctx.measureText(line).width)));
+  };
+  // Two lines where there is an article, so the name gets the big letters;
+  // otherwise one line, or two at a word break if one would be too small.
+  const m = /^(the|ye)\s+(.+)$/i.exec(text.trim());
+  let lines = m ? [m[2]] : [text.trim()];
+  if (fit(lines[0], 76, w - 90) < 50 && / /.test(lines[0])) {
+    const words = lines[0].split(' ');
+    const cut = Math.ceil(words.length / 2);
+    lines = [words.slice(0, cut).join(' '), words.slice(cut).join(' ')];
+  }
+  const px = Math.min(...lines.map((line) => fit(line, 76, w - 90)));
+  const top = m ? 44 : 0;
+  if (m) {
+    ctx.font = font(34);
+    ctx.fillText(m[1].toUpperCase(), x0 + w / 2, y0 + 88);
+  }
+  ctx.font = font(px);
+  const mid = y0 + h / 2 + top / 2 + 4;
+  lines.forEach((line, k) => ctx.fillText(line, x0 + w / 2, mid + (k - (lines.length - 1) / 2) * px * 1.05));
+  ctx.shadowColor = 'transparent';
+}
+
+function shopSigns(world, layout, built) {
+  const CELL = 13;
+  const SHELL = ROOM / 2 + 0.7;   // the wall's outer face, as build.js lays it
+  const DOOR_W = 3.2;
+  const DOOR_H = 3.1;
+  const plans = [];
+  const hung = new Set();
+  for (const item of built.decor) {
+    if (item.kind !== 'shopSign') continue;
+    hung.add(item.vnum);
+    plans.push({ text: item.name, kind: 'model', at: item });
+  }
+  for (const [vnum, info] of built.rooms) {
+    if (hung.has(vnum) || info.unbuilt || info.outdoor) continue;
+    const room = world.rooms.get(vnum);
+    if (!room || !room.mobs.some((m) => m.shop)) continue;
+    const sides = layout.sides.get(vnum) || [];
+    const doors = [0, 1, 2, 3].filter((d) => sides[d] && sides[d].kind === 'alley' && sides[d].exit);
+    const street = doors.find((d) => {
+      const next = built.rooms.get(sides[d].exit.to);
+      return next && next.outdoor;
+    });
+    const cx = info.cell.x * CELL; const cz = info.cell.z * CELL; const y = info.center.y;
+    if (street !== undefined) {
+      plans.push({ text: room.name, kind: 'blade', dir: street, cx, cz, y });
+    } else if (doors.length) {
+      const across = (doors[0] + 2) % 4;
+      const wall = !sides[across] ? across : [0, 1, 2, 3].find((d) => !sides[d]);
+      if (wall !== undefined) plans.push({ text: room.name, kind: 'wall', dir: wall, cx, cz, y });
+    }
+  }
+  if (!plans.length) return null;
+
+  const rows = Math.ceil(plans.length / SIGN_COLS);
+  const canvas = document.createElement('canvas');
+  canvas.width = SIGN_SLOT[0] * SIGN_COLS; canvas.height = SIGN_SLOT[1] * rows;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width; const H = canvas.height;
+  plans.forEach((plan, i) => paintSign(ctx, (i % SIGN_COLS) * SIGN_SLOT[0], Math.floor(i / SIGN_COLS) * SIGN_SLOT[1], plan.text));
+
+  const iron = [(SIGN_SLOT[0] * 0.5) / W, 1 - 3 / H];   // inside slot 0's dark border
+  const flat = (geo) => {
+    const uv = geo.attributes.uv;
+    for (let k = 0; k < uv.count; k++) uv.setXY(k, iron[0], iron[1]);
+    return geo;
+  };
+  const m4 = new THREE.Matrix4();
+  const parts = [];
+  plans.forEach((plan, i) => {
+    const u0 = ((i % SIGN_COLS) * SIGN_SLOT[0]) / W; const u1 = u0 + SIGN_SLOT[0] / W;
+    const v1 = 1 - (Math.floor(i / SIGN_COLS) * SIGN_SLOT[1]) / H; const v0 = v1 - SIGN_SLOT[1] / H;
+    const slot = (geo, keep = () => true) => {
+      const uv = geo.attributes.uv;
+      for (let k = 0; k < uv.count; k++) {
+        if (keep(k)) uv.setXY(k, u0 + uv.getX(k) * (u1 - u0), v0 + uv.getY(k) * (v1 - v0));
+        else uv.setXY(k, iron[0], iron[1]);
+      }
+      return geo;
+    };
+    if (plan.kind === 'model') {
+      // Both faces of the modelled board, a few millimetres proud of it. A
+      // plane turned a quarter to +x reads left to right from +x, and the
+      // other quarter from -x, so neither face is mirrored.
+      const p = SIGN_PANEL; const a = plan.at;
+      const frame = new THREE.Matrix4().makeRotationY(a.rotY || 0).setPosition(a.x, a.y, a.z);
+      for (const s of [1, -1]) {
+        const panel = slot(new THREE.PlaneGeometry(p.z1 - p.z0, p.y1 - p.y0));
+        panel.applyMatrix4(m4.makeRotationY(s * Math.PI / 2))
+          .translate(s * p.face, (p.y0 + p.y1) / 2, (p.z0 + p.z1) / 2).applyMatrix4(frame);
+        parts.push(panel);
+      }
+      return;
+    }
+    const board = new THREE.BoxGeometry(1.0, 0.69, 0.05);
+    const painted = board.groups.slice(4);
+    slot(board, (k) => painted.some((g) => k >= g.start / 1.5 && k < (g.start + g.count) / 1.5));
+    board.clearGroups();
+    const [dx, , dz] = DIR_STEP4[plan.dir];
+    if (plan.kind === 'blade') {
+      // No model: an iron arm out of the wall beside the door, and the board
+      // under it square to the wall, so it reads from up and down the street.
+      const tx = -dz; const tz = dx;
+      const side = DOOR_W / 2 + 0.75;
+      const bx = plan.cx + dx * SHELL + tx * side; const bz = plan.cz + dz * SHELL + tz * side;
+      const top = plan.y + DOOR_H + 0.75;
+      const yaw = Math.atan2(-dz, dx);   // turns local +x out of the wall
+      const at = (along, up, geo) => geo.applyMatrix4(m4.makeRotationY(yaw))
+        .translate(bx + dx * along, top + up, bz + dz * along);
+      parts.push(at(0.75, -0.52, board));
+      parts.push(at(0.7, 0, flat(new THREE.BoxGeometry(1.4, 0.05, 0.05))));
+      const brace = flat(new THREE.BoxGeometry(0.95, 0.04, 0.04));
+      brace.applyMatrix4(m4.makeRotationZ(0.62));
+      parts.push(at(0.38, -0.27, brace));
+      for (const a of [0.35, 1.15]) parts.push(at(a, -0.09, flat(new THREE.BoxGeometry(0.025, 0.14, 0.025))));
+      parts.push(at(0.03, -0.25, flat(new THREE.BoxGeometry(0.06, 0.62, 0.12))));
+    } else {
+      // Flat on the inner face of the back wall, high, and along it from any
+      // wall torch: a flame licks up past four metres, and the Boar's first
+      // board hung straight over one.
+      const inner = ROOM / 2 - 0.04;
+      const tx = -dz; const tz = dx;
+      const wx = plan.cx + dx * inner; const wz = plan.cz + dz * inner;
+      const torches = built.decor.filter((d) => d.kind === 'torch' && Math.abs(d.y - plan.y - 2.9) < 1.5
+        && Math.abs((d.x - wx) * dx + (d.z - wz) * dz) < 1 && Math.abs((d.x - wx) * tx + (d.z - wz) * tz) < ROOM / 2);
+      const slide = [0, 1.7, -1.7, 2.9, -2.9].find((o) => torches.every((d) => Math.abs((d.x - wx) * tx + (d.z - wz) * tz - o) > 1.25)) ?? 0;
+      board.applyMatrix4(m4.makeRotationY(Math.atan2(-dx, -dz)));
+      parts.push(board.translate(wx + tx * slide, plan.y + 4.2, wz + tz * slide));
+    }
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  const merged = mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
+  const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ map: texture, roughness: 0.78, metalness: 0.05 }));
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.name = 'shop-signs';
+  mesh.userData.signs = plans.map((p) => ({ text: p.text, kind: p.kind }));
+  return mesh;
+}
+
+/** north, east, south, west -- are.js's DIR_STEP, the four that lie flat. */
+const DIR_STEP4 = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]];
+
 // ---------------------------------------------------------------- figures ----
 
 function pushPart(parts, geometry, colour, matrix) {
@@ -1979,13 +2175,12 @@ export function populate(world, layout, built, options = {}) {
       };
       interactables.push(record.interactable);
 
-      if (mob.shop) {
-        const sign = makeLabel(shopSign(mob.proto.short), 0.6, { colour: '#f0d9a8' });
-        sign.position.set(0, height + 1.15, 0);
-        fig.add(sign);
-      }
     });
   }
+
+  // --- shop signs -----------------------------------------------------------
+  const signs = shopSigns(world, layout, built);
+  if (signs) group.add(signs);
 
   // --- objects on the ground ---------------------------------------------
 
@@ -3098,7 +3293,4 @@ export function populate(world, layout, built, options = {}) {
   };
 }
 
-function shopSign(short) {
-  const clean = short.replace(/^(the|a|an)\s+/i, '');
-  return clean.charAt(0).toUpperCase() + clean.slice(1);
-}
+
