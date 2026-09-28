@@ -57,6 +57,8 @@ const RULES = [
     kind: 'skeleton_seated', at: 'table', many: 5,
     re: /\bskeletons?\b[^.]{0,30}\b(?:sit|sits|sitting|siting|seated)\b|\b(?:sitting|seated)\b[^.]{0,20}\bskeletons?\b/i,
   },
+  // "Two creatures are melted into the floor": what is left of them.
+  { kind: 'skeleton', at: 'strew', many: 3, re: /\b(?:creatures?|bodies|adventurers?)\b[^.]{0,25}\bmelted\b/i },
   {
     kind: 'skeleton', at: 'strew', many: 3,
     re: /\bskeletons?\b/i,
@@ -327,7 +329,7 @@ const KINDS = {
   strongbox: { models: ['clutter_strongbox'], solid: true, pad: 0.5 },
   chest: { models: ['clutter_chest'], solid: true },
   treasure: { models: ['clutter_hoard'], solid: true },
-  sarcophagus: { models: ['clutter_sarcophagus'], solid: true, pad: 0.6 },
+  sarcophagus: { models: ['clutter_sarcophagus'], solid: true, pad: 0.25 },
   alchemy: { models: ['clutter_alchemy'], solid: true, pad: 0.7 },
   cage: { models: ['clutter_cages'], solid: true },
   globe: { models: ['clutter_globe'], solid: true, pad: 0.8 },
@@ -441,6 +443,20 @@ export function placeClutter(ctx) {
       const az = dz ? [pos.z + dz * near, pos.z + dz * far] : [pos.z - 2.0, pos.z + 2.0];
       keep.push({ x0: Math.min(...ax), x1: Math.max(...ax), z0: Math.min(...az), z1: Math.max(...az) });
     }
+    // A dungeon's shell already hangs empty irons on its blank walls, a pair
+    // to a wall 2.3 m either side of the middle (build.js `buildShackles`):
+    // the dead hang between them in their own, and no second set goes up.
+    const shellKind = info.materials && info.materials.shell ? info.materials.shell.kind : null;
+    if (shellKind === 'dungeon') {
+      for (let d = 0; d < 4; d++) {
+        if (sides[d]) continue;
+        const [dx, , dz] = DIR_STEP[d];
+        for (const along of [-2.3, 2.3]) {
+          const cx = pos.x + dx * (ROOM / 2 - 0.2) + (dz ? along : 0); const cz = pos.z + dz * (ROOM / 2 - 0.2) + (dx ? along : 0);
+          keep.push({ x0: cx - 0.3, x1: cx + 0.3, z0: cz - 0.3, z1: cz + 0.3 });
+        }
+      }
+    }
     // Things on the walls a hanging must not cover: torches, and furniture.
     const torches = here.filter((d) => d.kind === 'torch');
     for (const d of here) {
@@ -457,7 +473,8 @@ export function placeClutter(ctx) {
       // The stone and temple kits' inner face is at 5.13 (raycast), the
       // procedural walls' and a Shire room's plaster at 5.0; the plan's
       // `face` says which, but is measured for the floor, not the wall.
-      if (plan && !outside) return ROOM / 2 + ((plan.face || 0) > 0 ? 0.13 : 0);
+      // A log room's round logs stand proud everywhere (the shell's lining).
+      if (plan && !outside) return ROOM / 2 + ((plan.face || 0) > 0 ? 0.13 : (shellKind === 'log' ? plan.face : 0));
       // A walled room's wall is never further out than ROOM / 2: a wall with
       // a doorway in it has had no collider past the opening's jambs.
       const most = outside ? 7.2 : ROOM / 2 + 0.01;
@@ -580,6 +597,7 @@ export function placeClutter(ctx) {
       if (ask.outdoor && !outside) continue;
       if (ask.indoor && outside) continue;
       if (ask.kind === 'well' && room.exits && room.exits[5]) continue; // the way down is its well already
+      if (ask.kind === 'shackles' && shellKind === 'dungeon') continue;
       const spec = KINDS[ask.kind];
       if (ask.kind === 'giant_chain') { placeChain(); continue; }
       if (ask.kind === 'skeleton_seated') { seated(ask); continue; }

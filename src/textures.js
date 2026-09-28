@@ -1276,6 +1276,25 @@ const SURFACES = {
    * up the wall. Where it is thickest the stone is a charcoal grey and dead
    * matt; between the tongues the wall is grimed, never clean.
    */
+  /**
+   * "The floorstones are fiery red." Flags of dark iron-red stone, cracked
+   * between and across, and the cracks still hot: `emit` is how much of the
+   * crack glows, patchy, since a floor does not cool evenly.
+   */
+  embers(u, v, s) {
+    const [, edge, id] = cellular(u * 7, v * 7, 7, 811, 0.42);
+    const grain = fbm(u * 40, v * 40, 40, 813, 3);
+    const split = fbm(u * 18, v * 18, 18, 821, 3);
+    const heat = clamp01(fbm(u * 3, v * 3, 3, 817, 3) * 2.2 - 0.6);
+    // The joints, and a hairline across some stones where the heat split them.
+    const crack = Math.max(clamp01(1 - edge / 0.07), clamp01(1 - Math.abs(split - 0.5) / 0.018) * (id > 0.55 ? 1 : 0));
+    const stone = mix(rgb(0x3a221b), rgb(0x6a3322), id * 0.55 + grain * 0.3 + heat * 0.25);
+    s.color = mix(mix(stone, rgb(0x241713), (1 - grain) * 0.25), rgb(0x160d0a), crack * 0.85);
+    s.height = 0.62 + grain * 0.1 - crack * 0.45;
+    s.rough = 0.82 - heat * 0.12;
+    s.emit = crack * (0.25 + heat * 0.75);
+  },
+
   sootwall(u, v, s) {
     // Random rubble, not coursed: courses of 19 to 32 cm and stones of 40 to
     // 90, no two rows alike. The ruins wore the town's coursed stone -- every
@@ -1498,7 +1517,11 @@ function bake(name, size) {
   const albedo = new Uint8ClampedArray(size * size * 4);
   const roughness = new Uint8ClampedArray(size * size * 4);
   const height = new Float32Array(size * size);
-  const s = { color: [0, 0, 0], height: 0, rough: 1, metal: 0, alpha: 1 };
+  const s = { color: [0, 0, 0], height: 0, rough: 1, metal: 0, alpha: 1, emit: 0 };
+  // Only a surface that glows sets `emit`; it is the share of a fixed ember
+  // colour, and the map is dropped again if nothing on it did.
+  const emissive = new Uint8ClampedArray(size * size * 4);
+  let glows = false;
   // The palettes above read well as flat swatches, but albedo is consumed in
   // linear space, where mid-greys drop to almost nothing. This curve lifts the
   // darks and leaves the highlights roughly where they were.
@@ -1508,8 +1531,17 @@ function bake(name, size) {
     for (let x = 0; x < size; x++) {
       s.metal = 0;
       s.alpha = 1;
+      s.emit = 0;
       surface((x + 0.5) / size, (y + 0.5) / size, s);
       const i = (y * size + x);
+      if (s.emit > 0) {
+        glows = true;
+        const e = clamp01(s.emit);
+        emissive[i * 4] = 255 * e;
+        emissive[i * 4 + 1] = 92 * e * e;
+        emissive[i * 4 + 2] = 24 * e * e * e;
+      }
+      emissive[i * 4 + 3] = 255;
       albedo[i * 4] = lift(s.color[0]);
       albedo[i * 4 + 1] = lift(s.color[1]);
       albedo[i * 4 + 2] = lift(s.color[2]);
@@ -1547,7 +1579,7 @@ function bake(name, size) {
     }
   }
 
-  return { albedo, normal, roughness, size };
+  return { albedo, normal, roughness, size, emissive: glows ? emissive : null };
 }
 
 function toTexture(data, size, colorSpace) {
@@ -1694,6 +1726,14 @@ const RECIPES = {
   wood: { surface: 'wood', scale: 1.2, normalScale: 0.3, env: 0.75, wet: 0, detail: 0.2 },
   blanket: { surface: 'blanket', scale: 0.6, normalScale: 0.4, env: 0.3, wet: 0, detail: 0 },
   firebrick: { surface: 'brick', scale: 2.25, normalScale: 0.5, env: 0.8, wet: 0, detail: 0.5 },
+  // A room something has burned out, underground: the ruins' soot on the
+  // walls, and a floor whose cracks are still hot (`glow` is the emissive's
+  // strength, over the bloom threshold where the heat is).
+  scorched: { surface: 'sootwall', scale: 3.6, normalScale: 1.0, env: 1, wet: 0, detail: 0.55, buried: true },
+  emberstone: { surface: 'embers', scale: 3.2, normalScale: 0.9, env: 1, wet: 0, detail: 0.5, buried: true, glow: 3.2 },
+  // The sewer's ashlar in daylight: the dressed stone round a window in a
+  // masonry wall, which is finer and paler work than the wall it stands in.
+  dressing: { surface: 'ashlar', scale: 3.0, normalScale: 0.6, env: 0.8, wet: 0, detail: 0.5 },
   brokencobble: { surface: 'brokencobble', scale: 2.2, normalScale: 1.0, env: 1.05, lift: true, wet: 0.55, detail: 0.5 },
   ash: { surface: 'ash', scale: 3.0, normalScale: 0.6, env: 0.6, lift: true, wet: 0, detail: 0.6 },
   wasteground: { surface: 'wasteground', scale: 4.0, normalScale: 0.7, env: 0.45, lift: true, wet: 0, detail: 0.6 },
@@ -2287,6 +2327,18 @@ export function createMaterials(size = 512, onProgress = () => {}) {
     });
     material.name = name;
     material.userData.uvScale = 1 / recipe.scale;
+    if (baked.emissive) {
+      material.emissiveMap = toTexture(baked.emissive, size, THREE.SRGBColorSpace);
+      material.emissive = new THREE.Color(0xffffff);
+      material.emissiveIntensity = recipe.glow ?? 1;
+    }
+    // three draws a front-sided material's *back* faces into the shadow map,
+    // so what shades a ledge in a wall is the wall's own inner face a few
+    // centimetres away -- inside the bias. Every 3 cm course step in the
+    // stone kit caught the noon sun through a closed room as a white streak
+    // along the mortar, and at dusk whole courses of the Park Cafe lit up.
+    // Both faces put the wall's sunward face in the map, half a metre off.
+    material.shadowSide = THREE.DoubleSide;
     if (recipe.cutout) {
       material.alphaTest = recipe.cutout;
       material.side = THREE.DoubleSide;
