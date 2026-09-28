@@ -624,13 +624,19 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
   const _grid = new Map();
   const near = [];
 
+  // Numeric keys and lists kept between frames: a string and an array per
+  // figure per frame was ~1.4 MB/s of garbage for a table rebuilt every frame.
+  const gridKey = (kx, kz) => (kx + 32768) * 65536 + (kz + 32768);
+  const _filled = [];
   function rebuildGrid() {
-    _grid.clear();
+    for (const list of _filled) list.length = 0;
+    _filled.length = 0;
     for (const fig of figures) {
       if (fig.m.gone && fig.m.gone.done) continue;
-      const k = `${Math.floor(fig.at.x / 3)},${Math.floor(fig.at.z / 3)}`;
+      const k = gridKey(Math.floor(fig.at.x / 3), Math.floor(fig.at.z / 3));
       let list = _grid.get(k);
       if (!list) { list = []; _grid.set(k, list); }
+      if (!list.length) _filled.push(list);
       list.push(fig);
     }
   }
@@ -640,7 +646,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     const kx = Math.floor(fig.at.x / 3); const kz = Math.floor(fig.at.z / 3);
     for (let dx = -1; dx <= 1; dx++) {
       for (let dz = -1; dz <= 1; dz++) {
-        const list = _grid.get(`${kx + dx},${kz + dz}`);
+        const list = _grid.get(gridKey(kx + dx, kz + dz));
         if (list) for (const other of list) if (other !== fig) out.push(other);
       }
     }

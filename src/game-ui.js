@@ -1059,23 +1059,28 @@ export function createGameUi(game, { built = null } = {}) {
     if (!desc) return;
     const d = desc.getBoundingClientRect();
     const v = vitals.getBoundingClientRect();
-    if (d.width && v.width) document.body.style.setProperty('--g-mid', `${Math.round((d.right + v.left) / 2)}px`);
+    // A custom property on <body> restyles the whole page, so only when it moves.
+    const mid = `${Math.round((d.right + v.left) / 2)}px`;
+    if (d.width && v.width && document.body.style.getPropertyValue('--g-mid') !== mid) document.body.style.setProperty('--g-mid', mid);
     let top = title ? title.getBoundingClientRect().bottom : 0;
     if (gatesPanel.classList.contains('on')) top = Math.max(top, gatesPanel.getBoundingClientRect().bottom);
-    const bottom = window.innerHeight - d.top + 10;
-    log.style.bottom = `${Math.round(bottom)}px`;
+    const bottom = `${Math.round(window.innerHeight - d.top + 10)}px`;
+    if (log.style.bottom !== bottom) log.style.bottom = bottom;
     // No floor: a 60 px minimum is what put a line over the first line of
     // the prose when the panel was tall. Lines that do not fit are clipped
     // from the top (the oldest), and every one is in the command line too.
     const room = Math.max(0, Math.round(d.top - 10 - (top + 12)));
-    log.style.maxHeight = `${room}px`;
+    if (log.style.maxHeight !== `${room}px`) log.style.maxHeight = `${room}px`;
     // Whole lines only, newest first: overflow would slice the oldest one
-    // through the middle of its words.
+    // through the middle of its words. All shown, all measured, then the
+    // overflow hidden: showing and measuring one line at a time forced a
+    // layout per line.
     let used = 0;
     const kids = [...log.children];
+    for (const kid of kids) if (kid.style.display) kid.style.display = '';
+    const heights = kids.map((kid) => kid.offsetHeight);
     for (let i = kids.length - 1; i >= 0; i--) {
-      kids[i].style.display = '';
-      used += kids[i].offsetHeight + 2;
+      used += heights[i] + 2;
       if (used > room) kids[i].style.display = 'none';
     }
   }
@@ -1382,7 +1387,8 @@ export function createGameUi(game, { built = null } = {}) {
     const wait = game.magic ? game.magic.wait : 0;
     for (const { node, cd, sp } of slotNodes) {
       node.classList.toggle('poor', game.state.mana < sp.mana);
-      cd.style.height = `${Math.min(100, (wait / 3) * 100)}%`;
+      const height = `${Math.min(100, (wait / 3) * 100)}%`;
+      if (cd.__height !== height) { cd.__height = height; cd.style.height = height; }
     }
   }
 
@@ -1491,8 +1497,10 @@ export function createGameUi(game, { built = null } = {}) {
       node.classList.toggle('unknown', !a.known);
       node.classList.toggle('idle', a.known && !a.ready && wait === 0);
       node.classList.toggle('on', !!a.on);
-      node.querySelector('.cd').style.width = `${Math.min(100, (wait / 24) * 100)}%`;
-      node.querySelector('.p').textContent = a.known ? `${a.learned}%` : node.querySelector('.p').textContent;
+      const cd = node.querySelector('.cd');
+      const want = `${Math.min(100, (wait / 24) * 100)}%`;
+      if (cd.__width !== want) { cd.__width = want; cd.style.width = want; }
+      if (a.known) { const p = node.querySelector('.p'); const learned = `${a.learned}%`; if (p.textContent !== learned) p.textContent = learned; }
     }
   }
 
@@ -1560,6 +1568,12 @@ export function createGameUi(game, { built = null } = {}) {
   let tick = 0;
   let lastTarget = null;
 
+  // Every frame rewrote the vitals' widths, the prompt's text and its gold as
+  // fresh HTML whether or not they had moved, and each write is a style
+  // recalculation. Only a changed value is written now.
+  const putWidth = (node, value) => { if (node.__width !== value) { node.__width = value; node.style.width = value; } };
+  const putText = (node, value) => { if (node.textContent !== value) node.textContent = value; };
+
   function update() {
     consume();
     updateSpells();
@@ -1567,13 +1581,13 @@ export function createGameUi(game, { built = null } = {}) {
 
     const width = (value, max) => `${Math.max(0, Math.min(100, (value / Math.max(1, max)) * 100))}%`;
     const hitShown = s.hit + unshown(null);
-    hpFill.style.width = width(hitShown, s.maxHit);
-    manaFill.style.width = width(s.mana, s.maxMana);
-    moveFill.style.width = width(s.move, s.maxMove);
-    promptLeft.textContent = `${Math.max(0, hitShown)}hp ${s.mana}m ${s.move}mv`;
-    promptRight.innerHTML = `<b>${s.gold} gold</b>`;
+    putWidth(hpFill, width(hitShown, s.maxHit));
+    putWidth(manaFill, width(s.mana, s.maxMana));
+    putWidth(moveFill, width(s.move, s.maxMove));
+    putText(promptLeft, `${Math.max(0, hitShown)}hp ${s.mana}m ${s.move}mv`);
+    if (promptRight.__gold !== s.gold) { promptRight.__gold = s.gold; promptRight.innerHTML = `<b>${s.gold} gold</b>`; }
     const span = 1000;
-    xpFill.style.width = width(span - Math.min(span, s.expToLevel), span);
+    putWidth(xpFill, width(span - Math.min(span, s.expToLevel), span));
     if (s.level !== lastLevel) { lastLevel = s.level; drawGates(); }
     if (s.roomVnum !== gatesRoom) drawGates();
     else if (gateRows.length) showGates();
@@ -1609,19 +1623,19 @@ export function createGameUi(game, { built = null } = {}) {
       const at = offPanels(foe, head.x, head.y - ph / 2, 0, 0, 0);
       foe.style.transform = `translate(${at.x.toFixed(1)}px, ${(at.y + ph / 2).toFixed(1)}px) translate(-50%, -100%)`;
       if (foeName.textContent !== t.name) foeName.textContent = t.name;
-      foeNow.style.width = `${percent}%`;
-      foeLag.style.width = `${percent}%`;
+      putWidth(foeNow, `${percent}%`);
+      putWidth(foeLag, `${percent}%`);
       const cond = `level ${t.level} · ${t.condition}`;
       if (foeCond.textContent !== cond) foeCond.textContent = cond;
     }
     const lost = !!foeT && !head;
     target.classList.toggle('on', lost);
     if (lost) {
-      tName.textContent = t.name;
-      tSub.textContent = `level ${t.level} · fighting you`;
-      tBar.style.width = `${percent}%`;
-      tCond.textContent = t.condition;
-      tWhere.textContent = whereIs(t.slot);
+      putText(tName, t.name);
+      putText(tSub, `level ${t.level} · fighting you`);
+      putWidth(tBar, `${percent}%`);
+      putText(tCond, t.condition);
+      putText(tWhere, whereIs(t.slot));
     }
 
     // Whatever is in the crosshair, named over its own head -- unless it is

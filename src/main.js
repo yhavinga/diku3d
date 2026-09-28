@@ -1304,7 +1304,10 @@ async function boot() {
       document.body.classList.remove('titling');
     }
     const reeling = !!(titleReel && titleReel.active);
-    if (!quality.shouldRender(now, state.paused && !reeling)) return;
+    // The title reel is for someone looking at it: left up in a window behind
+    // other work, it drops to the same crawl as a released mouse.
+    const idle = reeling ? !document.hasFocus() : state.paused;
+    if (!quality.shouldRender(now, idle)) return;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     elapsed += dt;

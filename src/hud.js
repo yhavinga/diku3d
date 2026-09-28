@@ -302,6 +302,9 @@ class CompassRose {
     this.swing += (delta * 600 - this.swing * 38) * step;
     this.shown = (this.shown + this.swing * step + 360) % 360;
 
+    // A card at rest is the picture already on the canvas.
+    if (this.drawn !== undefined && Math.abs(this.shown - this.drawn) < 0.01) return this.shown;
+    this.drawn = this.shown;
     const ctx = this.ctx;
     ctx.clearRect(0, 0, COMPASS_SIZE, COMPASS_SIZE);
     ctx.save();
@@ -493,10 +496,16 @@ export class Hud {
     const names = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     const index = Math.round(shown / 45) % 8;
     const degrees = Math.round(shown) % 360;
-    this.el.bearing.textContent = `${names[index]} ${degrees.toString().padStart(3, '0')}°`;
+    const label = `${names[index]} ${degrees.toString().padStart(3, '0')}°`;
+    if (this.el.bearing.textContent !== label) this.el.bearing.textContent = label;
     // The map gets the true heading, not the card's: it is a marker, not an
-    // instrument, and has nothing to settle.
-    this.drawMinimap(roomVnum, heading);
+    // instrument, and has nothing to settle. It is redrawn when the room or
+    // the heading moves, and a few times a second for the mobiles' marks.
+    this.mapAge = (this.mapAge || 0) + dt;
+    if (roomVnum !== this.mapRoom || Math.abs(heading - this.mapHeading) > 0.002 || this.mapAge > 0.25) {
+      this.mapRoom = roomVnum; this.mapHeading = heading; this.mapAge = 0;
+      this.drawMinimap(roomVnum, heading);
+    }
   }
 
   drawMinimap(roomVnum, heading) {

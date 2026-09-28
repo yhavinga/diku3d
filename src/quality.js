@@ -65,7 +65,7 @@ export const PRESETS = {
   high: {
     dpr: 1.75, bloom: 'half', aa: 'smaa', shadow: 3072, span: 38,
     ao: { scale: 0.4, samples: 9, denoise: 4 },
-    shafts: false, detail: true, lights: 14, fps: 60,
+    shafts: false, detail: true, lights: 14, fps: 30,
   },
   max: {
     dpr: 2.0, bloom: 'full', aa: 'smaa', shadow: 4096, span: 34,
