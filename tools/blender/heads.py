@@ -123,7 +123,14 @@ def _loft_scale(table, zk=1.0, wk=(), fk=(), bk=(), nk=()):
             return pairs
         if not pairs:
             return 1.0
-        return float(np.interp(z, [a for a, _ in pairs], [b for _, b in pairs]))
+        zs = [a for a, _ in pairs]
+        # np.interp wants its x ascending and says nothing when it is not:
+        # a table written crown-down came back as its last factor at every
+        # height, which is how the woman's face got the chin's width all
+        # the way up.
+        if any(b <= a for a, b in zip(zs, zs[1:])):
+            raise ValueError("loft table must run in ascending height: %r" % (pairs,))
+        return float(np.interp(z, zs, [b for _, b in pairs]))
     return [(z * at(zk, z), w * at(wk, z), f * at(fk, z), b * at(bk, z), n * at(nk, z))
             for (z, w, f, b, n) in table]
 
@@ -158,24 +165,30 @@ MALE = dict(
 # nose smaller and the lips fuller.
 FEMALE = dict(
     MALE, name="female", sex="f",
-    loft=_loft_scale(LOFT_MALE, zk=[(0.13, 1.0), (-0.03, 1.0), (-0.13, 0.97)],
-                     wk=[(0.10, 1.0), (0.03, 1.0), (0.0, 0.975), (-0.03, 0.955), (-0.06, 0.945), (-0.09, 0.945), (-0.105, 0.99), (-0.12, 1.04)],
-                     fk=[(0.10, 1.02), (0.04, 0.985), (0.02, 0.96), (0.0, 0.985), (-0.07, 0.985), (-0.10, 0.97)],
-                     bk=[(0.1, 1.0), (-0.06, 0.96), (-0.12, 0.92)],
-                     nk=[(0.1, 0.94), (0.03, 0.88), (0.0, 0.80), (-0.05, 0.80), (-0.09, 0.84), (-0.12, 0.90)]),
-    brow=0.15,
-    cheek=((0.047, -0.055, -0.010), (0.018, 0.014, 0.012)),
-    chin=((0.0, -0.074, -0.098), (0.011, 0.008, 0.010)),
+    # A narrower, shorter lower face whose sections stay round to the chin:
+    # the man's jaw is a rounded box from the cheekbones down, and it was
+    # that corner -- not the brow or the nose -- that read as a man's at a
+    # metre, once these tables ran the way np.interp reads them.
+    loft=_loft_scale(LOFT_MALE, zk=[(-0.13, 0.95), (-0.03, 1.0), (0.13, 1.0)],
+                     wk=[(-0.12, 0.96), (-0.105, 0.92), (-0.09, 0.895), (-0.06, 0.905), (-0.03, 0.935), (0.0, 0.965), (0.03, 0.99), (0.10, 1.0)],
+                     fk=[(-0.10, 0.94), (-0.07, 0.99), (-0.04, 1.02), (0.0, 0.995), (0.02, 0.955), (0.04, 0.985), (0.10, 1.03)],
+                     bk=[(-0.12, 0.92), (-0.06, 0.96), (0.1, 1.0)],
+                     nk=[(-0.12, 0.86), (-0.09, 0.76), (-0.05, 0.72), (0.0, 0.78), (0.03, 0.88), (0.1, 0.94)]),
+    brow=0.0,
+    cheek=((0.046, -0.058, -0.004), (0.015, 0.011, 0.010)),
+    chin=((0.0, -0.072, -0.097), (0.009, 0.007, 0.009)),
+    # The round of the cheek under the bone, where a man's face hollows.
+    apple=((0.036, -0.066, -0.024), (0.016, 0.009, 0.013)),
     mouth_y=-0.0875,
     neck_r=0.042,
-    eye=(0.0315, -0.067, 0.005), eye_r=0.0120,
-    fissure=(0.0156, 0.0047, 0.0045), nose_k=0.0045,
-    tilt=0.0016,
-    nose=0.62, nose_w=0.80, nose_len=0.78, nose_top=0.010, nose_up=0.0018,
-    apple=((0.036, -0.066, -0.026), (0.014, 0.008, 0.011)), fold_z=0.0018,
-    lid=0.0014,
-    lips=1.4, lip_w=0.97,
-    fold=0.15,
+    eye=(0.0312, -0.067, 0.005), eye_r=0.0126,
+    fissure=(0.0164, 0.0056, 0.0049), nose_k=0.0045,
+    tilt=0.0018,
+    nose=0.52, nose_w=0.74, nose_len=0.70, nose_top=0.008, nose_up=0.0030,
+    fold_z=0.0014,
+    lid=0.0012,
+    lips=2.4, lip_w=0.94,
+    fold=0.05,
     stubble=0.0,
 )
 
@@ -229,9 +242,9 @@ TROLL = dict(
 RAT = dict(
     MALE, name="wererat",
     loft=_loft_scale(LOFT_MALE,
-                     wk=[(0.1, 0.98), (0.02, 0.96), (-0.02, 0.86), (-0.06, 0.74), (-0.10, 0.70), (-0.12, 0.8)],
-                     fk=[(0.1, 0.98), (0.03, 1.0), (0.0, 1.18), (-0.03, 1.55), (-0.055, 1.62), (-0.08, 1.30), (-0.10, 1.0), (-0.12, 0.85)],
-                     nk=[(0.1, 1.0), (0.02, 0.8), (-0.03, 0.46), (-0.06, 0.46), (-0.12, 0.7)]),
+                     wk=[(-0.12, 0.8), (-0.10, 0.70), (-0.06, 0.74), (-0.02, 0.86), (0.02, 0.96), (0.1, 0.98)],
+                     fk=[(-0.12, 0.85), (-0.10, 1.0), (-0.08, 1.30), (-0.055, 1.62), (-0.03, 1.55), (0.0, 1.18), (0.03, 1.0), (0.1, 0.98)],
+                     nk=[(-0.12, 0.7), (-0.06, 0.46), (-0.03, 0.46), (0.02, 0.8), (0.1, 1.0)]),
     brow=0.3, cheek=((0.040, -0.060, -0.016), (0.008, 0.008, 0.006)), nose_fwd=0.036,
     chin=((0.0, -0.080, -0.098), (0.008, 0.008, 0.008)),
     mouth_z=-0.070, mouth_y=-0.118,
@@ -246,9 +259,9 @@ RAT = dict(
 # and four tentacles where the mouth should be.
 ILLITHID = dict(
     MALE, name="illithid",
-    loft=_loft_scale(LOFT_MALE, wk=[(0.1, 1.06), (0.03, 1.02), (-0.03, 0.94), (-0.12, 0.82)],
-                     fk=[(0.1, 1.0), (0.0, 0.98), (-0.06, 0.96), (-0.12, 0.9)],
-                     bk=[(0.1, 1.12), (0.0, 1.08), (-0.12, 1.0)]),
+    loft=_loft_scale(LOFT_MALE, wk=[(-0.12, 0.82), (-0.03, 0.94), (0.03, 1.02), (0.1, 1.06)],
+                     fk=[(-0.12, 0.9), (-0.06, 0.96), (0.0, 0.98), (0.1, 1.0)],
+                     bk=[(-0.12, 1.0), (0.0, 1.08), (0.1, 1.12)]),
     dome=((0.0, 0.028, 0.066), (0.078, 0.108, 0.068)),
     brow=0.6, no_features=True, ears=False, brows=False, tentacles=True,
     cheek=((0.050, -0.056, -0.014), (0.010, 0.010, 0.008)),
@@ -259,7 +272,33 @@ ILLITHID = dict(
 
 ETTIN = dict(TROLL, name="ettin", double=True)
 
-SPECS = {s["name"]: s for s in (MALE, FEMALE, OLD_MALE, OLD_FEMALE, TROLL, RAT, ILLITHID, ETTIN)}
+# An ogre: the troll's kin in bulk and hide, but a heavier, blunter face --
+# a low brow over a broad flat nose, a wide lipped mouth over a jaw like a
+# shovel, small ears -- and no tusks: not one ogre in the stock areas is
+# described with them. The troll's hook nose, lantern jaw and tusks are what
+# made the Keep of Mahn-Tor read as a goblin village.
+OGRE = dict(
+    TROLL, name="ogre",
+    loft=_loft_scale(LOFT_MALE,
+                     wk=[(-0.12, 1.5), (-0.10, 1.44), (-0.07, 1.32), (-0.03, 1.15), (0.02, 1.02), (0.05, 0.95), (0.1, 0.88)],
+                     fk=[(-0.12, 1.12), (-0.10, 1.14), (-0.07, 1.12), (-0.03, 1.06), (0.0, 1.0), (0.03, 0.9), (0.06, 0.78), (0.1, 0.68)],
+                     bk=[(-0.12, 1.14), (0.0, 1.02), (0.1, 0.94)],
+                     nk=[(-0.12, 1.2), (-0.03, 1.14), (0.1, 1.0)]),
+    brow=3.0,
+    cheek=((0.060, -0.060, -0.018), (0.019, 0.015, 0.014)),
+    chin=((0.0, -0.094, -0.112), (0.040, 0.016, 0.020)),
+    mouth_z=-0.074, mouth_y=-0.0990,
+    eye=(0.0335, -0.073, 0.005), eye_r=0.0112,
+    fissure=(0.0124, 0.0040, 0.0036), iris=(0.20, 0.12, 0.05), sclera=(0.50, 0.46, 0.36),
+    tilt=-0.0010,
+    nose=1.5, nose_w=1.9, nose_len=1.05, nose_hump=0.0, nose_up=0.002,
+    lips=1.9, lip_w=1.55,
+    ear_scale=(1.25, 1.2, 1.2), ear_turn=30, ear_point=0.0,
+    warts=[(0.42, -1.0, 0.02, 0.0045), (-0.5, -1.0, -0.22, 0.005), (0.62, -0.75, 0.36, 0.0042)],
+    tusks=False,
+)
+
+SPECS = {s["name"]: s for s in (MALE, FEMALE, OLD_MALE, OLD_FEMALE, TROLL, RAT, ILLITHID, ETTIN, OGRE)}
 
 # Which faces each body carries, by file: the young and the old of each sex.
 # Every face of one body shares its eyes, its skull and its ears, so hair and
@@ -268,7 +307,7 @@ FACES = {
     "male": [("face_male", MALE), ("face_male_old", OLD_MALE), ("face_wererat", RAT),
              ("face_illithid", ILLITHID)],
     "female": [("face_female", FEMALE), ("face_female_old", OLD_FEMALE)],
-    "troll": [("face_troll", TROLL), ("face_ettin", ETTIN)],
+    "troll": [("face_troll", TROLL), ("face_ettin", ETTIN), ("face_ogre", OGRE)],
 }
 
 # Where the per-person bones pivot, canonical: the jaw from the middle of
@@ -931,8 +970,8 @@ def skull(P, name="skull"):
     under the zygomatic arch, the temples sunk -- in bone, the cavities dark
     in the vertex colour."""
     S = MALE
-    mass = loft_field(_loft_scale(LOFT_MALE, wk=[(0.1, 1.0), (0.0, 0.97), (-0.06, 0.90), (-0.12, 0.92)],
-                                  fk=[(0.1, 1.0), (0.0, 0.97), (-0.06, 0.95), (-0.12, 0.97)]))
+    mass = loft_field(_loft_scale(LOFT_MALE, wk=[(-0.12, 0.92), (-0.06, 0.90), (0.0, 0.97), (0.1, 1.0)],
+                                  fk=[(-0.12, 0.97), (-0.06, 0.95), (0.0, 0.97), (0.1, 1.0)]))
     dx, dr = S["dome"]
 
     def f(p):

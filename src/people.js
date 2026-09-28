@@ -48,10 +48,26 @@ const MONSTERS = [
   ['ghost', W('ghosts?|spectres?|specters?|wraiths?|phantoms?|apparitions?|banshees?|spirits?|shades?|poltergeists?|haunts?')],
   ['zombie', W('zombies?|ghouls?|ghasts?|corpses?|mummy|mummies|undead|revenants?|wights?|draugr')],
   // Anything troll-shaped: the troll rig at the right size and in the right
-  // hide. `giant` only as a person -- a giant spider is not an ogre.
+  // hide. Giants are not in it: see GIANT.
   ['troll', W('trolls?|ogres?|ogrillons?|ettins?|gnolls?|orcs?|orcish|hobgoblins?|bugbears?|goblins?|kobolds?|gargoyles?|swamp ?thing|trogs?|troglodytes?|yeti|sasquatch|slaads?|lizard ?m[ae]n|bullywugs?')],
-  ['troll', /\bgiants?\b(?!\s+(spider|rat|snake|worm|ant|beetle|bat|slug|lizard|frog|toad|eagle|centipede|scorpion|leech|crab|fish|squid|serpent|wasp|bee|fly|spiders|rats|snakes))/i],
 ];
+
+/**
+ * A giant is a man, bigger: every one the stock areas describe says so --
+ * "about 8 feet tall, with arms of steel", "this huge monster of a man ...
+ * and a BIG stick", "about 9 feet tall ... not very intelligent". So the
+ * people rig, scaled to the height the prose gives when it gives one, in
+ * rough clothes and a beard, with a club. They used to be trolls, tusks and
+ * all. A giant spider is not a giant, nor a giant troll.
+ */
+const GIANT = /\bgiants?\b(?!\s+(trolls?|spider|rat|snake|worm|ant|beetle|bat|slug|lizard|frog|toad|eagle|centipede|scorpion|leech|crab|fish|squid|serpent|wasp|bee|fly|spiders|rats|snakes))/i;
+const NUMBER = { six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20 };
+function giantScale(prose) {
+  const m = /\b(\d+(?:\.\d+)?|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty)[ -](?:feet|foot|ft)\b/i.exec(prose);
+  const feet = m ? (NUMBER[m[1].toLowerCase()] || parseFloat(m[1])) : 9;
+  // A man is 1.75 m; the giants are kept within what a room's doors allow.
+  return Math.min(1.9, Math.max(1.35, feet * 0.3048 / 1.75));
+}
 
 /** A troll-rigged monster's size and hide, by what it is called. */
 const TROLL_KINDS = [
@@ -271,6 +287,9 @@ export function personOf(proto, ITEM, instance = 0) {
       // A gang's ogres and trolls wear what they took: a crude leather
       // jacket over the hide -- every ogre, half the trolls.
       if (/\bgang\b/i.test(w) && (/\bogres?\b/i.test(w) || seed2 < 0.5)) out.arch = 'brute';
+      // An ogre's own face: the troll's kin, blunter, and without tusks --
+      // no ogre in the stock areas is described with any.
+      if (/\b(ogres?|ogrillons?)\b/i.test(w)) out.face = 'face_ogre';
     } else {
       out.arch = kind;
       if (kind === 'skeleton') {
@@ -283,6 +302,7 @@ export function personOf(proto, ITEM, instance = 0) {
         out.face = 'face_male_old';
         out.tint = { skin: ghoul ? 0x6a7362 : 0x7f8a6c, cloth: pick(DRAB, seed), cloth2: pick(DRAB, seed3), hair: 0x4a4238 };
         out.pieces = seed < 0.5 ? ['hair_fringe'] : ['hair_long'];
+        if (GIANT.test(w)) out.scale = giantScale(`${proto.long || ''} ${proto.description || ''}`);
       } else {
         out.tint = { skin: 0xb8c4cc, cloth: 0x9fb2c2, cloth2: 0x8a9eb0 };
         out.pieces = ['hood'];
@@ -309,6 +329,9 @@ export function personOf(proto, ITEM, instance = 0) {
   if (/\bvandals?\b/i.test(w)) { arch = 'beggar'; out.scale = 0.92; }
   // The dark dwarves are soldiers of the deep.
   if (special === 'duergar') arch = 'guard';
+  // A giant goes in rough homespun and carries a club.
+  const giant = GIANT.test(w);
+  if (giant) { arch = 'beggar'; out.weapon = 'weapon_mace'; }
 
   // Age. The mud says so for a few; for the rest a trade that takes years
   // to rise in is more often grey, so a crowd has its elders in it and not
@@ -482,6 +505,11 @@ export function personOf(proto, ITEM, instance = 0) {
     }
   }
   if (/\bsea hags?\b/i.test(w)) { out.tint.skin = 0x8a9a7c; out.tint.hair = 0x5a6a4a; }
+  if (giant) {
+    out.face = 'face_male';
+    out.pieces = ['hair_long', 'beard_full'];
+    out.tint = { ...out.tint, cloth: pick(DRAB, seed), cloth2: pick(EARTH, seed3), leather: 0x3a2a1c };
+  }
 
   // Size. A word for how old someone is is a word for how tall they are.
   const prose = `${w} ${proto.long || ''} ${proto.description || ''}`;
@@ -499,6 +527,8 @@ export function personOf(proto, ITEM, instance = 0) {
   // Last, so nothing above can put a halfling back at a man's height; it
   // reads the prose on purpose, because the Shire mostly only says so there.
   if (HALFLING.test(prose)) { out.scale = Math.min(out.scale, 1) * 0.6; out.headScale = Math.max(out.headScale, 1.1); }
+  // A head is a smaller share of a bigger man.
+  if (giant) { out.scale = giantScale(`${proto.long || ''} ${proto.description || ''}`); out.headScale = 0.94; }
   if (out.scale < 0.9) out.pieces = out.pieces.filter((p) => !p.startsWith('beard') && p !== 'moustache' || DWARF.test(w));
   applyEquipment(out, proto, ITEM, seed);
   return out;

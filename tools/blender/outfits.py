@@ -184,16 +184,21 @@ def rim(obj, thick):
 
 # --- hanging cloth ----------------------------------------------------------------
 
-def skirt_weights(obj, arm, top, hem, follow=0.5, bones=("hips", "thigh.L", "thigh.R"),
+def skirt_weights(obj, arm, top, hem, follow=0.5, bones=("hips", "skirt.L", "skirt.R"),
                   above=None):
     """Weights for cloth hanging below the waist: all hips at `top`, sliding
-    towards the thigh on its own side by the time it reaches `hem`, but only
-    ever `follow` of the way. `above` is an optional function giving weights
-    for vertices above `top` (a bodice, a tabard's chest)."""
+    towards the skirt bone on its own side by the time it reaches `hem`.
+    `follow` is how much of the thigh's swing the hem takes at a walk; the
+    skirt bones already take half of it there (rig.skirt_follow), so a
+    follow of 0.5 or more is the whole hem on them. `above` is an optional
+    function giving weights for vertices above `top` (a bodice, a tabard's
+    chest)."""
     for g in list(obj.vertex_groups):
         obj.vertex_groups.remove(g)
     groups = {b: obj.vertex_groups.new(name=b) for b in bones}
-    extra = {}
+    lower = {b: obj.vertex_groups.new(name=b.replace("skirt.", "skirt2.")) for b in bones[1:]}
+    knee = arm.data.bones["shin.L"].head_local.z
+    hip = arm.data.bones["thigh.L"].head_local
     for v in obj.data.vertices:
         z = v.co.z
         if above and z > top:
@@ -202,12 +207,20 @@ def skirt_weights(obj, arm, top, hem, follow=0.5, bones=("hips", "thigh.L", "thi
                     groups[b] = obj.vertex_groups.new(name=b)
                 groups[b].add([v.index], w, "REPLACE")
             continue
-        t = max(0.0, min(1.0, (top - z) / max(1e-3, top - hem)))
-        t = t * t * (3 - 2 * t) * follow
+        # Over to the skirt bones by a hand's breadth below the hip joint.
+        # Blended with the hips any lower, a seated body pulled the cloth
+        # over its thighs half-way to where the thighs went: into the seat
+        # behind, and stretched to nothing over the lap.
+        t = max(0.0, min(1.0, (top - z) / max(0.08, top - (hip.z - 0.12))))
+        t = t * t * (3 - 2 * t) * min(1.0, follow / 0.5)
         side = max(0.0, min(1.0, 0.5 + v.co.x / 0.12))
+        # Below the knee the shin's twin carries it.
+        u = max(0.0, min(1.0, (knee + 0.06 - z) / 0.12))
+        u = u * u * (3 - 2 * u)
         groups["hips"].add([v.index], 1.0 - t, "REPLACE")
-        groups["thigh.L"].add([v.index], t * side, "REPLACE")
-        groups["thigh.R"].add([v.index], t * (1.0 - side), "REPLACE")
+        for b, s_ in ((bones[1], side), (bones[2], 1.0 - side)):
+            groups[b].add([v.index], t * s_ * (1.0 - u), "REPLACE")
+            lower[b].add([v.index], t * s_ * u, "REPLACE")
     return obj
 
 

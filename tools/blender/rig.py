@@ -86,6 +86,14 @@ def bone_table(P):
             ("shin." + tag, tuple(kn), tuple(a), "thigh." + tag, True),
             ("foot." + tag, tuple(a), tuple(ball), "shin." + tag, True),
             ("toe." + tag, tuple(ball), tuple(tip), "foot." + tag, True),
+            # What hangs below the belt swings on these, not on the thighs:
+            # a thigh's twin, keyed at bake time to follow it half-way
+            # while walking and all the way once it is raised to sit (see
+            # `skirt_follow`). Non-deforming until the body is bound.
+            ("skirt." + tag, tuple(h), tuple(kn), "hips", False),
+            # ...and a shin's, so a long robe falls from the knees when the
+            # thighs come up, rather than standing out past them like a tube.
+            ("skirt2." + tag, tuple(kn), tuple(a), "skirt." + tag, False),
         ]
     out += face_bones(P)
     return out
@@ -99,6 +107,7 @@ def bone_table(P):
 # non-deforming, so bone heat on the body never hands them the neck; switched
 # to deforming once the body is bound (`deform_face`).
 FACE_BONES = ("eye.L", "eye.R", "jaw", "nose")
+SKIRT_BONES = ("skirt.L", "skirt.R", "skirt2.L", "skirt2.R")
 
 
 def face_bones(P):
@@ -117,8 +126,10 @@ def face_bones(P):
 
 
 def deform_face(arm):
+    """Switch on the bones bone heat must not hand the body to: the face's
+    and the skirts'. Everything weighted to them is weighted by hand."""
     select_only([arm], arm)
-    for n in FACE_BONES:
+    for n in FACE_BONES + SKIRT_BONES:
         if n in arm.data.bones:
             arm.data.bones[n].use_deform = True
 
@@ -436,8 +447,33 @@ def bake(arm, act, frames):
             pb = arm.pose.bones[n]
             M = arm.convert_space(pose_bone=pb, matrix=pb.matrix, from_space="POSE", to_space="LOCAL")
             row[n] = (M.to_translation(), M.to_quaternion())
+        for t in "LR":
+            if "skirt." + t in row:
+                g = skirt_follow(row["thigh." + t][1])
+                row["skirt." + t] = (V((0.0, 0.0, 0.0)), _part(row["thigh." + t][1], g))
+                row["skirt2." + t] = (V((0.0, 0.0, 0.0)), _part(row["shin." + t][1], g))
         samples.append(row)
     return samples
+
+
+def skirt_follow(q):
+    """How much of its thigh's rotation a skirt bone takes (and of its shin's,
+    the skirt bone below it): half at a walk -- the cloth swings with the
+    stride without splitting into two tubes -- rising to all of it by the
+    time the thigh is raised to sit, so the skirt comes up over the seat and
+    falls from the knees. Hung from the hips at a walk's share, a robe went
+    straight down through the bench, 12-20 cm deep, under every sitter."""
+    if q.w < 0:
+        q = -q
+    a = math.degrees(q.angle)
+    t = max(0.0, min(1.0, (a - 30.0) / 45.0))
+    return 0.5 + 0.5 * t * t * (3 - 2 * t)
+
+
+def _part(q, g):
+    if q.w < 0:
+        q = -q
+    return Quaternion().slerp(q, g)
 
 
 def commit(arm, name, samples, start=0):
@@ -615,6 +651,10 @@ class Gait:
             for t in "LR":
                 a, p = rows[f][t]
                 place(arm, "foot_ik." + t, frame, foot_matrix(arm, t, a, p))
+                # Rolled up onto the ball, the foot would carry the toes down
+                # through the ground with it -- 4.7 cm on a man at toe-off,
+                # 11 on a troll's claws. They stay flat and bend at the ball.
+                fk(arm.pose.bones["toe." + t], frame, x=min(0.0, p))
         return eased
 
 

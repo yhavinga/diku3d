@@ -631,7 +631,14 @@ def foot(P, sx, a):
         at = V((a.x + sx * off * k, base.y - 0.236 * k, 0.017 * k))
         toe = ellipsoid(tuple(at), (rt, rt * 1.7, rt * 0.95), name="toe", seg=10, rings=8)
         out.append(toe)
-        out.append(claw(P, at + V((0, -rt * 1.4, 0)), (0, -1, -0.35), (0, 0, -1), rt * 0.75))
+        c = claw(P, at + V((0, -rt * 1.4, 0)), (0, -1, -0.35), (0, 0, -1), rt * 0.75)
+        # The hook goes down to the ground and no further: modelled to bite
+        # into it, the tips stood 3.6 cm under the sole, and a troll scaled
+        # to 1.3-1.55 stood 4-6 cm into every floor it was put on.
+        low = min((c.matrix_world @ v.co).z for v in c.data.vertices)
+        for v in c.data.vertices:
+            v.co.z += 0.002 - low
+        out.append(c)
     return join(out, "foot")
 
 
@@ -799,7 +806,12 @@ def base(P, target=2700):
         # The hunch has to read from the front too, where a bent back does
         # not show: so the shoulders come up and forward round the head,
         # which sinks between them.
-        rig.repose(arm, [body] + fs, {"hips": (6, 0, 0), "spine": (18, 0, 0), "chest": (24, 0, 0),
+        # The hips tip forward and the legs hang from them, so the thighs
+        # take the tilt back out: pitched with the hips, the feet stood on
+        # their toes, 3 cm down through the floor, in every clip.
+        rig.repose(arm, [body] + fs, {"hips": (6, 0, 0), "thigh.L": (-6, 0, 0), "thigh.R": (-6, 0, 0),
+                                      "skirt.L": (-6, 0, 0), "skirt.R": (-6, 0, 0),
+                                      "spine": (18, 0, 0), "chest": (24, 0, 0),
                                       "neck": (-14, 0, 0), "head": (-30, 0, 0),
                                       "shoulder.L": (10, 0, 9), "shoulder.R": (10, 0, -9),
                                       "upperarm.L": (-12, 0, -8), "upperarm.R": (-12, 0, 8),
