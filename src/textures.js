@@ -2234,7 +2234,7 @@ const SURFACES = {
     const [kd, , kid] = cellular(u * 3, v * 2, 3, 2237, 0.4);
     const knot = kid > 0.72 ? clamp01(1 - kd * 3.2) : 0;
     const swirl = knot * Math.sin(kd * 22) * 0.35;
-    const fibre = fbm(u * 46 + warp * 6 + swirl * 8, v * 3, 46, 2239, 3);
+    const fibre = fbm(u * 46 + warp * 6 + swirl * 8, v * 3, 46, 2239, 2);
     const furrow = clamp01((0.42 - fibre) * 4);
     const band = fbm(u * 5 + warp, v * 1.5, 5, 2243, 3);
     let c = mix(rgb(0x7a4f30), rgb(0xa77449), band * 0.8 + fibre * 0.3);
@@ -2253,8 +2253,10 @@ const SURFACES = {
   ice(u, v, s) {
     const cloud = fbm(u * 4, v * 4, 4, 2251, 4);
     const [, crack] = cellular(u * 5, v * 5, 5, 2257, 0.5);
-    const [bd] = cellular(u * 30, v * 30, 30, 2263, 0.45);
-    const bubble = clamp01(1 - bd * 9) * (hash2(Math.floor(u * 30), Math.floor(v * 30), 30, 2267) > 0.7 ? 1 : 0);
+    // Bubbles: one to a lattice cell at most, a disc round a jittered point.
+    const bx = u * 30; const by = v * 30; const ix = Math.floor(bx); const iy = Math.floor(by);
+    const jx = hash2(ix, iy, 30, 2263) * 0.6 + 0.2; const jy = hash2(ix, iy, 30, 2269) * 0.6 + 0.2;
+    const bubble = hash2(ix, iy, 30, 2267) > 0.7 ? clamp01(1 - Math.hypot(bx - ix - jx, by - iy - jy) * 9) : 0;
     const line = clamp01(1 - crack * 18);
     let c = mix(rgb(0x8fb2c4), rgb(0xd8e8ef), cloud);
     c = mix(c, rgb(0xf2f8fa), line * 0.6 + bubble * 0.5);
@@ -3288,9 +3290,16 @@ function paintedTexture(canvas, wear, seed) {
     };
   };
   const fresco = wear === 'fresco';
-  const fade = field((u, v) => fbm(u * 6, v * 6, 64, seed + 1, 4));
+  // The broad fields change over tens of pixels: a nearest read of a finer
+  // lattice is as good as a bilinear one and a third of the cost.
+  const coarse = (fn, n = 256) => {
+    const f = new Float32Array(n * n);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) f[j * n + i] = fn(i / n, j / n);
+    return (u, v) => f[Math.min(n - 1, (v * n) | 0) * n + Math.min(n - 1, (u * n) | 0)];
+  };
+  const fade = coarse((u, v) => fbm(u * 6, v * 6, 64, seed + 1, 4));
   const loss = field((u, v) => fbm(u * 14, v * 14, 64, seed + 2, 4));
-  const grime = field((u, v) => fbm(u * 3, v * 3, 64, seed + 3, 3));
+  const grime = coarse((u, v) => fbm(u * 3, v * 3, 64, seed + 3, 3), 128);
   // Cracks: where a smooth field crosses its middle, which draws wandering
   // hairlines rather than the closed cells of a Worley edge -- those read as
   // crazy paving. Coarse field, sharp threshold, so the lines stay thin.
@@ -3310,7 +3319,8 @@ function paintedTexture(canvas, wear, seed) {
         // more of it low on the wall where damp comes up.
         const f = clamp01((fade(u, v) - 0.35) * 1.6) * 0.45;
         r = lerp(r, ground[0], f); g = lerp(g, ground[1], f); b = lerp(b, ground[2], f);
-        const lost = loss(u, v) + (v % 0.5 > 0.4 ? (v % 0.5 - 0.4) * 1.5 : 0);
+        const l = loss(u, v);
+        const lost = l + (v % 0.5 > 0.4 ? (v % 0.5 - 0.4) * 1.5 : 0);
         if (lost > 0.71) {
           const p = 0.78 + grime(u, v) * 0.2;
           r = 196 * p; g = 182 * p; b = 150 * p; hgt = 0.35;
@@ -3321,7 +3331,7 @@ function paintedTexture(canvas, wear, seed) {
         r *= soot; g *= soot; b *= soot;
         // The panel's edges are ragged: plaster gone back to the wall.
         const e = Math.min(Math.min(u, Math.abs(u - 0.75), 1 - u) * w, Math.min(v % 0.5, 0.5 - (v % 0.5)) * h);
-        a = e < 5 + loss(u, v) * 22 ? 0 : 255;
+        a = e < (5 + l * 22) * (w / 2048) ? 0 : 255;
       } else {
         hgt = 0.5 + (a / 255) * 0.1;
         // Worn: the marks are patchy where they have been rubbed.
@@ -3381,7 +3391,9 @@ function createPaintings(materials, macro, grain) {
       materials[material.name] = material;
     }
   };
-  make('mural', paintedTexture(paintMurals(2048), 'fresco', 5101), { rough: 0.9, env: 0.6, cut: 0.5 });
+  // 1536: 245 texels a metre over the temple's wide bays, which is sharper
+  // than a torchlit wall is seen, at half the boot cost of 2048.
+  make('mural', paintedTexture(paintMurals(1536), 'fresco', 5101), { rough: 0.9, env: 0.6, cut: 0.5 });
   make('faces', paintedTexture(paintFaces(1024), 'stroke', 5203), { rough: 0.9, env: 0.5, cut: 0.4 });
   make('bloodwall', paintedTexture(paintBlood(1024), 'stroke', 5307), { rough: 0.42, env: 0.9, cut: 0.4 });
   // Writing is per room -- it says what that room says -- so it is painted
