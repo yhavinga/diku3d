@@ -7715,6 +7715,7 @@ function buildHorizon(group, bounds, groundY, layout) {
     'horizon-forest-ridge', -3, 'forest');
 
   // ---------------------------------------------------------------- hills --
+  const COPSE = 0x34482a;
   // The Shire: rolling farmland going blue with distance, a hedge-and-copse
   // comb in front, round-headed trees rather than spires.
   {
@@ -7749,9 +7750,14 @@ function buildHorizon(group, bounds, groundY, layout) {
         }
       }
     }
-    silhouette(points, colors, new THREE.MeshBasicMaterial({
-      color: 0x18221a, side: THREE.DoubleSide, vertexColors: true,
-    }), 'horizon-hills-copses', 0, 'hills');
+    // Broadleaf crowns in farmland, in daylight: an albedo lit by the hour
+    // like the slopes behind them, not a near-black left for the fog to lift.
+    // The Shire's noon fog is thin, so 0x18221a stayed what it was -- a black
+    // cardboard strip, RGB 4,7,8, across a sunlit field. Kept out of `haze`
+    // for the reason the combs are: a copse is overlapping loose crowns.
+    const copse = new THREE.MeshBasicMaterial({ color: COPSE, side: THREE.DoubleSide, vertexColors: true });
+    lit.push({ material: copse, albedo: new THREE.Color(COPSE) });
+    silhouette(points, colors, copse, 'horizon-hills-copses', 0, 'hills');
     // Two ranges of hills, the nearer greener, the further gone to haze.
     strip(rings[1].r + 20, 256, waves([[4, 7], [7, 5], [13, 2.5]], 22), drift(1.1, 0.95),
       litSlope(0x3f5634), 'horizon-hills-near', -2, 'hills');
