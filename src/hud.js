@@ -314,6 +314,15 @@ class CompassRose {
   }
 }
 
+/**
+ * The minimap's side in CSS pixels. It was 240, and with the compass under it
+ * the panel was 103k pixels of a 1280x720 frame; the map still shows the
+ * rooms two streets out in every direction at this size.
+ */
+const MAP = 176;
+/** Reading speed for the prose, words a second, before it folds away. */
+const READ_WPS = 3.2;
+
 export class Hud {
   constructor(root, layout) {
     this.layout = layout;
@@ -333,8 +342,13 @@ export class Hud {
     };
     this.ctx = this.el.minimap.getContext('2d');
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.el.minimap.width = 240 * this.dpr;
-    this.el.minimap.height = 240 * this.dpr;
+    this.el.minimap.width = MAP * this.dpr;
+    this.el.minimap.height = MAP * this.dpr;
+    this.el.descBlock = root.querySelector('#desc-block');
+    this.readLeft = 0;
+    this.brief = false;
+    this.moving = 0;
+    this.lastEye = null;
     this.ctx.scale(this.dpr, this.dpr);
     this.compass = new CompassRose(root.querySelector('#compass'), this.dpr);
     this.currentVnum = null;
@@ -359,7 +373,29 @@ export class Hud {
     const exits = room.exits
       .map((exit, dir) => (exit ? DIR_NAME[dir] : null))
       .filter(Boolean);
-    this.el.exits.textContent = exits.length ? `exits: ${exits.join(', ')}` : 'no obvious exits';
+    this.exitsText = exits.length ? `exits: ${exits.join(', ')}` : 'no obvious exits';
+    // A new room is read in full; it folds to its first lines once there has
+    // been time to read it (see `update`).
+    this.readLeft = Math.min(30, Math.max(6, this.el.desc.textContent.split(/\s+/).length / READ_WPS));
+    this.setBrief(false);
+  }
+
+  /**
+   * The prose, folded or whole. Folded it keeps its opening lines and the
+   * exits, and says how to have the rest back -- nothing of the mud's text
+   * is lost, it is one key away. The whole panel was 139k pixels of the
+   * first frame at 1280x720.
+   */
+  setBrief(on) {
+    this.brief = !!on;
+    this.el.descBlock.classList.toggle('brief', this.brief);
+    this.el.exits.textContent = this.brief ? `${this.exitsText} · tab — read` : this.exitsText;
+  }
+
+  /** Tab: the whole of the room's prose, or folded again. */
+  toggleProse() {
+    this.readLeft = 0;
+    this.setBrief(!this.brief);
   }
 
   setLook(target) {
@@ -423,6 +459,21 @@ export class Hud {
   }
 
   update(dt, camera, roomVnum) {
+    if (this.readLeft > 0) {
+      this.readLeft -= dt;
+      if (this.readLeft <= 0 && !this.brief) this.setBrief(true);
+    }
+    // Walking, the panels step back: the street is what you are reading then.
+    // Smoothed over about half a second, so a stop between strides does not
+    // flash them up; a jump (goto, an exit taken by arrow) is not a walk.
+    const p = camera.position;
+    if (this.lastEye && dt > 0) {
+      const v = Math.hypot(p.x - this.lastEye.x, p.z - this.lastEye.z) / dt;
+      this.moving += ((v > 0.8 && v < 20 ? 1 : 0) - this.moving) * Math.min(1, dt * 2.5);
+    }
+    this.lastEye = { x: p.x, z: p.z };
+    const faded = this.moving > 0.5;
+    if (faded !== this.faded) { this.faded = faded; document.body.classList.toggle('hud-moving', faded); }
     if (this.toastTimer > 0) {
       this.toastTimer -= dt;
       if (this.toastTimer <= 0) this.el.toast.classList.remove('visible');
@@ -450,7 +501,7 @@ export class Hud {
 
   drawMinimap(roomVnum, heading) {
     const ctx = this.ctx;
-    const size = 240;
+    const size = MAP;
     const cell = this.layout.cells.get(roomVnum);
     ctx.clearRect(0, 0, size, size);
     ctx.fillStyle = 'rgba(10,9,8,0.55)';
@@ -458,7 +509,7 @@ export class Hud {
     if (!cell) return;
 
     const step = 7.5;   // rooms sit two grid cells apart
-    const reach = 15;
+    const reach = Math.ceil(size / 2 / step) + 1;
     const cx = size / 2;
     const cy = size / 2;
     const toScreen = (x, z) => [cx + (x - cell.x) * step, cy + (z - cell.z) * step];

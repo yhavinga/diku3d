@@ -1323,13 +1323,23 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
         const d = Math.hypot(dx, dz);
         m.fighting = d < 4.5;
         m.faceYaw = Math.atan2(dx, dz);
-        if (order.kind === 'face' || d <= (order.stop ?? CLOSE) + 0.15) { m.path = null; m.want = 0; return; }
+        // Crowded inside the standoff -- you walked up to them, or they were
+        // already that close when it started -- a fighter gives ground, a
+        // half step back at a time, still facing you. Without it a guard
+        // stayed wherever the fight found him: 1.1 m from your eye, measured,
+        // with his shield filling the frame.
+        const stop = order.stop ?? CLOSE;
+        if (m.fighting && order.kind === 'chase' && d < stop - 0.3 && !m.step && (fig.actions?.walk || fig.legs)) {
+          m.path = null; m.want = 0;
+          m.step = { t: 0, dur: 0.55, along: 0, side: 0, back: Math.min(0.55, stop - d), dx: -dx / d, dz: -dz / d };
+          return;
+        }
+        if (order.kind === 'face' || d <= stop + 0.15) { m.path = null; m.want = 0; return; }
         m.want = d > 4 ? fig.runPace : fig.pace * 1.25;
         m.repath -= dt;
         if (m.repath <= 0 || !m.path) {
           m.repath = 0.35;
           // Stop short of them, on the near side.
-          const stop = order.stop ?? CLOSE;
           const goal = { x: target.x - (dx / d) * stop, z: target.z - (dz / d) * stop };
           if (nav.clearLine(fig.level, fig.at.x, fig.at.z, goal.x, goal.z)) {
             m.path = [{ x: goal.x, y: fig.at.y, z: goal.z }]; m.pi = 0;
@@ -2023,6 +2033,11 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       const nx = fig.at.x + Math.cos(yaw) * v; const nz = fig.at.z - Math.sin(yaw) * v;
       if (nav.sample(nx, nz, fig.level)) { fig.at.x = nx; fig.at.z = nz; }
     }
+    if (m.step && m.step.back) {
+      const v = (m.step.back / m.step.dur) * dt;
+      const nx = fig.at.x + m.step.dx * v; const nz = fig.at.z + m.step.dz * v;
+      if (nav.sample(nx, nz, fig.level)) { fig.at.x = nx; fig.at.z = nz; }
+    }
     if (m.overlay || m.pending || m.lunge || m.step || m.sway || m.recoil || m.speed > 0.05) return;
     m.nextFidget -= dt;
     if (m.nextFidget > 0) return;
@@ -2031,7 +2046,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     const a = fig.actions || {};
     const r = fig.rand();
     if (free > 1.0 && r < 0.26 && a.attack) {
-      const name = a.attack2 && fig.rand() < 0.5 ? 'attack2' : 'attack';
+      const name = bareHanded(fig, a.attack2 && fig.rand() < 0.5 ? 'attack2' : 'attack');
       const dur = fig.clips[name];
       const hit = ((fig.hitFrame && fig.hitFrame[name]) ?? 0.4) * dur;
       playOnce(fig, name, { gain: 0.72, until: (hit * 0.5 + 0.22) / dur });
@@ -2220,6 +2235,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
 
   function strike(fig, name = 'attack', contactIn = 0.35) {
     if (!fig || fig.m.dead) return;
+    name = bareHanded(fig, name);
     const clip = fig.actions && (fig.actions[name] ? name : (fig.actions.attack ? 'attack' : null));
     if (clip) {
       const dur = fig.clips[clip];
@@ -2244,6 +2260,18 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       return;
     }
     fig.m.lunge = { t: 0, dur: Math.max(0.5, contactIn + 0.35), contact: clamp(contactIn / Math.max(0.5, contactIn + 0.35), 0.3, 0.8), reach: fig.legs ? 1 : 0.8 };
+  }
+
+  /**
+   * `attack` is an overhead chop, made round a weapon's haft. With nothing in
+   * the hand it is a bare forearm raised straight up over the head, and on a
+   * rotting zombie in a torn-off sleeve that thin raised arm read as a bow
+   * being carried. Someone with nothing in their hand swings `attack2`, the
+   * low driving blow, which reads as a fist or a claw.
+   */
+  function bareHanded(fig, name) {
+    if (name !== 'attack' || !fig.castPoint || !fig.actions || !fig.actions.attack2) return name;
+    return fig.weapon && fig.weapon.visible ? name : 'attack2';
   }
 
   /** Taking a blow, catching one on the blade, or stepping out of its way. */
@@ -2429,6 +2457,11 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       }
       if (m.speech > 0) m.speech -= dt;
       fig.walking = m.speed > 0.16;
+      // Up and down a temple's mound with the ground under it (nav.moundY).
+      if (nav.moundY) {
+        const g = nav.moundY(fig.at.x, fig.at.z, fig.level);
+        if (g !== null) { fig.at.y = g; m.onMound = true; } else if (m.onMound) { fig.at.y = fig.level * nav.LEVEL_H; m.onMound = false; }
+      }
       placeObject(fig);
       if (fig.bones) finishPose(fig, dt, dx * dx + dz * dz < 36 * 36);
     }

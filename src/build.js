@@ -19,8 +19,9 @@ import { SECTOR, ROOM_INDOORS, EX_ISDOOR, EX_CLOSED, EX_LOCKED, DIR_STEP, DIR_NA
 import { InstanceBatch, StaticBatches } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
 import { buildGrass } from './grass.js';
-import { classifyShells, shellFor } from './shells.js';
+import { classifyShells, shellFor, shellAttrs } from './shells.js';
 import { placeClutter } from './clutter.js';
+import { MURAL_REGIONS, faceRegion, bloodRegion } from './textures.js';
 
 export const CELL = 13;         // grid pitch; rooms sit two cells apart
 export const ROOM = 10;         // interior span of an indoor room
@@ -767,7 +768,7 @@ function dirBetween(a, b) {
 
 // -------------------------------------------------------- material choice ----
 
-function pickMaterials(room, area) {
+function pickMaterials(room, area, passage = false) {
   const name = `${room.name} ${area}`.toLowerCase();
   // `tomb` alongside `crypt`: the graveyard's thirteen tombs were reading as
   // ordinary rooms and coming out in plaster and floorboards.
@@ -946,6 +947,35 @@ function pickMaterials(room, area) {
   if (!holy && !cave && !wood && !shire && !kind && hash3(room.vnum, 0, 0, 9) > 0.6) wallOut = 'timber';
   if (!holy && !burrow && hash3(room.vnum, 1, 0, 3) > 0.84) roof = 'thatch';
 
+  // What the prose says the shell is made of (src/shells.js `readShell`),
+  // over everything the kind and the area chose: "smooth purple stone walls",
+  // "the floor is made from black stone". Under the ground the buried twin.
+  // A corridor routed out of the room is not what the room describes.
+  const said = isOpenAir(room) || passage ? null : shellAttrs(room);
+  let floorTint = null; let ceilTint = null; let toldWall = false;
+  if (said) {
+    const under = !!style || rockCave || kind === 'tomb';
+    const wall = said.wall && surfaceRecipe('wall', said.wall, wallIn, under, rockCave || !!style);
+    const flr = said.floor && surfaceRecipe('floor', said.floor, floor, under, rockCave || style === 'cave');
+    const top = said.ceil && surfaceRecipe('ceil', said.ceil, ceil, under, rockCave || style === 'cave');
+    if (wall && !holy) {
+      wallIn = wall.name; wallInTint = wall.tint; toldWall = true;
+      // A room built of one stone is roofed in it too, a shade darker for
+      // the lamp smoke, unless the prose says otherwise.
+      if (!top && SHAPED_STONE.has(wall.name)) { ceil = wall.name; ceilTint = (wall.tint || [1, 1, 1]).map((c) => c * 0.82); }
+    }
+    if (flr) { floor = flr.name; floorTint = flr.tint; }
+    if (top) { ceil = top.name; ceilTint = top.tint; }
+    // "You have stepped inside of this hollowed tree": the heartwood all
+    // round, the rotted crumb of it underfoot, bark outside (`buildGreatTree`);
+    // and the root it goes down into is the same wood.
+    if (said.named === 'tree' || said.named === 'root') {
+      cave = false; wallIn = 'livingwood'; ceil = 'livingwood'; floor = 'dirt'; wallInTint = null; ceilTint = null; floorTint = null;
+      toldWall = true;
+      if (said.named === 'tree') wallOut = 'bark';
+    }
+  }
+
   // The neighborhood, after everything else, because it overrules the sector
   // (No Man's Land is HILLS, which is grass) and the passage routed out of one
   // of its streets asks here what it is paved with.
@@ -958,8 +988,166 @@ function pickMaterials(room, area) {
   if (hood && hood !== 'ruin' && !holy && !wood) wallOut = 'sootwall';
   return {
     floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv, sewer: style, inRock: inRock || rockCave, hood,
-    rockCave, shire, shell, wallInTint,
+    rockCave, shire, shell, wallInTint, floorTint, ceilTint, toldWall, said,
   };
+}
+
+// ------------------------------------------------------ the shell's words ----
+
+/**
+ * The colours the prose names for stone and paint, as the sRGB they should
+ * come out at; `shellTint` turns one into the vertex tint that takes a pale
+ * recipe (linear albedo `base`) there. "Dark" and "pale" are not a colour of
+ * the stone, only a shade of it.
+ */
+const SHELL_COLOUR = {
+  purple: 0xa487b8, violet: 0x9c80bc, black: 0x5a5658, 'jet-black': 0x48454a, white: 0xe4e0d8,
+  'milky white': 0xe8e3d6, red: 0x8a3a2c, 'deep red': 0x7a2a20, crimson: 0x8c2426, blue: 0x4a6690,
+  green: 0x55724c, yellow: 0xbc9c4a, grey: 0x8c8a86, gray: 0x8c8a86, golden: 0xb08c3e,
+};
+const SHADE = { dark: 0.62, pale: 1.12 };
+function shellTint(colour, base = 0.76) {
+  if (SHADE[colour]) return [SHADE[colour], SHADE[colour], SHADE[colour] * 1.02];
+  const hex = SHELL_COLOUR[colour];
+  if (hex === undefined) return null;
+  return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255].map((c) => Math.min(1.3, Math.pow(c / 255, 2.2) / base));
+}
+/** Recipes a whole room can be built of, walls and roof alike. */
+const SHAPED_STONE = new Set(['polished', 'polisheddeep', 'ice', 'livingwood', 'crystal']);
+
+/**
+ * What a door the prose describes is made of, for actors.js to hang: "a large
+ * black stone door" is a slab, not boards with iron straps. Null leaves the
+ * boarded leaf, which is what a wooden door is.
+ */
+function doorLeaf(door, deep) {
+  if (!door) return null;
+  switch (door.material) {
+    case 'stone': return { material: deep ? 'polisheddeep' : 'polished', tint: shellTint(door.colour || 'grey') };
+    case 'obsidian': return { material: deep ? 'polisheddeep' : 'polished', tint: shellTint('jet-black') };
+    case 'marble': return { material: deep ? 'polisheddeep' : 'marble', tint: deep ? shellTint('white') : null };
+    case 'iron': return { material: deep ? 'rustiron' : 'iron', tint: door.colour ? shellTint(door.colour, 0.5) : [0.62, 0.62, 0.64], studs: true };
+    case 'silver': return { material: 'steel', tint: null, studs: true };
+    case 'living wood': return { material: 'livingwood', tint: null, carved: true };
+    default: return null;
+  }
+}
+
+/**
+ * "You are in a octagonal room", "the Circular hall": the plan inside the
+ * square the grid gives every room. The corners are walled off -- four
+ * diagonal faces for an octagon, a ring of 24 for a round room -- in the
+ * room's own wall material, and filled behind with colliders. The doorways,
+ * which are 3.2 m wide in the middle of each side, are clear of both: an
+ * octagon's side is 4.14 m, and a ring touches the square only at the middle
+ * of each wall, where the doorway is cut through it.
+ */
+const OCT_CUT = ROOM / (2 + Math.SQRT2);
+function buildPlanShape({ plan, batcher, chunk, pos, sides, mats, materials, addCollider, decor, lights, lit }) {
+  const R = ROOM / 2;
+  const uv = materials[mats.wallIn].userData.uvScale;
+  const panel = (ax, az, bx, bz, y0, y1) => {
+    const len = Math.hypot(bx - ax, bz - az);
+    const geo = new THREE.PlaneGeometry(len, y1 - y0);
+    const a = geo.attributes.uv;
+    for (let i = 0; i < a.count; i++) a.setXY(i, a.getX(i) * len * uv, (y0 + a.getY(i) * (y1 - y0)) * uv);
+    // Facing the middle of the room.
+    const mx = (ax + bx) / 2; const mz = (az + bz) / 2;
+    batcher.add(geo, mats.wallIn, place(pos.x + mx, pos.y + (y0 + y1) / 2, pos.z + mz, Math.atan2(-mx, -mz)),
+      { chunk, normals: true, keepUv: true, tint: mats.wallInTint, ao: wallAo(pos.y) });
+    geo.dispose();
+  };
+  const fill = (inside) => {
+    // Stair-stepped boxes over whatever of each quadrant is outside the plan.
+    const n = 8;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        for (let k = 0; k < n; k++) {
+          const x0 = (k / n) * R; const x1 = ((k + 1) / n) * R;
+          const z0 = inside(x0);
+          if (z0 > R - 0.05) continue;
+          const xa = pos.x + sx * x0; const xb = pos.x + sx * x1;
+          const za = pos.z + sz * z0; const zb = pos.z + sz * R;
+          addCollider(Math.min(xa, xb), Math.max(xa, xb), Math.min(za, zb), Math.max(za, zb), pos.y, pos.y + CEIL);
+        }
+      }
+    }
+  };
+  const torches = [];
+  if (plan === 'octagon') {
+    const c = R - OCT_CUT;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        panel(sx * R, sz * c, sx * c, sz * R, 0, CEIL);
+        torches.push([sx * (R + c) / 2, sz * (R + c) / 2]);
+      }
+    }
+    // Inside the octagon |x| + |z| <= R + c; beyond it, the corner is solid.
+    fill((x) => Math.max(c, R + c - x));
+  } else if (plan === 'round') {
+    const N = 24;
+    const doorHalf = Math.asin((DOOR_W / 2 + 0.1) / R);
+    for (let i = 0; i < N; i++) {
+      const a0 = (i / N) * Math.PI * 2; const a1 = ((i + 1) / N) * Math.PI * 2;
+      const am = (a0 + a1) / 2;
+      // Grown 1% about its middle so neighbouring faces overlap instead of
+      // showing a seam.
+      const k = 1.01;
+      const mx = (Math.cos(a0) + Math.cos(a1)) * R / 2; const mz = (Math.sin(a0) + Math.sin(a1)) * R / 2;
+      const ax = mx + (Math.cos(a0) * R - mx) * k; const az = mz + (Math.sin(a0) * R - mz) * k;
+      const bx = mx + (Math.cos(a1) * R - mx) * k; const bz = mz + (Math.sin(a1) * R - mz) * k;
+      // A doorway is cut through the ring where it meets a way out.
+      let door = false;
+      for (let d = 0; d < 4; d++) {
+        if (!openSide(sides[d])) continue;
+        const [dx, , dz] = DIR_STEP[d];
+        const diff = Math.abs(Math.atan2(Math.sin(am - Math.atan2(dz, dx)), Math.cos(am - Math.atan2(dz, dx))));
+        if (diff < doorHalf + Math.PI / N) door = true;
+      }
+      panel(ax, az, bx, bz, door ? DOOR_H : 0, CEIL);
+      if (i % 6 === 3) torches.push([Math.cos(am) * (R - 0.2), Math.sin(am) * (R - 0.2)]);
+    }
+    fill((x) => Math.sqrt(Math.max(0, R * R - x * x)));
+  }
+  if (!lit) return;
+  for (const [tx, tz] of torches) {
+    const len = Math.hypot(tx, tz);
+    const px = pos.x + tx * (1 - 0.7 / len); const pz = pos.z + tz * (1 - 0.7 / len);
+    decor.push({ kind: 'torch', x: px, y: pos.y + 2.9, z: pz, rotY: Math.atan2(-tx, -tz) });
+    lights.push({ x: px - (tx / len) * 0.4, y: pos.y + 3.4, z: pz - (tz / len) * 0.4, color: 0xffa347, intensity: 9, radius: 11, flicker: true });
+  }
+}
+
+/**
+ * The recipe and tint a surface the prose describes is built in, or null to
+ * leave it as the kind and the area chose. `current` is that choice; `rocky`
+ * means the room is bare rock already, where a plain "stone floor" is what it
+ * has. Gold, silver, iron, glass and ivory rooms have no recipe yet.
+ */
+function surfaceRecipe(key, said, current, under, rocky) {
+  const { material, colour, smooth } = said;
+  const hue = !!colour && !SHADE[colour];
+  const tint = colour ? shellTint(colour) : null;
+  const pick = (name, t = null) => ({ name, tint: t });
+  switch (material) {
+    // "The walls are (surprise!) blue": paint on whatever they are.
+    case null: return hue ? pick(current, shellTint(colour, 0.6)) : null;
+    case 'stone':
+      if (smooth || hue) return pick(under ? 'polisheddeep' : 'polished', tint || shellTint('grey'));
+      if (rocky) return colour ? pick(current, tint) : null;
+      return key === 'floor' ? pick(under ? 'sewerflag' : 'flagstone', tint) : pick(under ? 'ashlar' : 'stonewall', tint);
+    case 'obsidian': return under ? pick('polisheddeep', shellTint('jet-black')) : pick('obsidian');
+    case 'marble': return under ? pick('polisheddeep', shellTint(colour || 'white')) : pick('marble', hue ? shellTint(colour, 0.7) : null);
+    case 'granite': case 'basalt': case 'slate':
+      return pick(under ? 'ashlar' : 'stonewall', shellTint(material === 'granite' ? 'pale' : 'dark'));
+    case 'ice': return pick('ice');
+    case 'crystal': return pick('crystal');
+    case 'living wood': return pick('livingwood');
+    case 'wood': return pick(key === 'wall' ? 'boards' : 'planks');
+    case 'brick': return pick(under ? 'brick' : 'firebrick');
+    case 'earth': return pick('dirt');
+    default: return null;
+  }
 }
 
 // ---------------------------------------------- the Dangerous Neighborhood ----
@@ -1671,6 +1859,10 @@ export function buildScene(world, layout, materials, assets = null) {
 
   classifySewer(world);
   classifyShells(world, (room) => room.sector !== SECTOR.AIR && !isOpenAir(room));
+  const lifts = mounds(world, layout);
+  // Ground raised under a building, which nav.js and motion.js stand
+  // people on (`platform.base`): see `mounds`.
+  const raised = [];
   const turfAt = hoodTurf(layout);
   // The whole kit or none of it: a chamber with no tunnel to leave by is worse
   // than the plain walled room it falls back to.
@@ -1757,6 +1949,13 @@ export function buildScene(world, layout, materials, assets = null) {
   for (const cell of layout.order) {
     const room = cell.room;
     const pos = worldOf(cell);
+    // "The huge mound upon which the temple is built": everything in the
+    // room stands on it.
+    const lift = lifts.get(room.vnum) || 0;
+    if (lift) {
+      pos.y += lift;
+      buildPodium({ batcher, chunk: chunkOf(cell), x: pos.x, y: pos.y - lift, z: pos.z, lift, addCollider, addPlatform, raised, steps: true, sides: layout.sides.get(cell.vnum) });
+    }
     const chunk = chunkOf(cell);
     const outdoor = isOutdoor(room);
     // What the room record carries is the mud's answer, because rain and
@@ -1782,7 +1981,7 @@ export function buildScene(world, layout, materials, assets = null) {
     // the kits are dressed masonry and would look absurd in Moria.
     const hood = mats.hood;
     const ruin = hood === 'ruin';
-    const kit = (!openAir && !mats.cave && !mats.shire && !mats.shell && instances)
+    const kit = (!openAir && !mats.cave && !mats.shire && !mats.shell && !mats.toldWall && instances)
       ? (ruin && model(['ruin_wall_solid']) ? 'ruin_'
         : mats.holy && model(['temple_wall_solid']) ? 'temple_'
           : (model(['wall_solid']) ? '' : null))
@@ -1850,7 +2049,7 @@ export function buildScene(world, layout, materials, assets = null) {
     buildFloor({
       batcher, chunk, material: mats.floor, x: pos.x, y: pos.y, z: pos.z,
       half, holes: roomHoles.filter((h) => !h.ceiling), addPlatform, slab: !airborne,
-      shade: !openAir,
+      shade: !openAir, tint: mats.floorTint,
     });
 
     // Six of the marsh's rooms are sectored as open water and only two of them
@@ -1858,8 +2057,11 @@ export function buildScene(world, layout, materials, assets = null) {
     // thirteen metres of river. A bog takes pools instead.
     // Water in the sewer is the sewer's own, lying on the floor under a vault:
     // the river shader mirrors the sky and the shore grows reeds.
-    if (isDeep(room) && (isWater(room) || sewerFlood(room))) {
-      batcher.add(plane(half * 2, half * 2, 4), deepWater(room), place(pos.x, pos.y + SW_FLOOD, pos.z), { chunk });
+    // The water or mud the prose says the room stands in, to the depth it
+    // says: "water up to your neck" is 1.45 m of it, and you wade.
+    const flood = floodOf(room);
+    if (flood) {
+      batcher.add(plane(half * 2, half * 2, 4), flood.material, place(pos.x, pos.y + flood.depth, pos.z), { chunk });
     } else if (isWater(room) && !bog) {
       // A little over the cell, so two neighbouring sheets overlap instead of
       // meeting on a seam: they are at the same height and the same shader, and
@@ -1915,6 +2117,8 @@ export function buildScene(world, layout, materials, assets = null) {
       instances, batcher, chunk, cell, pos, dir: fort, layout, reserved, cellKey, addCollider, lights, groundAt,
     }) : null;
 
+    // A room inside a tree is walled by the tree, not by masonry.
+    const tree = !openAir && !!mats.said && mats.said.named === 'tree';
     for (let dir = 0; dir < 4; dir++) {
       const side = sides[dir];
       const [dx, , dz] = DIR_STEP[dir];
@@ -1931,11 +2135,13 @@ export function buildScene(world, layout, materials, assets = null) {
       const wx = pos.x + dx * distance;
       const wz = pos.z + dz * distance;
 
-      if (!openAir) {
+      if (!openAir && !tree) {
         buildIndoorWall({
           batcher, chunk, mats, x: wx, y: pos.y, z: wz, rotY, open, kit, instances,
           width: ROOM + (WALL_IN + WALL_OUT) * 2, addCollider, dir, room, lights, decor,
-          cellX: pos.x, cellZ: pos.z, breach: dir === breach, unlit: ruin || mats.shire === 'barn' || mats.smial,
+          cellX: pos.x, cellZ: pos.z, breach: dir === breach,
+          unlit: ruin || mats.shire === 'barn' || mats.smial || !!(mats.said && mats.said.plan),
+          flank: !!(mats.said && mats.said.marks && mats.said.marks.kind === 'mural'),
         });
       } else if (!airborne) {
         // Nothing walls a room under the canopy: `buildForest` stands a picket
@@ -1985,7 +2191,10 @@ export function buildScene(world, layout, materials, assets = null) {
         }
       }
 
-      if (side && side.exit && (side.exit.locks & EX_ISDOOR) && dir !== fort) {
+      // The tree hangs its own door, one leaf in the doorway cut through it.
+      const beyond = side && side.link ? (side.link.from.vnum === room.vnum ? side.link.to : side.link.from) : null;
+      const intoTree = !tree && !!beyond && !!beyond.room && !isOpenAir(beyond.room) && shellAttrs(beyond.room)?.named === 'tree';
+      if (side && side.exit && (side.exit.locks & EX_ISDOOR) && dir !== fort && !intoTree) {
         // A cabin standing on this side owns the opening: the model has a
         // 1.00 x 1.99 m void and one leaf fills it, because a one-room cabin
         // does not have double doors.
@@ -1993,8 +2202,8 @@ export function buildScene(world, layout, materials, assets = null) {
         doors.push({
           x: wx + dx * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), y: pos.y,
           z: wz + dz * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), rotY, dir,
-          width: hung ? hung.width : DOOR_W, height: hung ? hung.height : DOOR_H,
-          single: !!hung,
+          width: hung ? hung.width : (tree ? TREE_DOOR_W : DOOR_W), height: hung ? hung.height : (tree ? TREE_DOOR_H : DOOR_H),
+          single: !!hung || tree,
           // One round leaf covering the whole opening instead of two boarded
           // halves. The opening stays 3.2 x 3.1 -- square to within 3%, which
           // is close enough for a circle and leaves the lintel, the collider
@@ -2007,6 +2216,7 @@ export function buildScene(world, layout, materials, assets = null) {
           // iron you can see through, not boards.
           grate: GRATE.test(side.exit.keyword || ''),
           room: room.vnum,
+          leaf: mats.said ? doorLeaf(mats.said.doors[dir], !!mats.sewer || mats.rockCave) : null,
         });
         if (gated) buildGatehouse({ batcher, instances, chunk, pos, dir, addCollider });
         // Out in the open a grate hangs in a railing, not on its own: iron
@@ -2070,16 +2280,25 @@ export function buildScene(world, layout, materials, assets = null) {
       // "The walls and ceiling seem miles away": the lining goes up, and the
       // flat ceiling that would hide it does not go in.
       const top = ceilingOf(room, cell, layout);
-      if (!ruin && top !== VAST_CEIL) {
+      if (tree) {
+        buildGreatTree({ batcher, instances, chunk, room, pos, sides, addCollider, addPlatform, decor, lights, materials, cell, layout });
+      }
+      if (!ruin && !tree && top !== VAST_CEIL) {
         buildCeiling({
           batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + top, z: pos.z,
-          half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling),
+          half: ROOM / 2 + WALL_IN, holes: roomHoles.filter((h) => h.ceiling), tint: mats.ceilTint,
         });
       }
       if (mats.shire) {
         buildTimberFrame({
           batcher, chunk, pos, sides, addCollider, barn: mats.shire === 'barn',
           holes: roomHoles.filter((h) => h.ceiling), rail: shellKind !== 'inn',
+        });
+      }
+      if (mats.said && mats.said.plan && kit === null) {
+        buildPlanShape({
+          plan: mats.said.plan, batcher, chunk, pos, sides, mats, materials, addCollider, decor, lights,
+          lit: room.sector === SECTOR.INSIDE && !isDeep(room),
         });
       }
       buildShell({
@@ -2090,6 +2309,10 @@ export function buildScene(world, layout, materials, assets = null) {
       let lanterns = mats.shire === 'barn' ? [[-1.8, -2.6], [1.8, 2.6]] : null;
       if (mats.smial) lanterns = buildSmialVault({ batcher, chunk, pos, sides, addCollider });
       if (instances && lanterns) hangLanterns({ instances, chunk, pos, decor, lights, room, points: lanterns });
+      paintRoom({
+        room, said: mats.said, pos, sides, batcher, chunk, instances, kit, mats, materials, decor, lights,
+        lining: !!instances && (deepStyle(room) === 'cave' || mats.rockCave),
+      });
       if (instances && (deepStyle(room) === 'cave' || mats.rockCave)) {
         buildCaveLining({
           instances, chunk, room, pos, sides, roofed: !roomHoles.some((h) => h.ceiling), addCollider,
@@ -2102,7 +2325,7 @@ export function buildScene(world, layout, materials, assets = null) {
       // its own floor, so a 12.4 m rooftile prism ran from y -1.95 up to +0.6
       // and came through the grass -- measured over #3640, where it read as a
       // tiled roof lying on the turf. The chimney and its smoke went with it.
-      if (kit === null && !buried && !ruin) {
+      if (kit === null && !buried && !ruin && !tree) {
         buildRoof({ batcher, chunk, mats, room, x: pos.x, y: pos.y + CEIL + SLAB, z: pos.z, decor });
       }
       // A room under the ground has no outside to put a window in. The Shire's
@@ -2113,7 +2336,7 @@ export function buildScene(world, layout, materials, assets = null) {
       // Bywater Road are at street level and keep theirs, which is the whole
       // difference.
       // A ruin's windows are holes, and nobody is home in the gangs' lairs.
-      if (!isBuried(mats, cell) && !ruin && hood !== 'lair') {
+      if (!isBuried(mats, cell) && !ruin && hood !== 'lair' && !tree) {
         decor.push({
           kind: 'windows', x: pos.x, y: pos.y, z: pos.z,
           // On a log wall the casement sits on the logs' face, and the logs
@@ -2124,7 +2347,7 @@ export function buildScene(world, layout, materials, assets = null) {
         });
       }
       if (isDeep(room)) buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider });
-      else if (!ruin) rooms.get(room.vnum).plan = buildInteriorProps({ room, pos, sides, decor, mats, holes: roomHoles.filter((h) => !h.ceiling), lights, kit });
+      else if (!ruin && !tree) rooms.get(room.vnum).plan = buildInteriorProps({ room, pos, sides, decor, mats, holes: roomHoles.filter((h) => !h.ceiling), lights, kit });
       // "The inn actually looks fairly functional despite its lack of repair
       // ... It looks as if the beer is still on tap!!!" The one place in the
       // neighborhood with a sign out and a light at the door.
@@ -2255,10 +2478,25 @@ export function buildScene(world, layout, materials, assets = null) {
       buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor });
       continue;
     }
+    const liftFrom = lifts.get(link.from.vnum) || 0; const liftTo = lifts.get(link.to.vnum) || 0;
     buildAlley({
       batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt,
-      cellKey, streetCells: openStreet,
+      cellKey, streetCells: openStreet, lift: Math.min(liftFrom, liftTo),
     });
+    if (liftFrom && liftTo) {
+      for (const c of link.path) {
+        const at = worldOf({ ...c, level: link.from.level });
+        buildPodium({ batcher, chunk: chunkOf({ ...c, level: link.from.level }), x: at.x, y: at.y, z: at.z, lift: liftFrom, addCollider, addPlatform, raised, steps: false });
+      }
+    } else if ((liftFrom || liftTo) && link.path.length && link.kind === 'alley') {
+      // "Huge marble steps lead up to the temple gate."
+      const top = liftFrom ? link.from : link.to;
+      const first = liftFrom ? link.path[0] : link.path[link.path.length - 1];
+      buildMoundStair({
+        batcher, chunk: chunkOf({ ...first, level: top.level }), at: worldOf({ ...first, level: top.level }),
+        dir: dirBetween(first, top), lift: liftFrom || liftTo, addCollider, addPlatform, raised,
+      });
+    }
     // The neighborhood's anchor is Wall Road, and its passages into No Man's
     // Land are barricaded.
     const fromHood = hoodStyle(link.from.room);
@@ -2546,7 +2784,8 @@ export function buildScene(world, layout, materials, assets = null) {
   // What each room's own words put in it (src/clutter.js), once everything
   // it has to find a clear place among is standing.
   const clutter = placeClutter({
-    world, rooms, decor, colliders, addCollider, instances, lights, worldOf, openAir: isOpenAir, ROOM, HALF,
+    world, rooms, decor, colliders, addCollider, instances, lights, openAir: isOpenAir, ROOM, HALF,
+    worldOf: (cell) => { const w = worldOf(cell); w.y += lifts.get(cell.vnum) || 0; return w; },
     BufferAttribute: THREE.BufferAttribute,
   });
 
@@ -2595,6 +2834,15 @@ export function buildScene(world, layout, materials, assets = null) {
   }
   stats.meshes = batches.finish(zones.route);
   stats.clutter = clutter;
+  // Everything standing on a mound belongs to the level it rises from.
+  for (const p of platforms) {
+    for (const r of raised) {
+      if (p.x0 >= r.x0 - 0.01 && p.x1 <= r.x1 + 0.01 && p.z0 >= r.z0 - 0.01 && p.z1 <= r.z1 + 0.01 && p.top > r.y + 0.05 && p.top <= r.y + r.lift + 0.05) {
+        p.base = r.y;
+        break;
+      }
+    }
+  }
   return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones, grass };
 }
 
@@ -2819,9 +3067,10 @@ const alleyEnclosed = (link) => !isOpenAir(link.from.room) && !isOpenAir(link.to
 
 // ---------------------------------------------------------------- pieces ----
 
-function buildFloor({ batcher, chunk, material, x, y, z, half, holes, addPlatform, slab = true, shade = true }) {
+function buildFloor({ batcher, chunk, material, x, y, z, half, holes, addPlatform, slab = true, shade = true, tint = null }) {
   const emit = (cx, cz, w, d) => {
     batcher.add(plane(w, d, Math.max(2, Math.round(w / 2))), material, place(cx, y, cz), {
+      tint,
       // Darkening the perimeter is right in a room, where there is a wall all
       // the way round it. Out of doors there is not, and the cell next door --
       // a routed street, or a cell built on -- is painted flat, so the two meet
@@ -2848,9 +3097,9 @@ function buildFloor({ batcher, chunk, material, x, y, z, half, holes, addPlatfor
   }
 }
 
-function buildCeiling({ batcher, chunk, material, x, y, z, half, holes }) {
+function buildCeiling({ batcher, chunk, material, x, y, z, half, holes, tint = null }) {
   const emit = (cx, cz, w, d) => batcher.add(box(w, SLAB, d), material,
-    place(cx, y + SLAB / 2, cz), { chunk, ao: () => 0.62 });
+    place(cx, y + SLAB / 2, cz), { chunk, ao: () => 0.62, tint });
   if (!holes.length) { emit(x, z, half * 2, half * 2); return; }
   const hole = unionRect(holes);
   for (const b of [
@@ -2869,7 +3118,7 @@ function buildCeiling({ batcher, chunk, material, x, y, z, half, holes }) {
  * One wall of an indoor room: an inner skin you see from inside, an outer skin
  * that is the face of the building, and a doorway punched through both.
  */
-function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, instances, width, addCollider, dir, room, lights, decor, cellX, cellZ, breach = false, unlit = false }) {
+function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, instances, width, addCollider, dir, room, lights, decor, cellX, cellZ, breach = false, unlit = false, flank = false }) {
   const gap = open ? DOOR_W : 0;
   const eave = CEIL + 1.1;
   const [dx, , dz] = DIR_STEP[dir];
@@ -2929,7 +3178,9 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
   if (room.sector !== SECTOR.INSIDE || isDeep(room) || unlit) return;
   const px = x - dx * 0.7;
   const pz = z - dz * 0.7;
-  const spots = gap ? [-(gap / 2 + 0.8), gap / 2 + 0.8] : [0];
+  // A painted wall keeps its middle for the painting: the torches go on the
+  // pilasters either side of it.
+  const spots = gap ? [-(gap / 2 + 0.8), gap / 2 + 0.8] : (flank ? [-2.85, 2.85] : [0]);
   for (const s of spots) {
     const tx = px + (along ? 0 : s);
     const tz = pz + (along ? s : 0);
@@ -5226,11 +5477,11 @@ function buildRailFence({ batcher, chunk, pos, dir, addCollider }) {
  * buildings that fill the cells beside it become the street frontage; between
  * two indoor rooms it gets walls and a ceiling and becomes a corridor.
  */
-function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null, streetCells = null }) {
+function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null, streetCells = null, lift = 0 }) {
   const enclosed = alleyEnclosed(link);
   batcher.indoor = enclosed;
   const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
-  const mats = pickMaterials(source, source.area);
+  const mats = pickMaterials(source, source.area, true);
   const bog = isBog(source);
   // A river is a chain of water rooms with a routed cell between each pair, and
   // only the rooms ever got a water surface -- so midstream showed the raw
@@ -5242,7 +5493,8 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
   const midstream = !isDeep(source) && isWater(link.from.room) && isWater(link.to.room)
     && !isBog(link.from.room) && !isBog(link.to.room);
   const level = link.from.level;
-  const y = level * LEVEL_H;
+  // Between two rooms on the same mound, the corridor is up on it too.
+  const y = level * LEVEL_H + lift;
   const chain = [link.from, ...link.path, link.to];
   // Lined as a cave when it leaves one: the rock goes on until the brick of
   // whatever it reaches, and the room at the other end has its own wall.
@@ -5295,8 +5547,10 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
 
     // Between two flooded rooms in the sewer the water lies on the floor of
     // the passage too, in the sewer's own material, not the river's.
-    if (isDeep(source) && [link.from.room, link.to.room].every((r) => isWater(r) || sewerFlood(r))) {
-      batcher.add(plane(CELL, CELL, 4), deepWater(source), place(pos.x, y + SW_FLOOD, pos.z), { chunk });
+    // At the shallower end's depth: water finds one level.
+    const floods = [floodOf(link.from.room), floodOf(link.to.room)];
+    if (enclosed && floods[0] && floods[1] && floods[0].material === floods[1].material) {
+      batcher.add(plane(CELL, CELL, 4), floods[0].material, place(pos.x, y + Math.min(floods[0].depth, floods[1].depth), pos.z), { chunk });
     }
     // The floor underneath stays as it is; the plane covers it, at the same
     // height and size the rooms either side use.
@@ -5372,6 +5626,557 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
   batcher.indoor = false;
 }
 
+// ---------------------------------------------------------------- the mound ----
+
+/**
+ * "Large steps lead down through the grand temple gate, descending the huge
+ * mound upon which the temple is built and ends on the temple square below";
+ * from the square, "huge marble steps lead up to the temple gate". The room
+ * that says so, and the rooms of the same temple joined to it, are built
+ * MOUND_LIFT up, on a stepped marble podium, and the passage down to open
+ * ground is a flight of steps. Only where nothing stands on the level above.
+ */
+const MOUND_LIFT = 1.2;
+const MOUND_RISE = 0.15;
+function mounds(world, layout) {
+  const lifts = new Map();
+  for (const room of world.rooms.values()) {
+    const said = isOpenAir(room) ? null : shellAttrs(room);
+    if (!said || !said.mound) continue;
+    const cell = layout.cells.get(room.vnum);
+    if (!cell) continue;
+    const temple = /\btemple\b/i;
+    const queue = [room];
+    while (queue.length) {
+      const r = queue.shift();
+      const c = layout.cells.get(r.vnum);
+      if (!c || lifts.has(r.vnum) || c.level !== cell.level || layout.at(c.level + 1, c.x, c.z) !== undefined) continue;
+      lifts.set(r.vnum, MOUND_LIFT);
+      for (const e of r.exits.slice(0, 4)) {
+        const next = e && world.rooms.get(e.to);
+        if (next && !isOpenAir(next) && temple.test(next.name) && !lifts.has(next.vnum)) queue.push(next);
+      }
+    }
+  }
+  return lifts;
+}
+
+/** Marble under a raised cell, stepped back twice outside the walls like a temple's base. */
+function buildPodium({ batcher, chunk, x, y, z, lift, addCollider, addPlatform, raised, steps, sides = null }) {
+  const courses = steps ? [[0, lift / 3, 6.45], [lift / 3, (2 * lift) / 3, 6.05], [(2 * lift) / 3, lift - 0.01, 5.72]]
+    : [[0, lift - 0.01, 6.5]];
+  for (const [y0, y1, h] of courses) {
+    batcher.add(box(h * 2, y1 - y0, h * 2, 3, 1, 3), 'marble', place(x, y + (y0 + y1) / 2, z), { chunk, ao: () => 0.9 });
+    addCollider(x - h, x + h, z - h, z + h, y, y + y1);
+    addPlatform(x - h, x + h, z - h, z + h, y + y1 + 0.01);
+  }
+  const h = courses[courses.length - 1][2];
+  // Out of every doorway the mound runs level to the cell edge, where the
+  // corridor or the steps take over; the stepped courses stop either side.
+  for (let d = 0; d < 4 && sides; d++) {
+    if (!openSide(sides[d])) continue;
+    const [dx, , dz] = DIR_STEP[d];
+    const mid = (ROOM / 2 + HALF) / 2; const len = HALF - ROOM / 2; const w = DOOR_W + 0.8;
+    const cx = x + dx * mid; const cz = z + dz * mid;
+    const sx = dx ? len : w; const sz = dz ? len : w;
+    batcher.add(box(sx, 0.4, sz), 'marble', place(cx, y + lift - 0.2, cz), { chunk, ao: () => 0.9 });
+    addPlatform(cx - sx / 2, cx + sx / 2, cz - sz / 2, cz + sz / 2, y + lift);
+  }
+  raised.push({ x0: x - 6.5, x1: x + 6.5, z0: z - 6.5, z1: z + 6.5, y, lift });
+  // The top, out to the cell edge wherever the walls leave it open.
+  addPlatform(x - h, x + h, z - h, z + h, y + lift);
+}
+
+/**
+ * The flight from open ground up to the mound, in the passage cell next to
+ * the raised room: a landing at the top against the cell edge, then treads
+ * down away from it, wide as a temple's steps are, between marble cheeks.
+ */
+function buildMoundStair({ batcher, chunk, at, dir, lift, addCollider, addPlatform, raised }) {
+  const n = Math.round(lift / MOUND_RISE);
+  const going = 0.48; const W = 8.6; const landing = 1.8;
+  const [dx, , dz] = DIR_STEP[dir];
+  const along = (d) => ({ x: at.x + dx * d, z: at.z + dz * d });
+  // d measured from the cell's middle towards the raised room.
+  const slab = (d0, d1, top) => {
+    const a = along((d0 + d1) / 2); const len = d1 - d0;
+    const w = dx ? len : W; const dd = dx ? W : len;
+    batcher.add(box(w, top, dd, 2, 1, 2), 'marble', place(a.x, at.y + top / 2, a.z), { chunk, ao: () => 0.92 });
+    addPlatform(a.x - w / 2, a.x + w / 2, a.z - dd / 2, a.z + dd / 2, at.y + top);
+  };
+  slab(HALF - landing, HALF, lift);
+  for (let i = 0; i < n - 1; i++) {
+    const d1 = HALF - landing - i * going;
+    slab(d1 - going, d1, lift - (i + 1) * MOUND_RISE);
+  }
+  const foot = HALF - landing - (n - 1) * going;
+  for (const s of [-1, 1]) {
+    // Cheek walls, their tops following the flight.
+    const steps = 6;
+    for (let k = 0; k < steps; k++) {
+      const d0 = foot + ((HALF - foot) * k) / steps; const d1 = foot + ((HALF - foot) * (k + 1)) / steps;
+      const top = Math.min(lift, ((d1 - foot) / (HALF - landing - foot + 0.001)) * lift) + 0.35;
+      const a = along((d0 + d1) / 2);
+      const cx = a.x + (dx ? 0 : s * (W / 2 + 0.3)); const cz = a.z + (dz ? 0 : s * (W / 2 + 0.3));
+      const len = d1 - d0;
+      const w = dx ? len : 0.6; const dd = dx ? 0.6 : len;
+      batcher.add(box(w, top, dd), 'marble', place(cx, at.y + top / 2, cz), { chunk, ao: () => 0.9 });
+      addCollider(cx - w / 2, cx + w / 2, cz - dd / 2, cz + dd / 2, at.y, at.y + top);
+    }
+  }
+  const a = along((foot + HALF) / 2); const len = HALF - foot;
+  raised.push({
+    x0: a.x - (dx ? len / 2 : W / 2), x1: a.x + (dx ? len / 2 : W / 2),
+    z0: a.z - (dz ? len / 2 : W / 2), z1: a.z + (dz ? len / 2 : W / 2), y: at.y, lift,
+  });
+}
+
+// ------------------------------------------------------------ the great tree ----
+
+/**
+ * "You have stepped inside of this hollowed tree. From here steps lead down
+ * into darkness or you can exit the tree by going west" -- and from the circle
+ * of trees, "a wooden door carved into the huge tree to the east". The room is
+ * the hollow of a trunk twelve metres across: heartwood curving round and
+ * narrowing overhead into the dark, roots running out across the floor, a
+ * knot-hole letting the day in, and one door cut through the wood. Outside,
+ * the bark flares into buttresses at the foot and the trunk rises to where
+ * its great limbs carry the crown.
+ *
+ * Both skins are grids in (angle, height) so the doorway and the knot can be
+ * left out of them, with the wood between the skins lining each hole. Nothing
+ * here is the square room: no masonry, no roof, no casements.
+ */
+const TREE_DOOR_W = 1.5;
+const TREE_DOOR_H = 2.75;
+const TREE_TOP = 13.5;
+function buildGreatTree({ batcher, instances, chunk, room, pos, sides, addCollider, addPlatform, decor, lights, materials, cell, layout }) {
+  const NA = 96;
+  const inner = (a, y) => (4.5 + 0.2 * Math.sin(5 * a + 0.7) + 0.1 * Math.sin(11 * a + 2))
+    * (1 - 0.62 * THREE.MathUtils.smoothstep(y, 3.8, 7.0));
+  const outer = (a, y) => (5.9 + 0.18 * Math.sin(7 * a) + 0.5 * Math.max(0, Math.sin(4 * a + 1)) ** 2 * Math.exp(-y / 1.3))
+    * (1 - 0.22 * THREE.MathUtils.smoothstep(y, 0, TREE_TOP));
+  const hollowTop = 7.0;
+  // The door: whichever way out is a door; the knot: a wall with nothing in it.
+  const doorDir = [0, 1, 2, 3].find((d) => sides[d] && sides[d].exit && openSide(sides[d])) ?? 3;
+  const angleOf = (d) => Math.atan2(DIR_STEP[d][2], DIR_STEP[d][0]);
+  const doorA = angleOf(doorDir);
+  const knotDir = [(doorDir + 2) % 4, (doorDir + 1) % 4, (doorDir + 3) % 4].find((d) => !sides[d]) ?? (doorDir + 2) % 4;
+  const knotA = angleOf(knotDir) + 0.35;
+  const KNOT = { y: 3.0, hw: 0.5, hh: 0.78 };
+  const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  const lateral = (a, r, centre) => wrap(a - centre) * r;
+  const inDoor = (a, y, r) => Math.abs(lateral(a, r, doorA)) < TREE_DOOR_W / 2 + 0.05 && y < TREE_DOOR_H + 0.05
+    - Math.max(0, Math.abs(lateral(a, r, doorA)) - 0.35) * 0.9;
+  const inKnot = (a, y, r) => ((lateral(a, r, knotA) / KNOT.hw) ** 2 + ((y - KNOT.y) / KNOT.hh) ** 2) < 1;
+
+  // One skin: quads over (angle, height), facing in (the hollow) or out.
+  const skin = (radius, y0, y1, rows, facingIn, material, skip) => {
+    const uvScale = materials[material].userData.uvScale;
+    const P = []; const N = []; const U = [];
+    const at = (i, j) => {
+      const a = (i / NA) * Math.PI * 2; const y = y0 + ((y1 - y0) * j) / rows;
+      const r = radius(a, y);
+      return [pos.x + Math.cos(a) * r, pos.y + y, pos.z + Math.sin(a) * r, a, y, r];
+    };
+    for (let j = 0; j < rows; j++) {
+      for (let i = 0; i < NA; i++) {
+        const q = [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)];
+        const ca = ((i + 0.5) / NA) * Math.PI * 2; const cy = y0 + ((y1 - y0) * (j + 0.5)) / rows;
+        if (skip && skip(ca, cy, radius(ca, cy))) continue;
+        const tri = facingIn ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2];
+        for (const k of tri) {
+          const v = q[k];
+          P.push(v[0], v[1], v[2]);
+          // Smooth, from the surface itself: out along the radius, tipped by
+          // how fast the radius falls with height. Per-face normals ringed
+          // the hollow with a seam at every row.
+          const n = facingIn ? -1 : 1;
+          const slope = (radius(v[3], v[4] + 0.05) - radius(v[3], v[4] - 0.05)) / 0.1;
+          const len = Math.hypot(1, slope);
+          N.push((Math.cos(v[3]) / len) * n, (-slope / len) * n, (Math.sin(v[3]) / len) * n);
+          // Round the trunk and up it, in metres of the tile.
+          U.push((v[3] * 5.5) * uvScale, v[4] * uvScale);
+        }
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+    return geo;
+  };
+  const add = (geo, material, indoor, tint = null) => {
+    batcher.add(geo, material, IDENTITY, { chunk, normals: true, keepUv: true, indoor, tint, ao: indoor ? wallAo(pos.y) : null });
+    geo.dispose();
+  };
+  add(skin(inner, 0, hollowTop, 28, true, 'livingwood', (a, y, r) => inDoor(a, y, r) || inKnot(a, y, r)), 'livingwood', true);
+  add(skin(outer, 0, TREE_TOP, 54, false, 'bark', (a, y, r) => inDoor(a, y, r) || inKnot(a, y, r)), 'bark', false, [0.9, 0.84, 0.78]);
+  // The dark the hollow narrows into, and the top of the trunk outside.
+  const cap = (y, r, facingUp, material, indoor) => {
+    const geo = new THREE.CircleGeometry(r, 32);
+    geo.rotateX(facingUp ? -Math.PI / 2 : Math.PI / 2);
+    batcher.add(geo, material, place(pos.x, pos.y + y, pos.z), { chunk, indoor, ao: () => (indoor ? 0.35 : 0.8) });
+    geo.dispose();
+  };
+  cap(hollowTop, inner(0, hollowTop) + 0.3, false, 'livingwood', true);
+  cap(TREE_TOP, outer(0, TREE_TOP) + 0.3, true, 'bark', false);
+
+  // The wood between the skins, lining the doorway and the knot.
+  const lineHole = (centre, pts, material) => {
+    const P = []; const N = []; const U = [];
+    const uvScale = materials[material].userData.uvScale;
+    for (let k = 0; k < pts.length - 1; k++) {
+      const [l0, y0] = pts[k]; const [l1, y1] = pts[k + 1];
+      const quad = [];
+      for (const [l, y, which] of [[l0, y0, 0], [l1, y1, 0], [l1, y1, 1], [l0, y0, 1]]) {
+        const rIn = inner(centre, y) - 0.02; const rOut = outer(centre, y) + 0.02;
+        const r = which ? rOut : rIn;
+        const a = centre + l / r;
+        quad.push([pos.x + Math.cos(a) * r, pos.y + y, pos.z + Math.sin(a) * r, l, y, r]);
+      }
+      for (const i of [0, 1, 2, 0, 2, 3]) {
+        const v = quad[i];
+        P.push(v[0], v[1], v[2]); N.push(0, 1, 0);
+        U.push((v[5] + v[3]) * uvScale, v[4] * uvScale);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+    geo.computeVertexNormals();
+    // Both ways round: which face is inward depends on which side of the hole.
+    const back = geo.clone();
+    const idx = back.attributes.position.array;
+    for (let i = 0; i < idx.length; i += 9) for (let c = 0; c < 3; c++) { const t = idx[i + 3 + c]; idx[i + 3 + c] = idx[i + 6 + c]; idx[i + 6 + c] = t; }
+    back.computeVertexNormals();
+    add(geo, 'livingwood', true); add(back, 'livingwood', true);
+  };
+  // The doorway: up one side, over a pointed head, down the other.
+  const hw = TREE_DOOR_W / 2;
+  const door = [[-hw, 0], [-hw, TREE_DOOR_H - 0.36], [-0.35, TREE_DOOR_H], [0.35, TREE_DOOR_H], [hw, TREE_DOOR_H - 0.36], [hw, 0]];
+  lineHole(doorA, door, 'livingwood');
+  const knot = [];
+  for (let k = 0; k <= 20; k++) {
+    const t = (k / 20) * Math.PI * 2;
+    knot.push([Math.cos(t) * KNOT.hw, KNOT.y + Math.sin(t) * KNOT.hh]);
+  }
+  lineHole(knotA, knot, 'livingwood');
+  // A lip of scar-wood round the knot on both faces, which is what a knot is.
+  for (const [radius, material] of [[inner, 'livingwood'], [outer, 'bark']]) {
+    const r = radius(knotA, KNOT.y);
+    const lip = new THREE.TorusGeometry(1, 0.11, 6, 28);
+    lip.scale(KNOT.hw + 0.06, KNOT.hh + 0.06, 1.2);
+    const m = new THREE.Matrix4().makeRotationY(Math.PI / 2 - knotA);
+    m.setPosition(pos.x + Math.cos(knotA) * r, pos.y + KNOT.y, pos.z + Math.sin(knotA) * r);
+    batcher.add(lip, material, m, { chunk, normals: true, indoor: radius === inner });
+    lip.dispose();
+  }
+  // Floor under the doorway, out to the cell edge.
+  const [ddx, , ddz] = DIR_STEP[doorDir];
+  const mid = (ROOM / 2 + HALF) / 2;
+  const strip = { w: ddx ? HALF - ROOM / 2 + 0.1 : TREE_DOOR_W + 0.2, d: ddz ? HALF - ROOM / 2 + 0.1 : TREE_DOOR_W + 0.2 };
+  batcher.add(plane(strip.w, strip.d, 2), 'dirt', place(pos.x + ddx * mid, pos.y, pos.z + ddz * mid), { chunk });
+  addPlatform(pos.x + ddx * mid - strip.w / 2, pos.x + ddx * mid + strip.w / 2, pos.z + ddz * mid - strip.d / 2, pos.z + ddz * mid + strip.d / 2, pos.y);
+
+  // Roots, out from the foot of the wall across the floor, half sunk in it.
+  for (let k = 0; k < 9; k++) {
+    const a = (k / 9) * Math.PI * 2 + hash3(room.vnum, k, 0, 191) * 0.4;
+    if (Math.abs(wrap(a - doorA)) < 0.45) continue;
+    const len = 1.5 + hash3(room.vnum, k, 1, 191) * 1.2;
+    const r0 = inner(a, 0.2) - 0.1;
+    const root = new THREE.CylinderGeometry(0.05, 0.3, len, 9, 1);
+    root.rotateZ(Math.PI / 2);
+    const cx = pos.x + Math.cos(a) * (r0 - len / 2); const cz = pos.z + Math.sin(a) * (r0 - len / 2);
+    const m = new THREE.Matrix4().makeRotationY(-a);
+    m.setPosition(cx, pos.y + 0.04, cz);
+    batcher.add(root, 'livingwood', m, { chunk, indoor: true });
+    root.dispose();
+  }
+
+  // Colliders: every half-metre square of the cell outside the hollow,
+  // merged along rows, leaving the doorway's lane open.
+  const S = 0.5; const n = Math.round(CELL / S);
+  for (let j = 0; j < n; j++) {
+    const z = -HALF + (j + 0.5) * S;
+    let run = null;
+    const flush = (i) => {
+      if (run === null) return;
+      addCollider(pos.x - HALF + run * S, pos.x - HALF + i * S, pos.z + z - S / 2, pos.z + z + S / 2, pos.y, pos.y + hollowTop);
+      run = null;
+    };
+    for (let i = 0; i < n; i++) {
+      const x = -HALF + (i + 0.5) * S;
+      const a = Math.atan2(z, x); const r = Math.hypot(x, z);
+      const lane = Math.abs(lateral(a, r, doorA)) < hw + 0.1 && Math.cos(wrap(a - doorA)) > 0;
+      const solid = r > inner(a, 1) + 0.15 && r < outer(a, 0) + 0.3 && !lane;
+      if (solid && run === null) run = i;
+      if (!solid) flush(i);
+    }
+    flush(n);
+  }
+
+  if (!instances) return;
+  // The crown: four great limbs out of the top of the trunk, each carrying
+  // an oak's head of leaves.
+  // An oak's first fork is about four of its ten metres up; sunk that far
+  // into the trunk, its head is what shows over the top.
+  for (let k = 0; k < 5; k++) {
+    const a = (k / 5) * Math.PI * 2 + 0.6;
+    const r = outer(a, TREE_TOP) * 0.6;
+    const scale = 2.3 + hash3(room.vnum, k, 2, 193) * 0.5;
+    instances.add('tree_oak', {
+      x: pos.x + Math.cos(a) * r, y: pos.y + TREE_TOP - 3.6 * scale, z: pos.z + Math.sin(a) * r,
+      rotY: a * 2.3, scale,
+    }, chunk);
+  }
+  // Light by the knot, and a lantern kept on a peg by the door.
+  const la = doorA + 0.9;
+  const lr = inner(la, 3) - 0.45;
+  const lx = pos.x + Math.cos(la) * lr; const lz = pos.z + Math.sin(la) * lr;
+  if (instances.add('lantern', { x: lx, y: pos.y + 3.3, z: lz, rotY: la }, chunk)) {
+    decor.push({ kind: 'torch', bare: true, x: lx, y: pos.y + 3.3 - 1.72, z: lz });
+    lights.push({ x: lx, y: pos.y + 2.0, z: lz, color: 0xffb060, intensity: 9, radius: 11, flicker: true });
+  }
+}
+
+// ------------------------------------------------------ what is on the walls ----
+
+/**
+ * Paint, drawing and blood the prose puts on a room's walls (src/shells.js
+ * `marks` and `gore`), laid on the surface that is really there: projected
+ * onto the rock of a cave's lining or a kit panel's masonry, clipped to it
+ * triangle by triangle so it follows every bulge, or on the flat inner face
+ * of a procedural wall. Painted materials come from textures.js
+ * (`createPaintings`), in the `_deep` twin wherever the walls are lit as
+ * underground.
+ */
+const decalSource = new Map();
+/** A library model's triangles, model space, flat: [ax, ay, az, bx, ...]. */
+function modelTriangles(library, name) {
+  if (decalSource.has(name)) return decalSource.get(name);
+  const asset = library.get(name);
+  let out = null;
+  if (asset) {
+    const list = [];
+    for (const primitive of asset.primitives) {
+      const g = primitive.geometry;
+      const pos = g.attributes.position;
+      const idx = g.index;
+      const n = idx ? idx.count : pos.count;
+      for (let i = 0; i < n; i++) {
+        const k = idx ? idx.getX(i) : i;
+        list.push(pos.getX(k), pos.getY(k), pos.getZ(k));
+      }
+    }
+    out = new Float32Array(list);
+  }
+  decalSource.set(name, out);
+  return out;
+}
+
+const _dm = new THREE.Matrix4();
+const _dq = new THREE.Quaternion();
+const _dv = new THREE.Vector3();
+const _ds = new THREE.Vector3();
+const UP_AXIS = new THREE.Vector3(0, 1, 0);
+/** The world-space triangles of an instance placed as `instances.add` places it. */
+function placedTriangles(library, name, t) {
+  const src = modelTriangles(library, name);
+  if (!src) return null;
+  _dv.set(t.x, t.y, t.z); _dq.setFromAxisAngle(UP_AXIS, t.rotY || 0); _ds.set(t.scaleX ?? 1, t.scaleY ?? 1, t.scaleZ ?? 1);
+  _dm.compose(_dv, _dq, _ds);
+  const e = _dm.elements;
+  const out = new Float32Array(src.length);
+  for (let i = 0; i < src.length; i += 3) {
+    const x = src[i]; const y = src[i + 1]; const z = src[i + 2];
+    out[i] = e[0] * x + e[4] * y + e[8] * z + e[12];
+    out[i + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+    out[i + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+  }
+  return out;
+}
+
+/**
+ * Clip `tris` to a box in front of a wall and return a geometry with the
+ * painting's UVs on it. The frame: centre `c`, `r` to the right as you face
+ * the wall, `n` into it; `hw`, `hh` half the size; `region` [u0, v0, u1, v1];
+ * `flip` mirrors it. Only faces turned towards the room take paint.
+ */
+function projectDecal(tris, c, r, n, hw, hh, region, flip = false, reach = [-1.1, 0.5]) {
+  const pos = []; const nor = []; const uvs = [];
+  const toLocal = (x, y, z) => {
+    const dx = x - c.x; const dy = y - c.y; const dz = z - c.z;
+    return [dx * r.x + dz * r.z, dy, dx * n.x + dz * n.z];
+  };
+  const planes = [[0, 1, hw], [0, -1, hw], [1, 1, hh], [1, -1, hh], [2, 1, reach[1]], [2, -1, -reach[0]]];
+  for (let i = 0; i < tris.length; i += 9) {
+    const ax = tris[i]; const ay = tris[i + 1]; const az = tris[i + 2];
+    const e1 = [tris[i + 3] - ax, tris[i + 4] - ay, tris[i + 5] - az];
+    const e2 = [tris[i + 6] - ax, tris[i + 7] - ay, tris[i + 8] - az];
+    let fn = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    const len = Math.hypot(fn[0], fn[1], fn[2]);
+    if (len < 1e-9) continue;
+    fn = fn.map((v) => v / len);
+    if (fn[0] * n.x + fn[2] * n.z > -0.25) continue;
+    let poly = [toLocal(ax, ay, az), toLocal(tris[i + 3], tris[i + 4], tris[i + 5]), toLocal(tris[i + 6], tris[i + 7], tris[i + 8])];
+    // Quick reject before clipping.
+    if (poly.every((p) => p[0] > hw) || poly.every((p) => p[0] < -hw) || poly.every((p) => p[1] > hh)
+      || poly.every((p) => p[1] < -hh) || poly.every((p) => p[2] > reach[1]) || poly.every((p) => p[2] < reach[0])) continue;
+    for (const [axis, sign, limit] of planes) {
+      const next = [];
+      for (let k = 0; k < poly.length; k++) {
+        const p = poly[k]; const q = poly[(k + 1) % poly.length];
+        const dp = limit - sign * p[axis]; const dq = limit - sign * q[axis];
+        if (dp >= 0) next.push(p);
+        if ((dp >= 0) !== (dq >= 0)) {
+          const t = dp / (dp - dq);
+          next.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t]);
+        }
+      }
+      poly = next;
+      if (poly.length < 3) break;
+    }
+    if (poly.length < 3) continue;
+    const emit = (p) => {
+      // Back to the world, a centimetre off the surface towards the room.
+      pos.push(c.x + r.x * p[0] + n.x * (p[2] - 0.012), c.y + p[1], c.z + r.z * p[0] + n.z * (p[2] - 0.012));
+      nor.push(fn[0], fn[1], fn[2]);
+      let u = (p[0] / hw + 1) / 2; if (flip) u = 1 - u;
+      uvs.push(region[0] + (region[2] - region[0]) * u, region[1] + (region[3] - region[1]) * ((p[1] / hh + 1) / 2));
+    };
+    for (let k = 1; k < poly.length - 1; k++) { emit(poly[0]); emit(poly[k]); emit(poly[k + 1]); }
+  }
+  if (!pos.length) return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  return geo;
+}
+
+/** A flat wall face, as triangles, for rooms whose walls are procedural boxes. */
+function flatWall(pos, dir, face, y0, y1) {
+  const a = onWall(pos, dir, -ROOM / 2, 0, face); const b = onWall(pos, dir, ROOM / 2, 0, face);
+  // Wound to face the room.
+  return new Float32Array([
+    a.x, pos.y + y0, a.z, b.x, pos.y + y0, b.z, b.x, pos.y + y1, b.z,
+    a.x, pos.y + y0, a.z, b.x, pos.y + y1, b.z, a.x, pos.y + y1, a.z,
+  ]);
+}
+
+/** Temple kit bays between its pilaster strips and corner piers, inner face 5.10 m out. */
+const TEMPLE_FACE = 5.10;
+const TEMPLE_BAYS = [[-4.74, -3.33], [-2.38, 2.38], [3.33, 4.74]];
+
+function paintRoom({ room, said, pos, sides, batcher, chunk, instances, kit, mats, materials, lining, decor, lights }) {
+  if (!said || (!said.marks && !(said.gore && said.gore.walls))) return 0;
+  const deep = !!mats.sewer || !!mats.rockCave || (mats.shell && mats.shell.kind === 'tomb');
+  const name = (base) => (deep ? `${base}_deep` : base);
+  const rand = (k, salt) => hash3(room.vnum, k, salt, 173);
+  const library = instances && instances.library;
+  // The surface of each wall: the rock lining, the kit panel, or the plain face.
+  const surfaceOf = (dir) => {
+    const side = sides[dir];
+    const open = openSide(side) || (side && side.kind === 'gate');
+    const [dx, , dz] = DIR_STEP[dir];
+    if (lining && library) {
+      return placedTriangles(library, open ? 'cave_wall_door' : 'cave_wall', { x: pos.x + dx * ROOM / 2, y: pos.y, z: pos.z + dz * ROOM / 2, rotY: FACE_ROT[dir] });
+    }
+    if (kit !== null && library) {
+      return placedTriangles(library, `${kit}wall_${open ? 'door' : 'solid'}`, { x: pos.x + dx * KIT_LINE, y: pos.y, z: pos.z + dz * KIT_LINE, rotY: FACE_ROT[dir] });
+    }
+    return flatWall(pos, dir, ROOM / 2, 0, CEIL);
+  };
+  const surfaces = [0, 1, 2, 3].map(surfaceOf);
+  // Frame for wall `dir`, `along` metres from its middle, `y` up: r runs the
+  // way `onWall` does, n points out of the room into the wall.
+  const frame = (dir, along, y) => {
+    const { axis, normal } = SHELL_SIDES[dir];
+    const at = onWall(pos, dir, along, 0, ROOM / 2);
+    return { c: { x: at.x, y: pos.y + y, z: at.z }, r: { x: axis[0], z: axis[1] }, n: { x: -normal[0], z: -normal[1] } };
+  };
+  // Clear of a doorway on that wall, and of the corners.
+  const clear = (dir, along, hw) => Math.abs(along) + hw < ROOM / 2 - 0.2
+    && (!openSide(sides[dir]) || Math.abs(along) - hw > DOOR_W / 2 + 0.2);
+  let laid = 0;
+  const lay = (material, dir, along, y, hw, hh, region, flip) => {
+    const f = frame(dir, along, y);
+    // The frame's `r` must be screen-right for someone facing the wall.
+    const geo = projectDecal(surfaces[dir], f.c, f.r, f.n, hw, hh, region, flip);
+    if (!geo) return false;
+    batcher.add(geo, material, IDENTITY, { chunk, normals: true, keepUv: true });
+    geo.dispose();
+    laid++;
+    return true;
+  };
+
+  // Blood: thrown at every wall, heaviest on the ones with nothing in them.
+  if (said.gore && said.gore.walls) {
+    for (let k = 0; k < 9; k++) {
+      const dir = Math.floor(rand(k, 1) * 4);
+      const hw = 0.7 + rand(k, 2) * 0.6;
+      const along = (rand(k, 3) - 0.5) * (ROOM - 2 * hw - 0.6);
+      if (!clear(dir, along, hw)) continue;
+      lay(name('bloodwall'), dir, along, 0.8 + rand(k, 4) * 1.3, hw, hw, bloodRegion(k), rand(k, 5) > 0.5);
+    }
+  }
+  const marks = said.marks;
+  if (marks && marks.kind === 'faces') {
+    // "Drawings of faces in pain are on the walls": a row of them at eye
+    // height round the room, one to a stretch of wall.
+    let k = 0;
+    for (let dir = 0; dir < 4; dir++) {
+      for (const along of [-3.2, -1.1, 1.1, 3.2]) {
+        const hw = 0.5 + rand(k, 6) * 0.2;
+        const a = along + (rand(k, 7) - 0.5) * 0.4;
+        if (clear(dir, a, hw) && rand(k, 8) > 0.2) lay(name('faces'), dir, a, 1.45 + (rand(k, 9) - 0.5) * 0.5, hw, hw * 1.05, faceRegion(k), false);
+        k++;
+      }
+    }
+  } else if (marks && marks.kind === 'writing' && marks.texts.length && materials.$writing) {
+    // The words, once, on the wall with the most room for them.
+    const material = materials.$writing(marks.texts, deep, room.vnum);
+    const order = [0, 1, 2, 3].sort((a, b) => (openSide(sides[a]) ? 1 : 0) - (openSide(sides[b]) ? 1 : 0));
+    for (const dir of order) {
+      const hw = openSide(sides[dir]) ? 1.4 : 2.6;
+      const along = openSide(sides[dir]) ? (DOOR_W / 2 + 0.3 + hw) * (rand(1, 10) > 0.5 ? 1 : -1) : 0;
+      if (clear(dir, along, hw) && lay(material, dir, along, 2.0, hw, hw / 2, [0, 0, 1, 1], false)) break;
+    }
+  } else if (marks && marks.kind === 'mural') {
+    // "Most of the walls are covered by ancient wall paintings": painted
+    // plaster over every bay of wall a doorway leaves.
+    const wide = [MURAL_REGIONS.wideA, MURAL_REGIONS.wideB];
+    const tall = [MURAL_REGIONS.tallA, MURAL_REGIONS.tallB];
+    let k = 0;
+    for (let dir = 0; dir < 4; dir++) {
+      const bays = kit === 'temple_' ? TEMPLE_BAYS : [[-4.6, -1.9], [-1.5, 1.5], [1.9, 4.6]];
+      for (const [a0, a1] of bays) {
+        const centre = (a0 + a1) / 2; const hw = (a1 - a0) / 2;
+        if (!clear(dir, centre, hw - 0.3)) continue;
+        const big = hw > 1.5;
+        const region = big ? wide[k % 2] : tall[k % 2];
+        const y0 = 0.6; const y1 = kit === 'temple_' ? 3.86 : 3.9;
+        const face = kit === 'temple_' ? TEMPLE_FACE - 0.012 : ROOM / 2 - 0.012;
+        const at = onWall(pos, dir, centre, 0, face);
+        const geo = new THREE.PlaneGeometry(hw * 2, y1 - y0);
+        const uv = geo.attributes.uv;
+        const flip = !big && k % 4 > 1;
+        for (let i = 0; i < uv.count; i++) {
+          const u = flip ? 1 - uv.getX(i) : uv.getX(i);
+          uv.setXY(i, region[0] + (region[2] - region[0]) * u, region[1] + (region[3] - region[1]) * uv.getY(i));
+        }
+        const [nx, nz] = SHELL_SIDES[dir].normal;
+        batcher.add(geo, name('mural'), place(at.x, pos.y + (y0 + y1) / 2, at.z, Math.atan2(nx, nz)), { chunk, normals: true, keepUv: true });
+        geo.dispose();
+        laid++; k++;
+      }
+    }
+  }
+  return laid;
+}
+
 // ------------------------------------------------------- the sewer's kit ----
 
 /** Everything the sewer is assembled from; tools/blender/sewer.py makes them. */
@@ -5423,11 +6228,29 @@ function sewerRun({ pos, dir, from, to, y, addCollider, addPlatform }) {
  * channel and the kerbs, which is the point: in "the muddy sewer" there is
  * no walkway any more, and in "the watery sewer" there is no channel.
  */
-function sewerSheet({ batcher, chunk, pos, dir, from, to, y, flood }) {
+function sewerSheet({ batcher, chunk, pos, dir, from, to, y, flood, sheet = null }) {
   const r = sewerRect(pos, dir, from, to, -SW_A, SW_A);
   const w = r.x1 - r.x0; const d = r.z1 - r.z0;
-  batcher.add(plane(w, d, Math.max(2, Math.round(Math.max(w, d) / 2))), flood ? 'sewage' : 'sludge',
-    place((r.x0 + r.x1) / 2, y + (flood ? SW_FLOOD : SW_MUD), (r.z0 + r.z1) / 2), { chunk });
+  batcher.add(plane(w, d, Math.max(2, Math.round(Math.max(w, d) / 2))), sheet ? sheet.material : (flood ? 'sewage' : 'sludge'),
+    place((r.x0 + r.x1) / 2, y + (sheet ? sheet.depth : (flood ? SW_FLOOD : SW_MUD)), (r.z0 + r.z1) / 2), { chunk });
+}
+
+/**
+ * The water or mud a room stands in -- { depth, material } -- or null. The
+ * prose's depth where it gives one (src/shells.js), and the sewer's standing
+ * shallow flood where it only says the room is wet. A pool or a lake is
+ * water, black and still; a drain is sewage.
+ */
+function floodOf(room) {
+  const said = isOpenAir(room) ? null : shellAttrs(room);
+  if (said && said.water) {
+    const text = `${room.name} ${room.description}`;
+    const foul = isSewer(room) && !/\b(pool|lake|calm|swimming)\b/i.test(text);
+    return { depth: said.water.depth, material: said.water.stuff === 'mud' ? 'sludge' : (foul ? 'sewage' : 'cavewater') };
+  }
+  if (isDeep(room) && (isWater(room) || sewerFlood(room))) return { depth: SW_FLOOD, material: deepWater(room) };
+  if (isDeep(room) && sewerMud(room)) return { depth: SW_MUD, material: 'sludge' };
+  return null;
 }
 
 /** A tunnel mouth that nothing is routed through is stopped 0.3 m short of the cell edge. */
@@ -5504,20 +6327,21 @@ function buildSewerChamber({
   addCollider, addPlatform, lights, decor, portals, skyHoles,
 }) {
   const y = pos.y;
-  const mud = sewerMud(room);
-  const flood = sewerFlood(room);
+  const sheet = floodOf(room);
+  const mud = !!sheet && sheet.material === 'sludge';
+  const flood = !!sheet && !mud;
   // Out to the middle of the wall, so the floor's edge is under masonry.
   buildFloor({
     batcher, chunk, material: 'sewerflag', x: pos.x, y, z: pos.z,
     half: SW_CA + SW_CT / 2, holes: floorHoles, addPlatform,
   });
   if ((mud || flood) && !floorHoles.length) {
-    sewerSheet({ batcher, chunk, pos, dir: 0, from: -SW_CA, to: SW_CA, y, flood });
+    sewerSheet({ batcher, chunk, pos, dir: 0, from: -SW_CA, to: SW_CA, y, flood, sheet });
     // sewerSheet spans the tunnel's width; a chamber is wider than that.
     for (const s of [-1, 1]) {
       const r = { x0: pos.x + (s < 0 ? -SW_CA : SW_A), x1: pos.x + (s < 0 ? -SW_A : SW_CA), z0: pos.z - SW_CA, z1: pos.z + SW_CA };
-      batcher.add(plane(r.x1 - r.x0, r.z1 - r.z0, 3), flood ? 'sewage' : 'sludge',
-        place((r.x0 + r.x1) / 2, y + (flood ? SW_FLOOD : SW_MUD), pos.z), { chunk });
+      batcher.add(plane(r.x1 - r.x0, r.z1 - r.z0, 3), sheet.material,
+        place((r.x0 + r.x1) / 2, y + sheet.depth, pos.z), { chunk });
     }
   }
   const top = y + (shaft ? 7.15 : 5.0);
@@ -5547,7 +6371,7 @@ function buildSewerChamber({
       sewerRun({ pos, dir, from: SW_CA, to: HALF, y, addCollider, addPlatform });
       // The stub carries the room's mud or water out to the cell edge, where
       // the passage beyond takes it up if the room at its other end has any.
-      if (mud || flood) sewerSheet({ batcher, chunk, pos, dir, from: SW_CA - 0.05, to: HALF, y, flood });
+      if (mud || flood) sewerSheet({ batcher, chunk, pos, dir, from: SW_CA - 0.05, to: HALF, y, flood, sheet });
     }
 
     if (open && side.kind !== 'alley') {
@@ -5848,8 +6672,12 @@ function buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addColl
   const y = level * LEVEL_H;
   const chain = [link.from, ...link.path, link.to];
   // Mud and water run on between two rooms that both have them.
-  const mud = sewerMud(link.from.room) && sewerMud(link.to.room);
-  const flood = sewerFlood(link.from.room) && sewerFlood(link.to.room);
+  const ends = [floodOf(link.from.room), floodOf(link.to.room)];
+  // Only where both ends have the same stuff, at the shallower one's depth.
+  const sheet = ends[0] && ends[1] && ends[0].material === ends[1].material
+    ? { material: ends[0].material, depth: Math.min(ends[0].depth, ends[1].depth) } : null;
+  const mud = !!sheet && sheet.material === 'sludge';
+  const flood = !!sheet && !mud;
   const sconce = !mud && !flood ? instances.library.get('sewer_sconce') : null;
 
   for (let i = 1; i < chain.length - 1; i++) {
@@ -5862,7 +6690,7 @@ function buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addColl
     if (straight) {
       instances.add('sewer_tunnel', { x: pos.x, y, z: pos.z, rotY: FACE_ROT[open[0] % 2] }, chunk);
       sewerRun({ pos, dir: open[0], from: -HALF, to: HALF, y, addCollider, addPlatform });
-      if (mud || flood) sewerSheet({ batcher, chunk, pos, dir: open[0], from: -HALF, to: HALF, y, flood });
+      if (mud || flood) sewerSheet({ batcher, chunk, pos, dir: open[0], from: -HALF, to: HALF, y, flood, sheet });
       // Now and then a torch on the tunnel wall, low enough to sit on the
       // upright part of it rather than on the turn of the vault.
       if (sconce && hash3(c.x, c.z, level, 19) > 0.74) {
@@ -5879,12 +6707,12 @@ function buildSewerPassage({ batcher, instances, link, worldOf, chunkOf, addColl
     }
     instances.add('sewer_hub', { x: pos.x, y, z: pos.z, rotY: 0 }, chunk);
     addPlatform(pos.x - SW_A, pos.x + SW_A, pos.z - SW_A, pos.z + SW_A, y);
-    if (mud || flood) sewerSheet({ batcher, chunk, pos, dir: 0, from: -SW_A, to: SW_A, y, flood });
+    if (mud || flood) sewerSheet({ batcher, chunk, pos, dir: 0, from: -SW_A, to: SW_A, y, flood, sheet });
     for (let dir = 0; dir < 4; dir++) {
       if (open.includes(dir)) {
         instances.add('sewer_arm', { x: pos.x, y, z: pos.z, rotY: FACE_ROT[dir] }, chunk);
         sewerRun({ pos, dir, from: SW_A, to: HALF, y, addCollider, addPlatform });
-        if (mud || flood) sewerSheet({ batcher, chunk, pos, dir, from: SW_A, to: HALF, y, flood });
+        if (mud || flood) sewerSheet({ batcher, chunk, pos, dir, from: SW_A, to: HALF, y, flood, sheet });
       } else {
         instances.add('sewer_hub_end', { x: pos.x, y, z: pos.z, rotY: FACE_ROT[dir] }, chunk);
         const r = sewerRect(pos, dir, SW_A, SW_A + SW_WALL, -SW_A, SW_A);
@@ -7483,7 +8311,9 @@ const TRADE_PROPS = {
 function buildLooseProps({ room, pos, sides, decor, mats, plan = null, trade = null }) {
   const blank = [];
   for (let d = 0; d < 4; d++) if (!sides[d]) blank.push(d);
-  if (blank.length && /temple|altar|sanctum|hall|throne/i.test(room.name)) {
+  // Not over a painted wall: the paintings are what the room says is there.
+  const painted = mats.said && mats.said.marks && mats.said.marks.kind === 'mural';
+  if (blank.length && !painted && /temple|altar|sanctum|hall|throne/i.test(room.name)) {
     decor.push({ kind: 'banner', x: pos.x, y: pos.y, z: pos.z, dir: blank[0] });
   }
   // An inn with a named landlord was a bare stone box: eighteen prop models

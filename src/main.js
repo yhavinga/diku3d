@@ -574,7 +574,7 @@ async function boot() {
     quality, applyTime: (n) => applyTime(n), applyWeather: (w) => applyWeather(w), audio, state,
   });
   const game = createGame({ world, layout, built, actors });
-  const gameUi = createGameUi(game);
+  const gameUi = createGameUi(game, { built });
   const fx = createFx({
     scene, camera, composer, actors, game, audio, player, library: assets, sun, hemi, built, lightPool,
   });
@@ -645,7 +645,15 @@ async function boot() {
 
   const startCell = layout.cells.get(START_VNUM) || layout.start;
   const startInfo = built.rooms.get(startCell.vnum);
-  const firstExit = startCell.room.exits.findIndex((e, i) => e && i < 4);
+  // Facing the way out into the open air if there is one: the temple's
+  // first exit is north, into the inner hall, and a new player's first frame
+  // was a grey room with the gate and the square behind them.
+  const flatExits = startCell.room.exits.map((e, i) => (e && i < 4 ? i : -1)).filter((i) => i >= 0);
+  const outward = flatExits.find((i) => {
+    const to = built.rooms.get(startCell.room.exits[i].to);
+    return to && to.outdoor;
+  });
+  const firstExit = outward ?? (flatExits.length ? flatExits[0] : -1);
   const yaw = firstExit >= 0
     ? Math.atan2(-DIR_STEP[firstExit][0], -DIR_STEP[firstExit][2])
     : 0;
@@ -1046,6 +1054,10 @@ async function boot() {
       }
     }
     if (event.code === 'Escape') hud.hideExamine();
+    if (event.code === 'Tab' && !(event.target && /^(INPUT|TEXTAREA)$/.test(event.target.tagName))) {
+      event.preventDefault();
+      hud.toggleProse();
+    }
     if (event.code === 'Digit1') applyTime('dawn');
     if (event.code === 'Digit2') applyTime('noon');
     if (event.code === 'Digit3') applyTime('dusk');

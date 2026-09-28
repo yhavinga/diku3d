@@ -6,12 +6,17 @@
 // each kind takes per area, every match by name, and with --table a line per
 // walled room in the areas named (default: the nine the viewer loads).
 //
-// Run: node tools/shell-check.mjs [--table] [--areas midgaard,haon,...]
+// With --attrs, what `readShell` reads -- plan, materials and colours, doors,
+// water, blood, what is on the walls -- for every walled room in the areas
+// named that says anything, with the words it was read from, and a count per
+// attribute over all 45.
+//
+// Run: node tools/shell-check.mjs [--table] [--attrs] [--areas midgaard,haon,...]
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArea, buildWorld, ROOM_INDOORS, SECTOR_NAME } from '../src/are.js';
-import { classifyShells, shellFor, SHELL_KINDS } from '../src/shells.js';
+import { classifyShells, shellFor, SHELL_KINDS, readShell } from '../src/shells.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const areaDir = join(root, 'merc21', 'area');
@@ -59,4 +64,43 @@ if (table) {
     const kind = shell ? `${shell.kind}${shell.vast ? '+vast' : ''}` : '-';
     console.log(`${String(room.vnum).padEnd(5)} ${room.areaFile.replace('.are', '').padEnd(10)} ${String(SECTOR_NAME[room.sector]).padEnd(9)} ${kind.padEnd(11)} ${room.name}`);
   }
+}
+
+if (args.includes('--attrs')) {
+  const brief = (a) => {
+    const out = [];
+    if (a.plan) out.push(`plan ${a.plan}`);
+    for (const k of ['wall', 'floor', 'ceil']) {
+      const v = a[k];
+      if (v) out.push(`${k} ${[v.smooth ? 'smooth' : '', v.colour || '', v.material || ''].filter(Boolean).join(' ')}`);
+    }
+    a.doors.forEach((d, i) => { if (d) out.push(`door ${'NESW'[i]} ${[d.colour, d.material].filter(Boolean).join(' ')}`); });
+    if (a.water) out.push(`${a.water.stuff} ${a.water.depth} m`);
+    if (a.gore) out.push(`blood${a.gore.walls ? ' walls' : ''}${a.gore.floor ? ' floor' : ''}`);
+    if (a.marks) out.push(`${a.marks.kind}${a.marks.texts.length ? ` "${a.marks.texts.join(' / ').replace(/\s+/g, ' ')}"` : ''}`);
+    if (a.named) out.push(`named ${a.named}`);
+    if (a.mound) out.push('mound');
+    return out.join(', ');
+  };
+  const counts = new Map();
+  const bump = (k) => counts.set(k, (counts.get(k) || 0) + 1);
+  console.log('\nshell attributes, walled rooms that say something:');
+  for (const room of world.rooms.values()) {
+    if (!walled(room)) continue;
+    const a = readShell(room);
+    if (!a) continue;
+    if (a.plan) bump(`plan ${a.plan}`);
+    for (const k of ['wall', 'floor', 'ceil']) if (a[k]) bump(`${k} ${a[k].material || a[k].colour}`);
+    for (const d of a.doors) if (d) bump(`door ${d.material || d.colour}`);
+    if (a.water) bump(`${a.water.stuff} ${a.water.depth}`);
+    if (a.gore) bump('blood');
+    if (a.marks) bump(a.marks.kind);
+    if (a.named) bump(`named ${a.named}`);
+    if (a.mound) bump('mound');
+    if (!loaded.has(room.areaFile)) continue;
+    console.log(`${String(room.vnum).padEnd(5)} ${room.areaFile.replace('.are', '').padEnd(9)} ${room.name.slice(0, 30).padEnd(30)} ${brief(a)}`);
+    for (const w of a.why) console.log(`${' '.repeat(47)}| ${w}`);
+  }
+  console.log('\nper attribute, all 45 areas:');
+  for (const [k, n] of [...counts].sort((a, b) => b[1] - a[1])) console.log(`  ${k.padEnd(22)} ${n}`);
 }

@@ -60,7 +60,10 @@ worm, the dracolich and a Will-O-Wisp that carries its own light over the bog. T
 and walk the routed street to get there; fights are Merc's `fight.c`, played
 on the beat with the swing's contact frame landing on the blow. Nothing is
 named unless you look at it; a foe you cannot see gets a marker telling you
-which way to turn. Shops and inns are furnished by the keeper's trade and the room's own
+which way to turn. Rooms take their plan, materials and colours, doors, water depth, blood and
+wall paintings from their own descriptions: the Temple of Midgaard stands on
+its mound behind marble steps, painted with gods and giants, and Haon Dor's
+great tree is a hollow trunk you walk into. Shops and inns are furnished by the keeper's trade and the room's own
 description — a forge and anvil for the smith, racks for the weaponsmith, a
 bar with its back shelves for the tavern. People sit at tables, talk in pairs, stand at the bar and
 climb the stairs rather than vanishing at the foot of them. The casters
@@ -99,6 +102,7 @@ No Man's Land (south from inside the East Gate, down Wall Road).
 | `I` `B` `K` `R` `T` `Q` | inventory, trade, skills, rest, take, recall |
 | `Z` `X` / wheel, `C` / right mouse | mage and cleric: choose a spell, cast it |
 | `Z` `X` `C` `H` `J` `L` `N` | warrior and thief: the skill bar — kick, backstab, disarm, sneak, hide, steal, pick |
+| `tab` | show the room's full description again, or fold it (it folds by itself once there has been time to read it) |
 | `enter` | the mud's own command line: Merc's command table, abbreviations and all 90 socials; `enter` on an empty line closes it |
 | `esc` | release the mouse; click the view to take it again. The game starts without it, so the title's *Enter* works even where pointer lock is refused |
 

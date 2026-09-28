@@ -67,15 +67,21 @@
     from { -webkit-mask-position: 0 100%; mask-position: 0 100%; }
     to { -webkit-mask-position: 0 0; mask-position: 0 0; }
   }
+  /* Folded once read (hud.js setBrief): the opening lines and the exits. */
+  #desc-block.brief #room-desc {
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  #desc-block, #minimap-block { transition: opacity 400ms ease; }
+  body.hud-moving #desc-block, body.hud-moving #minimap-block { opacity: 0.5; }
   #exits {
     margin-top: 9px; font-family: var(--mono); font-size: 11px;
     letter-spacing: 0.1em; color: var(--gold); opacity: 0.75;
   }
 
   #minimap-block { position: absolute; right: 24px; top: 22px; padding: 6px; line-height: 0; }
-  #minimap { width: 240px; height: 240px; border-radius: 2px; }
+  #minimap { width: 176px; height: 176px; border-radius: 2px; }
   #compass-block { display: flex; flex-direction: column; align-items: center; padding: 5px 0 2px; }
-  #compass { width: 136px; height: 136px; display: block; }
+  #compass { width: 104px; height: 104px; display: block; }
   #bearing {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em;
     color: var(--gold); line-height: 1; margin-top: 4px;
@@ -258,6 +264,7 @@
     <b>W A S D</b><span>walk · shift to run</span>
     <b>arrows</b><span>take the exit n / e / s / w · pg up, pg dn for up, down</span>
     <b>mouse</b><span>look · click to attack · E to use, open, loot, drink</span>
+    <b>tab</b><span>the room's prose in full — it folds once you have had time to read it</span>
     <b>enter</b><span>the command line — look, get all corpse, unlock gate …</span>
     <b>Z X / C</b><span>a caster's spells: choose / cast · a fighter's or thief's skills on Z X C H J L</span>
     <b>I B K · T R</b><span>inventory, trade, skills and training · take everything · rest</span>
