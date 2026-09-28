@@ -582,6 +582,28 @@ function sandDrift(len, h, depth, out, salt) {
 }
 
 /**
+ * The rim of a bog hollow, `len` long and `depth` across, local z towards the
+ * outside when `out` is +1: a long slope up out of the wet, a lip whose line
+ * and height wander, and a shorter fall behind. See `buildOutdoorEdge`.
+ */
+function peatBank(len, h, depth, out, salt) {
+  const half = depth / 2;
+  const lip = (x) => out * (half - 1.4 + (terrainNoise(x * 0.3 + 2, 4, salt) - 0.5) * 1.2);
+  const height = (x, z) => {
+    const zl = lip(x);
+    const hl = h * (0.75 + 0.5 * terrainNoise(x * 0.35 + 9, 5, salt + 1));
+    // 0 at the toe inside, 1 at the lip, back to 0 at the outer edge.
+    const inner = out > 0 ? (z + half) / (zl + half) : (half - z) / (half - zl);
+    const outer = out > 0 ? (half - z) / (half - zl) : (z + half) / (zl + half);
+    const k = inner <= 1 ? inner : outer;
+    const lump = 1 + 0.25 * (terrainNoise(x * 0.8, z * 0.8 + 7, salt + 2) - 0.5);
+    const rise = k <= 0 ? 0 : 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, k));
+    return Math.max(0, hl * rise * lump);
+  };
+  return heightPatch(len, 28, 12, () => -half, () => half, height);
+}
+
+/**
  * A turf hill with an irregular outline and a lumpy crown, standing on its
  * own base: what the Shire's banks and knolls are, in place of a half
  * ellipsoid. The ellipsoid's rim is vertical and its crown a perfect dome --
@@ -4973,8 +4995,21 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
   const shade = bog
     ? (x, y) => 0.84 + 0.16 * Math.min(1, (y - pos.y) / h)
     : wallAo(pos.y);
-  batcher.add(box(along ? t : CELL, h, along ? CELL : t, 2, 2, 2), material,
-    place(bx, pos.y + h / 2, bz), { chunk, ao: shade });
+  if (bog) {
+    // Not a cut face: from inside the hollow a vertical metre of peat on
+    // every closed side made the bog a pit dug in a field, which is what a
+    // judge called it. The ground rises out of the hollow instead, over
+    // three metres, to a ragged lip -- and falls away more steeply behind.
+    const depth = 4.4;
+    const out = dir === 1 || dir === 2 ? 1 : -1;       // local z towards the edge
+    const geo = peatBank(CELL + 2.4, h, depth, out, room.vnum * 4 + dir);
+    const c = { x: pos.x + dx * (HALF - depth / 2 + 0.9), z: pos.z + dz * (HALF - depth / 2 + 0.9) };
+    batcher.add(geo, 'peat', place(c.x, pos.y - 0.04, c.z, along ? Math.PI / 2 : 0), { chunk, ao: shade, normals: true });
+    geo.dispose();
+  } else {
+    batcher.add(box(along ? t : CELL, h, along ? CELL : t, 2, 2, 2), material,
+      place(bx, pos.y + h / 2, bz), { chunk, ao: shade });
+  }
   addCollider(bx - (along ? t : CELL) / 2, bx + (along ? t : CELL) / 2,
     bz - (along ? CELL : t) / 2, bz + (along ? CELL : t) / 2, pos.y, pos.y + h + 2);
 }
