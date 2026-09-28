@@ -18,6 +18,7 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createNav } from './nav.js';
 import { createMotion } from './motion.js';
 import { personOf, carryOf, CLIP_FACTS, HIT_FRAME, LOOPS, CLIPS } from './people.js';
+import { dressedGeometry, personMaterial as dressMaterial } from './dress.js';
 
 const SKIN = [0xe8c39e, 0xd9a877, 0xb5834f, 0x8a5a33, 0x6d4526, 0xc9b7a0];
 const CLOTH = [
@@ -177,6 +178,202 @@ function gateBoard(dirName) {
   board.castShadow = false;
   return board;
 }
+
+/**
+ * The shop's name, painted on its sign: "The Grunting Boar", "The Weapon
+ * Shop" -- what a real one says. It replaced a two-metre serif word floating
+ * over the keeper's head ("Bartender"), which made his bounds 3.2 m tall and
+ * read as a debug label.
+ *
+ * build.js hangs the modelled `hanging_sign` beside a shop's street door and
+ * reports where (`shopSign` decor); the name goes on both faces of that
+ * board, between its battens. A shop with no sign out -- a bar reached through
+ * another room -- gets a flat board high on its back wall instead, the first
+ * thing seen coming in; and if the model is missing, the street door gets a
+ * procedural bracket and board. A dealer in the open air has no wall to hang
+ * anything from and gets nothing: his trade is on his look-plate.
+ *
+ * Every name is in one canvas and every board in one merged mesh: one draw
+ * for the whole town.
+ */
+const SIGN_SLOT = [512, 352];
+const SIGN_COLS = 4;
+/** The panel between the model's battens, in its own frame: out along +z, up y. */
+const SIGN_PANEL = { z0: 0.245, z1: 1.135, y0: 2.855, y1: 3.465, face: 0.034 };
+
+function paintSign(ctx, x0, y0, text) {
+  const [w, h] = SIGN_SLOT;
+  // Dark paint fills the whole slot first, so a mip that bleeds across the
+  // slot edge bleeds border, not the neighbour's lettering.
+  ctx.fillStyle = '#1c130b';
+  ctx.fillRect(x0, y0, w, h);
+  const grad = ctx.createLinearGradient(0, y0, 0, y0 + h);
+  grad.addColorStop(0, '#40291a'); grad.addColorStop(1, '#2b1b10');
+  ctx.fillStyle = grad;
+  ctx.fillRect(x0 + 8, y0 + 8, w - 16, h - 16);
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 40; i++) {
+    const y = y0 + 10 + ((i * 53) % (h - 20));
+    ctx.strokeStyle = `rgba(14,8,3,${0.10 + (i % 4) * 0.04})`;
+    ctx.beginPath(); ctx.moveTo(x0 + 8, y + 0.5);
+    ctx.bezierCurveTo(x0 + 170, y + 3, x0 + 340, y - 3, x0 + w - 8, y + 1); ctx.stroke();
+  }
+  // A gilt rule inset from the edge, the way a signwriter lines a board.
+  ctx.strokeStyle = 'rgba(214,176,98,0.85)'; ctx.lineWidth = 4;
+  ctx.strokeRect(x0 + 30, y0 + 30, w - 60, h - 60);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#efd59c';
+  ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowOffsetY = 2; ctx.shadowBlur = 3;
+  const font = (px) => `600 ${px}px "Iowan Old Style", "Palatino Linotype", Georgia, serif`;
+  const fit = (line, px, maxW) => {
+    ctx.font = font(px);
+    return Math.floor(px * Math.min(1, maxW / Math.max(1, ctx.measureText(line).width)));
+  };
+  // Two lines where there is an article, so the name gets the big letters;
+  // otherwise one line, or two at a word break if one would be too small.
+  const m = /^(the|ye)\s+(.+)$/i.exec(text.trim());
+  let lines = m ? [m[2]] : [text.trim()];
+  if (fit(lines[0], 76, w - 90) < 50 && / /.test(lines[0])) {
+    const words = lines[0].split(' ');
+    const cut = Math.ceil(words.length / 2);
+    lines = [words.slice(0, cut).join(' '), words.slice(cut).join(' ')];
+  }
+  const px = Math.min(...lines.map((line) => fit(line, 76, w - 90)));
+  const top = m ? 44 : 0;
+  if (m) {
+    ctx.font = font(34);
+    ctx.fillText(m[1].toUpperCase(), x0 + w / 2, y0 + 88);
+  }
+  ctx.font = font(px);
+  const mid = y0 + h / 2 + top / 2 + 4;
+  lines.forEach((line, k) => ctx.fillText(line, x0 + w / 2, mid + (k - (lines.length - 1) / 2) * px * 1.05));
+  ctx.shadowColor = 'transparent';
+}
+
+function shopSigns(world, layout, built) {
+  const CELL = 13;
+  const SHELL = ROOM / 2 + 0.7;   // the wall's outer face, as build.js lays it
+  const DOOR_W = 3.2;
+  const DOOR_H = 3.1;
+  const plans = [];
+  const hung = new Set();
+  for (const item of built.decor) {
+    if (item.kind !== 'shopSign') continue;
+    hung.add(item.vnum);
+    plans.push({ text: item.name, kind: 'model', at: item });
+  }
+  for (const [vnum, info] of built.rooms) {
+    if (hung.has(vnum) || info.unbuilt || info.outdoor) continue;
+    const room = world.rooms.get(vnum);
+    if (!room || !room.mobs.some((m) => m.shop)) continue;
+    const sides = layout.sides.get(vnum) || [];
+    const doors = [0, 1, 2, 3].filter((d) => sides[d] && sides[d].kind === 'alley' && sides[d].exit);
+    const street = doors.find((d) => {
+      const next = built.rooms.get(sides[d].exit.to);
+      return next && next.outdoor;
+    });
+    const cx = info.cell.x * CELL; const cz = info.cell.z * CELL; const y = info.center.y;
+    if (street !== undefined) {
+      plans.push({ text: room.name, kind: 'blade', dir: street, cx, cz, y });
+    } else if (doors.length) {
+      const across = (doors[0] + 2) % 4;
+      const wall = !sides[across] ? across : [0, 1, 2, 3].find((d) => !sides[d]);
+      if (wall !== undefined) plans.push({ text: room.name, kind: 'wall', dir: wall, cx, cz, y });
+    }
+  }
+  if (!plans.length) return null;
+
+  const rows = Math.ceil(plans.length / SIGN_COLS);
+  const canvas = document.createElement('canvas');
+  canvas.width = SIGN_SLOT[0] * SIGN_COLS; canvas.height = SIGN_SLOT[1] * rows;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width; const H = canvas.height;
+  plans.forEach((plan, i) => paintSign(ctx, (i % SIGN_COLS) * SIGN_SLOT[0], Math.floor(i / SIGN_COLS) * SIGN_SLOT[1], plan.text));
+
+  const iron = [(SIGN_SLOT[0] * 0.5) / W, 1 - 3 / H];   // inside slot 0's dark border
+  const flat = (geo) => {
+    const uv = geo.attributes.uv;
+    for (let k = 0; k < uv.count; k++) uv.setXY(k, iron[0], iron[1]);
+    return geo;
+  };
+  const m4 = new THREE.Matrix4();
+  const parts = [];
+  plans.forEach((plan, i) => {
+    const u0 = ((i % SIGN_COLS) * SIGN_SLOT[0]) / W; const u1 = u0 + SIGN_SLOT[0] / W;
+    const v1 = 1 - (Math.floor(i / SIGN_COLS) * SIGN_SLOT[1]) / H; const v0 = v1 - SIGN_SLOT[1] / H;
+    const slot = (geo, keep = () => true) => {
+      const uv = geo.attributes.uv;
+      for (let k = 0; k < uv.count; k++) {
+        if (keep(k)) uv.setXY(k, u0 + uv.getX(k) * (u1 - u0), v0 + uv.getY(k) * (v1 - v0));
+        else uv.setXY(k, iron[0], iron[1]);
+      }
+      return geo;
+    };
+    if (plan.kind === 'model') {
+      // Both faces of the modelled board, a few millimetres proud of it. A
+      // plane turned a quarter to +x reads left to right from +x, and the
+      // other quarter from -x, so neither face is mirrored.
+      const p = SIGN_PANEL; const a = plan.at;
+      const frame = new THREE.Matrix4().makeRotationY(a.rotY || 0).setPosition(a.x, a.y, a.z);
+      for (const s of [1, -1]) {
+        const panel = slot(new THREE.PlaneGeometry(p.z1 - p.z0, p.y1 - p.y0));
+        panel.applyMatrix4(m4.makeRotationY(s * Math.PI / 2))
+          .translate(s * p.face, (p.y0 + p.y1) / 2, (p.z0 + p.z1) / 2).applyMatrix4(frame);
+        parts.push(panel);
+      }
+      return;
+    }
+    const board = new THREE.BoxGeometry(1.0, 0.69, 0.05);
+    const painted = board.groups.slice(4);
+    slot(board, (k) => painted.some((g) => k >= g.start / 1.5 && k < (g.start + g.count) / 1.5));
+    board.clearGroups();
+    const [dx, , dz] = DIR_STEP4[plan.dir];
+    if (plan.kind === 'blade') {
+      // No model: an iron arm out of the wall beside the door, and the board
+      // under it square to the wall, so it reads from up and down the street.
+      const tx = -dz; const tz = dx;
+      const side = DOOR_W / 2 + 0.75;
+      const bx = plan.cx + dx * SHELL + tx * side; const bz = plan.cz + dz * SHELL + tz * side;
+      const top = plan.y + DOOR_H + 0.75;
+      const yaw = Math.atan2(-dz, dx);   // turns local +x out of the wall
+      const at = (along, up, geo) => geo.applyMatrix4(m4.makeRotationY(yaw))
+        .translate(bx + dx * along, top + up, bz + dz * along);
+      parts.push(at(0.75, -0.52, board));
+      parts.push(at(0.7, 0, flat(new THREE.BoxGeometry(1.4, 0.05, 0.05))));
+      const brace = flat(new THREE.BoxGeometry(0.95, 0.04, 0.04));
+      brace.applyMatrix4(m4.makeRotationZ(0.62));
+      parts.push(at(0.38, -0.27, brace));
+      for (const a of [0.35, 1.15]) parts.push(at(a, -0.09, flat(new THREE.BoxGeometry(0.025, 0.14, 0.025))));
+      parts.push(at(0.03, -0.25, flat(new THREE.BoxGeometry(0.06, 0.62, 0.12))));
+    } else {
+      // Flat on the inner face of the back wall, high, and along it from any
+      // wall torch: a flame licks up past four metres, and the Boar's first
+      // board hung straight over one.
+      const inner = ROOM / 2 - 0.04;
+      const tx = -dz; const tz = dx;
+      const wx = plan.cx + dx * inner; const wz = plan.cz + dz * inner;
+      const torches = built.decor.filter((d) => d.kind === 'torch' && Math.abs(d.y - plan.y - 2.9) < 1.5
+        && Math.abs((d.x - wx) * dx + (d.z - wz) * dz) < 1 && Math.abs((d.x - wx) * tx + (d.z - wz) * tz) < ROOM / 2);
+      const slide = [0, 1.7, -1.7, 2.9, -2.9].find((o) => torches.every((d) => Math.abs((d.x - wx) * tx + (d.z - wz) * tz - o) > 1.25)) ?? 0;
+      board.applyMatrix4(m4.makeRotationY(Math.atan2(-dx, -dz)));
+      parts.push(board.translate(wx + tx * slide, plan.y + 4.2, wz + tz * slide));
+    }
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  const merged = mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)));
+  const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ map: texture, roughness: 0.78, metalness: 0.05 }));
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.name = 'shop-signs';
+  mesh.userData.signs = plans.map((p) => ({ text: p.text, kind: p.kind }));
+  return mesh;
+}
+
+/** north, east, south, west -- are.js's DIR_STEP, the four that lie flat. */
+const DIR_STEP4 = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]];
 
 // ---------------------------------------------------------------- figures ----
 
@@ -444,95 +641,141 @@ function carriedClip(asset, name, carry) {
 }
 
 /**
- * An archetype's own scene: the file's scene with every other archetype
- * taken out, cloned once and kept. Each person is then a clone of this, with
- * the head pieces it does not wear removed.
+ * A file's rig, once: its bones, and one skinned mesh kept only to carry a
+ * skeleton through the clone -- every person then gets the clone and swaps
+ * that mesh's geometry for their own merged one (dress.js). The height of
+ * each archetype is read off its body and a bare face in their rest pose:
+ * Box3.setFromObject on a skinned mesh asks a skeleton that has not been
+ * posed yet and answers NaN.
  */
-const templates = new Map();
-function templateOf(asset, file, arch) {
-  const key = `${file}|${arch}`;
-  if (templates.has(key)) return templates.get(key);
+const rigs = new Map();
+function rigOf(asset, file) {
+  if (rigs.has(file)) return rigs.get(file);
   const scene = cloneSkinned(asset.scene);
-  const drop = [];
-  let body = null;
   // Only the rig's own children -- the meshes sit beside the root bone under
-  // the armature node. Deeper, a multi-material mesh is a group whose
-  // primitives are named arch_guard_1, arch_guard_2... and would be taken
-  // for other archetypes and thrown away.
+  // the armature node. Deeper, a multi-material mesh is a group of primitives.
   const holder = scene.getObjectByName('hips').parent;
-  for (const node of holder.children) {
-    if (node.name.startsWith('arch_')) {
-      if (node.name === `arch_${arch}`) body = node;
-      else drop.push(node);
+  let carrier = null;
+  for (const node of [...holder.children]) {
+    if (node.isBone) continue;
+    if (!carrier) {
+      node.traverse((n) => { if (!carrier && n.isSkinnedMesh) carrier = n; });
+      if (carrier) {
+        carrier.removeFromParent();
+        holder.add(carrier);
+      }
     }
+    if (node !== carrier) node.removeFromParent();
   }
-  if (!body) throw new Error(`actors: ${file}.glb has no arch_${arch}`);
-  for (const node of drop) node.removeFromParent();
-  // Standing height from the body mesh alone, not the hats, read off the
-  // geometry: the rig is at the origin and the geometry is in its rest pose,
-  // while Box3.setFromObject on a skinned mesh asks a skeleton that has not
-  // been posed yet and answers NaN.
-  let top = 0;
-  body.traverse((node) => {
-    if (!node.isMesh) return;
-    if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
-    top = Math.max(top, node.geometry.boundingBox.max.y);
-  });
-  const record = { scene, height: top };
-  templates.set(key, record);
+  if (!carrier) throw new Error(`actors: ${file}.glb has no skinned mesh`);
+  carrier.name = 'person';
+  const record = { scene, heights: new Map() };
+  rigs.set(file, record);
   return record;
 }
 
+function heightOf(asset, file, arch) {
+  const r = rigOf(asset, file);
+  if (r.heights.has(arch)) return r.heights.get(arch);
+  const holder = asset.scene.getObjectByName('hips').parent;
+  let top = 0;
+  const face = holder.children.find((node) => node.name.startsWith('face_'));
+  for (const part of [asset.scene.getObjectByName(`arch_${arch}`), face]) {
+    part?.traverse((node) => {
+      if (!node.isMesh) return;
+      if (!node.geometry.boundingBox) node.geometry.computeBoundingBox();
+      top = Math.max(top, node.geometry.boundingBox.max.y);
+    });
+  }
+  r.heights.set(arch, top);
+  return top;
+}
+
 /**
- * One material per surface and colour, shared by everyone who wears it. The
- * crowd's variety is in the colours, not in how many materials there are:
- * the twenty cityguards of Midgaard share one tabard.
+ * A face of one's own. The face meshes are few -- young and old of each sex
+ * -- and the difference between two people in a crowd is in the bones that
+ * no clip keys: the jaw (wider or narrower, longer or shorter in the chin) and
+ * the nose (bigger, smaller, more or less of it standing out). Bone-local
+ * axes are x across the face, y out of it, z along it, as rig.py sets them.
  */
-const personMaterials = new Map();
-function personMaterial(library, tag, hex, ghost) {
-  const key = `${tag}|${hex ?? '-'}|${ghost ? 1 : 0}`;
-  if (personMaterials.has(key)) return personMaterials.get(key);
-  const base = library.materialFor(tag);
-  const m = base.clone();
-  // The baked materials expect a colour attribute; the people carry none,
-  // and a missing one reads as black rather than as white.
-  m.vertexColors = false;
-  if (hex !== undefined && hex !== null) m.color.setHex(hex);
-  if (ghost) {
-    // A shade: see-through, lit from inside, and never in the depth buffer,
-    // so what is behind it still draws.
-    m.transparent = true;
-    m.opacity = tag === 'eye' ? 0.8 : 0.34;
-    m.depthWrite = false;
-    m.emissive = new THREE.Color(0x7f98b2);
-    m.emissiveIntensity = 0.55;
+function shapeFace(body, key) {
+  const jaw = body.getObjectByName('jaw');
+  const nose = body.getObjectByName('nose');
+  const r = (salt) => strHash(key, salt) * 2 - 1;
+  if (jaw) jaw.scale.set(1 + 0.08 * r(41), 1 + 0.04 * r(43), 1 + 0.06 * r(47));
+  if (nose) {
+    const k = 1 + 0.12 * r(53);
+    nose.scale.set(k * (1 + 0.08 * r(59)), k * (1 + 0.14 * r(61)), k);
   }
-  personMaterials.set(key, m);
-  return m;
 }
 
-/** The tags a person's own colours go on. */
-const TINTED = new Set(['cloth', 'cloth2', 'linen', 'skin', 'hair', 'leather', 'bone', 'paint']);
+/** The camera the people were last drawn for: what their eyes follow. */
+let viewer = null;
+const _eyeTarget = new THREE.Vector3();
+const _eyeInverse = new THREE.Matrix4();
+const _eyeDir = new THREE.Vector3();
+const _eyeTurn = new THREE.Quaternion();
+const EYE_REACH = 0.42;       // radians either way the eyes will turn
+const EYE_RANGE = 9;          // metres inside which someone meets your eye
 
-/** A carried model from the library, sharing its geometry with every copy. */
-function carried(library, name, tint, ghost) {
-  const asset = library.get(name);
-  if (!asset) return null;
-  const group = new THREE.Group();
-  group.name = name;
-  for (const p of asset.primitives) {
-    const tag = p.materialName;
-    const hex = tag === 'paint' ? tint.cloth : undefined;
-    const material = (TINTED.has(tag) && hex !== undefined) || ghost
-      ? personMaterial(library, tag, hex, ghost) : p.material;
-    const mesh = new THREE.Mesh(p.geometry, material);
-    mesh.castShadow = false;
-    group.add(mesh);
-  }
-  return group;
+/**
+ * Eyes that look at you. The eye bones are the rig's and no clip keys them,
+ * so after the mixer has posed the head they are turned towards the camera --
+ * if it is near and in front of the face -- and otherwise let drift a little
+ * about straight ahead, a new point every second or two, which is what eyes
+ * at rest do. Wrapped round the mixer's own update so every caller of it gets
+ * it for nothing; the camera is picked up by whichever face draws first.
+ */
+const LOD_FROM = 15;           // metres past which a person wears their far copy
+
+function lookWithEyes(body, mixer, group, mesh, nearGeometry, farGeometry) {
+  const eyes = ['eyeL', 'eyeR'].map((n) => body.getObjectByName(n)).filter(Boolean);
+  const rest = eyes.map((e) => e.quaternion.clone());
+  const forward = eyes.map((e) => new THREE.Vector3(0, 1, 0).applyQuaternion(e.quaternion));
+  let drift = 0;
+  const wander = new THREE.Vector3();
+  body.traverse((node) => {
+    if (node.isSkinnedMesh) node.onBeforeRender = (renderer, scene, camera) => { viewer = camera; };
+  });
+  const update = mixer.update.bind(mixer);
+  mixer.update = (dt) => {
+    update(dt);
+    if (!viewer) return mixer;
+    group.getWorldPosition(_eyeTarget);
+    const d2 = _eyeTarget.distanceToSquared(viewer.position);
+    const want = d2 > LOD_FROM * LOD_FROM ? farGeometry : nearGeometry;
+    if (mesh.geometry !== want) mesh.geometry = want;
+    const head = eyes.length ? eyes[0].parent : null;
+    if (!head) return mixer;
+    const far = d2 > EYE_RANGE * EYE_RANGE;
+    if (far) return mixer;
+    drift -= dt;
+    if (drift <= 0) {
+      drift = 0.8 + Math.random() * 1.6;
+      wander.set((Math.random() - 0.5) * 0.35, 1, (Math.random() - 0.5) * 0.18);
+    }
+    head.updateWorldMatrix(true, false);
+    _eyeInverse.copy(head.matrixWorld).invert();
+    eyes.forEach((eye, i) => {
+      const fwd = forward[i];
+      if (!far) {
+        _eyeDir.copy(viewer.position).applyMatrix4(_eyeInverse).sub(eye.position).normalize();
+      } else {
+        _eyeDir.set(0, 0, 0);
+      }
+      const angle = _eyeDir.lengthSq() ? fwd.angleTo(_eyeDir) : Infinity;
+      if (angle > EYE_REACH * 1.8) {
+        // Out of reach: rest ahead, with the drift.
+        _eyeDir.copy(fwd).add(_eyeTarget.set(wander.x, 0, wander.z).applyQuaternion(rest[i])).normalize();
+      } else if (angle > EYE_REACH) {
+        _eyeDir.lerp(fwd, 1 - EYE_REACH / angle).normalize();
+      }
+      _eyeTurn.setFromUnitVectors(fwd, _eyeDir);
+      eye.quaternion.copy(_eyeTurn).multiply(rest[i]);
+    });
+    return mixer;
+  };
 }
-
-const tagOfMaterial = (m) => (m && m.name ? m.name.replace(/^MAT:/, '') : '');
 
 /**
  * A person, dressed. Returns the figure record the rest of the viewer drives:
@@ -551,42 +794,35 @@ const tagOfMaterial = (m) => (m && m.name ? m.name.replace(/^MAT:/, '') : '');
  */
 function buildPerson(library, who, proto, instance) {
   const asset = library.get(who.file);
-  const t = templateOf(asset, who.file, who.arch);
-  const body = cloneSkinned(t.scene);
-  const wear = new Set(who.pieces);
-  const drop = [];
-  // Head pieces are the rig's children that are neither the archetype nor a bone.
-  for (const node of body.getObjectByName('hips').parent.children) {
-    if ((node.isMesh || node.isGroup) && !node.isBone && !node.name.startsWith('arch_')
-        && !wear.has(node.name)) drop.push(node);
-  }
-  for (const node of drop) node.removeFromParent();
+  if (!asset.scene.getObjectByName(`arch_${who.arch}`)) throw new Error(`actors: ${who.file}.glb has no arch_${who.arch}`);
+  const body = cloneSkinned(rigOf(asset, who.file).scene);
   const ghost = who.arch === 'ghost';
-  // One skeleton for the whole person. The loader and the clone give every
-  // primitive of every mesh its own Skeleton over the same bones -- nine or
-  // ten per person -- and the renderer recomputes and re-uploads each one's
-  // bone texture every frame. They are all bound to the same joints with the
-  // same inverse binds (one skin in the file), so one will do, and the
-  // renderer updates a shared skeleton once a frame.
-  let skeleton = null;
-  body.traverse((node) => {
-    if (!node.isSkinnedMesh) return;
-    if (!skeleton) { skeleton = node.skeleton; return; }
-    const same = node.skeleton.bones.length === skeleton.bones.length
-      && node.skeleton.bones.every((b, i) => b === skeleton.bones[i]);
-    if (same) node.bind(skeleton, node.bindMatrix);
-  });
-  body.traverse((node) => {
-    if (!node.isMesh) return;
-    // Figures stay out of the sun's shadow map: a skinned mesh there is a
-    // second skinning pass for a shadow the hand-placed contact patch
-    // already draws.
-    node.castShadow = false;
-    node.receiveShadow = !ghost;
-    const tag = tagOfMaterial(node.material);
-    node.material = personMaterial(library, tag, TINTED.has(tag) ? who.tint[tag] : undefined, ghost);
-    if (ghost) node.renderOrder = 2;
-  });
+  // What it holds, folded into the same mesh on the bone that holds it. The
+  // grip bones are in the weapons' own frame, so a weapon sits in the hand
+  // with no offset at all -- see weapons.py.
+  const held = [];
+  const weaponAsset = who.weapon && library.get(who.weapon);
+  const shieldAsset = who.shield && library.get(who.shield);
+  if (weaponAsset) held.push({ asset: weaponAsset, bone: 'gripR' });
+  if (shieldAsset) held.push({ asset: shieldAsset, bone: 'shieldL' });
+  const names = [`arch_${who.arch}`, ...(who.face ? [who.face] : []), ...who.pieces];
+  const key = `${who.file}|${names.join(',')}|${weaponAsset ? who.weapon : ''}|${shieldAsset ? who.shield : ''}`;
+  const dressed = dressedGeometry(asset, names, held, key);
+  // The far copy, if the file carries one: each piece's `lod_` twin.
+  const lodNames = names.map((n) => `lod_${n}`);
+  const far = lodNames.every((n) => asset.scene.getObjectByName(n))
+    ? dressedGeometry(asset, lodNames, held, `lod|${key}`) : dressed;
+  const mesh = body.getObjectByName('person');
+  mesh.geometry = dressed.geometry;
+  const show = new THREE.Vector2(1, 1);
+  mesh.material = dressMaterial(library, who.tint, ghost, show);
+  // Figures stay out of the sun's shadow map: a skinned mesh there is a
+  // second skinning pass for a shadow the hand-placed contact patch already
+  // draws.
+  mesh.castShadow = false;
+  mesh.receiveShadow = !ghost;
+  if (ghost) mesh.renderOrder = 2;
+  shapeFace(body, `${proto.short}#${instance}`);
   // A little of each person's own height, so a crowd is not one stature.
   const scale = who.scale * (0.95 + strHash(`${proto.short}#${instance}`, 3) * 0.10);
   body.scale.setScalar(scale);
@@ -596,23 +832,25 @@ function buildPerson(library, who, proto, instance) {
   }
   const group = new THREE.Group();
   group.add(body);
-
-  // What it holds. The grip bones are in the weapons' own frame, so a
-  // weapon sits in the hand with no offset at all -- see weapons.py.
-  let weapon = null;
-  let shield = null;
-  if (who.weapon) {
-    weapon = carried(library, who.weapon, who.tint, ghost);
-    const grip = body.getObjectByName('gripR');
-    if (weapon && grip) grip.add(weapon);
-    else weapon = null;
-  }
-  if (who.shield) {
-    shield = carried(library, who.shield, who.tint, ghost);
-    const mount = body.getObjectByName('shieldL');
-    if (shield && mount) mount.add(shield);
-    else shield = null;
-  }
+  // The figure contract has always handed back what is held, and items.js
+  // lets go of it by `.visible`. They are in the mesh now, so these are
+  // markers on the holding bones, named for the model, whose visibility is
+  // the shader's (dress.js folds the hidden one's vertices away).
+  // `userData.fromResets` says whether the mud put it in their hands or the
+  // archetype did: a looted corpse gives up only the first kind.
+  const marker = (name, bone, axis, fromResets) => {
+    const o = new THREE.Object3D();
+    o.name = name;
+    o.userData.fromResets = fromResets;
+    Object.defineProperty(o, 'visible', {
+      get: () => show[axis] > 0.5,
+      set: (v) => { show[axis] = v ? 1 : 0; },
+    });
+    body.getObjectByName(bone).add(o);
+    return o;
+  };
+  const weapon = weaponAsset ? marker(who.weapon, 'gripR', 'x', !!who.weaponFromResets) : null;
+  const shield = shieldAsset ? marker(who.shield, 'shieldL', 'y', !!who.shieldFromResets) : null;
 
   // Where a spell leaves from: the knot of a staff, or else the right fist.
   // weapons.py puts the staff's top at 0.855 m up its own axis.
@@ -656,9 +894,10 @@ function buildPerson(library, who, proto, instance) {
   // skeleton is in its bind pose, and `state.benchmark` stops the loop before
   // the actors are updated.
   mixer.update(0);
+  lookWithEyes(body, mixer, group, mesh, dressed.geometry, far.geometry);
   const facts = CLIP_FACTS[who.file];
   return {
-    group, headGroup: null, height: t.height * scale, scale, mixer, actions, clips,
+    group, headGroup: null, height: heightOf(asset, who.file, who.arch) * scale, scale, mixer, actions, clips,
     stride: { walk: facts.walk * scale, run: facts.run * scale },
     hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
   };
@@ -1744,13 +1983,12 @@ export function populate(world, layout, built, options = {}) {
       };
       interactables.push(record.interactable);
 
-      if (mob.shop) {
-        const sign = makeLabel(shopSign(mob.proto.short), 0.6, { colour: '#f0d9a8' });
-        sign.position.set(0, height + 1.15, 0);
-        fig.add(sign);
-      }
     });
   }
+
+  // --- shop signs -----------------------------------------------------------
+  const signs = shopSigns(world, layout, built);
+  if (signs) group.add(signs);
 
   // --- objects on the ground ---------------------------------------------
 
@@ -2863,7 +3101,4 @@ export function populate(world, layout, built, options = {}) {
   };
 }
 
-function shopSign(short) {
-  const clean = short.replace(/^(the|a|an)\s+/i, '');
-  return clean.charAt(0).toUpperCase() + clean.slice(1);
-}
+

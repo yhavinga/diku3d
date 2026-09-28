@@ -504,6 +504,38 @@ const SURFACES = {
     s.rough = 0.94 - wear * 0.16 + slub * 0.04;
   },
 
+  /**
+   * Linen: a smooth, tighter cloth than the woollens round it -- paler in its
+   * base, slubbed in fine streaks, and with a little sheen where it is worn
+   * smooth. What tells a shift from a tunic at street distance is value and
+   * sheen, not weave.
+   */
+  linen(u, v, s) {
+    const dye = fbm(u * 4, v * 4, 4, 521, 3);
+    const slub = fbm(u * 60, v * 60, 60, 523, 2);
+    const crease = fbm(u * 9, v * 9, 9, 527, 3);
+    const base = mix(rgb(0xb8b6b0), rgb(0xc8c4bc), dye);
+    s.color = mix(base, rgb(0xd2cec6), slub * 0.25);
+    s.height = 0.5 + crease * 0.05 + slub * 0.015;
+    s.rough = 0.80 - crease * 0.08 + slub * 0.04;
+  },
+
+  /**
+   * Wool, fulled and heavy: a deeper nap than the cloth recipe, pilled in
+   * little tufts, and the most matt thing a person wears -- a cloak or a
+   * beggar's coat takes no sheen at all.
+   */
+  wool(u, v, s) {
+    const dye = fbm(u * 5, v * 5, 5, 541, 4);
+    const nap = fbm(u * 18, v * 18, 18, 547, 3);
+    const [, edge] = cellular(u * 20, v * 20, 20, 557, 0.6);
+    const pill = clamp01(1 - edge * 3);
+    const base = mix(rgb(0x949494), rgb(0xaaaaaa), dye);
+    s.color = mix(base, rgb(0x8a8a8a), pill * 0.25);
+    s.height = 0.5 + nap * 0.08 + pill * 0.03;
+    s.rough = 0.97;
+  },
+
   /** Skin: nearly uniform, which is the point -- the little that is not. */
   skin(u, v, s) {
     const blotch = fbm(u * 6, v * 6, 6, 283, 3);
@@ -1341,7 +1373,15 @@ const RECIPES = {
   // A person is 1.75 m, so a 0.7 m tile puts two and a half repeats down a
   // sleeve -- close enough that nothing reads as a pattern.
   cloth: { surface: 'cloth', scale: 0.7, normalScale: 0.55, env: 0.35, wet: 0, detail: 0.5 },
-  skin: { surface: 'skin', scale: 0.5, normalScale: 0.28, env: 0.5, wet: 0, detail: 0.35 },
+  // A person's other cloths, so an outfit reads by its value and its sheen
+  // and not by its hue alone.
+  linen: { surface: 'linen', scale: 0.6, normalScale: 0.35, env: 0.4, wet: 0, detail: 0, moving: true },
+  wool: { surface: 'wool', scale: 0.8, normalScale: 0.7, env: 0.22, wet: 0, detail: 0, moving: true },
+  // Faces carry their own form in their normals now (heads.py sets every one
+  // from the sculpt), and at 0.28 with the world-space grain on top the skin's
+  // relief was the lumpiness a review called clay: a one-centimetre bump on a
+  // face fifteen wide. The mottling stays in the colour; the relief is a whisper.
+  skin: { surface: 'skin', scale: 0.5, normalScale: 0.07, env: 0.5, wet: 0, detail: 0 },
   plaster: { surface: 'plaster', scale: 3, normalScale: 0.34, env: 0.7, wet: 0, detail: 0.45 },
   stonewall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55 },
   timber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45 },

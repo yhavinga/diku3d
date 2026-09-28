@@ -52,6 +52,40 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### HUD and melee feedback (game-ui.js, fx.js, main.js vantage)
+
+- **The ways-out panel listed every gate seen all game**, which is how the
+  West Gate showed at the East Gate. A gate counts only in its own room or
+  its warden's; the old 18 m radius fired the executioner's line from the
+  room next door.
+- **Collision boxes do not cover everything you can see** — a temple column
+  has none — so a camera's line of sight is ray-tested against the built
+  world, and a sight line to a prop stops short of it (the fountain's box
+  ends 1.7 m from its centre).
+- **Headless timing tests can slow the game** by patching
+  `performance.now` in the page; the render loop reads it.
+- The shop signs were already modelled beside every shop door, blank; they
+  carry the shop's own room name now, 21 signs on one texture, +3 calls.
+
+### Faces and one draw per person (heads.py, hair.py, src/dress.js)
+
+- **Blender 5.2's glTF vertex colour survives only in a mesh's first
+  primitive.** Colours travel as the custom attribute `_COL` instead.
+- **An offset of a loft or superellipse "distance" is not a real offset** —
+  it put a wedge off the chin until the loft's outside distance was fixed.
+- **Stepping along a tangent drifts off a convex surface**; hair locks are
+  pulled back onto the head after every step.
+- **`Material.clone` round-trips `userData` through JSON**, so arrays live
+  in a closure, not on `userData`.
+- **Skin normal strength 0.28 → 0.07, no world grain**: that alone ended the
+  "clay head" read. Eyewhite roughness 0.14 so eyes catch a highlight.
+- The build now fails if an arm enters the head in any clip
+  (`rig.head_clearance`); the attack wind-up and the neck-rub idle were
+  re-keyed against it.
+- A person is one skinned mesh, one material: surfaces are layers of a
+  texture array and colours a small uniform array. Market Square 454 → 380
+  calls; 21 people in the barn cost 49 calls. A decimated copy past 15 m.
+
 ### Combat and crowds, second pass (motion.js, fx.js, game-ui.js)
 
 - **A stopped animation action still reports its old weight.** Zero the
@@ -138,6 +172,18 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
   scene at intensity 0; ~0.12 ms each at 720p.
 - **Aura shells on every mesh stack rims and turn a figure to glass.** Only
   skinned meshes over 150 vertices, lit on the silhouette.
+- **A ribbon has to be capped in angle, not only in metres.** A 1 m glow
+  half a metre from the lens covers the frame and reads as a flat pasted
+  strip — the second judge's "flat camera-facing ribbon".
+- **One broad soft glow sprite over a volumetric shape erases its surface.**
+  The fireball read as a peach-coloured egg, and hid its target at night,
+  until that sprite went; the point light does the lighting.
+- **The runtime fbm noise is mostly mid-grey.** Stretch it around 0.5
+  (×2.4–2.6) or every flame edge comes out as cotton wool.
+- **A particle stream needs a hold phase, and spawns spread along one
+  frame's travel**, or it dies before crossing the room and reads as beads.
+- **Measure frame time with base and branch alternated, each against its
+  own idle.** With other agents on the GPU idle moved from 7.4 to 12 ms.
 - Aim things that fly at the player 0.8 m ahead of the face, burst them at
   2.6 m, or the frame blows out.
 - Fireball at night 6.4 → 7.7 ms median; sanctuary on the target costs
