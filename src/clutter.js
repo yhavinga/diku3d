@@ -29,7 +29,10 @@ const MANY = /\b(numerous|many|lots? of|a lot of|several|all kinds of|all sorts 
 // "no furniture", "barren of growth", "the furniture has been stolen": the
 // thing is named because it is *not* there.
 const NOT_BEFORE = /\b(no|not|without|nothing|never|lacks?|lacking|barren|once full of|used to (?:be|have|hold)|any)\s+(?:\w+[\s,]+){0,3}$/i;
-const NOT_AFTER = /^[^.]{0,30}\b(has been stolen|have been stolen|is gone|are gone|has been removed|disappears)\b/i;
+const NOT_AFTER = /^[^.]{0,30}\b(has been stolen|have been stolen|is gone|are gone|has been removed|disappears|(?:have|has) been torn down|pulled down)\b/i;
+// "Below you can see a prismatic web with lots of animal bones caught in it":
+// somewhere else, seen from here.
+const FAR = /\b(below you|beneath you|above you|in the distance|far below|far above|far away|through the window)\b/i;
 // "The entrance to the well", "a path leads to the treasure": somewhere else.
 const TOWARDS = /\b(?:to|towards?|into|entrance to|way to|door to|path to|leads? to|leading to|reach|reaches)\s+(?:the\s+|a\s+|an\s+)?(?:\w+\s+){0,2}$/i;
 
@@ -66,16 +69,16 @@ const RULES = [
     // is read off the prose, which never names its mobiles as lying there.
     not: /\bskeletons?\s+(?:key|warriors?|guards?|of the)\b|\bskeletons?\b[^.]{0,40}\bhang\w*\b|\bskeletons?\b[^.]{0,30}\b(?:sit|sits|sitting|siting|seated)\b/i,
   },
-  { kind: 'skull', at: 'strew', many: 5, re: /\bskulls\b|\ba skull\b/i, not: /\bskull\s+(?:cap|and crossbones)\b|\bskull[- ]shaped\b/i },
+  { kind: 'skull', at: 'strew', many: 5, re: /\bskulls\b|\ba skull\b/i, not: /\bskull\s+(?:cap|and crossbones)\b|\bskull[- ]shaped\b|\b(?:adorned|decorated|inlaid|carved|studded)\b[^.]{0,20}\bskulls\b/i },
   {
     kind: 'bones', at: 'strew', many: 4,
     re: /\b(?:bones|bone shards|bone fragments|gnawed bones)\b/i,
-    not: /\b(?:to|in|into|through) (?:your|his|her|the) (?:very )?bones\b|\bbones? (?:ache|chill|cold)\b|\blazy\s*bones\b/i,
+    not: /\b(?:to|in|into|through) (?:your|his|her|the) (?:very )?bones\b|\bbones? (?:ache|chill|cold)\b|\blazy\s*bones\b|\b(?:clank\w*|rattl\w*|sound) of bones\b/i,
   },
   {
     kind: 'carcass', at: 'strew', many: 3,
     re: /\b(?:corpses?|carcass(?:es)?|cadavers?|half-eaten (?:body|bodies)|body parts|rotting (?:body|bodies|parts)|mangled bod(?:y|ies))\b/i,
-    not: /\bcorpse (?:light|candle)\b|\b(?:contain\w*|jars?|bottles?)\b[^.]{0,30}\bbody parts\b/i,
+    not: /\bcorpse (?:light|candle)\b|\b(?:contain\w*|jars?|bottles?)\b[^.]{0,30}\bbody parts\b|\bcarrying\b|\b(?:loot|sacrifice|command|get all)\b/i,
   },
   {
     kind: 'shackles', at: 'hang', many: 2,
@@ -109,7 +112,7 @@ const RULES = [
   {
     kind: 'sarcophagus', at: 'floor', many: 1, indoor: true,
     re: /\b(?:sarcophag\w*|coffins?|caskets?|biers?|burial chamber|crypt|tomb)\b/i,
-    not: /\btomb ?stones?\b|\b(?:to|into|entrance to|towards?) (?:the|a) (?:\w+ )?(?:tomb|crypt)\b|\bcasket of\b/i,
+    not: /\btomb ?stones?\b|\b(?:to|into|entrance to|towards?) (?:(?:the|a) )?(?:\w+ )?(?:tomb|crypt)\b|\bcasket of\b|\btomb's\b/i,
   },
 
   // The laboratory.
@@ -136,7 +139,7 @@ const RULES = [
   {
     kind: 'painting', at: 'hang', many: 3,
     re: /\b(?:paintings?|portraits?|pictures?|murals?|frescoe?s?|coat of arms)\b/i,
-    not: /\bpicture (?:yourself|it|the)\b|\bpicturing\b|\bget the picture\b|\bpicture perfect\b|\bpretty as a picture\b/i,
+    not: /\bpicture (?:yourself|it|the)\b|\bpicturing\b|\bget the picture\b|\bpicture perfect\b|\bpretty as a picture\b|\b(?:engraved|carved|etched|chiselled)\b[^.]{0,30}\b(?:pictures?|paintings?)\b|\bon the ceiling\b/i,
   },
   { kind: 'tapestry', at: 'hang', many: 3, re: /\btapestr(?:y|ies)\b|\bwall ?hangings?\b/i },
 
@@ -144,7 +147,7 @@ const RULES = [
   {
     kind: 'web', at: 'web', many: 3,
     re: /\b(?:cobwebs?|spider ?webs?|webs?\b(?! of (?:lies|intrigue|deceit))|sticky (?:ropes|wires|threads|strands)|giant threads)\b/i,
-    not: /\bweb of (?:lies|intrigue|deceit|roads|streets|paths|tunnels|corridors)\b|\bwebbed (?:feet|toes)\b/i,
+    not: /\bweb of (?:lies|intrigue|deceit|roads|streets|paths|tunnels|corridors)\b|\bwebbed (?:feet|toes)\b|\bweb-like\b/i,
   },
 
   { kind: 'cocoon', at: 'hang', many: 3, re: /\bcocoons\b|\ba cocoon\b/i, not: /\bcocoon of (?:blankets|warmth|silence)\b/i },
@@ -186,7 +189,7 @@ const RULES = [
     // not "well equipped", "well-kept", "as well" or "well lighted".
     kind: 'well', at: 'centre', many: 1, place: true,
     re: /\b(?:a|an|the|old|worn|stone|deep|dry|ancient|small)\s+(?:\w+\s+){0,2}?well\b(?![- ](?:equipped|kept|lit|lighted|made|built|known|worn|trodden|used|dressed|armed|done|preserved|hidden|guarded|maintained|placed|furnished))(?!\s+(?:equipped|kept|lit|lighted|made|built|known|worn|trodden|used|dressed|armed|as|enough|done|preserved|hidden|guarded|maintained|placed|furnished|off|be|over|above|below|into|beyond|past|before|after|behind))/i,
-    not: /\bas well\b|\bwell,|\bwell\s+(?:enough|done|then)\b/i,
+    not: /\bas well\b|\bwell,|\bwell\s+(?:enough|done|then)\b|\bwell(?:-|\s+)\w+(?:ed|en)\b|\b(?:sun|it|them|him|her|you|very|quite|so|pretty)\s+well\b/i,
   },
 ];
 
@@ -248,7 +251,7 @@ export function readClutter(room) {
       if (!m) continue;
       if (rule.not && rule.not.test(s)) continue;
       const before = s.slice(0, m.index);
-      if (NOT_BEFORE.test(before) || NOT_AFTER.test(s.slice(m.index + m[0].length))) continue;
+      if (NOT_BEFORE.test(before) || NOT_AFTER.test(s.slice(m.index + m[0].length)) || FAR.test(before)) continue;
       const wall = wallIn(s, exits);
       // "To the east is the well" is a direction when there is a way east;
       // "to the north you see a primitive picture" in a blind end is its wall.
