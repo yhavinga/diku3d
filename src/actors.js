@@ -2629,6 +2629,28 @@ export function populate(world, layout, built, options = {}) {
       x, y, z, rotY, ...(scale && { scaleX: scale[0], scaleY: scale[1], scaleZ: scale[2] }),
     }, 'furniture');
     const WALL_VEC = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    /**
+     * How far along the axis (wx, wz) from (x, z) the nearest standing face
+     * is -- a wall at least 2.6 m tall, wide enough to take a ladder -- or
+     * null for none within `reach`, or for a point already inside one.
+     */
+    const faceAhead = (x, y, z, wx, wz, reach) => {
+      let best = null;
+      for (const c of built.colliders) {
+        if (c.y0 > y + 0.4 || c.y1 < y + 2.6) continue;
+        if (x > c.x0 && x < c.x1 && z > c.z0 && z < c.z1) return null;
+        let d;
+        if (wx) {
+          if (z < c.z0 + 0.8 || z > c.z1 - 0.8) continue;
+          d = ((wx > 0 ? c.x0 : c.x1) - x) * wx;
+        } else {
+          if (x < c.x0 + 0.8 || x > c.x1 - 0.8) continue;
+          d = ((wz > 0 ? c.z0 : c.z1) - z) * wz;
+        }
+        if (d >= 0 && d <= reach && (best === null || d < best)) best = d;
+      }
+      return best;
+    };
     for (const item of clutter) {
       const kinds = Math.floor(item.seed * 3);
       const half = item.half || 6.5;
@@ -2656,6 +2678,20 @@ export function populate(world, layout, built, options = {}) {
           'stacked_crates', 'barrel_stack', 'firewood_pile', 'water_butt', 'bucket',
           'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',
         ], strHash(`${item.z}`, i));
+        if (prop === 'ladder' && instances) {
+          // A ladder leans on something or it is not a ladder. At a random
+          // turn in the open it stood on its own feet in the Market Square,
+          // leaning on the air. props.py builds it with its top on the wall
+          // plane z = 0 and its feet 0.93 m out, so it goes against the
+          // nearest tall face in the direction of the wall it was meant for,
+          // turned to it -- or, with nothing within reach, not at all.
+          const wall = faceAhead(px, item.y, pz, wx, wz, 2.6);
+          const tally = built.stats.ladders || (built.stats.ladders = { leaned: [], dropped: [] });
+          if (wall === null) { tally.dropped.push([Math.round(px), Math.round(pz)]); continue; }
+          tally.leaned.push([Math.round(px + wx * wall), Math.round(pz + wz * wall)]);
+          instances.add('ladder', { x: px + wx * (wall - 0.03), y: item.y, z: pz + wz * (wall - 0.03), rotY: Math.atan2(-wx, -wz) }, 'props');
+          continue;
+        }
         if (prop && instances) {
           // Indoors a wall bench is a high-backed settle, sat on exactly the
           // same way: furniture.py builds it to props.py's bench's seat.
