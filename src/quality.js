@@ -123,6 +123,8 @@ export class Quality {
       this.sun.shadow.map = null;
     }
     this.setDetail(preset.detail);
+    // Grass thickness and reach follow the preset's name (grass.js).
+    this.materials?.setGrass?.(this.name);
     this.renderer.shadowMap.needsUpdate = true;
     this.lightPool.resize(preset.lights);
     this.resize();

@@ -18,6 +18,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SECTOR, ROOM_INDOORS, EX_ISDOOR, EX_CLOSED, EX_LOCKED, DIR_STEP, DIR_NAME } from './are.js';
 import { InstanceBatch, StaticBatches } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
+import { buildGrass } from './grass.js';
 
 export const CELL = 13;         // grid pitch; rooms sit two cells apart
 export const ROOM = 10;         // interior span of an indoor room
@@ -2269,6 +2270,12 @@ export function buildScene(world, layout, materials, assets = null) {
   });
   buildDecals(zones.surface, decals, materials);
   if (skyHoles.length) zones.deep.add(buildSkyHoles(skyHoles));
+  // Blades on every grass surface laid above; must run before the batcher
+  // merges its geometry away.
+  const grass = buildGrass({
+    groups: batcher.groups, instances, colliders, layout, rooms, materials, cell: CELL, biomeOf: grassBiome,
+  });
+  zones.surface.add(grass);
   const batches = new StaticBatches();
   const regionOf = regions(hoodBox);
   const stats = batcher.finish(batches, regionOf);
@@ -2279,7 +2286,17 @@ export function buildScene(world, layout, materials, assets = null) {
     stats.instanced = placed.triangles;
   }
   stats.meshes = batches.finish(zones.route);
-  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones };
+  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones, grass };
+}
+
+/** Which of grass.js's biomes a room's ground grows. */
+function grassBiome(room) {
+  if (isShire(room)) return 'shire';
+  if (room.areaFile === 'grave.are') return 'grave';
+  if (isPark(room)) return 'park';
+  if (room.sector === SECTOR.HILLS) return 'hills';
+  if (room.sector === SECTOR.FIELD) return 'meadow';
+  return 'verge';
 }
 
 // --------------------------------------------------------------- zones ----

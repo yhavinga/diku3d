@@ -119,7 +119,208 @@ const NEEDLE_TWIGS = (() => {
   return twigs;
 })();
 
+/** A small seeded generator for laying out cards once at load. */
+function seeded(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * The grass atlas: eight cards of blades, two across and four down, each laid
+ * out in metres so a blade is drawn at the width it has in the world. The
+ * card geometry in grass.js is built from the same sizes, so a region is
+ * never stretched: at 512 x 256 texels a lawn card is about a millimetre a
+ * texel either way, and a 4 mm blade is four texels wide.
+ *
+ * `kind` picks the mix of what grows on it. Lawn and meadow are most of the
+ * world; the flowers and the broad-leaved weeds are the Shire's, and the
+ * trodden card is what a path through a field is made of.
+ */
+export const GRASS_CARDS = [
+  { w: 0.5, h: 0.28, kind: 'lawn', seed: 11 },
+  { w: 0.5, h: 0.42, kind: 'lawnseed', seed: 12 },
+  { w: 0.6, h: 0.8, kind: 'meadow', seed: 13 },
+  { w: 0.6, h: 0.62, kind: 'straw', seed: 14 },
+  { w: 0.5, h: 0.42, kind: 'buttercup', seed: 15 },
+  { w: 0.5, h: 0.3, kind: 'daisy', seed: 16 },
+  { w: 0.5, h: 0.34, kind: 'weed', seed: 17 },
+  { w: 0.5, h: 0.17, kind: 'trodden', seed: 18 },
+];
+export const GRASS_ATLAS = { cols: 2, rows: 4, size: 1024 };
+
+// Blade palettes: a coastal meadow is a deep, slightly blue green with the odd
+// blade gone yellow or dead, not one lawn colour -- and the spread is per
+// blade, which at a card's distance averages out instead of blotching.
+const GREENS = [0x3b5a24, 0x456629, 0x4f6f2d, 0x3f5f2f, 0x5a7631, 0x6b8237];
+const STRAW = [0x8e8150, 0x9d8c58, 0x7f7447, 0xa89a66];
+
+/**
+ * Each card's shapes, in card metres with y up from the root: blades, stalks
+ * with a head on top, and broad leaves. `depth` orders them front to back and
+ * darkens the ones behind, which is where the body of a tuft comes from.
+ */
+const GRASS_SHAPES = GRASS_CARDS.map((card) => {
+  const r = seeded(card.seed * 7919);
+  const pick = (list) => list[Math.floor(r() * list.length)];
+  const shapes = [];
+  const margin = 0.03 * card.w;
+  const blade = (hMin, hMax, lean, wMin, wMax, palette, dryChance) => {
+    const x0 = margin + 0.04 * card.w + r() * (card.w - 2 * margin - 0.08 * card.w);
+    // Shorter towards the card's ends, so a tuft is a mound and not a hedge
+    // cut level along the top.
+    const edge = Math.abs(x0 / card.w - 0.5) * 2;
+    const h = (hMin + r() * (hMax - hMin)) * card.h * (1 - 0.5 * edge * edge);
+    // Lean away from the middle, the way a tuft splays, with some crossing.
+    const out = (x0 - card.w / 2) / (card.w / 2);
+    let dx = (out * 0.6 + (r() - 0.5)) * lean * h;
+    dx = Math.max(margin - x0, Math.min(card.w - margin - x0, dx));
+    shapes.push({
+      type: 'blade', x0, h, dx, w: wMin + r() * (wMax - wMin), depth: r(),
+      col: rgb(pick(palette)), dry: r() < dryChance ? 0.15 + r() * 0.35 : 0,
+    });
+  };
+  const stalk = (head, hMin, hMax) => {
+    const x0 = card.w * (0.12 + r() * 0.76);
+    const h = (hMin + r() * (hMax - hMin)) * card.h;
+    shapes.push({ type: 'stalk', x0, h, dx: (r() - 0.5) * 0.12 * h, w: 0.0012, depth: 0.55 + r() * 0.45, head, col: rgb(0x55702f) });
+  };
+  const lawnish = card.kind === 'lawn' || card.kind === 'lawnseed';
+  const count = { lawn: 150, lawnseed: 115, meadow: 95, straw: 85, buttercup: 80, daisy: 90, weed: 40, trodden: 80 }[card.kind];
+  for (let i = 0; i < count; i++) {
+    if (card.kind === 'straw') blade(0.35, 0.97, 0.5, 0.0022, 0.0038, r() < 0.65 ? STRAW : GREENS, 0.4);
+    else if (card.kind === 'meadow') blade(0.3, 0.97, 0.55, 0.0022, 0.004, GREENS, 0.3);
+    else if (card.kind === 'trodden') blade(0.25, 0.95, 1.4, 0.0022, 0.0036, r() < 0.3 ? STRAW : GREENS, 0.2);
+    else blade(lawnish ? 0.4 : 0.3, 0.97, 0.42, 0.002, 0.0034, GREENS, 0.12);
+  }
+  if (card.kind === 'lawnseed') for (let i = 0; i < 4; i++) stalk('panicle', 0.75, 0.98);
+  if (card.kind === 'meadow') for (let i = 0; i < 7; i++) stalk(r() < 0.5 ? 'panicle' : 'spike', 0.7, 0.98);
+  if (card.kind === 'straw') for (let i = 0; i < 6; i++) stalk('panicle', 0.7, 0.98);
+  if (card.kind === 'buttercup') for (let i = 0; i < 7; i++) stalk('buttercup', 0.55, 0.95);
+  if (card.kind === 'daisy') {
+    for (let i = 0; i < 6; i++) stalk('daisy', 0.35, 0.8);
+    for (let i = 0; i < 4; i++) stalk('clover', 0.25, 0.55);
+  }
+  if (card.kind === 'weed') {
+    // Plantain and dock: broad leaves arching out of one rosette.
+    for (let i = 0; i < 9; i++) {
+      const x0 = card.w * (0.35 + r() * 0.3);
+      const h = card.h * (0.45 + r() * 0.5);
+      const dx = (r() < 0.5 ? -1 : 1) * (0.25 + r() * 0.6) * h;
+      shapes.push({ type: 'leaf', x0, h, dx: Math.max(margin - x0, Math.min(card.w - margin - x0, dx)), w: 0.007 + r() * 0.008, depth: r(), col: rgb(pick([0x3e5f28, 0x4a6b2c, 0x557533])) });
+    }
+  }
+  // Bin by x so a texel only tests the shapes that can reach it.
+  const bins = Array.from({ length: 16 }, () => []);
+  for (const sh of shapes) {
+    const x0 = Math.min(sh.x0, sh.x0 + sh.dx) - 0.03; const x1 = Math.max(sh.x0, sh.x0 + sh.dx) + 0.03;
+    for (let b = 0; b < 16; b++) {
+      const bx0 = (b / 16) * card.w; const bx1 = ((b + 1) / 16) * card.w;
+      if (x1 >= bx0 && x0 <= bx1) bins[b].push(sh);
+    }
+  }
+  return { card, bins };
+});
+
+/** Where a card's shape covers (x, y), and how: null if it does not. */
+function grassShapeAt(sh, x, y) {
+  if (y < 0 || y > sh.h + 0.03) return null;
+  if (sh.type === 'blade' || sh.type === 'stalk') {
+    const t = Math.min(1, y / sh.h);
+    if (y > sh.h) return sh.type === 'stalk' ? grassHead(sh, x, y) : null;
+    const cx = sh.x0 + sh.dx * Math.pow(t, 1.7);
+    const hw = sh.type === 'stalk' ? sh.w : sh.w * Math.pow(1 - t, 0.75);
+    const d = Math.abs(x - cx);
+    if (d < hw) return { t, across: d / Math.max(hw, 1e-5) };
+    return sh.type === 'stalk' ? grassHead(sh, x, y) : null;
+  }
+  if (sh.type === 'leaf') {
+    const t = Math.min(1, y / sh.h);
+    const cx = sh.x0 + sh.dx * Math.pow(t, 1.3);
+    const hw = sh.w * Math.sin(Math.PI * Math.pow(t, 0.8)) + 0.001;
+    const d = Math.abs(x - cx);
+    return d < hw ? { t, across: d / hw } : null;
+  }
+  return null;
+}
+
+function grassHead(sh, x, y) {
+  const hx = sh.x0 + sh.dx; const hy = sh.h;
+  const dx = x - hx; const dy = y - hy;
+  if (sh.head === 'panicle' || sh.head === 'spike') {
+    // A loose plume above the stalk: spikelets scattered in a narrow oval.
+    const len = sh.head === 'spike' ? 0.05 : 0.07;
+    if (dy < -0.004 || dy > len) return null;
+    // Widest a third of the way up, closing to a point.
+    const f = clamp01(dy / len);
+    const rx = (sh.head === 'spike' ? 0.0045 : 0.014) * Math.sin(Math.PI * Math.pow(f, 0.7)) + 0.0015;
+    if (Math.abs(dx) > rx) return null;
+    const grain = hash2(Math.floor(x * 1100), Math.floor(y * 700), 4096, 57);
+    return grain > (sh.head === 'spike' ? 0.12 : 0.3) ? { head: true, t: 1, across: Math.abs(dx) / rx } : null;
+  }
+  // A shade over life size: a 2 cm flower is 2 cm, but it has to read from
+  // five metres, where a buttercup is otherwise a single yellow texel.
+  const rx = sh.head === 'daisy' ? 0.014 : sh.head === 'clover' ? 0.0095 : 0.012;
+  const ry = sh.head === 'daisy' ? 0.006 : sh.head === 'clover' ? 0.0088 : 0.0085;
+  const e = (dx / rx) ** 2 + (dy / ry) ** 2;
+  return e < 1 ? { head: true, t: 1, across: Math.sqrt(e) } : null;
+}
+
+const HEADS = {
+  panicle: [0x9a8a5e, 0x7e6a5a], spike: [0x8f8a5a, 0x6f6a45],
+  buttercup: [0xe8c21c, 0xb88f10], daisy: [0xf2efe2, 0xd9d4c4], clover: [0xd8b8c4, 0xa9728a],
+};
+
 const SURFACES = {
+  /**
+   * The grass atlas (GRASS_CARDS). Every texel is the front-most shape over
+   * it; the ones behind are darker, and every blade darkens towards its root,
+   * so a tuft reads as a volume with shade inside it rather than as a stencil.
+   * Transparent texels carry the blades' own dark green so the mips do not rim
+   * the cards in black.
+   */
+  grassblades(u, v, s) {
+    const { cols, rows } = GRASS_ATLAS;
+    const col = Math.min(cols - 1, Math.floor(u * cols)); const row = Math.min(rows - 1, Math.floor(v * rows));
+    const { card, bins } = GRASS_SHAPES[row * cols + col];
+    const x = (u * cols - col) * card.w;
+    const y = (v * rows - row) * card.h * 1.02 - card.h * 0.01;
+    const bin = bins[Math.min(15, Math.max(0, Math.floor((x / card.w) * 16)))];
+    let best = null; let hit = null;
+    for (const sh of bin) {
+      if (best && sh.depth <= best.depth) continue;
+      const h = grassShapeAt(sh, x, y);
+      if (h) { best = sh; hit = h; }
+    }
+    if (!best) {
+      s.color = rgb(0x2c3d1d); s.alpha = 0; s.height = 0; s.rough = 0.8;
+      return;
+    }
+    let c;
+    if (hit.head) {
+      const [lit, dark] = HEADS[best.head];
+      c = mix(rgb(lit), rgb(dark), clamp01(hit.across * 0.8 + (y < best.h ? 0.4 : 0)));
+      if (best.head === 'daisy' && hit.across < 0.38) c = rgb(0xe0b020);
+    } else {
+      c = best.col;
+      if (best.dry && hit.t > 1 - best.dry) c = mix(c, rgb(0xa39263), clamp01((hit.t - (1 - best.dry)) / best.dry * 1.4));
+      if (best.type === 'leaf') c = mix(c, rgb(0x87a060), clamp01(1 - hit.across * 6) * 0.35);
+      // Root to tip: the base of a tuft is in its own shade.
+      const shade = 0.7 + 0.3 * Math.pow(hit.t, 0.55);
+      c = [c[0] * shade, c[1] * shade, c[2] * shade];
+    }
+    const behind = 0.84 + 0.16 * best.depth;
+    s.color = [c[0] * behind, c[1] * behind, c[2] * behind];
+    s.alpha = 1;
+    s.height = 0.3 + best.depth * 0.4 + (1 - hit.across) * 0.2;
+    s.rough = hit.head ? 0.7 : 0.62 + (1 - best.depth) * 0.2;
+  },
+
   cobble(u, v, s) {
     // 18 setts across a 2.2 m tile is 12 cm a stone, which is what a granite
     // sett actually measures. It was 7 across 2.6 m -- 37 cm -- and at that
@@ -432,15 +633,27 @@ const SURFACES = {
     s.rough = 0.92 - soak * 0.22 + moss * 0.06;
   },
 
+  /**
+   * The turf under the blades (grass.js), and on its own wherever the blades
+   * thin out with distance. It was a 120-cycle noise at 0.6 of the height
+   * range: 4.6 cm bumps whose Sobel normals swung the lit value by 28% under
+   * a noon sun (std 36 on a mean of 126), in 40 cm blotches -- camouflage, a
+   * judge said, and the albedo underneath varied by only 4%. The relief was
+   * the pattern. Now the blades are geometry, and what is left down here is
+   * what a meadow is from above: a low-contrast mat of green over thatch,
+   * patchy by the metre and not by the hand.
+   */
   grass(u, v, s) {
-    const blades = fbm(u * 120, v * 120, 120, 131, 2);
-    const clump = fbm(u * 14, v * 14, 14, 137, 4);
-    const dry = clamp01(fbm(u * 6, v * 6, 6, 149, 3) * 1.5 - 0.5);
-    const green = mix(rgb(0x33421f), rgb(0x5c7033), clump * 0.8 + blades * 0.2);
-    s.color = mix(green, rgb(0x8a7a45), dry * 0.55);
-    s.height = blades * 0.6 + clump * 0.3;
+    const patch = fbm(u * 3, v * 3, 3, 137, 3);
+    const fine = fbm(u * 44, v * 44, 44, 131, 2);
+    const dry = clamp01(fbm(u * 2, v * 2, 2, 149, 3) * 1.6 - 0.62);
+    const green = mix(rgb(0x2a3e18), rgb(0x364b1f), patch * 0.75 + fine * 0.25);
+    const c = mix(green, rgb(0x514f2d), dry * 0.35);
+    const shade = 0.95 + fine * 0.1;
+    s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
+    s.height = patch * 0.18 + fine * 0.07;
     // Live blades are waxy and catch a sheen; the dried-off patches do not.
-    s.rough = 0.72 + dry * 0.24 + clump * 0.06;
+    s.rough = 0.8 + dry * 0.14 + fine * 0.04;
   },
 
   leaves(u, v, s) {
@@ -1550,7 +1763,7 @@ function bake(name, size) {
   return { albedo, normal, roughness, size };
 }
 
-function toTexture(data, size, colorSpace) {
+function toTexture(data, size, colorSpace, cutout = 0) {
   const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
@@ -1559,8 +1772,65 @@ function toTexture(data, size, colorSpace) {
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
+  if (cutout) {
+    texture.mipmaps = cutoutMips(data, size, cutout);
+    texture.generateMipmaps = false;
+  }
   texture.needsUpdate = true;
   return texture;
+}
+
+/**
+ * Mips for an alpha-tested texture that keep what passes the test.
+ *
+ * A box filter conserves mean alpha, but the alpha *test* does not: a blade
+ * three texels wide at 0/255 is a 0.75 / 0.25 smear two levels down and a
+ * uniform 0.3 veil after that, which a 0.5 cut throws away entire -- so a
+ * meadow thins to bare turf with distance and a fir crown to a bottlebrush.
+ * Each level's alpha is scaled until the fraction of texels over the cut
+ * matches the full-size map (Castano's coverage-preserving mips), and colour
+ * is averaged by alpha so the fill colour in the gaps does not bleed in.
+ */
+function cutoutMips(data, size, cut) {
+  const covered = (a, n, k) => {
+    let c = 0;
+    const t = cut * 255;
+    for (let i = 3; i < n * n * 4; i += 4) if (a[i] * k >= t) c++;
+    return c / (n * n);
+  };
+  const target = covered(data, size, 1);
+  const levels = [{ data, width: size, height: size }];
+  let prev = data; let n = size;
+  while (n > 1) {
+    const m = n >> 1;
+    const next = new Uint8ClampedArray(m * m * 4);
+    for (let y = 0; y < m; y++) {
+      for (let x = 0; x < m; x++) {
+        let r = 0; let g = 0; let b = 0; let a = 0; let pr = 0; let pg = 0; let pb = 0;
+        for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+          const i = ((y * 2 + dy) * n + x * 2 + dx) * 4;
+          const w = prev[i + 3];
+          r += prev[i] * w; g += prev[i + 1] * w; b += prev[i + 2] * w; a += w;
+          pr += prev[i]; pg += prev[i + 1]; pb += prev[i + 2];
+        }
+        const o = (y * m + x) * 4;
+        if (a > 0) { next[o] = r / a; next[o + 1] = g / a; next[o + 2] = b / a; }
+        else { next[o] = pr / 4; next[o + 1] = pg / 4; next[o + 2] = pb / 4; }
+        next[o + 3] = a / 4;
+      }
+    }
+    // Bisect the scale that restores the coverage, then bake it in.
+    let lo = 0.5; let hi = 8;
+    for (let k = 0; k < 14; k++) {
+      const mid = (lo + hi) / 2;
+      if (covered(next, m, mid) < target) lo = mid; else hi = mid;
+    }
+    const k = (lo + hi) / 2;
+    for (let i = 3; i < next.length; i += 4) next[i] = Math.min(255, next[i] * k);
+    levels.push({ data: next, width: m, height: m });
+    prev = next; n = m;
+  }
+  return levels;
 }
 
 /**
@@ -1603,7 +1873,10 @@ const RECIPES = {
   rooftile: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0.35, detail: 0.5 },
   thatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7 },
   dirt: { surface: 'dirt', scale: 4.5, normalScale: 0.9, env: 0.7, wet: 0.3, detail: 0.6 },
-  grass: { surface: 'grass', scale: 5.5, normalScale: 0.55, env: 0.6, wet: 0, detail: 0.7 },
+  grass: { surface: 'grass', scale: 5.5, normalScale: 0.35, env: 0.6, wet: 0, detail: 0.5 },
+  // The blades over it: an atlas of cards, not a tile (GRASS_CARDS), baked at
+  // twice the usual size because a blade is a few millimetres wide.
+  grassblades: { surface: 'grassblades', size: 1024, scale: 1, normalScale: 0.15, env: 0.45, wet: 0, detail: 0, cutout: 0.5 },
   // The wettest recipe there is, and out of doors, which is where `wet`
   // belongs: damp standing in the low patches is the whole of what tells a bog
   // apart from a ploughed field.
@@ -2272,13 +2545,14 @@ export function createMaterials(size = 512, onProgress = () => {}) {
   const bakes = new Map();
   names.forEach((name, index) => {
     const recipe = RECIPES[name];
-    if (!bakes.has(recipe.surface)) bakes.set(recipe.surface, bake(recipe.surface, size));
+    const px = recipe.size ?? size;
+    if (!bakes.has(recipe.surface)) bakes.set(recipe.surface, bake(recipe.surface, px));
     const baked = bakes.get(recipe.surface);
     const material = new THREE.MeshStandardMaterial({
-      map: toTexture(baked.albedo, size, THREE.SRGBColorSpace),
-      normalMap: toTexture(baked.normal, size, THREE.NoColorSpace),
-      roughnessMap: toTexture(baked.roughness, size, THREE.NoColorSpace),
-      metalnessMap: toTexture(baked.roughness, size, THREE.NoColorSpace),
+      map: toTexture(baked.albedo, px, THREE.SRGBColorSpace, recipe.cutout),
+      normalMap: toTexture(baked.normal, px, THREE.NoColorSpace),
+      roughnessMap: toTexture(baked.roughness, px, THREE.NoColorSpace),
+      metalnessMap: toTexture(baked.roughness, px, THREE.NoColorSpace),
       roughness: 1,
       metalness: 1,
       envMapIntensity: recipe.env ?? 1,
