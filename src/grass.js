@@ -298,6 +298,8 @@ class GrassField extends THREE.LOD {
     this.blocks = [];
     this.range = 46;
     this.shadows = true;
+    // No wind, for comparing frames pixel for pixel.
+    this.still = false;
     this.clock = performance.now();
   }
 
@@ -306,13 +308,17 @@ class GrassField extends THREE.LOD {
     // and anything else that draws the scene should not move the field.
     if (!camera.isPerspectiveCamera) return;
     const eye = camera.getWorldPosition(uniforms.uGrassEye.value);
-    uniforms.uGrassTime.value = (performance.now() - this.clock) / 1000;
+    uniforms.uGrassTime.value = this.still ? 0 : (performance.now() - this.clock) / 1000;
     const reach = this.range + BLOCK * 0.75;
     for (const block of this.blocks) {
       const dx = Math.max(block.x0 - eye.x, 0, eye.x - block.x1);
       const dz = Math.max(block.z0 - eye.z, 0, eye.z - block.z1);
       const d = Math.hypot(dx, dz);
-      block.mesh.visible = d < reach;
+      // Only undo what this hid. A block in range that is not visible was
+      // hidden for this frame by cull.js, behind a wall, and cull.js puts it
+      // back itself; showing it here would draw it through the wall's cull.
+      if (d >= reach) { block.mesh.visible = false; block.far = true; }
+      else if (block.far) { block.mesh.visible = true; block.far = false; }
       block.mesh.castShadow = this.shadows && d < SHADOW_REACH;
     }
   }
@@ -634,7 +640,7 @@ export function buildGrass({ groups, instances, colliders, layout, rooms, materi
     mesh.raycast = () => {};
     mesh.matrixAutoUpdate = false;
     field.add(mesh);
-    field.blocks.push({ mesh, x0, x1, z0, z1 });
+    field.blocks.push({ mesh, x0, x1, z0, z1, far: false });
   }
 
   /** Quality preset: how thick and how far. A uniform write, no recompile. */
