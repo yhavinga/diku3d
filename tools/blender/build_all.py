@@ -40,6 +40,7 @@ MODULES = [
     "beasts",
     "monsters",
     "furniture",
+    "clutter",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a
@@ -144,6 +145,17 @@ BUDGET = {
     "furn_shelves_goods": 5500, "furn_shelves_bread": 5500, "furn_shelves_jars": 5500,
     "furn_shelves_hides": 3400, "furn_weapon_rack": 1800, "furn_weapon_board": 1600,
     "furn_armour_stand": 1500, "furn_settle": 1000, "furn_armchair": 1000, "furn_desk": 1100,
+    # clutter.py: what the prose puts in a room, one to a handful of each per
+    # room that names it and none anywhere else. A skeleton is all thin
+    # members -- ribs, fingers, the long bones -- and does not decimate; a
+    # painting's picture is its vertex colours, so its grid is its detail.
+    "clutter_bones": 3000, "clutter_skeleton": 3500, "clutter_skeleton_seated": 3500,
+    "clutter_skeleton_hanging": 4400, "clutter_shackles": 3000, "clutter_strongbox": 1200,
+    "clutter_hoard": 2600, "clutter_sarcophagus": 1500, "clutter_alchemy": 3600,
+    "clutter_painting_portrait": 2100, "clutter_painting_landscape": 2600, "clutter_painting_gathering": 3000,
+    "clutter_mural": 4000, "clutter_arms": 2000, "clutter_tapestry": 3100, "clutter_web": 2600,
+    "clutter_cages": 1600, "clutter_globe": 900, "clutter_feast": 4100, "clutter_carcass": 2500,
+    "clutter_pelts": 2000,
 }
 PROP_BUDGET = 800
 # people.py: an archetype is a whole dressed person, one skinned draw per

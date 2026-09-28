@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { interiorGlass, markPanes } from './windows.js';
+import { CLUTTER_NAMES } from './clutter.js';
 
 const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
@@ -97,6 +98,22 @@ const TAG_MATERIALS = {
   earthenware: { color: 0x9a6444, roughness: 0.66, metalness: 0 },
   wax: { color: 0xe6dcc2, roughness: 0.5, metalness: 0 },
   bread: { color: 0xb07436, roughness: 0.8, metalness: 0 },
+  // tools/blender/clutter.py. White where the colour is in the vertices -- a
+  // painting's canvas, a tapestry's weave, food, coloured glass.
+  canvas: { color: 0xffffff, roughness: 0.62, metalness: 0 },
+  weave: { color: 0xffffff, roughness: 0.93, metalness: 0 },
+  produce: { color: 0xffffff, roughness: 0.55, metalness: 0 },
+  phial: { color: 0xffffff, roughness: 0.1, metalness: 0, envMapIntensity: 1.2 },
+  // A giant spider's silk: glue-wet, so a little sheen.
+  silk: { color: 0xd8d4c8, roughness: 0.38, metalness: 0 },
+  chalk: { color: 0xd9d5c9, roughness: 0.96, metalness: 0 },
+  slate: { color: 0x2d3133, roughness: 0.82, metalness: 0 },
+  // Meat and what it bled: dark, and wet enough to catch a torch.
+  flesh: { color: 0x5a2019, roughness: 0.42, metalness: 0 },
+  // A hoard's coin. The holy symbol's gilt is a mirror, and heaped in a dark
+  // lair a mirror of nothing came out black: this is half as metallic and
+  // rougher, so it reads as gold by the colour of the light it scatters.
+  coin: { color: 0xcf9f42, roughness: 0.42, metalness: 0.4, envMapIntensity: 0.6 },
   soot: { color: 0x2c2723, roughness: 0.95, metalness: 0 },
   glass: {
     color: 0xd8c48a, roughness: 0.12, metalness: 0,
@@ -112,7 +129,7 @@ const TAG_MATERIALS = {
   },
 };
 /** Tags whose flat material wants the shared grain, at this strength. */
-const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6, bone: 0.5, velvet: 0.3, earthenware: 0.3, bread: 0.5, soot: 0.6 };
+const GRAINED = { weave: 0.6, canvas: 0.25, chalk: 0.4, slate: 0.3, cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6, bone: 0.5, velvet: 0.3, earthenware: 0.3, bread: 0.5, soot: 0.6 };
 
 export class AssetLibrary {
   constructor(materials, baseUrl = 'assets') {
@@ -748,4 +765,6 @@ export const ASSET_NAMES = [
   'beast_dustdigger', 'beast_camel', 'beast_dracolich',
   // The rooms' furniture: tools/blender/furniture.py.
   ...FURNITURE_NAMES,
+  // What the rooms' prose puts in them: tools/blender/clutter.py.
+  ...CLUTTER_NAMES,
 ];
