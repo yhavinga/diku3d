@@ -762,7 +762,12 @@ export function placeClutter(ctx) {
       // link centred 1.6 m up and turned across the first of them.
       const pitch = 1.02 * 8;
       const base = pos.y + 1.6 + 1.02 - 0.51;
-      for (let i = 0; i < 16; i++) instances.add('clutter_chain_run', { x, y: base + i * pitch, z, rotY: 0.3 }, chunk);
+      // Five runs, up into the cloud actors.js heaps round its end: sixteen
+      // were 130 m of chain, a line down from the top of every frame that
+      // could see it, and the prose has it vanish into the clouds.
+      const RUNS = 5;
+      for (let i = 0; i < RUNS; i++) instances.add('clutter_chain_run', { x, y: base + i * pitch, z, rotY: 0.3 }, chunk);
+      decor.push({ kind: 'chainMist', x, y: base + (RUNS - 1.6) * pitch, z, top: base + RUNS * pitch });
       addCollider(x - 0.5, x + 0.5, z - 0.5, z + 0.5, pos.y, pos.y + 12);
       strewn.push({ x0: 1.8, x1: 4.4, z0: -4.4, z1: -1.8 });
       placed++;

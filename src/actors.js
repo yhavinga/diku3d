@@ -2350,6 +2350,32 @@ function smokeTexture() {
   return texture;
 }
 
+/**
+ * One puff of low cloud: soft blobs heaped inside a circle, so it reads as
+ * billow rather than as the single radial smear the chimney smoke uses.
+ * Seeded, so every boot draws the same cloud.
+ */
+function mistTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let i = 0; i < 46; i++) {
+    const a = rnd() * Math.PI * 2; const r = Math.sqrt(rnd()) * 34;
+    const x = 64 + Math.cos(a) * r; const y = 64 + Math.sin(a) * r * 0.8;
+    const size = 14 + rnd() * 20;
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, size);
+    grad.addColorStop(0, 'rgba(255,255,255,0.22)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 128, 128);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 // ------------------------------------------------------------------- main ----
 
 /**
@@ -2378,6 +2404,7 @@ export function populate(world, layout, built, options = {}) {
   const windows = [];
   const flames = [];
   const smokes = [];
+  const mists = [];
   const waters = [];
   const clutter = [];
   const banners = [];
@@ -2573,6 +2600,7 @@ export function populate(world, layout, built, options = {}) {
       case 'tree': trees.push(item); break;
       case 'windows': windows.push(item); break;
       case 'smoke': smokes.push(item); break;
+      case 'chainMist': mists.push(item); break;
       case 'water': waters.push(item); break;
       case 'clutter': clutter.push(item); break;
       case 'banner': banners.push(item); break;
@@ -3375,6 +3403,50 @@ export function populate(world, layout, built, options = {}) {
     smokeSystem = { points, geo, base: positions.slice(), seeds };
   }
 
+  // --- the cloud the giant chain goes up into ----------------------------
+  // #3120: "The chain disappears in the clouds." Drawn to its full height it
+  // was 130 m of iron, a hairline hanging from the top of the frame down the
+  // Concourse. It stops at 36 m now, inside a heap of low cloud that hides
+  // where it goes. Lit, not glowing: at night it is barely there, as a cloud
+  // is. One instanced draw of camera-facing puffs, turned each frame.
+  let mistSystem = null;
+  if (mists.length) {
+    const PUFFS = 20;
+    // Coloured each frame from the fog, which is the colour of the haze at
+    // the horizon at this hour: lit by the sun, a cloud seen against the
+    // light at dusk came out as a black blot on the sky.
+    const material = new THREE.MeshBasicMaterial({
+      map: mistTexture(), transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      fog: false, toneMapped: false,
+    });
+    const mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), material, mists.length * PUFFS);
+    const puffs = [];
+    mists.forEach((m, k) => {
+      for (let i = 0; i < PUFFS; i++) {
+        const a = strHash(`${m.x},${m.z}`, i) * Math.PI * 2;
+        // The first few sit on the chain's end and hide it; the rest spread
+        // it into a bank, wider than it is deep.
+        // The core is stacked up the last of the chain to past its end, so
+        // no line of sight -- from the Concourse or from right under it --
+        // finds the end outside the cloud.
+        const core = 7;
+        const r = i < core ? 0.5 + (i % 2) * 0.8 : 2 + strHash(`${m.z}`, i + 40) * 10;
+        const size = i < core ? 7 + (i % 3) : 8 + strHash(`${m.x}`, i + 80) * 7;
+        const span = (m.top ?? m.y + 6) + 3 - m.y;
+        puffs.push({
+          x: m.x + Math.cos(a) * r, y: m.y + (i < core ? (i / (core - 1)) * span - 1 : -2 + strHash(`${m.x}${m.z}`, i + 9) * 7), z: m.z + Math.sin(a) * r,
+          w: size * 2.1, h: size, spin: strHash(`${m.z}${m.x}`, i) * Math.PI * 2, index: k * PUFFS + i,
+        });
+      }
+    });
+    mesh.frustumCulled = false;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.layers.set(OVERLAY_LAYER); // out of the AO prepass, like the smoke
+    group.add(mesh);
+    mistSystem = { mesh, puffs, white: new THREE.Color(0.93, 0.94, 0.96), q: new THREE.Quaternion(), roll: new THREE.Quaternion(), m: new THREE.Matrix4(), p: new THREE.Vector3(), s: new THREE.Vector3(), z: new THREE.Vector3(0, 0, 1) };
+  }
+
   // --- doors --------------------------------------------------------------
 
   // A 2.7 m opening is a gateway, not a house door, and one leaf across the
@@ -3732,6 +3804,34 @@ export function populate(world, layout, built, options = {}) {
 
   function update(dt, time, camera) {
     if (flameSystem) flameSystem.material.uniforms.time.value = time;
+    if (mistSystem) {
+      const ms = mistSystem;
+      let root = ms.mesh; while (root.parent) root = root.parent;
+      if (root.fog) {
+        // The fog colour is a display value and the sky behind is HDR, so
+        // taken as it is the cloud is a grey smudge at noon: lifted, and
+        // whitened in proportion to how bright the hour is.
+        const c = ms.mesh.material.color.copy(root.fog.color);
+        const lum = 0.3 * c.r + 0.59 * c.g + 0.11 * c.b;
+        c.multiplyScalar(1.35).addScalar(lum * 0.45);
+        c.r = Math.min(1, c.r); c.g = Math.min(1, c.g); c.b = Math.min(1, c.b);
+        // With the sun well up the haze colour is a warm grey and the cloud
+        // should be white: toward it as the sun climbs past ten degrees.
+        const high = THREE.MathUtils.smoothstep(sun.elevation ?? 0, 6, 26) * (0.55 + 0.45 * overhead.sun);
+        // The frame is tone mapped after everything is drawn and the noon
+        // sky is ~3 in linear units, so a white of 1 comes out as grey
+        // against it: by day the cloud is given the sky's own scale.
+        c.lerp(ms.white, high).multiplyScalar(1 + 1.9 * high);
+      }
+      for (const p of ms.puffs) {
+        ms.roll.setFromAxisAngle(ms.z, Math.sin(p.spin) * 0.25 + time * 0.004);
+        ms.q.copy(camera.quaternion).multiply(ms.roll);
+        ms.p.set(p.x + Math.sin(time * 0.05 + p.spin) * 0.8, p.y, p.z);
+        ms.m.compose(ms.p, ms.q, ms.s.set(p.w, p.h, 1));
+        ms.mesh.setMatrixAt(p.index, ms.m);
+      }
+      ms.mesh.instanceMatrix.needsUpdate = true;
+    }
     if (furnished.length) cullFurniture(camera);
     for (const material of waterMaterials) material.uniforms.time.value = time;
     for (const fountain of fountains) fountain.update(time);
