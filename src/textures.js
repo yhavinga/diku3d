@@ -2462,7 +2462,7 @@ const SURFACES = {
     s.height = 0.62 - arris * 0.22 - joint * 0.3 + cloud * 0.015;
     // Honed, not mirror-polished: at 0.27 the sewer's near-black sheen was
     // most of what the walls showed, and a coloured room read as black.
-    s.rough = joint ? 0.7 : 0.4 + cloud * 0.12 + arris * 0.12;
+    s.rough = joint ? 0.72 : 0.5 + cloud * 0.12 + arris * 0.1;
   },
 
   /**
