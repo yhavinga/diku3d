@@ -2205,6 +2205,7 @@ export function populate(world, layout, built, options = {}) {
         // and walk are `float` and `swim`, which ride at the waterline and
         // would sink it into dry ground. The boxed birds keep the old licence.
         swims: !!(beast && (made.afloat || (!made.mixer && beast.box && beast.box[2] === 'bird'))),
+        flies: !!(beast && beast.air),
       };
       figures.push(record);
 

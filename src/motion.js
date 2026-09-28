@@ -544,6 +544,21 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
         if (fig.interactable) fig.interactable.position.set(fig.at.x, fig.at.y + fig.height * 0.6, fig.at.z);
       }
     }
+    // Out of the lake. A marsh room can be all lake -- "floating on this
+    // boiling lake ... many a creature bumps the bottom of your boat" -- and
+    // the marsh giant reset into it stood on the water. Whatever neither
+    // swims nor flies starts on the nearest dry ground of its own room, if
+    // the room has any; its strolls already keep out of the water.
+    if (!fig.swims && !fig.flies && nav.sample(fig.at.x, fig.at.z, fig.level) === 2) {
+      const dry = nearestDry(fig);
+      if (dry) {
+        fig.at.x = dry.x; fig.at.z = dry.z;
+        fig.object.position.set(fig.at.x, fig.at.y, fig.at.z);
+        if (fig.home) fig.home.copy(fig.object.position);
+        if (fig.homeSpot) { fig.homeSpot.x = fig.at.x; fig.homeSpot.z = fig.at.z; }
+        if (fig.interactable) fig.interactable.position.set(fig.at.x, fig.at.y + fig.height * 0.6, fig.at.z);
+      }
+    }
     fig.m = {
       path: null, pi: 0, speed: 0, wait: 0.5 + fig.rand() * 4, turnTo: null,
       idle: 'idle', stuck: 0, repath: 0, goal: null,
@@ -555,6 +570,26 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       climb: null, drop: 0, lookAt: null,
     };
     fig.walking = false;
+  }
+
+  /** The nearest sample of dry ground, with room to stand, in fig's own room. */
+  function nearestDry(fig) {
+    const R = 12;
+    const step = nav.NAV_RES;
+    const dry = (x, z) => nav.sample(x, z, fig.level) === 1;
+    let best = null;
+    let bestD = Infinity;
+    for (let dz = -R; dz <= R; dz += step) {
+      for (let dx = -R; dx <= R; dx += step) {
+        const d = dx * dx + dz * dz;
+        if (d >= bestD || d > R * R) continue;
+        const x = fig.at.x + dx; const z = fig.at.z + dz;
+        if (!dry(x, z) || !dry(x + 0.6, z) || !dry(x - 0.6, z) || !dry(x, z + 0.6) || !dry(x, z - 0.6)) continue;
+        if (nav.roomAt(x, fig.at.y, z) !== fig.room) continue;
+        best = { x, z }; bestD = d;
+      }
+    }
+    return best;
   }
 
   const _grid = new Map();
