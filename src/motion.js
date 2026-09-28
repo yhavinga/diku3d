@@ -363,7 +363,9 @@ function thighUnderside(fig, mesh, bones, root) {
     .map(([a, b]) => [root.worldToLocal(a.getWorldPosition(new THREE.Vector3())), root.worldToLocal(b.getWorldPosition(new THREE.Vector3()))]);
   const reach = 0.14 * (fig.scale || 1);
   let low = Infinity;
-  for (let i = 0; i < skin.count; i += 2) {
+  // Every vertex: armour plates are few and far between, and every other
+  // one left a knight 4.6 cm down in the bench.
+  for (let i = 0; i < skin.count; i++) {
     if (!/^thigh[LR]$/.test(names[skin.getX(i)])) continue;
     mesh.getVertexPosition(i, _v1);
     root.worldToLocal(mesh.localToWorld(_v1));
@@ -526,7 +528,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     // How often a stroll is a run: children mostly, halflings sometimes.
     const title = (fig.interactable && fig.interactable.title) || '';
     fig.young = !fig.bones ? 0 : (CHILD.test(title) ? 0.6 : (/\byouths?\b/i.test(title) ? 0.3
-      : (fig.scale < 0.72 && !/dwarf|dwarves|gnome/i.test(title) ? 0.2 : 0)));
+      : (fig.scale < 0.72 && !/dwarf|dwarves|gnome/i.test(title) ? 0.08 : 0)));
     fig.at = { x: fig.object.position.x, y: fig.object.position.y, z: fig.object.position.z };
     fig.level = nav.levelOf(fig.at.y);
     // The reset ring puts people 2-3.6 m from the centre whatever is standing
@@ -982,13 +984,17 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     s.standQ = m.feet && m.feet.w > 0.99 ? m.feet.Q.map((q) => q.clone())
       : [b.footL.getWorldQuaternion(new THREE.Quaternion()), b.footR.getWorldQuaternion(new THREE.Quaternion())];
     m.feet = null;
-    s.seatFeet = [place(P.ankleL, rx, rz, floor + P.ankleL.y), place(P.ankleR, rx, rz, floor + P.ankleR.y)];
+    // Flat on the floor as they stand: the troll's sit plants its feet 4 cm
+    // lower than its idle does, and a big troll's soles went into the floor.
+    s.seatFeet = [place(P.ankleL, rx, rz, floor + I.ankleL.y), place(P.ankleR, rx, rz, floor + I.ankleR.y)];
     // A leg too short for the floor from this seat hangs, as a child's does
-    // from a bench, rather than being stretched straight to reach it.
+    // from a bench, rather than being stretched down to reach it -- which
+    // slopes the thigh through the bench's front edge (a baby troll's by
+    // 11 cm). Short, or lifted more than a hand's breadth, is hanging.
     const hip = place(P.thighL, rx, rz, floor + P.thighL.y + s.dy);
     const f0 = s.seatFeet[0];
-    s.hang = Math.hypot(hip.x - f0.x, hip.y - f0.y, hip.z - f0.z) > g.leg * 0.96;
-    if (s.hang) for (const f of s.seatFeet) f.y += s.dy;
+    s.hang = Math.hypot(hip.x - f0.x, hip.y - f0.y, hip.z - f0.z) > g.leg * 0.96 || s.dy > 0.12;
+    if (s.hang) for (const [i, f] of s.seatFeet.entries()) f.y = floor + (i ? P.ankleR.y : P.ankleL.y) + s.dy;
     const behind = spot.from === 'behind';
     s.dur = behind ? 1.9 : (clip === 'sit' ? 1.25 : 0.95);
     // Each foot its own step, the second starting before the first is down;
@@ -996,8 +1002,10 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     s.win = behind ? [[0.04, 0.46], [0.34, 0.78]] : [[0.02, 0.55], [0.3, 0.85]];
     s.lift = [0, 1].map((i) => {
       const d = Math.hypot(s.stand[i].x - s.seatFeet[i].x, s.stand[i].z - s.seatFeet[i].z);
-      if (d < 0.1) return 0;
-      return behind ? spot.seat + 0.07 : Math.min(0.12, 0.05 + d * 0.15);
+      // Anything more than a few centimetres is a step, lifted: a big
+      // troll's 9 cm, slid, was 14 cm of skating over two feet.
+      if (d < 0.03) return 0;
+      return behind ? spot.seat + 0.07 : Math.min(0.12, 0.04 + d * 0.15);
     });
     // Starting where the feet stand: the turn that called this has already
     // run its frame, and targets left at the origin stretched both legs
@@ -1064,9 +1072,31 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     s.from = s.from || { x: s.spot.approach.x, z: s.spot.approach.z };
   }
 
+  /**
+   * Children at tag: one runs at another, and the one caught runs off in
+   * turn. Only between children of the same room, and only when both are
+   * free to play.
+   */
+  function planTag(fig, order) {
+    if (!(fig.young >= 0.3) || fig.rand() > 0.55) return false;
+    neighbours(fig, near);
+    const others = near.filter((o) => o.young >= 0.3 && !o.m.dead && !o.m.settle && orderOf(o).kind === 'stroll'
+      && (o.at.x - fig.at.x) ** 2 + (o.at.z - fig.at.z) ** 2 < 8 * 8);
+    if (!others.length) return false;
+    const it = others[Math.floor(fig.rand() * others.length)];
+    const path = nav.pathInRoom(order.room, fig.at, it.at, 0.7);
+    if (!path || !path.length) return false;
+    const m = fig.m;
+    m.path = path; m.pi = 0; m.goal = { x: it.at.x, z: it.at.z }; m.stuck = 0; m.play = true;
+    // Caught, or nearly: it is off the moment the chaser gets there.
+    it.m.wait = Math.min(it.m.wait, 0.3 + (path.length * 0.5) / fig.runPace);
+    return true;
+  }
+
   function planStroll(fig, order) {
     const m = fig.m;
     if (planActivity(fig, order)) return;
+    if (planTag(fig, order)) return;
     const leash = order.radius ?? (fig.sentinel ? 2.8 : Infinity);
     const around = order.home || fig.homeSpot;
     const others = near;
@@ -1112,6 +1142,8 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     // then a long stop -- someone looking in a window, waiting for a friend.
     const long = fig.rand() < 0.22;
     m.wait = long ? 8 + fig.rand() * 12 : 2.2 + fig.rand() * 5.5;
+    // A child is off again almost at once.
+    if (fig.young >= 0.3) m.wait = 0.4 + fig.rand() * (long ? 4 : 1.8);
     m.idle = fig.actions && fig.actions.idle2 && fig.rand() < 0.4 ? 'idle2' : 'idle';
     m.turnTo = lookTarget(fig);
   }
@@ -2378,33 +2410,38 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
    * Animals at ease: a grazing beast's head goes down to the grass and comes
    * up to look round, a dog's to the ground to sniff; birds peck. The beasts
    * carry no graze clip, so the neck is bent here, after the mixer, about
-   * each bone's own hinge, by an amount measured once per rig to bring the
-   * head down near the ground. A bird's `attack` is a peck already.
+   * each bone's own hinge (the sign measured once per rig). A cow's neck is
+   * too short in the model to reach the grass -- its jaw comes down from
+   * 1.02 m to 0.84 -- so on cattle this reads as a head lowered; a pig's
+   * snout and a dog's nose reach the ground. A bird's `attack` is a peck.
    */
-  const GRAZERS = /^(bovine|equine|cervid|camel|pig)$/;
+  // Not the horse, the deer or the camel: bent at the neck, the equine
+  // frame folds its neck back into its chest instead of reaching down -- it
+  // needs a graze clip of its own (beasts.py).
+  const GRAZERS = /^(bovine|pig)$/;
   const SNIFFERS = /^(canine|rodent|bear)$/;
   const PECKERS = /^(fowl|songbird|waterfowl)$/;
-  function measureGraze(fig) {
-    const chain = [];
-    fig.object.traverse((n) => { if (n.isBone && /^(neck\d*|head)$/.test(n.name)) chain.push(n); });
-    const head = chain.find((b) => b.name === 'head');
-    if (!head || chain.length < 2) return null;
+  function measureGraze(fig, grazer) {
+    const necks = []; let head = null;
+    fig.object.traverse((n) => {
+      if (!n.isBone) return;
+      if (/^neck\d*$/.test(n.name)) necks.push(n);
+      else if (n.name === 'head') head = n;
+    });
+    if (!head || !necks.length) return null;
+    // Only the neck bones carry the head down (turning the head only aims
+    // the muzzle), mostly at the base, and the chest is left alone: the
+    // forelegs hang from it. Which way is down is measured once per rig.
     const root = fig.object;
-    const saved = chain.map((b) => b.quaternion.clone());
-    const heightAt = (angle) => {
-      chain.forEach((b, i) => b.quaternion.copy(saved[i]).multiply(_qa.setFromAxisAngle(_xAxis, angle / chain.length)));
-      root.updateMatrixWorld(true);
-      const y = root.worldToLocal(head.getWorldPosition(_v1)).y;
-      chain.forEach((b, i) => b.quaternion.copy(saved[i]));
-      root.updateMatrixWorld(true);
-      return y;
-    };
-    const standing = heightAt(0);
-    const sign = heightAt(0.3) < standing ? 1 : -1;
-    const want = standing * 0.3;
-    let angle = 0;
-    for (let a = 0.1; a <= 1.8; a += 0.05) { angle = a; if (heightAt(sign * a) <= want) break; }
-    return { chain, angle: sign * angle };
+    const saved = necks[0].quaternion.clone();
+    const y0 = root.worldToLocal(head.getWorldPosition(new THREE.Vector3())).y;
+    necks[0].quaternion.multiply(_qa.setFromAxisAngle(_xAxis, 0.3));
+    root.updateMatrixWorld(true);
+    const sign = root.worldToLocal(head.getWorldPosition(new THREE.Vector3())).y < y0 ? 1 : -1;
+    necks[0].quaternion.copy(saved);
+    root.updateMatrixWorld(true);
+    const share = (i) => (necks.length === 1 ? 1 : (i === 0 ? 0.75 : 0.25 / (necks.length - 1)));
+    return { necks, head, angle: sign * (grazer ? 1.0 : 0.8), tilt: sign * 0.25, share };
   }
 
   function animalLife(fig, dt) {
@@ -2423,7 +2460,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     }
     const grazer = GRAZERS.test(kind); const sniffer = SNIFFERS.test(kind);
     if (!grazer && !sniffer) return;
-    if (fig.graze === undefined) fig.graze = measureGraze(fig);
+    if (fig.graze === undefined) fig.graze = measureGraze(fig, grazer);
     if (!fig.graze) return;
     const g = m.graze || (m.graze = { w: 0, want: 0, next: fig.rand() * 3 });
     g.next -= dt;
@@ -2439,8 +2476,9 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
   function lowerHead(fig) {
     const g = fig.m.graze;
     if (!g || g.w < 0.001 || !fig.graze) return;
-    const each = (fig.graze.angle * smooth(g.w)) / fig.graze.chain.length;
-    for (const b of fig.graze.chain) b.quaternion.multiply(_qa.setFromAxisAngle(_xAxis, each));
+    const k = smooth(g.w);
+    fig.graze.necks.forEach((b, i) => b.quaternion.multiply(_qa.setFromAxisAngle(_xAxis, fig.graze.angle * k * fig.graze.share(i))));
+    fig.graze.head.quaternion.multiply(_qa.setFromAxisAngle(_xAxis, fig.graze.tilt * k));
   }
 
   // -- the room as you find it ---------------------------------------------------
