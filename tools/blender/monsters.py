@@ -1722,6 +1722,20 @@ def naga():
 
     def parts(body_solids):
         out = snake_parts(body_solids)
+        # The snake's jaw, gape and eyes are built for a snake's wedge of a
+        # head; on her face they came out as a pair of pink lips stuck on the
+        # chin and an eye on each cheek. Hers instead: gold eyes that glow,
+        # set under the brow, and a thin dark line of a mouth.
+        for o in [o for o in out if o.name.split(".")[0] in ("jaw", "mouth", "eye")]:
+            out.remove(o)
+            bpy.data.objects.remove(o, do_unlink=True)
+        for side in (1, -1):
+            at = B.surface_point(body_solids, P(side * 0.036, front + 0.6, z0 + 0.038), P(0, -1, 0), sink=0.005)
+            out.append(B.solid_part([ell(tuple(at), (0.015, 0.008, 0.0085), "head", blend=0.002)],
+                                    0.0018, 70, "eye", "glow", (1.0, 1.0, 1.0), smooth=0))
+        at = B.surface_point(body_solids, P(0, front + 0.6, z0 - 0.035), P(0, -1, 0), sink=0.003)
+        out.append(B.solid_part([ell(tuple(at), (0.026, 0.006, 0.0035), "head", blend=0.002)],
+                                0.0015, 60, "mouth", "horn", (0.06, 0.03, 0.03), smooth=0))
         # The hood: two fans of scale either side of the neck, behind the head.
         hood = [ell(P(0, front - 0.22, z0 + 0.03), (0.26, 0.3, 0.035), ("grad", "body1", "body2", P(0, front - 0.05, 0), P(0, front - 0.45, 0)), blend=0.05)]
         out.append(B.sdf_part(hood, 0.007, 700, "hood", "hide", smooth=1,

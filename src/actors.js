@@ -765,7 +765,7 @@ const BEASTS = [
   // the same creature four times over, in stone grey.
   { test: /\bgargoyles?\b/, asset: 'beast_imp', scale: 4.0, coat: 0x6a6964, pale: 0x7c7b76, points: 0x3c3b38, glow: 0xff5a24, box: [1.9, 0.8, 'quad', 0x6a6964] },
   { test: /\b(homonc?ulus|imps?|quasits?)\b/, asset: 'beast_imp', scale: 1.0, coat: 0x4a5a28, pale: 0x7a8a48, points: 0x283018, glow: 0xffc020, box: [0.45, 0.3, 'quad', 0x4a5a28] },
-  { test: /\bnagas?\b/, asset: 'beast_naga', scale: 1.0, stands: 1.9, coat: 0x56662a, pale: 0xc8b25e, points: 0x56662a, patch: 0x8a8a3a, cover: 0.35, box: [0.3, 5, 'quad', 0x56662a] },
+  { test: /\bnagas?\b/, asset: 'beast_naga', scale: 1.0, stands: 1.9, coat: 0x56662a, pale: 0xc8b25e, points: 0x56662a, patch: 0x8a8a3a, cover: 0.35, glow: 0xf0c040, box: [0.3, 5, 'quad', 0x56662a] },
   { test: /\bbasilisks?\b/, asset: 'beast_basilisk', scale: 1.0, coat: 0x5a4a32, pale: 0xbca264, points: 0x3a3020, patch: 0x4a3c28, cover: 0.3, glow: 0x9cff9c, box: [0.5, 2.5, 'quad', 0x5a4a32] },
   // The worm stands in a crater of its own sand, which is all the ground it
   // touches: its contact patch is the crater's, not ten metres of body, and
