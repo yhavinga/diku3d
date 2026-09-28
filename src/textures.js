@@ -4049,8 +4049,17 @@ function decorate(material, recipe, macro, grain) {
           float dikuIblL = dot( iblIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
           iblIrradiance = mix( iblIrradiance, dikuIblL * mix( dikuSkyBleachTint, vec3( 1.06, 1.0, 0.90 ), vIndoor ),
             max( vIndoor * 0.8, dikuSkyBleach ) );
+          // What a surface mirrors, as against what lights it. The cube is
+          // open sky over a flat ground, with no town in it. Indoors none of
+          // it is in view: a sconce's iron mirrors plaster and floorboards,
+          // and with half the sky's hue left in (as there was) every metal in
+          // every room came out striped blue -- the iron has no diffuse to
+          // hide it behind. Outdoors a mirror-smooth surface does see the
+          // sky, but a rough lobe spreads over the walls and roofs round it
+          // too, so it takes the hour's bleach as the diffuse sky does.
           float dikuRadL = dot( radiance, vec3( 0.2126, 0.7152, 0.0722 ) );
-          radiance = mix( radiance, dikuRadL * vec3( 1.03, 1.0, 0.95 ), vIndoor * 0.5 );
+          radiance = mix( radiance, dikuRadL * vec3( 1.03, 1.0, 0.95 ),
+            max( vIndoor, dikuSkyBleach * smoothstep( 0.25, 0.7, material.roughness ) ) );
         #endif
         #include <lights_fragment_end>
       `)

@@ -2436,7 +2436,10 @@ export function populate(world, layout, built, options = {}) {
   // Modelled props are used where they exist and quietly skipped where they
   // don't, so the library can be finished asset by asset.
   const assets = options.assets || null;
-  const instances = assets ? new InstanceBatch(assets) : null;
+  // A prop in a room is lit as the room is (see `indoorGeometry` in assets.js).
+  const instances = assets ? new InstanceBatch(assets, {
+    indoorAt: (x, y, z) => { const info = roomInfoAt(x, y, z); return !!info && !info.outdoor && !isBuriedRoom(info); },
+  }) : null;
   // The rooms' furniture is batched apart from the street's props and never
   // instanced (see the end of `populate`).
   const furnishing = assets ? new InstanceBatch(assets) : null;
@@ -2448,7 +2451,7 @@ export function populate(world, layout, built, options = {}) {
   // the sky (textures.js `buriedTwin`) -- by the room's own cell or the nearer
   // end of a passage, as nav.roomAt decides. What is placed there is filed
   // under a chunk that says so, and StaticBatches dresses it accordingly.
-  const buriedAt = (x, y, z) => {
+  const roomInfoAt = (x, y, z) => {
     const level = Math.round(y / LEVEL_H); const cx = Math.round(x / GRID); const cz = Math.round(z / GRID);
     let vnum = layout.at(level, cx, cz);
     if (vnum === undefined) {
@@ -2459,8 +2462,9 @@ export function populate(world, layout, built, options = {}) {
         vnum = da <= db ? passage.from.vnum : passage.to.vnum;
       }
     }
-    return isBuriedRoom(built.rooms.get(vnum));
+    return built.rooms.get(vnum);
   };
+  const buriedAt = (x, y, z) => isBuriedRoom(roomInfoAt(x, y, z));
   const chunkAt = (chunk, x, y, z) => (buriedAt(x, y, z) ? `${chunk}${BURIED_MARK}` : chunk);
 
   const trees = [];
