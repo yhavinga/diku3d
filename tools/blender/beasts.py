@@ -571,7 +571,36 @@ def make_rig(name, bones):
     return arm
 
 
-def bind(arm, parts, name):
+def flow_uv(obj, legtop):
+    """UVs in metres, laid so V runs the way the hair lies: along the body
+    on the flanks, the back and the belly, down the legs below `legtop`, and
+    down the chest, the rump and the face. The fur surface draws its strands
+    along V; cube projection put them vertical on a flank and sideways on a
+    back, and an isotropic map was all it could carry -- which is how a grey
+    wolf came to read as grey clay."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    uv = bm.loops.layers.uv.verify()
+    for f in bm.faces:
+        n = f.normal
+        c = f.calc_center_median()
+        ax = max(range(3), key=lambda i: abs(n[i]))
+        for loop in f.loops:
+            x, y, z = loop.vert.co
+            if ax == 1:
+                loop[uv].uv = (x, z)
+            elif ax == 2:
+                loop[uv].uv = (x, y)
+            elif c.z > legtop:
+                loop[uv].uv = (z, y)
+            else:
+                loop[uv].uv = (y, z)
+    bm.to_mesh(obj.data)
+    bm.free()
+    return obj
+
+
+def bind(arm, parts, name, legtop=None):
     """Join the parts into one mesh per material and skin them to the rig.
 
     One object per material, not one object with two: the glTF exporter
@@ -594,7 +623,10 @@ def bind(arm, parts, name):
         # solids graze; the exporter warns and may write it wrongly.
         mesh.data.validate()
         shade_smooth(mesh)
-        lib.uv_project(mesh)
+        if legtop is not None and mat == "MAT:fur":
+            flow_uv(mesh, legtop)
+        else:
+            lib.uv_project(mesh)
         bpy.ops.object.select_all(action="DESELECT")
         mesh.select_set(True)
         arm.select_set(True)
@@ -1024,7 +1056,9 @@ def canine():
               (0.08, 0.19, 0.032), (0.08, 0.24, 0.012)],
         scapula=(0.07, 0.15, 0.50),
         extra={"ear*": ((0.042, 0.365, 0.665), (0.058, 0.358, 0.745), "head"),
-               "flop*": ((0.052, 0.352, 0.662), (0.074, 0.372, 0.575), "head")},
+               "flop*": ((0.052, 0.352, 0.662), (0.074, 0.372, 0.575), "head"),
+               # The ruff: its own bone, so a breed without one collapses it.
+               "ruff": ((0, 0.27, 0.53), (0, 0.33, 0.6), "neck")},
     )
     tail = L["tail"]
     body = [
@@ -1107,6 +1141,25 @@ def canine():
             a, bb = apply_side(b0[0], side), apply_side(b0[1], side)
             ear = [cone(P(*a), P(*bb), 0.031, 0.022, "flop" + t, blend=0.01, squash=(0.26, 1.0, 1.0), mask=(0, 0.2))]
             out.append(sdf_part(ear, 0.003, 160, "flop", "fur", smooth=1))
+        # The ruff: locks of long guard hair round the neck and the throat,
+        # lying back towards the shoulders -- what makes a wolf's front end
+        # heavier than a dog's. Pale beneath.
+        a0, a1 = V((0, 0.24, 0.47)), V((0, 0.35, 0.6))
+        ax = (a1 - a0).normalized()
+        u0 = V((1, 0, 0))
+        w0 = ax.cross(u0).normalized()
+        ruff = []
+        for ring, (t, rr, ln) in enumerate(((0.15, 0.095, 0.11), (0.45, 0.085, 0.1), (0.75, 0.072, 0.085))):
+            c = a0.lerp(a1, t)
+            for q in range(11):
+                ang = 2 * math.pi * (q + 0.5 * ring) / 11
+                out_ = u0 * math.cos(ang) + w0 * math.sin(ang)
+                root = c + out_ * rr * 0.8
+                tip = root + out_ * ln * 0.45 - ax * ln * 0.85 + V((0, 0, -0.02))
+                below = max(0.0, -out_.z)
+                ruff.append(cone(P(*root), P(*tip), 0.03, 0.006, "ruff", blend=0.02, squash=(1, 1, 0.55),
+                                 mask=(0.55 * below, 0.0)))
+        out.append(sdf_part(ruff, 0.004, 900, "ruff", "fur", smooth=1))
         return out
 
     return dict(name="beast_canine", archetype="canine", L=L, body=body, masks=masks, parts=parts, h=0.0055, tris=3000,
@@ -1440,16 +1493,40 @@ def equine():
 
     def parts(body_solids):
         out = []
-        # Mane and forelock: a flat ridge of hair along the crest.
-        mane = [cone(P(0, 0.5, 1.56), P(0, 0.85, 1.8), 0.05, 0.075, {"neck": 1.0}, blend=0.03, squash=(0.3, 1, 1), group="m"),
-                cone(P(0, 0.85, 1.8), P(0, 1.12, 2.0), 0.075, 0.05, {"neck2": 1.0}, blend=0.03, squash=(0.3, 1, 1), group="m"),
-                cone(P(0, 1.14, 1.98), P(0, 1.24, 1.84), 0.045, 0.02, "head", blend=0.02, squash=(0.5, 1, 1), group="m")]
-        out.append(sdf_part(mane, 0.01, 360, "mane", "fur", smooth=1,
+        # Mane and forelock: locks off the crest, falling to the off side of
+        # the neck each its own length, so the crest reads as hair against
+        # the sky and not as a fin. A smooth ridge here, in a dim barn, was
+        # half of why a horse read as a blob.
+        rng = np.random.default_rng(17)
+        mane = []
+        crest = [V((0, 0.5, 1.56)), V((0, 0.85, 1.8)), V((0, 1.12, 2.0))]
+        for i in range(15):
+            t = i / 14.0
+            c = crest[0].lerp(crest[1], t * 2) if t < 0.5 else crest[1].lerp(crest[2], (t - 0.5) * 2)
+            bone = ("grad", "neck", "neck2", P(0, 0.6, 1.6), P(0, 1.0, 1.9))
+            L_ = 0.2 + 0.12 * math.sin(math.pi * t) + rng.uniform(-0.04, 0.04)
+            end = c + V((-0.13 - 0.05 * rng.random(), -0.05 - 0.04 * rng.random(), -L_))
+            mid = c.lerp(end, 0.45) + V((-0.06, 0.0, 0.02))
+            mane += [cone(P(*c), P(*mid), 0.05, 0.04, bone, blend=0.02, squash=(0.45, 1, 1), group="m%d" % i),
+                     cone(P(*mid), P(*end), 0.04, 0.008, bone, blend=0.02, squash=(0.45, 1, 1), group="m%d" % i)]
+        for x in (-0.03, 0.0, 0.03):
+            top = V((x, 1.13, 2.0))
+            mane.append(cone(P(*top), P(x * 1.4, 1.27, 1.8), 0.028, 0.006, "head", blend=0.015, squash=(0.6, 1, 1)))
+        out.append(sdf_part(mane, 0.009, 760, "mane", "fur", smooth=1,
                             mask_fn=lambda co, n, p, d: (p * 0, np.ones(len(co)))))
-        # The tail: a short dock and a long fall of hair.
-        hair = [cone(P(*tail[i]), P(*tail[i + 1]), 0.065 + i * 0.012, 0.077 + i * 0.012, "tail%d" % (i + 1),
-                     blend=0.03, squash=(0.55, 1, 1), group="t") for i in range(len(tail) - 1)]
-        out.append(sdf_part(hair, 0.01, 420, "tailhair", "fur", smooth=1,
+        # The tail: a short dock, then a fall of hair in locks that part
+        # and swing, following the dock bones down so a swish moves them.
+        hair = [cone(P(*tail[i]), P(*tail[i + 1]), 0.06, 0.055, "tail%d" % (i + 1), blend=0.03, group="d")
+                for i in range(2)]
+        for j in range(8):
+            a = 2 * math.pi * j / 8
+            off = V((math.cos(a) * 0.04, math.sin(a) * 0.03, 0))
+            pts = [V(tail[1]) + off * 0.5, V(tail[2]) + off * 1.3, V(tail[3]) + off * 1.9 + V((0, 0, rng.uniform(-0.03, 0.03))),
+                   V(tail[4]) + off * 2.4 + V((0, 0.02 * math.sin(a * 3), -0.12 - rng.uniform(0, 0.12)))]
+            for i in range(3):
+                hair.append(cone(P(*pts[i]), P(*pts[i + 1]), 0.04 - 0.008 * i, 0.03 - 0.009 * i if i < 2 else 0.006,
+                                 "tail%d" % (i + 2), blend=0.02, squash=(0.6, 1, 1), group="t%d" % j))
+        out.append(sdf_part(hair, 0.009, 700, "tailhair", "fur", smooth=1,
                             mask_fn=lambda co, n, p, d: (p * 0, np.ones(len(co)))))
         jaw = [cone(P(0, 1.17, 1.72), P(0, 1.36, 1.41), 0.07, 0.05, "jaw", blend=0.02, squash=(0.8, 1, 1))]
         out.append(sdf_part(jaw, 0.008, 200, "jaw", "fur", smooth=1,
@@ -3089,7 +3166,9 @@ def build_body(spec):
                     smooth=2, mask_fn=spec.get("masks"), patch_fn=spec.get("patch"))
     parts = [body] + spec["parts"](spec["body"])
     arm = make_rig(spec["name"], spec.get("bones") or quad_bones(spec["L"]))
-    meshes = bind(arm, parts, spec["name"])
+    # Where the legs begin, for the lie of the hair: the hind knee.
+    legtop = spec["L"]["hind"][1][2] if "L" in spec and "hind" in spec["L"] else None
+    meshes = bind(arm, parts, spec["name"], legtop=legtop)
     return arm, meshes, lib.stats(meshes)
 
 

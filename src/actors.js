@@ -781,13 +781,13 @@ const BEASTS = [
   // does not have.
   { test: /\bwargs?\b/, asset: 'beast_canine', scale: 1.6, coat: 0x26221f, pale: 0x3a342e, points: 0x151311, hide: ['flop'], box: [1.0, 1.6, 'quad', 0x2b2724] },
   { test: /\b(guardian|roving) beast\b/, asset: 'beast_canine', scale: 1.7, coat: 0x1b1918, pale: 0x2b2724, points: 0x100f0e, hide: ['flop'], grow: { head: 1.1 }, box: [1.0, 1.6, 'quad', 0x1b1918] },
-  { test: /\b(wolf|wolves)\b/, asset: 'beast_canine', scale: 1.32, coat: 0x807870, pale: 0xd9d2c4, points: 0x4d4841, hide: ['flop'], grow: { tail1: 1.1 }, box: [0.72, 1.15, 'quad', 0x5b5750] },
-  { test: /\bfox(es)?\b/, asset: 'beast_canine', scale: 0.72, coat: 0xa4501e, pale: 0xefe8dc, points: 0x1f1813, hide: ['flop'], grow: { ear: 1.35, tail1: 1.3 }, box: [0.4, 0.7, 'quad', 0xa4501e] },
-  { test: /\b(rottweiler|doberman)\b/, asset: 'beast_canine', scale: 1.08, width: 1.12, coat: 0x1c1917, pale: 0x8a5630, points: 0x8a5630, hide: ['ear'], grow: { flop: 0.7 }, box: [0.62, 1.0, 'quad', 0x2e2622] },
-  { test: /\b(hound|mastiff|cooshee|pitbull)s?\b/, asset: 'beast_canine', scale: 1.15, width: 1.1, coat: 0x5f4d3c, pale: 0xb8a58a, points: 0x3a2f25, hide: ['ear'], box: [0.72, 1.15, 'quad', 0x5b5750] },
-  { test: /\bbeagles?\b/, asset: 'beast_canine', scale: 0.7, coat: 0xa06c38, pale: 0xf1ede4, points: 0xf1ede4, patch: 0x1e1a16, cover: 0.42, hide: ['ear'], grow: { flop: 1.15 }, box: [0.5, 0.85, 'quad', 0x7a6247] },
-  { test: /\b(puppy|puppies|pup)\b/, asset: 'beast_canine', scale: 0.5, coat: 0x8e7152, pale: 0xe2d6c2, points: 0x5a4632, hide: ['ear'], grow: { head: 1.35, flop: 1.1 }, box: [0.26, 0.42, 'quad', 0x8a7355] },
-  { test: /\b(fido|dog|dogs|cur|mutt|mongrel)\b/, asset: 'beast_canine', scale: 0.82, coat: 0x6b5641, pale: 0xa6927a, points: 0x3a3028, patch: 0xcfc6b4, cover: 0.2, hide: ['ear'], box: [0.5, 0.85, 'quad', 0x7a6247] },
+  { test: /\b(wolf|wolves)\b/, asset: 'beast_canine', scale: 1.32, coat: 0x7e7568, pale: 0xdcd4c4, points: 0x9c8a70, patch: 0x45403a, cover: 0.38, hide: ['flop'], grow: { tail1: 1.1 }, box: [0.72, 1.15, 'quad', 0x5b5750] },
+  { test: /\bfox(es)?\b/, asset: 'beast_canine', scale: 0.72, coat: 0xa4501e, pale: 0xefe8dc, points: 0x1f1813, hide: ['flop'], grow: { ear: 1.35, tail1: 1.3, ruff: 0.7 }, box: [0.4, 0.7, 'quad', 0xa4501e] },
+  { test: /\b(rottweiler|doberman)\b/, asset: 'beast_canine', scale: 1.08, width: 1.12, coat: 0x1c1917, pale: 0x8a5630, points: 0x8a5630, hide: ['ear', 'ruff'], grow: { flop: 0.7 }, box: [0.62, 1.0, 'quad', 0x2e2622] },
+  { test: /\b(hound|mastiff|cooshee|pitbull)s?\b/, asset: 'beast_canine', scale: 1.15, width: 1.1, coat: 0x5f4d3c, pale: 0xb8a58a, points: 0x3a2f25, hide: ['ear', 'ruff'], box: [0.72, 1.15, 'quad', 0x5b5750] },
+  { test: /\bbeagles?\b/, asset: 'beast_canine', scale: 0.7, coat: 0xa06c38, pale: 0xf1ede4, points: 0xf1ede4, patch: 0x1e1a16, cover: 0.42, hide: ['ear', 'ruff'], grow: { flop: 1.15 }, box: [0.5, 0.85, 'quad', 0x7a6247] },
+  { test: /\b(puppy|puppies|pup)\b/, asset: 'beast_canine', scale: 0.5, coat: 0x8e7152, pale: 0xe2d6c2, points: 0x5a4632, hide: ['ear', 'ruff'], grow: { head: 1.35, flop: 1.1 }, box: [0.26, 0.42, 'quad', 0x8a7355] },
+  { test: /\b(fido|dog|dogs|cur|mutt|mongrel)\b/, asset: 'beast_canine', scale: 0.82, coat: 0x6b5641, pale: 0xa6927a, points: 0x3a3028, patch: 0xcfc6b4, cover: 0.2, hide: ['ear', 'ruff'], box: [0.5, 0.85, 'quad', 0x7a6247] },
   // --- cats, great and small. The patch channel on the feline is tabby
   // stripes, so `cover` is how striped it is.
   { test: /\btigers?\b/, asset: 'beast_feline', scale: 4.0, coat: 0xc0692a, pale: 0xefe6d6, points: 0xc0692a, patch: 0x1a1512, cover: 0.42, box: [1.0, 1.9, 'quad', 0xc0692a] },
@@ -806,11 +806,11 @@ const BEASTS = [
   { test: /\b(rat|rats|rodent|vermin)\b/, asset: 'beast_rodent', scale: 1.2, coat: 0x5e5043, pale: 0x9e9180, points: 0x5e5043, box: [0.14, 0.26, 'quad', 0x4d453c] },
   // --- horses, and the deer, which is a lighter build of the same frame.
   // Horses vary coat by the mobile, so a stable of four is not one horse.
-  { test: /\b(donkey|donkeys)\b/, asset: 'beast_equine', scale: 0.72, coat: 0x756b60, pale: 0xdcd4c8, points: 0x2c2723, grow: { ear: 1.8 }, box: [1.1, 1.6, 'quad', 0x756b60] },
-  { test: /\b(mule|mules)\b/, asset: 'beast_equine', scale: 0.88, coat: 0x5a4636, pale: 0xb7a58e, points: 0x2a221c, grow: { ear: 1.5 }, box: [1.3, 1.9, 'quad', 0x5a4636] },
-  { test: /\b(pony|ponies)\b/, asset: 'beast_equine', scale: 0.72, coats: 'horse', box: [1.1, 1.6, 'quad', 0x6b4f36] },
-  { test: /\bpegasus\b/, asset: 'beast_equine', scale: 1.0, coat: 0xe9e5dd, pale: 0xe9e5dd, points: 0xcfcac2, box: [1.45, 2.1, 'quad', 0xe9e5dd] },
-  { test: /\b(horse|horses|mare|stallion|steed|colt|foal)\b/, asset: 'beast_equine', scale: 1.0, coats: 'horse', box: [1.45, 2.1, 'quad', 0x6b4f36] },
+  { test: /\b(donkey|donkeys)\b/, asset: 'beast_equine', scale: 0.72, sleek: true, coat: 0x756b60, pale: 0xdcd4c8, points: 0x2c2723, grow: { ear: 1.8 }, box: [1.1, 1.6, 'quad', 0x756b60] },
+  { test: /\b(mule|mules)\b/, asset: 'beast_equine', scale: 0.88, sleek: true, coat: 0x5a4636, pale: 0xb7a58e, points: 0x2a221c, grow: { ear: 1.5 }, box: [1.3, 1.9, 'quad', 0x5a4636] },
+  { test: /\b(pony|ponies)\b/, asset: 'beast_equine', scale: 0.72, coats: 'horse', sleek: true, box: [1.1, 1.6, 'quad', 0x6b4f36] },
+  { test: /\bpegasus\b/, asset: 'beast_equine', scale: 1.0, sleek: true, coat: 0xe9e5dd, pale: 0xe9e5dd, points: 0xcfcac2, box: [1.45, 2.1, 'quad', 0xe9e5dd] },
+  { test: /\b(horse|horses|mare|stallion|steed|colt|foal)\b/, asset: 'beast_equine', scale: 1.0, coats: 'horse', sleek: true, box: [1.45, 2.1, 'quad', 0x6b4f36] },
   { test: /\b(stag|stags|elk)\b/, asset: 'beast_cervid', scale: 1.15, coat: 0x8c5c32, pale: 0xefe6d6, points: 0x3a2c20, patch: 0xefe6d6, cover: 0.14, box: [0.95, 1.4, 'quad', 0x8c5c32] },
   { test: /\b(deer|doe|fawn)\b/, asset: 'beast_cervid', scale: 1.0, coat: 0x9c6a3a, pale: 0xefe6d6, points: 0x3a2c20, patch: 0xefe6d6, cover: 0.18, hide: ['antler'], box: [0.85, 1.3, 'quad', 0x9c6a3a] },
   // --- cattle. `\bbull\b` would match hood.are's pitbull, which is why the
@@ -1042,6 +1042,30 @@ function beastLook(spec, proto, seed = 0) {
   return look;
 }
 
+/**
+ * A short, groomed coat -- a horse's -- takes a sheen the shaggy ones do not:
+ * the highlight sliding down a flank is what draws the shape of a dark horse
+ * in a dim barn, where the plain fur left a bay as a brown blob.
+ */
+const sleekCache = new WeakMap();
+function sleekFur(library) {
+  let m = sleekCache.get(library);
+  if (!m) {
+    m = library.materialFor('fur').clone();
+    m.name = 'fur-sleek';
+    m.roughness = 0.7;
+    m.envMapIntensity = 1.0;
+    // A groomed coat lies flat: the locks are there in the relief, faintly,
+    // and not in the colour at all -- their light and dark tips, on a horse,
+    // read as the grain of carved wood. The map's mean stands in for it.
+    m.normalScale = new THREE.Vector2(0.1, 0.1);
+    m.map = null;
+    m.color.setScalar(0.4);
+    sleekCache.set(library, m);
+  }
+  return m;
+}
+
 function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const info = prepareBeast(asset);
   const look = beastLook(spec, proto, options.seed || 0);
@@ -1054,7 +1078,7 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     // hand in populate(), and knows how long the animal is.
     node.castShadow = false;
     const tag = node.material && node.material.name ? node.material.name.replace(/^MAT:/, '') : '';
-    node.material = library.materialFor(tag);
+    node.material = tag === 'fur' && spec.sleek ? sleekFur(library) : library.materialFor(tag);
     node.geometry = paintedGeometry(asset, node, tag, look);
   });
   const scale = (spec.scale || 1) * (0.94 + strHash(proto.short, 3) * 0.12);

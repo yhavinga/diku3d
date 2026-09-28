@@ -542,26 +542,43 @@ const SURFACES = {
   },
 
   /**
-   * Fur and hide, for the animals. Near-neutral, like cloth, because every
-   * beast carries its coat, its pale belly and its dark points in vertex colour
-   * and the map must not fight them. What the map does carry is the one thing
-   * that tells a pelt from a painted shell at a few metres: the coat lies in
-   * clumps that each catch the light a little differently, and the gaps
-   * between them are shadowed. Isotropic on purpose -- the UVs are cube
-   * projected, so a strand direction would change at every projection seam.
+   * Fur, for the animals. Near-neutral, like cloth, because every beast
+   * carries its coat, its pale belly and its dark points in vertex colour and
+   * the map must not fight them. What the map carries is what tells a pelt
+   * from a painted shell: the hair lies in one direction -- down V, which
+   * beasts.py lays along the body and down the legs -- in locks that each end
+   * in lighter guard-hair tips over a darker undercoat showing between them.
+   * An isotropic clump map on cube-projected UVs, at 0.3 normal strength, read
+   * on a grey wolf as grey clay.
    */
   fur(u, v, s) {
-    const [d1, edge, id] = cellular(u * 16, v * 16, 16, 401, 0.5);
-    const fine = fbm(u * 64, v * 64, 64, 409, 2);
+    // Noise stretched along V that still tiles: each axis wraps on its own.
+    const aniso = (x, y, px, py, seed) => {
+      const ix = Math.floor(x); const iy = Math.floor(y);
+      const fx = x - ix; const fy = y - iy;
+      const h = (a, b) => hash2(((a % px) + px) % px, ((b % py) + py) % py, 65536, seed);
+      const sx = fx * fx * (3 - 2 * fx); const sy = fy * fy * (3 - 2 * fy);
+      return lerp(lerp(h(ix, iy), h(ix + 1, iy), sx), lerp(h(ix, iy + 1), h(ix + 1, iy + 1), sx), sy);
+    };
+    // Locks: a row of them across U, each offset along V so their tips do
+    // not line up, and each a sawtooth along V -- root low, tip proud.
+    const lockU = u * 18;
+    const li = Math.floor(lockU);
+    const within = lockU - li;
+    const offset = hash2(((li % 18) + 18) % 18, 0, 18, 401);
+    const along = v * 6 + offset * 6;
+    const saw = along - Math.floor(along);
+    const lock = Math.sin(Math.PI * within) ** 0.6 * (0.35 + 0.65 * saw);
+    const strand = aniso(u * 160, v * 10, 160, 10, 409);
+    const strand2 = aniso(u * 90, v * 6, 90, 6, 411);
     const tone = fbm(u * 4, v * 4, 4, 419, 3);
-    const clump = clamp01(edge * 3.2);
-    const base = mix(rgb(0x9e9e9e), rgb(0xb4b4b4), tone);
-    // Kept low: at 0.16 of tone and 0.07 of relief a horse's short coat read
-    // as a fleece at two metres.
-    const shade = (0.95 + id * 0.08) * (0.95 + clump * 0.05) * (0.95 + fine * 0.08);
+    const height = lock * 0.7 + strand * 0.2 + strand2 * 0.1;
+    const base = mix(rgb(0xa2a2a2), rgb(0xb6b6b6), tone);
+    // Undercoat dark where the locks part, guard hair light at the tips.
+    const shade = 0.8 + 0.3 * height;
     s.color = [base[0] * shade, base[1] * shade, base[2] * shade];
-    s.height = 0.5 + clump * 0.035 + fine * 0.025 - d1 * 0.01;
-    s.rough = 0.86 + fine * 0.1;
+    s.height = 0.5 + height * 0.1;
+    s.rough = 0.72 + (1 - height) * 0.2;
   },
 
   /**
@@ -1430,7 +1447,7 @@ const RECIPES = {
   // still reads as a coat on a horse. `moving` keeps the world-space effects
   // off them: a splash line fixed to the paving and a grain fixed to the world
   // both slide over anything that walks through them.
-  fur: { surface: 'fur', scale: 0.4, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, moving: true },
+  fur: { surface: 'fur', scale: 0.3, normalScale: 0.5, env: 0.4, wet: 0, detail: 0, moving: true },
   feather: { surface: 'feather', scale: 0.3, normalScale: 0.3, env: 0.5, wet: 0, detail: 0, moving: true },
   // The monsters (tools/blender/monsters.py): shell, living mud and reptile
   // skin, all coloured per creature in its vertices like the fur.
