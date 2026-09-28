@@ -1034,7 +1034,7 @@ const SURFACES = {
     const c = mix(green, rgb(0x63613a), dry * 0.35);
     const shade = 0.95 + fine * 0.1;
     s.color = [c[0] * shade, c[1] * shade, c[2] * shade];
-    s.height = patch * 0.18 + fine * 0.07;
+    s.height = patch * 0.18 + fine * 0.03;
     // Live blades are waxy and catch a sheen; the dried-off patches do not.
     s.rough = 0.8 + dry * 0.14 + fine * 0.04;
   },
@@ -2303,7 +2303,7 @@ const RECIPES = {
   rooftile: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0.35, detail: 0.5 },
   thatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7 },
   dirt: { surface: 'dirt', scale: 4.5, normalScale: 0.9, env: 0.7, wet: 0.3, detail: 0.6 },
-  grass: { surface: 'grass', scale: 5.5, normalScale: 0.25, env: 0.6, wet: 0, detail: 0.3 },
+  grass: { surface: 'grass', scale: 5.5, normalScale: 0.2, env: 0.6, wet: 0, detail: 0.3 },
   // The blades over it: an atlas of cards, not a tile (GRASS_CARDS), baked at
   // twice the usual size because a blade is a few millimetres wide.
   grassblades: { surface: 'grassblades', size: 1024, scale: 1, normalScale: 0.15, env: 0.45, wet: 0, detail: 0, cutout: 0.5 },

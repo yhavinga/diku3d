@@ -56,7 +56,7 @@ const BIOMES = {
   grave: { density: 4.2, height: 0.95, mix: [0.34, 0.3, 0.16, 0.06, 0, 0.06, 0.08, 0] },
   meadow: { density: 4.4, height: 1.05, mix: [0.06, 0.2, 0.44, 0.2, 0.04, 0.02, 0.04, 0] },
   hills: { density: 4.2, height: 1.0, mix: [0.16, 0.28, 0.3, 0.16, 0.04, 0.02, 0.04, 0] },
-  verge: { density: 3.6, height: 1.0, mix: [0.12, 0.26, 0.36, 0.18, 0.03, 0.01, 0.04, 0] },
+  verge: { density: 2.8, height: 1.0, mix: [0.12, 0.26, 0.36, 0.18, 0.03, 0.01, 0.04, 0] },
 };
 const TRODDEN = 7;
 
@@ -64,7 +64,7 @@ const TRODDEN = 7;
 // it thins to nothing: the fields beyond are seen from the walls and gates,
 // past the range of any blade, and the base texture is what reads there.
 const VERGE_FULL = 16;
-const VERGE_END = 40;
+const VERGE_END = 32;
 
 /** A deterministic stream, so the same world grows the same meadow. */
 function stream(seed) {
@@ -564,19 +564,26 @@ export function buildGrass({ groups, instances, colliders, layout, rooms, materi
         const yc = inTri(tri, x, z);
         const owner = ownerAt(x, yc ?? ay, z);
         if (!owner || owner.d > VERGE_END + half) continue;
-        let clear = 0;
+        // Nine probes: how much of the triangle's share of this cell is open.
+        // As a share of the probes that land in the triangle, not of all nine
+        // -- the samples below are already thrown away outside it, and
+        // counting that twice sowed a hill's flank at a quarter of the field
+        // beside it.
+        let clear = 0; let inside = 0;
         for (const [ox, oz] of [[0, 0], [-0.8, -0.8], [0.8, -0.8], [-0.8, 0.8], [0.8, 0.8], [0, -0.8], [0, 0.8], [-0.8, 0], [0.8, 0]]) {
           const px = x + ox * half; const pz = z + oz * half;
           const py = inTri(tri, px, pz);
-          if (py !== null && !covered(px, py, pz)) clear++;
+          if (py === null) continue;
+          inside++;
+          if (!covered(px, py, pz)) clear++;
         }
-        if (!clear) continue;
+        if (inside && !clear) continue;
         const mine = occupied.has(`${gx},${gz}`);
         const biome = mine ? (BIOMES[biomeOf(owner.info.room)] || BIOMES.verge) : BIOMES.verge;
         // The ground plane between and beyond the rooms: full near the town,
         // thinning out into the fields.
         const thin = mine ? 1 : 1 - Math.max(0, Math.min(1, (owner.d - VERGE_FULL) / (VERGE_END - VERGE_FULL)));
-        const n = Math.floor(cell * cell * biome.density * (clear / 9) * thin + rng());
+        const n = Math.floor(cell * cell * biome.density * (inside ? clear / inside : 1) * thin + rng());
         for (let k = 0; k < n; k++) {
           const px = x + (rng() - 0.5) * cell; const pz = z + (rng() - 0.5) * cell;
           const py = inTri(tri, px, pz);
