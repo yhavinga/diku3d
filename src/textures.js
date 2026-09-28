@@ -2703,11 +2703,11 @@ export const SHARED_LIGHT = { indoorBounce, skyBleach, skyBleachTint };
 const HEMI_LINE = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
 const POINT_LINE = 'getPointLightInfo( pointLight, geometryPosition, directLight );';
 const SUN_LINE = 'getDirectionalLightInfo( directionalLight, directLight );';
-const LIGHTS_FRAGMENT_INDOOR = THREE.ShaderChunk.lights_fragment_begin.replace(
-  HEMI_LINE,
-  'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal )'
-  + ' * mix( 1.0, indoorBounce, vIndoor );',
-).replace(
+/**
+ * The light loop as anything underground has it, behind `DIKU_BURIED`: the
+ * torches scaled out of the hour's exposure, and the sun only from above.
+ */
+const LIGHTS_FRAGMENT_BURIED = THREE.ShaderChunk.lights_fragment_begin.replace(
   POINT_LINE,
   `${POINT_LINE}\n#ifdef DIKU_BURIED\n\t\tdirectLight.color *= dikuBuriedGain;\n#endif`,
 ).replace(
@@ -2716,7 +2716,18 @@ const LIGHTS_FRAGMENT_INDOOR = THREE.ShaderChunk.lights_fragment_begin.replace(
   // world, which nothing underground is between -- it drew moonlit blue
   // hairlines down every corner of the sewer. Underground, a sun below the
   // horizon gives nothing; one above it still falls down a shaft.
-  `${SUN_LINE}\n#ifdef DIKU_BURIED\n\t\tdirectLight.color *= smoothstep( 0.02, 0.12, dot( directionalLight.direction, viewMatrix[ 1 ].xyz ) );\n#endif`,
+  //
+  // `DIKU_SUNLESS` is for what stands underground and receives no shadow --
+  // a door leaf, a creature: with nothing to stop it, the noon sun lit the
+  // sewer's doors through seven metres of earth (door planks 121 at noon
+  // against 28 at night, the sewer's own walls 18 at both).
+  `${SUN_LINE}\n#ifdef DIKU_BURIED\n\t\tdirectLight.color *= smoothstep( 0.02, 0.12, dot( directionalLight.direction, viewMatrix[ 1 ].xyz ) );\n#endif`
+  + '\n#ifdef DIKU_SUNLESS\n\t\tdirectLight.color = vec3( 0.0 );\n#endif',
+);
+const LIGHTS_FRAGMENT_INDOOR = LIGHTS_FRAGMENT_BURIED.replace(
+  HEMI_LINE,
+  'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal )'
+  + ' * mix( 1.0, indoorBounce, vIndoor );',
 );
 if (!LIGHTS_FRAGMENT_INDOOR.includes('indoorBounce') || !LIGHTS_FRAGMENT_INDOOR.includes('dikuBuriedGain')
   || !LIGHTS_FRAGMENT_INDOOR.includes('directionalLight.direction, viewMatrix')) {
@@ -2766,6 +2777,103 @@ function updateBuried(exposure) {
   buried.murk.value.copy(BURIED_MURK).multiplyScalar(k);
 }
 
+/** The buried terms, in whatever shader wears them. */
+const BURIED_DECLS = `
+  uniform float dikuBuriedGain;
+  uniform vec3 dikuBuriedIrradiance;
+  uniform vec3 dikuBuriedRadiance;
+  uniform vec3 dikuMurk;
+  uniform float dikuMurkDensity;`;
+// No sky down here: a fixed fill for the ambient and a near-black for
+// anything glossy to mirror, whatever the hour. A little more from above than
+// from below, the way a room lit by torches on its walls is: a fill with no
+// direction at all modelled nothing, and a vault read as flat as the floor
+// under it.
+const BURIED_AMBIENT = `
+  float dikuUpFill = 0.8 + 0.2 * dot( geometryNormal, viewMatrix[ 1 ].xyz );
+  irradiance = dikuBuriedIrradiance * dikuUpFill;
+  iblIrradiance = irradiance;
+  radiance = dikuBuriedRadiance;`;
+// The sewer's own murk, not the hour's haze: a night fog is blue and a noon
+// one is sky-pale, and neither is the air in a drain.
+const BURIED_FOG = `
+  #ifdef USE_FOG
+    float dikuMurkF = 1.0 - exp( - dikuMurkDensity * dikuMurkDensity * vFogDepth * vFogDepth );
+    gl_FragColor.rgb = mix( gl_FragColor.rgb, dikuMurk, dikuMurkF );
+  #endif`;
+function buriedUniforms(uniforms) {
+  uniforms.dikuBuriedGain = buried.gain;
+  uniforms.dikuBuriedIrradiance = buried.irradiance;
+  uniforms.dikuBuriedRadiance = buried.radiance;
+  uniforms.dikuMurk = buried.murk;
+  uniforms.dikuMurkDensity = buried.murkDensity;
+}
+const syncBuried = (renderer) => updateBuried(renderer.toneMappingExposure);
+
+/**
+ * The underground twin of any lit material: the same surface, lit by the
+ * fixed fill and the torches instead of the sky.
+ *
+ * Only the sewer's own recipes were `buried`, so everything else that ended
+ * up below ground -- the Haon Dor cultist temple's marble, a door into the
+ * inner Lair, a crate in the Playpen, a torch stand, a figure -- was lit by the
+ * hour's sky through the rock: #6155 metered 76 at noon and 18 at night, the
+ * lair door went from pale to RGB 0. Anything built or placed in a buried room
+ * wears this instead of its own material.
+ *
+ * `sunless` for what receives no shadow (see LIGHTS_FRAGMENT_BURIED).
+ * A material with a shader of someone else's (glass, water, glow) or no
+ * lighting at all comes back as it is: none of those takes the sky's light.
+ */
+const decorated = new WeakSet();
+const twins = new Map(); // base -> { plain, sunless }
+export function buriedTwin(base, { sunless = false } = {}) {
+  if (!base || !base.isMeshStandardMaterial) return base;
+  const own = Object.prototype.hasOwnProperty.call(base, 'onBeforeCompile');
+  if (own && !decorated.has(base)) return base;
+  if (base.defines?.DIKU_BURIED && !sunless) return base;
+  let pair = twins.get(base);
+  if (!pair) { pair = {}; twins.set(base, pair); }
+  const key = sunless ? 'sunless' : 'plain';
+  if (pair[key]) return pair[key];
+  const twin = base.clone();
+  twin.name = base.name;
+  twin.defines = { ...base.defines, DIKU_BURIED: 1, ...(sunless ? { DIKU_SUNLESS: 1 } : {}) };
+  twin.defaultAttributeValues = base.defaultAttributeValues;
+  twin.onBeforeRender = syncBuried;
+  if (decorated.has(base)) {
+    // decorate() closes over the base material and files its wetness uniform
+    // there; a twin compiling must not take the base's rain away from it.
+    twin.onBeforeCompile = (shader, renderer) => {
+      const keep = base.userData.wetnessUniform;
+      base.onBeforeCompile(shader, renderer);
+      if (keep) base.userData.wetnessUniform = keep;
+    };
+    const baseKey = base.customProgramCacheKey.bind(base);
+    twin.customProgramCacheKey = () => `${baseKey()}|buried${sunless ? '|sunless' : ''}`;
+  } else {
+    twin.onBeforeCompile = (shader) => {
+      buriedUniforms(shader.uniforms);
+      const frag = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${BURIED_DECLS}`)
+        .replace('#include <lights_fragment_begin>', LIGHTS_FRAGMENT_BURIED)
+        .replace('#include <lights_fragment_end>', `${BURIED_AMBIENT}\n#include <lights_fragment_end>`)
+        .replace('#include <fog_fragment>', BURIED_FOG);
+      if (!frag.includes('dikuBuriedGain;') || !frag.includes('dikuUpFill') || !frag.includes('dikuMurkF')) {
+        throw new Error(`textures: the buried twin of ${base.name || base.type} missed an injection`);
+      }
+      shader.fragmentShader = frag;
+    };
+    twin.customProgramCacheKey = () => `diku-buried-flat${sunless ? '|sunless' : ''}`;
+  }
+  pair[key] = twin;
+  return twin;
+}
+
+/** The same terms for the person material (dress.js), which blends them in
+ * by how far underground each figure stands. */
+export const BURIED_LIGHT = { declarations: BURIED_DECLS, uniforms: buriedUniforms, sync: syncBuried };
+
 /**
  * Everything the baked maps cannot say, said in the shader instead:
  *
@@ -2778,6 +2886,7 @@ function updateBuried(exposure) {
  *    at golden hour is doing.
  */
 function decorate(material, recipe, macro, grain) {
+  decorated.add(material);
   material.userData.detailStrength = recipe.detail ?? 0.5;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.macroMap = { value: macro };
@@ -2799,11 +2908,7 @@ function decorate(material, recipe, macro, grain) {
     shader.uniforms.dikuShadeLift = shadeLift;
     shader.uniforms.dikuSkyBleach = skyBleach;
     shader.uniforms.dikuSkyBleachTint = skyBleachTint;
-    shader.uniforms.dikuBuriedGain = buried.gain;
-    shader.uniforms.dikuBuriedIrradiance = buried.irradiance;
-    shader.uniforms.dikuBuriedRadiance = buried.radiance;
-    shader.uniforms.dikuMurk = buried.murk;
-    shader.uniforms.dikuMurkDensity = buried.murkDensity;
+    buriedUniforms(shader.uniforms);
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSurfacePos;\nattribute float aIndoor;\nvarying float vIndoor;')
@@ -2828,24 +2933,12 @@ function decorate(material, recipe, macro, grain) {
         uniform float dikuShadeLift;
         uniform float dikuSkyBleach;
         uniform vec3 dikuSkyBleachTint;
-        uniform float dikuBuriedGain;
-        uniform vec3 dikuBuriedIrradiance;
-        uniform vec3 dikuBuriedRadiance;
-        uniform vec3 dikuMurk;
-        uniform float dikuMurkDensity;
+        ${BURIED_DECLS}
       `)
       .replace('#include <lights_fragment_begin>', LIGHTS_FRAGMENT_INDOOR)
       .replace('#include <lights_fragment_end>', /* glsl */`
         #ifdef DIKU_BURIED
-          // No sky down here: a fixed fill for the ambient and a near-black
-          // for anything glossy to mirror, whatever the hour.
-          // A little more from above than from below, the way a room lit by
-          // torches on its walls is: a fill with no direction at all modelled
-          // nothing, and a vault read as flat as the floor under it.
-          float dikuUpFill = 0.8 + 0.2 * dot( geometryNormal, viewMatrix[ 1 ].xyz );
-          irradiance = dikuBuriedIrradiance * dikuUpFill;
-          iblIrradiance = irradiance;
-          radiance = dikuBuriedRadiance;
+          ${BURIED_AMBIENT}
         #else
           #ifdef DIKU_LIFT
             // The burnt district's sky light, by the hour: see setShadeLift.
@@ -2867,12 +2960,7 @@ function decorate(material, recipe, macro, grain) {
       `)
       .replace('#include <fog_fragment>', /* glsl */`
         #ifdef DIKU_BURIED
-          #ifdef USE_FOG
-            // The sewer's own murk, not the hour's haze: a night fog is blue
-            // and a noon one is sky-pale, and neither is the air in a drain.
-            float dikuMurkF = 1.0 - exp( - dikuMurkDensity * dikuMurkDensity * vFogDepth * vFogDepth );
-            gl_FragColor.rgb = mix( gl_FragColor.rgb, dikuMurk, dikuMurkF );
-          #endif
+          ${BURIED_FOG}
         #else
           #include <fog_fragment>
         #endif
@@ -2965,7 +3053,7 @@ function decorate(material, recipe, macro, grain) {
     material.defines = { ...material.defines, DIKU_BURIED: 1 };
     // Read the hour's exposure where it is certain to be current: at draw
     // time, from the renderer itself. One compare when nothing changed.
-    material.onBeforeRender = (renderer) => updateBuried(renderer.toneMappingExposure);
+    material.onBeforeRender = syncBuried;
   }
   if (recipe.moving) material.defines = { ...material.defines, DIKU_MOVING: 1 };
   if (recipe.lift) material.defines = { ...material.defines, DIKU_LIFT: 1 };
@@ -3086,7 +3174,8 @@ export function createMaterials(size = 512, onProgress = () => {}) {
 
   /** Close-range detail normals, on or off. Recompiles; only the P key does it. */
   materials.setDetail = (on) => {
-    for (const material of surfaced) {
+    const buriedCopies = [...twins.keys()].filter((b) => decorated.has(b)).flatMap((b) => Object.values(twins.get(b)));
+    for (const material of [...surfaced, ...buriedCopies]) {
       const has = !!material.defines?.DIKU_DETAIL;
       if (has === !!on) continue;
       material.defines = { ...material.defines };

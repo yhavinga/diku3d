@@ -22,7 +22,7 @@
  */
 
 import * as THREE from 'three';
-import { SHARED_LIGHT } from './textures.js';
+import { SHARED_LIGHT, BURIED_LIGHT } from './textures.js';
 
 /** Every surface a person, or what a person carries, is made of. */
 export const SLOTS = ['skin', 'cloth', 'cloth2', 'linen', 'leather', 'mail', 'steel', 'iron', 'hair',
@@ -204,13 +204,26 @@ if (!ENVMAP_BY_SLOT.includes(DIFFUSE_ENV.toFixed(3)) || !ENVMAP_BY_SLOT.includes
  */
 const HEMI_LINE = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
 const POINT_LINE = 'getPointLightInfo( pointLight, geometryPosition, directLight );';
+const SUN_LINE = 'getDirectionalLightInfo( directionalLight, directLight );';
+/*
+ * Underground (`dikuBuried`, eased per person like `dikuIndoor`) a person is
+ * lit as the sewer's walls are -- textures.js `buriedTwin`: no hemisphere, the
+ * torches scaled out of the hour's exposure, the sun only from above. Without
+ * it the master mindflayer in the sealed inner Lair (#7201) metered 25 at noon
+ * and 3 at night beside walls that read 18 at both.
+ */
 const LIGHTS_BEGIN = 'vec3 dikuTorch = vec3( 0.0 );\n' + THREE.ShaderChunk.lights_fragment_begin
   .replace(HEMI_LINE,
-    'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal ) * mix( 1.0, indoorBounce, dikuIndoor );')
+    'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal )'
+    + ' * mix( 1.0, indoorBounce, dikuIndoor ) * ( 1.0 - dikuBuried );')
   // What the torches deliver here whichever way the surface faces: the fill
   // below is a share of it.
-  .replace(POINT_LINE, `${POINT_LINE}\n\t\tdikuTorch += directLight.visible ? directLight.color : vec3( 0.0 );`);
-if (!LIGHTS_BEGIN.includes('dikuIndoor') || !LIGHTS_BEGIN.includes('dikuTorch +=')) {
+  .replace(POINT_LINE, `${POINT_LINE}\n\t\tdirectLight.color *= mix( 1.0, dikuBuriedGain, dikuBuried );`
+    + '\n\t\tdikuTorch += directLight.visible ? directLight.color : vec3( 0.0 );')
+  .replace(SUN_LINE, `${SUN_LINE}\n\t\tdirectLight.color *= mix( 1.0,`
+    + ' smoothstep( 0.02, 0.12, dot( directionalLight.direction, viewMatrix[ 1 ].xyz ) ), dikuBuried );');
+if (!LIGHTS_BEGIN.includes('dikuIndoor') || !LIGHTS_BEGIN.includes('dikuTorch +=')
+  || !LIGHTS_BEGIN.includes('dikuBuriedGain, dikuBuried') || !LIGHTS_BEGIN.includes('viewMatrix[ 1 ].xyz ) ), dikuBuried')) {
   throw new Error('dress: three\'s light loop moved; the indoor hemisphere or torch injection missed');
 }
 
@@ -236,6 +249,11 @@ export const FIGURE_FILL = { value: 2.4 };
 
 const LIGHTS_END = `
   {
+    // Underground the sky's terms give way to the fixed fill (textures.js).
+    float dikuUpFill = 0.8 + 0.2 * dot( geometryNormal, viewMatrix[ 1 ].xyz );
+    irradiance = mix( irradiance, dikuBuriedIrradiance * dikuUpFill, dikuBuried );
+    iblIrradiance = mix( iblIrradiance, dikuBuriedIrradiance * dikuUpFill, dikuBuried );
+    radiance = mix( radiance, dikuBuriedRadiance, dikuBuried );
     // The sky indoors has lost its hue by the time it reaches anyone, as the
     // walls' has; outdoors the hour's own bleach -- both as textures.js.
     float dikuIblL = dot( iblIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) );
@@ -250,9 +268,20 @@ const LIGHTS_END = `
   }
   #include <lights_fragment_end>`;
 
-function inject(shader, set, tints, show, indoor) {
+// The drain's murk rather than the hour's haze, underground.
+const FOG = `
+  vec3 dikuClear = gl_FragColor.rgb;
+  #include <fog_fragment>
+  #ifdef USE_FOG
+    float dikuMurkF = 1.0 - exp( - dikuMurkDensity * dikuMurkDensity * vFogDepth * vFogDepth );
+    gl_FragColor.rgb = mix( gl_FragColor.rgb, mix( dikuClear, dikuMurk, dikuMurkF ), dikuBuried );
+  #endif`;
+
+function inject(shader, set, tints, show, indoor, buried) {
   shader.uniforms.heldShow = { value: show };
   shader.uniforms.dikuIndoor = indoor;
+  shader.uniforms.dikuBuried = buried;
+  BURIED_LIGHT.uniforms(shader.uniforms);
   shader.uniforms.indoorBounce = SHARED_LIGHT.indoorBounce;
   shader.uniforms.dikuSkyBleach = SHARED_LIGHT.skyBleach;
   shader.uniforms.dikuSkyBleachTint = SHARED_LIGHT.skyBleachTint;
@@ -281,12 +310,15 @@ function inject(shader, set, tints, show, indoor) {
       uniform vec2 slotParams[ ${MAX_SLOTS} ];
       uniform vec3 slotTint[ ${MAX_SLOTS} ];
       uniform float dikuIndoor;
+      uniform float dikuBuried;
+      ${BURIED_LIGHT.declarations}
       uniform float indoorBounce;
       uniform float dikuSkyBleach;
       uniform vec3 dikuSkyBleachTint;
       uniform float dikuFill;`)
     .replace('#include <lights_fragment_begin>', LIGHTS_BEGIN)
     .replace('#include <lights_fragment_end>', LIGHTS_END)
+    .replace('#include <fog_fragment>', FOG)
     .replace('#include <map_fragment>', `
       int dikuSlot = ${SLOT_OF};
       vec4 sampledDiffuseColor = texture( slotAlbedo, vec3( vMapUv, float( dikuSlot ) ) );
@@ -302,7 +334,7 @@ function inject(shader, set, tints, show, indoor) {
       normal = normalize( tbn * mapN );`);
   // What each surface reflects of the sky: see ENVMAP_BY_SLOT.
   const envd = frag.replace('#include <envmap_physical_pars_fragment>', ENVMAP_BY_SLOT);
-  if (!frag.includes('dikuWrap') || !frag.includes('indoorBounce, dikuIndoor')) {
+  if (!frag.includes('dikuWrap') || !frag.includes('indoorBounce, dikuIndoor') || !frag.includes('dikuMurkF')) {
     throw new Error('dress: the person material missed its light-loop injection');
   }
   for (const [before, after] of [[shader.fragmentShader, frag], [frag, envd]]) {
@@ -341,9 +373,13 @@ export function personMaterial(library, tint, ghost, show = new THREE.Vector2(1,
   // How far indoors this person is, 0..1, eased by actors.js as they walk in
   // and out; shared by the material's clones, which share this closure.
   const indoor = { value: 0 };
-  m.onBeforeCompile = (shader) => inject(shader, set, tints, show, indoor);
-  m.customProgramCacheKey = () => 'diku-person-3';
+  // And how far underground, the same way.
+  const buried = { value: 0 };
+  m.onBeforeCompile = (shader) => inject(shader, set, tints, show, indoor, buried);
+  m.customProgramCacheKey = () => 'diku-person-4';
+  m.onBeforeRender = BURIED_LIGHT.sync;
   m.dikuIndoor = indoor;
+  m.dikuBuried = buried;
   if (ghost) {
     m.transparent = true;
     m.opacity = 0.34;
