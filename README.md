@@ -90,7 +90,7 @@ No Man's Land (south from inside the East Gate, down Wall Road).
 | `page up` / `page down` | take the exit up or down, leaving you looking where you were |
 | mouse | look, `E` to examine, open, unlock (with the key you carry), drink, search a body or pick up; `E` again closes it |
 | `1` – `4` | dawn, noon, dusk, night |
-| `P` | cycle quality: low, medium, high, max |
+| `P` | cycle quality: low, medium, high, max (also grass density and reach) |
 | `F` | frame rate, draw calls, triangles, GPU milliseconds, and the room's vnum, sector and build statistics |
 | `V` | noclip |
 | `M` | sound |

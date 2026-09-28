@@ -52,6 +52,29 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### Grass, bark and leaves (src/grass.js, wave5-ground)
+
+- **Camouflage came from bump detail, not colour.** The grass colour varied
+  4%; a strong fine bump made 28% of lit variation. The forest floor had the
+  same fault. Measure the rendered frame's variation, not the texture's.
+  Close turf at #1128: 24.7% → 7.9%.
+- **Alpha-tested textures need coverage-preserving mips**, or a meadow or a
+  fir crown thins to nothing with distance. Every `cutout` recipe now gets
+  them automatically.
+- **Cut-out foliage in the AO pre-pass darkens itself** — a field of cards
+  occludes itself, and under overcast that is most of the light. Grass
+  supplies its own pre-pass material (`userData.aoMaterial`) that stays out.
+- **Chevron bark came from projecting each trunk facet on its own slant**
+  and a bark texture that didn't repeat vertically; trunks are 16-sided now
+  with bark wrapped up them.
+- **Distance hiding must only undo what it hid itself**, or it re-shows
+  blocks the visibility cull hid behind walls.
+- Blender: re-read mesh data after switching edit mode; a reference taken
+  before pointed at the UV data. When sampling a big triangle cell by cell,
+  don't count coverage twice.
+- 512k clumps as one mesh per 24 m block, 1.5 s to build, +0.3–0.6 ms and
+  ~+15 calls a frame; `diku.built.grass.still = true` for pixel diffs.
+
 ### Measured visibility (src/cull.js)
 
 - **Visibility is measured, not declared.** For the camera's cell the solid
