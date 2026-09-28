@@ -145,7 +145,8 @@ def build_door_ring():
                         (xb + nb.x, max(0.0, zb + nb.y)), (xa + na.x, max(0.0, za + na.y))],
                        -WALL_T - 0.01, 0.0, "reveal", "plaster"))
     # The threshold: one worn flag across the floor of the opening.
-    p.append(kit.slab((2.0, WALL_T + 0.3, 0.05), (0, -WALL_T / 2 + 0.12, 0.0), mat="flagstone",
+    # (in the ring's own stone: a material more is a draw more in every region)
+    p.append(kit.slab((2.0, WALL_T + 0.3, 0.05), (0, -WALL_T / 2 + 0.12, 0.0), mat="stonewall",
                       name="threshold", width=0.015))
     return kit.deliver(p, "shire_door_ring")
 
@@ -279,9 +280,10 @@ def build_window_box():
     p = []
     L, D, H = 1.15, 0.26, 0.2
     p.append(kit.timber((L, D, H), (0, D / 2 + 0.02, H / 2), (0, 0, 0), "doorgreen", 0.012, "box"))
+    # Brackets painted with the box, and no soil: the flowers cover it, and
+    # each material is a draw more in every region the boxes stand in.
     for x in (-L / 2 + 0.15, L / 2 - 0.15):
-        p.append(kit.timber((0.05, D, 0.05), (x, D / 2 + 0.02, -0.05), (0, 0, 0), "iron", 0.006, "bracket"))
-    p.append(kit.slab((L - 0.06, D - 0.06, 0.02), (0, D / 2 + 0.02, H - 0.02), mat="dirt", name="soil", width=0.005))
+        p.append(kit.timber((0.05, D, 0.05), (x, D / 2 + 0.02, -0.05), (0, 0, 0), "doorgreen", 0.006, "bracket"))
     cards = trees.Cards("blooms", tile=0.4)
     bloom_mass(cards, rng, -L / 2 + 0.06, L / 2 - 0.06, 0.06, D - 0.02, H - 0.01, 0.3, 18)
     return trees.deliver_conifer(p, cards.mesh("blooms"), "shire_window_box")
