@@ -203,7 +203,9 @@ const CSS = `
 #g-spells { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
   padding: 7px 9px 8px; display: none; }
 #game-ui.caster #g-spells { display: block; }
-#game-ui.caster #g-hint { bottom: 112px; }
+/* Over the spell bar by its measured height (placeOverBar): a fixed 112 px
+   put the prompt on the bar's own key line at 1280x720. */
+#game-ui.caster #g-hint { bottom: var(--g-over-bar, 112px); }
 #g-spells .keys { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase;
   color: var(--gold); opacity: 0.6; margin: 0 2px 6px; display: flex; justify-content: space-between; gap: 18px; }
 #g-spells .slots { display: flex; gap: 5px; }
@@ -455,26 +457,76 @@ export function createGameUi(game) {
   // three vitals bars and sat there for the rest of the session ("You have
   // been KILLED!!" rendered on top of the HP bar). And lines expire -- a
   // quiet minute should hand the corner of the screen back to the HUD.
+  //
+  // A line is also about somewhere. What was said of a room -- a warden in
+  // the gate, a door, a mobile talking -- goes when you leave that room, and
+  // everything goes when you are carried off rather than walk (recall, a
+  // portal, a debug jump): "The executioner holds the way up." used to follow
+  // a judge from the temple into the desert, the marsh and the sewer.
   const LINES = 7;
   const LINE_TTL = 11000;
-  function say(text, cls = '') {
+  const lines = [];
+  function retire(entry) {
+    if (entry.leaving) return;
+    entry.leaving = true;
+    entry.node.style.transition = 'opacity 900ms ease';
+    entry.node.style.opacity = '0';
+    setTimeout(() => {
+      entry.node.remove();
+      const at = lines.indexOf(entry);
+      if (at >= 0) lines.splice(at, 1);
+    }, 950);
+  }
+  function say(text, cls = '', here = false) {
     if (!text) return;
     console_.print(text, cls);
     const line = el('p', cls);
     line.textContent = text.replace(/\s*\n\s*/g, ' ');
     log.appendChild(line);
-    setTimeout(() => {
-      if (!line.parentNode) return;
-      line.style.transition = 'opacity 900ms ease';
-      line.style.opacity = '0';
-      setTimeout(() => line.remove(), 950);
-    }, LINE_TTL);
-    while (log.children.length > LINES) log.removeChild(log.firstChild);
+    const entry = { node: line, room: game.state.roomVnum, here };
+    lines.push(entry);
+    setTimeout(() => retire(entry), LINE_TTL);
+    while (lines.length > LINES) { const old = lines.shift(); old.leaving = true; old.node.remove(); }
     // Old lines fade rather than vanish, so the eye stays on the newest.
-    const kids = log.children;
-    for (let i = 0; i < kids.length; i++) {
-      kids[i].style.opacity = String(Math.min(1, 0.28 + (i / Math.max(1, kids.length - 1)) * 0.72));
+    const live = lines.filter((l) => !l.leaving);
+    live.forEach((l, i) => {
+      l.node.style.opacity = String(Math.min(1, 0.28 + (i / Math.max(1, live.length - 1)) * 0.72));
+    });
+    placeLog();
+  }
+
+  /**
+   * Called when the room changes: `walked` is false for a jump. A line said
+   * in the room just entered stays -- a warden is announced on the same frame
+   * the room changes. Blows still waiting for their beat are the old place's
+   * too: shown after a jump, a marsh wolf went on biting in the troll den.
+   */
+  function logMoved(walked, now) {
+    for (const entry of lines.slice()) {
+      if (entry.room !== now && (entry.here || !walked)) retire(entry);
     }
+    if (!walked) pending.length = 0;
+  }
+
+  /**
+   * Where a new number can go without touching one still in the air: its
+   * box as laid out, against every live float's box as it is drawn right now
+   * (getBoundingClientRect includes the animation's transform), stepped up a
+   * line at a time until it is clear. A blow on you and a dodge used to land
+   * on the same spot over the health bar and read "D-2DODGE".
+   */
+  function clearOf(node, x, y, side) {
+    const w = node.offsetWidth;
+    const h = node.offsetHeight;
+    const left = side > 0 ? x : side < 0 ? x - w : x - w / 2;
+    const others = [];
+    for (const other of floats.children) if (other !== node) others.push(other.getBoundingClientRect());
+    for (let i = 0; i < 8; i++) {
+      const l = left - 6; const r = left + w + 6; const t = y - h / 2 - 3; const b = y + h / 2 + 3;
+      if (!others.some((o) => o.left < r && o.right > l && o.top < b && o.bottom > t)) break;
+      y -= h * 0.8 + 6;
+    }
+    return y;
   }
 
   /** Experience, gold: a note that rises over the crosshair and goes. */
@@ -482,6 +534,9 @@ export function createGameUi(game) {
     const node = el('span', 'note', text);
     node.style.color = colour;
     floats.appendChild(node);
+    // Experience and gold arrive together at a kill; the second sits above.
+    const lift = window.innerHeight / 2 - clearOf(node, window.innerWidth / 2, window.innerHeight / 2, 0);
+    node.style.marginTop = `${-lift.toFixed(1)}px`;
     const dx = (Math.random() - 0.5) * 60;
     node.animate([
       { transform: `translate(-50%, -50%) translate(${dx * 0.25}px, 40px) scale(0.85)`, opacity: 0 },
@@ -568,6 +623,8 @@ export function createGameUi(game) {
     node.style.left = `${x.toFixed(1)}px`;
     node.style.top = `${y.toFixed(1)}px`;
     floats.appendChild(node);
+    y = clearOf(node, x, y, side);
+    node.style.top = `${y.toFixed(1)}px`;
     const ax = side > 0 ? '0%' : '-100%';
     const drift = side * (10 + Math.random() * 8);
     const rise = onYou ? 34 : 58;
@@ -961,8 +1018,32 @@ export function createGameUi(game) {
     if (gatesPanel.classList.contains('on')) top = Math.max(top, gatesPanel.getBoundingClientRect().bottom);
     const bottom = window.innerHeight - d.top + 10;
     log.style.bottom = `${Math.round(bottom)}px`;
-    log.style.maxHeight = `${Math.max(60, Math.round(d.top - 10 - (top + 12)))}px`;
+    // No floor: a 60 px minimum is what put a line over the first line of
+    // the prose when the panel was tall. Lines that do not fit are clipped
+    // from the top (the oldest), and every one is in the command line too.
+    const room = Math.max(0, Math.round(d.top - 10 - (top + 12)));
+    log.style.maxHeight = `${room}px`;
+    // Whole lines only, newest first: overflow would slice the oldest one
+    // through the middle of its words.
+    let used = 0;
+    const kids = [...log.children];
+    for (let i = kids.length - 1; i >= 0; i--) {
+      kids[i].style.display = '';
+      used += kids[i].offsetHeight + 2;
+      if (used > room) kids[i].style.display = 'none';
+    }
   }
+  // The description is replaced on every room and the ways-out board comes
+  // and goes, so the log follows them the moment they change size.
+  if (typeof ResizeObserver === 'function') {
+    const watch = new ResizeObserver(() => placeLog());
+    for (const id of ['desc-block', 'room-block']) {
+      const node = document.getElementById(id);
+      if (node) watch.observe(node);
+    }
+    watch.observe(gatesPanel);
+  }
+  window.addEventListener('resize', () => placeLog());
 
   /** Where a mobile's head is on screen, if it is on screen. */
   function headOf(slot, lift = 0.3) {
@@ -1009,7 +1090,7 @@ export function createGameUi(game) {
           drawGates();
           break;
         case 'gate-seen':
-          say(event.text, 'faint');
+          say(event.text, 'faint', true);
           drawGates();
           break;
         case 'ending':
@@ -1035,11 +1116,11 @@ export function createGameUi(game) {
           console_.print(event.text, '');
           break;
         case 'mobsay': case 'emote':
-          if (event.heard) say(event.text, 'speech');
+          if (event.heard) say(event.text, 'speech', true);
           if (event.slot) bubble(event.slot, event.said ? `\u2018${event.said}\u2019` : event.text, event);
           break;
         case 'locked':
-          say(event.text, 'gate');
+          say(event.text, 'gate', true);
           break;
         case 'condition':
           say(event.text, 'them');
@@ -1057,7 +1138,7 @@ export function createGameUi(game) {
           if (sheetMode) drawSheet();
           break;
         case 'kick': case 'backstab': case 'respawn': case 'reset': case 'door-sound':
-          if (event.text) say(event.text, 'faint');
+          if (event.text) say(event.text, 'faint', event.kind === 'door-sound');
           break;
         default:
           say(event.text, 'faint');
@@ -1086,7 +1167,7 @@ export function createGameUi(game) {
     let count = 0;
     for (const list of byWarden.values()) {
       const open = list.every((gate) => gate.open);
-      const ways = waysPhrase(list).replace(/^the ways? /, '');
+      const ways = waysPhrase(list, game.wayFrom && game.wayFrom(room)).replace(/^the ways? /, '');
       count += new Set(list.map((gate) => gate.way)).size;
       const li = el('li', open ? 'open' : '');
       li.append(
@@ -1096,6 +1177,7 @@ export function createGameUi(game) {
       gatesList.appendChild(li);
     }
     gatesTitle.textContent = count > 1 ? 'the ways out' : 'the way out';
+    placeLog();
   }
 
   // -- the spell bar ---------------------------------------------------------
@@ -1128,6 +1210,12 @@ export function createGameUi(game) {
     return Math.max(3, Math.min(7, Math.floor((to - from - 18 + 5) / 94)));
   }
 
+  /** The prompts under the crosshair stand on the spell bar, however tall it came out. */
+  function placeOverBar() {
+    const top = spellList.length ? spellBar.getBoundingClientRect().top : window.innerHeight - 22;
+    document.body.style.setProperty('--g-over-bar', `${Math.round(window.innerHeight - top + 10)}px`);
+  }
+
   function drawSpells() {
     spellSlots.textContent = '';
     slotNodes.length = 0;
@@ -1142,6 +1230,7 @@ export function createGameUi(game) {
       spellSlots.appendChild(node);
       slotNodes.push({ node, cd, sp });
     }
+    placeOverBar();
   }
 
   function chooseSpell(step) {
@@ -1354,6 +1443,7 @@ export function createGameUi(game) {
 
   // -- the frame ------------------------------------------------------------
   let lastLevel = game.state.level;
+  let logRoom = null;
   let tick = 0;
   let lastTarget = null;
 
@@ -1373,6 +1463,15 @@ export function createGameUi(game) {
     xpFill.style.width = width(span - Math.min(span, s.expToLevel), span);
     if (s.level !== lastLevel) { lastLevel = s.level; drawGates(); }
     if (s.roomVnum !== gatesRoom) drawGates();
+    if (s.roomVnum !== logRoom) {
+      // One step through an exit, either way round, is a walk; anything
+      // else is being carried there.
+      const from = game.world && game.world.rooms.get(logRoom);
+      const to = game.world && game.world.rooms.get(s.roomVnum);
+      const joined = (a, b) => !!(a && b && a.exits.some((e) => e && e.to === b.vnum));
+      logMoved(logRoom === null || joined(from, to) || joined(to, from), s.roomVnum);
+      logRoom = s.roomVnum;
+    }
 
     let t = game.target();
     // The killing blow is still on its way when the rules already have the
