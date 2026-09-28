@@ -451,6 +451,7 @@ export class LightShaftPass extends Pass {
  */
 export const OVERLAY_LAYER = 2;
 
+
 /**
  * GTAO with a resolution of its own. The pass re-renders the scene into a
  * normal/depth buffer, so its cost tracks the size it is asked for and not the
@@ -462,6 +463,8 @@ class ScaledGTAOPass extends GTAOPass {
     this.scale = scale;
     this.unshaded = [];
     this.unshadedAge = Infinity;
+    this.foliage = [];
+    this.foliageNormals = new Map();
   }
 
   /**
@@ -475,8 +478,10 @@ class ScaledGTAOPass extends GTAOPass {
     if (++this.unshadedAge > 90) {
       this.unshadedAge = 0;
       this.unshaded.length = 0;
+      this.foliage.length = 0;
       this.scene.traverse((object) => {
         if (object.isPoints || object.isLine || object.isLine2) this.unshaded.push(object);
+        else if (object.isMesh && object.material?.userData?.foliage) this.foliage.push(object);
       });
     }
     for (const object of this.unshaded) {
@@ -484,6 +489,48 @@ class ScaledGTAOPass extends GTAOPass {
       object.visible = false;
       this._visibilityCache.push(object);
     }
+    // Alpha-cut foliage draws its own cut-out into the normal buffer. Under
+    // the override material a needle card is the whole rectangle it is: the
+    // sky between the sprays took the card's occlusion. Left out of the pass
+    // altogether it was worse -- a near bough then wore the occlusion of
+    // whatever stood behind it and read as a ghost.
+    for (const mesh of this.foliage) {
+      mesh.userData.aoSwap = mesh.material;
+      mesh.material = this.foliageNormal(mesh.material);
+    }
+  }
+
+  _restoreVisibility() {
+    super._restoreVisibility();
+    for (const mesh of this.foliage) {
+      if (mesh.userData.aoSwap) mesh.material = mesh.userData.aoSwap;
+      mesh.userData.aoSwap = null;
+    }
+  }
+
+  /** The override's own normal material, cut by the foliage's alpha. */
+  foliageNormal(source) {
+    let material = this.foliageNormals.get(source);
+    if (material) return material;
+    material = new THREE.MeshNormalMaterial({ side: source.side });
+    material.blending = THREE.NoBlending;
+    // Exempt from the scene's override, or the pass would swap it straight
+    // back for the uncut one.
+    material.allowOverride = false;
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.foliageMap = { value: source.map };
+      shader.uniforms.foliageCut = { value: source.alphaTest };
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec2 vFoliageUv;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvFoliageUv = uv;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('uniform float opacity;', 'uniform float opacity;\nuniform sampler2D foliageMap;\nuniform float foliageCut;\nvarying vec2 vFoliageUv;')
+        .replace('#include <normal_fragment_begin>',
+          'if ( texture2D( foliageMap, vFoliageUv ).a < foliageCut ) discard;\n\t#include <normal_fragment_begin>');
+    };
+    material.customProgramCacheKey = () => 'foliage-normal';
+    this.foliageNormals.set(source, material);
+    return material;
   }
 
   setSize(width, height) {

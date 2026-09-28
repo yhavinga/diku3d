@@ -14,6 +14,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { interiorGlass, markPanes } from './windows.js';
 
 const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
@@ -57,7 +58,7 @@ function takeColour(geometry) {
 // are the feather surface: rows of overlapping scallops is what both of them
 // are, and at the size either is seen the two read the same.
 // Wool is the cloth recipe under its own tint; plate is worked steel.
-const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', wool: 'cloth', plate: 'steel', scales: 'feather' };
+const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', wool: 'cloth', plate: 'steel', scales: 'feather', wicker: 'rope' };
 // (linen and wool have recipes of their own now; the aliases are the fallback.)
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
@@ -85,13 +86,33 @@ const TAG_MATERIALS = {
   // own colour in the vertex colours; glossy, because that is the difference
   // between an eye and a painted dot.
   horn: { color: 0xffffff, roughness: 0.34, metalness: 0 },
+  // The furniture's small things (tools/blender/furniture.py): too small to
+  // wear a baked surface, and read by colour and sheen. `soot` is the inside
+  // of a fireplace -- dark, and never RGB 0.
+  // Half metal, and a dim reflection: fully metallic, a tankard mirrored the
+  // blue sky light and read as blue glass across the room.
+  pewter: { color: 0x8e8b82, roughness: 0.45, metalness: 0.15, envMapIntensity: 0.3 },
+  brass: { color: 0xb08a4a, roughness: 0.38, metalness: 0.85 },
+  bottle: { color: 0x2f4a32, roughness: 0.12, metalness: 0 },
+  earthenware: { color: 0x9a6444, roughness: 0.66, metalness: 0 },
+  wax: { color: 0xe6dcc2, roughness: 0.5, metalness: 0 },
+  bread: { color: 0xb07436, roughness: 0.8, metalness: 0 },
+  soot: { color: 0x2c2723, roughness: 0.95, metalness: 0 },
   glass: {
     color: 0xd8c48a, roughness: 0.12, metalness: 0,
     transparent: true, opacity: 0.55, emissive: 0x000000,
   },
+  // The glass in a house's windows, as against a lantern's: dark, because
+  // what a window shows is the room behind it (windows.js) and the sky it
+  // mirrors, and the pale lantern glass laid on a facade read by day as a
+  // cream panel and by night as a flat lit one.
+  windowpane: {
+    color: 0x1c222a, roughness: 0.08, metalness: 0.25, envMapIntensity: 1.3,
+    emissive: 0x000000,
+  },
 };
 /** Tags whose flat material wants the shared grain, at this strength. */
-const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6, bone: 0.5, velvet: 0.3 };
+const GRAINED = { cloth: 0.5, skin: 0.22, oak: 0.35, leather: 0.45, hair: 0.6, bone: 0.5, velvet: 0.3, earthenware: 0.3, bread: 0.5, soot: 0.6 };
 
 export class AssetLibrary {
   constructor(materials, baseUrl = 'assets') {
@@ -119,6 +140,9 @@ export class AssetLibrary {
     if (recipe) {
       const material = new THREE.MeshStandardMaterial({ vertexColors: true, ...recipe });
       material.name = tag;
+      // After dark the panes on the models show a room behind them, and a
+      // share of them an empty one: this glass has no per-house choice made.
+      if (tag === 'windowpane') interiorGlass(material, { allowDark: true, day: 'hour', opaque: true });
       material.userData.uvScale = 1;
       // Flat does not have to mean featureless. Cloth and skin are tinted per
       // person and would look wrong wearing a stone pattern, but with no map
@@ -164,10 +188,12 @@ export class AssetLibrary {
    * has not one window on.
    */
   setWindowLight(colourHex, intensity) {
-    const glass = this.extra.get('glass');
-    if (!glass) return;
-    glass.emissive.setHex(colourHex);
-    glass.emissiveIntensity = Math.max(0, intensity);
+    for (const tag of ['glass', 'windowpane']) {
+      const glass = this.extra.get(tag);
+      if (!glass) continue;
+      glass.emissive.setHex(colourHex);
+      glass.emissiveIntensity = Math.max(0, intensity);
+    }
   }
 
   /**
@@ -221,7 +247,15 @@ export class AssetLibrary {
     gltf.scene.updateMatrixWorld(true);
     gltf.scene.traverse((node) => {
       if (!node.isMesh || !node.geometry) return;
-      const materialName = tagOf(node.material);
+      let materialName = tagOf(node.material);
+      // Glass spanning more than a lantern is a window, and has a room
+      // behind it; a lantern's four small panes keep the plain glow.
+      if (materialName === 'glass') {
+        node.geometry.computeBoundingBox();
+        const size = node.geometry.boundingBox.getSize(new THREE.Vector3()).applyMatrix4(
+          new THREE.Matrix4().extractRotation(node.matrixWorld));
+        if (Math.max(Math.abs(size.x), Math.abs(size.z)) > 0.6) materialName = 'windowpane';
+      }
       const material = this.materialFor(materialName);
 
       takeColour(node.geometry);
@@ -254,6 +288,9 @@ export class AssetLibrary {
         const count = geometry.attributes.position.count;
         geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
       }
+      // Glass samples no texture; its UVs carry where on its own pane each
+      // vertex is, which is what the room behind it is laid out from.
+      if (materialName === 'windowpane') markPanes(geometry);
       geometry.computeBoundingBox();
       bounds.union(geometry.boundingBox);
       primitives.push({ geometry, material, materialName, skinned: !!node.isSkinnedMesh });
@@ -590,6 +627,17 @@ export class StaticBatches {
 
 const UP = new THREE.Vector3(0, 1, 0);
 
+/** Everything furniture.py makes; actors.js furnishes the rooms from these. */
+export const FURNITURE_NAMES = [
+  'furn_table_trestle', 'furn_table_board', 'furn_bench_plank', 'furn_bench_staked', 'furn_stool', 'furn_settle',
+  'furn_bar_counter', 'furn_shop_counter', 'furn_backbar', 'furn_cask_rack',
+  'furn_hearth', 'furn_hearth_pot', 'furn_forge', 'furn_anvil', 'furn_grindstone',
+  'furn_weapon_rack', 'furn_weapon_board', 'furn_armour_stand', 'furn_oven',
+  'furn_shelves_goods', 'furn_shelves_bread', 'furn_shelves_jars', 'furn_shelves_hides',
+  'furn_bed', 'furn_desk', 'furn_desk_things', 'furn_chair', 'furn_armchair',
+  'furn_tankard', 'furn_tankard_pewter', 'furn_jug', 'furn_candle', 'furn_scales', 'furn_basket',
+];
+
 /** Everything the world builder will ask for, so one call loads the lot. */
 export const ASSET_NAMES = [
   'house_a', 'house_b', 'house_c', 'house_stone_a', 'house_stone_b',
@@ -597,14 +645,14 @@ export const ASSET_NAMES = [
   'temple_wall_solid', 'temple_wall_door', 'temple_corner', 'temple_roof',
   'temple_steps', 'temple_column',
   'wall_solid', 'wall_door', 'wall_corner', 'wall_roof',
-  'temple', 'market_stall', 'well', 'fountain', 'lamp_post', 'hanging_sign',
+  'temple', 'market_stall', 'well', 'fountain', 'lamp_post', 'hanging_sign', 'grate_leaf', 'wall_lantern',
   'signpost', 'stone_arch', 'portcullis', 'torch_sconce', 'chimney_pot',
   'door_leaf', 'door_round', 'log_cabin',
   'barrel', 'crate', 'sack', 'hay_bale', 'handcart', 'bench', 'trough',
   'stacked_crates', 'barrel_stack', 'firewood_pile', 'water_butt', 'bucket',
   'rope_coil', 'ladder', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',
   'tree_oak', 'tree_pine', 'bush', 'grass_tuft',
-  'tree_fir', 'tree_snag', 'fern', 'salal_bush', 'moss_rock',
+  'tree_fir', 'tree_cedar', 'tree_snag', 'fern', 'salal_bush', 'moss_rock',
   'reed_clump', 'tussock', 'dead_log',
   'headstone', 'grave_slab', 'iron_fence',
   // the sewer: tools/blender/sewer.py
@@ -634,4 +682,6 @@ export const ASSET_NAMES = [
   'beast_spider', 'beast_beetle', 'beast_scorpion', 'beast_drider', 'beast_bat', 'beast_mud',
   'beast_myconoid', 'beast_ratman', 'beast_imp', 'beast_naga', 'beast_sandworm', 'beast_basilisk',
   'beast_dustdigger', 'beast_camel', 'beast_dracolich',
+  // The rooms' furniture: tools/blender/furniture.py.
+  ...FURNITURE_NAMES,
 ];

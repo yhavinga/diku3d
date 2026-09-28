@@ -26,6 +26,7 @@ import { createRain } from './rain.js';
 import { createItems } from './items.js';
 import { installSave } from './save.js';
 import { createKick } from './kick.js';
+import { setPaneDaylight } from './windows.js';
 
 const params = new URLSearchParams(location.search);
 // The default world is no longer one town. Midgaard plus the five areas
@@ -163,6 +164,13 @@ const TIMES = {
     // judge asks for. This costs the market nothing.
     sun: 0xfff4e2, sunIntensity: 22, sky: 0xa3c4e4, ground: 0xb0a894, ambient: 32,
     hemiSky: 0x000000, hemiIndoor: 0.22,
+    // A shaded street at noon does not see a whole sky: half of what is over
+    // it is sunlit wall and paving, warm and neutral. Taken straight from the
+    // cube the shade was lit by pure sky, and a cast shadow on #2159's cobble
+    // metered B/R 1.41 (46,55,65) where a skylit fill holds 1.05-1.15. This
+    // takes that share of the sky's hue out of the diffuse term outdoors
+    // (reflections keep their blue).
+    skyBleach: 0.55, skyBleachTint: 0xfff5e3,
     env: 0.42, bounce: 0x77694f, haze: 0xbcd2e6,
     bloom: 0.14, bloomThreshold: 28, stars: 0, turbidity: 3.0, rayleigh: 1.3,
     shafts: 0, shaftTint: 0xffffff,
@@ -191,7 +199,17 @@ const TIMES = {
     // haze, which is the one thing that lifts a far wall off zero without
     // lighting anything.
     elevation: -8, azimuth: 300, exposure: 0.62, fog: 0x1a2340, density: 0.024,
-    sun: 0x8ea6d6, sunIntensity: 6.2, sky: 0x2b3a5c, ground: 0x171a22, ambient: 1.2,
+    // The directional light is a moon, 34 degrees up in the south-south-east
+    // (see applyTime): an open field has to be lit by *something* from above.
+    // Measured at the graveyard, #3604: 55% of the frame under luma 8 with
+    // the old light from under the world, 8% now. The ambient came up with it
+    // and lost most of its blue -- a moonlit night reads blue because of the
+    // eye, not because skylight is sapphire; at the old 1.2 of 0x2b3a5c the
+    // shade on grass came out RGB 3,8,15, which is black with a tint.
+    moon: [34, 330],
+    sun: 0x8ea6d6, sunIntensity: 2.0, sky: 0x2b3a5c, ground: 0x171a22, ambient: 6,
+    // Indoors keeps the old 1.2 of it: there is no open sky inside a room.
+    hemiSky: 0x4a5468, hemiIndoor: 0.2, skyBleach: 0.5, skyBleachTint: 0xe4ecff,
     env: 1.0, bounce: 0x1a1e28, haze: 0x2c3c62, shadeLift: 3.5,
     // Rayleigh does the work a black sky cannot: a night sky is deep
     // blue-violet with a brighter band at the horizon, and that band is the
@@ -693,7 +711,16 @@ async function boot() {
     const phi = THREE.MathUtils.degToRad(90 - preset.elevation);
     const theta = THREE.MathUtils.degToRad(preset.azimuth);
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
-    sunDirection.copy(sunPosition);
+    // After dark the directional light is the moon, which is *up*: at the
+    // sun's own -8 degrees it came from under the world, no up-facing surface
+    // got any of it, and an open field -- the graveyard at #3604 -- was 55% of
+    // the frame under luma 8. The sky keeps the real sun, below the horizon.
+    const moon = preset.moon;
+    const lightPosition = moon
+      ? new THREE.Vector3().setFromSphericalCoords(1,
+        THREE.MathUtils.degToRad(90 - moon[0]), THREE.MathUtils.degToRad(moon[1]))
+      : sunPosition;
+    sunDirection.copy(lightPosition);
     sunElevation = preset.elevation;
     sky.material.uniforms.sunPosition.value.copy(sunPosition);
     sky.material.uniforms.turbidity.value = preset.turbidity;
@@ -706,7 +733,7 @@ async function boot() {
     sky.material.uniforms.cloudDensity.value = preset.stockCloud?.[1] ?? 0.4;
     skyRange.setFloor(preset.skyFloor ?? 0x000000, preset.skyFloorGain ?? 0);
     skyRange.setCloud(...preset.cloud);
-    sun.position.copy(sunPosition).multiplyScalar(120);
+    sun.position.copy(lightPosition).multiplyScalar(120);
     sun.color.setHex(preset.sun);
     sun.intensity = preset.sunIntensity;
     // Not `preset.sky`: that colour is also the water's mirror, and at noon the
@@ -719,6 +746,7 @@ async function boot() {
     // it stands in for the sunlit ground.
     materials.setIndoorBounce(preset.hemiIndoor ?? 1);
     materials.setShadeLift(preset.shadeLift ?? 1);
+    materials.setSkyBleach(preset.skyBleach ?? 0, preset.skyBleachTint ?? 0xffffff);
     scene.fog = new THREE.FogExp2(preset.fog, preset.density);
     // Rain-damp on everything outdoors that keeps a wet recipe; identity for
     // clear weather. It is a material global and there is no per-room copy, so
@@ -736,6 +764,19 @@ async function boot() {
     // The bog's ground mist, lit by the same haze the rain is and thickest when
     // the ground is coldest. Only the marsh has any, so this is null elsewhere.
     built.mist?.setHour(preset.haze, preset.elevation);
+    // The far slopes that have a colour of their own (sand, grass, red rock)
+    // take the hour's light: full at noon's exposure, falling with the sun,
+    // and divided by the exposure so a brighter-exposed hour does not lift
+    // them. The haze colour tints them the way distance does.
+    // What a lit Lambert face would give: the sun on a slope half-turned to
+    // it, over pi, plus a little sky -- unlit materials go through the same
+    // exposure as everything else, so they have to be given a radiance.
+    {
+      const up = Math.max(0, Math.sin(THREE.MathUtils.degToRad(preset.elevation + 12)));
+      const light = new THREE.Color(preset.sun).lerp(new THREE.Color(preset.haze), 0.35);
+      built.horizon?.setHour(light.getHex(),
+        (preset.sunIntensity * up * 0.55 + 1.2 * preset.env) / Math.PI);
+    }
     renderer.toneMappingExposure = preset.exposure;
     bloom.strength = preset.bloom;
     bloom.threshold = preset.bloomThreshold;
@@ -745,7 +786,8 @@ async function boot() {
     state.shaftGain = preset.shafts;
     // Figures are kept out of the shadow map, so their contact shadows are
     // placed by hand and have to be told where the light is coming from.
-    actors.setSun(sunPosition, preset.elevation, preset.sunFraction ?? 1);
+    // Moonlight casts a shadow too, only a faint one.
+    actors.setSun(lightPosition, moon ? moon[0] : preset.elevation, (moon ? 0.35 : 1) * (preset.sunFraction ?? 1));
     // The water mirrors the hour's sky -- preset.sky, not haze: noon's sky is
     // within 4/255 of what the shader always assumed, so clear noon holds
     // still, while overcast pales it and night stops it glowing (the sheet
@@ -765,9 +807,14 @@ async function boot() {
     // The panes on the modelled buildings are one material for the whole town,
     // so they cannot be lit house by house. They still light: sky by day, and
     // after dark the hearth behind them, or no window in Midgaard is ever on.
+    // Lamps are lit by golden hour, so the rooms behind the model glass go
+    // from daylit to lamplit over the same span the street lamps do; at dusk
+    // the old switch at 0.05 left every pane a dark, unlit room.
+    const paneDay = THREE.MathUtils.smoothstep(daylight, 0.2, 0.6);
+    setPaneDaylight(paneDay);
     if (assets) {
-      assets.setWindowLight(daylight > 0.05 ? preset.haze : 0xff9c46,
-        daylight > 0.05 ? daylight : 0.85);
+      assets.setWindowLight(new THREE.Color(0xff9c46).lerp(new THREE.Color(preset.haze), paneDay).getHex(),
+        0.85 * (1 - paneDay) + daylight * 1.6 * paneDay);
     }
 
     // Rebake the environment from the sky we just set up. This is the whole
@@ -1255,6 +1302,7 @@ async function boot() {
     shafts.aim(camera, sunDirection, sunElevation, shaftTint, state.shaftGain);
 
     lightPool.update(camera.position, elapsed);
+    built.horizon?.update(camera.position, dt);
     actors.update(dt, elapsed, camera);
     fx.update(dt);
     spellfx.update(state.paused ? 0 : dt);
@@ -1652,6 +1700,8 @@ async function boot() {
       player.spawn(x, y, z, yaw);
       camera.rotation.set(pitch, yaw, 0);
       state.roomVnum = null;
+      // A jump is not a walk: the skyline should not be seen sinking.
+      built.horizon?.settle(camera.position);
     },
     goto(vnum, yaw = 0, pitch = 0) {
       const info = built.rooms.get(vnum);
