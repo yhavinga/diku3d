@@ -1044,7 +1044,9 @@ export function placeClutter(ctx) {
           for (let d = 0; d < 4; d++) instances.add(d === face ? 'tent_wall_door' : 'tent_wall', { x, y: pos.y, z, rotY: FACE_ROT[d], scale: TENT }, chunk);
         }
         where.push({ vnum, name, x: +x.toFixed(2), y: +pos.y.toFixed(2), z: +z.toFixed(2), rotY: +rotY.toFixed(2) });
-        addCollider(r.x0, r.x1, r.z0, r.z1, pos.y, pos.y + 4);
+        // A trunk or a post is walked round, not along a box's side.
+        if (tent) addCollider(r.x0, r.x1, r.z0, r.z1, pos.y, pos.y + 4);
+        else ctx.colliders.push({ x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1, y0: pos.y, y1: pos.y + 4, r: sign ? 0.18 : 0.42 * scale });
         take(r, true);
         mine.push({ x, z });
         placed++;
