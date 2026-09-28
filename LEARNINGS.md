@@ -52,6 +52,21 @@ landed in the wrong `assets/`; it derives it from `__file__` now.
 - `export_force_sampling=False` and linear keys halved the files.
 - 15 bodies, 2 draws each; Shire barn with 14 animals 5.0 → 4.9 ms.
 
+### HUD and melee feedback (game-ui.js, fx.js, main.js vantage)
+
+- **The ways-out panel listed every gate seen all game**, which is how the
+  West Gate showed at the East Gate. A gate counts only in its own room or
+  its warden's; the old 18 m radius fired the executioner's line from the
+  room next door.
+- **Collision boxes do not cover everything you can see** — a temple column
+  has none — so a camera's line of sight is ray-tested against the built
+  world, and a sight line to a prop stops short of it (the fountain's box
+  ends 1.7 m from its centre).
+- **Headless timing tests can slow the game** by patching
+  `performance.now` in the page; the render loop reads it.
+- The shop signs were already modelled beside every shop door, blank; they
+  carry the shop's own room name now, 21 signs on one texture, +3 calls.
+
 ### Faces and one draw per person (heads.py, hair.py, src/dress.js)
 
 - **Blender 5.2's glTF vertex colour survives only in a mesh's first

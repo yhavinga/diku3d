@@ -89,7 +89,7 @@ No Man's Land (south from inside the East Gate, down Wall Road).
 | mouse | look, `E` to examine, open, unlock (with the key you carry), drink, search a body or pick up; `E` again closes it |
 | `1` – `4` | dawn, noon, dusk, night |
 | `P` | cycle quality: low, medium, high, max |
-| `F` | frame rate, draw calls, triangles, GPU milliseconds |
+| `F` | frame rate, draw calls, triangles, GPU milliseconds, and the room's vnum, sector and build statistics |
 | `V` | noclip |
 | `M` | sound |
 | `G` | force every lock in the world |
