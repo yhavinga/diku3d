@@ -8,6 +8,21 @@ is an opinion.
 
 ## 2026-09-28 — wave 6: what the rooms say they are
 
+### Nature and terrain (wave6-nature)
+
+- **The height-to-normal bake is steep**: a height step of 0.04 already
+  tips a normal past 45°, so a recessed bed joint turns the top of every
+  course into an upward strip that catches and reflects the sky — the blue
+  lines in the burnt district. Confirm with `normalScale = 0`.
+- **A shader projection must include the instance matrix**; the existing
+  surface-position value leaves it out, which is fine for mottling and
+  wrong for projecting onto instanced rocks (`triplanar`).
+- **Moss or a cap built as a second mesh always shows an edge.** Grow it in
+  the shader from facing and noise (`moss` 0–1).
+- **Geometry that should shade smooth must compute normals while still
+  indexed and go in with `normals: true`**; the batcher unrolls the mesh.
+- Burned is cold char; only prose that says the floor is hot keeps glowing.
+
 ### Set pieces from the prose (tools/blender/setpiece.py)
 
 - **Blender's front is three's +Z.** The glTF exporter maps Blender −Y to
