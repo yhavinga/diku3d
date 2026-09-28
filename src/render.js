@@ -186,14 +186,23 @@ export function clampSkyHighlights(sky, ceiling = 60) {
   // x: cover threshold (higher is less cloud), y: how much of it to believe,
   // z: gain over the sky behind it, w: drift, so the two skies are not identical
   const cloud = new THREE.Vector4(0.62, 0.85, 1.9, 0);
+  // The cap for everything but the sun's disc and a hair round it. At a low
+  // sun the whole quarter of sky around it sits at the ceiling, over the
+  // bloom threshold, and the bloom spread it across half the frame: facing
+  // the setting sun over the bog, the right half read 182 of luma, a flat
+  // haze, and 121 with the bloom off. Past exposure and ACES that sky is
+  // white either way, so capping it below the threshold changes the sky by
+  // nothing you can see and takes the veil away; the disc keeps its glow.
+  const broad = { value: ceiling };
   sky.material.onBeforeCompile = (shader) => {
     shader.uniforms.skyCeiling = { value: ceiling };
+    shader.uniforms.skyBroad = broad;
     shader.uniforms.skyFloor = { value: floor };
     shader.uniforms.skyCloud = { value: cloud };
     sky.material.userData.skyFloor = shader.uniforms.skyFloor;
     shader.fragmentShader = shader.fragmentShader
       .replace('void main() {',
-        `uniform float skyCeiling;\n\t\t\tuniform vec3 skyFloor;\n\t\t\tuniform vec4 skyCloud;\n${SKY_CLOUD}\n\t\t\tvoid main() {`)
+        `uniform float skyCeiling;\n\t\t\tuniform float skyBroad;\n\t\t\tuniform vec3 skyFloor;\n\t\t\tuniform vec4 skyCloud;\n${SKY_CLOUD}\n\t\t\tvoid main() {`)
       .replace(
         'gl_FragColor = vec4( texColor, 1.0 );',
         '\t\t\tvec3 skyDir = normalize( vWorldPosition - cameraPosition );\n'
@@ -221,7 +230,8 @@ export function clampSkyHighlights(sky, ceiling = 60) {
         + '\t\t\t\ttexColor = mix( texColor, cloudCol, cover * skyCloud.y );\n'
         + '\t\t\t}\n'
         + '\t\t\tfloat skyPeak = max( max( texColor.r, texColor.g ), texColor.b );\n'
-        + '\t\t\ttexColor *= skyCeiling / max( skyCeiling, skyPeak );\n'
+        + '\t\t\tfloat skyCap = mix( skyBroad, skyCeiling, smoothstep( 0.9990, 0.99995, dot( skyDir, vSunDirection ) ) );\n'
+        + '\t\t\ttexColor *= skyCap / max( skyCap, skyPeak );\n'
         + '\t\t\tfloat skyHorizon = 1.0 - clamp( abs( skyDir.y ), 0.0, 1.0 );\n'
         + '\t\t\ttexColor = max( texColor, skyFloor * ( 0.42 + skyHorizon * skyHorizon * 1.35 ) );\n'
         + '\t\t\tgl_FragColor = vec4( texColor, 1.0 );',
@@ -235,6 +245,10 @@ export function clampSkyHighlights(sky, ceiling = 60) {
     },
     setCloud(coverage, amount, gain, drift) {
       cloud.set(coverage, amount, gain, drift);
+    },
+    /** The cap away from the sun's disc; see `broad`. */
+    setBroad(value) {
+      broad.value = Math.min(ceiling, value);
     },
   };
 }

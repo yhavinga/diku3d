@@ -2126,6 +2126,225 @@ const WATER_FRAG = `
     gl_FragColor = vec4(colour + spec * glint, 0.88);
   }`;
 
+// ------------------------------------------------------------------ doors ----
+
+/**
+ * Every modelled door leaf in the world, drawn as one instanced mesh per
+ * primitive rather than three meshes a leaf. From the marsh looking east, 93
+ * leaves in the frustum were 279 draws a pass, twice over with the AO
+ * prepass: a fifth of the frame's calls for doors, nearly all of them behind
+ * a facade two hundred metres off. The pivots stay in the scene graph --
+ * they are what the game swings -- and their leaves stop drawing; each
+ * swing rewrites that door's instances.
+ *
+ * The right-hand leaf is the left one mirrored, and three picks the winding
+ * from the object's matrix, not the instance's: mirrored leaves get meshes of
+ * their own, flipped as a whole, with the flip taken back out of every
+ * instance.
+ */
+const MIRROR = new THREE.Matrix4().makeScale(-1, 1, 1);
+
+function instanceDoorLeaves(doors, group) {
+  group.updateMatrixWorld(true);
+  const kinds = new Map(); // primitive + handedness -> { mesh, slots }
+  const slots = new Map(); // door -> [{ source, kind, index }]
+  for (const door of doors) {
+    for (const pivot of door.pivots) {
+      pivot.node.traverse((mesh) => {
+        const primitive = mesh.userData.doorPrimitive;
+        if (!primitive) return;
+        const mirrored = mesh.matrixWorld.determinant() < 0;
+        const key = `${primitive.geometry.uuid}|${primitive.material.uuid}|${mirrored}`;
+        if (!kinds.has(key)) kinds.set(key, { primitive, mirrored, sources: [] });
+        const kind = kinds.get(key);
+        if (!slots.has(door)) slots.set(door, []);
+        slots.get(door).push({ source: mesh, kind, index: kind.sources.length });
+        kind.sources.push(mesh);
+        mesh.visible = false;
+      });
+    }
+  }
+  const m = new THREE.Matrix4();
+  const write = (slot) => {
+    m.copy(slot.source.matrixWorld);
+    if (slot.kind.mirrored) m.premultiply(MIRROR);
+    slot.kind.mesh.setMatrixAt(slot.index, m);
+    slot.kind.mesh.instanceMatrix.needsUpdate = true;
+  };
+  for (const kind of kinds.values()) {
+    const mesh = new THREE.InstancedMesh(kind.primitive.geometry, kind.primitive.material, kind.sources.length);
+    mesh.name = 'door leaves';
+    // As the leaves they stand for: casting, not receiving.
+    mesh.castShadow = true;
+    if (kind.mirrored) mesh.scale.x = -1;
+    kind.mesh = mesh;
+    group.add(mesh);
+  }
+  for (const list of slots.values()) for (const slot of list) write(slot);
+  for (const kind of kinds.values()) kind.mesh.computeBoundingSphere();
+  return {
+    update(door) {
+      const list = slots.get(door);
+      if (!list) return;
+      for (const p of door.pivots) p.node.updateMatrixWorld(true);
+      for (const slot of list) write(slot);
+    },
+  };
+}
+
+// --------------------------------------------------------------- fountain ----
+
+/**
+ * A fountain's water, as water rather than as the river's shader cut into a
+ * disc. That shader is a sky tone laid over a teal body, which is right for a
+ * reach of river seen at a slant and wrong for a basin a metre off: from
+ * above it has no sky to show, so it read as a flat teal plate -- "a flat
+ * teal disc", at night more than ever, when the only light on it is the lamp
+ * beside it and the shader cannot see lamps at all.
+ *
+ * So a lit, near-mirror surface: dark, the basin floor only just showing, rough 0.04, reflecting the
+ * baked sky and catching every lamp and the sun as a highlight, broken by the
+ * rings where the four spouts land and a faint chop. The same surface in the
+ * upper bowl, over the model's own flat plate. And the four spouts pour: a
+ * falling arc each, streaked and running, which is most of what says "water"
+ * at any distance.
+ *
+ * The model (tools/blender/props.py `build_fountain`): lower water 0.775 m,
+ * radius 1.18 (see the note where the basin is placed); upper bowl water at
+ * 1.98, radius 0.5; spouts at 1.82 on a 0.5 m ring, tips 0.6 out, at 45
+ * degrees and every quarter turn from there.
+ */
+const SPOUT_Y = 1.82;
+const SPOUT_TIP = 0.6;
+const UPPER_Y = 2.005;
+const UPPER_R = 0.48;
+/** Outward speed at the spout: lands 0.95 m out, clear of the 1.18 m rim. */
+const SPOUT_V = 0.8;
+
+function rippled(time, drops) {
+  const material = new THREE.MeshStandardMaterial({
+    // Clear and shallow over pale stone: mostly the basin floor, darkened,
+    // with the sky on it at a slant.
+    color: 0x101b19, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.84, envMapIntensity: 1.2,
+  });
+  material.name = 'fountainwater';
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.time = time;
+    shader.uniforms.drops = { value: drops };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vFount;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFount = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform float time;
+        uniform vec3 drops[4];
+        varying vec3 vFount;
+        // Height of the surface: rings running out from where the spouts
+        // land, dying with distance, over a faint chop.
+        float fountHeight(vec2 p) {
+          float h = 0.0;
+          for (int i = 0; i < 4; i++) {
+            float d = distance(p, drops[i].xz);
+            h += sin(d * 34.0 - time * 9.0 + float(i) * 1.7) * exp(-d * 2.6) * 0.016;
+          }
+          h += sin(p.x * 9.0 + time * 1.3) * sin(p.y * 11.0 - time * 1.1) * 0.0035;
+          return h;
+        }`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          vec2 p = vFount.xz;
+          float e = 0.01;
+          float h = fountHeight(p);
+          vec3 up = normalize(vec3(-(fountHeight(p + vec2(e, 0.0)) - h) / e, 1.0, -(fountHeight(p + vec2(0.0, e)) - h) / e));
+          normal = normalize((viewMatrix * vec4(up, 0.0)).xyz);
+        }`);
+  };
+  return material;
+}
+
+function streakTexture() {
+  const w = 64; const h = 16;
+  const data = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // Along the stream (x) the water runs in lumps; round it (y) in threads.
+      const along = 0.55 + 0.45 * Math.sin(x / w * Math.PI * 6 + Math.sin(y * 1.9) * 2.0);
+      const thread = 0.6 + 0.4 * Math.sin(y / h * Math.PI * 4 + x * 0.15);
+      const v = Math.round(255 * Math.min(1, 0.25 + 0.75 * along * thread));
+      const i = (y * w + x) * 4;
+      data[i] = data[i + 1] = data[i + 2] = v; data[i + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, w, h);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function makeFountainWater(w) {
+  const group = new THREE.Group();
+  group.name = 'fountain water';
+  const time = { value: 0 };
+  const rotY = w.basin.rotY;
+  // Where the spouts are: model +x at 45 degrees and every quarter turn,
+  // turned with the instance. Blender's +y is three's -z.
+  const spouts = [];
+  for (let i = 0; i < 4; i++) {
+    const a = Math.PI / 4 + i * Math.PI / 2;
+    const lx = Math.cos(a); const lz = -Math.sin(a);
+    const c = Math.cos(rotY); const s = Math.sin(rotY);
+    spouts.push(new THREE.Vector2(lx * c + lz * s, -lx * s + lz * c));
+  }
+  const base = w.y - 0.775; // the fountain's own floor
+  const fall = SPOUT_Y - 0.775;
+  const flight = Math.sqrt((2 * fall) / 9.81);
+  const land = SPOUT_TIP + SPOUT_V * flight;
+  const drops = spouts.map((d) => new THREE.Vector3(w.x + d.x * land, w.y, w.z + d.y * land));
+
+  const lower = new THREE.Mesh(new THREE.CircleGeometry(w.radius, 40).rotateX(-Math.PI / 2), rippled(time, drops));
+  lower.position.set(w.x, w.y, w.z);
+  lower.receiveShadow = true;
+  const upperDrops = spouts.map(() => new THREE.Vector3(w.x, base + UPPER_Y, w.z));
+  const upper = new THREE.Mesh(new THREE.CircleGeometry(UPPER_R, 28).rotateX(-Math.PI / 2), rippled(time, upperDrops));
+  upper.position.set(w.x, base + UPPER_Y, w.z);
+  upper.receiveShadow = true;
+  group.add(lower, upper);
+
+  // The four falls: a parabola from each spout tip to the basin.
+  const streaks = streakTexture();
+  const fallMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd4e6ea, roughness: 0.12, metalness: 0, transparent: true, opacity: 0.62,
+    alphaMap: streaks, depthWrite: false,
+  });
+  fallMaterial.name = 'fountainfall';
+  const falls = [];
+  for (const d of spouts) {
+    const points = [];
+    for (let k = 0; k <= 12; k++) {
+      const t = (k / 12) * flight;
+      const r = SPOUT_TIP + SPOUT_V * t;
+      points.push(new THREE.Vector3(w.x + d.x * r, base + SPOUT_Y - 0.5 * 9.81 * t * t, w.z + d.y * r));
+    }
+    const curve = new THREE.CatmullRomCurve3(points);
+    // Thicker where it leaves the spout than where it has thinned in falling.
+    falls.push(new THREE.TubeGeometry(curve, 24, 0.028, 8, false));
+  }
+  // One draw for the four of them.
+  const fallMesh = new THREE.Mesh(mergeGeometries(falls, false), fallMaterial);
+  for (const tube of falls) tube.dispose();
+  fallMesh.castShadow = false;
+  group.add(fallMesh);
+  return {
+    group,
+    update(t) {
+      time.value = t;
+      // Streaks run down the fall at about the water's own speed.
+      streaks.offset.x = -t * 1.6;
+    },
+  };
+}
+
 // ------------------------------------------------------------------ smoke ----
 
 function smokeTexture() {
@@ -2351,6 +2570,7 @@ export function populate(world, layout, built, options = {}) {
           // and a fountain with no specular on it at golden hour reads as
           // painted concrete -- which is what a judge called it.
           chop: 0.45, glint: 1.25, deep: 0x2c5f60,
+          basin: { rotY: mesh.rotation.y },
         });
       }
     });
@@ -3100,7 +3320,14 @@ export function populate(world, layout, built, options = {}) {
   // --- water surfaces -----------------------------------------------------
 
   const waterMaterials = [];
+  const fountains = [];
   for (const w of waters) {
+    if (w.basin) {
+      const fountain = makeFountainWater(w);
+      group.add(fountain.group);
+      fountains.push(fountain);
+      continue;
+    }
     // A reach of river fills its cell and is square; a basin is round. Round
     // ones say so with a radius.
     const geo = w.radius
@@ -3187,6 +3414,7 @@ export function populate(world, layout, built, options = {}) {
     for (const primitive of asset.primitives) {
       const mesh = new THREE.Mesh(primitive.geometry, primitive.material);
       mesh.castShadow = true;
+      mesh.userData.doorPrimitive = primitive;
       leaf.add(mesh);
     }
     return leaf;
@@ -3303,6 +3531,8 @@ export function populate(world, layout, built, options = {}) {
       y0: spec.y, y1: spec.y + spec.height, door,
     });
   }
+
+  const doorLeaves = instanceDoorLeaves(doors, group);
 
   // --- per-frame ----------------------------------------------------------
 
@@ -3523,6 +3753,7 @@ export function populate(world, layout, built, options = {}) {
     if (flameSystem) flameSystem.material.uniforms.time.value = time;
     if (furnished.length) cullFurniture(camera);
     for (const material of waterMaterials) material.uniforms.time.value = time;
+    for (const fountain of fountains) fountain.update(time);
 
     // Where everyone walks, and what their bodies do: motion.js. Beyond 46 m
     // a person is a few pixels tall and not worth a skinning pass, so there
@@ -3567,6 +3798,7 @@ export function populate(world, layout, built, options = {}) {
       if (Math.abs(door.t - want) > 0.001) {
         door.t += Math.sign(want - door.t) * Math.min(Math.abs(want - door.t), dt * 2.2);
         for (const p of door.pivots) p.node.rotation.y = p.base + p.sign * door.t * (Math.PI / 2) * 0.95;
+        doorLeaves.update(door);
       }
     }
 

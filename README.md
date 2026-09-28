@@ -112,6 +112,7 @@ No Man's Land (south from inside the East Gate, down Wall Road).
 | `?time=dusk` | `dawn`, `noon`, `dusk`, `night` |
 | `?quality=medium` | `low`, `medium`, `high`, `max` |
 | `?class=mage` | start as `warrior`, `mage`, `cleric` or `thief` (also on the title screen) |
+| `?cull=off` | draw everything, for comparing against the measured visibility |
 | `?fps=30` | override the preset's frame cap; `0` uncaps it |
 
 Try `?areas=moria&room=7000`, `?areas=sewer&room=7100`, `?areas=haon&room=6500`

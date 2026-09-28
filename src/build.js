@@ -1760,7 +1760,10 @@ export function buildScene(world, layout, materials, assets = null) {
         if (!canopy) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog, instances });
         // Once, for the whole cell -- the corners need to know about all four
         // sides, not one at a time.
-        if (dir === 3) {
+        // Outside a gate is outside the wall: no houses. See `townEdges`.
+        if (dir === 3 && gateOf(room) >= 0) {
+          buildGateFlanks({ batcher, chunk, pos, dir: gateOf(room), addCollider });
+        } else if (dir === 3) {
           buildCityFrontage({
             batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors,
             lights, decals, turf: hood ? turfAt(cell.z) : null,
@@ -1842,6 +1845,10 @@ export function buildScene(world, layout, materials, assets = null) {
       if (link.from !== cell || link.side !== null || link.kind === 'alley' || link.kind === 'stairs') continue;
       if (deadExit(link.exit)) continue;
       if (airborne) continue;
+      // Up out of the Temple Square is "In the air...", which is never built:
+      // the arch stood in the middle of the square leading nowhere, a portal
+      // to a room the game refuses to enter.
+      if (link.to && link.to.room.sector === SECTOR.AIR) continue;
       const angle = hash3(room.vnum, 5, 0, 1) * Math.PI * 2;
       const ax = pos.x + Math.cos(angle) * half * 0.4;
       const az = pos.z + Math.sin(angle) * half * 0.4;
@@ -2180,6 +2187,8 @@ export function buildScene(world, layout, materials, assets = null) {
   };
 
   const townWalls = [];
+  const edges = townEdges(layout, world);
+  if (instances && instances.library.get('city_wall')) townWalls.push(...edges.pathWalls);
   for (const spot of frontage.values()) {
     if (mountain.has(cellKey(spot.level, spot.x, spot.z))) continue;
     if (reserved.has(cellKey(spot.level, spot.x, spot.z))) continue;
@@ -2195,6 +2204,11 @@ export function buildScene(world, layout, materials, assets = null) {
     }
     spot.faces = faces; // the party walls below need to know which cells share a street
     const pos = { x: spot.x * CELL, y: spot.level * LEVEL_H, z: spot.z * CELL };
+    const edge = edges.get(cellKey(spot.level, spot.x, spot.z));
+    if (edge && buildTownEdge({
+      edge, spot, pos, batcher, instances, model, chunk: chunkOf(spot), addCollider, decor, groundAt, townWalls,
+      key: cellKey(spot.level, spot.x, spot.z),
+    })) continue;
     if (spot.hood) {
       const key = cellKey(spot.level, spot.x, spot.z);
       const open = insideNml(spot);
@@ -4142,6 +4156,212 @@ function buildIronFence({ instances, model, chunk, x, y, z, dir, addCollider }) 
   const cx = x + dx * out;
   const cz = z + dz * out;
   addCollider(cx - w / 2, cx + w / 2, cz - d / 2, cz + d / 2, y, y + 2.2);
+}
+
+// ----------------------------------------------------------- town edges ----
+
+/**
+ * Where the town stops, as the rooms there say it does.
+ *
+ * The curtain wall goes up wherever a street cell faces open country, which is
+ * right for the town's outer edge and wrong in two places. Outside a gate the
+ * rooms are city rooms -- "Outside the West Gate", paved -- so the cells round
+ * them were built as town, and a judge looking from Haon Dor's forest edge at
+ * the West Gate saw half-timbered houses standing outside the wall in front of
+ * it. And the graveyard is sectored FIELD, so every town cell beside it faced
+ * "country" and it was walled in by Midgaard's crenellated curtain, the town's
+ * houses looking over it.
+ *
+ * So: outside a gate, the cells on the far side of the gate's line are
+ * fields, and the cells beside the gate passage on the town side carry the
+ * curtain on to the towers. Round the graveyard, a low churchyard wall behind
+ * its railings and dark evergreens -- "a gravel path winding its way between
+ * dark evergreen trees" -- which also stand between it and the town.
+ */
+const OUTSIDE_GATE = /\boutside\b[^.]*\bgate\b/i;
+/** A MOUNTAIN room that says so. The rest are mis-sectored lowland. */
+const MOUNTAINOUS = /\b(mountains?|cliffs?|crags?|ledges?|canyon|peaks?|ridge|gorge|ravine|rocks?|rocky|pass|summit|slopes?)\b/i;
+/** How far along the wall and out from it a gate's surroundings are taken as outside the town. */
+const GATE_REACH = 2;
+const CHURCHYARD_H = 1.25;
+const CHURCHYARD_T = 0.55;
+
+function gateOf(room) {
+  if (room.sector !== SECTOR.CITY || !isOpenAir(room) || !OUTSIDE_GATE.test(room.name)) return -1;
+  return room.exits.findIndex((e, d) => d < 4 && e && (e.locks & EX_ISDOOR) && /\bgate\b/i.test(e.keyword || ''));
+}
+
+/** cell key -> what the town's edge wants built in that empty cell instead of a house. */
+function townEdges(layout, world) {
+  const edges = new Map();
+  edges.pathWalls = [];
+  const key = (level, x, z) => `${level}:${x},${z}`;
+  const walkable = (level, x, z) => layout.at(level, x, z) !== undefined || layout.isPath(level, x, z);
+  // Is this cell part of the town proper -- a street or room that is neither
+  // outside a gate nor open country? The layout is not a plan, and a town
+  // room can land on the far side of a gate's line: its neighbours stay town.
+  const outside = (room) => gateOf(room) >= 0 || COUNTRY.has(room.sector);
+  const town = (level, x, z) => {
+    const v = layout.at(level, x, z);
+    if (v !== undefined) return !outside(world.rooms.get(v));
+    const link = layout.passageAt(level, x, z);
+    return !!link && !(outside(link.from.room) && outside(link.to.room));
+  };
+  for (const cell of layout.order) {
+    const g = gateOf(cell.room);
+    if (g < 0) continue;
+    const [gx, , gz] = DIR_STEP[g];
+    const ax = gz ? 1 : 0; const az = gx ? 1 : 0;
+    for (let a = -GATE_REACH; a <= GATE_REACH; a++) {
+      for (let depth = -GATE_REACH; depth <= 1; depth++) {
+        const x = cell.x + gx * depth + ax * a; const z = cell.z + gz * depth + az * a;
+        const back = [x - gx, z - gz];
+        if (walkable(cell.level, x, z)) {
+          // A street running along the inside of the wall line takes the
+          // wall on its outer side, unless it leaves that way: without it
+          // the fields let you walk round the gate.
+          if (depth === 1 && a !== 0 && layout.isPath(cell.level, x, z) && !walkable(cell.level, back[0], back[1])) {
+            edges.pathWalls.push({ spot: { level: cell.level, x, z }, pos: { x: x * CELL, y: cell.level * LEVEL_H, z: z * CELL }, dir: (g + 2) % 4 });
+          }
+          continue;
+        }
+        // The first cells on the town side of the gate line carry the wall
+        // on from the towers; out from the line is fields, unless the town
+        // itself is next door.
+        if (depth === 1) { edges.set(key(cell.level, x, z), { kind: 'wall', dir: (g + 2) % 4 }); continue; }
+        // A town street across the wall line is behind the wall, not next door.
+        let near = false;
+        for (let d = 0; d < 4 && !near; d++) {
+          const nx = x + DIR_STEP[d][0]; const nz = z + DIR_STEP[d][2];
+          if ((nx - cell.x) * gx + (nz - cell.z) * gz > 0) continue;
+          near = town(cell.level, nx, nz);
+        }
+        if (!near && !edges.has(key(cell.level, x, z))) edges.set(key(cell.level, x, z), { kind: 'outer' });
+      }
+    }
+  }
+  // A room the mud sectors MOUNTAIN that its own name calls a beach, a bog's
+  // edge or a forest -- half the Old Marsh -- handed every empty cell round it
+  // an eleven-metre cube of rock: the "large featureless slabs" standing in
+  // the reeds at #8315. They take the marsh's own ground instead.
+  for (const cell of layout.order) {
+    const room = cell.room;
+    if (room.sector !== SECTOR.MOUNTAIN || !isOpenAir(room) || isHood(room) || MOUNTAINOUS.test(room.name)) continue;
+    for (let dir = 0; dir < 4; dir++) {
+      const x = cell.x + DIR_STEP[dir][0]; const z = cell.z + DIR_STEP[dir][2];
+      if (walkable(cell.level, x, z) || edges.has(key(cell.level, x, z))) continue;
+      edges.set(key(cell.level, x, z), { kind: 'lowland', forest: /\bforest\b/i.test(room.name) });
+    }
+  }
+  const grave = (level, x, z) => {
+    const v = layout.at(level, x, z);
+    if (v !== undefined) return GRAVEYARD.test(world.rooms.get(v).name);
+    const link = layout.passageAt(level, x, z);
+    return !!link && GRAVEYARD.test(link.from.room.name) && GRAVEYARD.test(link.to.room.name);
+  };
+  const graves = [];
+  for (const cell of layout.order) if (grave(cell.level, cell.x, cell.z)) graves.push(cell);
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || !grave(link.from.level, link.path?.[0]?.x, link.path?.[0]?.z)) continue;
+    for (const c of link.path) graves.push({ level: link.from.level, x: c.x, z: c.z });
+  }
+  for (const c of graves) {
+    for (let dir = 0; dir < 4; dir++) {
+      const [dx, , dz] = DIR_STEP[dir];
+      const x = c.x + dx; const z = c.z + dz;
+      if (walkable(c.level, x, z)) continue;
+      const k = key(c.level, x, z);
+      const edge = edges.get(k);
+      if (edge && edge.kind !== 'churchyard') continue;
+      if (!edge) edges.set(k, { kind: 'churchyard', toward: [(dir + 2) % 4] });
+      else if (!edge.toward.includes((dir + 2) % 4)) edge.toward.push((dir + 2) % 4);
+    }
+  }
+  return edges;
+}
+
+/**
+ * Build what the town's edge wants in one empty cell. Returns false when the
+ * cell should be built as usual after all.
+ */
+function buildTownEdge({ edge, spot, pos, batcher, instances, model, chunk, addCollider, decor, groundAt, townWalls, key }) {
+  const { x, y, z } = pos;
+  if (edge.kind === 'lowland') {
+    // Built as usual, as what the room says it is.
+    if (spot.sector === SECTOR.MOUNTAIN) {
+      if (edge.forest) spot.sector = SECTOR.FOREST;
+      else spot.bog = true;
+    }
+    return false;
+  }
+  if (edge.kind === 'wall') {
+    if (!instances || !instances.library.get('city_wall')) return false;
+    groundAt.set(key, 'cobble');
+    batcher.add(plane(CELL, CELL, 3), 'cobble', place(x, y, z), { chunk });
+    townWalls.push({ spot, pos, dir: edge.dir });
+    return true;
+  }
+  // Not a building: no party wall may lean on it.
+  spot.sector = SECTOR.FIELD;
+  groundAt.set(key, 'grass');
+  batcher.add(plane(CELL, CELL, 3), 'grass', place(x, y, z), { chunk });
+  if (edge.kind === 'outer') return true;
+
+  // A churchyard wall: waist high, coped, just behind the graveyard's railing.
+  for (const dir of edge.toward) {
+    const [dx, , dz] = DIR_STEP[dir];
+    const out = HALF - CHURCHYARD_T / 2 - 0.05;
+    const wx = x + dx * out; const wz = z + dz * out;
+    const [w, d] = dx ? [CHURCHYARD_T, CELL] : [CELL, CHURCHYARD_T];
+    batcher.add(box(w, CHURCHYARD_H, d, 1, 2, 6), 'stonewall', place(wx, y + CHURCHYARD_H / 2, wz), { chunk, ao: wallAo(y) });
+    const [cw, cd] = dx ? [CHURCHYARD_T + 0.18, CELL] : [CELL, CHURCHYARD_T + 0.18];
+    batcher.add(box(cw, 0.16, cd), 'stonewall', place(wx, y + CHURCHYARD_H + 0.08, wz), { chunk, ao: () => 0.95 });
+    addCollider(wx - w / 2, wx + w / 2, wz - d / 2, wz + d / 2, y, y + CHURCHYARD_H + 0.16);
+  }
+  // Evergreens, clear of the wall by a crown's width, thick enough to stand
+  // between the graves and the town's gables.
+  const clear = (d, v) => (edge.toward.includes(d) ? Math.min(v, HALF - 3.2) : Math.min(v, HALF - 1.2));
+  for (let i = 0; i < 4; i++) {
+    let ox = (hash3(spot.x, spot.z, i, 211) - 0.5) * CELL;
+    let oz = (hash3(spot.x, spot.z, i, 212) - 0.5) * CELL;
+    ox = ox >= 0 ? clear(1, ox) : -clear(3, -ox);
+    oz = oz >= 0 ? clear(2, oz) : -clear(0, -oz);
+    const tx = x + ox; const tz = z + oz;
+    decor.push({ kind: 'tree', conifer: true, x: tx, y, z: tz, scale: 1.7 + hash3(spot.x, spot.z, i, 213) * 0.9 });
+    addCollider(tx - 0.7, tx + 0.7, tz - 0.7, tz + 0.7, y, y + 8);
+  }
+  if (instances) {
+    scatterUndergrowth({
+      instances, chunk, x, y, z,
+      rand: (i, k, salt) => hash3(spot.x, spot.z, i, salt + k),
+      kinds: [
+        { name: model(['salal_bush', 'bush'], 0), count: 2 + Math.floor(hash3(spot.x, spot.z, 0, 214) * 3), ring: 4.0, spread: 3.2, size: 1.0, salt: 215 },
+        { name: model(['fern'], 0), count: 2, ring: 3.6, spread: 3.0, size: 1.0, salt: 217 },
+      ],
+    });
+  }
+  return true;
+}
+
+/**
+ * The curtain between the gatehouse's towers and the cell's edge, where the
+ * next length of wall takes over: 1.5 m each side that otherwise showed
+ * straight through the wall.
+ */
+function buildGateFlanks({ batcher, chunk, pos, dir, addCollider }) {
+  const [dx, , dz] = DIR_STEP[dir];
+  const out = HALF - 0.3;
+  const from = DOOR_W / 2 + TOWER_W;
+  const length = HALF - from;
+  const h = 8.4;
+  for (const s of [-1, 1]) {
+    const a = s * (from + length / 2);
+    const cx = pos.x + dx * out + (dz ? a : 0);
+    const cz = pos.z + dz * out + (dx ? a : 0);
+    const [w, d] = dx ? [TOWER_W, length] : [length, TOWER_W];
+    batcher.add(box(w, h, d, 1, 4, 1), 'stonewall', place(cx, pos.y + h / 2, cz), { chunk, ao: wallAo(pos.y) });
+    addCollider(cx - w / 2, cx + w / 2, cz - d / 2, cz + d / 2, pos.y, pos.y + h);
+  }
 }
 
 // ---------------------------------------------------------------- verges ----
