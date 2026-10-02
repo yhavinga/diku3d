@@ -1,5 +1,10 @@
 # Judging
 
+Run headless and in parallel with `tools/judge/headless/drive.mjs` (its
+header says how to set it up); `tools/judge/headless/agent-brief.md` is the
+brief worker agents were given. The judge's own prompt is in LEARNINGS.md's
+rounds: read-only, fresh roam seeds every round, never softened.
+
 The judge drives the world itself rather than being handed a fixed set of
 pictures. Load `http://localhost:8173/`, wait about ten seconds for the world to
 build, then:
