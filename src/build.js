@@ -1919,11 +1919,12 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   // Two batches, split on the chunk's level: see `buildZones`.
   const instances = assets ? new InstanceBatch(assets) : null;
   const model = (names, seed) => (assets ? assets.choose(names, seed) : null);
-  // A vista leaves out what is too small to read from past a gate: it is
-  // placed as if it stood there, so nothing falls back to geometry instead.
+  // A vista leaves out what is too small to read from past a gate, and rock
+  // that would hang in the air without the rooms round it: it is placed as
+  // if it stood there, so nothing falls back to geometry instead.
   if (instances && vista?.dropModel) {
     const add = instances.add.bind(instances);
-    instances.add = (name, ...rest) => (vista.dropModel(name) ? true : add(name, ...rest));
+    instances.add = (name, ...rest) => (vista.dropModel(name, rest[0]) ? true : add(name, ...rest));
   }
 
   const colliders = [];   // {x0,x1,z0,z1,y0,y1}

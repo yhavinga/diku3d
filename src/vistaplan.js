@@ -78,7 +78,9 @@ export function vistaSites(world, plan, here, zone, openAirOf) {
   for (const crossing of plan.crossings) {
     if (crossing.fromZone !== zone.id || crossing.dir > 3) continue;
     const from = here.cells.get(crossing.from);
-    if (!from || from.room.sector === SECTOR.AIR) continue;
+    // Below level 0 the drawn zone's ground plane lies over the gate: a
+    // vista there would be built under the ground (Thalos #5279).
+    if (!from || from.room.sector === SECTOR.AIR || from.level < 0) continue;
     const gate = here.links.find((l) => l.kind === 'gate' && l.from === from && l.dir === crossing.dir && l.exit.to === crossing.to);
     if (!gate || gate.side === null || gate.side === undefined || gate.side > 3) continue;
     const arrive = world.rooms.get(crossing.to);
@@ -159,14 +161,21 @@ export function planVista(site, there, taken = null) {
       if (!next || seen.has(next.vnum)) return;
       seen.add(next.vnum);
       const p = map(next.level, next.x, next.z);
-      const ok = next.room.sector !== SECTOR.AIR && p.level >= at.level && beyond(p) && clear(p)
+      // On the arrival room's own level only. A room a level up stands on
+      // whatever its own zone put under it -- Juargan's "Up the hill" on
+      // nothing, a stack of slabs with sky between -- and in a vista nothing
+      // may float; a level down is under the drawn zone's ground.
+      const ok = next.room.sector !== SECTOR.AIR && p.level === at.level && beyond(p) && clear(p)
         && (d > 3 || clear(map(next.level, (cell.x + next.x) / 2, (cell.z + next.z) / 2)));
       if (!ok) return;
       if (hops + 1 <= VISTA_HOPS && metres(p) <= VISTA_NEAR_M && kept.has(cell.vnum)) {
         kept.add(next.vnum);
         queue.push([next, hops + 1]);
       } else if (metres(p) <= VISTA_FAR_M && !taken?.has(key(p.level, p.x, p.z))) {
-        far.push(next);
+        // Outlined only on the arrival room's own level: a far room up or
+        // down a level has nothing under it here but air or ground, and its
+        // mound or house would hang there or be buried.
+        if (p.level === at.level) far.push(next);
         queue.push([next, hops + 1]);
       }
     });

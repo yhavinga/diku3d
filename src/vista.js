@@ -39,7 +39,18 @@ const SMALL = new Set(['fern', 'salal_bush', 'grass_tuft', 'nettles', 'tall_weed
   'cartwheel', 'cushions', 'rug', 'figurine_dragons', 'crow', 'torch_sconce', 'lantern', 'wall_lantern', 'stacked_crates',
   'water_butt', 'hitch_line', 'handcart', 'bone_pile', 'refuse_heap', 'fungus_cluster', 'reed_clump', 'shire_flowerbed',
   'shire_window_box', 'sewer_sconce', 'candle']);
-const dropModel = (name) => SMALL.has(name) || /^(furn_|clutter_|weapon_|shield_|beast_|person_)/.test(name);
+/**
+ * Rock that does not stand on the ground. A cave room's cap (build.js
+ * `buildMassif`) sits on its ceiling and is held up by the blocks of
+ * mountain round it; a vista drops the blocks that would stand on the drawn
+ * zone's ground, and the cap was left hanging over Moria's hills with sky
+ * under it. Nothing in a vista may float, so rock whose foot is above its
+ * level's floor is not placed.
+ */
+const ROCK = /^(massif_|cave_|moss_rock|rubble|stalag|stalac)/;
+const ALOFT = 0.5;
+const dropModel = (name, at) => SMALL.has(name) || /^(furn_|clutter_|weapon_|shield_|beast_|person_)/.test(name)
+  || (ROCK.test(name) && !!at && at.y - Math.floor((at.y + ALOFT) / LEVEL_H) * LEVEL_H > ALOFT);
 
 const HOUSES = ['house_a', 'house_b', 'house_c', 'house_stone_a', 'house_stone_b'];
 /** Models front -Z; the turn that fronts one towards direction d (build.js's FACE_ROT). */
