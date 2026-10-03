@@ -448,6 +448,22 @@ choose.
   wall in the room it *arrives* in too; count it when a stair picks its
   wall. `tools/exit-check.mjs --strict` is the guard: 0 doorless exits,
   every one-way opening barred, ≤157 wrong walls, ≤8 corner arches.
+- **The game has more than one player now (`game.players`, `bind(pc)`).**
+  The bound player is Merc's `ch`; rules modules follow it through
+  `k.onBind`, and a line built inside `withPlayer` reads the new binding.
+  Standalone must stay byte-identical — check with a seeded trace, and run
+  `node tools/server-check.mjs` (needs `cd server && npm ci`) after any
+  change to `game.js` or `src/rules/`.
+- **A light hidden inside a model only shows at night.** The "blue
+  thresholds" were a cyan point light in every portal arch since the first
+  commit; noon drowned it. Find a colour cast by switching lights off one
+  at a time.
+- **Modelled animals take a fill light (`beastlight.js`)** like people do
+  (`dress.js`); without it they were RGB 0 indoors. A new creature module
+  must go through `buildModelledBeast`.
+- **Sound needs a gesture, and "enter" is the wrong one.** Headless and
+  devtools Chrome autoplay, so a silent title is only reproducible in a
+  normal browser.
 - Figures are skinned meshes: one draw each, no instancing, and a second pass if
   they cast shadows. They are kept out of the shadow map and culled past 46 m.
 - Large soft sprites are the most expensive thing per pixel in the scene. The

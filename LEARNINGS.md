@@ -6,6 +6,82 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-03 — wave 12: other players, sound, and the last of build.js
+
+### A server beside the page (wave12-server)
+
+- `server/` (Node, `ws` 8.18.3 pinned with a lockfile) runs the same
+  `game.js`, `src/rules/` and `magic.js` as the page. Merc's `char_list` is
+  `game.players` plus `bind(pc)`: the bound player is Merc's `ch`, and the
+  rules modules follow it through `k.onBind` because they capture `state`
+  once at install. Standalone was proved unchanged by a seeded ten-minute
+  trace (4 classes, fights, deaths, resets): byte-identical against main.
+- Boot 0.22 s for 2,568 rooms / 1,856 mobiles / 34 zones; tick 1.2–1.5 ms
+  with 3–4 players. Load (walking + talking): 1 player 0.88 KB/s and 3.9%
+  of a core, 10 → 3.8 KB/s and 8.6%, 50 → 8.8 KB/s each (89% positions)
+  and 18.3%.
+- Clock-driven NPC strolls (`timedRand`) only partly agree across tabs:
+  0.67 m apart after 15 s against 1.20 m for `Math.random`. Frame timing
+  and local avoidance in `motion.js` cause the rest.
+- Traps: events carry `fromCh`/`toCh` and are re-derived per reader, never
+  null for someone else's blow; a string built inside `withPlayer` reads the
+  new binding (the thief shouting "Boromir is a bloody thief!" was Boromir);
+  removing the bound player mid-command breaks the command, so quit/deny are
+  deferred; `serialize()` stamps `savedAt` and must be stripped before
+  diffing; zones overlap in coordinates, the server offsets them by `SPAN`.
+- PvP is Merc 2.1's `is_safe`/`check_killer`, except that ROOM_SAFE refuses
+  it (2.1 only reads the flag for summon), marked DIVERGES.
+
+### Sound from ElevenLabs (wave12-audio, wave12-audio2)
+
+- 112 clips, 14 MB of Opus/OGG: footsteps per surface, 23 ambience beds,
+  12 music pieces, combat, doors, spells, 18 creature voices, positional
+  fountains/hearths/forges, rain on roofs. 27.4k of 121,850 monthly credits
+  (SFX ~11 credits/s, a 75 s piece ~1,030). Boot time unchanged: clips load
+  lazily after the context exists.
+- A browser keeps the AudioContext suspended until a gesture, and the
+  gesture on the title is "enter", which ended the title music unheard; a
+  "♪ music" button now appears only while the context is suspended. Headless
+  Chromium and the devtools Chrome both autoplay, so neither reproduces it.
+- Composition plans refuse `force_instrumental` (422): leave out `lines`.
+  Music returns its own length with silent tails. Ambience carries a lot
+  under 50 Hz: high-pass at 80 Hz before levelling. Soft footsteps come back
+  as swishes, so cut steps on prominence relative to the clip, and continuous
+  one-shot sheets on silence (`findRuns`). Decoded audio is float32: 50
+  preloaded one-shots are ~50 MB mono, so the one-shots are mono.
+
+### The Mud School's creatures (wave12-beasts)
+
+- Lizard, rabbit, snail, beast and blob are new bodies (`creatures.py`);
+  boar, fox/wolf and bear gained pastimes (root, sniff, haunch, snarl, howl,
+  rear). Strides declared vs measured agree to <2% except the rabbit's run.
+  +2.76 MB of models; the deer rebuilds byte-identical.
+- Modelled animals indoors read RGB 0–5 against walls at 80–140: no light
+  reached them at all. `beastlight.js` gives them the share of local light
+  `dress.js` gives people; zero outdoors by day.
+- Don't name an animal clip `sit` or `lean` — motion.js drives those for
+  seating. The lizard's spine wave direction was measured, not reasoned:
+  the reasoned one slipped 2.7 cm on the run.
+
+### The last of build.js (wave12-polish)
+
+- Temple Square corner: corner posts of `closeCorners` ran to CEIL+SLAB and
+  shared a plane with a corridor ceiling strip; 106 → 0 px. Horizon lanes
+  per style: far ties 314 → 8 px over 16 seam views, `Z.swim` 1.56% → 0.20%.
+- `wall_door`: the tie was the architrave's foot in the plinth's face, not
+  the threshold (50 mm proud). Read the sweep's `at`, not the report.
+- The blue night thresholds were a cyan point light inside every portal
+  arch since the first commit; noon drowned it.
+- Moria's tunnels are FOREST+INDOORS: 565 trees underground → 0 with burrow
+  words and "a canopy room must lead to open ground or forest". Trees under
+  anything built: 158 → 0.
+- Ways up/down (`tools/judge/headless/ways.mjs`, 504 exits): shown
+  vertically 390 → 490, nothing 6 → 0, barred 19 → 0. Ladders and steps
+  claim their stretch of wall and take the torches down.
+- Raised open-air towns stand on hills (`buildHills`): six zones, earth
+  where gentle, rock past 44°; rooms up in the air by their own words keep
+  hanging.
+
 ## 2026-10-03 — wave 11: the hills, and every exit a door
 
 ### Every exit a doorway (wave11-exits)

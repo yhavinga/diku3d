@@ -221,12 +221,26 @@ chain are WebGL-only and would have to be rewritten as TSL node materials.
 | `src/game-ui.js` | the game's own overlay: vitals, target, combat log |
 | `tools/blender/` | the scripts that generate `assets/*.glb` |
 | `src/hud.js` | room text, minimap, compass |
-| `src/audio.js` | wind, footsteps, doors, a bell — synthesised, no files |
+| `src/audio.js` | sound: committed ElevenLabs clips (`assets/audio`, `src/soundmap.js`), synth as fallback |
+| `src/link.js` | the page's game, local or over a WebSocket to `server/` |
+| `server/` | the multiplayer server: Merc's `char_list`, login, channels, PvP |
 | `merc21/` | Merc 2.1 as released on 1 August 1993, unmodified |
 
 `window.diku` is exposed in the console: `diku.goto(3014)`, `diku.look(x,y,z,yaw)`,
 `diku.applyTime('night')`, plus `layout`, `built`, `world`, `game` and `quality`.
 Set `diku.state.benchmark = true` to halt the render loop before measuring.
+
+## Playing together
+
+    cd server && npm ci && node main.mjs --port 4011
+
+then choose "connect to a server" on the title screen and give
+`localhost:4011`. The same Merc 2.1 rules run for everyone: say, tell, the
+channels, shout, follow and group, socials, and Merc's player-killing rules
+with KILLER and THIEF flags. The owner becomes implementor with
+`node server/main.mjs --make-implementor <name>`, which asks for the password
+on the terminal. Playing alone stays the default and needs no server.
+`node tools/server-check.mjs` logs four players in over real sockets.
 
 ## Running the mud itself
 
@@ -256,8 +270,8 @@ then stored in the clear, which is fine on loopback and nowhere else.
 - Two staircases in one room share a single opening in the ceiling.
 - An exit whose room has no free wall left ends up as an archway standing in the
   middle of the floor.
-- The viewer never talks to the running mud. A websocket-to-telnet bridge would
-  make that possible; nothing here assumes it.
+- The viewer never talks to the C mud in `merc21/`; multiplayer runs the
+  port's own rules in `server/` instead (see *Playing together*).
 
 ## Credits
 
