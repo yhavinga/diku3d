@@ -3192,7 +3192,7 @@ def dragon():
                 gait=dict(walk_stride=2.1, walk_frames=46, walk_duty=0.66, lift=0.22,
                           run_stride=3.4, run_frames=26, run_duty=0.4, run_lift=0.35,
                           gallop="transverse", wag=5.0, idle_wag=1, tail_pitch=-4.0, lie=0.5, arch=4.0,
-                          attack_frames=24, lair=True,
+                          attack_frames=24, lair=True, pastimes=["loaf", "rear"], rear_pitch=48.0,
                           flex={"hind": dict(lean=6, push=15, fold=35, curl=30),
                                 "fore": dict(lean=6, push=18, fold=60, curl=35, scap=10)}))
 
@@ -3601,6 +3601,9 @@ def quad_clips(arm, spec):
                     fk[toe] = (5, 0, 0)
             return dict(fk=fk, loc=loc, ik={leg: planted(rest, leg) for leg in rest}, limp=1.0)
         clip.run("lair", 120, lair, step=2)
+        if "loaf" in g.get("pastimes", []):
+            # Away from its hoard a dragon still lies down the same way.
+            clip.run("loaf", 120, lair, step=2)
 
     if g.get("pastimes"):
         quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pitch, height, bones)
@@ -3786,6 +3789,11 @@ def quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pi
             ik = {leg: planted(rest, leg) for leg in rest if leg.startswith("hind")}
             if k < 0.02:
                 ik = flat()
+            if "wing1.L" in bones:
+                # A dragon rears with its wings thrown open and beating, the
+                # tail lashing: the roar of something that owns the room.
+                fk.update(wings(open_=0.95 * k, flap=30 * wave(3 * t) * roar + 15 * k, lift=0.2 * k))
+                fk.update(tail_wave(tails, t, 14 * k, freq=2, pitch=tail_pitch - 12 * k))
             return dict(fk=fk, loc=V((0, 0, 0)), rot=rot, ik=ik)
         clip.run("rear", 120, rear)
 
@@ -3854,7 +3862,7 @@ def quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pi
             return dict(fk=fk, loc=loc, rot=rot, ik=ik)
         clip.run("groom", 180, groom)
 
-    if "loaf" in names:
+    if "loaf" in names and not g.get("lair"):
         # Lying down with the paws tucked or out in front, the tail round
         # beside it, the head up -- and now and then nodding off, the head
         # sinking and coming back up. Legs by FK: nothing of it stands.

@@ -129,7 +129,7 @@ const PASTIME_NAMES = Object.keys(PASTIMES);
  */
 const ALARM = { snail: ['withdraw', 2.2], lagomorph: ['situp', 4.5], lizard: ['display', 3.2], serpent: ['hiss', 2.4],
   fowl: ['flap', 1.6], songbird: ['flap', 5], rodent: ['situp', 3], spider: ['threat', 2.2],
-  cervid: ['alert', 7], equine: ['alert', 3] };
+  cervid: ['alert', 7], equine: ['alert', 3], dragon: ['rear', 7] };
 /**
  * people.py's sit, in seconds: the first REST_LOOP of it is at rest and
  * breathing and comes back to its first frame, and SIP is the stretch where
