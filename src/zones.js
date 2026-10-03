@@ -4,7 +4,7 @@
  * The world the rules engine runs is every area in area.lst at once -- the
  * mobiles of the Mud School reset and wander whether or not anyone is looking
  * at them, as they would on a server holding the whole mud. What is *drawn* is
- * one zone at a time. The home zone is the nine areas that make one walkable
+ * one zone at a time. The home zone is the ten areas that make one walkable
  * world round Midgaard; every other area (or a small group that only makes
  * sense together) is a zone of its own, laid out by itself. An exit whose far
  * end is in another zone is a crossing: taking it tears down one zone and
@@ -25,7 +25,7 @@ import { layoutWorld } from './layout.js';
  * neighborhood laid down whole beside the desert.
  */
 export const HOME_AREAS = ['midgaard.are', 'haon.are', 'shire.are', 'marsh.are',
-  'trollden.are', 'grave.are', 'sewer.are', 'eastern.are', 'hood.are'];
+  'trollden.are', 'grave.are', 'sewer.are', 'eastern.are', 'hood.are', 'midennir.are'];
 export const HOME_START = 3001;
 // A live trap: the breadth-first placement stops mid-walk at the cap, and
 // whole areas silently get zero rooms while their exits degrade to gates.
