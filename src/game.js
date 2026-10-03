@@ -2192,6 +2192,8 @@ export function createGame({
     if (!route) return false;
     slot.travel = { from: slot.roomVnum, to, door, route, run };
     order(slot, { kind: 'travel', route, run, wait });
+    // Anyone following it goes the same way (rules/actcomm.js).
+    if (multi && rules.mobMoved) rules.mobMoved(slot, slot.roomVnum, to, door);
     return true;
   }
 
@@ -2565,6 +2567,29 @@ export function createGame({
   }
 
   /**
+   * do_kill on a KILLER or THIEF, and do_murder, once is_safe has let it
+   * through: WAIT_STATE, check_killer, and one round now. Out of reach the
+   * fight is on and the violence pulse swings once you are close -- a player
+   * is not walked to anyone, so close it yourself.
+   */
+  function attackPlayer(victim) {
+    const vpc = pcOf(victim);
+    if (!vpc || victim === state) return { ok: false, text: "They aren't here." };
+    if (state.position === POS.DEAD) return { ok: false, text: 'You are dead.' };
+    state.wait = Math.max(state.wait, PULSE_VIOLENCE);
+    ctx.checkKiller(state, victim);
+    if (dist2(pcFeet(vpc), feet()) > MELEE * MELEE) {
+      ctx.setFighting(state, victim);
+      if (!victim.fighting) ctx.setFighting(victim, state);
+      return { ok: true, text: `You attack ${victim.name}.` };
+    }
+    state.position = POS.STANDING;
+    ctx.round = { player: CLICK_WINDUP, npc: MOB_BEAT };
+    try { multiHit(state, victim, undefined, ctx); } finally { ctx.round = null; ctx.now = undefined; }
+    return { ok: true, text: '' };
+  }
+
+  /**
    * act_obj.c: get_obj -- from the floor, or from `container` -- including the
    * carry limits from str_app and dex, and money going straight into the purse.
    */
@@ -2767,7 +2792,10 @@ export function createGame({
   /** The bound player's half of a frame: where you are, and what that ends. */
   function playerFrame() {
     const room = nearestRoom(position);
+    const before = state.roomVnum;
     if (room) state.roomVnum = room.vnum;
+    // move_char's half that is not the walking: "$n leaves north." and the followers.
+    if (multi && rules.playerMoved && before !== undefined && before !== state.roomVnum) rules.playerMoved(before, state.roomVnum);
     if (!puppet) {
       loseTouch();
       // Walking is the body's, not a typed command, so what a command would end
@@ -2979,6 +3007,9 @@ export function createGame({
     update,
     attack,
     attackSlot,
+    attackPlayer,
+    /** db.c's create_mobile for a slot, if it has not been yet: the mobile itself. */
+    wakeSlot: (slot) => wake(slot),
     get nav() { return ways; },
     /** Draw another zone (see enterZone); the rules keep running everywhere. */
     enterZone,
@@ -3220,6 +3251,21 @@ export function createGame({
      * the rules ever binds it.
      */
     addRemote(ch, id) { return makePc(ch, id); },
+    /**
+     * char_from_room and char_to_room for a player the rules move (goto,
+     * transfer, at): stood in the room's middle, where everyone arrives. The
+     * 'teleport' event tells their own screen to follow. False when the room
+     * has nowhere to stand.
+     */
+    placePlayer(pc, vnum, { quiet = false } = {}) {
+      const info = built.rooms.get(vnum);
+      if (!info || info.unbuilt) return false;
+      pc.position.x = info.center.x; pc.position.y = info.center.y + 1.72; pc.position.z = info.center.z;
+      pc.ch.roomVnum = vnum;
+      pc.restAt = null;
+      if (!quiet) emit({ kind: 'teleport', x: info.center.x, y: info.center.y, z: info.center.z, vnum, pc: pc.id, placed: true });
+      return true;
+    },
     removeRemote(pc) { pcOfCh.delete(pc.ch); },
 
   };
@@ -3263,6 +3309,8 @@ export function createGame({
     get pc() { return current; },
     onBind(fn) { rebinders.push(fn); },
     players, pcOf, withPlayer, tell, roomcast, multi, feetOf,
+    // What a descriptor list would give the rules: save, quit, the password.
+    server,
     // The zone being drawn, read when used: entering another one swaps them.
     get layout() { return layout; },
     get built() { return built; },

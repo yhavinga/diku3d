@@ -13,7 +13,7 @@
 import { ITEM, DIR_NAME, EX_CLOSED, EX_ISDOOR, SECTOR } from '../are.js';
 import {
   AFF, PLR, COND, LIQUIDS, capitalise, isName, isPrefix, oneArgument, numberArgument, findNamed,
-  doorName, hasAff,
+  doorName, hasAff, canSee,
 } from './handler.js';
 import { SOCIALS } from './socials.js';
 
@@ -71,17 +71,27 @@ export function installInterp(k) {
 
   // ------------------------------------------------------------ finding --
 
-  /** get_char_room: the mobiles about you, nearest first, and 'self'. */
+  /**
+   * get_char_room: the mobiles about you, nearest first, and 'self'. On a
+   * server the other players in the room come first -- each a player record
+   * (`isPc`), not a mobile's slot -- the ones you can see.
+   */
   function charsHere() {
-    return mobs
+    const list = mobs
       .filter((s) => !s.dead && (s.roomVnum === state.roomVnum
         || Math.hypot(s.pos.x - k.position.x, s.pos.z - k.position.z) < 9))
       .sort((a, b) => Math.hypot(a.pos.x - k.position.x, a.pos.z - k.position.z)
         - Math.hypot(b.pos.x - k.position.x, b.pos.z - k.position.z));
+    if (!k.multi) return list;
+    const others = k.players.filter((pc) => pc.ch !== state && canSee(state, pc.ch)
+      && (pc.ch.roomVnum === state.roomVnum || Math.hypot(pc.position.x - k.position.x, pc.position.z - k.position.z) < 9));
+    return [...others, ...list];
   }
+  const isPc = (x) => !!(x && x !== 'self' && x.ch && !x.proto);
+  const keywordsOf = (x) => (isPc(x) ? x.ch.name : x.proto.keywords);
   function getCharRoom(arg) {
     if (arg === 'self') return 'self';
-    return findNamed(charsHere(), arg, (s) => s.proto.keywords);
+    return findNamed(charsHere(), arg, keywordsOf);
   }
 
   /** The room's contents: what is lying in the room you stand in, nearest first. */
@@ -162,6 +172,7 @@ export function installInterp(k) {
 
   /** act_info.c: show_char_to_char_0 -- one line for someone in the room. */
   function showChar0(slot) {
+    if (isPc(slot)) return showPlayer0(slot.ch);
     const mob = slot.instance;
     const flags = mob && hasAff(mob, AFF.SANCTUARY) ? '(White Aura) ' : '';
     if (!mob || mob.position === POS.STANDING) return `${flags}${slot.proto.long}`;
@@ -177,8 +188,24 @@ export function installInterp(k) {
     return capitalise(`${flags}${mob.name}${where}`);
   }
 
+  /** show_char_to_char_0 for another player: the flags, the name and title, the pose. */
+  function showPlayer0(ch) {
+    const flags = `${hasAff(ch, AFF.INVISIBLE) ? '(Invis) ' : ''}${hasAff(ch, AFF.HIDE) ? '(Hide) ' : ''}`
+      + `${hasAff(ch, AFF.SANCTUARY) ? '(White Aura) ' : ''}${ch.act & PLR.KILLER ? '(KILLER) ' : ''}${ch.act & PLR.THIEF ? '(THIEF) ' : ''}`;
+    let where = {
+      [POS.DEAD]: ' is DEAD!!', [POS.MORTAL]: ' is mortally wounded.', [POS.INCAP]: ' is incapacitated.',
+      [POS.STUNNED]: ' is lying here stunned.', [POS.SLEEPING]: ' is sleeping here.', [POS.RESTING]: ' is resting here.',
+      [POS.STANDING]: ' is here.',
+    }[ch.position];
+    if (ch.position === POS.FIGHTING) {
+      where = ` is here, fighting ${!ch.fighting ? 'thin air??' : (ch.fighting === state ? 'YOU!' : `${ch.fighting.name}.`)}`;
+    }
+    return capitalise(`${flags}${ch.name}${ch.title || ''}${where}`);
+  }
+
   /** act_info.c: show_char_to_char_1 -- looking at someone: prose, health, gear, and a peek. */
   function lookAtChar(slot) {
+    if (isPc(slot)) return lookAtPlayer(slot.ch);
     const mob = k.wake(slot);
     send(slot.proto.description.trim() || `You see nothing special about ${act('$M', null, mob)}.`);
     send(`${capitalise(mob.name)} ${MERC.condition(mob) === 'perfect health' ? 'is in perfect health' : conditionLine(mob)}.`);
@@ -187,6 +214,21 @@ export function installInterp(k) {
     if (k.rng.percent() < (state.learned.peek || 0)) {
       send('You peek at the inventory:');
       listObjects(mob.inventory, true);
+    }
+  }
+  /** show_char_to_char_1 for a player: they see you looking, and so does the room. */
+  function lookAtPlayer(ch) {
+    if (canSee(ch, state)) {
+      k.tell(ch, { kind: 'room', text: `${capitalise(state.name)} looks at you.` });
+      k.roomcast(state.roomVnum, { kind: 'room', text: `${capitalise(state.name)} looks at ${ch.name}.` }, [state, ch]);
+    }
+    send(ch.description ? ch.description.trim() : `You see nothing special about ${act('$M', null, ch)}.`);
+    send(`${capitalise(ch.name)} ${MERC.condition(ch) === 'perfect health' ? 'is in perfect health' : conditionLine(ch)}.`);
+    const worn = ch.equipment.map((o, i) => (o ? `${WHERE_NAME[i]}${o.name}` : null)).filter(Boolean);
+    if (worn.length) { send(`${capitalise(ch.name)} is using:`); worn.forEach(send); }
+    if (k.rng.percent() < (state.learned.peek || 0)) {
+      send('You peek at the inventory:');
+      listObjects(ch.inventory, true);
     }
   }
   const conditionLine = (mob) => {
@@ -305,7 +347,7 @@ export function installInterp(k) {
     if (!arg) return send('Consider killing whom?');
     const slot = getCharRoom(arg);
     if (!slot || slot === 'self') return send("They're not here.");
-    const mob = k.wake(slot);
+    const mob = isPc(slot) ? slot.ch : k.wake(slot);
     const diff = mob.level - state.level;
     const msg = diff <= -10 ? 'You can kill $N naked and weaponless.' : diff <= -5 ? '$N is no match for you.'
       : diff <= -2 ? '$N looks like an easy kill.' : diff <= 1 ? 'The perfect match!'
@@ -418,12 +460,14 @@ export function installInterp(k) {
       if (!arg2) return send('Give what to whom?');
       const slot = getCharRoom(arg2);
       if (!slot || slot === 'self') return send("They aren't here.");
+      if (isPc(slot)) return k.giveGoldToPlayer(Number(arg1), slot.ch);
       return reply(game.giveGold(Number(arg1), slot));
     }
     const obj = getObjCarry(arg1);
     if (!obj) return send(getObjWear(arg1) ? 'You must remove it first.' : 'You do not have that item.');
     const slot = getCharRoom(arg2);
     if (!slot || slot === 'self') return send("They aren't here.");
+    if (isPc(slot)) return k.giveToPlayer(obj, slot.ch);
     reply(game.give(obj, slot));
   }
 
@@ -556,6 +600,7 @@ export function installInterp(k) {
     const slot = getCharRoom(arg1);
     if (!slot) return send("They aren't here.");
     if (slot === 'self') return send('You hit yourself.  Ouch!');
+    if (isPc(slot)) return k.killPlayer(slot.ch, false);
     if (state.position === POS.FIGHTING) return send('You do the best you can!');
     reply(game.attackSlot(slot));
   }
@@ -566,6 +611,7 @@ export function installInterp(k) {
     const slot = getCharRoom(arg1);
     if (!slot) return send("They aren't here.");
     if (slot === 'self') return send('How can you sneak up on yourself?');
+    if (isPc(slot)) return send('You must MURDER a player.');
     if (Math.hypot(slot.pos.x - k.position.x, slot.pos.z - k.position.z) > 3.2) {
       return send(`${capitalise(slot.proto.short)} is too far away to reach.`);
     }
@@ -579,6 +625,7 @@ export function installInterp(k) {
     const slot = getCharRoom(arg2);
     if (!slot) return send("They aren't here.");
     if (slot === 'self') return send("That's pointless.");
+    if (isPc(slot)) return k.stealFromPlayer(slot.ch);
     if (Math.hypot(slot.pos.x - k.position.x, slot.pos.z - k.position.z) > 3.2) {
       return send(`You would have to get closer to ${slot.proto.short}.`);
     }
@@ -609,6 +656,7 @@ export function installInterp(k) {
     if (who) {
       const slot = getCharRoom(who);
       if (slot === 'self') target = state;
+      else if (isPc(slot)) target = slot.ch;
       else if (slot) target = k.wake(slot);
       else obj = getObjCarry(who);
       if (!target && !obj) return send("They aren't here.");
@@ -637,12 +685,19 @@ export function installInterp(k) {
     if (state.position === POS.STUNNED) { send('You are too stunned to do that.'); return true; }
     if (state.position === POS.SLEEPING && name !== 'snore') { send('In your dreams, or what?'); return true; }
     const [target] = oneArgument(arg);
-    if (!target) { if (charNoArg) send(act(charNoArg, state)); return true; }
+    // The room sees it too, once there is anyone else in it to see.
+    const others = (text, except = [state]) => { if (text) k.roomcast(state.roomVnum, { kind: 'emote', text }, except); };
+    if (!target) { if (charNoArg) send(act(charNoArg, state)); others(entry[2] && act(entry[2], state)); return true; }
     const slot = getCharRoom(target);
     if (!slot) { send("They aren't here."); return true; }
-    if (slot === 'self') { if (charAuto) send(act(charAuto, state)); return true; }
-    const victim = k.wake(slot);
+    if (slot === 'self') { if (charAuto) send(act(charAuto, state)); others(entry[7] && act(entry[7], state)); return true; }
+    const victim = isPc(slot) ? slot.ch : k.wake(slot);
     if (charFound) send(act(charFound, state, victim));
+    others(entry[4] && act(entry[4], state, victim), [state, victim]);
+    if (isPc(slot)) {
+      if (entry[5]) k.tell(victim, { kind: 'emote', text: act(entry[5], state, victim) });
+      return true;
+    }
     if (!victim.npc || hasAff(victim, AFF.CHARM) || !MERC.isAwake(victim)) return true;
     const roll = k.rng.bits(4);
     if (roll === 0) {
@@ -734,7 +789,7 @@ export function installInterp(k) {
     ['kick', () => reply(game.kick()), P.FIGHTING],
     ['murde', notHere('If you want to MURDER, spell it out.'), P.FIGHTING],
     ['murder', notHere('There is no one here you may murder.'), P.FIGHTING],
-    ['rescue', (a) => { const [t] = oneArgument(a); if (!t) return send('Rescue whom?'); const s = getCharRoom(t); if (!s) return send("They aren't here."); if (s === 'self') return send('What about fleeing instead?'); reply(game.rescue(s)); }, P.FIGHTING],
+    ['rescue', (a) => { const [t] = oneArgument(a); if (!t) return send('Rescue whom?'); const s = getCharRoom(t); if (!s) return send("They aren't here."); if (s === 'self') return send('What about fleeing instead?'); if (isPc(s)) return k.rescuePlayer(s.ch); reply(game.rescue(s)); }, P.FIGHTING],
     ['follow', notHere('You follow no one but yourself.'), P.RESTING],
     ['group', notHere('You have no group.'), P.SLEEPING],
     ['hide', () => reply(game.hide()), P.RESTING], ['practice', doPractice, P.SLEEPING],
@@ -782,6 +837,8 @@ export function installInterp(k) {
     let text = line.trim();
     if (!text) return null;
     state.affectedBy &= ~AFF.HIDE;
+    // interp.c: PLR_FREEZE stops everything (act_wiz.c's freeze; a server only).
+    if (k.multi && (state.act & 2097152)) { send("You're totally frozen!"); return null; }
     let command;
     let arg;
     if (!/^[a-z0-9]/i.test(text)) { command = text[0]; arg = text.slice(1).trim(); } else {
@@ -790,7 +847,10 @@ export function installInterp(k) {
     spoke = false;
     const off = game.listen((event) => { if (event.text && event.kind !== 'out') spoke = true; });
     try {
-      const entry = [...extra, ...commands].find(([name]) => command[0] === name[0] && isPrefix(command, name));
+      // A command above your level is not there at all, as in interp.c.
+      const trust = state.trust || state.level;
+      const entry = [...extra, ...commands].find(([name, , , level]) => command[0] === name[0] && isPrefix(command, name)
+        && (level === undefined || level <= trust));
       if (!entry) {
         const soc = SOCIALS.find((s) => command[0] === s[0][0] && isPrefix(command, s[0]));
         if (!soc || !social(soc, arg)) send('Huh?');
@@ -814,10 +874,34 @@ export function installInterp(k) {
   /** Commands added from elsewhere (magic.js's `cast`), matched before the table. */
   const extra = [];
 
+  // What rules/actcomm.js builds the server's commands from: interp.c's
+  // table itself (replacing an entry keeps its place, so abbreviations still
+  // resolve in Merc's order), and the pieces the commands are made of.
+  k.interp = {
+    commands, send, act, getCharRoom, charsHere, isPc, showChar0, lookAtChar, listObjects, WHERE_NAME,
+    /** Put `fn` in place of the table's own `name`, keeping its position in the order. */
+    replace(name, fn, position) {
+      const entry = commands.find((c) => c[0] === name);
+      if (!entry) throw new Error(`interp: no command '${name}' to replace`);
+      entry[1] = fn;
+      if (position !== undefined) entry[2] = position;
+    },
+    /** Commands Merc has and this table did not: appended, which is where interp.c keeps them. */
+    append(list) { commands.push(...list); },
+    /** At its place in interp.c's order: `before` is the name it goes in front of. */
+    insert(entry, before) {
+      const i = commands.findIndex((c) => c[0] === before);
+      if (i < 0) throw new Error(`interp: no command '${before}' to insert before`);
+      commands.splice(i, 0, entry);
+    },
+    social,
+  };
+
   Object.assign(game, {
     interpret,
     addCommand(name, fn, position = POS.RESTING) { extra.push([name, fn, position]); },
-    commandNames: () => [...extra, ...commands].map((c) => c[0]).filter((n) => /^[a-z]/.test(n)),
+    commandNames: () => [...extra, ...commands].filter((c) => c[3] === undefined || c[3] <= (state.trust || state.level))
+      .map((c) => c[0]).filter((n) => /^[a-z]/.test(n)),
     look: () => doLook(''),
   });
   void LIQUIDS; void SECTOR; void numberArgument;
