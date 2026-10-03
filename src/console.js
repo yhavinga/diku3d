@@ -72,9 +72,9 @@ export function createConsole({ root, game, onOpen = () => {}, onClose = () => {
   input.type = 'text';
   input.spellcheck = false;
   input.autocomplete = 'off';
-  input.placeholder = "look · score · open gate · help";
+  input.placeholder = "look · score · help";
   const hint = document.createElement('em');
-  hint.textContent = 'esc closes';
+  hint.textContent = 'ctrl-c or enter closes';
   row.append(prompt, input, hint);
   box.append(scroll, row);
   root.appendChild(box);

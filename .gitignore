@@ -7,3 +7,5 @@ tools/judge/round-*/
 # merc21/ is a submodule; what the mud writes while it runs (object files, the
 # binary, logs, player files) is excluded inside it, in merc21/.git/info/exclude.
 .env
+.env.*
+!.env.example
