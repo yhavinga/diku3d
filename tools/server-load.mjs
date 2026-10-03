@@ -1,8 +1,8 @@
 /**
  * How much a crowd costs the server: starts server/main.mjs as its own
  * process, connects N simulated players over real WebSockets, walks them
- * through Midgaard's streets at a brisk walk sending their position ten times
- * a second, has them talk now and then, and reports per player per second
+ * along Midgaard's streets at a walk, sending their position ten times a
+ * second (the server checks each one; the count it refused is reported), has them talk now and then, and reports per player per second
  * what came back -- messages and bytes -- and the server's own CPU.
  *
  *     (cd server && npm ci) && node tools/server-load.mjs [N ...] [--seconds 20]
@@ -40,8 +40,24 @@ const home = w.zoneOfVnum(3001);
 const streets = [...w.world.rooms.values()].filter((r) => r.areaFile === 'midgaard.are' && w.built.rooms.has(r.vnum)
   && !w.built.rooms.get(r.vnum).unbuilt && r.exits.some((e, d) => e && d < 4 && w.built.rooms.has(e.to)));
 const centre = (vnum) => { const c = w.built.rooms.get(vnum).center; return { x: c.x - home.offset, y: c.y + 1.72, z: c.z }; };
+/**
+ * The street between two rooms as the layout routed it: the server checks
+ * every report against it (server/mud.mjs `position`), so a walker goes
+ * along it, not across whatever lies between the two centres.
+ */
+const street = (from, to) => home.layout.links.find((l) => l.kind === 'alley' && l.to
+  && ((l.from.vnum === from && l.to.vnum === to) || (l.from.vnum === to && l.to.vnum === from)));
+const waypoints = (from, to) => {
+  // A room with no street out: stand in it.
+  if (from === to) return [centre(from)];
+  const link = street(from, to);
+  const cells = link.from.vnum === from ? link.path : [...link.path].reverse();
+  const y = centre(from).y;
+  return [...cells.map((c) => ({ x: c.x * 13, y, z: c.z * 13 })), centre(to)];
+};
 const next = (vnum, rand) => {
-  const ways = w.world.rooms.get(vnum).exits.map((e, d) => (e && d < 4 && w.built.rooms.has(e.to) && w.zoneOfVnum(e.to) === home ? e.to : null)).filter(Boolean);
+  const ways = w.world.rooms.get(vnum).exits.map((e, d) => (e && d < 4 && !(e.locks & 2) && w.built.rooms.has(e.to)
+    && w.zoneOfVnum(e.to) === home && street(vnum, e.to) ? e.to : null)).filter(Boolean);
   return ways.length ? ways[Math.floor(rand() * ways.length)] : vnum;
 };
 const cpuSeconds = (pid) => {
@@ -57,7 +73,9 @@ async function run(n) {
     const ch = createCharacter(i % 4, { sex: 1 });
     const name = `Walker${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26) % 26)}`;
     ch.name = name;
-    accounts.store({ version: 1, name, created: 'load', password: await hashPassword('walkwalk'), char: { ...serialize(ch), room: 3014 } });
+    // Each starts in a street of its own, where its file says it was.
+    const room = streets[(i * 7919 + 13) % streets.length].vnum;
+    accounts.store({ version: 1, name, created: 'load', password: await hashPassword('walkwalk'), char: { ...serialize(ch), room } });
   }
   const port = 4600 + n;
   const server = spawn(process.execPath, [join(root, 'server/main.mjs'), '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'inherit'] });
@@ -67,7 +85,7 @@ async function run(n) {
   for (let i = 0; i < n; i++) {
     const name = `Walker${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26) % 26)}`;
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
-    const c = { ws, name, bytes: 0, msgs: 0, kinds: new Map(), seq: 0, entered: false };
+    const c = { ws, name, bytes: 0, msgs: 0, kinds: new Map(), seq: 0, entered: false, refused: 0, room: null };
     let seed = i * 7919 + 1;
     c.rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
     ws.on('message', (raw) => {
@@ -75,7 +93,16 @@ async function run(n) {
       c.msgs += 1;
       const msg = JSON.parse(raw.toString());
       c.kinds.set(msg.t, (c.kinds.get(msg.t) || 0) + raw.length);
-      if (msg.t === 'enter') { c.entered = true; c.seq = msg.seq; }
+      if (msg.t === 'enter') { c.entered = true; c.seq = msg.seq; c.room = msg.room; }
+      if (msg.t === 'at') {
+        // Put back: stand where the server says, and walk on from that room.
+        c.refused += 1;
+        c.seq = msg.seq;
+        c.room = msg.room;
+        c.at = { x: msg.x, y: msg.y + 1.72, z: msg.z };
+        c.to = next(c.room, c.rand);
+        c.path = waypoints(c.room, c.to);
+      }
       if (msg.t === 'ev') for (const e of msg.e) if (e.seq) c.seq = Math.max(c.seq, e.seq);
     });
     await new Promise((resolve) => ws.once('open', resolve));
@@ -85,9 +112,9 @@ async function run(n) {
   while (!clients.every((c) => c.entered)) await new Promise((r) => setTimeout(r, 50));
   // Each walks from the square to a neighbour, and on, at 1.6 m/s.
   for (const c of clients) {
-    c.room = streets[Math.floor(c.rand() * streets.length)].vnum;
     c.at = centre(c.room);
     c.to = next(c.room, c.rand);
+    c.path = waypoints(c.room, c.to);
   }
   for (const c of clients) { c.bytes = 0; c.msgs = 0; c.kinds.clear(); }
   const cpu0 = cpuSeconds(server.pid);
@@ -97,9 +124,12 @@ async function run(n) {
     const timer = setInterval(() => {
       const dt = 0.1;
       for (const c of clients) {
-        const goal = centre(c.to);
+        const goal = c.path[0];
         const dx = goal.x - c.at.x; const dz = goal.z - c.at.z; const d = Math.hypot(dx, dz);
-        if (d < 0.3) { c.room = c.to; c.to = next(c.room, c.rand); } else { c.at.x += (dx / d) * Math.min(d, 1.6 * dt); c.at.z += (dz / d) * Math.min(d, 1.6 * dt); }
+        if (d < 0.3) {
+          c.path.shift();
+          if (!c.path.length) { c.room = c.to; c.to = next(c.room, c.rand); c.path = waypoints(c.room, c.to); }
+        } else { c.at.x += (dx / d) * Math.min(d, 1.6 * dt); c.at.z += (dz / d) * Math.min(d, 1.6 * dt); }
         c.at.y = goal.y;
         c.ws.send(JSON.stringify({ t: 'pos', zone: home.zone.id, x: c.at.x, y: c.at.y, z: c.at.z, yaw: Math.atan2(-dx, -dz), seq: c.seq }));
       }
@@ -119,7 +149,8 @@ async function run(n) {
   for (const c of clients) for (const [k, b] of c.kinds) kinds.set(k, (kinds.get(k) || 0) + b);
   const share = [...kinds].sort((a, b) => b[1] - a[1]).map(([k, b]) => `${k} ${(100 * b / bytes).toFixed(0)}%`).join(', ');
   console.log(`${String(n).padStart(4)} players: ${(msgs / n / secs).toFixed(1)} msgs and ${(bytes / n / secs / 1024).toFixed(2)} KB in`
-    + ` per player per second (${share}); positions out 10/s each; server CPU ${(100 * cpu / secs).toFixed(1)}% of a core`);
+    + ` per player per second (${share}); positions out 10/s each; server CPU ${(100 * cpu / secs).toFixed(1)}% of a core;`
+    + ` ${clients.reduce((s, c) => s + c.refused, 0)} reports refused`);
   for (const c of clients) c.ws.close();
   server.kill('SIGTERM');
   await new Promise((resolve) => server.once('exit', resolve));
