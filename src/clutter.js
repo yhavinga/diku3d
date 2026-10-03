@@ -23,6 +23,8 @@ import { DIR_STEP } from './are.js';
 // ------------------------------------------------------------ reading ----
 
 const WALL_WORD = { north: 0, east: 1, south: 2, west: 3 };
+// How far in front of the stone a mural's plane is, plus a clear gap.
+const MURAL_PROUD = 0.045;
 
 /** build.js asks these too: the altar a statue stands behind is brought out from its wall. */
 export const STATUE_OF_ODIN = /\bstatue of odin\b/i;
@@ -309,6 +311,21 @@ function wallIn(sentence, exits) {
 }
 
 /**
+ * "A small plaque is on this wall": the wall the sentence before it was
+ * about. The temple's is "steps lead UP through a small door", so the way up
+ * -- which build.js puts in a wall of its own -- and not a blank wall picked
+ * at random, where it had been hung over the middle of a mural.
+ */
+function thisWall(sentence, before) {
+  if (!/\bthis wall\b/i.test(sentence) || !before) return null;
+  const named = before.match(/\b(north|south|east|west)(?:ern)?\b/i);
+  if (named) return { dir: WALL_WORD[named[1].toLowerCase()], door: false };
+  if (/\bup\b/i.test(before)) return { dir: null, way: 4, door: false };
+  if (/\bdown\b/i.test(before)) return { dir: null, way: 5, door: false };
+  return null;
+}
+
+/**
  * The requests for one room: [{ kind, count, at, dir, why }]. `dir` is the
  * wall the text names or null. `why` is the words it was read from, for the
  * check tool and for anyone wondering why a room has a skull in it.
@@ -317,7 +334,10 @@ export function readClutter(room) {
   const exits = room.exits || [];
   const found = new Map();
   const fixed = (room.items || []).filter((o) => !(o.proto.wearFlags & 1)).map((o) => `${o.proto.keywords} ${o.proto.short}`).join(' ');
+  let said = '';
   for (const { s, from } of sentencesOf(room)) {
+    const prevSaid = said;
+    said = s;
     for (const rule of RULES) {
       if (found.has(rule.kind) && found.get(rule.kind).count >= rule.many) continue;
       const m = s.match(rule.re);
@@ -325,7 +345,7 @@ export function readClutter(room) {
       if (rule.not && rule.not.test(s)) continue;
       const before = s.slice(0, m.index);
       if (NOT_BEFORE.test(before) || NOT_AFTER.test(s.slice(m.index + m[0].length)) || FAR.test(before)) continue;
-      const wall = wallIn(s, exits);
+      const wall = wallIn(s, exits) || thisWall(s, prevSaid);
       // "To the east is the well" is a direction when there is a way east;
       // "to the north you see a primitive picture" in a blind end is its wall.
       if (rule.place && (TOWARDS.test(before) || (wall && wall.door))) continue;
@@ -333,7 +353,7 @@ export function readClutter(room) {
       const prev = found.get(rule.kind);
       if (prev) { prev.count = Math.max(prev.count, count); continue; }
       found.set(rule.kind, {
-        kind: rule.kind, count, at: rule.at, dir: wall ? wall.dir : null,
+        kind: rule.kind, count, at: rule.at, dir: wall ? wall.dir : null, way: wall ? wall.way ?? null : null,
         outdoor: !!rule.outdoor, indoor: !!rule.indoor, why: `${from}: ${s}`,
       });
     }
@@ -522,6 +542,11 @@ export function placeClutter(ctx) {
     const arrive = { x0: info.center.x - 1.3, x1: info.center.x + 1.3, z0: info.center.z - 1.3, z1: info.center.z + 1.3 };
     const keep = [arrive];
     const core = [];
+    const lanes = [];
+    // "Most of the walls are covered by ancient wall paintings" (build.js
+    // `buildMarks`): the plaster is painted 3 cm proud of the stone, and the
+    // temple's plaque hung at the stone showed through it as a ghost.
+    const painted = !outside && info.materials?.said?.marks?.kind === 'mural';
     if (plan) for (const t of plan.taken) keep.push({ x0: pos.x + t.x0, x1: pos.x + t.x1, z0: pos.z + t.z0, z1: pos.z + t.z1 });
     for (let d = 0; d < 4; d++) {
       if (!sides[d]) continue;
@@ -530,7 +555,8 @@ export function placeClutter(ctx) {
       const near = 0.8;
       const ax = dx ? [pos.x + dx * near, pos.x + dx * far] : [pos.x - 2.0, pos.x + 2.0];
       const az = dz ? [pos.z + dz * near, pos.z + dz * far] : [pos.z - 2.0, pos.z + 2.0];
-      keep.push({ x0: Math.min(...ax), x1: Math.max(...ax), z0: Math.min(...az), z1: Math.max(...az) });
+      lanes[d] = { x0: Math.min(...ax), x1: Math.max(...ax), z0: Math.min(...az), z1: Math.max(...az) };
+      keep.push(lanes[d]);
       // The middle of that lane, which even a heap of garbage leaves open.
       const cx = dx ? ax : [pos.x - 0.9, pos.x + 0.9];
       const cz = dz ? az : [pos.z - 0.9, pos.z + 0.9];
@@ -583,7 +609,7 @@ export function placeClutter(ctx) {
       return outside ? HALF : ROOM / 2;
     };
 
-    const put = (name, x, z, rotY, { scale = 1, collide = false, y = pos.y, far = false } = {}) => {
+    const put = (name, x, z, rotY, { scale = 1, collide = false, y = pos.y, far = false, examine = null } = {}) => {
       if (!library.get(name)) return null;
       // Indoors above ground it goes with the furniture (actors.js), which
       // is switched off past 32 m: from the Market Square every room to the
@@ -593,6 +619,7 @@ export function placeClutter(ctx) {
       // from its door -- and is left to the visibility cull like the walls.
       if (!outside && info.cell.level >= 0 && !far) decor.push({ kind: 'prop', name, x, y, z, rotY, scale });
       else instances.add(name, { x, y, z, rotY, scale }, chunk, swap);
+      if (examine) decor.push({ kind: 'examine', x, y: examine.y, z, title: examine.title, body: examine.body });
       where.push({ vnum, name, x: +x.toFixed(2), y: +y.toFixed(2), z: +z.toFixed(2), rotY: +rotY.toFixed(2) });
       const b = library.get(name).bounds;
       const r = footprint(b, x, z, rotY, scale);
@@ -610,6 +637,11 @@ export function placeClutter(ctx) {
       if (!b) return null;
       const blank = [0, 1, 2, 3].filter((d) => !sides[d]);
       const doors = [0, 1, 2, 3].filter((d) => sides[d]);
+      // A way up or down named as "this wall": whichever wall build.js gave it.
+      if (ask.dir === null && ask.way) {
+        const d = doors.find((w) => sides[w].link && sides[w].link.dir === ask.way);
+        if (d !== undefined) ask.dir = d;
+      }
       const order = ask.dir !== null ? [ask.dir, ...blank, ...doors].filter((d, i, a) => a.indexOf(d) === i)
         : [...blank, ...doors];
       const start = Math.floor(roll(room.vnum, k, 5) * order.length);
@@ -632,7 +664,7 @@ export function placeClutter(ctx) {
       }
       for (const dir of walls) {
         for (const along of alongs) {
-          const face = wallAt(dir, along) - 0.02 - (above && dir === fitting.dir ? lift[1] : 0);
+          const face = wallAt(dir, along) - 0.02 - (above && dir === fitting.dir ? lift[1] : 0) - (hang && painted ? MURAL_PROUD : 0);
           const [dx, , dz] = DIR_STEP[dir];
           const x = pos.x + dx * face + (dz ? along : 0);
           const z = pos.z + dz * face + (dx ? along : 0);
@@ -646,7 +678,16 @@ export function placeClutter(ctx) {
           const reach = { x0: r.x0 - Math.abs(dz) * 0.3 - Math.abs(dx) * 1.2, x1: r.x1 + Math.abs(dz) * 0.3 + Math.abs(dx) * 1.2,
             z0: r.z0 - Math.abs(dx) * 0.3 - Math.abs(dz) * 1.2, z1: r.z1 + Math.abs(dx) * 0.3 + Math.abs(dz) * 1.2 };
           if (torches.some((t) => t.x > reach.x0 && t.x < reach.x1 && t.z > reach.z0 && t.z < reach.z1)) continue;
-          if (hang ? (!above && !clear(r, false)) : !clear(r)) continue;
+          // On the wall of a way up or down ("a small plaque is on this
+          // wall"): no lane walks through it at floor level, but the steps
+          // stand against it, so beside them, never sunk in a tread.
+          const wayWall = !!ask.way && dir === ask.dir;
+          if (wayWall) {
+            if (Math.abs(along) < 1.5 || keep.some((q) => q !== lanes[dir] && overlaps(r, q))) continue;
+            const bottom = pos.y + b.min.y * scale;
+            const wide = (c) => Math.max(c.x1 - c.x0, c.z1 - c.z0) > 3;
+            if (colliders.some((c) => !wide(c) && c.y1 > bottom && c.y0 < pos.y + b.max.y * scale && overlaps(r, c, 0.1))) continue;
+          } else if (hang ? (!above && !clear(r, false)) : !clear(r)) continue;
           // A barrel under a painting is where barrels go; a cupboard in
           // front of one is not.
           if (hang && !high && blocked.some((q) => overlaps(r, q, -0.05) && !solid.includes(q) && (q.h ?? 9) > 1.2)) continue;
@@ -722,7 +763,14 @@ export function placeClutter(ctx) {
           const scale = ask.kind === 'web' ? 0.42 : 1;
           at = onWall(name, ask, k, { hang: !spec.solid, depthPad: 0.02, scale });
           if (at) {
-            put(name, at.x, at.z, at.rotY, { scale, collide: !!spec.solid, y: at.y });
+            // What the mud says you see when you look at it, for E: the
+            // plaque's credits to Hatchet, Kahn and Furey.
+            const extra = (room.extra || []).find((e) => e.keyword.split(/\s+/).some((w) => w.toLowerCase() === ask.kind));
+            const b = extra && library.get(name).bounds;
+            put(name, at.x, at.z, at.rotY, {
+              scale, collide: !!spec.solid, y: at.y,
+              examine: extra ? { title: ask.kind, body: extra.description.trim(), y: at.y + ((b.min.y + b.max.y) / 2) * scale } : null,
+            });
             take(at.r, !!spec.solid);
             if (ask.kind === 'cocoon' || ask.kind === 'web') ask.dir = null;
           }
