@@ -2876,6 +2876,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   // Wall Road down four cells of the corridor between #3022 and #3023, and
   // four more in Midgaard that layout.js could not route apart.
   const openStreet = new Set();
+  const streetClutter = new Map();
   for (const link of layout.links) {
     if (link.kind !== 'alley' || alleyEnclosed(link)) continue;
     for (const c of link.path) openStreet.add(cellKey(link.from.level, c.x, c.z));
@@ -2900,7 +2901,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     const liftFrom = lifts.get(link.from.vnum) || 0; const liftTo = lifts.get(link.to.vnum) || 0;
     buildAlley({
       batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt,
-      cellKey, streetCells: openStreet, lift: Math.min(liftFrom, liftTo),
+      cellKey, streetCells: openStreet, lift: Math.min(liftFrom, liftTo), streetClutter,
     });
     if (liftFrom && liftTo) {
       for (const c of link.path) {
@@ -3104,6 +3105,8 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     // Behind a Shire lane's banks it is fields, not paving.
     const paved = spot.bog ? 'peat' : (spot.east ? 'sand' : spot.shire && spot.sector === SECTOR.CITY ? 'grass' : FILLER_GROUND[spot.sector]);
     if (paved) groundAt.set(cellKey(spot.level, spot.x, spot.z), paved);
+    // A house of the town's own, which a street beside it may front onto.
+    spot.house = spot.sector === SECTOR.CITY && !spot.shire && !spot.bog && !spot.east;
     buildFiller({
       batcher, instances, model, faceRot: faces < 0 ? null : FACE_ROT[faces],
       chunk: chunkOf(spot),
@@ -3166,6 +3169,10 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     for (const c of link.path) streetCells.push({ level: link.from.level, x: c.x, z: c.z });
   }
   buildPartyWalls({ batcher, frontage, addCollider, layout, rooms, streetCells });
+  const lanes = buildLanes({
+    batcher, instances, layout, world, rooms, frontage, lifts, reserved, mountain, cellKey, chunkOf, worldOf,
+    decor, lights, addCollider, streetClutter, pathWalls: edges.pathWalls,
+  });
 
   // --- the graveyard's railings --------------------------------------------
 
@@ -3327,6 +3334,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   stats.clutter = clutter;
   stats.ways = ways;
   stats.hills = hills;
+  stats.lanes = lanes;
   // Everything standing on a mound belongs to the level it rises from.
   for (const p of platforms) {
     for (const r of raised) {
@@ -4069,12 +4077,14 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
       // corner; the lower one stops at the taller one's back wall, inside it,
       // where nothing of it could be seen anyway.
       let lo = -HALF; let hi = HALF;
+      let builtLo = false; let builtHi = false;
       const h = heightAt(bx, bz, 62 + dir);
       for (const n of [(dir + 3) % 4, (dir + 1) % 4]) {
         if (isOpen(n) || n === fenced) continue;
         const [ndx, , ndz] = DIR_STEP[n];
         // Which end of this block the neighbour's corner is at, along it.
         const s = along ? ndz : ndx;
+        if (s < 0) builtLo = true; else builtHi = true;
         const nh = heightAt(pos.x + ndx * inset, pos.z + ndz * inset, 62 + n);
         if (nh > h || (nh === h && !along)) {
           if (s < 0) lo = -HALF + FRONTAGE_D; else hi = HALF - FRONTAGE_D;
@@ -4092,8 +4102,18 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
         continue;
       }
       const mid = (lo + hi) / 2; const len = hi - lo;
-      block(along ? bx : pos.x + mid, along ? pos.z + mid : bz, along ? sx : len, along ? len : sz,
-        62 + dir, (dir + 2) % 4, bx, bz);
+      if (hood) {
+        block(along ? bx : pos.x + mid, along ? pos.z + mid : bz, along ? sx : len, along ? len : sz,
+          62 + dir, (dir + 2) % 4, bx, bz);
+      } else {
+        // A room's own cell: no jetties and no stepped fronts. Its street
+        // lamp stands 0.7 m off this front with its lantern at 4.3 m, and the
+        // prose stands its well, its statue or its ladder against it.
+        buildHouseRow({
+          batcher, instances, chunk, pos, dir, a0: lo, a1: hi, cell, salt: 62 + dir, decor, lights, addCollider,
+          fixLo: builtLo && lo === -HALF, fixHi: builtHi && hi === HALF, room: true,
+        });
+      }
       continue;
     }
     // Mostly bank, a cottage now and then -- a village of holes with a few
@@ -4110,8 +4130,287 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
     const bx = pos.x + sx * inset;
     const bz = pos.z + sz * inset;
     if (shire) knoll(bx, bz, 70 + dirA);
-    else block(bx, bz, FRONTAGE_D, FRONTAGE_D, 70 + dirA);
+    else if (hood) block(bx, bz, FRONTAGE_D, FRONTAGE_D, 70 + dirA);
+    else buildCornerHouse({ batcher, chunk, pos, dirA, dirB, cell, decor, addCollider });
   }
+}
+
+/**
+ * A row of town houses along one closed side of an open-air city cell.
+ *
+ * The side used to be one 13 m box with one roof: a slab of wall the length
+ * of the cell, a ridge dead straight along it, and a cell boundary at each end
+ * where the next slab started. Down a street that is the grid itself, drawn in
+ * masonry -- the "square" the user saw. A medieval street is a run of narrow
+ * houses, each its own height, some with the gable to the street and some the
+ * eaves, fronts that do not line up, and upper storeys built out over the lane
+ * on jetties so the strip of sky narrows as it goes up. None of that moves a
+ * room or a doorway: every house stands inside the frontage strip the old slab
+ * stood in, and steps *back* from its street face, never forward, at ground
+ * level -- except along a routed lane that bends (`laneBend`), where the row
+ * facing the bend comes forward by what the other gives back, and the lane
+ * keeps its width. Above head height (a jetty starts at 2.9 m) a storey may
+ * oversail the street by up to 1.1 m.
+ *
+ * Local frame: `a` runs along the street, `o` outwards from the cell centre.
+ * The base street face is at `HALF - FRONTAGE_D`, the back at the cell edge.
+ * `fixLo`/`fixHi`: a perpendicular block butts against that end at the base
+ * street face, so the end house may not step back (it would open a slot).
+ */
+const ROW_FACE = HALF - FRONTAGE_D;
+const JETTY_Y = 2.9;
+// Limewash, as the houses of Colmar and Rothenburg wear it: muted, never
+// saturated -- multiplied into the plaster's own off-white.
+const LIMEWASH = [[1, 0.98, 0.93], [1, 0.9, 0.72], [0.98, 0.86, 0.8], [0.88, 0.93, 0.83], [0.86, 0.9, 0.95], [1, 1, 1], [0.96, 0.92, 0.84]];
+const DOOR_PAINT = ['doorboard', 'doorboard', 'doorgreen', 'doorred', 'doorblue', 'doorboard'];
+
+function rowFrame(pos, dir) {
+  const [dx, , dz] = DIR_STEP[dir];
+  const along = dir === 1 || dir === 3;
+  return {
+    along,
+    at: (a, o) => (along ? { x: pos.x + dx * o, z: pos.z + a } : { x: pos.x + a, z: pos.z + dz * o }),
+    // [world x, world z] extents of something `len` along the street and `dep` out.
+    span: (len, dep) => (along ? [dep, len] : [len, dep]),
+    // triPrism's ridge is its local Z: these turn it along the street or across it.
+    ridgeAlong: along ? 0 : Math.PI / 2,
+    ridgeAcross: along ? Math.PI / 2 : 0,
+  };
+}
+
+/**
+ * A gabled roof with a wall-coloured gable at each end. The prism is the
+ * roof; the gable is a second, narrower prism at the same pitch whose ends
+ * stand proud of the roof's, so the triangle at the end of a house is wall
+ * and the tile shows round it as a verge -- not a triangle of roof tile
+ * standing on end, which is what every block's gable was. Five centimetres
+ * proud, not one: at one the two tied in depth from across a square
+ * (tools/judge/zfight.js, 3,300 px over Midgaard's lanes).
+ *
+ * `recess` sets both ends back from the faces the ridge runs between. A
+ * roof whose ridge ends on a house's street face has its end triangle in
+ * that face's plane, and its eaves overhang carries that triangle across the
+ * neighbour's front, coplanar and facing the same way: a gable to the street
+ * between two houses that line up tied with both (~2,400 px over the home
+ * zone). Set back 5 cm the gable wall is flush with the front below it and
+ * the roof's end is behind it.
+ */
+function gableRoof(batcher, chunk, c, y, cross, overhang, ridge, rise, rot, roofMat, wallMat, tint, recess = 0) {
+  const full = cross + 2 * overhang;
+  batcher.add(triPrism(full, rise, ridge - 2 * recess), roofMat, place(c.x, y, c.z, rot), { chunk });
+  batcher.add(triPrism(cross, rise * cross / full, ridge - 2 * recess + 0.1), wallMat,
+    place(c.x, y, c.z, rot), { chunk, tint, ao: () => 0.92 });
+}
+
+function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cell, salt, decor, lights, addCollider, fixLo = false, fixHi = false, bareLo = false, bareHi = false, bend = null, room = false }) {
+  const F = rowFrame(pos, dir);
+  const y0 = pos.y;
+  const street = (dir + 2) % 4;
+  const R = (i, k) => hash3(cell.x * 31 + i * 7 + dir, cell.z * 31 + k, cell.level, salt);
+
+  // Narrow houses, three and a half to six metres: the width a burgage plot
+  // gave a house front. The last one takes what is left.
+  const plots = [];
+  for (let s = a0, i = 0; a1 - s > 0.05; i++) {
+    const left = a1 - s;
+    let w = 3.6 + R(i, 1) * 2.6;
+    if (left - w < 3.2) w = left <= 6.6 ? left : left / 2;
+    plots.push([s, s + w]);
+    s += w;
+  }
+
+  let lastH = -1;
+  const houses = [];
+  plots.forEach(([s0, s1], i) => {
+    const L = s1 - s0;
+    const am = (s0 + s1) / 2;
+    const r = (k) => R(i, 10 + k);
+    const atEnd = (i === 0 && fixLo) || (i === plots.length - 1 && fixHi);
+    // A room's own cell keeps its street face where it always was: the prose
+    // stands its fountain, well or statue against it, measured off the
+    // colliders, and a stepped front gave those a notch to straddle -- the
+    // fountain at #3141 stood with its bowl in the next house.
+    const back = atEnd || room ? 0 : (r(0) < 0.5 ? 0 : (r(0) - 0.5) * 1.4);
+    // `bend` is where the lane's middle has wandered to, towards +x or +z:
+    // the row on that side steps back by as much, the row facing it forward.
+    const f = ROW_FACE + back + (bend ? (dir === 1 || dir === 2 ? 1 : -1) * bend(am) : 0);
+    const D = HALF - f;
+    let h = 5.8 + r(1) * 3.8;
+    // Two neighbours of one height share a roof plane: one of them steps.
+    if (lastH >= 0 && Math.abs(h - lastH) < 0.5) h = h + (h < 8.0 ? 0.8 : -0.8);
+    lastH = h;
+
+    const stoneGround = r(2) < 0.45;
+    const plaster = r(3) < 0.4;
+    const tint = plaster ? LIMEWASH[Math.floor(r(4) * LIMEWASH.length)] : null;
+    const upperMat = plaster ? 'plaster' : 'timber';
+    const groundMat = stoneGround ? 'stonewall' : upperMat;
+    const groundTint = stoneGround ? null : tint;
+    // Not on a house that keeps a corner: its jetty would run on past the
+    // corner into the next row, and its end would lie in that row's back
+    // wall, facing the same way -- 3,219 tied pixels in one view.
+    // ...nor beside a room's doorway, where its sign and lantern hang out.
+    const bare = (i === 0 && bareLo) || (i === plots.length - 1 && bareHi);
+    const jetty = !room && !atEnd && !bare && r(5) > 0.35 && h > 5.6;
+    const yJ = JETTY_Y + r(6) * 0.3;
+    const J1 = jetty ? 0.4 + r(7) * 0.3 : 0;
+    const yJ2 = yJ + 2.6;
+    const J2 = jetty && h - yJ2 > 2.0 ? 0.25 + r(8) * 0.15 : 0;
+    const top = f - J1 - J2;
+    const Dt = HALF - top;
+    const door = L >= 3.4 && r(15) < 0.8;
+
+    // Storeys, bottom up: [y from, y to, street face].
+    const storeys = jetty
+      ? (J2 ? [[0, yJ, f], [yJ, yJ2, f - J1], [yJ2, h, top]] : [[0, yJ, f], [yJ, h, f - J1]])
+      : [[0, h, f]];
+    houses.push({ s0, s1, storeys });
+    const flowers = instances && r(19) > 0.55 && instances.library.get('shire_window_box') ? 'shire_window_box' : null;
+    storeys.forEach(([ya, yb, face], k) => {
+      const dep = HALF - face;
+      const c = F.at(am, (face + HALF) / 2);
+      const [sx, sz] = F.span(L, dep);
+      batcher.add(box(sx, yb - ya, sz, 2, k ? 1 : 2, 2), k === 0 ? groundMat : upperMat,
+        place(c.x, y0 + (ya + yb) / 2, c.z), { chunk, tint: k === 0 ? groundTint : tint, ao: k === 0 ? wallAo(y0) : null });
+      // The street face's windows, and only that face's: the ends are party
+      // walls against the next house, and the back is against the next cell.
+      const win = {
+        kind: 'windows', x: c.x, y: y0 + (k === 0 ? 0 : ya - 0.5), z: c.z, w: sx, d: sz,
+        h: k === 0 ? yb : yb - ya + 0.5, seed: r(20 + k), frame: k === 0 && stoneGround ? 'stone' : 'timber',
+        only: [street], doorSides: k === 0 && door ? true : undefined,
+      };
+      decor.push(win);
+      // Flowers on the sills of the upper floors of some: in front of the
+      // reveal, standing on the sill, where a window box sits.
+      if (flowers) {
+        for (const p of windowSpots(win, street)) {
+          if (p.y < y0 + JETTY_Y + 0.5) continue;
+          const [ox, , oz] = DIR_STEP[street];
+          instances.add(flowers, { x: p.x + ox * 0.34, y: p.y - 0.69, z: p.z + oz * 0.34, rotY: FACE_ROT[street] }, chunk);
+        }
+      }
+      if (k === 0) return;
+      // The bressumer the jetty stands on, and the joist ends under it. Each
+      // is seated *on* the face it meets, not sunk into it: a face it only
+      // touches points the other way and can never tie with it, while one
+      // sunk 2 cm draws a line where the two cross (tools/judge/zfight.js
+      // counts those, and they flicker along the edge).
+      const prev = storeys[k - 1][2];
+      const bc = F.at(am, face + 0.09);
+      const [bx, bz] = F.span(L - 0.04, 0.24);
+      batcher.add(box(bx, 0.24, bz), 'wood', place(bc.x, y0 + ya - 0.12, bc.z), { chunk, tint: FRAME_OAK });
+      const n = Math.max(2, Math.floor(L / 0.7));
+      for (let j = 0; j < n; j++) {
+        const a = s0 + (j + 0.5) * (L / n);
+        const jc = F.at(a, (face + 0.21 + prev) / 2);
+        const [jx, jz] = F.span(0.13, prev - face - 0.21);
+        batcher.add(box(jx, 0.15, jz), 'wood', place(jc.x, y0 + ya - 0.075, jc.z), { chunk, tint: FRAME_OAK });
+      }
+    });
+    // The ground storey is all a person can walk into.
+    {
+      const c = F.at(am, (f + HALF) / 2);
+      const [sx, sz] = F.span(L, D);
+      addCollider(c.x - sx / 2, c.x + sx / 2, c.z - sz / 2, c.z + sz / 2, y0, y0 + h);
+    }
+
+    // Gable to the street on most of the narrow ones, the way a street of
+    // burgage plots reads; eaves to the street on the wide ones.
+    const roofMat = r(9) > 0.88 ? 'thatch' : 'rooftile';
+    const gableFront = L < 5.4 ? r(11) > 0.3 : r(11) > 0.75;
+    const topC = F.at(am, (top + HALF) / 2);
+    const rise = gableFront ? (L / 2 + 0.25) * (1.2 + r(12) * 0.5) : (Dt / 2 + 0.35) * (1.0 + r(12) * 0.35);
+    if (gableFront) gableRoof(batcher, chunk, topC, y0 + h, L, 0.25, Dt, rise, F.ridgeAcross, roofMat, upperMat, tint, 0.05);
+    else gableRoof(batcher, chunk, topC, y0 + h, Dt, 0.35, L, rise, F.ridgeAlong, roofMat, upperMat, tint);
+    // A chimney stack on some, off the ridge towards the back, standing clear
+    // of the ridge whatever the pitch.
+    if (r(13) > 0.62) {
+      const cc = F.at(s0 + L * (0.25 + r(14) * 0.5), HALF - 0.9);
+      const ch = rise + 1.1;
+      batcher.add(box(0.62, ch, 0.62, 1, 2, 1), 'stonewall', place(cc.x, y0 + h - 0.5 + ch / 2, cc.z), { chunk });
+    }
+
+    // A door in most of them, painted in some, and a lantern by a few.
+    if (door) {
+      const leafMat = DOOR_PAINT[Math.floor(r(16) * DOOR_PAINT.length)];
+      // Leaf, jambs and head all seated on the wall's face, as the jetty's
+      // timbers are.
+      const dc = F.at(am, f - 0.03);
+      const [lx, lz] = F.span(1.0, 0.06);
+      batcher.add(box(lx, 2.1, lz), leafMat, place(dc.x, y0 + 1.05, dc.z), { chunk });
+      for (const sgn of [-1, 1]) {
+        const jc = F.at(am + sgn * 0.6, f - 0.065);
+        const [jx, jz] = F.span(0.18, 0.13);
+        batcher.add(box(jx, 2.3, jz), 'wood', place(jc.x, y0 + 1.15, jc.z), { chunk, tint: FRAME_OAK });
+      }
+      const hc = F.at(am, f - 0.075);
+      const [hx, hz] = F.span(1.5, 0.15);
+      batcher.add(box(hx, 0.2, hz), 'wood', place(hc.x, y0 + 2.4, hc.z), { chunk, tint: FRAME_OAK });
+      const lantern = instances && r(17) > 0.72 ? 'wall_lantern' : null;
+      if (lantern && instances.library.get(lantern)) {
+        const side = r(18) > 0.5 ? 1 : -1;
+        const lc = F.at(am + side * 1.05, f);
+        // The model's arm reaches out along +z from a plate on the wall.
+        instances.add(lantern, { x: lc.x, y: y0, z: lc.z, rotY: FACE_ROT[street] + Math.PI }, chunk);
+        const [ox, , oz] = DIR_STEP[street];
+        lights.push({ x: lc.x + ox * 0.4, y: y0 + 2.8, z: lc.z + oz * 0.4, color: 0xffb566, intensity: 5, radius: 7, flicker: true, outdoor: true });
+      }
+    }
+  });
+  return { F, houses };
+}
+
+/**
+ * Where actors.js puts the windows of a `windows` decor item on one face --
+ * the same rows and columns, worked out the same way (its lit-window loop).
+ * Change one and change the other.
+ */
+function windowSpots(w, faceDir) {
+  const [nx, , nz] = DIR_STEP[faceDir];
+  const tx = nz; const tz = -nx;
+  const span = nx ? w.d : w.w;
+  const cols = Math.max(1, Math.floor(span / 3.0));
+  const rows = Math.max(1, Math.floor((w.h - 1.4) / 2.6));
+  const cx = w.x + nx * (w.w / 2); const cz = w.z + nz * (w.d / 2);
+  const out = [];
+  for (let row = 0; row < rows; row++) {
+    const y = w.y + 1.8 + row * 2.6;
+    if (y > w.y + w.h - 0.9) continue;
+    for (let c = 0; c < cols; c++) {
+      const spread = (c - (cols - 1) / 2) * (span / cols);
+      if (row === 0 && Math.abs(spread) < 1.5 && w.doorSides) continue;
+      out.push({ x: cx + tx * spread, y, z: cz + tz * spread });
+    }
+  }
+  return out;
+}
+
+/**
+ * The house on the corner between two ways out: low, so it is not the
+ * free-standing tower a 3.2 m square block ten metres high was, with windows
+ * on both of its street faces and its roof turned whichever way.
+ */
+function buildCornerHouse({ batcher, chunk, pos, dirA, dirB, cell, decor, addCollider }) {
+  const [ax, , az] = DIR_STEP[dirA];
+  const [bx2, , bz2] = DIR_STEP[dirB];
+  const inset = HALF - FRONTAGE_D / 2;
+  const x = pos.x + (ax + bx2) * inset;
+  const z = pos.z + (az + bz2) * inset;
+  const R = (k) => hash3(cell.x * 13 + dirA, cell.z * 13 + k, cell.level, 87);
+  const h = 4.8 + R(0) * 2.4;
+  const plaster = R(1) < 0.4;
+  const tint = plaster ? LIMEWASH[Math.floor(R(2) * LIMEWASH.length)] : null;
+  const mat = R(3) < 0.5 ? 'stonewall' : plaster ? 'plaster' : 'timber';
+  batcher.add(box(FRONTAGE_D, h, FRONTAGE_D, 2, 2, 2), mat, place(x, pos.y + h / 2, z),
+    { chunk, tint: mat === 'stonewall' ? null : tint, ao: wallAo(pos.y) });
+  addCollider(x - FRONTAGE_D / 2, x + FRONTAGE_D / 2, z - FRONTAGE_D / 2, z + FRONTAGE_D / 2, pos.y, pos.y + h);
+  const rot = R(4) > 0.5 ? Math.PI / 2 : 0;
+  gableRoof(batcher, chunk, { x, z }, pos.y + h, FRONTAGE_D, 0.3, FRONTAGE_D, (FRONTAGE_D / 2 + 0.3) * (1.1 + R(5) * 0.4),
+    rot, R(6) > 0.88 ? 'thatch' : 'rooftile', mat === 'stonewall' ? 'stonewall' : mat, mat === 'stonewall' ? null : tint, 0.05);
+  decor.push({
+    kind: 'windows', x, y: pos.y, z, w: FRONTAGE_D, d: FRONTAGE_D, h, seed: R(7),
+    frame: mat === 'stonewall' ? 'stone' : 'timber', only: [(dirA + 2) % 4, (dirB + 2) % 4],
+  });
 }
 
 /**
@@ -4217,6 +4516,247 @@ function buildPartyWalls({ batcher, frontage, addCollider, layout, rooms, street
       }
     }
   }
+}
+
+/**
+ * A line of washing across a lane, from an upper floor on one side to the
+ * one facing it: the thing that says people live behind these fronts, and a
+ * strip of the sky taken out over the lane. It sags a little and nothing on
+ * it hangs lower than 3.2 m, so nobody walks into a shirt.
+ */
+const WASHING = [[0.95, 0.93, 0.88], [0.92, 0.82, 0.62], [0.72, 0.42, 0.36], [0.5, 0.58, 0.7], [0.66, 0.7, 0.58], [0.85, 0.85, 0.82]];
+function washingLine({ batcher, chunk, pos, rows, seed }) {
+  const R = (k) => hash3(Math.round(pos.x), Math.round(pos.z), k, Math.floor(seed * 9973));
+  const a = (R(1) - 0.5) * 7;
+  const y = 4.4 + R(2) * 1.1;
+  // Each end on the face of whatever storey is at that height there.
+  const ends = rows.map(({ F, houses }) => {
+    const h = houses.find((q) => a >= q.s0 + 0.4 && a <= q.s1 - 0.4);
+    const st = h && h.storeys.find(([ya, yb]) => y >= ya + 0.3 && y <= yb - 0.3);
+    if (!st) return null;
+    const p = F.at(a, st[2]);
+    return new THREE.Vector3(p.x, pos.y + y, p.z);
+  });
+  if (!ends[0] || !ends[1]) return false;
+  const [p0, p1] = ends;
+  const sag = 0.18 + R(3) * 0.15;
+  const mid = p0.clone().lerp(p1, 0.5).setY(pos.y + y - sag);
+  const across = Math.abs(p1.x - p0.x) > Math.abs(p1.z - p0.z);
+  // The rope: two straight runs down to the middle.
+  for (const [u, v] of [[p0, mid], [mid, p1]]) {
+    const len = u.distanceTo(v);
+    const tilt = Math.asin((v.y - u.y) / len);
+    const geo = new THREE.BoxGeometry(0.03, 0.03, len);
+    const flat = across ? Math.sign(v.x - u.x) : Math.sign(v.z - u.z);
+    geo.rotateX(-flat * tilt);
+    const c = u.clone().lerp(v, 0.5);
+    batcher.add(geo, 'rope', place(c.x, c.y, c.z, across ? Math.PI / 2 : 0), { chunk });
+    geo.dispose();
+  }
+  // What is hanging on it.
+  const n = 3 + Math.floor(R(4) * 3);
+  for (let i = 0; i < n; i++) {
+    const t = 0.14 + (0.72 * (i + 0.2 + R(10 + i) * 0.6)) / n;
+    const w = 0.42 + R(20 + i) * 0.4;
+    const h = 0.45 + R(30 + i) * 0.45;
+    const at = p0.clone().lerp(p1, t);
+    const lineY = pos.y + y - sag * (1 - Math.abs(2 * t - 1));
+    const [sx, sz] = across ? [w, 0.025] : [0.025, w];
+    batcher.add(box(sx, h, sz), 'linen', place(at.x, lineY - h / 2 - 0.01, at.z), {
+      chunk, tint: WASHING[Math.floor(R(40 + i) * WASHING.length)],
+    });
+  }
+  return true;
+}
+
+/**
+ * A lane that does not run dead straight through its cell.
+ *
+ * Only a straight run -- houses on both sides, the way through at both ends
+ * and nowhere else -- and only between the ends: the offset is a half wave,
+ * nothing at either cell edge and `amp` in the middle, so a lane leaves a
+ * cell exactly where it entered it and meets the next cell, a crossing or a
+ * room's doorway, square on. Cells take their side by hash, so a run of them
+ * wanders: an S where two neighbours lean opposite ways, a long bow where
+ * they agree. One cell in five keeps straight. 0.8-1.4 m at the middle is a
+ * bend you see down a street -- the facades close the view a little further
+ * on -- and never one that takes the lane off the room's middle, where the
+ * player arrives.
+ */
+function laneBend(cell, shut, ways) {
+  const ew = shut[0] && shut[2] && ways.has(1) && ways.has(3) && ways.size === 2;
+  const ns = shut[1] && shut[3] && ways.has(0) && ways.has(2) && ways.size === 2;
+  if (!ew && !ns) return null;
+  const t = ew ? cell.x : cell.z;
+  const across = ew ? cell.z : cell.x;
+  const r = hash3(t, across, cell.level, 191);
+  if (r < 0.2) return null;
+  const amp = (0.8 + hash3(t, across, cell.level, 192) * 0.6) * (r < 0.6 ? 1 : -1);
+  return { amp: Math.abs(amp), at: (a) => amp * Math.cos(Math.PI * a / CELL) };
+}
+
+/** actors.js's street clutter, less the ladder (see `buildLanes`). */
+const LANE_PROPS = [
+  'barrel', 'crate', 'sack', 'hay_bale', 'bench', 'trough', 'stacked_crates', 'barrel_stack', 'firewood_pile',
+  'water_butt', 'bucket', 'rope_coil', 'planks_pile', 'herb_pots', 'broom', 'cartwheel', 'nettles',
+];
+
+/**
+ * Lanes: houses brought forward along the routed streets, as the rooms' own
+ * cells already had them.
+ *
+ * Measured with tools/judge/cozy.js before this: Midgaard's 58 open-air
+ * street rooms had a median lane of 9.4 m and 64% open sky over them, and its
+ * 194 routed street cells -- three for every room -- 17.7 m and 80%. The
+ * rooms had been narrowed to lanes and everything between them was still a
+ * thirteen-metre cell of paving, so a street was a slot, a void, a slot. The
+ * "spacy", gridded town was mostly those cells.
+ *
+ * A side of a routed cell is built on when nothing walks through it: no
+ * passage turns that way (`ways`), and what is next door is a house, another
+ * street that does not join this one, or a room whose wall there has no way
+ * through it. Two parallel streets that the mud never joins become two lanes
+ * with a row of houses between them, which is what the graph says they are.
+ * Nothing is built where a square is next door (a square keeps its size and
+ * its mouths), where the town wall runs, on the temple's mound, or in the
+ * Shire, the desert, the bog or the neighbourhood, which have their own.
+ */
+function buildLanes({ batcher, instances, layout, world, rooms, frontage, lifts, reserved, mountain, cellKey, chunkOf, worldOf, decor, lights, addCollider, streetClutter, pathWalls }) {
+  // Every way out of every routed cell, over all the passages that share it.
+  const cells = new Map();
+  for (const link of layout.links) {
+    if (link.kind !== 'alley') continue;
+    const level = link.from.level;
+    const chain = [link.from, ...link.path, link.to];
+    for (let i = 1; i < chain.length - 1; i++) {
+      const k = cellKey(level, chain[i].x, chain[i].z);
+      if (!cells.has(k)) cells.set(k, { level, x: chain[i].x, z: chain[i].z, dirs: new Set(), through: [] });
+      const c = cells.get(k);
+      c.dirs.add(dirBetween(chain[i], chain[i - 1]));
+      c.dirs.add(dirBetween(chain[i], chain[i + 1]));
+      c.through.push(link);
+    }
+  }
+  const walled = new Set(pathWalls.map(({ spot, dir }) => `${cellKey(spot.level, spot.x, spot.z)}|${dir}`));
+  const townEnd = (room) => !isOpenAir(room) || (room.sector === SECTOR.CITY && !isShire(room) && !hoodStyle(room)
+    && !eastStyle(room) && !isBog(room));
+  const squareAt = (level, x, z) => {
+    const v = layout.at(level, x, z);
+    if (v === undefined) return null;
+    const room = world.rooms.get(v);
+    return isOpenAir(room) && SQUARE.test(room.name) ? room : null;
+  };
+
+  // What happened to every routed cell, for tools/judge/cozy.js.
+  const tally = { cells: cells.size, built: 0, rows: 0, corners: 0, reserved: 0, notTown: 0, square: 0, nothingShut: 0, bent: 0, washing: 0, stalls: 0, why: new Map(), lines: [] };
+  for (const [k, { level, x, z, dirs, through }] of cells) {
+    if (reserved.has(k) || mountain.has(k)) { tally.reserved++; tally.why.set(k, 'reserved'); continue; }
+    let ok = true; let street = false;
+    for (const link of through) {
+      for (const end of [link.from, link.to]) {
+        const info = rooms.get(end.vnum);
+        if (!info || info.unbuilt || lifts.get(end.vnum) || !townEnd(end.room)) ok = false;
+        if (isOpenAir(end.room) && wantsFrontage(end.room)) street = true;
+      }
+    }
+    if (!ok || !street) { tally.notTown++; tally.why.set(k, 'notTown'); continue; }
+    let nearSquare = null;
+    for (let d = 0; d < 4; d++) nearSquare = nearSquare || squareAt(level, x + DIR_STEP[d][0], z + DIR_STEP[d][2]);
+
+    // Is side `d` a wall a house may stand against?
+    const closed = (d) => {
+      if (dirs.has(d) || walled.has(`${k}|${d}`)) return false;
+      const nx = x + DIR_STEP[d][0]; const nz = z + DIR_STEP[d][2];
+      const v = layout.at(level, nx, nz);
+      if (v !== undefined) {
+        const info = rooms.get(v);
+        if (!info || info.unbuilt) return false;
+        if (layout.sides.get(v)?.[REVERSE_DIR[d]]) return false;
+        return !isOpenAir(info.room) || (wantsFrontage(info.room) && townEnd(info.room));
+      }
+      const next = cells.get(cellKey(level, nx, nz));
+      if (next) return next.through.every((l) => townEnd(l.from.room) && townEnd(l.to.room));
+      const spot = frontage.get(cellKey(level, nx, nz));
+      return !!spot && !!spot.house;
+    };
+    const shut = [0, 1, 2, 3].map(closed);
+    const pos = worldOf({ level, x, z });
+    const chunk = chunkOf({ level, x, z });
+    const cell = { level, x, z };
+    if (nearSquare) {
+      tally.square++; tally.why.set(k, 'square');
+      // A market's mouths are where its stalls stand, against the houses
+      // either side and clear of the way through.
+      if (instances && /\bmarket\b/i.test(nearSquare.name) && instances.library.get('market_stall')) {
+        for (let d = 0; d < 4; d++) {
+          if (!shut[d]) continue;
+          const F = rowFrame(pos, d);
+          for (const a of [-3.0, 3.0]) {
+            if (hash3(x * 5 + d, z * 5 + Math.sign(a), level, 197) < 0.3) continue;
+            const c = F.at(a + (hash3(x, z, d, 198) - 0.5) * 0.6, HALF - 1.35);
+            instances.add('market_stall', { x: c.x, y: pos.y, z: c.z, rotY: FACE_ROT[(d + 2) % 4] + Math.PI }, chunk);
+            const [sx, sz] = F.span(2.7, 1.8);
+            addCollider(c.x - sx / 2, c.x + sx / 2, c.z - sz / 2, c.z + sz / 2, pos.y, pos.y + 2.4);
+            tally.stalls++;
+          }
+        }
+      }
+      continue;
+    }
+    if (!shut.some(Boolean)) tally.nothingShut++;
+    else tally.built++;
+    tally.why.set(k, shut.map((v) => (v ? '#' : '.')).join(''));
+
+    const bend = laneBend(cell, shut, dirs);
+    const built = [];
+    // A way out of this cell into a room: its shop sign and lantern hang
+    // over this cell's edge there.
+    const toRoom = (d) => dirs.has(d) && layout.at(level, x + DIR_STEP[d][0], z + DIR_STEP[d][2]) !== undefined;
+    if (bend) tally.bent++;
+    for (let dir = 0; dir < 4; dir++) {
+      if (!shut[dir]) continue;
+      tally.rows++;
+      // Where two rows meet in a corner the one along x keeps it and the one
+      // along z stops at its street face; the corner-keeping end may then not
+      // step back, or it would open a slot beside the other row's end.
+      if (dir === 1 || dir === 3) {
+        built[dir] = buildHouseRow({
+          batcher, instances, chunk, pos, dir, cell, salt: 162 + dir, decor, lights, addCollider,
+          a0: shut[0] ? -HALF + FRONTAGE_D : -HALF, a1: shut[2] ? HALF - FRONTAGE_D : HALF, bend: bend && bend.at,
+          bareLo: toRoom(0), bareHi: toRoom(2),
+        });
+      } else {
+        built[dir] = buildHouseRow({
+          batcher, instances, chunk, pos, dir, cell, salt: 162 + dir, decor, lights, addCollider,
+          a0: -HALF, a1: HALF, fixLo: shut[3], fixHi: shut[1], bend: bend && bend.at,
+          bareLo: toRoom(3), bareHi: toRoom(1),
+        });
+      }
+    }
+    // Washing strung across from one upper floor to the one facing it.
+    for (const [da, db] of [[0, 2], [1, 3]]) {
+      if (!built[da] || !built[db] || hash3(x, z, level, 193) > 0.4) continue;
+      if (washingLine({ batcher, chunk, pos, rows: [built[da], built[db]], seed: hash3(x, z, level, 194) })) { tally.washing++; tally.lines.push([level, x, z, da]); }
+    }
+    // The corner between two ways through: a house, so a turn or a crossing
+    // is a corner of a lane and not a widening of it.
+    for (const [dirA, dirB] of [[0, 1], [1, 2], [2, 3], [3, 0]]) {
+      if (!dirs.has(dirA) || !dirs.has(dirB)) continue;
+      tally.corners++;
+      buildCornerHouse({ batcher, chunk, pos, dirA, dirB, cell, decor, addCollider });
+    }
+    // The barrels and crates against the new fronts, not out in the lane.
+    const item = streetClutter.get(k);
+    // In a bent cell only against the side the lane has bowed towards: the
+    // row facing it comes forward, and a barrel at the old line stood in it.
+    if (item && shut.some(Boolean)) {
+      item.half = HALF - FRONTAGE_D;
+      // A ladder leans its top on the ground storey, which is under a jetty.
+      item.props = item.props ? item.props.filter((p) => p !== 'ladder') : LANE_PROPS;
+      item.walls = [0, 1, 2, 3].filter((d) => shut[d] && (!bend || (d === 1 || d === 2 ? 1 : -1) * bend.at(0) > 0));
+    }
+  }
+  return tally;
 }
 
 /**
@@ -6114,7 +6654,7 @@ function buildRailFence({ batcher, chunk, pos, dir, addCollider }) {
  * buildings that fill the cells beside it become the street frontage; between
  * two indoor rooms it gets walls and a ceiling and becomes a corridor.
  */
-function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null, streetCells = null, lift = 0 }) {
+function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null, streetCells = null, lift = 0, streetClutter = null }) {
   const enclosed = alleyEnclosed(link);
   batcher.indoor = enclosed;
   const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
@@ -6245,12 +6785,16 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
       if (!built && !midstream && !bog && wantsClutter(source)
         && hash3(c.x, c.z, level, 12) > 0.45) {
         const walls = [0, 1, 2, 3].filter((d) => !openDirs.has(d));
-        decor.push({
+        const item = {
           kind: 'clutter', x: pos.x, y, z: pos.z, half: HALF,
           walls: walls.length ? walls : [0, 1, 2, 3],
           seed: hash3(c.x, c.z, level, 13), indoor: false,
           props: clutterProps(source),
-        });
+        };
+        decor.push(item);
+        // `buildLanes` brings houses forward on this cell's closed sides and
+        // stands the clutter against them.
+        if (streetClutter && cellKey) streetClutter.set(cellKey(level, c.x, c.z), item);
       }
       continue;
     }
