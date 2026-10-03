@@ -5,7 +5,8 @@
  * looks like the map you'd sketch on paper while exploring.
  */
 
-import { SECTOR, SECTOR_NAME, DIR_NAME, DIR_STEP } from './are.js';
+import { SECTOR, SECTOR_NAME, DIR_NAME } from './are.js';
+import { CELL, LEVEL_H } from './build.js';
 
 const SECTOR_COLOUR = {
   [SECTOR.INSIDE]: '#8a7f6a',
@@ -327,8 +328,9 @@ const MAP = 176;
 const READ_WPS = 3.2;
 
 export class Hud {
-  constructor(root, layout) {
+  constructor(root, layout, crossings = []) {
     this.layout = layout;
+    this.crossings = crossings;
     this.el = {
       title: root.querySelector('#room-title'),
       area: root.querySelector('#room-area'),
@@ -358,9 +360,10 @@ export class Hud {
     this.toastTimer = 0;
   }
 
-  /** Another zone's grid for the map (main.js crossTo). */
-  setLayout(layout) {
+  /** Another zone's grid for the map, and its gates out (main.js crossTo). */
+  setLayout(layout, crossings = []) {
     this.layout = layout;
+    this.crossings = crossings;
     this.mapRoom = null;
     this.currentVnum = null;
   }
@@ -508,59 +511,69 @@ export class Hud {
     // The map gets the true heading, not the card's: it is a marker, not an
     // instrument, and has nothing to settle. It is redrawn when the room or
     // the heading moves, and a few times a second for the mobiles' marks.
+    // Redrawn as you walk, too: the map is centred on you, not on the room.
     this.mapAge = (this.mapAge || 0) + dt;
-    if (roomVnum !== this.mapRoom || Math.abs(heading - this.mapHeading) > 0.002 || this.mapAge > 0.25) {
+    const moved = !this.mapEye || Math.hypot(p.x - this.mapEye.x, p.z - this.mapEye.z) > 0.25;
+    if (roomVnum !== this.mapRoom || Math.abs(heading - this.mapHeading) > 0.002 || moved || this.mapAge > 0.25) {
       this.mapRoom = roomVnum; this.mapHeading = heading; this.mapAge = 0;
-      this.drawMinimap(roomVnum, heading);
+      this.mapEye = { x: p.x, y: p.y, z: p.z };
+      this.drawMinimap(roomVnum, heading, this.mapEye);
     }
   }
 
-  drawMinimap(roomVnum, heading) {
+  /**
+   * North up, centred on where you stand. It was centred on the room you are
+   * counted in, with the heading wedge on that room's square, so out in a
+   * street the wedge sat on a room you were not in -- 13 m north of the West
+   * Gate it pointed out of the middle of the Magic Shop. The room you are
+   * counted in is still the bright square.
+   */
+  drawMinimap(roomVnum, heading, eye) {
     const ctx = this.ctx;
     const size = MAP;
     const cell = this.layout.cells.get(roomVnum);
     ctx.clearRect(0, 0, size, size);
     ctx.fillStyle = 'rgba(10,9,8,0.55)';
     ctx.fillRect(0, 0, size, size);
-    if (!cell) return;
+    if (!eye) return;
+    // Your feet, not your eye: a level is 7.6 m and the eye is 1.72 up.
+    const level = cell ? cell.level : Math.round((eye.y - 1.72) / LEVEL_H);
+    const px = eye.x / CELL;
+    const pz = eye.z / CELL;
 
     const step = 7.5;   // rooms sit two grid cells apart
     const reach = Math.ceil(size / 2 / step) + 1;
     const cx = size / 2;
     const cy = size / 2;
-    const toScreen = (x, z) => [cx + (x - cell.x) * step, cy + (z - cell.z) * step];
-    const near = (c) => Math.abs(c.x - cell.x) <= reach && Math.abs(c.z - cell.z) <= reach;
+    const toScreen = (x, z) => [cx + (x - px) * step, cy + (z - pz) * step];
+    const near = (c) => Math.abs(c.x - px) <= reach && Math.abs(c.z - pz) <= reach;
 
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     for (const link of this.layout.links) {
-      if (link.from.level !== cell.level || !near(link.from)) continue;
+      if (link.from.level !== level) continue;
       if (link.kind === 'alley') {
+        const chain = [link.from, ...link.path, link.to];
+        // Any of it in view: a street from a room off the map's edge still
+        // runs across it.
+        if (!chain.some(near)) continue;
         ctx.strokeStyle = 'rgba(214,196,160,0.45)';
         ctx.beginPath();
-        const chain = [link.from, ...link.path, link.to];
         chain.forEach((c, i) => {
           const [x, y] = toScreen(c.x, c.z);
           if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
         ctx.stroke();
-      } else if (link.kind === 'portal') {
+      } else if (link.kind === 'portal' && near(link.from)) {
         const [x1, y1] = toScreen(link.from.x, link.from.z);
         ctx.fillStyle = '#7fd8ff';
         ctx.fillRect(x1 - 2, y1 - 2, 4, 4);
-      } else if (link.kind === 'gate' && link.exit.to >= 0 && link.dir < 4) {
-        // A way into another zone: a gold mark on the side it leaves by.
-        const [x1, y1] = toScreen(link.from.x + DIR_STEP[link.dir][0] * 0.9, link.from.z + DIR_STEP[link.dir][2] * 0.9);
-        ctx.fillStyle = '#e0bd77';
-        ctx.beginPath();
-        ctx.moveTo(x1, y1 - 3.5); ctx.lineTo(x1 + 3.5, y1); ctx.lineTo(x1, y1 + 3.5); ctx.lineTo(x1 - 3.5, y1);
-        ctx.closePath(); ctx.fill();
       }
     }
 
     for (const other of this.layout.cells.values()) {
-      if (other.level !== cell.level || !near(other)) continue;
+      if (other.level !== level || !near(other)) continue;
       const [x, y] = toScreen(other.x, other.z);
       const isHere = other.vnum === roomVnum;
       ctx.fillStyle = isHere ? '#f2d999' : (SECTOR_COLOUR[other.room.sector] || '#8a7f6a');
@@ -572,6 +585,33 @@ export class Hud {
         ctx.fillStyle = 'rgba(226,120,90,0.9)';
         ctx.fillRect(x + r - 2.5, y - r, 2.5, 2.5);
       }
+    }
+
+    // A way into another zone: a gold arrowhead just outside its room's
+    // square, on the wall its gate is in (build.js `crossingFrame`), pointing
+    // the way through. It was a diamond guessed on the exit's own axis 0.9 of
+    // a grid cell out -- 11.7 m from the room's middle, in whatever the grid
+    // had there, and on the wrong side wherever the layout put the gate on
+    // another wall than the one the exit names. The gate itself stands 3.3 m
+    // in, which at this scale is under the room's own square.
+    for (const gate of this.crossings) {
+      if (gate.to < 0) continue;
+      const home = this.layout.cells.get(gate.room);
+      if (!home || home.level !== level || !near(home)) continue;
+      const [ox, oz] = gate.out;
+      const [tx, tz] = gate.along;
+      const [rx, ry] = toScreen(home.x, home.z);
+      // Clear of the heading wedge's tip (9 px) on the room you are in.
+      const edge = home.vnum === roomVnum ? 8.5 : 5.1;
+      const x1 = rx + ox * edge; const y1 = ry + oz * edge;
+      ctx.fillStyle = '#e0bd77';
+      ctx.strokeStyle = 'rgba(10,9,8,0.8)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x1 + ox * 5, y1 + oz * 5);
+      ctx.lineTo(x1 + tx * 3.5, y1 + tz * 3.5);
+      ctx.lineTo(x1 - tx * 3.5, y1 - tz * 3.5);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
     // heading wedge. The map is north-up and the wedge is drawn pointing north,

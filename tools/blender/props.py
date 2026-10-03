@@ -367,17 +367,34 @@ def build_portcullis():
     lib.reset()
     p = []
     W, H, lift = 3.2, 3.1, 0.42
+    # It hangs in `stone_arch`, whose opening is round-headed: square to the
+    # springing at 1.5 m, then a half-circle of radius W/2. A square grille
+    # stuck out of the voussoirs' backs at both haunches, and its stone
+    # channels ran up past the ring to 3.3 m with their inner faces in the
+    # plane of the piers' -- the arch and the channel took turns to be drawn,
+    # which was the flicker at every crossing. Each bar now stops 6 cm into
+    # the soffit above it, each rail 6 cm into whatever it meets.
+    spring, r = 1.5, W / 2
+    soffit = lambda x: spring + math.sqrt(max(0.0, r * r - x * x))
     bars = 7
     for i in range(bars):
         bx = -W / 2 + W * (i + 0.5) / bars
-        p.append(kit.timber((0.11, 0.11, H - lift - 0.2), (bx, 0, lift + (H - lift - 0.2) / 2 + 0.2),
+        top = soffit(bx) + 0.06
+        p.append(kit.timber((0.11, 0.11, top - lift - 0.2), (bx, 0, lift + 0.2 + (top - lift - 0.2) / 2),
                             (0, 0, 0), "iron", 0.02, "bar"))
         p.append(lib.cone(0.09, 0.0, 0.3, (bx, 0, lift + 0.15), verts=6, rotation=(math.pi, 0, 0),
                           name="spike", mat="iron"))
-    for z in (lift + 0.55, H * 0.55, H - 0.28):
-        p.append(kit.timber((W, 0.14, 0.13), (0, 0, z), (0, 0, 0), "iron", 0.025, "rail"))
+    for z in (lift + 0.55, 1.70, 2.30):
+        # 6 cm, not 4: at 2.30 m a 4 cm lap put the rail's end in the plane
+        # of the outermost bar's outer face.
+        half = (W / 2 if z <= spring else math.sqrt(r * r - (z - spring) ** 2)) + 0.06
+        p.append(kit.timber((half * 2, 0.14, 0.13), (0, 0, z), (0, 0, 0), "iron", 0.025, "rail"))
+    # The grooves it runs in: up the piers to the impost, standing 4 cm proud
+    # of each pier's face and 2 cm short of its plinth's, so no face of the
+    # channel lies in a face of the arch.
     for sx in (-1, 1):
-        p.append(kit.timber((0.2, 0.32, H + 0.2), (sx * (W / 2 + 0.1), 0, (H + 0.2) / 2),
+        x0, x1 = W / 2 - 0.04, W / 2 + 0.2
+        p.append(kit.timber((x1 - x0, 0.32, spring), (sx * (x0 + x1) / 2, 0, spring / 2),
                             (0, 0, 0), "stonewall", 0.03, "channel"))
     return kit.deliver(p, "portcullis")
 

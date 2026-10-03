@@ -681,7 +681,7 @@ async function boot() {
 
   const player = new Player(camera, renderer.domElement, built);
   player.nav = actors.nav;   // so a compass step walks round furniture
-  const hud = new Hud(document.body, layout);
+  const hud = new Hud(document.body, layout, built.crossings);
   const audio = new Audio();
 
   const options = createOptions({
@@ -1278,13 +1278,13 @@ async function boot() {
   // during a glide queues and fires on arrival instead of being swallowed.
   let queuedStep = null;
 
-  function step(dir, typed = false) {
+  function step(dir, typed = false, from = null) {
     // Typed at the command line, a refusal is the mud's line in the console;
     // from the arrow keys it is a toast over the world.
     const refuse = (toast, mud) => { if (typed) return { ok: false, text: mud }; hud.toast(toast); return null; };
     if (player.gliding) { queuedStep = dir; return null; }
     if (fadeTimer > 0 || crossing) return null;
-    const here = currentRoom();
+    const here = from ?? currentRoom();
     const room = here && world.rooms.get(here);
     if (!room) return null;
     const exit = room.exits[dir];
@@ -1472,7 +1472,7 @@ async function boot() {
     fileLights();
     player.setWorld(built);
     player.nav = actors.nav;
-    hud.setLayout(layout);
+    hud.setLayout(layout, built.crossings);
     gameUi.setBuilt(liveBuilt);
     items.setBuilt(built);
     game.enterZone({ layout, built, actors });
@@ -1648,24 +1648,42 @@ async function boot() {
   let pressing = 0;
   function walkIntoCrossing(dt) {
     if (pressing < 0) { pressing = Math.min(0, pressing + dt); return; }
-    const room = state.roomVnum !== null ? world.rooms.get(state.roomVnum) : null;
-    const info = room && built.rooms.get(room.vnum);
-    if (!info || !player.keys.has('KeyW')) { pressing = 0; return; }
-    const fx = -Math.sin(camera.rotation.y);
-    const fz = -Math.cos(camera.rotation.y);
-    for (let dir = 0; dir < 4; dir++) {
-      const exit = room.exits[dir];
+    if (!player.keys.has('KeyW')) { pressing = 0; return; }
+    const gate = crossingAt(player.position.x, player.position.y - 1.72, player.position.z, camera.rotation.y);
+    if (!gate) { pressing = 0; return; }
+    pressing += dt;
+    if (pressing > 0.25) {
+      pressing = -1.5;
+      // From the gate's own room, whatever `currentRoom` makes of where you stand.
+      step(gate.dir, false, gate.room);
+    }
+  }
+
+  /**
+   * The crossing whose bars you are against, facing them: in front of the
+   * arch, within its opening, and on its level (build.js `crossingFrame`; the
+   * gate's collider stops you 0.87 m short of the bars, a shut door's swing
+   * 1.82 m short, where it should still say the door is shut). Read from where you
+   * stand rather than from the room you are counted in, which in a street
+   * routed past a gate can be another room altogether.
+   */
+  function crossingAt(x, feetY, z, yaw) {
+    const fx = -Math.sin(yaw);
+    const fz = -Math.cos(yaw);
+    for (const gate of built.crossings || []) {
+      const exit = world.rooms.get(gate.room)?.exits[gate.dir];
       const beyond = exit && !exit.offMap ? plan.zoneOf(exit.to) : null;
       if (!beyond || beyond === zone) continue;
-      const sign = built.decor.find((d) => d.kind === 'gateSign' && d.text === DIR_NAME[dir]
-        && Math.hypot(d.x - info.center.x, d.z - info.center.z) < 9);
-      if (!sign || Math.hypot(player.position.x - sign.x, player.position.z - sign.z) > 1.5) continue;
-      if (fx * sign.dx + fz * sign.dz < 0.6) continue;
-      pressing += dt;
-      if (pressing > 0.25) { pressing = -1.5; step(dir); }
-      return;
+      if (Math.abs(feetY - gate.y) > 1.2) continue;
+      const [ox, oz] = gate.out;
+      const [tx, tz] = gate.along;
+      const depth = (x - gate.x) * ox + (z - gate.z) * oz;
+      const across = (x - gate.x) * tx + (z - gate.z) * tz;
+      if (depth < -2.4 || depth > 0 || Math.abs(across) > gate.half + 0.2) continue;
+      if (fx * ox + fz * oz < 0.5) continue;
+      return gate;
     }
-    pressing = 0;
+    return null;
   }
 
   /** What the build came to, for the stats overlay (F). */
@@ -2014,6 +2032,8 @@ async function boot() {
     plan,
     /** Cross into the zone room `vnum` is in, as a crossing does; resolves with its timings. */
     cross: (vnum, options) => crossTo(vnum, options),
+    /** Which way walking on from (x, z) facing `yaw` would cross, or null (tools/judge/headless/crossings.mjs). */
+    crossingAt: (x, z, yaw, feetY = player.position.y - 1.72) => crossingAt(x, feetY, z, yaw)?.dir ?? null,
     zoneCard,
     times: TIMES, overcast: OVERCAST, rain,
     /**
