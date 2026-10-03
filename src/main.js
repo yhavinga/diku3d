@@ -35,6 +35,7 @@ import { createVisibility } from './cull.js';
 import { createImpostors } from './impostor.js';
 import { createOcclusion } from './occlusion.js';
 import { createTitleReel } from './title.js';
+import { createVistas } from './vista.js';
 import { attachSocketLink, SocketLink } from './link.js';
 import { createConnectUi } from './link-ui.js';
 import { OUTDOOR_FILL } from './dress.js';
@@ -551,10 +552,17 @@ async function boot() {
     }
   }
 
+  // The neighbouring zones past the crossings (vista.js): built once the
+  // zone is up, but the cells between their gates and them are left clear
+  // now. `?vista=off` draws none, for A/B.
+  const vistas = createVistas({ world, plan, layoutOf, viewOf, materials, assets });
+  const sitesOf = (z, l) => (params.get('vista') === 'off' ? [] : vistas.sitesFor(z, l));
+  let sites = sitesOf(zone, layout);
+
   const raising = `${layout.cells.size} rooms of ${zone.name || 'the town'}`;
   await progress(bar.raise[0], 'raising the town', raising);
   let built = await buildScene(viewOf(zone), layout, materials, assets,
-    (fraction) => progress(along(bar.raise, fraction), null, raising));
+    (fraction) => progress(along(bar.raise, fraction), null, raising), { clear: vistas.bridgeCells(sites) });
 
   const peopling = 'mobiles, their clothes and what they carry';
   await progress(bar.people[0], 'peopling the rooms', peopling);
@@ -1453,7 +1461,7 @@ async function boot() {
     pipeline.gtao.unshaded.length = 0;
     pipeline.gtao.unshadedAge = Infinity;
     const keep = collectResources([materials, assets, impostors ? impostors.models : null]);
-    const freed = disposeZoneGraph([built.group, actors.group], keep, (m) => !!impostors && impostors.owns(m));
+    const freed = disposeZoneGraph([built.group, actors.group, vistas.release()], keep, (m) => !!impostors && impostors.owns(m));
     lightPool.grid = new Map();
     heldLight.key = null;
     lookTarget = null;
@@ -1597,11 +1605,12 @@ async function boot() {
         zone = target;
         t = performance.now();
         layout = layoutOf(zone);
+        sites = sitesOf(zone, layout);
         timing.layout = performance.now() - t;
         await zoneCard.progress(CROSS_BAR.build[0]);
         t = performance.now();
         built = await buildScene(viewOf(zone), layout, materials, assets,
-          (fraction) => zoneCard.progress(along(CROSS_BAR.build, fraction)));
+          (fraction) => zoneCard.progress(along(CROSS_BAR.build, fraction)), { clear: vistas.bridgeCells(sites) });
         timing.build = performance.now() - t;
         await zoneCard.progress(CROSS_BAR.populate[0]);
         t = performance.now();
@@ -1627,6 +1636,9 @@ async function boot() {
       await nextFrame();
       await nextFrame();
       timing.ready = performance.now() - t0;
+      // Behind the card as it lifts: the nearest -- the one you came
+      // through -- is up before the card is gone.
+      mountVistas();
       await zoneCard.hide();
       timing.total = performance.now() - t0;
       state.lastCrossing = timing;
@@ -1666,6 +1678,48 @@ async function boot() {
       return;
     }
     pressing = 0;
+  }
+
+  /** The drawn zone's vistas, built behind the play a slice a frame; each one's shadows wanted once it is up. */
+  function mountVistas() {
+    const t = performance.now();
+    vistas.mount(scene, sites, camera.position, {
+      // Every program they need, for every step of the light pool, before
+      // they are drawn: a vista brings surfaces the zone may have none of,
+      // and a program first met in a frame is compiled in that frame. Issued
+      // in one task -- no frame drawn between two light levels -- and then
+      // waited on without blocking.
+      prepare: async (group) => {
+        const previous = renderer.getRenderTarget();
+        renderer.setRenderTarget(composer.renderTarget1);
+        try {
+          for (const level of lightPool.levels) {
+            lightPool.setLevel(level);
+            renderer.compile(group, camera, scene);
+          }
+        } finally {
+          lightPool.setLevel(lightPool.level < 0 ? 0 : lightPool.level);
+          renderer.setRenderTarget(previous);
+        }
+        const target = renderer.getRenderTarget();
+        renderer.setRenderTarget(composer.renderTarget1);
+        const ready = renderer.compileAsync(group, camera, scene);
+        renderer.setRenderTarget(target);
+        await ready;
+      },
+      onReady: () => {
+        // Their trees go to cards past the crossfade, and cull.js indexes
+        // their instances, as the zone's own were at its first frame.
+        // Reindexed first: that puts every compacted instance buffer back,
+        // and the cards are sized from the meshes' full counts.
+        visibility.reindex();
+        if (impostors) { impostors.release(); impostors.adopt(scene); }
+        shadowAnchor.set(Infinity, Infinity, Infinity);
+      },
+    }).then((done) => {
+      if (done) console.info(`vistas: ${done.length} for ${zone.id} in ${(performance.now() - t).toFixed(0)} ms wall,`
+        + ` ${vistas.state.ms.toFixed(0)} ms building, ${(vistas.state.triangles / 1e3).toFixed(0)}k triangles`);
+    });
   }
 
   /** What the build came to, for the stats overlay (F). */
@@ -2009,6 +2063,8 @@ async function boot() {
     get built() { return built; },
     get actors() { return actors; },
     get visibility() { return visibility; },
+    /** The neighbouring zones drawn past the crossings (vista.js). */
+    vistas,
     /** The zone being drawn, and every zone there is (zones.js). */
     get zone() { return zone; },
     plan,
@@ -2491,6 +2547,7 @@ async function boot() {
   if (titleReel.active) document.body.classList.add('titling');
   dom.title.classList.remove('hidden');
   frame();
+  mountVistas();
 }
 
 function makeStars() {

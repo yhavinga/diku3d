@@ -133,6 +133,11 @@ function classifyCanopy(world) {
 // courtyard of a beautiful building complex ... the plants all died".
 const isOpenAir = (room) => isOutdoor(room) || isCanopy(room)
   || (!!eastStyle(room) && eastStyle(room) !== 'cave') || hoodStyle(room) === 'court';
+/** `isOpenAir` for a zone's rooms before that zone is built: what a vista (vista.js) is planned by. */
+export function openAirIn(world) {
+  classifyCanopy(world);
+  return isOpenAir;
+}
 
 /**
  * An exit to room -1 is the stock files' way of writing "nothing": four of
@@ -1898,7 +1903,15 @@ function buildDecals(group, decals, materials) {
 
 // ------------------------------------------------------------------ main ----
 
-function* raise(world, layout, materials, assets = null) {
+/**
+ * `options.clear`: cell keys (`level:x,z`) nothing is to be built on -- the
+ * cell between a crossing's gate and the neighbouring zone's vista
+ * (vista.js). `options.vista`: build only what a vista draws -- no ground
+ * plane, skyline, grass or mist -- and no frontage on a cell `keep(level, x,
+ * z)` refuses, where the drawn zone already builds.
+ */
+export function* raise(world, layout, materials, assets = null, options = {}) {
+  const vista = options.vista || null;
   const group = new THREE.Group();
   group.name = 'world';
   const batcher = new Batcher(materials);
@@ -1907,6 +1920,12 @@ function* raise(world, layout, materials, assets = null) {
   // Two batches, split on the chunk's level: see `buildZones`.
   const instances = assets ? new InstanceBatch(assets) : null;
   const model = (names, seed) => (assets ? assets.choose(names, seed) : null);
+  // A vista leaves out what is too small to read from past a gate: it is
+  // placed as if it stood there, so nothing falls back to geometry instead.
+  if (instances && vista?.dropModel) {
+    const add = instances.add.bind(instances);
+    instances.add = (name, ...rest) => (vista.dropModel(name) ? true : add(name, ...rest));
+  }
 
   const colliders = [];   // {x0,x1,z0,z1,y0,y1}
   const platforms = [];   // {x0,x1,z0,z1,top}
@@ -1923,7 +1942,7 @@ function* raise(world, layout, materials, assets = null) {
   const skyHoles = [];    // the tops of the sewer's air shafts
   const cabins = [];      // world rects a cabin shell stands on: keep them clear
   const decals = [];      // paint and blood, laid on surfaces: see buildDecals
-  const reserved = new Set(); // cells something other than a house stands on
+  const reserved = new Set(options.clear || []); // cells something other than a house stands on
 
   const addCollider = (x0, x1, z0, z1, y0, y1) => colliders.push({ x0, x1, z0, z1, y0, y1 });
   const addPlatform = (x0, x1, z0, z1, top) => platforms.push({ x0, x1, z0, z1, top });
@@ -2006,7 +2025,7 @@ function* raise(world, layout, materials, assets = null) {
     const ux = plan.upper.x * CELL; const uz = plan.upper.z * CELL;
     groundHoles.push({ x0: ux + rect.x0, x1: ux + rect.x1, z0: uz + rect.z0, z1: uz + rect.z1 });
   }
-  for (const r of rectsAround({ x0: gx0, x1: gx1, z0: gz0, z1: gz1 }, groundHoles)) {
+  for (const r of vista ? [] : rectsAround({ x0: gx0, x1: gx1, z0: gz0, z1: gz1 }, groundHoles)) {
     const w = r.x1 - r.x0; const d = r.z1 - r.z0;
     const seg = Math.max(1, Math.min(32, Math.round(Math.max(w, d) / 60)));
     batcher.add(plane(w, d, seg), 'grass', place((r.x0 + r.x1) / 2, groundY, (r.z0 + r.z1) / 2), { chunk: 'ground' });
@@ -2014,7 +2033,7 @@ function* raise(world, layout, materials, assets = null) {
   }
   // ...and something for it to end against, out where the fog is thick enough
   // to do the work.
-  const horizon = buildHorizon(group, bounds, groundY, layout);
+  const horizon = vista ? null : buildHorizon(group, bounds, groundY, layout);
   yield 0.017;
 
   // --- rooms ---------------------------------------------------------------
@@ -2889,7 +2908,7 @@ function* raise(world, layout, materials, assets = null) {
   // Before the frontage, because a cell the mountain takes is not a street's
   // to build on.
   const mountain = instances && assets.has('massif_a')
-    ? buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey }) : new Set();
+    ? buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey, keep: vista?.keep }) : new Set();
 
   yield 0.222;
   // --- build on every empty cell that fronts a street ----------------------
@@ -2897,6 +2916,7 @@ function* raise(world, layout, materials, assets = null) {
   const frontage = new Map(); // cell key -> sector to build from
   const consider = (level, x, z, sector, bog, shire, east = false, hood = false) => {
     if (layout.at(level, x, z) !== undefined || layout.isPath(level, x, z)) return;
+    if (vista && !vista.keep(level, x, z)) return;
     const k = `${level}:${x},${z}`;
     if (!frontage.has(k)) frontage.set(k, { level, x, z, sector, bog, shire, east, hood });
   };
@@ -3218,7 +3238,7 @@ function* raise(world, layout, materials, assets = null) {
   }
 
   yield 0.292;
-  const mist = buildMist(group, mistCells);
+  const mist = buildMist(group, vista ? [] : mistCells);
 
   const zones = buildZones(group, groundY, groundHoles, hoodBox && {
     x0: hoodBox.x0 * CELL - HALF, x1: hoodBox.x1 * CELL + HALF, z0: hoodBox.z0 * CELL - HALF, z1: hoodBox.z1 * CELL + HALF,
@@ -3227,10 +3247,10 @@ function* raise(world, layout, materials, assets = null) {
   if (skyHoles.length) zones.deep.add(buildSkyHoles(skyHoles));
   // Blades on every grass surface laid above; must run before the batcher
   // merges its geometry away.
-  const grass = yield* within(0.294, 0.915, buildGrass({
+  const grass = vista ? null : yield* within(0.294, 0.915, buildGrass({
     groups: batcher.groups, instances, colliders, layout, rooms, materials, cell: CELL, biomeOf: grassBiome,
   }));
-  zones.surface.add(grass);
+  if (grass) zones.surface.add(grass);
   const batches = new StaticBatches();
   const regionOf = regions(hoodBox);
   yield 0.915;
@@ -3284,8 +3304,8 @@ const SLICE_MS = 100;
  * `onProgress(fraction)`, which is expected to let a frame paint; nothing the
  * build reads changes in between, so what is built is the same as in one go.
  */
-export function buildScene(world, layout, materials, assets = null, onProgress = null) {
-  return inSlices(raise(world, layout, materials, assets), onProgress);
+export function buildScene(world, layout, materials, assets = null, onProgress = null, options = {}) {
+  return inSlices(raise(world, layout, materials, assets, options), onProgress);
 }
 
 /** Run a generator of 0..1 fractions to its return value, awaiting `onProgress` every `SLICE_MS`. */
@@ -7944,7 +7964,7 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
   return { cells: support.size, triangles };
 }
 
-function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey }) {
+function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey, keep = null }) {
   // The desert's caves wear its sandstone; a cave anywhere else -- the troll
   // den in Haon Dor's firs -- the same crags in grey rock.
   const rocky = (room) => eastStyle(room) === 'cave' || pickMaterials(room, room.area).rockCave;
@@ -7965,7 +7985,7 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
     && layout.at(1, x, z) === undefined && !layout.isPath(1, x, z);
   const block = (x, z, swap) => {
     const k = cellKey(0, x, z);
-    if (taken.has(k)) return;
+    if (taken.has(k) || (keep && !keep(0, x, z))) return;
     taken.add(k);
     const cx = x * CELL; const cz = z * CELL;
     const tall = hash3(x, z, 0, 211);

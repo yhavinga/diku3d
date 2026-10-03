@@ -2768,6 +2768,28 @@ const isBuriedRoom = (info) => !!info && (info.cell.level < 0 || !!(info.materia
  * 210 ms of 730) -- and this hands the thread back through `onProgress` as
  * `buildScene` does (build.js `inSlices`).
  */
+/**
+ * build.js's `tree` decor as modelled trees, into `instances`. Exported for
+ * vista.js, which plants a neighbouring zone's trees exactly where and as
+ * that zone plants them.
+ */
+export function plantTrees(trees, instances, model) {
+  const fallback = model(['tree_oak', 'tree_fir']);
+  for (const t of trees) {
+    // A forest cell asks for conifers (`choose` picks uniformly, so
+    // repeating a name is how a species gets weighted); everywhere else --
+    // parks, field edges -- keeps the broadleaf mix it always had.
+    const kind = (t.conifer
+      ? model(['tree_fir', 'tree_fir', 'tree_cedar', 'tree_pine', 'tree_oak'], strHash(`${t.x},${t.z}`, 2))
+      : model(['tree_oak', 'tree_pine'], strHash(`${t.x},${t.z}`, 2))) || fallback;
+    instances.add(kind, {
+      x: t.x, y: t.y, z: t.z,
+      rotY: strHash(`${t.x},${t.z}`, 4) * Math.PI * 2,
+      scale: t.scale * (0.85 + strHash(`${t.z}`, 6) * 0.35),
+    }, 'trees');
+  }
+}
+
 export function populate(world, layout, built, options = {}, onProgress = null) {
   return inSlices(peopleOf(world, layout, built, options), onProgress);
 }
@@ -3605,19 +3627,7 @@ function* peopleOf(world, layout, built, options = {}) {
 
   const treeModel = model(['tree_oak', 'tree_fir']);
   if (trees.length && treeModel && instances) {
-    for (const t of trees) {
-      // A forest cell asks for conifers (`choose` picks uniformly, so
-      // repeating a name is how a species gets weighted); everywhere else --
-      // parks, field edges -- keeps the broadleaf mix it always had.
-      const kind = (t.conifer
-        ? model(['tree_fir', 'tree_fir', 'tree_cedar', 'tree_pine', 'tree_oak'], strHash(`${t.x},${t.z}`, 2))
-        : model(['tree_oak', 'tree_pine'], strHash(`${t.x},${t.z}`, 2))) || treeModel;
-      instances.add(kind, {
-        x: t.x, y: t.y, z: t.z,
-        rotY: strHash(`${t.x},${t.z}`, 4) * Math.PI * 2,
-        scale: t.scale * (0.85 + strHash(`${t.z}`, 6) * 0.35),
-      }, 'trees');
-    }
+    plantTrees(trees, instances, model);
   } else if (trees.length) {
     const trunkGeo = G.cylinder(0.22, 0.34, 4.2, 7);
     trunkGeo.translate(0, 2.1, 0);
