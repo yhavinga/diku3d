@@ -8,6 +8,31 @@ is an opinion.
 
 ## 2026-10-03 — wave 9: every area, one zone at a time
 
+### The flicker the user saw from the start (wave9-zfight)
+
+- Z-fighting, from 13 separate causes, none of them depth precision:
+  half-timber corner posts ending in the side wall's infill plane
+  (`kit.py`), window surround sides running through head and sill
+  (`actors.js`), indoor walls all spanning full width, two street blocks
+  both filling a corner, Shire corridor roofs ending on the room's wall
+  (the user's "painted board" at #1125 was the walkway's thatch gable),
+  vault linings, sewer mouths and floors, dune rims, gatehouse parts, the
+  bakery oven, gravel and grass patches. Each fixed by 2–20 mm (one 0.11 m)
+  or by letting one piece own the joint; no polygonOffset.
+- Home zone sweep (578 rooms × 4 headings × level/up): 829,498 → 38,292
+  flicker px; median per room 180 → 18. User's spots: 12,585 → 158 and
+  15,378 → 7. School, Arachnos and High Tower down 43–91%.
+- The plain stone room kit asked for `corner` instead of `wall_corner`, so
+  its corner pillars had never been placed; they are now (a visible
+  change), and it still asks for `roof` instead of `wall_roof` (left alone).
+- Remaining: #5022 fungus on the cave wall (4.2k px), wood-on-wood in
+  benches, sewer tunnel undersides, the High Tower door frame, and a
+  fountain reading ~5k px only in a full sweep (23 px from the same camera
+  directly). A chimney block floats inside #1125.
+- Regenerating some Blender modules changes models outside the work
+  (`statue_worm`, palms, cushions, refuse heap): their committed `.glb` is
+  out of date against its source.
+
 ### Zones (wave9-zones)
 
 - All 44 areas in `area.lst` load at boot; 1,856 mobiles, 1,440 of them

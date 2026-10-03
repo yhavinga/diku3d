@@ -404,6 +404,17 @@ choose.
   patches a *shared* baked material's shader must check it has not already
   (the second zone's shader would not compile); and never dispose shared
   materials, or the next zone recompiles every program.
+- **Coincident surfaces flicker, and depth precision is never why** (near
+  0.1 m gives ~0.1 mm at 10 m). Two boxes that both fill a corner always
+  share two planes: one must own the corner. End a piece a few mm *inside*
+  the one it meets, never exactly on its face. Measure with
+  `tools/judge/zfight.js` (id colours, near plane nudged: coverage cannot
+  move, so only depth ties change; a repeated identical render is the
+  control for animation) and sweep a zone with
+  `tools/judge/headless/zsweep.mjs`; `tools/coplanar-check.mjs` lists
+  coplanar overlaps inside the `.glb` files. `instances.add` with an
+  unknown model name places nothing and says nothing — the stone room kit's
+  corner pillars were missing for that reason.
 - Figures are skinned meshes: one draw each, no instancing, and a second pass if
   they cast shadows. They are kept out of the shadow map and culled past 46 m.
 - Large soft sprites are the most expensive thing per pixel in the scene. The
