@@ -13,7 +13,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ITEM, SECTOR, ACT_AGGRESSIVE, ACT_SENTINEL } from './are.js';
 import { hash3, ROOM, CEIL, PIECES, CELL as GRID, LEVEL_H } from './build.js';
 import { InstanceBatch, StaticBatches, FURNITURE_NAMES, BURIED_MARK } from './assets.js';
-import { buriedTwin } from './textures.js';
+import { buriedTwin, honourEnv } from './textures.js';
 import { OVERLAY_LAYER } from './render.js';
 import { interiorGlass, markPanes } from './windows.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
@@ -1348,6 +1348,8 @@ function sleekFur(library) {
     m.roughness = 0.82;
     m.envMapIntensity = 0.6;
     m.normalScale = new THREE.Vector2(0.3, 0.3);
+    // A clone keeps none of the base's hooks, so its 0.6 would be ignored.
+    honourEnv(m);
     sleekCache.set(library, m);
   }
   return m;
@@ -2352,6 +2354,7 @@ function rippled(time, drops) {
           normal = normalize((viewMatrix * vec4(up, 0.0)).xyz);
         }`);
   };
+  honourEnv(material);
   return material;
 }
 
@@ -3523,6 +3526,7 @@ export function populate(world, layout, built, options = {}) {
       });
       // A room behind every lit pane, tinted by the pane's vertex colour.
       interiorGlass(glow, { tint: true, opaque: true });
+      honourEnv(glow);
       glowMaterial = glow;
       const mesh = new THREE.Mesh(markPanes(mergeGeometries(panes, false)), glow);
       group.add(mesh);
@@ -3559,6 +3563,7 @@ export function populate(world, layout, built, options = {}) {
       // ...and what that daylight shows is a room, not a flat panel -- nor,
       // opaque, the masonry of the wall the pane is laid on.
       interiorGlass(glass, { opaque: true, day: 'day' });
+      honourEnv(glass);
       glassMaterial = glass;
       const mesh = new THREE.Mesh(mergeGeometries(dark, false), glass);
       mesh.receiveShadow = true;

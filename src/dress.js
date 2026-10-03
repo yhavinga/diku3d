@@ -183,8 +183,16 @@ const SLOT_OF = 'int( vSlot + 0.5 )';
  * wall did, and indoors -- where the sky is nearly all the light there is --
  * every figure came out a dark shape against a lit wall. Diffuse sky light
  * does not care what a surface is made of: every surface of a person takes
- * `DIFFUSE_ENV`, the town's walls' own share (stone 0.72, plaster 0.7,
- * timber 0.8, planks 0.85).
+ * `DIFFUSE_ENV`.
+ *
+ * It is not the walls' share, whatever this once said. Under three r185 no
+ * world material honoured its recipe's `env` at all (the renderer overwrote
+ * it with the scene's), so the walls took the whole diffuse sky and still do:
+ * textures.js `honourEnv` now applies `env` to what a wall *mirrors*, exactly
+ * as `slotParams.y` does here. 0.75 is the figures' own balance against those
+ * walls, and it is what the torso-against-wall numbers in LEARNINGS were
+ * measured with; honouring the walls' `env` moved those walls by under one
+ * sRGB step indoors.
  */
 const DIFFUSE_ENV = 0.75;
 const IBL_IRRADIANCE = 'return PI * envMapColor.rgb * envMapIntensity;';

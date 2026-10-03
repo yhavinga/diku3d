@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { interiorGlass, markPanes } from './windows.js';
 import { CLUTTER_NAMES } from './clutter.js';
-import { buriedTwin } from './textures.js';
+import { buriedTwin, honourEnv } from './textures.js';
 
 /** In a placement's chunk name: it stands in a buried room (StaticBatches). */
 export const BURIED_MARK = '~buried';
@@ -177,6 +177,8 @@ export class AssetLibrary {
         material.normalMap = grain;
         material.normalScale = new THREE.Vector2(strength, strength);
       }
+      // Last, so it chains the pane's hook: see honourEnv.
+      honourEnv(material);
       this.extra.set(tag, material);
       return material;
     }

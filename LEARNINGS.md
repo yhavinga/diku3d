@@ -6,6 +6,45 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-03 — wave 8: a recipe's env, made to count
+
+### env on world materials (wave8-env)
+
+- **The bug.** Under r185 every material without its own envMap has its
+  `envMapIntensity` overwritten by `scene.environmentIntensity`, so every
+  `env` in `textures.js` had been decoration since the upgrade — only
+  dress.js honoured it. Fixed with a `dikuEnv` uniform applied to
+  `radiance` in `decorate()`, and `honourEnv()` for everything decorate()
+  does not reach (decals, `TAG_MATERIALS`, fountain water, window glass,
+  the cloned `fur-sleek`, the held-weapon clone — whose ×0.7 had never
+  applied because the clone lost the hook). Assigning `scene.environment`
+  per material was rejected: it replaces the hour's intensity instead of
+  composing with it, scales the diffuse sky too, and needs updating on
+  every sky rebake.
+- **A/B at birth, same frozen frame** (separate page loads drift ±4 luma
+  from animation — the instrument is: freeze, read with every
+  `envMapIntensity` forced to 1, read again): cobble 0→1.15 changes 49% of
+  the 3014 noon frame by +5.4 luma; iron 1→1.4 +4.6 where seen; plaster
+  0.7 / thatch 0.55 −0.5 (matte); wet cobble in rain 45% of the frame.
+  Sewer 7009/7110: 0 px.
+- **Relight.** Foliage, bark and duff had been written at 0.3–0.45 while
+  the number did nothing; with it biting, the forest went blacker (RGB 0 at
+  6128 dusk up), so they rose to 0.55–0.85 and the Douglas-fir furrow
+  `0x160e0a` (0.6% albedo, darker than soot) to `0x26180f`. Net: sun share
+  at noon 72.6 → 72.3%, town frames within ±0.7 luma, 6128 dusk RGB 0
+  1.74 → 1.44%, graveyard RGB 0 0.037 → 0.011%, torsos unchanged against
+  walls (≤0.8 sRGB step), draw calls/triangles/programs identical.
+- **Wrapping an `onBeforeCompile` needs its own program key.** three's
+  default key is the hook's source; every wrapped material would share the
+  wrapper's source and one program.
+- **`buriedTwin` must treat an `honourEnv`-only material as plain**, or it
+  takes it for someone else's shader and the sky shows underground.
+- Still open: forest RGB 0 at dusk (1.4%) is GTAO on sRGB-1 needles —
+  0.00% with AO off. And underground noon-vs-night is **not** zero on main
+  either (~95k px at 7009, bloom at 0, same before and after this change):
+  the hour still reaches buried rooms by some path not yet found.
+- `probe.js` `H.classify` throws on sprites (raycaster without a camera).
+
 ## 2026-09-28 — wave 7: below and inside
 
 ### Outdoor script time (wave7-cpu2)

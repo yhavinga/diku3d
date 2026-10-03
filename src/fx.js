@@ -25,6 +25,7 @@ import { Pass } from 'three/addons/postprocessing/Pass.js';
 import { OVERLAY_LAYER } from './render.js';
 import { MOB_BEAT, WEAR } from './game.js';
 import { personMaterial, SLOTS } from './dress.js';
+import { honourEnv } from './textures.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const ease = (u) => u * u * (3 - 2 * u);
@@ -242,6 +243,8 @@ function modelledWeapon(library, name) {
       material.roughness = Math.max(material.roughness, 0.38);
       if (material.normalScale) material.normalScale.multiplyScalar(0.4);
       material.envMapIntensity = (material.envMapIntensity ?? 1) * 0.7;
+      // The clone lost the hook that makes three honour that number.
+      honourEnv(material);
     }
     inner.add(new THREE.Mesh(p.geometry, material));
   }
