@@ -23,7 +23,7 @@
 
 import {
   ACT_SENTINEL, ACT_AGGRESSIVE, ACT_PRACTICE, ACT_SCAVENGER, ITEM,
-  ROOM_NO_MOB, ROOM_PRIVATE, ROOM_SOLITARY, DIR_NAME,
+  ROOM_NO_MOB, ROOM_PRIVATE, ROOM_SOLITARY, DIR_NAME, EX_CLOSED,
 } from './are.js';
 import { createNav } from './nav.js';
 import {
@@ -1010,11 +1010,26 @@ const dist2 = (a, b) => {
 };
 
 /**
+ * Where a mobile is when it is in no zone being drawn: far enough from any
+ * laid-out coordinate that no reach, no hearing and no aggression test can
+ * mistake it for being near you. Such a mobile still has a room -- the mud's
+ * own idea of where it is -- and that is all the rules ask of it.
+ */
+export const FAR = 1e7;
+
+/**
  * @param {object} deps  world/layout/built from the boot chain. `actors` is
  *   optional: without it the game runs headless, which is how the harness and
  *   any future test drives it.
+ *
+ *   `world` is everything the mud holds; `layout`/`built`/`actors` are only
+ *   the zone being drawn (zones.js). `zoneOf(vnum)` says which zone a room is
+ *   in; without it the whole world is one zone, as it always was. Mobiles in
+ *   rooms the current zone did not build are kept by room alone: they reset,
+ *   wander and run their spec_funs, but have no body and no position until a
+ *   zone holding their room is entered (`game.enterZone`).
  */
-export function createGame({ world, layout, built, actors = null, seed, classIndex = 3, nav = null } = {}) {
+export function createGame({ world, layout, built, actors = null, seed, classIndex = 3, nav = null, zoneOf = null } = {}) {
   const rng = new Rng(seed);
   const events = [];
   const listeners = [];
@@ -1028,7 +1043,9 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   };
   // The walkable grid and the routes between rooms. actors.js builds it over
   // the real geometry; headless, it is the layout alone.
-  const ways = nav || (actors && actors.nav) || createNav({ layout, built, world });
+  let ways = nav || (actors && actors.nav) || createNav({ layout, built, world });
+  /** Mobiles do not walk out of their zone: the body would have nowhere to go. */
+  const sameZone = (a, b) => !zoneOf || zoneOf(a) === zoneOf(b);
 
   // -- kill_table -----------------------------------------------------------
   // db.c counts every mobile prototype into kill_table at boot, after fuzzing
@@ -1043,17 +1060,23 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   }
 
   // -- rooms ----------------------------------------------------------------
-  const roomCentres = [];
-  for (const [vnum, info] of built.rooms) {
-    roomCentres.push({ vnum, x: info.center.x, y: info.center.y, z: info.center.z, outdoor: !!info.outdoor });
-  }
+  // The zone's rooms by where they stand; redone on entering a zone.
+  let roomCentres = [];
   const roomBucket = new Map();
   const bucketKey = (x, z) => `${Math.floor(x / 26)},${Math.floor(z / 26)}`;
-  for (const room of roomCentres) {
-    const key = bucketKey(room.x, room.z);
-    if (!roomBucket.has(key)) roomBucket.set(key, []);
-    roomBucket.get(key).push(room);
+  function indexRooms() {
+    roomCentres = [];
+    roomBucket.clear();
+    for (const [vnum, info] of built.rooms) {
+      roomCentres.push({ vnum, x: info.center.x, y: info.center.y, z: info.center.z, outdoor: !!info.outdoor });
+    }
+    for (const room of roomCentres) {
+      const key = bucketKey(room.x, room.z);
+      if (!roomBucket.has(key)) roomBucket.set(key, []);
+      roomBucket.get(key).push(room);
+    }
   }
+  indexRooms();
 
   function nearestRoom(p) {
     let best = null;
@@ -1079,61 +1102,46 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   }
 
   // -- mobiles --------------------------------------------------------------
-  // actors.js builds one figure per placed mobile, walking built.rooms and then
-  // room.mobs; the same walk in the same order pairs them back up. If actors
-  // ever hands the record over directly, use that instead.
-  const records = [];
-  for (const [vnum] of built.rooms) {
-    const room = world.rooms.get(vnum);
-    if (!room) continue;
-    room.mobs.forEach((record, index) => {
-      records.push({ record, roomVnum: vnum, index, of: room.mobs.length });
-    });
-  }
-  if (actors && actors.figures && actors.figures.length !== records.length) {
-    throw new Error(`game.js: ${actors.figures.length} figures for ${records.length} placed mobiles`
-      + ' -- actors.js changed the order it places them in and the pairing is no longer safe');
-  }
-
+  // One slot per M line in the whole world, whether or not its room is drawn.
+  // `here` is whether it is in the zone being drawn and so has a position (and,
+  // with actors, a body); see enterZone for how the two are paired.
   const mobs = [];
-  records.forEach((entry, index) => {
-    const figure = actors && actors.figures ? actors.figures[index] : null;
-    const info = built.rooms.get(entry.roomVnum);
-    // Headless, stand them in a ring the way actors.js does -- never on the
-    // centre, and never on each other, or `attack` cannot tell them apart.
-    const angle = (entry.index / entry.of) * Math.PI * 2;
-    const home = figure
-      ? { x: figure.at ? figure.at.x : figure.home.x, y: figure.home.y, z: figure.at ? figure.at.z : figure.home.z }
-      : {
-        x: info.center.x + Math.cos(angle) * 2.6,
-        y: info.center.y,
-        z: info.center.z + Math.sin(angle) * 2.6,
-      };
-    mobs.push({
-      record: entry.record,
-      proto: entry.record.proto,
-      roomVnum: entry.roomVnum,
-      figure,
-      anchor: { ...home },
-      pos: { ...home },
-      instance: null,
-      dead: false,
-      corpse: null,
-      // What the body is doing, as an order actors.js carries out (see
-      // motion.js); `travel` is a walk to the next room that mobile_update
-      // started and has not finished yet.
-      order: null,
-      travel: null,
-      bucket: null,
-    });
-  });
-
+  for (const room of world.rooms.values()) {
+    for (const record of room.mobs) {
+      mobs.push({
+        record,
+        proto: record.proto,
+        roomVnum: room.vnum,
+        figure: null,
+        here: false,
+        anchor: { x: FAR, y: 0, z: FAR },
+        pos: { x: FAR, y: 0, z: FAR },
+        instance: null,
+        dead: false,
+        corpse: null,
+        // What the body is doing, as an order actors.js carries out (see
+        // motion.js); `travel` is a walk to the next room that mobile_update
+        // started and has not finished yet.
+        order: null,
+        travel: null,
+        bucket: null,
+      });
+    }
+  }
+  const slotOfRecord = new Map(mobs.map((slot) => [slot.record, slot]));
   const figureSlot = new Map();
-  for (const slot of mobs) if (slot.figure) figureSlot.set(slot.figure, slot);
 
-  // Mobiles walk now, so the buckets are kept up as they go.
+  // Mobiles walk now, so the buckets are kept up as they go. Only the ones
+  // in the zone being drawn are in them: nobody else has a position.
   const mobBucket = new Map();
+  function unbucket(slot) {
+    if (slot.bucket === null) return;
+    const old = mobBucket.get(slot.bucket);
+    if (old) old.splice(old.indexOf(slot), 1);
+    slot.bucket = null;
+  }
   function rebucket(slot) {
+    if (!slot.here) { unbucket(slot); return; }
     const key = bucketKey(slot.pos.x, slot.pos.z);
     if (key === slot.bucket) return;
     if (slot.bucket !== null) {
@@ -1144,7 +1152,6 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     mobBucket.get(key).push(slot);
     slot.bucket = key;
   }
-  for (const slot of mobs) rebucket(slot);
   function mobsNear(p, radius) {
     const out = [];
     const span = Math.ceil(radius / 26) + 1;
@@ -1304,7 +1311,9 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     consider(room.mobs, 0);
     if (!warden) {
       for (const exit of room.exits) {
-        if (!exit || exit.offMap) continue;
+        // One step back into the city: never across into another zone,
+        // which is what the gate leads to, not what holds it.
+        if (!exit || exit.offMap || !sameZone(fromVnum, exit.to)) continue;
         const next = world.rooms.get(exit.to);
         if (next) consider(next.mobs, 1);
       }
@@ -1444,7 +1453,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       const info = rooms[rng.range(0, rooms.length - 1)];
       if (state.fighting) ctx.stopFighting(state);
       emit({ kind: 'teleport', x: info.center.x, y: info.center.y, z: info.center.z, vnum: info.room.vnum });
-      if (onTeleport) onTeleport(info.center.x, info.center.y, info.center.z);
+      if (onTeleport) onTeleport(info.center.x, info.center.y, info.center.z, info.room.vnum);
       return true;
     },
     sky: () => weather.sky,
@@ -1598,7 +1607,11 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
   /** act_move.c: do_recall. Half your movement, and the temple. */
   function recall(afterDeath = false) {
-    const temple = built.rooms.get(ROOM_VNUM_TEMPLE) || built.rooms.values().next().value;
+    // The temple may be in a zone that is not drawn: then there is no point
+    // to stand on yet, only the room, and main.js crosses to it.
+    const temple = built.rooms.get(ROOM_VNUM_TEMPLE)
+      || (world.rooms.has(ROOM_VNUM_TEMPLE) ? { center: { x: undefined, y: undefined, z: undefined } } : null)
+      || built.rooms.values().next().value;
     if (!temple) return false;
     if (!afterDeath && state.fighting) {
       if (rng.bits(1) === 0) {
@@ -1615,7 +1628,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       kind: 'recall', vnum: ROOM_VNUM_TEMPLE, text: 'You pray for transportation!',
       x: temple.center.x, y: temple.center.y, z: temple.center.z,
     });
-    if (onTeleport) onTeleport(temple.center.x, temple.center.y, temple.center.z);
+    if (onTeleport) onTeleport(temple.center.x, temple.center.y, temple.center.z, temple.room ? temple.room.vnum : ROOM_VNUM_TEMPLE);
     return true;
   }
 
@@ -1971,6 +1984,15 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     const exit = room && room.exits[door];
     if (!exit || exit.offMap) return false;
     const to = exit.to;
+    if (!sameZone(slot.roomVnum, to)) return false;
+    // Out of the drawn zone the move is the mud's own: instant, refused only
+    // by a shut door. Never into a room the drawn zone built, though -- a
+    // body would have to appear there from nowhere.
+    if (!slot.here) {
+      if (built.rooms.has(to) || (exit.locks & EX_CLOSED)) return false;
+      slot.roomVnum = to;
+      return true;
+    }
     if (!built.rooms.has(to) || built.rooms.get(to).unbuilt) return false;
     if (!ways.doorOpen(slot.roomVnum, door, to, actors ? actors.doors : null)) return false;
     const route = ways.route(slot.roomVnum, door, to, slot.pos, wanderRand);
@@ -2006,6 +2028,9 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
     for (const slot of mobs) {
       if (slot.dead || slot.travel) continue;
+      // Out of the drawn zone and never seen: made when the zone was left (or
+      // at boot), or here if a reset brought it back since.
+      if (!slot.here && !slot.instance) wake(slot, wanderRng);
       const mob = slot.instance;
       const act = slot.proto.act;
       // "Examine call for special procedure": a spec_fun that acted ends this
@@ -2113,6 +2138,13 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     playerFeet.x = position.x; playerFeet.z = position.z; playerFeet.y = position.y - 1.72;
     for (const slot of mobs) {
       if (slot.dead) continue;
+      if (!slot.here) {
+        // No body to walk an errand: it is done the moment it is set.
+        const task = slot.task;
+        slot.task = null;
+        if (task && task.onArrive) task.onArrive();
+        continue;
+      }
       const mob = slot.instance;
       const figure = slot.figure;
       // The body is the truth about where a mobile is; the game follows it.
@@ -2568,6 +2600,136 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     }
   }
 
+  // -- zones ----------------------------------------------------------------
+  /**
+   * Hooks run after a zone is entered (rules/world.js: the hinges told what
+   * the exits say, and objects left in rooms nobody had built given a place).
+   */
+  const zoneHooks = [];
+
+  /** A spot on open floor near `vnum`'s middle, `index` of `of` round a ring. */
+  function ringSpot(vnum, index, of) {
+    const info = built.rooms.get(vnum);
+    const angle = (index / Math.max(1, of)) * Math.PI * 2;
+    let at = { x: info.center.x + Math.cos(angle) * 2.6, y: info.center.y, z: info.center.z + Math.sin(angle) * 2.6 };
+    if (ways.sample && ways.nearestOpen) {
+      const level = ways.levelOf ? ways.levelOf(at.y) : 0;
+      if (!ways.sample(at.x, at.z, level)) {
+        const open = ways.nearestOpen(level, at.x, at.z, 4);
+        if (open) at = { x: (open[0] + 0.5) * ways.NAV_RES, y: at.y, z: (open[1] + 0.5) * ways.NAV_RES };
+      }
+    }
+    return at;
+  }
+
+  /** Out of the drawn world: a room, and no position. */
+  function disembody(slot) {
+    slot.here = false;
+    slot.figure = null;
+    unbucket(slot);
+    slot.pos = { x: FAR, y: 0, z: FAR };
+    slot.anchor = { ...slot.pos };
+  }
+
+  /** Into it, standing at `at`. */
+  function embody(slot, at) {
+    slot.here = true;
+    slot.pos = { ...at };
+    slot.anchor = { ...at };
+    rebucket(slot);
+  }
+
+  /**
+   * Leave the zone being drawn: every fight in it ends (fight.c's
+   * violence_update stops a fight whenever the two are no longer in one
+   * room), a walk half done is finished -- the mud's move is instant -- and
+   * everyone in it is put back to a room and no position.
+   */
+  function leaveZone() {
+    if (state.fighting) ctx.stopFighting(state);
+    for (const slot of mobs) {
+      if (!slot.here) continue;
+      if (slot.instance && slot.instance.fighting) ctx.stopFighting(slot.instance);
+      if (slot.travel) { slot.roomVnum = slot.travel.to; slot.travel = null; }
+      slot.task = null;
+      slot.notice = null;
+      slot.order = null;
+      slot.home = null;
+      disembody(slot);
+    }
+    figureSlot.clear();
+    focusSlot = null;
+  }
+
+  /**
+   * Draw another zone: its layout, its build and (with a viewer) its bodies.
+   * actors.js builds one figure per M line whose room it built, walking
+   * built.rooms and then room.mobs; the same walk pairs them with the slots.
+   * Whatever the mud did while the zone was not drawn is honoured: a body
+   * whose mobile wandered is stood in the room it wandered to, a dead one
+   * lies where it fell or is not there at all.
+   */
+  function enterZone(next) {
+    leaveZone();
+    layout = next.layout;
+    built = next.built;
+    actors = next.actors || null;
+    ways = next.nav || (actors && actors.nav) || createNav({ layout, built, world });
+    indexRooms();
+
+    const placed = [];
+    for (const [vnum] of built.rooms) {
+      const room = world.rooms.get(vnum);
+      if (!room) continue;
+      room.mobs.forEach((record, index) => {
+        placed.push({ slot: slotOfRecord.get(record), vnum, index, of: room.mobs.length });
+      });
+    }
+    const figures = actors && actors.figures ? actors.figures : null;
+    if (figures && figures.length !== placed.length) {
+      throw new Error(`game.js: ${figures.length} figures for ${placed.length} placed mobiles`
+        + ' -- actors.js changed the order it places them in and the pairing is no longer safe');
+    }
+    placed.forEach((entry, i) => {
+      const { slot } = entry;
+      const figure = figures ? figures[i] : null;
+      const info = built.rooms.get(entry.vnum);
+      // Headless, stand them in a ring the way actors.js does -- never on the
+      // centre, and never on each other, or `attack` cannot tell them apart.
+      const angle = (entry.index / entry.of) * Math.PI * 2;
+      const home = figure
+        ? { x: figure.at ? figure.at.x : figure.home.x, y: figure.home.y, z: figure.at ? figure.at.z : figure.home.z }
+        : { x: info.center.x + Math.cos(angle) * 2.6, y: info.center.y, z: info.center.z + Math.sin(angle) * 2.6 };
+      slot.origin = { ...home };
+      slot.originRoom = entry.vnum;
+      slot.figure = figure;
+      if (figure) figureSlot.set(figure, slot);
+      // A room this zone did not build is somewhere a body cannot stand; the
+      // mobile is put back on its post rather than drawn in mid-air.
+      const there = built.rooms.get(slot.roomVnum);
+      if (!there || there.unbuilt) slot.roomVnum = entry.vnum;
+      if (slot.dead) {
+        const corpse = slot.corpse && slot.corpse.inRoom !== null && slot.corpse.at ? slot.corpse : null;
+        embody(slot, corpse ? corpse.at : home);
+        if (figure && actors.respawn) actors.respawn(figure, slot.pos);
+        if (corpse) order(slot, { kind: 'dead', delay: 0 });
+        else if (figure) {
+          // Already gone before anyone came back: no fade, no body.
+          order(slot, { kind: 'gone' });
+          if (figure.m) figure.m.gone = { t: 3.5 };
+          figure.object.visible = false;
+        }
+        return;
+      }
+      if (slot.roomVnum === entry.vnum) { embody(slot, home); return; }
+      const others = placed.filter((p) => p.slot.roomVnum === slot.roomVnum);
+      const at = ringSpot(slot.roomVnum, others.indexOf(entry) + 1, others.length + 1);
+      embody(slot, at);
+      if (figure && actors.respawn) actors.respawn(figure, at);
+    });
+    for (const fn of zoneHooks) fn();
+  }
+
   const game = {
     state,
     world,
@@ -2586,7 +2748,11 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     update,
     attack,
     attackSlot,
-    nav: ways,
+    get nav() { return ways; },
+    /** Draw another zone (see enterZone); the rules keep running everywhere. */
+    enterZone,
+    /** Which zone a room is in, or null when the world is one zone. */
+    zoneOf: (vnum) => (zoneOf ? zoneOf(vnum) : null),
 
     // -- magic --------------------------------------------------------------
     magic,
@@ -2790,8 +2956,21 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
   Object.defineProperty(game, 'specFuns', { get: () => SPEC_FUNS, enumerable: true });
 
+  enterZone({ layout, built, actors, nav: ways });
+  // db.c creates every mobile at boot. The drawn zone's wait until they are
+  // first seen (update); the rest are made now, behind the loading screen --
+  // made on the first mobile pulse instead, the 1,440 of them were a 21 ms
+  // hitch in the first second of play -- so their spec_funs run unwatched.
+  for (const slot of mobs) if (!slot.here) wake(slot, wanderRng);
+
   installRules({
-    world, layout, built, actors, ways, rng, wanderRng, state, position, facing, playerFeet,
+    world, rng, wanderRng, state, position, facing, playerFeet,
+    // The zone being drawn, read when used: entering another one swaps them.
+    get layout() { return layout; },
+    get built() { return built; },
+    get actors() { return actors; },
+    get ways() { return ways; },
+    zoneHooks, sameZone, embody, disembody, ringSpot, FAR,
     mobs, ground, gates, protoInfo, emit, ctx, game, SPEC_FUNS, rules,
     wake, order, moveMobile, mobsNear, nearestRoom, objToRoom, objFromRoom, dropSpot, removeBody,
     toRoom, recall, breakOff, facingAway, weather: () => weather, dist2, updatePos,

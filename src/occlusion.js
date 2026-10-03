@@ -420,5 +420,19 @@ export function createOcclusion({ renderer, scene, camera, world }) {
     found[0] = v;
   }
 
-  return { state, capture, hidden, hiddenAt, sortMovers, sentinel };
+  /**
+   * Another zone's world (main.js crossTo): the sentinel moves to it, and the
+   * depth held from the last one is forgotten -- it describes walls that are
+   * no longer there. `null` only takes the sentinel off the old world.
+   */
+  function setWorld(next) {
+    if (world) world.remove(sentinel);
+    world = next;
+    if (world) world.add(sentinel);
+    map = null;
+    state.ready = false;
+    state.version++;
+  }
+
+  return { state, capture, hidden, hiddenAt, sortMovers, sentinel, setWorld };
 }

@@ -215,6 +215,45 @@
     transition: opacity 260ms ease; z-index: 15;
   }
 
+  /* -------------------------------------------------------- crossing -- */
+  /* Taking an exit into another zone (zonecard.js): the loading screen's
+     black, the area named the way the title names Midgaard, and the first
+     words of the room you will stand in. */
+  #zone-card {
+    position: fixed; inset: 0; z-index: 28; display: flex; align-items: center;
+    padding-left: max(56px, 7vw); padding-right: 26px;
+    background: radial-gradient(ellipse at 50% 42%, #17161c 0%, #07070a 72%);
+    opacity: 0; pointer-events: none; transition: opacity 520ms ease;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.75);
+  }
+  #zone-card.open { opacity: 1; pointer-events: auto; transition-duration: 300ms; }
+  .zc-body {
+    display: flex; flex-direction: column; gap: 14px; max-width: min(1120px, 86vw);
+    transform: translateY(8px); transition: transform 1100ms cubic-bezier(.2,.7,.2,1);
+  }
+  #zone-card.open .zc-body { transform: none; }
+  .zc-way {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.3em;
+    text-transform: uppercase; color: var(--gold); opacity: 0.75;
+  }
+  .zc-name {
+    font-size: clamp(34px, 5.2vw, 72px); font-weight: 400; letter-spacing: 0.14em;
+    margin: 0 0 0 -0.04em; line-height: 1.04; color: #f4e7cb; text-transform: uppercase;
+    text-shadow: 0 0 42px rgba(224, 160, 80, 0.24), 0 2px 10px rgba(0,0,0,0.6);
+  }
+  .zc-levels {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.24em;
+    text-transform: uppercase; color: var(--dim); margin-top: -6px;
+  }
+  .zc-line {
+    margin: 12px 0 0; max-width: 620px; font-size: 17px; line-height: 1.6;
+    font-style: italic; color: #e7dcc4; opacity: 0.9;
+  }
+  .zc-room { font-style: normal; color: var(--gold); }
+  .zc-track { margin-top: 20px; width: min(360px, 60vw); height: 2px; background: rgba(224,189,119,0.16); }
+  .zc-bar { width: 0; height: 100%; background: var(--gold); transition: width 220ms ease; }
+  #zone-card.failed .zc-track { display: none; }
+
   /* ------------------------------------------------------------- help -- */
   #help {
     position: fixed; inset: 0; z-index: 45; display: none; align-items: center; justify-content: center;

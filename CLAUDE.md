@@ -394,6 +394,16 @@ choose.
   put back for the shadow pass. Anything new that renders must survive
   `?cull=off` vs on with a zero-pixel diff; a new mesh that should never be
   culled (sky, UI in world) has to opt out there, not be special-cased.
+- **Zones (`src/zones.js`): the rules engine holds all 44 areas, the
+  renderer one zone.** A mobile outside the drawn zone has a room and no
+  body, the server/client split the multiplayer plan wants. Each zone lays
+  out from a fixed root, so `?room=` never changes a layout. Three things
+  bite on teardown: a long-lived module that captures `built` or figures
+  (AO mesh lists, aura maps, decal pools, the title reel) keeps a whole zone
+  alive — find it with a heap snapshot, not by guessing; a build that
+  patches a *shared* baked material's shader must check it has not already
+  (the second zone's shader would not compile); and never dispose shared
+  materials, or the next zone recompiles every program.
 - Figures are skinned meshes: one draw each, no instancing, and a second pass if
   they cast shadows. They are kept out of the shadow map and culled past 46 m.
 - Large soft sprites are the most expensive thing per pixel in the scene. The

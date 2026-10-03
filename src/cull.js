@@ -172,6 +172,8 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
    */
   const pieceGeometry = new WeakMap(); // batch -> geometryId -> geometry; kept, never disposed:
   // disposing a geometry frees its attributes, and these share the batch's.
+  // Listed as well, for `dispose` -- when the zone goes, the batch goes too.
+  const pieces = [];
   function proxiesFor(cell) {
     const region = cell.box.clone();
     region.min.x -= CELL; region.max.x += CELL; region.min.z -= CELL; region.max.z += CELL;
@@ -242,6 +244,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
               geometry.setDrawRange(range.start, range.count);
               geometry.boundingSphere = o.getBoundingSphereAt(info.geometryIndex, new THREE.Sphere());
               byId[info.geometryIndex] = geometry;
+              pieces.push(geometry);
             }
             o.getMatrixAt(i, m);
             put(new THREE.Mesh(geometry, distance), m.premultiply(o.matrixWorld));
@@ -1406,7 +1409,31 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     return cell;
   }
 
-  return { begin, end, work, settle, state, cells, instanced, sensor, measure: (level, x, z) => {
+  /**
+   * The zone this measured is going (main.js crossTo): the probe's target and
+   * material, the sensor in the scene, and every stand-in built to measure
+   * against. A measurement belongs to the walls it was taken against, so the
+   * next zone gets a visibility of its own rather than this one emptied.
+   */
+  function dispose() {
+    showAll();
+    hiddenNow.length = 0;
+    scene.remove(sensor);
+    sensor.geometry.dispose();
+    sensor.material.dispose();
+    for (const cell of cells.values()) if (cell.job) for (const proxy of cell.job.owned) proxy.dispose();
+    for (const geometry of pieces) geometry.dispose();
+    pieces.length = 0;
+    target.dispose();
+    distance.dispose();
+    cells.clear();
+    queue.length = 0;
+    instanced.length = 0;
+    instancedBy.clear();
+    grid = null;
+  }
+
+  return { begin, end, work, settle, state, cells, instanced, sensor, dispose, measure: (level, x, z) => {
     const cell = cellAt(level, x, z, true);
     while (!cell.done) step(true);
     return cell;

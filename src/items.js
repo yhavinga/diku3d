@@ -450,7 +450,8 @@ export function createItems({ scene, game, library, built }) {
     syncGear();
     const live = new Set();
     for (const obj of game.ground) {
-      if (!ours(obj)) continue;
+      // The ground is the whole mud's; only the drawn zone's rooms are drawn.
+      if (!ours(obj) || !built.rooms.has(obj.inRoom)) continue;
       live.add(obj);
       let node = drawn.get(obj);
       if (!node) { node = draw(obj); drawn.set(obj, node); } else if (node.position.x !== obj.at.x || node.position.z !== obj.at.z) {
@@ -476,6 +477,7 @@ export function createItems({ scene, game, library, built }) {
     let best = null;
     let bestScore = -Infinity;
     for (const obj of game.ground) {
+      if (!built.rooms.has(obj.inRoom)) continue;
       if (!(obj.wearFlags & TAKE) && !game.isContainer(obj)) continue;
       if (!(obj.wearFlags & TAKE) && !(obj.slot)) continue;
       _to.set(obj.at.x - camera.position.x, obj.at.y + 0.15 - camera.position.y, obj.at.z - camera.position.z);
@@ -490,5 +492,8 @@ export function createItems({ scene, game, library, built }) {
     return best;
   }
 
-  return { group, update, lookable, drawn };
+  /** Another zone (main.js crossTo): what lies in its rooms is drawn from now on. */
+  function setBuilt(next) { built = next; }
+
+  return { group, update, lookable, drawn, setBuilt };
 }

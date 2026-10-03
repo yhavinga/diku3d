@@ -6,6 +6,39 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-03 — wave 9: every area, one zone at a time
+
+### Zones (wave9-zones)
+
+- All 44 areas in `area.lst` load at boot; 1,856 mobiles, 1,440 of them
+  outside the drawn zone with a room and no position, moving room to room.
+  Engine cost 0.23 ms/pulse in node against 0.13 for nine areas; 0.33 vs
+  0.31 ms/frame in the browser. 34 zones: home (nine areas), Ofcol + New
+  Ofcol together, every other area alone; 86 crossings, all checked by
+  world-check to land in a placed room.
+- `layoutWorld` gained `roots`: arrival rooms the zone's start cannot walk
+  to (High Tower, Miden'nir, Moria, Redferne). Home layout unchanged room
+  for room, Midgaard 93%, mean 94.6%.
+- Crossing: home → school 0.9–1.1 s ready, school → home 3.7–4.0 s (build.js
+  2.7 s of it). Five round trips: geometries/textures/programs flat, heap
+  242 → 246 MB levelling off — after six leaks were found that had grown it
+  ~190 MB per trip (AO mesh lists, spell auras, sanctuary records, ground
+  decals, the title reel, grass shaders patched twice).
+- Open: the sky area (all sector AIR, never built); crossings still drawn as
+  the old barred gate (build.js should draw an open arch with the area
+  name); `actors.js` label canvases are never released (~256 KB per mobile
+  name); most new areas are dressed generically — Arachnos is stone
+  corridors, the Chapel open streets, Moria has floating rocks.
+
+### Jump and compass steps (coordinator)
+
+- Every jump peaked at 0 cm: the frame that set the velocity still read as
+  grounded by height, and the next frame zeroed it. Rising now never counts
+  as standing.
+- A compass glide was a straight lerp with no collision — 1.63 m deep
+  through the Market Square plinth. It now asks nav.js's grid (held to the
+  cells the line crosses) and grazes edges by ≤0.18 m.
+
 ## 2026-10-03 — wave 8: a recipe's env, made to count
 
 ### Sanctuary you can see from across the square (wave8-sanct)

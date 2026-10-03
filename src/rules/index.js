@@ -12,7 +12,8 @@ import { installSpecials } from './specials.js';
 import { installInterp } from './interp.js';
 
 export function installRules(k) {
-  k.perform = k.actors && k.actors.perform ? (slot, clip, options) => k.actors.perform(slot, clip, options) : null;
+  // The zone's bodies, whichever zone is drawn when it is called.
+  k.perform = (slot, clip, options) => (k.actors && k.actors.perform ? k.actors.perform(slot, clip, options) : null);
   installWorld(k);
   installObjects(k);
   installMove(k);

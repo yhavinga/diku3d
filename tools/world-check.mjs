@@ -21,6 +21,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArea, buildWorld, SECTOR, DIR_NAME } from '../src/are.js';
 import { layoutWorld } from '../src/layout.js';
+import { planZones, layoutZone, HOME_AREAS, HOME_MAX_ROOMS } from '../src/zones.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const areaDir = join(root, 'merc21', 'area');
@@ -157,10 +158,8 @@ for (const area of areas) {
 // set gets its own pass, with the viewer's own start room and cap.
 const DEFAULT_WORLD = ['midgaard.are', 'haon.are', 'shire.are', 'marsh.are',
   'trollden.are', 'grave.are', 'sewer.are', 'eastern.are', 'hood.are'];
-// Mirrors MAX_ROOMS in src/main.js. Not imported: main.js is a browser module
-// that reads `location` at import time, and the point of this tool is that it
-// runs in node. If that number moves, move this one.
-const MAX_ROOMS = 640;
+// The home zone (src/zones.js), which is what main.js lays out by default.
+const MAX_ROOMS = HOME_MAX_ROOMS;
 const defaultSet = areas.filter((a) => DEFAULT_WORLD.includes(a.file));
 if (defaultSet.length === DEFAULT_WORLD.length) {
   const world = buildWorld(defaultSet);
@@ -195,6 +194,61 @@ if (defaultSet.length === DEFAULT_WORLD.length) {
     console.log(`  ${check.name} -- ${faults.length}`);
     for (const f of faults.slice(0, 6)) console.log(`      ${f}`);
   }
+}
+
+// The zones the viewer actually draws (src/zones.js): every area in
+// area.lst loaded at once, the home zone laid out from the temple and every
+// other zone from its own fixed start, with the rooms a crossing arrives in
+// laid down whole if the start cannot walk to them. Three more invariants
+// span the zones: each zone's layout is free of the faults above, laying it
+// out twice gives the same coordinates (a server and every client must
+// agree), and every exit from one zone into another arrives in a room the
+// target zone placed.
+const listed = readFileSync(join(areaDir, 'area.lst'), 'latin1').split(/\s+/).filter((f) => f.endsWith('.are'));
+if (!args.length) {
+  const all = listed.map((f) => areas.find((a) => a.file === f) || parseArea(readFileSync(join(areaDir, f), 'latin1'), f));
+  const world = buildWorld(all);
+  const plan = planZones(world);
+  const layouts = new Map();
+  let zoneFaults = 0;
+  const say = (line) => { zoneFaults++; console.log(`  ${line}`); };
+  console.log(`\nzones: ${plan.zones.length} over ${all.length} areas in area.lst, ${plan.crossings.length} crossings`);
+  for (const zone of plan.zones) {
+    const layout = layoutZone(world, plan, zone);
+    layouts.set(zone.id, layout);
+    for (const check of CHECKS) {
+      for (const fault of check.run(world, layout)) say(`${zone.id}: ${check.name} -- ${fault}`);
+    }
+    const again = layoutZone(world, plan, zone);
+    const moved = [...layout.cells.values()].filter((c) => {
+      const d = again.cells.get(c.vnum);
+      return !d || d.x !== c.x || d.z !== c.z || d.level !== c.level;
+    }).length;
+    if (moved || again.cells.size !== layout.cells.size) say(`${zone.id}: laid out twice, ${moved} rooms moved`);
+  }
+  // The home zone is the default world: same rooms, same coordinates.
+  const home = layouts.get(plan.home.id);
+  const reference = layoutWorld(buildWorld(all.filter((a) => HOME_AREAS.includes(a.file))), { startVnum: 3001, maxRooms: MAX_ROOMS });
+  const differ = [...reference.cells.values()].filter((c) => {
+    const d = home.cells.get(c.vnum);
+    return !d || d.x !== c.x || d.z !== c.z || d.level !== c.level;
+  }).length;
+  if (differ || home.cells.size !== reference.cells.size) {
+    say(`home zone differs from the nine-area world: ${differ} rooms moved, ${home.cells.size} against ${reference.cells.size}`);
+  }
+  let sky = 0;
+  let stranded = 0;
+  for (const c of plan.crossings) {
+    const arrival = layouts.get(c.toZone).cells.get(c.to);
+    if (!arrival) { say(`#${c.from} ${DIR_NAME[c.dir]} -> #${c.to}: ${c.toZone} did not place its arrival`); continue; }
+    // build.js does not build the sky; main.js refuses those crossings.
+    if (isUnbuilt(arrival.room)) sky++;
+    // A crossing out of a room its own zone never placed cannot be taken.
+    if (!layouts.get(c.fromZone).cells.has(c.from)) stranded++;
+  }
+  console.log(`  every crossing arrives in a placed room; ${sky} into rooms build.js does not build (sector AIR),`
+    + ` ${stranded} from rooms their own zone did not place`);
+  total += zoneFaults;
 }
 
 console.log(total === 0

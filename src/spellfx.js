@@ -3161,5 +3161,34 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     mark: (p, r, mode, color = PAL.fire.glow, life = 7, cool = 1.6) => mark(p, r, mode, color, life, cool),
     heat,
     dispose() { unlisten(); scene.remove(group); overlay.remove(); for (const l of lights) scene.remove(l.light); },
+    /**
+     * The zone these were drawn in is going (main.js crossTo). Whatever is in
+     * flight or lying on its ground stops here -- a scorch would otherwise be
+     * left burning at the same coordinates in the next zone -- and the
+     * shells, hung in that zone's graph and keyed here by body, are let go,
+     * or they would keep the whole zone alive.
+     */
+    releaseZone() {
+      effects.length = 0;
+      byId.clear();
+      for (const l of lingering) anchors.release(l.anchor);
+      lingering.length = 0;
+      for (const d of decals) { d.busy = false; d.mesh.visible = false; d.drive = null; d.anchorFn = null; d.owner = null; }
+      for (const sp of spheres) freeSphere(sp);
+      for (const l of lights) { l.busy = false; l.fn = null; l.owner = null; l.light.intensity = 0; }
+      light.n = 0;
+      matter.n = 0;
+      for (const a of auras.values()) a.material.dispose();
+      for (const sv of sanct.values()) {
+        sv.material.dispose();
+        if (sv.ground) { sv.ground.life = 0; sv.ground = null; }
+      }
+      auras.clear();
+      sanct.clear();
+      for (const mask of heat.masks.values()) heat.maskScene.remove(mask);
+      heat.masks.clear();
+      for (const material of heat.maskMaterials.values()) material.dispose();
+      heat.maskMaterials.clear();
+    },
   };
 }

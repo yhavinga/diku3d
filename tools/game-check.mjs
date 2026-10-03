@@ -569,7 +569,8 @@ const wander = (() => {
   for (let t = 0; t < 600; t += dt) {
     game.update(dt, at, look);
     for (const slot of game.mobs) {
-      if (slot.dead) continue;
+      // A mobile whose room the layout did not place has a room and no body.
+      if (slot.dead || !slot.here) continue;
       const here = game.nav.roomAt(slot.pos.x, slot.pos.y, slot.pos.z);
       if (here === undefined) offGround++;
       else if (slot.travel) {

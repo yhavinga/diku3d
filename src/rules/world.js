@@ -34,13 +34,15 @@ export function resetSpot(proto, index, center) {
 const SCENERY_RADIUS = { [ITEM.FOUNTAIN]: 1.7, [ITEM.FURNITURE]: 0.9, [ITEM.CONTAINER]: 0.6, [ITEM.BOAT]: 1.2 };
 
 export function installWorld(k) {
-  const { world, built, state, ground, mobs, emit, game, rules, ways } = k;
-  const doors = k.actors ? k.actors.doors : null;
+  const { world, state, ground, mobs, emit, game, rules } = k;
+  // The drawn zone's hinges -- only that zone has any.
+  const hinges = () => (k.actors ? k.actors.doors : null);
 
   // ------------------------------------------------------------- doors ----
 
   /** The viewer's hinges on this exit, either side of it. */
   function hingesOf(vnum, dir) {
+    const doors = hinges();
     if (!doors) return [];
     const exit = world.rooms.get(vnum)?.exits[dir];
     const back = REVERSE_DIR[dir];
@@ -84,6 +86,7 @@ export function installWorld(k) {
     for (const room of world.rooms.values()) {
       for (const exit of room.exits) if (exit) exit.locks &= ~EX_LOCKED;
     }
+    const doors = hinges();
     if (doors) for (const door of doors) { door.spec.locked = false; door.forced = true; }
   }
 
@@ -95,10 +98,23 @@ export function installWorld(k) {
    * things into, and what can be carried is drawn by items.js and carried off.
    */
   function placeReset(obj, vnum, index) {
-    const info = built.rooms.get(vnum);
-    if (!info) return null;
-    let at = resetSpot(obj.proto, index, info.center);
     obj.radius = SCENERY_RADIUS[obj.itemType] && !(obj.wearFlags & 1) ? SCENERY_RADIUS[obj.itemType] : 0;
+    obj.resetIndex = index;
+    const info = k.built.rooms.get(vnum);
+    // A room the drawn zone did not build: the object is in it, and is given
+    // a place on the floor when a zone holding it is drawn (see below).
+    if (!info) {
+      const placed = k.objToRoom(obj, vnum, { x: k.FAR, y: 0, z: k.FAR });
+      placed.unplaced = true;
+      return placed;
+    }
+    return k.objToRoom(obj, vnum, spotFor(obj, info));
+  }
+
+  /** Where a reset object lies in a built room. */
+  function spotFor(obj, info) {
+    const ways = k.ways;
+    let at = resetSpot(obj.proto, obj.resetIndex || 0, info.center);
     // Scenery stays exactly where actors.js stood it. A thing you can pick up
     // is put down where a foot could reach it, not inside the bar.
     if ((obj.wearFlags & 1) && ways.sample && ways.nearestOpen) {
@@ -108,9 +124,30 @@ export function installWorld(k) {
         if (open) at = { x: (open[0] + 0.5) * ways.NAV_RES, y: at.y, z: (open[1] + 0.5) * ways.NAV_RES };
       }
     }
-    obj.resetIndex = index;
-    return k.objToRoom(obj, vnum, at);
+    return at;
   }
+
+  /**
+   * On entering a zone: what the mud put down in its rooms while nobody had
+   * built them gets a place on the floor, and every hinge is told what its
+   * exit says now -- the mayor may have opened the gates while you were away.
+   */
+  k.zoneHooks.push(() => {
+    for (const obj of ground) {
+      if (!obj.unplaced) continue;
+      const info = k.built.rooms.get(obj.inRoom);
+      if (!info) continue;
+      obj.at = obj.resetIndex !== undefined ? spotFor(obj, info) : k.ringSpot(obj.inRoom, ground.indexOf(obj) % 7, 7);
+      obj.unplaced = false;
+    }
+    for (const door of hinges() || []) {
+      const exit = world.rooms.get(door.spec.room)?.exits[door.spec.dir];
+      if (!exit) continue;
+      door.open = !(exit.locks & EX_CLOSED);
+      door.spec.closed = !door.open;
+      door.spec.locked = !!(exit.locks & EX_LOCKED);
+    }
+  });
 
   // ------------------------------------------------------------ areas ----
 
@@ -145,9 +182,11 @@ export function installWorld(k) {
     });
     areas.push({ name: area.name, file: area.file, lines, age: 0 });
   }
+  // Where each line's body stands when it is reset. Off the drawn zone that is
+  // only a room; game.js's enterZone fills in the spot when it is drawn.
   for (const slot of mobs) {
-    slot.origin = { ...slot.anchor };
-    slot.originRoom = slot.roomVnum;
+    if (!slot.origin) slot.origin = { ...slot.anchor };
+    if (slot.originRoom === undefined) slot.originRoom = slot.roomVnum;
   }
 
   const areaOf = (vnum) => world.rooms.get(vnum)?.area;
@@ -186,7 +225,7 @@ export function installWorld(k) {
         case 'O': {
           const proto = world.objProtos.get(line.arg1);
           const room = world.rooms.get(line.arg3);
-          if (!proto || !room || !built.rooms.has(room.vnum)) { last = false; break; }
+          if (!proto || !room) { last = false; break; }
           if (occupied || countIn(proto.vnum, ground.filter((o) => o.inRoom === room.vnum)) > 0) { last = false; break; }
           const obj = k.game.MERC.createObject(proto, k.wanderRng.fuzzy(level));
           obj.cost = 0;
@@ -229,8 +268,8 @@ export function installWorld(k) {
   /**
    * db.c: area_update -- an area ages a minute a PULSE_AREA; with nobody in
    * it, it resets from three minutes on, and with you in it, at fifteen, with
-   * a warning a minute before. Mud School would reset every three; it is not
-   * among the areas this viewer loads.
+   * a warning a minute before. Mud School resets every three, as the mud's
+   * own special case says.
    */
   function areaUpdate() {
     for (const area of areas) {
@@ -263,6 +302,12 @@ export function installWorld(k) {
     slot.task = null;
     slot.notice = null;
     slot.roomVnum = home;
+    if (!slot.here) {
+      // Nobody is drawing its zone: back in its room, and that is all.
+      k.wake(slot, k.wanderRng);
+      emit({ kind: 'respawn', slot, text: '' });
+      return;
+    }
     slot.anchor = { ...slot.origin };
     const entry = entryPoint(home, slot.origin) || slot.origin;
     slot.pos = { ...entry };
@@ -275,6 +320,7 @@ export function installWorld(k) {
   /** Part way down one of the room's routed ways in: somewhere to walk in from. */
   function entryPoint(vnum, origin) {
     const room = world.rooms.get(vnum);
+    const { ways, built } = k;
     if (!room || !ways.route) return null;
     const doorsOut = [0, 1, 2, 3, 4, 5].filter((d) => {
       const exit = room.exits[d];

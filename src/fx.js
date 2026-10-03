@@ -944,7 +944,11 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
   let ambient = 1;
   let lastViolence = Infinity;
 
-  const motion = actors.motion;
+  // Read through on every use: another zone brings other bodies (main.js crossTo).
+  const motion = {
+    strike: (...args) => actors.motion.strike(...args),
+    react: (...args) => actors.motion.react(...args),
+  };
   const figureOf = (slot) => (slot && slot.figure && slot.figure.m ? slot.figure : null);
 
   /** A figure's chest, or the point just in front of your own. */

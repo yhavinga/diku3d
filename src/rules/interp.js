@@ -59,7 +59,7 @@ export function act(format, ch, victim = null, extra = {}) {
 }
 
 export function installInterp(k) {
-  const { world, built, state, ground, mobs, emit, game } = k;
+  const { world, state, ground, mobs, emit, game } = k;
   const { MERC } = game;
   const { POS } = MERC;
 
@@ -259,7 +259,7 @@ export function installInterp(k) {
   }
 
   function doWeather() {
-    const info = built.rooms.get(state.roomVnum);
+    const info = k.built.rooms.get(state.roomVnum);
     if (!info || !info.outdoor) return send("You can't see the weather indoors.");
     const w = k.weather();
     send(`The sky is ${SKY_LOOK[w.sky]} and ${w.change >= 0 ? 'a warm southerly breeze blows' : 'a cold northern gust blows'}.`);
