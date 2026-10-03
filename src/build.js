@@ -2228,7 +2228,7 @@ function* raise(world, layout, materials, assets = null) {
       const rotY = (dir === 1 || dir === 3) ? Math.PI / 2 : 0;
       buildArch({
         batcher, instances, model, chunk, x: p.x, y: pos.y, z: p.z, rotY, sealed,
-        veils: sealed ? null : veils, scale: small ? { x: 0.5, y: 0.8 } : null,
+        veils: sealed ? null : veils, scale: small ? { x: 0.5, y: 0.8 } : null, out: [fx, fz],
       });
       if (sealed) return;
       const q = at(depth - 0.8, along);
@@ -2305,7 +2305,7 @@ function* raise(world, layout, materials, assets = null) {
         const az = pos.z + dz * (distance - 0.1);
         buildArch({
           batcher, instances, model, chunk, x: ax, y: pos.y, z: az, rotY, sealed: side.kind === 'gate',
-          veils: side.kind === 'gate' ? null : veils,
+          veils: side.kind === 'gate' ? null : veils, out: [dx, dz],
         });
         if (side.kind !== 'gate') {
           portals.push({
@@ -7600,14 +7600,17 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
 }
 
 /** A stone archway: portals you step through, gates that are sealed. */
-function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed, veils = null, scale = null }) {
+function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed, veils = null, scale = null, out = [0, 0] }) {
   const arch = model(['stone_arch'], 0);
   // What an archway opens onto is another place, not whatever the grid has
   // behind the wall -- the void, or the sunlit world outside an indoor
   // arena. A dark threshold stands in the arch's middle plane and fills its
   // opening; its edges run into the stone, so only the opening shows it.
   const sx = scale ? scale.x : 1; const sy = scale ? scale.y : 1;
-  if (veils) veils.push({ x, y, z, rotY, sx, sy, round: !!(arch && instances) });
+  // Towards the arch's back (`out`, the way through), 0.3 of its 0.425 m
+  // half-depth: a cave's rock stands up to 0.9 m proud of the wall line and
+  // round the opening it crossed a threshold in the arch's middle plane.
+  if (veils) veils.push({ x: x + out[0] * 0.3, y, z: z + out[1] * 0.3, rotY, sx, sy, round: !!(arch && instances) });
   if (arch && instances) {
     instances.add(arch, scale ? { x, y, z, rotY, scaleX: sx, scaleY: sy } : { x, y, z, rotY }, chunk);
     const bars = sealed ? model(['portcullis'], 0) : null;
