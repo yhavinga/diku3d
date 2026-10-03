@@ -2666,6 +2666,10 @@ export function createGame({
         .map((obj) => ({ obj, cost: getCost(shop, obj, true) }))
         .filter((entry) => entry.cost > 0),
       sellsBack: shop.buyType.filter((t) => t > 0),
+      // do_sell's price for each thing you carry: nothing for what the keeper already stocks.
+      offers: state.inventory.map((obj) => ({
+        obj, cost: mob.inventory.some((o) => o.vnum === obj.vnum) ? 0 : getCost(shop, obj, false),
+      })),
     };
   }
 

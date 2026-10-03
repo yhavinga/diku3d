@@ -403,7 +403,36 @@ export function attachSocketLink(link, game, host, enter) {
   offs.push(link.on('mob', (msg) => { for (const [i, ...view] of msg.m) mirror.mob(i, view); }));
   offs.push(link.on('ground', (msg) => { if (msg.z === host.zoneId()) mirror.ground(msg.o); }));
   offs.push(link.on('weather', (msg) => mirror.weather(msg.w)));
+  // The shop panel reads the server's keeper: its stock rolled there, its
+  // prices and offers worked out there. Rolled here, the list showed a
+  // different sword at a different price than the one buying gave you.
+  let shop = null;
+  game.shopHere = () => shop;
+  offs.push(link.on('shop', (msg) => {
+    const v = msg.s;
+    shop = v && {
+      keeper: v.keeper, slot: mobs[v.m] || null, name: v.name, open: v.open, hours: v.hours, sellsBack: v.sellsBack,
+      stock: v.stock.map(({ vnum, name, level, itemType, cost }) => ({ obj: { vnum, name, level, itemType }, cost })),
+      offers: v.offers.map(([oid, cost]) => ({ id: oid, cost })),
+    };
+  }));
+  // Who holds each gate and whether it is still held: the server's word, so a
+  // warden killed by someone else opens the gate on this map too.
+  offs.push(link.on('gates', (msg) => {
+    for (const [vnum, dir, open, level] of msg.g) {
+      for (const gate of game.gates) {
+        if (gate.vnum !== vnum || gate.dir !== dir) continue;
+        gate.open = !!open;
+        gate.wardenLevel = level;
+      }
+    }
+  }));
   offs.push(link.on('enter', (msg) => { seq = msg.seq; id = msg.id; host.teleport(msg.room); }));
+  // A report the server would not believe: back to where it has you.
+  offs.push(link.on('at', (msg) => {
+    seq = Math.max(seq, msg.seq);
+    host.place(msg);
+  }));
   offs.push(link.on('who', (msg) => {
     for (const [rid, name, title, level, cls, sex, position, flags, percent, linkdead, fighting, weapon, shield] of msg.add) {
       const info = { name, title, level, cls, sex, position, flags, percent, linkdead, fighting, weapon, shield };

@@ -12,10 +12,12 @@
  * own zone's coordinates; `toServer`/`toClient` are the whole translation.
  *
  * What the server cannot have is the geometry: build.js is three.js. Its rooms
- * are the layout grid, as tools/game-check.mjs stubs them, so two of build.js's
- * refinements are missing here -- the temple mound's 1.2 m lift, and the
- * arrival point moved off a stair opening. Both are within a metre or so of
- * what a client draws.
+ * are the layout grid, as tools/game-check.mjs stubs them, and the server's
+ * game stands everyone on that grid. Where build.js raises a room -- the
+ * temple's mound, `mounds` below -- a client's report comes down by the lift
+ * on the way in and goes back up on the way out (`liftAt`), so a player on
+ * the temple steps and a mobile beside them are on one floor for reach. The
+ * arrival point moved off a stair opening is still the client's alone.
  */
 
 import { readFileSync } from 'fs';
@@ -24,6 +26,7 @@ import { join } from 'path';
 import { parseArea, buildWorld, SECTOR, ROOM_INDOORS } from '../src/are.js';
 import { planZones, layoutZone, HOME_AREAS } from '../src/zones.js';
 import { createNav } from '../src/nav.js';
+import { readShell } from '../src/shells.js';
 
 /** build.js's grid, as nav.js and game-check.mjs repeat it. */
 export const CELL = 13;
@@ -75,6 +78,14 @@ export function bootWorld(root, { log = () => {} } = {}) {
     zones.push({ zone, index, offset, layout, local, nav: null });
   }
   const byId = new Map(zones.map((z) => [z.zone.id, z]));
+  const lifts = mounds(world, zones);
+  /** How far build.js raises the floor at a server point: the lift of the room it belongs to. */
+  const liftAt = (x, y, z) => {
+    const zone = zoneAtX(x);
+    if (!zone) return 0;
+    const vnum = navOf(zone).roomAt(x - zone.offset, y, z);
+    return lifts.get(vnum) || 0;
+  };
   const zoneOfVnum = (vnum) => byId.get(plan.zoneOf(vnum)?.id) || null;
   const zoneAtX = (x) => zones[Math.floor((x + SPAN / 2) / SPAN)] || null;
   // nav.js per zone, made the first time anything asks about that zone.
@@ -84,7 +95,7 @@ export function bootWorld(root, { log = () => {} } = {}) {
   };
 
   return {
-    world, plan, zones, byId, built, zoneOfVnum, zoneAtX,
+    world, plan, zones, byId, built, zoneOfVnum, zoneAtX, lifts, liftAt,
     layout: { links, cells: new Map() },
     nav: compositeNav({ zones, zoneOfVnum, zoneAtX, navOf }),
     /** A client's zone-local point into the server's frame. */
@@ -95,6 +106,40 @@ export function bootWorld(root, { log = () => {} } = {}) {
       return z ? { zone: z.zone.id, x: p.x - z.offset, y: p.y, z: p.z } : null;
     },
   };
+}
+
+/**
+ * build.js `mounds`, without three.js: "the huge mound upon which the temple
+ * is built" raises that room and the temple rooms joined to it on its level
+ * MOUND_LIFT, unless something stands on the level above. build.js keeps
+ * open-air rooms off the mound by its own `isOpenAir`; here the mud's sector
+ * stands in for it, which is the same set wherever a mound is written.
+ * tools/server-check.mjs holds the result to what a page builds.
+ */
+export const MOUND_LIFT = 1.2;
+function mounds(world, zones) {
+  const lifts = new Map();
+  const openAir = (room) => OUTDOOR.has(room.sector) && !(room.flags & ROOM_INDOORS);
+  const temple = /\btemple\b/i;
+  for (const { layout } of zones) {
+    for (const vnum of layout.cells.keys()) {
+      const room = world.rooms.get(vnum);
+      if (openAir(room) || !readShell(room)?.mound) continue;
+      const cell = layout.cells.get(vnum);
+      const queue = [room];
+      while (queue.length) {
+        const r = queue.shift();
+        const c = layout.cells.get(r.vnum);
+        if (!c || lifts.has(r.vnum) || c.level !== cell.level || layout.at(c.level + 1, c.x, c.z) !== undefined) continue;
+        lifts.set(r.vnum, MOUND_LIFT);
+        for (const e of r.exits.slice(0, 4)) {
+          const next = e && world.rooms.get(e.to);
+          if (next && !openAir(next) && temple.test(next.name) && !lifts.has(next.vnum)) queue.push(next);
+        }
+      }
+    }
+  }
+  return lifts;
 }
 
 /**

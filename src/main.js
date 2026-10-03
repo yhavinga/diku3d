@@ -1760,6 +1760,11 @@ async function boot() {
       if (!info) throw new Error(`link: the server put you in #${vnum}, which this zone did not build`);
       player.spawn(info.center.x, info.center.y, info.center.z, camera.rotation.y);
     },
+    /** Put back where the server has you ({ zone, x, y, z, room }: y is the floor). */
+    place({ zone: zoneId, x, y, z, room }) {
+      if (zoneId !== zone.id || x === null) { linkHost.teleport(room); return; }
+      player.spawn(x, y, z, camera.rotation.y);
+    },
     walk: (dir) => step(dir, true),
     disconnected(why) {
       document.getElementById('link-lost-text').textContent = `${why}  The world stays as it was; reload to play again.`;

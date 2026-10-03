@@ -19,7 +19,8 @@ import { WebSocketServer } from 'ws';
 import { createGame, createCharacter, POS, CLASS_TABLE } from '../src/game.js';
 import { serialize, restore } from '../src/save.js';
 import { titleFor, trustOf, PLR_MORE } from '../src/rules/actcomm.js';
-import { PLR, nested } from '../src/rules/handler.js';
+import { PLR, AFF, nested } from '../src/rules/handler.js';
+import { EX_CLOSED } from '../src/are.js';
 import { bootWorld } from './world.mjs';
 import {
   createAccounts, hashPassword, checkPassword, checkParseName, properName, EXTRA,
@@ -33,6 +34,12 @@ const SIGHT = 160;
 const LINKDEAD_SECONDS = 180;
 /** Autosave, as char_update's oldest-save-first does every few minutes. */
 const AUTOSAVE_SECONDS = 300;
+/** Metres a second a page may move its player inside one room: a glide's top speed and some. */
+const MAX_SPEED = 45;
+/** ...and up or down: a fall, a jump, a stair. */
+const MAX_CLIMB = 30;
+/** Metres of jitter on top: two reports in one packet, a frame's rounding. */
+const SPEED_SLACK = 3;
 
 export async function startMud({
   root, dataDir, port = 4011, host = '127.0.0.1', seed, tickMs = 50, log = console.log,
@@ -44,7 +51,7 @@ export async function startMud({
   const sessions = new Set();
   const byPc = new Map();
   let nextPcId = 1;
-  const stats = { events: 0, routed: 0, dropped: 0, msgsOut: 0, bytesOut: 0, msgsIn: 0, ticks: 0, tickMs: 0 };
+  const stats = { refused: 0, events: 0, routed: 0, dropped: 0, msgsOut: 0, bytesOut: 0, msgsIn: 0, ticks: 0, tickMs: 0 };
 
   // -------------------------------------------------------------- the game --
   const hooks = {
@@ -109,7 +116,7 @@ export async function startMud({
     const fast = stats.ticks % Math.max(1, Math.round(100 / tickMs)) === 0;
     for (const s of sessions) {
       if (!s.pc || !s.open) continue;
-      if (fast) { sendSelf(s); sendMobs(s); sendGround(s); sendPlayers(s); }
+      if (fast) { sendSelf(s); sendMobs(s); sendGround(s); sendPlayers(s); sendShop(s); sendGates(s); }
       flush(s);
       if ((s.saveIn -= dt) <= 0) { s.saveIn = AUTOSAVE_SECONDS; saveSession(s); }
     }
@@ -126,7 +133,7 @@ export async function startMud({
   wss.on('connection', (ws, request) => {
     const s = {
       ws, open: true, host: request.socket.remoteAddress || '?', state: 'name', pc: null, record: null,
-      out: [], zone: null, seq: 0, played: 0, saveIn: AUTOSAVE_SECONDS, linkdead: null, logged: false,
+      out: [], zone: null, seq: 0, posAt: null, played: 0, saveIn: AUTOSAVE_SECONDS, linkdead: null, logged: false,
       sent: { self: '', mobs: new Map(), ground: new Map(), roster: new Map(), weather: '' }, pending: null,
     };
     sessions.add(s);
@@ -265,6 +272,8 @@ export async function startMud({
   function welcome(s, text) {
     const pc = s.pc;
     s.seq += 1;
+    s.posAt = null;
+    s.navRoom = null;
     s.sent = { self: '', kit: '', mobs: new Map(), ground: new Map(), roster: new Map(), weather: '' };
     send(s, {
       t: 'enter', id: pc.id, name: pc.ch.name, room: pc.ch.roomVnum, seq: s.seq, now: Date.now() - started,
@@ -277,16 +286,80 @@ export async function startMud({
   }
 
   // ---------------------------------------------------- what a client says --
-  function position(s, { zone, x, y, z, yaw = 0, seq = 0 }) {
+  /**
+   * Where a client says its player is, checked before it is believed: the
+   * body is the page's to walk, but not to put anywhere it likes. A report is
+   * refused, and the client put back where the server has it (`at`), when
+   *  - it lies in no room's ground, nor a street's, nor next to one;
+   *  - it is in another room than the server's, and no open exit leads
+   *    there (a jump without the server's sequence number is that);
+   *  - inside one room it moved faster than anything a page does: a run is
+   *    9.5 m/s, and a glide along an exit (player.js) tops out near 40.
+   * Never a kick: a page that lagged or fell is put back, not thrown out.
+   */
+  function position(s, msg) {
+    const { zone, x, y, z, yaw = 0, seq = 0 } = msg;
     // A report from before the last jump would put the body back where it was.
     if (seq < s.seq) return;
     const local = w.byId.get(zone);
-    if (!local || ![x, y, z].every(Number.isFinite)) return sendError(s, `bad position in zone ${JSON.stringify(zone)}`);
+    if (!local || ![x, y, z, yaw].every(Number.isFinite)) return sendError(s, `bad position in zone ${JSON.stringify(zone)}`);
     const pc = s.pc;
-    pc.position.x = x + local.offset; pc.position.y = y; pc.position.z = z;
+    const now = performance.now();
+    const sx = x + local.offset;
+    // The client stands on build.js's floor; the server's game on the grid.
+    const sy = y - w.liftAt(sx, y - 1.72, z);
+    const why = refusal(s, pc, sx, sy, z, now);
+    if (why) {
+      stats.refused += 1;
+      s.refused = (s.refused || 0) + 1;
+      if (s.refused <= 3 || s.refused % 50 === 0) log(`${pc.ch.name}@${s.host}: position refused (${why}), ${s.refused} so far`);
+      return resync(s, why);
+    }
+    pc.position.x = sx; pc.position.y = sy; pc.position.z = z;
     pc.facing.x = -Math.sin(yaw); pc.facing.z = -Math.cos(yaw);
     s.zone = zone;
     s.yaw = yaw;
+    s.posAt = now;
+    s.navRoom = w.nav.roomAt(sx, sy - 1.72, z);
+  }
+
+  /** Why a reported point cannot be where this player is, or null. */
+  function refusal(s, pc, x, y, z, now) {
+    const feet = y - 1.72;
+    const vnum = w.nav.roomAt(x, feet, z);
+    if (vnum === undefined || !w.built.rooms.has(vnum)) return 'off the map';
+    // The room of the last report believed, by the same rule as this one's;
+    // after a jump, the room the server put the player in.
+    const from = s.navRoom ?? pc.ch.roomVnum;
+    // Just placed (enter, teleport, recall): the next report is the first.
+    if (s.posAt === null) return vnum === from || adjacent(pc.ch, from, vnum) ? null : `#${vnum} is not #${from}`;
+    if (vnum !== from) return adjacent(pc.ch, from, vnum) ? null : `no open way from #${from} to #${vnum}`;
+    const dt = Math.max(0.05, (now - s.posAt) / 1000);
+    const d = Math.hypot(x - pc.position.x, z - pc.position.z);
+    if (d > MAX_SPEED * dt + SPEED_SLACK) return `${d.toFixed(1)} m in ${dt.toFixed(2)} s`;
+    if (Math.abs(y - pc.position.y) > MAX_CLIMB * dt + SPEED_SLACK) return `${Math.abs(y - pc.position.y).toFixed(1)} m up or down in ${dt.toFixed(2)} s`;
+    return null;
+  }
+
+  /** move_char's question: an exit from `from` to `to`, not shut -- unless you pass doors. */
+  function adjacent(ch, from, to) {
+    const room = w.world.rooms.get(from);
+    if (!room) return false;
+    const passDoor = (ch.affectedBy || 0) & AFF.PASS_DOOR;
+    return room.exits.some((e) => e && !e.offMap && e.to === to && (!(e.locks & EX_CLOSED) || passDoor));
+  }
+
+  /** Put the client back where the server has its player, under a new sequence number. */
+  function resync(s, why) {
+    const pc = s.pc;
+    s.seq += 1;
+    s.posAt = null;
+    const c = w.toClient(pc.position);
+    const lift = w.liftAt(pc.position.x, pc.position.y - 1.72, pc.position.z);
+    send(s, {
+      t: 'at', seq: s.seq, room: pc.ch.roomVnum, zone: c ? c.zone : null, why,
+      x: c ? round(c.x) : null, y: round(pc.position.y - 1.72 + lift), z: round(pc.position.z),
+    });
   }
 
   function command(s, line) {
@@ -430,7 +503,7 @@ export async function startMud({
     }
     for (const s of readers) {
       const out = encode(event, s);
-      if (event.kind === 'teleport' || event.kind === 'recall') { s.seq += 1; out.seq = s.seq; }
+      if (event.kind === 'teleport' || event.kind === 'recall') { s.seq += 1; out.seq = s.seq; s.posAt = null; s.navRoom = null; }
       s.out.push(out);
       stats.routed += 1;
     }
@@ -554,12 +627,64 @@ export async function startMud({
       const key = JSON.stringify(info);
       if (s.sent.roster.get(o.pc.id) !== key) { s.sent.roster.set(o.pc.id, key); roster.push([o.pc.id, ...info]); }
       const c = local(s, p);
-      pos.push([o.pc.id, c.x, c.y, c.z, round(o.yaw || 0)]);
+      // Back up onto whatever build.js raised there (the temple mound).
+      pos.push([o.pc.id, c.x, round(p.y + w.liftAt(p.x, p.y - 1.72, p.z)), c.z, round(o.yaw || 0)]);
     }
     const gone = [...s.sent.roster.keys()].filter((id) => !seen.has(id));
     for (const id of gone) s.sent.roster.delete(id);
     if (roster.length || gone.length) send(s, { t: 'who', add: roster, del: gone });
     if (pos.length) send(s, { t: 'pos', at: Date.now() - started, p: pos });
+  }
+
+  /**
+   * The shop the reader is standing at, as the server's keeper has it: the
+   * stock it actually holds (db.c rolled each piece's level here, not in the
+   * page), what it asks, and what it would pay for each thing carried. Null
+   * when no keeper is in reach. Sent when it changes.
+   */
+  function sendShop(s) {
+    const pc = s.pc;
+    const shop = game.withPlayer(pc, () => game.shopHere());
+    const view = shop && {
+      keeper: shop.keeper, m: slotIndex.get(shop.slot), name: shop.name, open: shop.open, hours: shop.hours,
+      sellsBack: shop.sellsBack,
+      stock: shop.stock.map(({ obj, cost }) => ({
+        vnum: obj.vnum, name: obj.name, level: obj.level, itemType: obj.itemType, cost,
+      })),
+      offers: shop.offers.map(({ obj, cost }) => [idOf(obj), cost]),
+    };
+    const text = JSON.stringify(view || null);
+    if (s.sent.shop === text) return;
+    s.sent.shop = text;
+    send(s, { t: 'shop', s: view || null });
+  }
+
+  /**
+   * The gates of the reader's zone: [room, direction, open, warden's level]
+   * -- the level of the warden actually standing there (db.c fuzzes it at
+   * reset), and open once that warden is dead, for every player at once.
+   */
+  const gateViews = { tick: -1, byZone: new Map() };
+  function sendGates(s) {
+    const zone = s.zone || w.zoneOfVnum(s.pc.ch.roomVnum)?.zone.id;
+    if (!zone) return;
+    if (gateViews.tick !== stats.ticks) {
+      gateViews.tick = stats.ticks;
+      gateViews.byZone = new Map();
+      const wardens = new Map();
+      for (const slot of game.mobs) if (!slot.dead && slot.instance) wardens.set(slot.record, slot.instance);
+      for (const gate of game.gates) {
+        const id = w.zoneOfVnum(gate.vnum)?.zone.id;
+        if (!gateViews.byZone.has(id)) gateViews.byZone.set(id, []);
+        const warden = wardens.get(gate.warden);
+        gateViews.byZone.get(id).push([gate.vnum, gate.dir, gate.open ? 1 : 0, warden ? warden.level : gate.wardenLevel]);
+      }
+    }
+    const list = gateViews.byZone.get(zone) || [];
+    const text = JSON.stringify(list);
+    if (s.sent.gates === text) return;
+    s.sent.gates = text;
+    send(s, { t: 'gates', z: zone, g: list });
   }
 
   function sendWeather(only = null) {
@@ -708,5 +833,19 @@ export async function startMud({
     set onClose(fn) { onClose = fn; },
     /** For a harness: the session of a character by name. */
     sessionNamed: (name) => findPlaying(name),
+    /**
+     * For a harness: put player `id` in room `vnum` the way goto does (a
+     * 'teleport' with a sequence number), unless the last report it believed
+     * is in that room already or one open exit away. True when it jumped.
+     */
+    place(id, vnum) {
+      const s = byPc.get(id);
+      if (!s || !s.pc) throw new Error(`place: no player ${id}`);
+      const from = s.navRoom ?? s.pc.ch.roomVnum;
+      // A room it could walk into is walked into: the report alone is believed.
+      if (from === vnum || adjacent(s.pc.ch, from, vnum)) return false;
+      if (!game.placePlayer(s.pc, vnum)) throw new Error(`place: #${vnum} has nowhere to stand`);
+      return true;
+    },
   };
 }

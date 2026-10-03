@@ -883,8 +883,9 @@ export function createGameUi(game, { built = null } = {}) {
       const bag = el('ul');
       if (!game.state.inventory.length) bag.append(row('nothing to sell', '', { cls: 'dim' }));
       for (const obj of game.state.inventory.slice()) {
-        const wanted = shop.sellsBack.includes(obj.itemType);
-        bag.append(row(obj.name, wanted ? 'sell' : 'not wanted',
+        const offer = (shop.offers || []).find((o) => o.obj === obj || (obj.mirrorId !== undefined && o.id === obj.mirrorId));
+        const wanted = offer ? offer.cost > 0 : shop.sellsBack.includes(obj.itemType);
+        bag.append(row(obj.name, wanted ? (offer ? `sell · ${offer.cost} gold` : 'sell') : 'not wanted',
           { cls: wanted ? '' : 'dim', onClick: wanted ? () => game.sell(shop.keeper, obj) : null }));
       }
       right.append(bag);
