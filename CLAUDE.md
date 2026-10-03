@@ -447,7 +447,7 @@ choose.
   always one of them, so walkability cannot drop. A one-way exit names a
   wall in the room it *arrives* in too; count it when a stair picks its
   wall. `tools/exit-check.mjs --strict` is the guard: 0 doorless exits,
-  every one-way opening barred, ≤157 wrong walls, ≤8 corner arches.
+  every one-way opening barred, ≤177 wrong walls (157 before Miden'nir joined the home zone), ≤8 corner arches.
 - **The game has more than one player now (`game.players`, `bind(pc)`).**
   The bound player is Merc's `ch`; rules modules follow it through
   `k.onBind`, and a line built inside `withPlayer` reads the new binding.
