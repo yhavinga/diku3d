@@ -1885,6 +1885,7 @@ function* raise(world, layout, materials, assets = null) {
   const platforms = [];   // {x0,x1,z0,z1,top}
   const lights = [];      // {x,y,z,color,intensity,radius,flicker}
   const portals = [];     // walk-through archways
+  const veils = [];       // the dark thresholds in them: see `buildArch`
   const doors = [];       // interactive door panels
   const rooms = new Map();// vnum -> {room, cell, center, outdoor, materials, sides}
   const decor = [];       // handed to actors.js
@@ -2175,6 +2176,67 @@ function* raise(world, layout, materials, assets = null) {
       if (!sd || !(openSide(sd) || (sd.exit && (sd.exit.locks & EX_ISDOOR)))) return false;
       return !smialTunnel(sd.link);
     }) : [];
+    // Ways out that are not doorways: a way up or down with a wall of its
+    // own is a ladder up it or a shaft at its foot, and anything the layout
+    // could give no wall -- a way up or down out of a room whose four walls
+    // are all doors, an archway the grid could not route -- stands in a
+    // corner against a wall, clear of the doorway in its middle. Never in the
+    // middle of the floor: an arch there read as a lone pillar edge-on.
+    const stairWalls = new Set(stairPlans.filter((p) => p.lower === cell || p.upper === cell).map((p) => p.dir));
+    const corners = [];
+    for (const d of [0, 1, 2, 3]) for (const sign of [1, -1]) corners.push({ d, sign });
+    const used = new Set();
+    const cornerFor = (prefer) => {
+      const order = [...corners].sort((a, b) => {
+        const rank = (c) => (stairWalls.has(c.d) ? 8 : 0) + ((c.d - prefer + 4) % 4) * 2 + (c.sign > 0 ? 0 : 1);
+        return rank(a) - rank(b);
+      });
+      const pick = order.find((c) => !used.has(`${c.d}${c.sign}`)) || order[0];
+      used.add(`${pick.d}${pick.sign}`);
+      return pick;
+    };
+    const fixture = ({ way, dir, along, target, exitDir, sealed = false }) => {
+      const [fx, , fz] = DIR_STEP[dir];
+      // Along the wall, to the right of someone facing it.
+      const tx = -fz; const tz = fx;
+      const at = (depth, a) => ({ x: pos.x + fx * depth + tx * a, z: pos.z + fz * depth + tz * a });
+      const wall = openAir ? HALF : ROOM / 2;
+      const portal = (p, radius) => portals.push({
+        x: p.x, y: pos.y, z: p.z, radius, target: target.vnum, from: room.vnum, label: target.room.name, dir: exitDir,
+      });
+      if (way === 'up' && !openAir && model(['sewer_ladder'], 0)) {
+        // "A ladder leads up": iron rungs to a dark round mouth, its back on
+        // the wall face.
+        const p = at(wall, along);
+        instances.add('sewer_ladder', { x: p.x, y: pos.y, z: p.z, rotY: FACE_ROT[dir] }, chunk);
+        portal(at(wall - 0.7, along), 1.2);
+        return;
+      }
+      if (way === 'down' && model(['sewer_pit'], 0)) {
+        // A shaft in the floor with rungs down its inside.
+        const p = at(wall - 1.55, along);
+        instances.add('sewer_pit', { x: p.x, y: pos.y, z: p.z, rotY: FACE_ROT[dir] }, chunk);
+        addCollider(p.x - 1.0, p.x + 1.0, p.z - 1.0, p.z + 1.0, pos.y, pos.y + 0.62);
+        portal(at(wall - 1.55 - PIT_REACH, along), 1.0);
+        return;
+      }
+      // An archway: full size in a wall of its own, narrower in a corner,
+      // its back to the wall either way.
+      const small = along !== 0;
+      const depth = wall - (small ? 0.5 : 0.1);
+      const p = at(depth, along);
+      const rotY = (dir === 1 || dir === 3) ? Math.PI / 2 : 0;
+      buildArch({
+        batcher, instances, model, chunk, x: p.x, y: pos.y, z: p.z, rotY, sealed,
+        veils: sealed ? null : veils, scale: small ? { x: 0.5, y: 0.8 } : null,
+      });
+      if (sealed) return;
+      const q = at(depth - 0.8, along);
+      portal(q, small ? 1.1 : 1.6);
+      lights.push({ x: p.x, y: pos.y + 2.2, z: p.z, color: 0x7fd8ff, intensity: small ? 3 : 5, radius: 10 });
+    };
+    const CORNER = openAir ? 4.2 : 3.8;
+
     for (let dir = 0; dir < 4; dir++) {
       const side = sides[dir];
       const [dx, , dz] = DIR_STEP[dir];
@@ -2184,9 +2246,13 @@ function* raise(world, layout, materials, assets = null) {
       // sewer somewhere the grid could not put directly underneath, so the way
       // down is a portal -- and it is a well in the floor, not an archway
       // glowing blue in the wall.
-      const wellDown = sewerKit && side && side.kind === 'portal' && side.link && side.link.dir === 5
+      const wellDown = sewerKit && side && side.kind === 'shaft' && side.link && side.link.dir === 5
         && side.target && isSewer(side.target.room);
-      const open = side && (side.kind === 'alley' || side.kind === 'portal') && !wellDown;
+      // A way up or down out of doors is an archway at the cell's edge, as
+      // a level one is; indoors it is a ladder or a shaft against a wall
+      // that stays whole (`fixture`).
+      const shaft = !!side && side.kind === 'shaft' && !wellDown;
+      const open = side && (side.kind === 'alley' || side.kind === 'portal' || (shaft && openAir)) && !wellDown;
       const distance = openAir ? HALF : ROOM / 2;
       const wx = pos.x + dx * distance;
       const wz = pos.z + dz * distance;
@@ -2232,11 +2298,16 @@ function* raise(world, layout, materials, assets = null) {
           x: wx2 - dx * PIT_REACH, y: pos.y, z: wz2 - dz * PIT_REACH, radius: 1.0, target: side.target.vnum,
           from: room.vnum, label: side.target.room.name, dir,
         });
-      } else if (side && (side.kind === 'portal' || side.kind === 'gate') && !airborne && !deadExit(side.exit)) {
+      } else if (shaft && !openAir && !airborne && !deadExit(side.exit) && side.target) {
+        fixture({ way: side.link.dir === 5 ? 'down' : 'up', dir, along: 0, target: side.target, exitDir: side.link.dir });
+      } else if (side && (side.kind === 'portal' || side.kind === 'gate' || shaft) && !airborne && !deadExit(side.exit)) {
         const ax = pos.x + dx * (distance - 0.1);
         const az = pos.z + dz * (distance - 0.1);
-        buildArch({ batcher, instances, model, chunk, x: ax, y: pos.y, z: az, rotY, sealed: side.kind === 'gate' });
-        if (side.kind === 'portal') {
+        buildArch({
+          batcher, instances, model, chunk, x: ax, y: pos.y, z: az, rotY, sealed: side.kind === 'gate',
+          veils: side.kind === 'gate' ? null : veils,
+        });
+        if (side.kind !== 'gate') {
           portals.push({
             x: ax - dx * 0.8, y: pos.y, z: az - dz * 0.8, radius: 1.6,
             target: side.target.vnum, from: room.vnum, label: side.target.room.name, dir,
@@ -2312,30 +2383,32 @@ function* raise(world, layout, materials, assets = null) {
     // gangs' fires.
     if (openAir && !hood) buildStreetLamp({ room, cell, pos, decor, lights, addCollider, instances, chunk });
 
-    // links that had no free wall left: an arch standing in the room itself
+    // Ways out with no wall of their own, and the far ends of ways up and
+    // down: in a corner (`fixture`).
     for (const ref of layout.links) {
-      // The far end of a two-way level archway is an arch here too, when
-      // layout.js could not give it a wall (`backSide` null).
-      const back = ref.to === cell && ref.backSide === null && ref.kind === 'portal';
-      if (!back && (ref.from !== cell || ref.side !== null || ref.kind === 'alley' || ref.kind === 'stairs')) continue;
-      const link = back ? { kind: 'portal', exit: ref.exitBack, to: ref.from, dir: REVERSE_DIR[ref.dir] } : ref;
-      if (deadExit(link.exit)) continue;
-      if (airborne) continue;
+      if (airborne || ref.kind === 'alley' || ref.kind === 'stairs') continue;
+      let job = null;
+      if (ref.from === cell && ref.side === null) {
+        job = { link: ref, target: ref.to, exit: ref.exit, exitDir: ref.dir };
+      } else if (ref.to === cell && ref.kind === 'portal' && ref.twoWay
+        && (ref.dir > 3 || ref.backSide === null)) {
+        // The far end of a two-way archway with no wall here, or of a way
+        // up or down: layout.js gives those a wall only where they start.
+        job = { link: ref, target: ref.from, exit: ref.exitBack, exitDir: REVERSE_DIR[ref.dir] };
+      }
+      if (!job || deadExit(job.exit)) continue;
       // Up out of the Temple Square is "In the air...", which is never built:
       // the arch stood in the middle of the square leading nowhere, a portal
       // to a room the game refuses to enter.
-      if (link.to && link.to.room.sector === SECTOR.AIR) continue;
-      // Two arches standing in one room are not to stand in one spot.
-      const angle = hash3(room.vnum, 5, back ? 7 : 0, 1) * Math.PI * 2;
-      const ax = pos.x + Math.cos(angle) * half * 0.4;
-      const az = pos.z + Math.sin(angle) * half * 0.4;
-      buildArch({ batcher, instances, model, chunk, x: ax, y: pos.y, z: az, rotY: -angle, sealed: link.kind === 'gate' });
-      if (link.kind === 'portal' && link.to) {
-        portals.push({
-          x: ax, y: pos.y, z: az, radius: 1.6, target: link.to.vnum,
-          from: room.vnum, label: link.to.room.name, dir: link.dir,
-        });
-        lights.push({ x: ax, y: pos.y + 2.2, z: az, color: 0x7fd8ff, intensity: 5, radius: 10 });
+      if (!job.target || job.target.room.sector === SECTOR.AIR) {
+        if (job.target || ref.kind !== 'gate') continue;
+      }
+      const way = job.exitDir === 4 ? 'up' : job.exitDir === 5 ? 'down' : 'level';
+      const c = cornerFor(job.exitDir < 4 ? job.exitDir : Math.floor(hash3(room.vnum, 5, 0, 1) * 4));
+      if (ref.kind === 'gate') {
+        fixture({ way: 'level', dir: c.d, along: c.sign * CORNER, target: null, exitDir: ref.dir, sealed: true });
+      } else {
+        fixture({ way, dir: c.d, along: c.sign * CORNER, target: job.target, exitDir: job.exitDir });
       }
     }
 
@@ -2996,7 +3069,8 @@ function* raise(world, layout, materials, assets = null) {
       }
     }
   }
-  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones, grass };
+  const thresholds = buildThresholds(veils, zones);
+  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones, grass, thresholds };
 }
 
 /** A sub-step's own 0..1 progress, as a stretch [a, b] of its caller's. */
@@ -3448,7 +3522,7 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
   if (!wantsFrontage(room)) return;
   const isOpen = (d) => {
     const side = sides[d];
-    return !!(side && (side.kind === 'alley' || side.kind === 'portal' || side.kind === 'gate'));
+    return !!(side && (side.kind === 'alley' || side.kind === 'portal' || side.kind === 'shaft' || side.kind === 'gate'));
   };
   const inset = HALF - FRONTAGE_D / 2;
   const shire = isShire(room);
@@ -6059,6 +6133,115 @@ function buildMoundStair({ batcher, chunk, at, dir, lift, addCollider, addPlatfo
  * left out of them, with the wood between the skins lining each hole. Nothing
  * here is the square room: no masonry, no roof, no casements.
  */
+/**
+ * The opening of `stone_arch` (tools/blender/props.py): a half-circle of
+ * radius 1.6 springing at 1.5 m. The threshold's outline runs a little into
+ * the piers and the voussoirs, which are solid, and never past their outside
+ * -- out of doors there is no wall behind an arch to hide a square corner.
+ */
+const ARCH_SPRING = 1.5;
+/** main.js's noon preset, which the threshold's colours were set under. */
+const NOON_EXPOSURE = 0.165;
+const ARCH_IN = 1.7;
+
+/**
+ * The threshold in an archway: dark, faintly blue at its heart, never black
+ * (RGB 0 is a bug here, not a shade), and unlit, so neither the sun nor a
+ * buried room's darkness changes it. One material for every zone; `shimmer`
+ * drifts its texture so it reads as something moving, not a painted board.
+ */
+let veilMaterial = null;
+function thresholdMaterial() {
+  if (veilMaterial) return veilMaterial;
+  const size = 128;
+  const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(size, size) : null;
+  let map = null;
+  if (canvas) {
+    const g = canvas.getContext('2d');
+    const grad = g.createRadialGradient(size / 2, size * 0.6, 4, size / 2, size * 0.6, size * 0.7);
+    grad.addColorStop(0, '#2c3c78');
+    grad.addColorStop(0.55, '#141a3a');
+    grad.addColorStop(1, '#0a0c1c');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+    // Faint streaks, so the drift shows.
+    for (let i = 0; i < 40; i++) {
+      const x = hash3(i, 3, 0, 91) * size; const y = hash3(i, 5, 0, 91) * size;
+      g.fillStyle = `rgba(120,160,255,${0.04 + 0.06 * hash3(i, 7, 0, 91)})`;
+      g.fillRect(x, y, 1 + 3 * hash3(i, 9, 0, 91), 6 + 18 * hash3(i, 11, 0, 91));
+    }
+    map = new THREE.CanvasTexture(canvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  }
+  veilMaterial = new THREE.MeshBasicMaterial({ color: map ? 0xffffff : 0x141a3a, map });
+  veilMaterial.name = 'threshold';
+  return veilMaterial;
+}
+
+/** The thresholds a build collected, as one mesh per level band. */
+function buildThresholds(veils, zones) {
+  const meshes = [];
+  for (const deep of [false, true]) {
+    const mine = veils.filter((v) => (v.y < -1) === deep);
+    if (!mine.length) continue;
+    const parts = mine.map((v) => {
+      let geo;
+      if (v.round) {
+        const shape = new THREE.Shape();
+        shape.moveTo(-ARCH_IN, 0);
+        shape.lineTo(ARCH_IN, 0);
+        shape.lineTo(ARCH_IN, ARCH_SPRING);
+        shape.absarc(0, ARCH_SPRING, ARCH_IN, 0, Math.PI, false);
+        shape.lineTo(-ARCH_IN, 0);
+        geo = new THREE.ShapeGeometry(shape, 16);
+        // ShapeGeometry's UVs are its coordinates, in metres: the texture
+        // tiled once a metre and the threshold read as a grid of blue tiles.
+        const uv = geo.attributes.uv;
+        for (let i = 0; i < uv.count; i++) {
+          uv.setXY(i, (uv.getX(i) + ARCH_IN) / (2 * ARCH_IN), uv.getY(i) / (ARCH_SPRING + ARCH_IN));
+        }
+      } else {
+        // The procedural fallback: two posts and a lintel, square inside.
+        geo = new THREE.PlaneGeometry(DOOR_W + 0.02, DOOR_H + 1.0);
+        geo.translate(0, (DOOR_H + 1.0) / 2, 0);
+      }
+      geo.scale(v.sx, v.sy, 1);
+      // Both faces as front faces, not a DoubleSide material: the AO
+      // prepass draws everything in one FrontSide override material, and
+      // from the far room the back of a single plane was not there for it
+      // -- the occlusion of whatever stood beyond showed through, and moved
+      // with what cull.js let draw.
+      const back = geo.clone();
+      back.rotateY(Math.PI);
+      return [geo, back].map((g) => {
+        g.rotateY(v.rotY);
+        g.translate(v.x, v.y, v.z);
+        return g;
+      });
+    }).flat();
+    const mesh = new THREE.Mesh(mergeGeometries(parts, false), thresholdMaterial());
+    for (const geo of parts) geo.dispose();
+    mesh.name = 'thresholds';
+    (deep ? zones.deep : zones.surface).add(mesh);
+    meshes.push(mesh);
+  }
+  return {
+    meshes,
+    /**
+     * `exposure` is the hour's: an unlit surface is scaled by it like any
+     * other, so the night's 0.62 against noon's 0.165 turned a dark
+     * threshold into a glowing blue sheet. Held near its noon look instead.
+     */
+    shimmer(time, exposure = NOON_EXPOSURE) {
+      if (!veilMaterial) return;
+      veilMaterial.color.setScalar(Math.min(1, (NOON_EXPOSURE / Math.max(0.05, exposure)) ** 0.85));
+      const map = veilMaterial.map;
+      if (map) map.offset.set(Math.sin(time * 0.13) * 0.06, time * 0.035);
+    },
+  };
+}
+
 const TREE_DOOR_W = 1.5;
 const TREE_DOOR_H = 2.75;
 const TREE_TOP = 13.5;
@@ -6672,7 +6855,7 @@ function buildSewerChamber({
     const link = side && side.link;
     // A way up or down that claimed this wall is a ladder or a pit against
     // it, not a tunnel mouth: there is nowhere level for a tunnel to go.
-    const vertical = !!link && link.dir >= 4 && side.kind === 'portal';
+    const vertical = !!link && link.dir >= 4 && side.kind === 'shaft';
     const open = !!side && !vertical && !deadExit(side.exit) && ['alley', 'portal', 'gate'].includes(side.kind);
     const rotY = FACE_ROT[dir];
     const piece = shaft ? (open ? 'sewer_shaft_open' : 'sewer_shaft_solid')
@@ -7417,10 +7600,16 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
 }
 
 /** A stone archway: portals you step through, gates that are sealed. */
-function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed }) {
+function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed, veils = null, scale = null }) {
   const arch = model(['stone_arch'], 0);
+  // What an archway opens onto is another place, not whatever the grid has
+  // behind the wall -- the void, or the sunlit world outside an indoor
+  // arena. A dark threshold stands in the arch's middle plane and fills its
+  // opening; its edges run into the stone, so only the opening shows it.
+  const sx = scale ? scale.x : 1; const sy = scale ? scale.y : 1;
+  if (veils) veils.push({ x, y, z, rotY, sx, sy, round: !!(arch && instances) });
   if (arch && instances) {
-    instances.add(arch, { x, y, z, rotY }, chunk);
+    instances.add(arch, scale ? { x, y, z, rotY, scaleX: sx, scaleY: sy } : { x, y, z, rotY }, chunk);
     const bars = sealed ? model(['portcullis'], 0) : null;
     if (bars) instances.add(bars, { x, y, z, rotY }, chunk);
     if (bars || !sealed) return;

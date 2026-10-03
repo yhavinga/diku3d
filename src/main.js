@@ -1306,6 +1306,18 @@ async function boot() {
     // Anything else -- a portal, a stair, a layout that had to bend -- keeps
     // the fade, because gliding through a wall would say something false.
     const hereInfo = built.rooms.get(room.vnum);
+    // A way up or down with a ladder or a shaft of its own (build.js
+    // `fixture`): walk to its foot, and it carries you on.
+    const shaft = dir >= 4 && hereInfo && built.portals.find((p) => p.from === room.vnum && p.target === exit.to);
+    const toShaft = shaft && actors.nav.pathInRoom(room.vnum, player.position, { x: shaft.x, z: shaft.z }, 1);
+    if (toShaft && toShaft.length) {
+      player.glidePath(toShaft, null, () => {
+        const queued = queuedStep;
+        queuedStep = null;
+        if (queued !== null) step(queued);
+      });
+      return { ok: true };
+    }
     if (dir < 4 && hereInfo) {
       const ox = target.center.x - hereInfo.center.x;
       const oy = target.center.y - hereInfo.center.y;
@@ -1841,6 +1853,7 @@ async function boot() {
 
     lightPool.update(camera.position, elapsed);
     built.horizon?.update(camera.position, dt);
+    built.thresholds?.shimmer(elapsed, renderer.toneMappingExposure);
     actors.update(dt, elapsed, camera);
     fx.update(dt);
     if (reeling) fx.viewModel.scene.visible = false; // no fists in the title's reel

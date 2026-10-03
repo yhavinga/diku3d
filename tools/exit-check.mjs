@@ -9,9 +9,10 @@
  * is where build.js takes its doorways from:
  *   wrong wall  the exit has an opening, but on another wall than its direction
  *               (sometimes forced: the graph is not Euclidean, see CLAUDE.md)
- *   in room     no wall was left for it, so its archway stands free in the
- *               room (The Void in Machine Dreams: four exits a room, routed
- *               across each other) -- visible and walkable, not on a wall
+ *   in corner   no wall was left for it, so its archway stands in a corner
+ *               against a wall, beside that wall's own doorway (The Void in
+ *               Machine Dreams: four exits a room, routed across each other)
+ *               -- visible and walkable, but not on the wall it names
  *   no door     the exit has no opening in this room at all, and the compass
  *               step would cut through a wall
  *   one-way     an opening into a room this room has no exit to (the mud's own
@@ -21,7 +22,7 @@
  * Up and down are not checked here: they are stairs or archways, not walls.
  *
  * --strict fails on any exit with no door, on any one-way opening left open,
- * and on more wrong walls or free-standing arches than the CEILING below --
+ * and on more wrong walls or corner archways than the CEILING below --
  * lower the ceiling when a change brings the counts down.
  */
 import { readFileSync } from 'node:fs';
@@ -46,7 +47,7 @@ const total = { exits: 0, wrongWall: 0, inRoom: 0, noDoor: 0, oneWay: 0, oneWayO
 for (const zone of only ? [only] : plan.zones) {
   const layout = layoutZone(world, plan, zone);
   const count = { exits: 0, wrongWall: 0, inRoom: 0, noDoor: 0, oneWay: 0, oneWayOpen: 0 };
-  // Archways with no wall: standing in the room they lead out of.
+  // Archways with no wall of their own: build.js stands them in a corner.
   const freeArch = new Set();
   for (const l of layout.links) {
     if (!l.to || (l.kind !== 'portal' && l.kind !== 'gate')) continue;
@@ -65,7 +66,7 @@ for (const zone of only ? [only] : plan.zones) {
       if (s && s.target && s.target.vnum === ex.to) return;
       const at = sides.findIndex((x) => x && x.target && x.target.vnum === ex.to);
       if (at >= 0) { count.wrongWall++; notes.push(`wrong wall  ${D[d]} to #${ex.to} opens in the ${D[at]} wall (${sides[at].kind})`); }
-      else if (freeArch.has(`${v}>${ex.to}`)) { count.inRoom++; notes.push(`in room     ${D[d]} to #${ex.to} is an archway standing in the room`); }
+      else if (freeArch.has(`${v}>${ex.to}`)) { count.inRoom++; notes.push(`in corner   ${D[d]} to #${ex.to} is an archway in a corner, beside another door`); }
       else { count.noDoor++; notes.push(`no door     ${D[d]} to #${ex.to} ${world.rooms.get(ex.to).name}`); }
     });
     sides.forEach((s, d) => {
@@ -80,17 +81,17 @@ for (const zone of only ? [only] : plan.zones) {
   for (const k in count) total[k] += count[k];
   if (!only && (count.wrongWall || count.inRoom || count.noDoor || count.oneWayOpen)) {
     console.log(`${String(zone.name).padEnd(32)} exits ${String(count.exits).padStart(4)}  wrong wall ${String(count.wrongWall).padStart(3)}`
-      + `  in room ${String(count.inRoom).padStart(2)}  no door ${String(count.noDoor).padStart(2)}  one-way ${count.oneWay}${count.oneWayOpen ? ` (${count.oneWayOpen} open)` : ''}`);
+      + `  in corner ${String(count.inRoom).padStart(2)}  no door ${String(count.noDoor).padStart(2)}  one-way ${count.oneWay}${count.oneWayOpen ? ` (${count.oneWayOpen} open)` : ''}`);
   }
 }
-console.log(`\n${total.exits} exits: ${total.wrongWall} on the wrong wall, ${total.inRoom} archways in the room, `
+console.log(`\n${total.exits} exits: ${total.wrongWall} on the wrong wall, ${total.inRoom} archways in a corner, `
   + `${total.noDoor} with no door, ${total.oneWay} one-way openings (${total.oneWayOpen} not barred)`);
 if (strict) {
   const faults = [];
   if (total.noDoor) faults.push(`${total.noDoor} exits with no door`);
   if (total.oneWayOpen) faults.push(`${total.oneWayOpen} one-way openings not barred`);
   if (!only && total.wrongWall > CEILING.wrongWall) faults.push(`${total.wrongWall} wrong walls, ceiling ${CEILING.wrongWall}`);
-  if (!only && total.inRoom > CEILING.inRoom) faults.push(`${total.inRoom} free-standing archways, ceiling ${CEILING.inRoom}`);
+  if (!only && total.inRoom > CEILING.inRoom) faults.push(`${total.inRoom} corner archways, ceiling ${CEILING.inRoom}`);
   if (faults.length) { console.log(`strict: FAIL -- ${faults.join('; ')}`); process.exit(1); }
   console.log('strict: ok');
 }

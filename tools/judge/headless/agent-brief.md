@@ -43,7 +43,7 @@ what, and the agent's own task.
     node tools/world-check.mjs
     node tools/game-check.mjs; node tools/magic-check.mjs; node tools/rules-check.mjs
     node tools/people-check.mjs; node tools/shell-check.mjs; node tools/clutter-check.mjs
-    node tools/exit-check.mjs --strict   # "...0 with no door... (0 not barred)", strict: ok
+    node tools/exit-check.mjs --strict   # "...0 with no door, ... (0 not barred)" and "strict: ok"
 
 …plus screenshots at noon and dusk/night, near and mid-distance, draw calls,
 triangles and frame time before vs after, and a zero-pixel diff with

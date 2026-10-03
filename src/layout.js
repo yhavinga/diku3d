@@ -609,7 +609,10 @@ export function layoutWorld(world, options = {}) {
     for (const link of [...archways.filter((l) => l.dir <= 3), ...archways.filter((l) => l.dir > 3)]) {
       const side = wallFor(link.from.vnum, link.dir);
       link.side = side;
-      if (side !== null) claim(link.from.vnum, side, { kind: link.kind, link, exit: link.exit, target: link.to });
+      // A way up or down on a wall is a ladder or a shaft against it, not a
+      // doorway through it: build.js leaves that wall solid.
+      const kind = link.kind === 'portal' && link.dir > 3 ? 'shaft' : link.kind;
+      if (side !== null) claim(link.from.vnum, side, { kind, link, exit: link.exit, target: link.to });
       // A level archway described from both ends is an archway at both ends.
       // It used to be drawn only where it was placed from, so the room at the
       // other end had a wall where its exit should be.
