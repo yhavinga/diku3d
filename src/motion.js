@@ -89,6 +89,13 @@ const PASTIMES = {
 };
 const PASTIME_NAMES = Object.keys(PASTIMES);
 /**
+ * What a rig does when you walk up to it, by archetype: [pastime, metres at
+ * scale 1]. The snail "trying to get out of your way" draws itself in; the
+ * rabbit sits up to see what you are; the lizard answers you with push-ups,
+ * which is what a lizard does at anything that comes onto its ground.
+ */
+const ALARM = { snail: ['withdraw', 2.2], lagomorph: ['situp', 4.5], lizard: ['display', 3.2] };
+/**
  * people.py's sit, in seconds: the first REST_LOOP of it is at rest and
  * breathing and comes back to its first frame, and SIP is the stretch where
  * the right hand brings the cup up and puts it down again.
@@ -2719,6 +2726,21 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     const m = fig.m;
     const g = m.graze || (m.graze = { w: 0, want: 0, next: 0.5 + fig.rand() * 3, name: null });
     g.next -= dt;
+    // Startled: someone coming close sets it off at once -- see ALARM.
+    const alarm = ALARM[fig.archetype];
+    if (alarm && fig.actions[alarm[0]]) {
+      const near = Math.hypot(_player.x - fig.at.x, _player.z - fig.at.z) < alarm[1] * (fig.scale || 1);
+      m.alarmed = Math.max(0, (m.alarmed || 0) - dt);
+      if (near && !m.wasNear && still && m.alarmed <= 0 && g.name !== alarm[0]) {
+        const action = fig.actions[alarm[0]];
+        action.time = 0;
+        g.name = alarm[0];
+        g.want = 1;
+        g.next = action.getClip().duration;
+        m.alarmed = 8;
+      }
+      m.wasNear = near;
+    }
     if (!still) { if (g.want) g.next = Math.max(g.next, 0.6 + fig.rand()); g.want = 0; }
     else if (g.next <= 0) {
       if (g.want) {

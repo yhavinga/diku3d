@@ -687,8 +687,10 @@ def snail():
         (f0, w0, h0), (f1, w1, h1) = foot[i], foot[i + 1]
         # Flat-soled and wider than it is deep: a squashed round cone sitting
         # on the floor.
-        body.append(cone(P(0, f0, h0 * 0.55), P(0, f1, h1 * 0.55), w0, w1, fbones[i], blend=0.03, group="foot",
-                         squash=(1.0, 1.0, max(h0, 0.01) / max(w0, 0.01) * 0.95)))
+        # The sole on the floor: half the foot's depth either side of its
+        # axis, and the axis that high.
+        body.append(cone(P(0, f0, h0 * 0.5 + 0.004), P(0, f1, h1 * 0.5 + 0.004), w0, w1, fbones[i], blend=0.03, group="foot",
+                         squash=(1.0, 1.0, max(h0, 0.01) * 0.5 / max(w0, 0.01))))
     # The head end lifted off the floor, rounded.
     body.append(ell(P(0, 0.215, 0.062), (0.04, 0.045, 0.035), "head", blend=0.025))
     # The mantle where the body goes up into the shell.
@@ -979,7 +981,7 @@ def blob():
     grad = lambda b0, b1, z0, z1: ("grad", b0, b1, P(0, 0, z0), P(0, 0, z1))
     body = [
         # The heap: a broad slumped base, a mass on it, a crown.
-        ell(P(0, 0.0, 0.16), (0.82, 0.78, 0.2), "base", blend=0.2),
+        ell(P(0, 0.0, 0.22), (0.82, 0.78, 0.2), "base", blend=0.2),
         ell(P(0, 0.02, 0.45), (0.62, 0.58, 0.4), grad("base", "mid", 0.15, 0.6), blend=0.25),
         ell(P(0, 0.04, 0.82), (0.4, 0.38, 0.3), grad("mid", "top", 0.6, 1.0), blend=0.22),
         # The fold of the mouth, a lower lip hanging over it.
@@ -993,7 +995,7 @@ def blob():
     # Lobes slumping down its sides.
     for i in range(18):
         ang = rng.uniform(0, 2 * math.pi)
-        z = rng.uniform(0.15, 0.85)
+        z = rng.uniform(0.24, 0.85)
         rr = (0.7 if z < 0.4 else 0.5) * rng.uniform(0.85, 1.0)
         c = (math.cos(ang) * rr, 0.02 + math.sin(ang) * rr * 0.9, z)
         r = rng.uniform(0.14, 0.24)
