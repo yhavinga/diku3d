@@ -153,14 +153,12 @@ choose.
 - **Blender's roll operators aim Z, not X.** `townsperson.py` meant to roll
   every bone so its local X swings forward and back;
   `calculate_roll(type="GLOBAL_POS_X")` aims the bone's **Z** axis there
-  instead, so the keyed axis was the sideways one — the exporter was innocent,
-  though an earlier version of this bullet blamed it. Measured then: the left
-  shin travelled 0.247 m *across* the figure and 0.012 m along it, and people
-  walked with a shoulder leading. Worse, the load-time patch (`uprightSwing`
-  in assets.js, now deleted) conjugated whole rotation tracks — rest pose
-  included, because a glTF track holds the bone's entire local rotation — and
-  that put one arm 0.16 m out of its socket and turned each foot a quarter
-  turn off its leg. The "detached foot" and the arm slot a judge reported were
+  instead, so the keyed axis was the sideways one — not the exporter's doing.
+  Measured then: the left shin travelled 0.247 m *across* the figure and
+  0.012 m along it, and people walked with a shoulder leading. Do not patch it
+  at load time: conjugating whole rotation tracks catches the rest pose too (a
+  glTF track holds the bone's entire local rotation), and that put one arm
+  0.16 m out of its socket and turned each foot a quarter turn off its leg. The "detached foot" and the arm slot a judge reported were
   the compensation, not the model. The rolls are set explicitly at the source
   now; after the regeneration the same measurement (force `actions.walk` to
   weight 1, sample a shin's world position into `figure.worldToLocal()` for a
@@ -182,9 +180,9 @@ choose.
   AO never touches. Indoors there is no sun — ambient is the only light there
   is — so an enclosed corner comes out at *literally RGB 0*, in hard-edged
   rectangles that follow the geometry. Measured at 6.5% of the frame in the
-  temple. `blendIntensity = 0.78` leaves a fifth of the ambient standing and
-  takes that to 0.03%; the `scale` exponent came down 4.5 → 2.6 with it, since
-  4.5 was chosen when the blend could still hide the bottom end.
+  temple. `blendIntensity` (set in `render.js`, with the measurement behind
+  its current value) leaves part of the ambient standing so no enclosed corner
+  reaches zero; `scale` is an exponent on the result and is tuned with it.
   **Switching the default preset from `medium` to `high` is what turned this on
   for everyone** — `medium` has `ao: false`. A change that only flips a setting
   can still be the change that ships a bug.
@@ -237,13 +235,11 @@ choose.
   non-premultiplied and `glGenerateMipmap` averages RGB and alpha separately, so
   black glyph ink bleeds into transparent background and distant labels go
   muddy. `generateMipmaps = false`, `minFilter = LinearFilter`.
-  A claim that used to sit here — that this mips down to a solid black plate —
-  is **wrong**, and an independent second opinion killed it with a measurement
-  worth remembering: **a box filter conserves the mean of every channel.** A
-  canvas that is a fifth ink stays a fifth ink at every level (mean alpha held
-  at 30/255 from level 0 to the 1×1), so minification can only ever produce a
-  faint veil. The solid dark card was the semi-opaque plate the text used to sit
-  on, tone-mapped to near-black.
+  Mipmapping cannot produce a solid black plate: **a box filter conserves the
+  mean of every channel.** A canvas that is a fifth ink stays a fifth ink at
+  every level (mean alpha held at 30/255 from level 0 to the 1×1), so
+  minification can only ever produce a faint veil. A solid dark card behind a
+  label is a semi-opaque plate, tone-mapped to near-black.
 - **"A bug of the right shape" is not "this bug".** One reported black rectangle
   turned up four different culprits — a corridor to an unbuilt room, unlit
   window panes at `0x14110e`, the arch's voussoirs, and the label plate. All
