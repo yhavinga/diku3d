@@ -127,8 +127,13 @@ export function createVistas({ world, plan, layoutOf, viewOf }) {
     const t0 = performance.now();
     const site = vista;
     const cut = cutLayout(vista.layout, vista.near);
+    // The arrival room's own gate back to the drawn zone opens at the back
+    // too: through it lies the bridge, and the gate you are looking from.
+    const [bx, , bz] = DIR_STEP[(vista.side - vista.turns + 6) % 4];
+    const s0 = vista.start;
     const built = yield* raise(viewOf(plan.byId.get(site.zone)), cut, materials, assets, {
       vista: { keep: vista.keepFrontage, dropModel },
+      clear: new Set([`${s0.level}:${s0.x + bx},${s0.z + bz}`]),
     });
     const root = built.group;
     root.name = `vista ${site.zone} #${site.arrive}`;
