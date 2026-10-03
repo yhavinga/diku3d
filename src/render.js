@@ -478,6 +478,7 @@ class ScaledGTAOPass extends GTAOPass {
     this.unshaded = [];
     this.unshadedAge = Infinity;
     this.foliage = [];
+    this.horizon = [];
     this.foliageNormals = new Map();
   }
 
@@ -493,12 +494,30 @@ class ScaledGTAOPass extends GTAOPass {
       this.unshadedAge = 0;
       this.unshaded.length = 0;
       this.foliage.length = 0;
+      this.horizon.length = 0;
       this.scene.traverse((object) => {
         if (object.isPoints || object.isLine || object.isLine2) this.unshaded.push(object);
+        else if (object.isMesh && object.name.startsWith('horizon-')) this.horizon.push(object);
         else if (object.isMesh && object.material?.userData?.foliage) this.foliage.push(object);
       });
     }
     for (const object of this.unshaded) {
+      if (!object.visible) continue;
+      object.visible = false;
+      this._visibilityCache.push(object);
+    }
+    // The skyline (build.js `buildHorizon`) is 300-800 m out, which is past
+    // the AO reach cull.js already keeps out of this pass -- but a ring round
+    // the whole world has the eye inside its bounding sphere, so that test
+    // never caught it. In the pass it was the flicker on the far hills: its
+    // normals are all straight up on surfaces that stand facing the eye, so
+    // the pass darkened it by ~25 luma in a mottle tied to the screen, and
+    // turning the head slid the hills under the mottle. Measured outside the East
+    // Gate (#3053) at dusk, motion-compensated, turning 2 px a frame: 32.7% of the
+    // horizon's pixels changed by over 3 luma from one frame to the next,
+    // 0.11% without it. Not depth precision: a near plane of 1.0 instead of
+    // 0.1 left it at 30%.
+    for (const object of this.horizon) {
       if (!object.visible) continue;
       object.visible = false;
       this._visibilityCache.push(object);
