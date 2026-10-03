@@ -24,7 +24,7 @@ import { DIR_STEP, SECTOR } from './are.js';
 import { raise, openAirIn, hash3, CELL, LEVEL_H } from './build.js';
 import { InstanceBatch, StaticBatches } from './assets.js';
 import { plantTrees } from './actors.js';
-import { vistaSites, planVista, cutLayout, bridgeCells } from './vistaplan.js';
+import { vistaSites, planVista, cutLayout, vistaCells } from './vistaplan.js';
 
 /** Milliseconds of building per frame, at most -- give or take one room. */
 const BUDGET_MS = 6;
@@ -70,7 +70,11 @@ function worldUv(geometry, material) {
   return g;
 }
 
-export function createVistas({ world, plan, layoutOf, viewOf, materials, assets }) {
+export function createVistas({ world, plan, layoutOf, viewOf }) {
+  // The baked surfaces and the model library: there once the boot has made
+  // them, which is after the first zone's vistas are planned (`use`).
+  let materials = null;
+  let assets = null;
   let group = null;
   let generation = 0;
   const openAir = new Map();
@@ -80,9 +84,23 @@ export function createVistas({ world, plan, layoutOf, viewOf, materials, assets 
   };
   const state = { sites: [], built: [], pending: 0, ms: 0, triangles: 0 };
 
-  /** The drawn zone's vistas, decided from it alone: what `buildScene` must leave clear. */
-  function sitesFor(zone, layout) {
-    return vistaSites(world, plan, layout, zone, openAirOf);
+  /**
+   * The drawn zone's vistas, planned before it is built: each neighbour laid
+   * out (cached by main.js, so the way back costs nothing) and cut to what
+   * is seen. `vistaCells` of these is what `buildScene` must leave clear.
+   */
+  function planFor(zone, layout) {
+    const taken = new Set();
+    const plans = [];
+    for (const site of vistaSites(world, plan, layout, zone, openAirOf)) {
+      // A site whose arrival room lands on an earlier vista's ground is left
+      // to that one.
+      if (taken.has(`${site.at.level}:${site.at.x},${site.at.z}`)) continue;
+      const vista = planVista(site, layoutOf(plan.byId.get(site.zone)), taken);
+      for (const k of vistaCells([vista])) taken.add(k);
+      plans.push(vista);
+    }
+    return plans;
   }
 
   /**
@@ -90,12 +108,10 @@ export function createVistas({ world, plan, layoutOf, viewOf, materials, assets 
    * out (cached by main.js), cut to its near rooms, raised, its trees
    * planted, and the lot turned and moved to where the crossing leads.
    */
-  function* buildOne(site) {
+  function* buildOne(vista) {
     const t0 = performance.now();
-    const there = layoutOf(plan.byId.get(site.zone));
-    yield 0;
-    const vista = planVista(site, there);
-    const cut = cutLayout(there, vista.near);
+    const site = vista;
+    const cut = cutLayout(vista.layout, vista.near);
     const built = yield* raise(viewOf(plan.byId.get(site.zone)), cut, materials, assets, {
       vista: { keep: vista.keepFrontage, dropModel },
     });
@@ -261,7 +277,8 @@ export function createVistas({ world, plan, layoutOf, viewOf, materials, assets 
   }
 
   return {
-    sitesFor, bridgeCells, mount, release, state,
+    planFor, cellsOf: vistaCells, mount, release, state,
+    use(library) { ({ materials, assets } = library); },
     get group() { return group; },
   };
 }

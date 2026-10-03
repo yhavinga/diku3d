@@ -1904,9 +1904,8 @@ function buildDecals(group, decals, materials) {
 // ------------------------------------------------------------------ main ----
 
 /**
- * `options.clear`: cell keys (`level:x,z`) nothing is to be built on -- the
- * cell between a crossing's gate and the neighbouring zone's vista
- * (vista.js). `options.vista`: build only what a vista draws -- no ground
+ * `options.clear`: cell keys (`level:x,z`) nothing but rooms and streets is
+ * to be built on -- where the neighbouring zones' vistas stand (vista.js). `options.vista`: build only what a vista draws -- no ground
  * plane, skyline, grass or mist -- and no frontage on a cell `keep(level, x,
  * z)` refuses, where the drawn zone already builds.
  */
@@ -1974,6 +1973,10 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   // boundaries between two biomes without guessing at them a second time.
   const groundAt = new Map();
   const cellKey = (level, x, z) => `${level}:${x},${z}`;
+  // What this build may put down on a cell that is neither a room nor a
+  // street: not where a vista stands (`options.clear`), nor, in a vista,
+  // where the drawn zone already builds.
+  const free = (level, x, z) => !options.clear?.has(cellKey(level, x, z)) && (!vista || vista.keep(level, x, z));
 
   // --- floor and ceiling openings for staircases ---------------------------
 
@@ -2908,7 +2911,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   // Before the frontage, because a cell the mountain takes is not a street's
   // to build on.
   const mountain = instances && assets.has('massif_a')
-    ? buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey, keep: vista?.keep }) : new Set();
+    ? buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey, keep: free }) : new Set();
 
   yield 0.222;
   // --- build on every empty cell that fronts a street ----------------------
@@ -2916,7 +2919,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   const frontage = new Map(); // cell key -> sector to build from
   const consider = (level, x, z, sector, bog, shire, east = false, hood = false) => {
     if (layout.at(level, x, z) !== undefined || layout.isPath(level, x, z)) return;
-    if (vista && !vista.keep(level, x, z)) return;
+    if (!free(level, x, z)) return;
     const k = `${level}:${x},${z}`;
     if (!frontage.has(k)) frontage.set(k, { level, x, z, sector, bog, shire, east, hood });
   };
@@ -3153,7 +3156,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   }
 
   if (instances && assets.has('dune_a')) {
-    buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt, cellKey, chunkOf });
+    buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt, cellKey, chunkOf, keep: free });
   }
 
   yield 0.232;
@@ -3249,6 +3252,8 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   // merges its geometry away.
   const grass = vista ? null : yield* within(0.294, 0.915, buildGrass({
     groups: batcher.groups, instances, colliders, layout, rooms, materials, cell: CELL, biomeOf: grassBiome,
+    keepOff: options.clear?.size
+      ? (x, y, z) => options.clear.has(cellKey(Math.round(y / LEVEL_H), Math.round(x / CELL), Math.round(z / CELL))) : null,
   }));
   if (grass) zones.surface.add(grass);
   const batches = new StaticBatches();
@@ -7676,7 +7681,7 @@ function buildEastRoom({ room, pos, sides, instances, chunk, decor, lights, addC
  */
 const SAND_MARGIN = 7;
 
-function buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt, cellKey, chunkOf }) {
+function buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt, cellKey, chunkOf, keep = null }) {
   let x0 = Infinity; let x1 = -Infinity; let z0 = Infinity; let z1 = -Infinity;
   for (const cell of layout.order) {
     const style = eastStyle(cell.room);
@@ -7689,6 +7694,7 @@ function buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt
     for (let z = z0 - SAND_MARGIN; z <= z1 + SAND_MARGIN; z++) {
       const k = cellKey(0, x, z);
       if (layout.at(0, x, z) !== undefined || layout.isPath(0, x, z) || mountain.has(k) || frontage.has(k)) continue;
+      if (keep && !keep(0, x, z)) continue;
       // Not over the town or anything else that is not the desert's: only
       // cells nearer the desert than any other area's room.
       if (nearestArea(layout, x, z) !== 'eastern.are') continue;

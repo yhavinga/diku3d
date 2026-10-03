@@ -106,7 +106,7 @@ export function vistaSites(world, plan, here, zone, openAirOf) {
  * the ones further off drawn only as a silhouette (`far`), and which of its
  * own frontage cells it may build on (`keepFrontage`, in its own grid).
  */
-export function planVista(site, there) {
+export function planVista(site, there, taken = null) {
   const start = there.cells.get(site.arrive);
   if (!start) throw new Error(`vista: #${site.arrive} is not laid out in zone ${site.zone}`);
   const { at, fromCell, near, turns: q } = site;
@@ -118,7 +118,15 @@ export function planVista(site, there) {
   // Past the gate: at least as far out along the gate's facing as the
   // arrival room itself.
   const beyond = (p) => (p.x - fromCell.x) * sx + (p.z - fromCell.z) * sz >= 2;
-  const clear = (p) => !near(p.level, p.x, p.z);
+  // Clear of the drawn zone, and of the vistas planned before this one
+  // (`taken`, their `vistaCells`): two crossings a street apart lead to two
+  // zones that would otherwise be laid over each other.
+  const free = (p) => {
+    if (!taken) return true;
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (taken.has(key(p.level, p.x + a, p.z + b))) return false;
+    return true;
+  };
+  const clear = (p) => !near(p.level, p.x, p.z) && free(p);
   const metres = (p) => Math.hypot(p.x - at.x, p.z - at.z) * CELL_M;
 
   const kept = new Set([start.vnum]);
@@ -139,7 +147,7 @@ export function planVista(site, there) {
       if (hops + 1 <= VISTA_HOPS && metres(p) <= VISTA_NEAR_M && kept.has(cell.vnum)) {
         kept.add(next.vnum);
         queue.push([next, hops + 1]);
-      } else if (metres(p) <= VISTA_FAR_M) {
+      } else if (metres(p) <= VISTA_FAR_M && !taken?.has(key(p.level, p.x, p.z))) {
         far.push(next);
         queue.push([next, hops + 1]);
       }
@@ -147,18 +155,39 @@ export function planVista(site, there) {
   }
   const keepFrontage = (level, x, z) => {
     const p = map(level, x, z);
-    return beyond(p) && clear(p);
+    return beyond(p) && !near(p.level, p.x, p.z) && !taken?.has(key(p.level, p.x, p.z));
   };
   return { ...site, map, near: kept, far, start, keepFrontage, layout: there };
 }
 
 /**
- * The cells the drawn zone must leave unbuilt so its vistas meet it: the one
- * between each vista's gate and its arrival room. Cell keys as build.js
+ * Every cell of the drawn zone's grid a vista stands on, which the drawn
+ * zone must not build its own fields, dunes or rock over: the bridge, the
+ * kept rooms and the streets between them, the ring round those where the
+ * neighbour builds its frontage, and the far rooms. Cell keys as build.js
  * writes them (`level:x,z`).
  */
-export function bridgeCells(sites) {
-  return new Set(sites.map((v) => key(v.bridge.level, v.bridge.x, v.bridge.z)));
+export function vistaCells(vistas) {
+  const out = new Set();
+  for (const v of vistas) {
+    out.add(key(v.bridge.level, v.bridge.x, v.bridge.z));
+    const take = (level, x, z, ring) => {
+      for (let a = -ring; a <= ring; a++) {
+        for (let b = -ring; b <= ring; b++) {
+          if ((a || b) && !v.keepFrontage(level, x + a, z + b)) continue;
+          const p = v.map(level, x + a, z + b);
+          out.add(key(p.level, p.x, p.z));
+        }
+      }
+    };
+    for (const vnum of v.near) { const c = v.layout.cells.get(vnum); take(c.level, c.x, c.z, 1); }
+    for (const l of v.layout.links) {
+      if (l.kind !== 'alley' || !l.path || !l.to || !v.near.has(l.from.vnum) || !v.near.has(l.to.vnum)) continue;
+      for (const c of l.path) take(l.from.level, c.x, c.z, 1);
+    }
+    for (const c of v.far) take(c.level, c.x, c.z, 0);
+  }
+  return out;
 }
 
 /**

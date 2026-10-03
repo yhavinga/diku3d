@@ -528,6 +528,14 @@ async function boot() {
   let zone = plan.zoneOf(START_VNUM) || plan.home;
   await progress(0.01, 'laying out the streets', `${world.rooms.size} rooms in ${files.length} areas`);
   let layout = layoutOf(zone);
+  // The neighbouring zones past the crossings (vista.js): built once the
+  // zone is up, but planned now -- while the texture workers bake -- because
+  // the zone must leave clear the ground they stand on. `?vista=off` draws
+  // none, for A/B.
+  const vistaOff = params.get('vista') === 'off';
+  const vistas = createVistas({ world, plan, layoutOf, viewOf });
+  const planVistas = (z, l) => (vistaOff ? [] : vistas.planFor(z, l));
+  let sites = planVistas(zone, layout);
 
   const bar = bootPlan(cachedShare);
   await progress(bar.bake[0], 'baking stone, timber and thatch', 'every surface is generated here, not downloaded');
@@ -551,18 +559,12 @@ async function boot() {
       console.warn('assets: no material for tag(s)', [...assets.unknownTags].join(', '));
     }
   }
-
-  // The neighbouring zones past the crossings (vista.js): built once the
-  // zone is up, but the cells between their gates and them are left clear
-  // now. `?vista=off` draws none, for A/B.
-  const vistas = createVistas({ world, plan, layoutOf, viewOf, materials, assets });
-  const sitesOf = (z, l) => (params.get('vista') === 'off' ? [] : vistas.sitesFor(z, l));
-  let sites = sitesOf(zone, layout);
+  vistas.use({ materials, assets });
 
   const raising = `${layout.cells.size} rooms of ${zone.name || 'the town'}`;
   await progress(bar.raise[0], 'raising the town', raising);
   let built = await buildScene(viewOf(zone), layout, materials, assets,
-    (fraction) => progress(along(bar.raise, fraction), null, raising), { clear: vistas.bridgeCells(sites) });
+    (fraction) => progress(along(bar.raise, fraction), null, raising), { clear: vistas.cellsOf(sites) });
 
   const peopling = 'mobiles, their clothes and what they carry';
   await progress(bar.people[0], 'peopling the rooms', peopling);
@@ -1605,12 +1607,12 @@ async function boot() {
         zone = target;
         t = performance.now();
         layout = layoutOf(zone);
-        sites = sitesOf(zone, layout);
+        sites = planVistas(zone, layout);
         timing.layout = performance.now() - t;
         await zoneCard.progress(CROSS_BAR.build[0]);
         t = performance.now();
         built = await buildScene(viewOf(zone), layout, materials, assets,
-          (fraction) => zoneCard.progress(along(CROSS_BAR.build, fraction)), { clear: vistas.bridgeCells(sites) });
+          (fraction) => zoneCard.progress(along(CROSS_BAR.build, fraction)), { clear: vistas.cellsOf(sites) });
         timing.build = performance.now() - t;
         await zoneCard.progress(CROSS_BAR.populate[0]);
         t = performance.now();
@@ -1714,6 +1716,9 @@ async function boot() {
         // and the cards are sized from the meshes' full counts.
         visibility.reindex();
         if (impostors) { impostors.release(); impostors.adopt(scene); }
+        // And the AO prepass looks for what to leave out again now, not
+        // within the next ninety frames: the vistas are `horizon-` too.
+        pipeline.gtao.unshadedAge = Infinity;
         shadowAnchor.set(Infinity, Infinity, Infinity);
       },
     }).then((done) => {
