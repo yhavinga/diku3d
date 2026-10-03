@@ -1418,6 +1418,12 @@ async function boot() {
   function climbTo(vnum, dir, then) {
     const way = (built.stats.ways || []).find((w) => w.room === vnum && w.dir === dir && w.route);
     if (!way) return false;
+    // A flight whose foot is in another exit's archway (#3120's runs into
+    // the arch south to #3134) would carry you off through that one: take
+    // the old cut instead.
+    const own = (p) => p.from === vnum && p.dir === dir;
+    if (way.route.some((q) => built.portals.some((p) => !own(p) && Math.abs(p.y - q.y) <= 3
+      && Math.hypot(p.x - q.x, p.z - q.z) < p.radius + 0.5))) return false;
     const [foot, ...rest] = way.route;
     const done = () => {
       const queued = queuedStep;
