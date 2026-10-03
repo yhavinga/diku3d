@@ -668,7 +668,7 @@ async function boot() {
     // School, continued in the Mud School.
     onRestore: (vnum) => {
       if (plan.zoneOf(vnum) && plan.zoneOf(vnum) !== zone) {
-        crossTo(vnum, { yaw: arrivalYaw(world, vnum, null), why: 'continue' });
+        crossTo(vnum, { yaw: arrivalYaw(world, plan, vnum, null), why: 'continue' });
         return;
       }
       const info = built.rooms.get(vnum) || built.rooms.get(START_VNUM);
@@ -714,6 +714,7 @@ async function boot() {
     heldLight.intensity = /lantern|lamp/.test(light.name) ? 4.2 : 5.5;
   }
 
+  const startZone = zone;
   const startCell = layout.cells.get(START_VNUM) || layout.start;
   const startInfo = built.rooms.get(startCell.vnum);
   // Facing the way out into the open air if there is one: the temple's
@@ -1352,6 +1353,7 @@ async function boot() {
     visibility = makeVisibility();
     fileLights();
     player.setWorld(built);
+    player.nav = actors.nav;
     hud.setLayout(layout);
     gameUi.setBuilt(liveBuilt);
     items.setBuilt(built);
@@ -1402,12 +1404,16 @@ async function boot() {
    * came -- or, up and down having no heading, out of the room. The rules
    * engine is not touched beyond telling it which zone is drawn: the mud ran
    * the whole time, and your hit points, gear and affects are its, not the
-   * scene's. A crossing in progress swallows any other.
+   * scene's.
    */
   async function crossTo(vnum, { from = null, dir = null, yaw = null, why = 'exit' } = {}) {
     const target = plan.zoneOf(vnum);
     if (!target) throw new Error(`crossTo: #${vnum} is in no zone`);
-    if (crossing) return crossing;
+    // Refused before anything is taken down: build.js does not build the sky.
+    if (world.rooms.get(vnum).sector === SECTOR.AIR) throw new Error(`crossTo: #${vnum} is in the air, and nothing is built there`);
+    // One at a time: a recall typed while the last card is still lifting
+    // goes once that one has finished, rather than being lost.
+    if (crossing) return crossing.then(() => crossTo(vnum, { from, dir, yaw, why }));
     crossing = (async () => {
       const t0 = performance.now();
       // The title's camera is not the player's; the reel ends here at the latest.
@@ -1449,7 +1455,7 @@ async function boot() {
         await zoneCard.progress(0.78);
         t = performance.now();
         mountZone();
-        arriveAt(vnum, yaw ?? arrivalYaw(world, vnum, dir), dir);
+        arriveAt(vnum, yaw ?? arrivalYaw(world, plan, vnum, dir), dir);
         timing.mount = performance.now() - t;
         t = performance.now();
         await precompile();
@@ -1587,7 +1593,9 @@ async function boot() {
       begun = true;
       if (titleReel) titleReel.stop();
       document.body.classList.remove('titling');
-      player.spawn(startInfo.center.x, startInfo.center.y, startInfo.center.z, yaw);
+      // Unless something has crossed into another zone already (a harness's
+      // goto): then where the start room stood is somewhere else's floor.
+      if (zone === startZone) player.spawn(startInfo.center.x, startInfo.center.y, startInfo.center.z, yaw);
       state.roomVnum = null;
       built.horizon?.settle(camera.position);
       if (fromSave) game.loadSave();
@@ -1903,9 +1911,9 @@ async function boot() {
       // #3700 is off-map too, and used to win this outright -- an interior with
       // a bricked-up ceiling is not what the key means.
       add('gate', pick((r) => built.rooms.get(r.vnum).outdoor
-          && r.exits.some((e, i) => e && e.offMap && i < 4),
+          && r.exits.some((e, i) => e && i < 4 && (e.offMap || plan.zoneOf(e.to) !== zone)),
         (r) => (/gate/i.test(r.name) ? 3 : 0) + ways(r) + stuff(r)),
-        'a sealed gate out of the world');
+        'a gate out of the zone: a crossing into another');
       add('crowd', pick((r) => r.mobs.length >= 2), 'several mobiles together');
       // Under the town. The works are the sewer's brick-vaulted pipe rooms on
       // the first level down; the more ways out, the more tunnel mouths there

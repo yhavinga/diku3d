@@ -16,7 +16,7 @@
  * never depends on where the player happens to enter.
  */
 
-import { DIR_STEP, REVERSE_DIR } from './are.js';
+import { DIR_STEP } from './are.js';
 import { layoutWorld } from './layout.js';
 
 /**
@@ -127,18 +127,20 @@ export function layoutZone(world, plan, zone) {
 }
 
 /**
- * Which way to face on arriving through a crossing: on along the way you
- * came for a step north, east, south or west; for up and down, away from
- * the way back if it is level, otherwise out of the room by its first level
- * exit. Yaw in the camera's convention (forward is (-sin, 0, -cos)).
+ * Which way to face on arriving: on along the way you came for a step
+ * north, east, south or west; otherwise -- up, down, a recall, a saved game
+ * -- out of the room by its first level exit that stays in the zone, so the
+ * first frame is the place and not the archway back out of it. Yaw in the
+ * camera's convention (forward is (-sin, 0, -cos)).
  */
-export function arrivalYaw(world, arrive, dir) {
+export function arrivalYaw(world, plan, arrive, dir) {
   const yawOf = (d) => Math.atan2(-DIR_STEP[d][0], -DIR_STEP[d][2]);
   if (dir !== undefined && dir !== null && dir < 4) return yawOf(dir);
   const room = world.rooms.get(arrive);
   if (!room) return 0;
-  const back = dir !== undefined && dir !== null ? REVERSE_DIR[dir] : -1;
-  if (back >= 0 && back < 4 && room.exits[back]) return yawOf(REVERSE_DIR[back]);
-  const level = [0, 1, 2, 3].filter((d) => room.exits[d] && d !== back);
-  return level.length ? yawOf(level[0]) : 0;
+  const zone = plan.zoneOf(arrive);
+  const level = [0, 1, 2, 3].filter((d) => room.exits[d] && !room.exits[d].offMap);
+  const inside = level.filter((d) => plan.zoneOf(room.exits[d].to) === zone);
+  const pick = inside.length ? inside : level;
+  return pick.length ? yawOf(pick[0]) : 0;
 }

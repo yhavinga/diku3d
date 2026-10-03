@@ -2028,9 +2028,8 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
     for (const slot of mobs) {
       if (slot.dead || slot.travel) continue;
-      // db.c creates every mobile at boot; this viewer creates the ones in
-      // the drawn zone when first seen (update), and the rest here, so their
-      // spec_funs run whether or not anyone is looking.
+      // Out of the drawn zone and never seen: made when the zone was left (or
+      // at boot), or here if a reset brought it back since.
       if (!slot.here && !slot.instance) wake(slot, wanderRng);
       const mob = slot.instance;
       const act = slot.proto.act;
@@ -2958,6 +2957,11 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   Object.defineProperty(game, 'specFuns', { get: () => SPEC_FUNS, enumerable: true });
 
   enterZone({ layout, built, actors, nav: ways });
+  // db.c creates every mobile at boot. The drawn zone's wait until they are
+  // first seen (update); the rest are made now, behind the loading screen --
+  // made on the first mobile pulse instead, the 1,440 of them were a 21 ms
+  // hitch in the first second of play -- so their spec_funs run unwatched.
+  for (const slot of mobs) if (!slot.here) wake(slot, wanderRng);
 
   installRules({
     world, rng, wanderRng, state, position, facing, playerFeet,
