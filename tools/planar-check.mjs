@@ -353,10 +353,17 @@ const TRIALS = {
   terrace: { terrace: true },
   keepClear: { keepClear: true },
   midennirWhole: { laidWhole: new Set(['hood.are', 'midennir.are']) },
+  // Laid whole, but the street to its block gets no more reach than any other.
+  midennirShort: { laidWhole: new Set(['hood.are', 'midennir.are']), anchorReach: false },
 };
 function runTrial(name) {
-  const opts = TRIALS[name] || (name.startsWith('reach=') ? { reach: Number(name.slice(6)) } : null);
-  if (!opts) throw new Error(`no trial ${name}: ${[...Object.keys(TRIALS), 'reach=N'].join(', ')}`);
+  // Several at once: --try midennirWhole,reach=6
+  const opts = {};
+  for (const part of name.split(',')) {
+    const o = TRIALS[part] || (part.startsWith('reach=') ? { reach: Number(part.slice(6)) } : null);
+    if (!o) throw new Error(`no trial ${part}: ${[...Object.keys(TRIALS), 'reach=N'].join(', ')}`);
+    Object.assign(opts, o);
+  }
   const world = buildWorld(listed.map(read));
   const plan = planZones(world, {});
   const lay = (zone, o) => layoutWorld(world, { startVnum: zone.start, maxRooms: zone.maxRooms, includeVnum: (v) => plan.zoneOf(v) === zone, roots: zone.arrivals, ...o });

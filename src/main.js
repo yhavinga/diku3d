@@ -35,6 +35,7 @@ import { createVisibility } from './cull.js';
 import { createImpostors } from './impostor.js';
 import { createOcclusion } from './occlusion.js';
 import { createTitleReel } from './title.js';
+import { createVistas } from './vista.js';
 import { attachSocketLink, SocketLink } from './link.js';
 import { createConnectUi } from './link-ui.js';
 import { OUTDOOR_FILL } from './dress.js';
@@ -527,6 +528,14 @@ async function boot() {
   let zone = plan.zoneOf(START_VNUM) || plan.home;
   await progress(0.01, 'laying out the streets', `${world.rooms.size} rooms in ${files.length} areas`);
   let layout = layoutOf(zone);
+  // The neighbouring zones past the crossings (vista.js): built once the
+  // zone is up, but planned now -- while the texture workers bake -- because
+  // the zone must leave clear the ground they stand on. `?vista=off` draws
+  // none, for A/B.
+  const vistaOff = params.get('vista') === 'off';
+  const vistas = createVistas({ world, plan, layoutOf, viewOf });
+  const planVistas = (z, l) => (vistaOff ? [] : vistas.planFor(z, l));
+  let sites = planVistas(zone, layout);
 
   const bar = bootPlan(cachedShare);
   await progress(bar.bake[0], 'baking stone, timber and thatch', 'every surface is generated here, not downloaded');
@@ -550,11 +559,12 @@ async function boot() {
       console.warn('assets: no material for tag(s)', [...assets.unknownTags].join(', '));
     }
   }
+  vistas.use({ materials, assets });
 
   const raising = `${layout.cells.size} rooms of ${zone.name || 'the town'}`;
   await progress(bar.raise[0], 'raising the town', raising);
   let built = await buildScene(viewOf(zone), layout, materials, assets,
-    (fraction) => progress(along(bar.raise, fraction), null, raising));
+    (fraction) => progress(along(bar.raise, fraction), null, raising), { clear: vistas.cellsOf(sites) });
 
   const peopling = 'mobiles, their clothes and what they carry';
   await progress(bar.people[0], 'peopling the rooms', peopling);
@@ -681,7 +691,7 @@ async function boot() {
 
   const player = new Player(camera, renderer.domElement, built);
   player.nav = actors.nav;   // so a compass step walks round furniture
-  const hud = new Hud(document.body, layout);
+  const hud = new Hud(document.body, layout, built.crossings);
   const audio = new Audio();
 
   const options = createOptions({
@@ -1278,13 +1288,13 @@ async function boot() {
   // during a glide queues and fires on arrival instead of being swallowed.
   let queuedStep = null;
 
-  function step(dir, typed = false) {
+  function step(dir, typed = false, from = null) {
     // Typed at the command line, a refusal is the mud's line in the console;
     // from the arrow keys it is a toast over the world.
     const refuse = (toast, mud) => { if (typed) return { ok: false, text: mud }; hud.toast(toast); return null; };
     if (player.gliding) { queuedStep = dir; return null; }
     if (fadeTimer > 0 || crossing) return null;
-    const here = currentRoom();
+    const here = from ?? currentRoom();
     const room = here && world.rooms.get(here);
     if (!room) return null;
     const exit = room.exits[dir];
@@ -1488,7 +1498,7 @@ async function boot() {
     pipeline.gtao.unshaded.length = 0;
     pipeline.gtao.unshadedAge = Infinity;
     const keep = collectResources([materials, assets, impostors ? impostors.models : null]);
-    const freed = disposeZoneGraph([built.group, actors.group], keep, (m) => !!impostors && impostors.owns(m));
+    const freed = disposeZoneGraph([built.group, actors.group, vistas.release()], keep, (m) => !!impostors && impostors.owns(m));
     lightPool.grid = new Map();
     heldLight.key = null;
     lookTarget = null;
@@ -1507,7 +1517,7 @@ async function boot() {
     fileLights();
     player.setWorld(built);
     player.nav = actors.nav;
-    hud.setLayout(layout);
+    hud.setLayout(layout, built.crossings);
     gameUi.setBuilt(liveBuilt);
     items.setBuilt(built);
     game.enterZone({ layout, built, actors });
@@ -1646,11 +1656,12 @@ async function boot() {
         zone = target;
         t = performance.now();
         layout = layoutOf(zone);
+        sites = planVistas(zone, layout);
         timing.layout = performance.now() - t;
         await zoneCard.progress(CROSS_BAR.build[0]);
         t = performance.now();
         built = await buildScene(viewOf(zone), layout, materials, assets,
-          (fraction) => zoneCard.progress(along(CROSS_BAR.build, fraction)));
+          (fraction) => zoneCard.progress(along(CROSS_BAR.build, fraction)), { clear: vistas.cellsOf(sites) });
         timing.build = performance.now() - t;
         await zoneCard.progress(CROSS_BAR.populate[0]);
         t = performance.now();
@@ -1676,6 +1687,9 @@ async function boot() {
       await nextFrame();
       await nextFrame();
       timing.ready = performance.now() - t0;
+      // Behind the card as it lifts: the nearest -- the one you came
+      // through -- is up before the card is gone.
+      mountVistas();
       await zoneCard.hide();
       timing.total = performance.now() - t0;
       state.lastCrossing = timing;
@@ -1697,23 +1711,22 @@ async function boot() {
   let pressing = 0;
   function walkIntoCrossing(dt) {
     if (pressing < 0) { pressing = Math.min(0, pressing + dt); return; }
-    const room = state.roomVnum !== null ? world.rooms.get(state.roomVnum) : null;
-    const info = room && built.rooms.get(room.vnum);
-    if (!info || !player.keys.has('KeyW')) { pressing = 0; return; }
-    const fx = -Math.sin(camera.rotation.y);
-    const fz = -Math.cos(camera.rotation.y);
-    for (let dir = 0; dir < 4; dir++) {
-      const exit = room.exits[dir];
-      const beyond = exit && !exit.offMap ? plan.zoneOf(exit.to) : null;
-      if (!beyond || beyond === zone) continue;
-      const sign = built.decor.find((d) => d.kind === 'gateSign' && d.text === DIR_NAME[dir]
-        && Math.hypot(d.x - info.center.x, d.z - info.center.z) < 9);
-      if (!sign || Math.hypot(player.position.x - sign.x, player.position.z - sign.z) > 1.5) continue;
-      if (fx * sign.dx + fz * sign.dz < 0.6) continue;
+    if (!player.keys.has('KeyW')) { pressing = 0; return; }
+    const gate = crossingAt(player.position.x, player.position.y - 1.72, player.position.z, camera.rotation.y);
+    if (gate) {
       pressing += dt;
-      if (pressing > 0.25) { pressing = -1.5; step(dir); }
+      if (pressing > 0.25) {
+        pressing = -1.5;
+        // From the gate's own room, whatever `currentRoom` makes of where you stand.
+        step(gate.dir, false, gate.room);
+      }
       return;
     }
+    const room = state.roomVnum !== null ? world.rooms.get(state.roomVnum) : null;
+    const info = room && built.rooms.get(room.vnum);
+    if (!info) { pressing = 0; return; }
+    const fx = -Math.sin(camera.rotation.y);
+    const fz = -Math.cos(camera.rotation.y);
     // wave13-temple: up and down into another zone -- the temple's steps up
     // to the Mud School end in a doorway, and walking into it has to take you
     // through. Its marker (build.js `climb`, `fixture`) hangs 2.7 m over the
@@ -1733,6 +1746,78 @@ async function boot() {
       return;
     }
     pressing = 0;
+  }
+
+  /** The drawn zone's vistas, built behind the play a slice a frame; each one's shadows wanted once it is up. */
+  function mountVistas() {
+    const t = performance.now();
+    vistas.mount(scene, sites, camera.position, {
+      // Every program they need, for every step of the light pool, before
+      // they are drawn: a vista brings surfaces the zone may have none of,
+      // and a program first met in a frame is compiled in that frame. Issued
+      // in one task -- no frame drawn between two light levels -- and then
+      // waited on without blocking.
+      prepare: async (group) => {
+        const previous = renderer.getRenderTarget();
+        renderer.setRenderTarget(composer.renderTarget1);
+        try {
+          for (const level of lightPool.levels) {
+            lightPool.setLevel(level);
+            renderer.compile(group, camera, scene);
+          }
+        } finally {
+          lightPool.setLevel(lightPool.level < 0 ? 0 : lightPool.level);
+          renderer.setRenderTarget(previous);
+        }
+        const target = renderer.getRenderTarget();
+        renderer.setRenderTarget(composer.renderTarget1);
+        const ready = renderer.compileAsync(group, camera, scene);
+        renderer.setRenderTarget(target);
+        await ready;
+      },
+      onReady: () => {
+        // Their trees go to cards past the crossfade, and cull.js indexes
+        // their instances, as the zone's own were at its first frame.
+        // Reindexed first: that puts every compacted instance buffer back,
+        // and the cards are sized from the meshes' full counts.
+        visibility.reindex();
+        if (impostors) { impostors.release(); impostors.adopt(scene); }
+        // And the AO prepass looks for what to leave out again now, not
+        // within the next ninety frames: the vistas are `horizon-` too.
+        pipeline.gtao.unshadedAge = Infinity;
+        shadowAnchor.set(Infinity, Infinity, Infinity);
+      },
+    }).then((done) => {
+      if (done) console.info(`vistas: ${done.length} for ${zone.id} in ${(performance.now() - t).toFixed(0)} ms wall,`
+        + ` ${vistas.state.ms.toFixed(0)} ms building, ${(vistas.state.triangles / 1e3).toFixed(0)}k triangles`);
+    });
+  }
+
+  /**
+   * The crossing whose bars you are against, facing them: in front of the
+   * arch, within its opening, and on its level (build.js `crossingFrame`; the
+   * gate's collider stops you 0.87 m short of the bars, a shut door's swing
+   * 1.82 m short, where it should still say the door is shut). Read from where you
+   * stand rather than from the room you are counted in, which in a street
+   * routed past a gate can be another room altogether.
+   */
+  function crossingAt(x, feetY, z, yaw) {
+    const fx = -Math.sin(yaw);
+    const fz = -Math.cos(yaw);
+    for (const gate of built.crossings || []) {
+      const exit = world.rooms.get(gate.room)?.exits[gate.dir];
+      const beyond = exit && !exit.offMap ? plan.zoneOf(exit.to) : null;
+      if (!beyond || beyond === zone) continue;
+      if (Math.abs(feetY - gate.y) > 1.2) continue;
+      const [ox, oz] = gate.out;
+      const [tx, tz] = gate.along;
+      const depth = (x - gate.x) * ox + (z - gate.z) * oz;
+      const across = (x - gate.x) * tx + (z - gate.z) * tz;
+      if (depth < -2.4 || depth > 0 || Math.abs(across) > gate.half + 0.2) continue;
+      if (fx * ox + fz * oz < 0.5) continue;
+      return gate;
+    }
+    return null;
   }
 
   /** What the build came to, for the stats overlay (F). */
@@ -2076,11 +2161,15 @@ async function boot() {
     get built() { return built; },
     get actors() { return actors; },
     get visibility() { return visibility; },
+    /** The neighbouring zones drawn past the crossings (vista.js). */
+    vistas,
     /** The zone being drawn, and every zone there is (zones.js). */
     get zone() { return zone; },
     plan,
     /** Cross into the zone room `vnum` is in, as a crossing does; resolves with its timings. */
     cross: (vnum, options) => crossTo(vnum, options),
+    /** Which way walking on from (x, z) facing `yaw` would cross, or null (tools/judge/headless/crossings.mjs). */
+    crossingAt: (x, z, yaw, feetY = player.position.y - 1.72) => crossingAt(x, feetY, z, yaw)?.dir ?? null,
     zoneCard,
     times: TIMES, overcast: OVERCAST, rain,
     /**
@@ -2558,6 +2647,7 @@ async function boot() {
   if (titleReel.active) document.body.classList.add('titling');
   dom.title.classList.remove('hidden');
   frame();
+  mountVistas();
 }
 
 function makeStars() {

@@ -218,8 +218,11 @@ function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = new Se
  * long street, which is what the mud says it is ("The road extends south
  * along the inside of the wall surrounding the city"). Nothing else moves:
  * every other area's placement is identical to the world without it.
+ * Miden'nir is laid whole for the same reason: placed room by room it moved
+ * 107 of Midgaard's rooms (the park, the river) to sit against both its
+ * links; whole, nothing moves and the Dump's link south is the long one.
  */
-const LAID_WHOLE = new Set(['hood.are']);
+const LAID_WHOLE = new Set(['hood.are', 'midennir.are']);
 
 export function layoutWorld(world, options = {}) {
   const {
@@ -235,12 +238,18 @@ export function layoutWorld(world, options = {}) {
     // either direction (the default guards only the way up); `keepClear`
     // keeps the cells beyond a crossing into another zone free of rooms and
     // streets; `laidWhole` is the set of areas set down as a block;
-    // `reach` is how many cells a street may wander (6 since the first
-    // commit, never measured -- 12 is what planar-check reports on).
+    // `anchorReach` lets the street to a block laid whole run as far as
+    // the block was set down.
     terrace = false,
     keepClear = false,
     laidWhole = LAID_WHOLE,
-    reach: reachDefault = 6,
+    anchorReach = true,
+    // How many cells a street may wander: a maximum, never a target, since
+    // routing is breadth-first by length. It was 6 from the first commit and
+    // never measured; at 12 the home zone goes from 94.3% to 97.4% walkable
+    // and wrong walls over all zones from 177 to 73, with no area losing a
+    // passage (tools/planar-check.mjs --try reach=6 shows the way back).
+    reach: reachDefault = 12,
   } = options;
 
   const cells = new Map();      // vnum -> {x, level, z, room}
@@ -304,7 +313,7 @@ export function layoutWorld(world, options = {}) {
           const oz = here.z + dz * (1 + along) + dx * side * sign;
           if (!clear(ox, oz)) continue;
           for (const c of sub.order) { place(c.room, here.level + c.level, c.x + ox, c.z + oz); queue.push(c.room); }
-          reach.set(pair(room.vnum, target.vnum), 2 * far + 12);
+          if (anchorReach) reach.set(pair(room.vnum, target.vnum), 2 * far + 12);
           return true;
         }
       }

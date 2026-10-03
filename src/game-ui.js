@@ -1222,8 +1222,11 @@ export function createGameUi(game, { built = null } = {}) {
       const ways = waysPhrase(list, game.wayFrom && game.wayFrom(room)).replace(/^the ways? /, '');
       count += new Set(list.map((gate) => gate.way)).size;
       const li = el('li', open ? 'open' : '');
+      // Where it goes: every area is loaded now, and a gate is a crossing
+      // into another zone, not the edge of the map it used to be.
+      const beyond = [...new Set(list.map((gate) => game.world && game.world.rooms.get(gate.to)?.area).filter(Boolean))];
       li.append(
-        el('span', null, `${ways.charAt(0).toUpperCase()}${ways.slice(1)}, beyond the map`),
+        el('span', null, `${ways.charAt(0).toUpperCase()}${ways.slice(1)}, ${beyond.length ? `to ${beyond.join(' and ')}` : 'beyond the map'}`),
         el('em', null, open ? 'open' : `${list[0].wardenName} · ${list[0].wardenLevel}`),
       );
       gatesList.appendChild(li);

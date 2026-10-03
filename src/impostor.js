@@ -540,7 +540,9 @@ export function createImpostors({ renderer, library, range = [80, 95] }) {
       if (!o.isInstancedMesh || !o.userData.cullable) return;
       const lod = byGeometry.get(o.geometry);
       if (!lod) return;
-      o.material = twin(o.material);
+      // Adopted again when a vista joins the scene (vista.js): a twin's twin
+      // would dissolve twice.
+      if (!o.userData.lod) o.material = twin(o.material);
       o.userData.lod = lod;
       if (lod.primary) capacity.set(lod.model, (capacity.get(lod.model) || 0) + o.count);
     });

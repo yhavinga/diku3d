@@ -133,6 +133,11 @@ function classifyCanopy(world) {
 // courtyard of a beautiful building complex ... the plants all died".
 const isOpenAir = (room) => isOutdoor(room) || isCanopy(room)
   || (!!eastStyle(room) && eastStyle(room) !== 'cave') || hoodStyle(room) === 'court';
+/** `isOpenAir` for a zone's rooms before that zone is built: what a vista (vista.js) is planned by. */
+export function openAirIn(world) {
+  classifyCanopy(world);
+  return isOpenAir;
+}
 
 /**
  * An exit to room -1 is the stock files' way of writing "nothing": four of
@@ -1898,7 +1903,14 @@ function buildDecals(group, decals, materials) {
 
 // ------------------------------------------------------------------ main ----
 
-function* raise(world, layout, materials, assets = null) {
+/**
+ * `options.clear`: cell keys (`level:x,z`) nothing but rooms and streets is
+ * to be built on -- where the neighbouring zones' vistas stand (vista.js). `options.vista`: build only what a vista draws -- no ground
+ * plane, skyline, grass or mist -- and no frontage on a cell `keep(level, x,
+ * z)` refuses, where the drawn zone already builds.
+ */
+export function* raise(world, layout, materials, assets = null, options = {}) {
+  const vista = options.vista || null;
   const group = new THREE.Group();
   group.name = 'world';
   const batcher = new Batcher(materials);
@@ -1907,12 +1919,20 @@ function* raise(world, layout, materials, assets = null) {
   // Two batches, split on the chunk's level: see `buildZones`.
   const instances = assets ? new InstanceBatch(assets) : null;
   const model = (names, seed) => (assets ? assets.choose(names, seed) : null);
+  // A vista leaves out what is too small to read from past a gate, and rock
+  // that would hang in the air without the rooms round it: it is placed as
+  // if it stood there, so nothing falls back to geometry instead.
+  if (instances && vista?.dropModel) {
+    const add = instances.add.bind(instances);
+    instances.add = (name, ...rest) => (vista.dropModel(name, rest[0]) ? true : add(name, ...rest));
+  }
 
   const colliders = [];   // {x0,x1,z0,z1,y0,y1}
   const platforms = [];   // {x0,x1,z0,z1,top}
   const lights = [];      // {x,y,z,color,intensity,radius,flicker}
   const portals = [];     // walk-through archways
   const veils = [];       // the dark thresholds in them: see `buildArch`
+  const crossings = [];   // gates into other zones: see `crossingFrame`
   // What was built for each way up or down, by room and exit direction:
   // tools/judge/headless/ways.mjs counts the ones nothing shows.
   const ways = [];
@@ -1923,7 +1943,7 @@ function* raise(world, layout, materials, assets = null) {
   const skyHoles = [];    // the tops of the sewer's air shafts
   const cabins = [];      // world rects a cabin shell stands on: keep them clear
   const decals = [];      // paint and blood, laid on surfaces: see buildDecals
-  const reserved = new Set(); // cells something other than a house stands on
+  const reserved = new Set(options.clear || []); // cells something other than a house stands on
 
   const addCollider = (x0, x1, z0, z1, y0, y1) => colliders.push({ x0, x1, z0, z1, y0, y1 });
   const addPlatform = (x0, x1, z0, z1, top) => platforms.push({ x0, x1, z0, z1, top });
@@ -1955,6 +1975,10 @@ function* raise(world, layout, materials, assets = null) {
   // boundaries between two biomes without guessing at them a second time.
   const groundAt = new Map();
   const cellKey = (level, x, z) => `${level}:${x},${z}`;
+  // What this build may put down on a cell that is neither a room nor a
+  // street: not where a vista stands (`options.clear`), nor, in a vista,
+  // where the drawn zone already builds.
+  const free = (level, x, z) => !options.clear?.has(cellKey(level, x, z)) && (!vista || vista.keep(level, x, z));
 
   // --- floor and ceiling openings for staircases ---------------------------
 
@@ -2006,7 +2030,7 @@ function* raise(world, layout, materials, assets = null) {
     const ux = plan.upper.x * CELL; const uz = plan.upper.z * CELL;
     groundHoles.push({ x0: ux + rect.x0, x1: ux + rect.x1, z0: uz + rect.z0, z1: uz + rect.z1 });
   }
-  for (const r of rectsAround({ x0: gx0, x1: gx1, z0: gz0, z1: gz1 }, groundHoles)) {
+  for (const r of vista ? [] : rectsAround({ x0: gx0, x1: gx1, z0: gz0, z1: gz1 }, groundHoles)) {
     const w = r.x1 - r.x0; const d = r.z1 - r.z0;
     const seg = Math.max(1, Math.min(32, Math.round(Math.max(w, d) / 60)));
     batcher.add(plane(w, d, seg), 'grass', place((r.x0 + r.x1) / 2, groundY, (r.z0 + r.z1) / 2), { chunk: 'ground' });
@@ -2014,7 +2038,7 @@ function* raise(world, layout, materials, assets = null) {
   }
   // ...and something for it to end against, out where the fog is thick enough
   // to do the work.
-  const horizon = buildHorizon(group, bounds, groundY, layout);
+  const horizon = vista ? null : buildHorizon(group, bounds, groundY, layout);
   yield 0.017;
 
   // --- rooms ---------------------------------------------------------------
@@ -2445,6 +2469,17 @@ function* raise(world, layout, materials, assets = null) {
           way: side.link.dir === 5 ? 'down' : 'up', dir, along: 0, target: side.target || null,
           exitDir: side.link.dir, crossing: side.kind === 'gate',
         });
+      } else if (isCrossingSide(side) && !airborne) {
+        // A gate's lodge fills its wall to 3.5 m either side of the middle:
+        // a corner fixture on that wall would stand in its end.
+        if (openAir) { used.add(`${dir}1`); used.add(`${dir}-1`); }
+        buildCrossing({
+          batcher, instances, model, chunk, room, pos, dir, exitDir: side.link.dir, openAir, addCollider, decor, crossings,
+          between: openAir && gateOf(room) < 0 && frontsCrossing(room, dir),
+          // Past it stands the next zone's vista (vista.js): the lodge's back
+          // is a gateway onto it, not a wall in front of it.
+          seeThrough: !!options.clear?.has(cellKey(cell.level, cell.x + DIR_STEP[dir][0], cell.z + DIR_STEP[dir][2])),
+        });
       } else if (side && (side.kind === 'portal' || side.kind === 'gate' || shaft) && !airborne && !deadExit(side.exit)) {
         const ax = pos.x + dx * (distance - 0.1);
         const az = pos.z + dz * (distance - 0.1);
@@ -2474,9 +2509,12 @@ function* raise(world, layout, materials, assets = null) {
         // 1.00 x 1.99 m void and one leaf fills it, because a one-room cabin
         // does not have double doors.
         const hung = cabin && cabin.dir === dir ? cabin : null;
+        // A door into another zone hangs in its gate, 0.2 m in front of the
+        // arch's middle as it did when the arch stood on the cell's edge.
+        const gate = openAir && isCrossingSide(side) ? crossingFrame({ pos, dir, openAir }) : null;
         doors.push({
-          x: wx + dx * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), y: pos.y,
-          z: wz + dz * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), rotY, dir,
+          x: gate ? gate.x - dx * 0.2 : wx + dx * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), y: pos.y,
+          z: gate ? gate.z - dz * 0.2 : wz + dz * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), rotY, dir,
           width: hung ? hung.width : (tree ? TREE_DOOR_W : DOOR_W), height: hung ? hung.height : (tree ? TREE_DOOR_H : DOOR_H),
           single: !!hung || tree,
           // One round leaf covering the whole opening instead of two boarded
@@ -2569,6 +2607,9 @@ function* raise(world, layout, materials, assets = null) {
         fixture({ way, dir: c.d, along: c.sign * CORNER, target: null, exitDir: job.exitDir, crossing: true });
       } else if (ref.kind === 'gate') {
         fixture({ way: 'level', dir: c.d, along: c.sign * CORNER, target: null, exitDir: ref.dir, sealed: true });
+        if (ref.dir < 4 && !job.exit.offMap) {
+          cornerCrossing({ room, pos, dir: c.d, along: c.sign * CORNER, exitDir: ref.dir, openAir, addCollider, decor, crossings });
+        }
       } else {
         fixture({ way, dir: c.d, along: c.sign * CORNER, target: job.target, exitDir: job.exitDir });
       }
@@ -2925,7 +2966,7 @@ function* raise(world, layout, materials, assets = null) {
   // Before the frontage, because a cell the mountain takes is not a street's
   // to build on.
   const mountain = instances && assets.has('massif_a')
-    ? buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey }) : new Set();
+    ? buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey, keep: free }) : new Set();
 
   yield 0.222;
   // --- build on every empty cell that fronts a street ----------------------
@@ -2933,6 +2974,7 @@ function* raise(world, layout, materials, assets = null) {
   const frontage = new Map(); // cell key -> sector to build from
   const consider = (level, x, z, sector, bog, shire, east = false, hood = false) => {
     if (layout.at(level, x, z) !== undefined || layout.isPath(level, x, z)) return;
+    if (!free(level, x, z)) return;
     const k = `${level}:${x},${z}`;
     if (!frontage.has(k)) frontage.set(k, { level, x, z, sector, bog, shire, east, hood });
   };
@@ -3169,7 +3211,7 @@ function* raise(world, layout, materials, assets = null) {
   }
 
   if (instances && assets.has('dune_a')) {
-    buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt, cellKey, chunkOf });
+    buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt, cellKey, chunkOf, keep: free });
   }
 
   yield 0.232;
@@ -3254,7 +3296,7 @@ function* raise(world, layout, materials, assets = null) {
   }
 
   yield 0.292;
-  const mist = buildMist(group, mistCells);
+  const mist = buildMist(group, vista ? [] : mistCells);
 
   const zones = buildZones(group, groundY, groundHoles, hoodBox && {
     x0: hoodBox.x0 * CELL - HALF, x1: hoodBox.x1 * CELL + HALF, z0: hoodBox.z0 * CELL - HALF, z1: hoodBox.z1 * CELL + HALF,
@@ -3263,10 +3305,12 @@ function* raise(world, layout, materials, assets = null) {
   if (skyHoles.length) zones.deep.add(buildSkyHoles(skyHoles));
   // Blades on every grass surface laid above; must run before the batcher
   // merges its geometry away.
-  const grass = yield* within(0.294, 0.915, buildGrass({
+  const grass = vista ? null : yield* within(0.294, 0.915, buildGrass({
     groups: batcher.groups, instances, colliders, layout, rooms, materials, cell: CELL, biomeOf: grassBiome,
+    keepOff: options.clear?.size
+      ? (x, y, z) => options.clear.has(cellKey(Math.round(y / LEVEL_H), Math.round(x / CELL), Math.round(z / CELL))) : null,
   }));
-  zones.surface.add(grass);
+  if (grass) zones.surface.add(grass);
   const batches = new StaticBatches();
   const regionOf = regions(hoodBox);
   yield 0.915;
@@ -3293,7 +3337,7 @@ function* raise(world, layout, materials, assets = null) {
     }
   }
   const thresholds = buildThresholds(veils, zones);
-  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones, grass, thresholds };
+  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones, grass, thresholds, crossings };
 }
 
 /** A sub-step's own 0..1 progress, as a stretch [a, b] of its caller's. */
@@ -3320,8 +3364,8 @@ const SLICE_MS = 100;
  * `onProgress(fraction)`, which is expected to let a frame paint; nothing the
  * build reads changes in between, so what is built is the same as in one go.
  */
-export function buildScene(world, layout, materials, assets = null, onProgress = null) {
-  return inSlices(raise(world, layout, materials, assets), onProgress);
+export function buildScene(world, layout, materials, assets = null, onProgress = null, options = {}) {
+  return inSlices(raise(world, layout, materials, assets, options), onProgress);
 }
 
 /** Run a generator of 0..1 fractions to its return value, awaiting `onProgress` every `SLICE_MS`. */
@@ -3732,6 +3776,8 @@ const SQUARE = /\b(square|plaza|piazza|courtyard|market|green|common|park|field|
 // unfronted open-air room gets its boundary.
 const wantsFrontage = (room) => room.sector === SECTOR.CITY && !SQUARE.test(room.name)
   && !(isShire(room) && FARMYARD.test(room.name));
+/** Does `buildCityFrontage` stand houses either side of a crossing's lodge on side `dir`? */
+const frontsCrossing = (room, dir) => wantsFrontage(room) && !isShire(room) && dir !== hoodFenceDir(room);
 
 /**
  * Bring the frontage forward on every side of a city cell that is not a way
@@ -3743,8 +3789,12 @@ const wantsFrontage = (room) => room.sector === SECTOR.CITY && !SQUARE.test(room
  */
 function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors, lights = [], decals = null, turf = null, gateSide = -1 }) {
   if (!wantsFrontage(room)) return;
+  // A crossing's side is a frontage like any closed one, with the gate's
+  // lodge in a gap in the middle of it (`buildCrossing`): left open, it was
+  // a free-standing arch on the paving that you could walk round.
   const isOpen = (d) => {
     const side = sides[d];
+    if (isCrossingSide(side) && frontsCrossing(room, d)) return false;
     return !!(side && (side.kind === 'alley' || side.kind === 'portal' || side.kind === 'shaft' || side.kind === 'gate'));
   };
   const inset = HALF - FRONTAGE_D / 2;
@@ -3758,7 +3808,9 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
   // `key` is where the block is hashed from: a block cut back to clear a
   // corner keeps the height and the material it had at full length.
   const heightAt = (kx, kz, salt) => 6.2 + hash3(cell.x * 7 + Math.round(kx), cell.z * 7 + Math.round(kz), cell.level, salt) * 4.6;
-  const block = (bx, bz, sx, sz, salt, face = -1, kx = bx, kz = bz) => {
+  // `skip`: a face that gets no windows -- the end of a house that is the
+  // side of a gate's pocket.
+  const block = (bx, bz, sx, sz, salt, face = -1, kx = bx, kz = bz, skip = -1) => {
     const seed = hash3(cell.x * 7 + Math.round(kx), cell.z * 7 + Math.round(kz), cell.level, salt);
     const h = 6.2 + seed * 4.6;
     // In the neighborhood every front is masonry: a boarded window nailed
@@ -3794,7 +3846,10 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
       return;
     }
     // A blank three-storey wall along the street was reported; give it openings.
-    decor.push({ kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed, frame: stone || marble ? 'stone' : 'timber' });
+    decor.push({
+      kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed, frame: stone || marble ? 'stone' : 'timber',
+      only: skip >= 0 ? [0, 1, 2, 3].filter((d) => d !== skip) : undefined,
+    });
   };
 
   /**
@@ -4024,6 +4079,17 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
         if (nh > h || (nh === h && !along)) {
           if (s < 0) lo = -HALF + FRONTAGE_D; else hi = HALF - FRONTAGE_D;
         }
+      }
+      if (isCrossingSide(sides[dir])) {
+        // One house either side of the gate's lodge, keyed as the whole
+        // block so the two halves are one building with the gate through it.
+        for (const [a0, a1, skip] of [[lo, -LODGE_PW / 2, along ? 2 : 1], [LODGE_PW / 2, hi, along ? 0 : 3]]) {
+          if (a1 - a0 < 0.5) continue;
+          const mid = (a0 + a1) / 2; const len = a1 - a0;
+          block(along ? bx : pos.x + mid, along ? pos.z + mid : bz, along ? sx : len, along ? len : sz,
+            62 + dir, (dir + 2) % 4, bx, bz, skip);
+        }
+        continue;
       }
       const mid = (lo + hi) / 2; const len = hi - lo;
       block(along ? bx : pos.x + mid, along ? pos.z + mid : bz, along ? sx : len, along ? len : sz,
@@ -7692,7 +7758,7 @@ function buildEastRoom({ room, pos, sides, instances, chunk, decor, lights, addC
  */
 const SAND_MARGIN = 7;
 
-function buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt, cellKey, chunkOf }) {
+function buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt, cellKey, chunkOf, keep = null }) {
   let x0 = Infinity; let x1 = -Infinity; let z0 = Infinity; let z1 = -Infinity;
   for (const cell of layout.order) {
     const style = eastStyle(cell.room);
@@ -7705,6 +7771,7 @@ function buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt
     for (let z = z0 - SAND_MARGIN; z <= z1 + SAND_MARGIN; z++) {
       const k = cellKey(0, x, z);
       if (layout.at(0, x, z) !== undefined || layout.isPath(0, x, z) || mountain.has(k) || frontage.has(k)) continue;
+      if (keep && !keep(0, x, z)) continue;
       // Not over the town or anything else that is not the desert's: only
       // cells nearer the desert than any other area's room.
       if (nearestArea(layout, x, z) !== 'eastern.are') continue;
@@ -7980,7 +8047,7 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
   return { cells: support.size, triangles };
 }
 
-function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey }) {
+function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey, keep = null }) {
   // The desert's caves wear its sandstone; a cave anywhere else -- the troll
   // den in Haon Dor's firs -- the same crags in grey rock.
   const rocky = (room) => eastStyle(room) === 'cave' || pickMaterials(room, room.area).rockCave;
@@ -8001,7 +8068,7 @@ function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey
     && layout.at(1, x, z) === undefined && !layout.isPath(1, x, z);
   const block = (x, z, swap) => {
     const k = cellKey(0, x, z);
-    if (taken.has(k)) return;
+    if (taken.has(k) || (keep && !keep(0, x, z))) return;
     taken.add(k);
     const cx = x * CELL; const cz = z * CELL;
     const tall = hash3(x, z, 0, 211);
@@ -8117,7 +8184,9 @@ function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed, ve
   if (arch && instances) {
     instances.add(arch, scale ? { x, y, z, rotY, scaleX: sx, scaleY: sy } : { x, y, z, rotY }, chunk);
     const bars = sealed ? model(['portcullis'], 0) : null;
-    if (bars) instances.add(bars, { x, y, z, rotY }, chunk);
+    // At the arch's own scale: full size in a corner's half-size arch, the
+    // grille stood 0.8 m out of each side of it.
+    if (bars) instances.add(bars, scale ? { x, y, z, rotY, scaleX: sx, scaleY: sy } : { x, y, z, rotY }, chunk);
     if (bars || !sealed) return;
   }
   const t = 0.8;
@@ -8138,6 +8207,160 @@ function buildArch({ batcher, instances, model, chunk, x, y, z, rotY, sealed, ve
       place(x + Math.cos(rotY) * off, y + h / 2, z - Math.sin(rotY) * off, rotY), { chunk });
   }
   batcher.add(box(DOOR_W, 0.2, 0.2), 'iron', place(x, y + h * 0.55, z, rotY), { chunk });
+}
+
+/**
+ * A way north, east, south or west into another zone, or out of the loaded
+ * world: a barred archway (`buildCrossing`).
+ */
+const isCrossingSide = (side) => !!side && side.kind === 'gate' && !!side.link && side.link.dir < 4 && !deadExit(side.exit);
+
+/**
+ * The gate lodge's measures, in the gate's own frame: `a` along the wall to
+ * the right of someone facing out, `o` outwards from the arch's middle plane.
+ * Its front is a wall the arch is set into; behind the bars is a closed pocket,
+ * PW wide, that only the bars look into; its back stands on the cell's edge.
+ */
+const LODGE_W = 7.0;
+const LODGE_PW = 3.6;
+const LODGE_H = 4.6;
+const LODGE_FRONT = -0.1;   // the wall face, 0.33 m behind the arch's
+const LODGE_SLAB = 0.8;     // ... and its back, past the arch's back face
+const LODGE_BACK_T = 0.75;  // holds a kerb (`buildOutdoorEdge`, 0.6) inside it
+/**
+ * The opening through the lodge's front wall, [y0, y1, half width]: square
+ * to the springing, then stepped up inside `stone_arch`'s ring. Each step's
+ * half width lies between the soffit (1.6 m radius about the springing at
+ * 1.5 m) and the ring's back (2.02 m) over the whole of its band, so no wall
+ * shows inside the opening and none of the pocket shows round the ring.
+ * Closed above 3.4 m; the portcullis's tallest bar stops at 3.16.
+ */
+const LODGE_HOLE = [[0, 2.3, 1.7], [2.3, 2.8, 1.46], [2.8, 3.1, 1.08], [3.1, 3.4, 0.34]];
+
+/**
+ * Where a crossing's gate stands and which way it faces: the arch's middle
+ * at (x, y, z), turned `rotY`, `out` the way through and `along` across it,
+ * `half` the half width of its opening. In open air the gate is set back
+ * from the room's edge by a frontage's depth so that a lodge round it fits
+ * inside the cell; `pocket` is the closed space behind the bars in that
+ * lodge, as [o0, o1] out from the arch and ±half across -- what can be seen
+ * through the bars and nothing else. Indoors the room's own wall is behind it.
+ * Pure: build.js builds from it, and anything that wants to dress a crossing
+ * reads the same frame back from `built.crossings`.
+ */
+export function crossingFrame({ pos, dir, openAir, along = 0 }) {
+  const [dx, , dz] = DIR_STEP[dir];
+  // `along`: a gate the layout found no wall for stands in a corner, half
+  // size, against the wall or the room's edge (`fixture` in buildScene).
+  const corner = along !== 0;
+  const depth = corner ? (openAir ? HALF : ROOM / 2) - 0.5
+    : openAir ? HALF - FRONTAGE_D - 0.08 - LODGE_FRONT : ROOM / 2 - 0.1;
+  const back = openAir && !corner ? HALF - 0.005 - depth : 0.43;
+  return {
+    x: pos.x + dx * depth - dz * along, y: pos.y, z: pos.z + dz * depth + dx * along,
+    rotY: (dir === 1 || dir === 3) ? Math.PI / 2 : 0,
+    out: [dx, dz], along: [-dz, dx], depth, back, half: DOOR_W / (corner ? 4 : 2),
+    pocket: openAir && !corner ? { o0: LODGE_SLAB, o1: back - LODGE_BACK_T, half: LODGE_PW / 2 } : null,
+  };
+}
+
+/**
+ * A crossing in a corner (see `crossingFrame`): its half-size barred arch is
+ * `fixture`'s, against the wall or the room's kerb, which is its back. What it
+ * lacked was everything that makes it a crossing -- a collider in the bars, the
+ * mark main.js walks you through by, and its record.
+ */
+function cornerCrossing({ room, pos, dir, along, exitDir, openAir, addCollider, decor, crossings }) {
+  const f = crossingFrame({ pos, dir, openAir, along });
+  const [ox, oz] = f.out; const [tx, tz] = f.along;
+  const xs = [-1.15, 1.15].flatMap((a) => [-0.45, f.back].map((o) => f.x + tx * a + ox * o));
+  const zs = [-1.15, 1.15].flatMap((a) => [-0.45, f.back].map((o) => f.z + tz * a + oz * o));
+  addCollider(Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs), pos.y, pos.y + 2.6);
+  decor.push({ kind: 'gateSign', x: f.x - ox * 0.9, y: pos.y + 2.2, z: f.z - oz * 0.9, rotY: f.rotY, dx: ox, dz: oz, text: DIR_NAME[exitDir] });
+  const exit = room.exits[exitDir];
+  crossings.push({ ...f, room: room.vnum, dir: exitDir, wall: dir, to: exit ? exit.to : -1, door: false });
+}
+
+/**
+ * The gate itself. It used to be the arch alone, standing on the room's edge
+ * with nothing round it, no collider and nothing behind it: at Midgaard's
+ * #3040 the grid routes a street past the far side of that edge, so you
+ * could walk round the gate, look at it from the back, and walk through the
+ * bars into the room without crossing -- with the portcullis's grooves
+ * flickering against the piers. Now it is a gateway in a wall that faces
+ * only the way the exit goes. Out of doors the arch is set into the front of
+ * a small stone lodge whose back closes the space behind the bars; between
+ * a street's houses (`between`, see `buildCityFrontage`) the houses are its
+ * sides. Indoors the room's solid wall is its back. A collider over the
+ * lot, bars included: you walk into the gate and main.js takes you through.
+ */
+function buildCrossing({ batcher, instances, model, chunk, room, pos, dir, exitDir, openAir, between, addCollider, decor, crossings, seeThrough = false }) {
+  const f = crossingFrame({ pos, dir, openAir });
+  const exit = room.exits[exitDir];
+  // Out of doors a door the mud hangs there is the gate's closure (the room
+  // loop hangs it in this arch), and bars behind it would show the moment it
+  // opened. Indoors the door is in the wall behind and the bars stay.
+  const door = openAir && !!(exit && (exit.locks & EX_ISDOOR));
+  buildArch({ batcher, instances, model, chunk, x: f.x, y: pos.y, z: f.z, rotY: f.rotY, sealed: !door, out: f.out });
+  const [ox, oz] = f.out;
+  const [tx, tz] = f.along;
+  const alongX = Math.abs(tx) > 0.5;
+  const at = (a, o) => ({ x: f.x + tx * a + ox * o, z: f.z + tz * a + oz * o });
+  const rect = (a0, a1, o0, o1) => {
+    const p = at(a0, o0); const q = at(a1, o1);
+    return [Math.min(p.x, q.x), Math.max(p.x, q.x), Math.min(p.z, q.z), Math.max(p.z, q.z)];
+  };
+  const W2 = openAir && !between ? LODGE_W / 2 : LODGE_PW / 2;
+  if (openAir) {
+    const material = hoodStyle(room) ? 'sootwall' : 'stonewall';
+    const solid = (a0, a1, o0, o1, y0, y1, ao = wallAo(pos.y)) => {
+      const c = at((a0 + a1) / 2, (o0 + o1) / 2);
+      const w = a1 - a0; const d = o1 - o0;
+      batcher.add(box(alongX ? w : d, y1 - y0, alongX ? d : w, 2, 2, 2), material,
+        place(c.x, pos.y + (y0 + y1) / 2, c.z), { chunk, ao });
+    };
+    // The front wall, round the opening, then closed over it.
+    for (const [y0, y1, w] of LODGE_HOLE) {
+      for (const s of [-1, 1]) {
+        const [a0, a1] = s < 0 ? [-W2, -w] : [w, W2];
+        solid(a0, a1, LODGE_FRONT, LODGE_SLAB, y0, y1);
+      }
+    }
+    const shut = LODGE_HOLE[LODGE_HOLE.length - 1][1];
+    solid(-W2, W2, LODGE_FRONT, LODGE_SLAB, shut, LODGE_H);
+    // The pocket's sides (a street's houses are those, between them) and back.
+    const pocket = f.pocket;
+    if (!between) {
+      for (const s of [-1, 1]) {
+        const [a0, a1] = s < 0 ? [-W2, -pocket.half] : [pocket.half, W2];
+        solid(a0, a1, LODGE_SLAB, pocket.o1, 0, LODGE_H);
+      }
+    }
+    if (seeThrough) {
+      // The back cut as the front is, so the bars look out on what lies past.
+      for (const [y0, y1, w] of LODGE_HOLE) {
+        for (const s of [-1, 1]) {
+          const [a0, a1] = s < 0 ? [-W2, -w] : [w, W2];
+          solid(a0, a1, pocket.o1, f.back, y0, y1);
+        }
+      }
+      solid(-W2, W2, pocket.o1, f.back, shut, LODGE_H);
+    } else {
+      solid(-W2, W2, pocket.o1, f.back, 0, LODGE_H);
+    }
+    // A coping along the front, proud of it, its ends inside the houses
+    // either side when there are houses.
+    solid(-W2 - 0.12, W2 + 0.12, LODGE_FRONT - 0.12, LODGE_SLAB + 0.12, LODGE_H, LODGE_H + 0.24, () => 0.8);
+  }
+  // One collider from the arch's face to the lodge's back: the arch has
+  // none of its own, and the bars are in it.
+  const [x0, x1, z0, z1] = rect(-Math.max(W2, 2.3), Math.max(W2, 2.3), -0.45, f.back);
+  addCollider(x0, x1, z0, z1, pos.y, pos.y + (openAir ? LODGE_H : DOOR_H + 1.0));
+  decor.push({
+    kind: 'gateSign', x: f.x - ox * 0.9, y: pos.y + 2.7, z: f.z - oz * 0.9, rotY: f.rotY, dx: ox, dz: oz,
+    text: DIR_NAME[exitDir],
+  });
+  crossings.push({ ...f, room: room.vnum, dir: exitDir, wall: dir, to: exit ? exit.to : -1, door, chunk });
 }
 
 /**

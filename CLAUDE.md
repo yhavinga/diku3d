@@ -22,7 +22,8 @@ There is no build step, no bundler, no test framework and no linter. So
 
 `layout-check` prints a walkable percentage per area. That number is the
 project's main quality metric — if a change drops it, the change is wrong.
-Midgaard should read 93%, and the mean across the 43 areas 94%.
+Midgaard should read 97%, and the mean across the 43 areas 95.4% (streets
+may run up to 12 cells since wave 13; at 6 they were 93% and 94%).
 Two areas that leave town on the same side fight over the same cells; hood
 is laid whole (`LAID_WHOLE` in `layout.js`) so it cannot land in the desert.
 
@@ -63,8 +64,9 @@ residuals are small: (0,0,1), (1,0,0), (-2,0,1), (2,0,-1), (2,0,1), (1,0,6),
 (0,0,6), on the exits #3042s, #3104s, #3107s, #3114e, #3115e, #3120e, #3120s.
 
 Cut those 7 and every remaining cycle closes — verified by rebuilding the
-spanning tree on the remainder and counting. `layout.js` portals 8 edges (the
-8 archways in `layout-check`), so it is one edge off the floor. There is no
+spanning tree on the remainder and counting. With streets limited to six cells
+`layout.js` portalled 8 edges (one off the floor); a street may bend round a
+residual, so with the 12-cell reach Midgaard keeps only 3 archways. There is no
 clever layout waiting to be found.
 
 Two things that look like better answers and are not:
@@ -447,7 +449,7 @@ choose.
   always one of them, so walkability cannot drop. A one-way exit names a
   wall in the room it *arrives* in too; count it when a stair picks its
   wall. `tools/exit-check.mjs --strict` is the guard: 0 doorless exits,
-  every one-way opening barred, ≤177 wrong walls (157 before Miden'nir joined the home zone), ≤8 corner arches.
+  every one-way opening barred, ≤52 wrong walls, ≤8 corner arches.
 - **The game has more than one player now (`game.players`, `bind(pc)`).**
   The bound player is Merc's `ch`; rules modules follow it through
   `k.onBind`, and a line built inside `withPlayer` reads the new binding.

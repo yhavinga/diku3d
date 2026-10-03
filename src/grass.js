@@ -346,8 +346,11 @@ class GrassField extends THREE.LOD {
  * @param {object} args.materials the baked materials
  * @param {number} args.cell the grid pitch
  * @param {(room: object) => string} args.biomeOf which BIOMES entry a room grows
+ * @param {((x: number, y: number, z: number) => boolean)|null} args.keepOff ground
+ *   another zone's vista stands on (vista.js): its floors are laid at the
+ *   level's height, half a metre over this ground, and blades come through.
  */
-export function* buildGrass({ groups, instances, colliders, layout, rooms, materials, cell, biomeOf }) {
+export function* buildGrass({ groups, instances, colliders, layout, rooms, materials, cell, biomeOf, keepOff = null }) {
   const lit = materials.grassblades;
   if (!lit) throw new Error('grass: no grassblades material');
   const t0 = performance.now();
@@ -516,6 +519,7 @@ export function* buildGrass({ groups, instances, colliders, layout, rooms, mater
     if (!here) { counts.far++; return; }
     const open = !occupied.has(`${Math.round(x / cell)},${Math.round(z / cell)}`);
     if (covered(x, y, z)) { counts.covered++; return; }
+    if (keepOff && keepOff(x, y, z)) { counts.covered++; return; }
     if (standing(x, y, z)) { counts.standing++; return; }
     const kind = open ? BIOMES.verge : (BIOMES[biomeOf(here.info.room)] || BIOMES.verge);
     let card = pick(kind.mix, x, z);
