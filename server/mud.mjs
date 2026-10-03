@@ -28,7 +28,12 @@ import {
   createAccounts, hashPassword, checkPassword, checkParseName, properName, EXTRA,
 } from './accounts.mjs';
 
-export const PROTOCOL = 1;
+/**
+ * 2: positions are checked and answered with `at`, which a page must obey
+ * or every later report is dropped as stale; and `shop`, `gates`, the
+ * reconnect token in `enter`.
+ */
+export const PROTOCOL = 2;
 const ROOM_VNUM_TEMPLE = 3001;
 /** How far another player is seen from: the far end of a street, not the zone. */
 const SIGHT = 160;

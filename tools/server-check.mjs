@@ -116,7 +116,7 @@ const a = client('Arwen');
 await a.opened;
 await a.waitFor((x) => x.messages.find((m) => m.t === 'hello'), 3000, 'hello');
 const hello = a.messages.find((m) => m.t === 'hello');
-check(hello.v === 1 && hello.world.mobs === game.mobs.length, 'hello names the protocol and the world', `${hello.world.rooms} rooms, ${hello.world.mobs} mobiles, ${hello.world.hash}`);
+check(hello.v === 2 && hello.world.mobs === game.mobs.length, 'hello names the protocol and the world', `${hello.world.rooms} rooms, ${hello.world.mobs} mobiles, ${hello.world.hash}`);
 a.send({ t: 'login', name: 'Arwen', password: 'elbereth' });
 const asked = await a.waitFor((x) => x.messages.find((m) => m.t === 'login'), 3000, 'login reply');
 check(asked.new === true && /Did I get that right, Arwen/.test(asked.why), 'an unknown name is a new character, asked to confirm', asked.why);

@@ -23,7 +23,7 @@ import { TAR } from './magic.js';
 import { PLR } from './rules/handler.js';
 
 /** The protocol this page speaks; the server says its own in `hello`. */
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
 /** How far behind the server's clock other players are drawn, so there are two reports to blend. */
 const BEHIND_MS = 100;
 /** Positions go out at this rate, and come in at it. */
