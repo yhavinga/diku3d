@@ -1037,12 +1037,12 @@ function playerShadows() {
  * lettering, warmer, on no plate (see `labelTexture` for why not). Its own
  * canvas, not the label cache -- every line said would stay in that.
  */
-function speechSprite(text, height = 0.3) {
+function speechSprite(text, height = 0.36) {
   const said = text.length > 56 ? `${text.slice(0, 55)}\u2026` : text;
   const size = 96;
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  const font = `italic ${size}px "Iowan Old Style", "Palatino Linotype", Georgia, serif`;
+  const font = `italic 600 ${size}px "Iowan Old Style", "Palatino Linotype", Georgia, serif`;
   ctx.font = font;
   const width = Math.ceil(ctx.measureText(`\u201c${said}\u201d`).width) + 40;
   canvas.width = THREE.MathUtils.ceilPowerOfTwo(width);
@@ -1053,8 +1053,10 @@ function speechSprite(text, height = 0.3) {
   ctx.lineJoin = 'round';
   ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
   ctx.shadowBlur = 4;
-  ctx.lineWidth = Math.max(2, size * 0.085);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+  // Thinner than the name's: at a third of a metre the name's outline ate
+  // the italic's hairlines, and the words read as dark against a pale wall.
+  ctx.lineWidth = Math.max(2, size * 0.05);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
   ctx.strokeText(`\u201c${said}\u201d`, canvas.width / 2, canvas.height / 2 + 2);
   ctx.shadowBlur = 0;
   ctx.fillStyle = '#f6e7b8';
