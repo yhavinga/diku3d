@@ -41,7 +41,7 @@ const SPIRAL = spiralOffsets(6);
  * that joins up more exits than it breaks. A handful of sweeps is enough to
  * pull a district like Midgaard's park back onto its own street grid.
  */
-function relax(world, cells, occupied, order, passes = 12) {
+function relax(world, cells, occupied, order, passes = 12, { terrace = false, reserved = new Set() } = {}) {
   const incoming = new Map();
   for (const cell of order) {
     for (let dir = 0; dir < 6; dir++) {
@@ -76,17 +76,24 @@ function relax(world, cells, occupied, order, passes = 12) {
   for (let pass = 0; pass < passes; pass++) {
     let changed = 0;
     for (const cell of order) {
-      const current = satisfied(cell, cell.level, cell.x, cell.z);
+      // Standing on ground kept clear beyond a crossing costs half an exit,
+      // so an equally good free cell nearby wins.
+      const current = satisfied(cell, cell.level, cell.x, cell.z) - (reserved.has(key(cell.level, cell.x, cell.z)) ? 0.5 : 0);
       let best = null;
       let bestScore = current;
       for (const [ox, oz] of CANDIDATES) {
         if (ox === 0 && oz === 0) continue;
         const x = cell.x + ox;
         const z = cell.z + oz;
-        if (occupied.has(key(cell.level, x, z))) continue;
+        if (occupied.has(key(cell.level, x, z)) || reserved.has(key(cell.level, x, z))) continue;
         if (cell.level > 0 && openToSky(cell.room)) {
           const below = occupied.get(key(cell.level - 1, x, z));
           if (below !== undefined && openToSky(world.rooms.get(below))) continue;
+        }
+        if (terrace) {
+          const below = occupied.get(key(cell.level - 1, x, z));
+          if (below !== undefined && openToSky(world.rooms.get(below))) continue;
+          if (openToSky(cell.room) && occupied.has(key(cell.level + 1, x, z))) continue;
         }
         const score = satisfied(cell, cell.level, x, z) - Math.hypot(ox, oz) * 0.01;
         if (score > bestScore) { bestScore = score; best = [x, z]; }
@@ -109,7 +116,7 @@ function relax(world, cells, occupied, order, passes = 12) {
  * in the direction the exit claims to go, and refusing walls already spoken for
  * at either end.
  */
-function routeShortest(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Set(), forbidLast = new Set()) {
+function routeShortest(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Set(), forbidLast = new Set(), blocked = new Set()) {
   const first = [nominalDir, ...[0, 1, 2, 3].filter((d) => d !== nominalDir)]
     .filter((d) => !forbidFirst.has(d));
   const queue = [{ x: from.x, z: from.z, cells: [], entryDir: null }];
@@ -128,7 +135,7 @@ function routeShortest(from, to, nominalDir, occupied, MAX = 6, forbidFirst = ne
       }
       const seenKey = `${x},${z}`;
       if (seen.has(seenKey)) continue;
-      if (occupied.has(key(from.level, x, z))) continue;
+      if (occupied.has(key(from.level, x, z)) || blocked.has(key(from.level, x, z))) continue;
       seen.add(seenKey);
       queue.push({ x, z, cells: [...node.cells, { x, z }], entryDir: node.entryDir ?? dir });
     }
@@ -145,7 +152,7 @@ function routeShortest(from, to, nominalDir, occupied, MAX = 6, forbidFirst = ne
  * that leaves north out of the north wall is the better street.
  * `cost(end, dir)` is that price for setting off (end 0) or arriving (end 1).
  */
-function routePath(from, to, occupied, MAX = 6, cost = () => 0) {
+function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = new Set()) {
   // Breadth-first by length, but a state is the cell *and* the wall it left
   // by: the same cell reached out of two walls is two different routes.
   // Cells are kept as a chain back to the first, not copied at every step.
@@ -156,7 +163,7 @@ function routePath(from, to, occupied, MAX = 6, cost = () => 0) {
     if (c0 === Infinity) continue;
     const [dx, , dz] = DIR_STEP[dir];
     const x = from.x + dx; const z = from.z + dz;
-    if ((x === to.x && z === to.z) || occupied.has(key(from.level, x, z))) continue;
+    if ((x === to.x && z === to.z) || occupied.has(key(from.level, x, z)) || blocked.has(key(from.level, x, z))) continue;
     seen.add(`${x},${z},${dir}`);
     frontier.push({ x, z, back: null, entryDir: dir, c0 });
   }
@@ -178,7 +185,7 @@ function routePath(from, to, occupied, MAX = 6, cost = () => 0) {
         }
         if (len >= MAX) continue;
         const seenKey = `${x},${z},${node.entryDir}`;
-        if (seen.has(seenKey) || occupied.has(key(from.level, x, z))) continue;
+        if (seen.has(seenKey) || occupied.has(key(from.level, x, z)) || blocked.has(key(from.level, x, z))) continue;
         seen.add(seenKey);
         next.push({ x, z, back: node, entryDir: node.entryDir, c0: node.c0 });
       }
@@ -223,11 +230,24 @@ export function layoutWorld(world, options = {}) {
     // a crossing from another zone arrives (zones.js). Each one the walk
     // missed is laid out with whatever it reaches and set down whole.
     roots = [],
+    // Measurement options, all off by default and exercised only by
+    // tools/planar-check.mjs --try: `terrace` never roofs open ground in
+    // either direction (the default guards only the way up); `keepClear`
+    // keeps the cells beyond a crossing into another zone free of rooms and
+    // streets; `laidWhole` is the set of areas set down as a block;
+    // `reach` is how many cells a street may wander (6 since the first
+    // commit, never measured -- 12 is what planar-check reports on).
+    terrace = false,
+    keepClear = false,
+    laidWhole = LAID_WHOLE,
+    reach: reachDefault = 6,
   } = options;
 
   const cells = new Map();      // vnum -> {x, level, z, room}
   const occupied = new Map();   // grid key -> vnum
   const order = [];             // placement order, for deterministic building
+  const reserved = new Set();   // grid keys kept clear beyond a crossing
+  const reservations = [];      // { level, x, z, dx, dz } of the room each crossing leaves
 
   const start = world.rooms.get(startVnum) || world.rooms.values().next().value;
   if (!start) throw new Error('layout: the world has no rooms');
@@ -237,6 +257,17 @@ export function layoutWorld(world, options = {}) {
     cells.set(room.vnum, cell);
     occupied.set(key(level, x, z), room.vnum);
     order.push(cell);
+    if (keepClear) {
+      for (let d = 0; d < 4; d++) {
+        const exit = room.exits[d];
+        if (!exit || exit.offMap || includeVnum(exit.to) || !world.rooms.has(exit.to)) continue;
+        const [dx, , dz] = DIR_STEP[d];
+        reservations.push({ level, x, z, dx, dz });
+        // Reserved whether or not a room already stands there: relax() then
+        // moves a room placed earlier off the ground the crossing wants.
+        reserved.add(key(level, x + dx, z + dz));
+      }
+    }
     return cell;
   };
 
@@ -250,7 +281,7 @@ export function layoutWorld(world, options = {}) {
   const pair = (a, b) => `${Math.min(a, b)}-${Math.max(a, b)}`;
   const layWhole = (room, target, dir, here) => {
     const file = target.areaFile;
-    if (!LAID_WHOLE.has(file) || file === room.areaFile || dir > 3) return false;
+    if (!laidWhole.has(file) || file === room.areaFile || dir > 3) return false;
     if (!rest) { if (!waiting.includes(room)) waiting.push(room); return true; }
     const sub = layoutWorld(world, {
       startVnum: target.vnum, compact: true,
@@ -334,8 +365,11 @@ export function layoutWorld(world, options = {}) {
           if (drift > 3.2) break;
           const x = wantX + ox;
           const z = wantZ + oz;
-          if (occupied.has(key(level, x, z))) continue;
+          if (occupied.has(key(level, x, z)) || reserved.has(key(level, x, z))) continue;
           if (airborne && shadesStreet(level, x, z)) continue;
+          // Open ground is never roofed: not by a room reached by going
+          // down from it, nor by landing open ground under something.
+          if (terrace && (shadesStreet(level, x, z) || (openToSky(target) && occupied.has(key(level + 1, x, z))))) continue;
           const backwards = (ox * dx + oz * dz) < 0 ? 0.6 : 0;
           const score = fit(x, z) * 2 - drift * 0.45 - backwards;
           if (score > bestScore) { bestScore = score; best = [x, z]; }
@@ -379,7 +413,7 @@ export function layoutWorld(world, options = {}) {
     }
   }
 
-  relax(world, cells, occupied, order);
+  relax(world, cells, occupied, order, 12, { terrace, reserved });
   if (options.compact) return { order };
 
   // Spread the grid: rooms keep the even coordinates and every cell between
@@ -390,6 +424,13 @@ export function layoutWorld(world, options = {}) {
     cell.x *= 2;
     cell.z *= 2;
     occupied.set(key(cell.level, cell.x, cell.z), cell.vnum);
+  }
+  // The ground beyond a crossing, spread: the cell past the gate wall and
+  // the room cell beyond it, kept out of every street.
+  const blocked = new Set();
+  for (const r of reservations) {
+    blocked.add(key(r.level, 2 * r.x + r.dx, 2 * r.z + r.dz));
+    blocked.add(key(r.level, 2 * r.x + 2 * r.dx, 2 * r.z + 2 * r.dz));
   }
 
   // Classify every exit of every placed room.
@@ -538,7 +579,7 @@ export function layoutWorld(world, options = {}) {
       claim(link.from.vnum, route.entryDir, alleyEnd(link, 0));
       claim(link.to.vnum, REVERSE_DIR[route.exitDir], alleyEnd(link, 1));
     };
-    const reachOf = (link) => reach.get(pair(link.from.vnum, link.to.vnum)) || 6;
+    const reachOf = (link) => reach.get(pair(link.from.vnum, link.to.vnum)) || reachDefault;
     const level = (link) => link.kind === 'portal' && link.to && link.from.level === link.to.level;
 
     // First pass: which exits become streets, greedily in link order --
@@ -550,9 +591,9 @@ export function layoutWorld(world, options = {}) {
       if (firstPass === 'shortest') {
         const forbidFirst = new Set([0, 1, 2, 3].filter((d) => !free(link.from.vnum, d)));
         const forbidLast = new Set([0, 1, 2, 3].filter((d) => !free(link.to.vnum, REVERSE_DIR[d])));
-        route = routeShortest(link.from, link.to, link.dir, occupied, reachOf(link), forbidFirst, forbidLast);
+        route = routeShortest(link.from, link.to, link.dir, occupied, reachOf(link), forbidFirst, forbidLast, blocked);
       } else {
-        route = routePath(link.from, link.to, occupied, reachOf(link), routeCost(link));
+        route = routePath(link.from, link.to, occupied, reachOf(link), routeCost(link), blocked);
       }
       if (!route) continue;
       lay(link, route);
@@ -566,7 +607,7 @@ export function layoutWorld(world, options = {}) {
       let better = 0;
       for (const link of links) {
         if (!level(link)) continue;
-        const route = routePath(link.from, link.to, occupied, reachOf(link), routeCost(link));
+        const route = routePath(link.from, link.to, occupied, reachOf(link), routeCost(link), blocked);
         if (!route) continue;
         lay(link, route);
         streets.push(link);
@@ -581,7 +622,7 @@ export function layoutWorld(world, options = {}) {
         sides.get(link.from.vnum)[link.entryDir] = null;
         sides.get(link.to.vnum)[REVERSE_DIR[link.exitDir]] = null;
         const now = link.path.length + cost(0, link.entryDir) + cost(1, link.exitDir);
-        const route = routePath(link.from, link.to, occupied, reachOf(link), cost);
+        const route = routePath(link.from, link.to, occupied, reachOf(link), cost, blocked);
         if (route && route.score < now) {
           lay(link, route);
           better++;
