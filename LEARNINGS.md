@@ -6,6 +6,43 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-03 — wave 13: the town closes in, and the world beyond the gates
+
+- **Layout (wave13-planar, Fable; wave13-reach):** `tools/planar-check.mjs`
+  audits the embedding (fidelity 92.5% both walls, crossings from both
+  sides, load-order identical). The street reach of 6 cells dated from the
+  first commit and was never measured: at 12, Midgaard 93 → 97%, mean
+  94.57 → 95.44%, wrong walls 177 → 73, no area drops, the squares and Main
+  Street pixel-identical. Height does not close a horizontal residual (an
+  up/down edge only adds y); it only buys free cells, and a longer street
+  buys more. Miden'nir placed room by room moved 107 of Midgaard's rooms;
+  laid whole (`LAID_WHOLE`) nothing moves, wrong walls 52.
+- **Crossings (wave13-gates):** a gate stood free at the cell edge with a
+  routed street behind it (non-Euclidean residual, not a layout bug), had no
+  collider, and its portcullis grooves lay in the pier faces. Now an arch in
+  a stone lodge between the street's houses, one collider, `crossingFrame()`
+  and `built.crossings`; ghost bars 18 → 0, reachable backs 17 → 0. Read
+  "which crossing am I at" from where the player stands, not `roomVnum`.
+- **Vistas (wave13-vista):** 44 of 82 crossings show the neighbour's real
+  rooms built by the same builder near the gate, outlines to 300 m;
+  +0.15–0.55 ms. Every whole-area builder (frontage, sand, rock, grass) has
+  to respect another zone's ground in both directions; rock must reach the
+  ground or be dropped (92 floating pieces → 0).
+- **#3001 (wave13-temple):** four faults made the steps unclimbable — no
+  trigger at the doorway, no blocker at the landing's face, no step-down in
+  player.js (43 airborne frames going down), PgUp skipping the steps.
+  `tools/judge/headless/temple-walk.mjs` and `gate-walk.mjs` guard both.
+- **Fauna:** pastimes and alarms per creature read from its own prose
+  (`temperOf`); a location-keyed bone must be keyed in every clip.
+- **Cozy Midgaard (wave13-cozy):** the "spacy" feel was the 194 routed cells
+  between rooms, each 13 m of bare paving. Rows of narrow houses with jetties,
+  steps and bends: median sightline in routed cells 19.0 → 9.5 m, open sky
+  0.80 → 0.68; squares unchanged. `tools/judge/cozy.js` measures it. A piece
+  sunk into a face draws a flicker line where they cross; one that only
+  touches it cannot.
+- **Sound:** a 200 Hz harmonic comb in four ambience beds was the "electric
+  buzz" (temple 20 dB over its floor); `post.hum` notches it.
+
 ## 2026-10-03 — wave 12: other players, sound, and the last of build.js
 
 ### A server beside the page (wave12-server)
