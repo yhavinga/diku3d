@@ -1871,7 +1871,7 @@ function buildDecals(group, decals, materials) {
 
 // ------------------------------------------------------------------ main ----
 
-export function buildScene(world, layout, materials, assets = null) {
+function* raise(world, layout, materials, assets = null) {
   const group = new THREE.Group();
   group.name = 'world';
   const batcher = new Batcher(materials);
@@ -1983,10 +1983,13 @@ export function buildScene(world, layout, materials, assets = null) {
   // ...and something for it to end against, out where the fog is thick enough
   // to do the work.
   const horizon = buildHorizon(group, bounds, groundY, layout);
+  yield 0.017;
 
   // --- rooms ---------------------------------------------------------------
 
+  let roomsDone = 0;
   for (const cell of layout.order) {
+    yield 0.017 + 0.183 * (roomsDone++ / layout.order.length);
     const room = cell.room;
     const pos = worldOf(cell);
     // "The huge mound upon which the temple is built": everything in the
@@ -2548,6 +2551,7 @@ export function buildScene(world, layout, materials, assets = null) {
     }
   }
   batcher.indoor = false;
+  yield 0.2;
 
   // --- streets and corridors ----------------------------------------------
 
@@ -2638,11 +2642,13 @@ export function buildScene(world, layout, materials, assets = null) {
 
   // --- the eastern mountains ----------------------------------------------
 
+  yield 0.221;
   // Before the frontage, because a cell the mountain takes is not a street's
   // to build on.
   const mountain = instances && assets.has('massif_a')
     ? buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey }) : new Set();
 
+  yield 0.222;
   // --- build on every empty cell that fronts a street ----------------------
 
   const frontage = new Map(); // cell key -> sector to build from
@@ -2715,7 +2721,9 @@ export function buildScene(world, layout, materials, assets = null) {
   const townWalls = [];
   const edges = townEdges(layout, world);
   if (instances && instances.library.get('city_wall')) townWalls.push(...edges.pathWalls);
+  let spotsDone = 0;
   for (const spot of frontage.values()) {
+    yield 0.223 + 0.005 * (spotsDone++ / frontage.size);
     if (mountain.has(cellKey(spot.level, spot.x, spot.z))) continue;
     if (reserved.has(cellKey(spot.level, spot.x, spot.z))) continue;
     // Face the house at the street. Models are built fronting -Z, so the
@@ -2819,6 +2827,7 @@ export function buildScene(world, layout, materials, assets = null) {
     }
   }
 
+  yield 0.228;
   // Every cell you can stand on out of doors in the town: the rooms and the
   // passages routed between them. A party wall is only ever laid where one of
   // these can see the gap, which is what keeps it a street feature.
@@ -2884,7 +2893,9 @@ export function buildScene(world, layout, materials, assets = null) {
     buildSandSea({ layout, batcher, instances, frontage, mountain, groundAt, cellKey, chunkOf });
   }
 
+  yield 0.232;
   buildVerges({ batcher, instances, model, groundAt, chunkOf });
+  yield 0.234;
   // What each room's own words put in it (src/clutter.js), once everything
   // it has to find a clear place among is standing.
   const clutter = placeClutter({
@@ -2905,6 +2916,7 @@ export function buildScene(world, layout, materials, assets = null) {
     },
   });
 
+  yield 0.288;
   // No tree grows through a room's walls. A forest fir is modelled with its
   // lowest boughs 3.6 m out and planted at up to 2.6x, so one standing a
   // whole cell away from Haon Dor's cabin still put its crown through the
@@ -2926,6 +2938,7 @@ export function buildScene(world, layout, materials, assets = null) {
     else if ((d.scale || 1) > fits) d.scale = fits;
   }
 
+  yield 0.292;
   const mist = buildMist(group, mistCells);
 
   const zones = buildZones(group, groundY, groundHoles, hoodBox && {
@@ -2935,19 +2948,22 @@ export function buildScene(world, layout, materials, assets = null) {
   if (skyHoles.length) zones.deep.add(buildSkyHoles(skyHoles));
   // Blades on every grass surface laid above; must run before the batcher
   // merges its geometry away.
-  const grass = buildGrass({
+  const grass = yield* within(0.294, 0.915, buildGrass({
     groups: batcher.groups, instances, colliders, layout, rooms, materials, cell: CELL, biomeOf: grassBiome,
-  });
+  }));
   zones.surface.add(grass);
   const batches = new StaticBatches();
   const regionOf = regions(hoodBox);
+  yield 0.915;
   const stats = batcher.finish(batches, regionOf);
+  yield 0.932;
   if (instances) {
     markIndoorAssets(assets);
     const placed = instances.finish(group, batches, regionOf);
     stats.triangles += placed.triangles;
     stats.instanced = placed.triangles;
   }
+  yield 0.934;
   stats.meshes = batches.finish(zones.route);
   stats.clutter = clutter;
   // Everything standing on a mound belongs to the level it rises from.
@@ -2960,6 +2976,47 @@ export function buildScene(world, layout, materials, assets = null) {
     }
   }
   return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones, grass };
+}
+
+/** A sub-step's own 0..1 progress, as a stretch [a, b] of its caller's. */
+function* within(a, b, steps) {
+  for (;;) {
+    const { value, done } = steps.next();
+    if (done) return value;
+    yield a + (b - a) * value;
+  }
+}
+
+/**
+ * How long the build runs between two looks at the clock that may hand the
+ * thread back. Each hand-back costs a frame, and the home zone's 3 s build at
+ * 100 ms a slice is about thirty of them.
+ */
+const SLICE_MS = 100;
+
+/**
+ * Build a zone. `raise` does the work and yields how far it has got, 0 to 1,
+ * between rooms, between the grass's sown faces and between the stages after
+ * them; the shares are what each stage took on the home zone (rooms 18%,
+ * grass 62%, the rest the merge and the props). Every `SLICE_MS` this awaits
+ * `onProgress(fraction)`, which is expected to let a frame paint; nothing the
+ * build reads changes in between, so what is built is the same as in one go.
+ */
+export function buildScene(world, layout, materials, assets = null, onProgress = null) {
+  return inSlices(raise(world, layout, materials, assets), onProgress);
+}
+
+/** Run a generator of 0..1 fractions to its return value, awaiting `onProgress` every `SLICE_MS`. */
+export async function inSlices(steps, onProgress) {
+  let since = performance.now();
+  for (;;) {
+    const { value, done } = steps.next();
+    if (done) return value;
+    if (onProgress && performance.now() - since >= SLICE_MS) {
+      await onProgress(value);
+      since = performance.now();
+    }
+  }
 }
 
 /** Which of grass.js's biomes a room's ground grows. */

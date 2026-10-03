@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ITEM, SECTOR, ACT_AGGRESSIVE, ACT_SENTINEL } from './are.js';
-import { hash3, ROOM, CEIL, PIECES, CELL as GRID, LEVEL_H } from './build.js';
+import { hash3, ROOM, CEIL, PIECES, CELL as GRID, LEVEL_H, inSlices } from './build.js';
 import { InstanceBatch, StaticBatches, FURNITURE_NAMES, BURIED_MARK } from './assets.js';
 import { buriedTwin, honourEnv } from './textures.js';
 import { OVERLAY_LAYER } from './render.js';
@@ -2496,7 +2496,18 @@ const FURNITURE_REACH = 32;
 /** Below ground or dug into rock: lit by the fixed fill, not the sky. */
 const isBuriedRoom = (info) => !!info && (info.cell.level < 0 || !!(info.materials && info.materials.inRock));
 
-export function populate(world, layout, built, options = {}) {
+/**
+ * Put the zone's people, animals, fittings and lights in. `peopleOf` does the
+ * work and yields how far it has got, 0 to 1 -- between rooms and between
+ * windows, the two stretches that take most of it on the home zone (330 and
+ * 210 ms of 730) -- and this hands the thread back through `onProgress` as
+ * `buildScene` does (build.js `inSlices`).
+ */
+export function populate(world, layout, built, options = {}, onProgress = null) {
+  return inSlices(peopleOf(world, layout, built, options), onProgress);
+}
+
+function* peopleOf(world, layout, built, options = {}) {
   const group = new THREE.Group();
   group.name = 'actors';
   // Modelled props are used where they exist and quietly skipped where they
@@ -2562,7 +2573,9 @@ export function populate(world, layout, built, options = {}) {
   // --- mobiles ------------------------------------------------------------
 
   const figures = [];
+  let roomsDone = 0;
   for (const [vnum, info] of built.rooms) {
+    yield 0.45 * (roomsDone++ / built.rooms.size);
     const room = world.rooms.get(vnum);
     if (!room || !room.mobs.length) continue;
     const count = room.mobs.length;
@@ -2646,6 +2659,7 @@ export function populate(world, layout, built, options = {}) {
   }
 
   // --- shop signs -----------------------------------------------------------
+  yield 0.45;
   const signs = shopSigns(world, layout, built);
   if (signs) group.add(signs);
 
@@ -3374,6 +3388,7 @@ export function populate(world, layout, built, options = {}) {
 
   let glassMaterial = null;
   let glowMaterial = null;
+  yield 0.48;
   if (windows.length) {
     const panes = [];
     const dark = [];
@@ -3410,7 +3425,9 @@ export function populate(world, layout, built, options = {}) {
         .translate(0, ROUND_R + 0.08, 0.15).rotateZ(a));
     }
     const FACE_ROT_OF = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
+    let windowsDone = 0;
     for (const w of windows) {
+      yield 0.48 + 0.29 * (windowsDone++ / windows.length);
       // The surround is what the wall is built of: dressed stone round a
       // window in masonry, oak in a timber frame. It was vertex-coloured flat
       // brown in the prop material, and a raking dusk sun turned every one of
@@ -3876,6 +3893,7 @@ export function populate(world, layout, built, options = {}) {
     return mesh;
   };
 
+  yield 0.78;
   for (const spec of built.doors) {
     const [ux, uz] = [Math.cos(spec.rotY), -Math.sin(spec.rotY)];
     // `single` is a one-leaf opening: the log cabin's doorway is 1.00 m of
@@ -4242,6 +4260,7 @@ export function populate(world, layout, built, options = {}) {
 
   // Furniture only ever stands indoors, so its geometry carries the `aIndoor`
   // flag build.js writes on room kits: no sky bounce off a floor it cannot see.
+  yield 0.82;
   if (instances) {
     for (const name of FURNITURE_NAMES) {
       const asset = assets.get(name);
@@ -4282,6 +4301,7 @@ export function populate(world, layout, built, options = {}) {
   // collider for the player but a mobile still walks round it.
   const nav = createNav({ layout, built, world });
   if (assets) nav.addInstances([built.group, group], assets, THREE);
+  yield 0.87;
   const motion = createMotion({ figures, nav, zones: built.zones || null, spots, furniture });
   figures.forEach((fig, i) => { if (fig.indoor) easeIndoor(fig, i, Infinity); });
 

@@ -333,7 +333,9 @@ class GrassField extends THREE.LOD {
 
 /**
  * Sow the world's grass. Call before `batcher.finish`, which consumes the
- * geometry this reads.
+ * geometry this reads. A generator: it yields how far it has got, 0 to 1,
+ * so build.js can hand the thread back mid-way, and returns the field.
+ * `stats.ms` is wall time, pauses included.
  *
  * @param {object} args
  * @param {Map} args.groups the Batcher's (chunk|material) -> {materialName, list}
@@ -345,7 +347,7 @@ class GrassField extends THREE.LOD {
  * @param {number} args.cell the grid pitch
  * @param {(room: object) => string} args.biomeOf which BIOMES entry a room grows
  */
-export function buildGrass({ groups, instances, colliders, layout, rooms, materials, cell, biomeOf }) {
+export function* buildGrass({ groups, instances, colliders, layout, rooms, materials, cell, biomeOf }) {
   const lit = materials.grassblades;
   if (!lit) throw new Error('grass: no grassblades material');
   const t0 = performance.now();
@@ -392,6 +394,7 @@ export function buildGrass({ groups, instances, colliders, layout, rooms, materi
     return false;
   };
 
+  yield 0.05;
   // --- what stands on it ------------------------------------------------------
   const blocked = new Buckets(4);
   const PLANTS = /^(grass_tuft|fern|salal_bush|bush|nettles|tall_weeds|tussock|reed_clump|bramble)$/;
@@ -541,7 +544,15 @@ export function buildGrass({ groups, instances, colliders, layout, rooms, materi
   };
 
   const inTri = (tri, x, z) => heightIn(tri, x, z);
+  // What a face costs to sow, in microseconds, fitted on the home zone: a
+  // small face by the blades on it, a big one mostly by being looked at --
+  // its cells far from any room are skipped (47 us at 54 m2, 83 at 1,170).
+  const cost = (area) => (area < 40 ? 2.5 + 1.1 * area : 45 + 0.03 * area);
+  const costTotal = sown.reduce((sum, { area }) => sum + cost(area), 0);
+  let costDone = 0;
   for (const { tri, area } of sown) {
+    yield 0.05 + 0.91 * (costDone / costTotal);
+    costDone += cost(area);
     const [ax, ay, az, bx, by, bz, cx, cy, cz] = tri;
     if (area < 40) {
       const owner = ownerAt((ax + bx + cx) / 3, (ay + by + cy) / 3, (az + bz + cz) / 3);
@@ -599,6 +610,7 @@ export function buildGrass({ groups, instances, colliders, layout, rooms, materi
     }
   }
 
+  yield 0.96;
   // A modelled grass tuft on turf that now grows blades is a stiff, dark
   // starburst in the middle of a meadow: it was the only grass there was.
   // It stays where nothing is sown -- the burnt lots, the dust.
@@ -622,6 +634,7 @@ export function buildGrass({ groups, instances, colliders, layout, rooms, materi
     }
   }
 
+  yield 0.99;
   // --- draw ---------------------------------------------------------------------
   dressLit(lit);
   lit.userData.aoMaterial = NOT_IN_PREPASS;

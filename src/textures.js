@@ -2669,7 +2669,7 @@ function bake(name, size) {
   return { albedo, normal, roughness, size, emissive: glows ? emissive : null };
 }
 
-function toTexture(data, size, colorSpace, cutout = 0) {
+function toTexture(data, size, colorSpace, mips = null) {
   const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
@@ -2678,8 +2678,8 @@ function toTexture(data, size, colorSpace, cutout = 0) {
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  if (cutout) {
-    texture.mipmaps = cutoutMips(data, size, cutout);
+  if (mips) {
+    texture.mipmaps = mips;
     texture.generateMipmaps = false;
   }
   texture.needsUpdate = true;
@@ -3067,7 +3067,7 @@ const DECAL_PAINT = {
   blood: { base: 0x1c0f0a, dark: 0x120a07, drips: false },
 };
 
-function bakeDecal(name, size = 256) {
+function bakeDecal(name, size) {
   const shape = DECAL_SHAPES[name];
   const paint = DECAL_PAINT[name];
   const data = new Uint8ClampedArray(size * size * 4);
@@ -3109,7 +3109,11 @@ function bakeDecal(name, size = 256) {
       data[i + 3] = ink ? 255 : 0;
     }
   }
-  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  return { map: { data, width: size, height: size } };
+}
+
+function decalTexture({ data, width }) {
+  const texture = new THREE.DataTexture(data, width, width, THREE.RGBAFormat);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.generateMipmaps = true;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -3120,10 +3124,10 @@ function bakeDecal(name, size = 256) {
 }
 
 /** The decal materials, keyed `decal_<name>`, in the same table as everything else. */
-function createDecals(materials) {
+function createDecals(materials, pixels) {
   for (const name of Object.keys(DECAL_SHAPES)) {
     const material = new THREE.MeshStandardMaterial({
-      map: bakeDecal(name),
+      map: decalTexture(pixels(`decal:${name}@${DECAL_PX}`).map),
       alphaTest: 0.5,
       roughness: name === 'blood' ? 0.72 : 0.88,
       metalness: 0,
@@ -3189,6 +3193,8 @@ export const bloodRegion = (k) => {
 };
 
 function canvas2d(w, h) {
+  // The bake worker has no document; the paintings are drawn there too.
+  if (typeof document === 'undefined') return new OffscreenCanvas(w, h);
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   return c;
@@ -3731,7 +3737,7 @@ function paintWriting(texts, seed, size = 2048) {
  * plaster and rags the panel's edges; `stroke` leaves the marks as they are
  * and makes everything unpainted transparent. Rows flipped: see above.
  */
-function paintedTexture(canvas, wear, seed) {
+function paintedPixels(canvas, wear, seed) {
   const w = canvas.width; const h = canvas.height;
   const src = canvas.getContext('2d').getImageData(0, 0, w, h).data;
   const data = new Uint8ClampedArray(w * h * 4);
@@ -3802,13 +3808,6 @@ function paintedTexture(canvas, wear, seed) {
       height[(h - 1 - y) * w + x] = hgt;
     }
   }
-  const map = new THREE.DataTexture(data, w, h, THREE.RGBAFormat);
-  map.colorSpace = THREE.SRGBColorSpace;
-  map.generateMipmaps = true;
-  map.minFilter = THREE.LinearMipmapLinearFilter;
-  map.magFilter = THREE.LinearFilter;
-  map.anisotropy = 8;
-  map.needsUpdate = true;
   // Normals at a quarter of the size: the relief is plaster and flake edges.
   const nw = Math.max(4, w >> 2); const nh = Math.max(4, h >> 2);
   const nd = new Uint8ClampedArray(nw * nh * 4);
@@ -3821,6 +3820,17 @@ function paintedTexture(canvas, wear, seed) {
       nd[i] = (-dx / len * 0.5 + 0.5) * 255; nd[i + 1] = (-dy / len * 0.5 + 0.5) * 255; nd[i + 2] = (1 / len * 0.5 + 0.5) * 255; nd[i + 3] = 255;
     }
   }
+  return { map: { data, width: w, height: h }, normal: { data: nd, width: nw, height: nh } };
+}
+
+function paintedTexture({ map: { data, width: w, height: h }, normal: { data: nd, width: nw, height: nh } }) {
+  const map = new THREE.DataTexture(data, w, h, THREE.RGBAFormat);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.generateMipmaps = true;
+  map.minFilter = THREE.LinearMipmapLinearFilter;
+  map.magFilter = THREE.LinearFilter;
+  map.anisotropy = 8;
+  map.needsUpdate = true;
   const normal = new THREE.DataTexture(nd, nw, nh, THREE.RGBAFormat);
   normal.colorSpace = THREE.NoColorSpace;
   normal.generateMipmaps = true;
@@ -3836,7 +3846,15 @@ function paintedTexture(canvas, wear, seed) {
  * buried rooms are (see `buried`), because a painting has to take the light
  * of the wall under it or it glows.
  */
-function createPaintings(materials, macro, grain) {
+const PAINTINGS = {
+  // 1536: 245 texels a metre over the temple's wide bays, which is sharper
+  // than a torchlit wall is seen, at half the boot cost of 2048.
+  mural: { px: 1536, paint: paintMurals, wear: 'fresco', seed: 5101, look: { rough: 0.9, env: 0.6, cut: 0.5 } },
+  faces: { px: 1024, paint: paintFaces, wear: 'stroke', seed: 5203, look: { rough: 0.9, env: 0.5, cut: 0.4 } },
+  bloodwall: { px: 1024, paint: paintBlood, wear: 'stroke', seed: 5307, look: { rough: 0.7, env: 0.8, cut: 0.4 } },
+};
+
+function createPaintings(materials, macro, grain, pixels) {
   const make = (name, textures, { rough = 0.85, env = 0.7, cut = 0 } = {}) => {
     for (const deep of [false, true]) {
       const material = new THREE.MeshStandardMaterial({
@@ -3852,16 +3870,14 @@ function createPaintings(materials, macro, grain) {
       materials[material.name] = material;
     }
   };
-  // 1536: 245 texels a metre over the temple's wide bays, which is sharper
-  // than a torchlit wall is seen, at half the boot cost of 2048.
-  make('mural', paintedTexture(paintMurals(1536), 'fresco', 5101), { rough: 0.9, env: 0.6, cut: 0.5 });
-  make('faces', paintedTexture(paintFaces(1024), 'stroke', 5203), { rough: 0.9, env: 0.5, cut: 0.4 });
-  make('bloodwall', paintedTexture(paintBlood(1024), 'stroke', 5307), { rough: 0.7, env: 0.8, cut: 0.4 });
+  for (const [name, p] of Object.entries(PAINTINGS)) {
+    make(name, paintedTexture(pixels(`painting:${name}@${p.px}`)), p.look);
+  }
   // Writing is per room -- it says what that room says -- so it is painted
   // when build.js first asks for it, and kept by what it says.
   materials.$writing = (texts, deep, seed) => {
     const key = `writing_${seed}`;
-    if (!materials[key]) make(key, paintedTexture(paintWriting(texts, seed), 'stroke', seed), { rough: 0.6, env: 0.7, cut: 0.4 });
+    if (!materials[key]) make(key, paintedTexture(paintedPixels(paintWriting(texts, seed), 'stroke', seed)), { rough: 0.6, env: 0.7, cut: 0.4 });
     return deep ? `${key}_deep` : key;
   };
 }
@@ -3883,7 +3899,7 @@ function createPaintings(materials, macro, grain) {
  * Isotropic noise instead: tooling marks and pitting, which is what you
  * actually see from half a metre away and what no bond pattern should survive.
  */
-function bakeGrain(size = 256) {
+function bakeGrain(size) {
   const height = new Float32Array(size * size);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -3907,10 +3923,10 @@ function bakeGrain(size = 256) {
       data[i + 3] = 255;
     }
   }
-  return toTexture(data, size, THREE.NoColorSpace);
+  return { map: { data, width: size, height: size } };
 }
 
-function bakeMacro(size = 128) {
+function bakeMacro(size) {
   const data = new Uint8ClampedArray(size * size * 4);
   const spread = (v) => clamp01((v - 0.5) * 1.7 + 0.5) * 255;
   // Two octaves at period 2, over a tile 26 metres wide: the finest thing in
@@ -3926,6 +3942,10 @@ function bakeMacro(size = 128) {
       data[i + 3] = 255;
     }
   }
+  return { map: { data, width: size, height: size } };
+}
+
+function macroTexture({ data, width: size }) {
   const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
@@ -4505,26 +4525,98 @@ function decorate(material, recipe, macro, grain) {
     + `|${material.defines?.DIKU_MOSS ? 1 : 0}|${material.defines?.DIKU_GLISTEN ? 1 : 0}`;
 }
 
+const MACRO_PX = 128;
+const GRAIN_PX = 256;
+const DECAL_PX = 256;
+const surfaceKey = (recipe, size) => `surface:${recipe.surface}@${recipe.size ?? size}`;
+
+/**
+ * Every pixel `createMaterials` needs, as a list of independent bakes. A key
+ * names what is baked and at what size, so it can be looked up again -- the
+ * bake worker (bakery.js) runs these off the main thread and keeps them in
+ * IndexedDB under the hash of this file. Several recipes share a surface --
+ * the sewer's flags, rust and bark, the neighborhood's bone -- and differ
+ * only in how they are lit: one bake each, at the first recipe's size.
+ */
+export function bakeJobs(size = 512) {
+  const jobs = [
+    { key: `macro@${MACRO_PX}`, kind: 'macro', px: MACRO_PX },
+    { key: `grain@${GRAIN_PX}`, kind: 'grain', px: GRAIN_PX },
+  ];
+  const surfaces = new Map();
+  for (const recipe of Object.values(RECIPES)) {
+    const key = surfaceKey(recipe, size);
+    if (!surfaces.has(key)) {
+      surfaces.set(key, { key, kind: 'surface', name: recipe.surface, px: recipe.size ?? size, cuts: [] });
+    }
+    // An alpha-tested recipe's mips are its own (see `cutoutMips`).
+    const job = surfaces.get(key);
+    if (recipe.cutout && !job.cuts.includes(recipe.cutout)) job.cuts.push(recipe.cutout);
+  }
+  jobs.push(...surfaces.values());
+  for (const name of Object.keys(DECAL_SHAPES)) jobs.push({ key: `decal:${name}@${DECAL_PX}`, kind: 'decal', name, px: DECAL_PX });
+  for (const [name, p] of Object.entries(PAINTINGS)) jobs.push({ key: `painting:${name}@${p.px}`, kind: 'painting', name, px: p.px });
+  return jobs;
+}
+
+/**
+ * Run one of `bakeJobs`: plain pixel arrays by map name, `{ data, width,
+ * height }`, nothing of three's. Runs on the main thread or in the worker.
+ */
+export function runBake(job) {
+  if (job.kind === 'macro') return bakeMacro(job.px);
+  if (job.kind === 'grain') return bakeGrain(job.px);
+  if (job.kind === 'decal') return bakeDecal(job.name, job.px);
+  if (job.kind === 'painting') {
+    const p = PAINTINGS[job.name];
+    return paintedPixels(p.paint(p.px), p.wear, p.seed);
+  }
+  if (job.kind !== 'surface') throw new Error(`textures: no bake of kind ${job.kind}`);
+  const b = bake(job.name, job.px);
+  const map = (data) => ({ data, width: job.px, height: job.px });
+  const maps = { albedo: map(b.albedo), normal: map(b.normal), roughness: map(b.roughness) };
+  if (b.emissive) maps.emissive = map(b.emissive);
+  for (const cut of job.cuts) {
+    // Level 0 is the albedo itself and is not stored twice.
+    cutoutMips(b.albedo, job.px, cut).slice(1).forEach((level, i) => { maps[`mips${cut}:${i + 1}`] = level; });
+  }
+  return maps;
+}
+
 /**
  * Bake every recipe into a MeshStandardMaterial. Triplanar would be nicer but
  * every surface here is axis-aligned, so per-face UV scaling is enough.
+ *
+ * `baked` is the pixels already made, keyed as `bakeJobs` keys them (see
+ * bakery.js); without it everything is baked here, synchronously.
  */
-export function createMaterials(size = 512, onProgress = () => {}) {
+export function createMaterials(size = 512, onProgress = () => {}, baked = null) {
+  if (!baked) baked = new Map(bakeJobs(size).map((job) => [job.key, runBake(job)]));
+  const pixels = (key) => {
+    const maps = baked.get(key);
+    if (!maps) throw new Error(`textures: nothing baked for ${key}`);
+    return maps;
+  };
   const materials = {};
-  const macro = bakeMacro();
-  const grain = bakeGrain();
+  const macro = macroTexture(pixels(`macro@${MACRO_PX}`).map);
+  const grainMap = pixels(`grain@${GRAIN_PX}`).map;
+  const grain = toTexture(grainMap.data, grainMap.width, THREE.NoColorSpace);
   const names = Object.keys(RECIPES);
   const surfaced = [];
-  // Several recipes share a surface -- the sewer's flags, rust and bark, the
-  // neighborhood's bone -- and differ only in how they are lit. One bake each.
-  const bakes = new Map();
   names.forEach((name, index) => {
     const recipe = RECIPES[name];
     const px = recipe.size ?? size;
-    if (!bakes.has(recipe.surface)) bakes.set(recipe.surface, bake(recipe.surface, px));
-    const baked = bakes.get(recipe.surface);
+    const maps = pixels(surfaceKey(recipe, size));
+    const baked = {
+      albedo: maps.albedo.data, normal: maps.normal.data, roughness: maps.roughness.data, emissive: maps.emissive?.data,
+    };
+    let mips = null;
+    if (recipe.cutout) {
+      mips = [maps.albedo];
+      for (let level = 1; maps[`mips${recipe.cutout}:${level}`]; level++) mips.push(maps[`mips${recipe.cutout}:${level}`]);
+    }
     const material = new THREE.MeshStandardMaterial({
-      map: toTexture(baked.albedo, px, THREE.SRGBColorSpace, recipe.cutout),
+      map: toTexture(baked.albedo, px, THREE.SRGBColorSpace, mips),
       normalMap: toTexture(baked.normal, px, THREE.NoColorSpace),
       roughnessMap: toTexture(baked.roughness, px, THREE.NoColorSpace),
       metalnessMap: toTexture(baked.roughness, px, THREE.NoColorSpace),
@@ -4624,8 +4716,8 @@ export function createMaterials(size = 512, onProgress = () => {}) {
     }
   };
 
-  createDecals(materials);
-  createPaintings(materials, macro, grain);
+  createDecals(materials, pixels);
+  createPaintings(materials, macro, grain, pixels);
 
   // Not baked: the floor of an "In the air..." room, which has to read as
   // something you could stand on without becoming a lid over the street below.

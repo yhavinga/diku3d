@@ -12,7 +12,8 @@ import { AFF } from './magic.js';
 import { planZones, layoutZone, zoneWorld, arrivalYaw, HOME_AREAS, HOME_START, HOME_MAX_ROOMS } from './zones.js';
 import { createZoneCard, levelsOf, firstLine } from './zonecard.js';
 import { collectResources, disposeZoneGraph } from './teardown.js';
-import { createMaterials } from './textures.js';
+import { createMaterials, bakeJobs, runBake } from './textures.js';
+import { bakeTextures } from './bakery.js';
 import { buildScene, CELL, LEVEL_H } from './build.js';
 import { populate } from './actors.js';
 import { Player } from './player.js';
@@ -428,11 +429,44 @@ const dom = {
  * while the main thread is busy.
  */
 const progress = (fraction, text, detail = '') => {
-  dom.loadingBar.style.width = `${Math.round(fraction * 100)}%`;
+  dom.loadingBar.style.width = `${(fraction * 100).toFixed(1)}%`;
   if (text) dom.loadingText.textContent = text;
   dom.loadingDetail.textContent = detail;
   return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
 };
+
+/** The bar alone, mid-step, without waiting for a frame: the step's own work is off this thread. */
+const progressBar = (fraction, detail) => {
+  dom.loadingBar.style.width = `${(fraction * 100).toFixed(1)}%`;
+  dom.loadingDetail.textContent = detail;
+};
+
+/**
+ * Where each boot step starts and ends on the bar, from what the steps took
+ * (ms, headless Chromium on an M-series Mac, home zone, wave 10). Reading and
+ * laying out come first and are fixed at 0-2%; the rest is shared out by
+ * time once it is known how much of the bake the cache holds -- 1.15 s baked
+ * on eight workers against 0.13 s read back -- so the bar runs at one speed
+ * on a first visit and on a repeat one.
+ */
+const STEP_MS = { bake: 1150, bakeCached: 130, carve: 230, raise: 2980, people: 850, mud: 30, compile: 820 };
+function bootPlan(cachedShare) {
+  const ms = { ...STEP_MS, bake: STEP_MS.bakeCached * cachedShare + STEP_MS.bake * (1 - cachedShare) };
+  const steps = ['bake', 'carve', 'raise', 'people', 'mud', 'compile'];
+  const total = steps.reduce((sum, k) => sum + ms[k], 0);
+  const plan = {};
+  let at = 0.02;
+  for (const k of steps) { plan[k] = [at, at + (ms[k] / total) * 0.98]; at = plan[k][1]; }
+  return plan;
+}
+/**
+ * The same for a crossing's card, from school -> home (the long way: build
+ * 2.8 s, populate 0.47, compile 0.13-0.25, teardown and mount tens of ms).
+ * The short way spends about the same shares.
+ */
+const CROSS_BAR = { teardown: 0.01, build: [0.02, 0.8], populate: [0.8, 0.93], compile: [0.94, 1] };
+/** `fraction` of the way through a step `[start, end]`. */
+const along = ([a, b], fraction) => a + (b - a) * fraction;
 
 const fetchText = async (url) => {
   const response = await fetch(url);
@@ -441,6 +475,20 @@ const fetchText = async (url) => {
 };
 
 async function boot() {
+  // The texture bake needs nothing from the world, so it starts first and runs
+  // in its workers while the area files are read and laid out. What it reports
+  // before its own step comes up is held until then.
+  let bakeShown = null;
+  let bakesDone = 0;
+  let lastBake = [0, ''];
+  let cachedShare = 0;
+  const baking = bakeTextures(bakeJobs(512), runBake, {
+    fresh: params.get('bake') === 'fresh',
+    onStart: ({ cached, jobs }) => { cachedShare = cached / jobs; },
+    onProgress: (fraction, key) => { bakesDone++; lastBake = [fraction, key]; bakeShown?.(fraction, key); },
+  });
+  // Not a swallow: the same promise is awaited below, where a failure stops the boot.
+  baking.catch(() => {});
   await progress(0, 'reading the area files');
   // The mud boots off area.lst, so does this: every area it lists, plus any
   // the home zone names that it does not.
@@ -478,12 +526,21 @@ async function boot() {
   await progress(0.01, 'laying out the streets', `${world.rooms.size} rooms in ${files.length} areas`);
   let layout = layoutOf(zone);
 
-  await progress(0.02, 'baking stone, timber and thatch', 'every surface is generated here, not downloaded');
-  const materials = createMaterials(512, () => {});
+  const bar = bootPlan(cachedShare);
+  await progress(bar.bake[0], 'baking stone, timber and thatch', 'every surface is generated here, not downloaded');
+  const jobCount = bakeJobs(512).length;
+  bakeShown = (fraction, key) => progressBar(along(bar.bake, fraction),
+    `${key.replace(/^\w+:|@\d+$/g, '')} · ${bakesDone} of ${jobCount}`);
+  if (bakesDone) bakeShown(...lastBake);
+  const { baked, stats: bakeStats } = await baking;
+  console.info(`textures: ${bakeStats.jobs} bakes in ${bakeStats.ms.toFixed(0)} ms on ${bakeStats.workers} workers,`
+    + ` ${bakeStats.cached} from this browser's cache, ${bakeStats.baked} baked`);
+  bakeStats.stored.then((bytes) => console.info(`textures: cache holds ${(bytes / 1e6).toFixed(1)} MB`));
+  const materials = createMaterials(512, () => {}, baked);
 
   // Modelled assets are optional: anything missing falls back to the
   // procedural geometry, so the viewer runs against a half-built library.
-  if (params.get('assets') !== 'off') await progress(0.56, 'carving the furniture', `${ASSET_NAMES.length} models`);
+  if (params.get('assets') !== 'off') await progress(bar.carve[0], 'carving the furniture', `${ASSET_NAMES.length} models`);
   const assets = params.get('assets') === 'off' ? null
     : await new AssetLibrary(materials).load(ASSET_NAMES);
   if (assets) {
@@ -492,11 +549,15 @@ async function boot() {
     }
   }
 
-  await progress(0.58, 'raising the town', `${layout.cells.size} rooms of ${zone.name || 'the town'}`);
-  let built = buildScene(viewOf(zone), layout, materials, assets);
+  const raising = `${layout.cells.size} rooms of ${zone.name || 'the town'}`;
+  await progress(bar.raise[0], 'raising the town', raising);
+  let built = await buildScene(viewOf(zone), layout, materials, assets,
+    (fraction) => progress(along(bar.raise, fraction), null, raising));
 
-  await progress(0.83, 'peopling the rooms', 'mobiles, their clothes and what they carry');
-  let actors = populate(viewOf(zone), layout, built, { materials, assets });
+  const peopling = 'mobiles, their clothes and what they carry';
+  await progress(bar.people[0], 'peopling the rooms', peopling);
+  let actors = await populate(viewOf(zone), layout, built, { materials, assets },
+    (fraction) => progress(along(bar.people, fraction), null, peopling));
 
   // ---------------------------------------------------------------- scene --
 
@@ -624,7 +685,7 @@ async function boot() {
   const options = createOptions({
     quality, applyTime: (n) => applyTime(n), applyWeather: (w) => applyWeather(w), audio, state,
   });
-  await progress(0.9, 'waking the mud', `resets and mobiles in all ${files.length} areas`);
+  await progress(bar.mud[0], 'waking the mud', `resets and mobiles in all ${files.length} areas`);
   // The whole mud, and the zone being drawn (see enterZone in game.js).
   const game = createGame({ world, layout, built, actors, zoneOf: (vnum) => plan.zoneOf(vnum) });
   /**
@@ -1485,26 +1546,28 @@ async function boot() {
         let t = performance.now();
         timing.freed = unmountZone();
         timing.teardown = performance.now() - t;
-        await zoneCard.progress(0.12);
+        await zoneCard.progress(CROSS_BAR.teardown);
         zone = target;
         t = performance.now();
         layout = layoutOf(zone);
         timing.layout = performance.now() - t;
-        await zoneCard.progress(0.22);
+        await zoneCard.progress(CROSS_BAR.build[0]);
         t = performance.now();
-        built = buildScene(viewOf(zone), layout, materials, assets);
+        built = await buildScene(viewOf(zone), layout, materials, assets,
+          (fraction) => zoneCard.progress(along(CROSS_BAR.build, fraction)));
         timing.build = performance.now() - t;
-        await zoneCard.progress(0.6);
+        await zoneCard.progress(CROSS_BAR.populate[0]);
         t = performance.now();
-        actors = populate(viewOf(zone), layout, built, { materials, assets });
+        actors = await populate(viewOf(zone), layout, built, { materials, assets },
+          (fraction) => zoneCard.progress(along(CROSS_BAR.populate, fraction)));
         timing.populate = performance.now() - t;
-        await zoneCard.progress(0.78);
+        await zoneCard.progress(CROSS_BAR.compile[0]);
         t = performance.now();
         mountZone();
         arriveAt(vnum, yaw ?? arrivalYaw(world, plan, vnum, dir), dir);
         timing.mount = performance.now() - t;
         t = performance.now();
-        await precompile();
+        await precompile((fraction) => zoneCard.progress(along(CROSS_BAR.compile, fraction)));
         timing.compile = performance.now() - t;
         await zoneCard.progress(1);
       } catch (error) {
@@ -1818,6 +1881,8 @@ async function boot() {
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
     pipeline, environment, materials, wetness, assets, impostors, occlusion,
+    /** What the texture bake did: bakes, cache hits, ms, workers; `stored` resolves to the cache's bytes. */
+    bake: bakeStats,
     player, hud, world, applyTime, applyWeather, state, audio,
     // The drawn zone's, so read through: a crossing replaces all four.
     get layout() { return layout; },
@@ -2256,7 +2321,7 @@ async function boot() {
    * the cards, the doors. Programs already made are found in three's cache,
    * so a zone seen before costs only the walk over its scene.
    */
-  async function precompile() {
+  async function precompile(onProgress = () => {}) {
     const hidden = [];
     scene.traverse((o) => {
       // `placements` is a record for nav.js, never drawn.
@@ -2277,6 +2342,7 @@ async function boot() {
         // Again each time: frames drawn while this waits move the target.
         renderer.setRenderTarget(composer.renderTarget1);
         await renderer.compileAsync(scene, camera);
+        await onProgress((lightPool.levels.indexOf(level) + 1) / lightPool.levels.length);
       }
     } finally {
       lightPool.level = -1;
@@ -2285,8 +2351,9 @@ async function boot() {
     }
     console.info(`precompiled in ${(performance.now() - started).toFixed(0)} ms`);
   }
-  await progress(0.91, 'compiling shaders', 'every material, once, on your GPU');
-  await precompile();
+  const compiling = 'every material, once, on your GPU';
+  await progress(bar.compile[0], 'compiling shaders', compiling);
+  await precompile((fraction) => progress(along(bar.compile, fraction), null, compiling));
 
   await progress(1, 'ready');
   dom.loading.classList.add('hidden');
