@@ -198,12 +198,13 @@ def build_temple_wall_door():
 
 def _pier_band(z0, z1, out):
     """A pier band's heights. A band that projects is carried 20 mm past
-    the panel's band at both ends: the pier swallows the panel's ends in plan,
-    but at the same heights the panel's cornice soffit and the pier's lay in
-    one plane, and so did their tops -- they took turns to be drawn round
-    every corner of every stone room."""
+    the panel's band at both ends -- the plinth 20 mm under the floor too:
+    the pier swallows the panel's ends in plan, but at the same heights the
+    panel's cornice soffit and the pier's lay in one plane, and so did their
+    tops and their feet -- they took turns to be drawn round every corner of
+    every stone room."""
     if out > 0:
-        z0, z1 = (z0 - 0.02 if z0 > 0 else z0), z1 + 0.02
+        z0, z1 = z0 - 0.02, z1 + 0.02
     return z0, z1
 
 

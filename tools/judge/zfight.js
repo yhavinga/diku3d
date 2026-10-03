@@ -294,7 +294,13 @@ export function install() {
   Z.sweep = async ({ yaws = [0, Math.PI / 2, Math.PI, -Math.PI / 2], pitches = [0, 0.35], filter = null, frames = 3, scale = 0.5, log = null } = {}) => {
     const rows = [];
     const culprits = new Map();
-    const rooms = [...d.built.rooms.entries()].filter(([v, i]) => !i.unbuilt && (!filter || filter(v, i)));
+    // The zone being drawn, held: a portal stood on at a room's centre would
+    // carry the camera into another zone and swap `diku.built` mid-sweep, so
+    // the game is paused for the duration -- nothing walks, nothing teleports.
+    const built = d.built;
+    const rooms = [...built.rooms.entries()].filter(([v, i]) => !i.unbuilt && (!filter || filter(v, i)));
+    const paused = d.state.paused;
+    d.state.paused = true;
     d.state.benchmark = false;
     const sig = (x) => x.obj === null ? '?' : `${x.name}${x.model ? ' [' + x.model + ']' : ''}${x.geometry !== undefined ? ' g' + x.geometry + ' ' + x.size : ''} ${x.face}`;
     for (const [vnum] of rooms) {
@@ -314,9 +320,11 @@ export function install() {
           culprits.set(k, c);
         }
       }
-      rows.push({ vnum, name: d.built.rooms.get(vnum).room.name, total, worst, ties });
+      if (d.built !== built) throw new Error(`zfight: the drawn zone changed at room ${vnum}`);
+      rows.push({ vnum, name: built.rooms.get(vnum).room.name, total, worst, ties });
       if (log) log(rows.length, rooms.length);
     }
+    d.state.paused = paused;
     const pairs = [...culprits.entries()].sort((a, b) => b[1].n - a[1].n).map(([k, c]) => ({ pair: k, ...c }));
     return { rows, pairs, total: rows.reduce((s, r) => s + r.total, 0), ties: rows.reduce((s, r) => s + r.ties, 0) };
   };
