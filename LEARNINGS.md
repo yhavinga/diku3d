@@ -6,6 +6,39 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-03 — wave 10: bake beside the page
+
+### Workers and a cache for the texture bake (wave10-bake)
+
+- Boot on this Mac, home zone: ready 11.7–12.6 s → 6.2 s first visit, 5.0 s
+  repeat; the bake 6.9–7.7 s → 1.1 s (8 workers; 4 gave 2.05 s, 12 gave
+  0.88 s) → 0.12 s from cache. Longest main-thread task during boot 7.7 s
+  → ≤ 0.24 s. Crossing school → home still ~4 s, but its longest task went
+  2.7 s → 0.3 s. Cache: 65 MB deflated per channel, constant channels
+  dropped, against 290 MB raw RGBA.
+- `createMaterials` split into `bakeJobs` (98 bakes) / `runBake` (pixels
+  only, the old functions unchanged) / assembly; without baked input it
+  still bakes synchronously, so node tools keep working.
+- Proof of sameness: 389 maps byte-identical (fresh vs fresh, worker vs
+  main, cache vs fresh); every material's properties, defines, hook source,
+  program key and texture bytes equal to main; composited frame 0 px at
+  #3014, #3001, #7009, #3700 with randomness, time uniforms and torch
+  flicker frozen. #6128 differs even against itself within one load.
+- Traps: an IndexedDB miss waits behind other workers' write transactions
+  (69 s of worker time for 9 s of baking); compressing in the same worker
+  slows its next bake (1.6 vs 1.1 s); module workers have no import map.
+- Open: `writing_7400` (wall text drawn on a main-thread canvas) is not
+  identical between loads; grass `stats.ms` is now wall time.
+
+### Exits against doorways (coordinator)
+
+- `tools/exit-check.mjs`: over 34 zones, 5,324 exits — 385 open in another
+  wall than their direction, 88 have no doorway at all (an archway link
+  drawn at neither end; the compass step cuts through the wall), 36
+  openings lead where the mud has only a one-way exit. The Mud School:
+  8 doorless exits in four facing west/east pairs (#3702/#3704, #3712/#3714,
+  #3743/#3744, #3748/#3752), #3705's north door in its east wall.
+
 ## 2026-10-03 — wave 9: every area, one zone at a time
 
 ### The flicker the user saw from the start (wave9-zfight)

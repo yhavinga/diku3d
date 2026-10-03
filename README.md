@@ -15,6 +15,12 @@ there, to the server named in a gitignored `.env` (see `.env.example`),
 behind Cloudflare; `tools/deploy/nginx-diku3d.conf` is the site config it
 installs.
 
+Every texture is still generated in the browser, in up to eight workers
+(`src/bakery.js`, `src/bakeworker.js`); IndexedDB keeps what this browser baked
+before, about 65 MB, under a SHA-256 of `src/textures.js`, so any change to that
+file bakes everything again. A first visit is ready in about 6 s, a repeat visit
+in about 5; `diku.bake` says what came from where.
+
 There is no build step. Three.js is vendored under `vendor/`; the app is plain
 ES modules.
 
@@ -134,6 +140,7 @@ No Man's Land (south from inside the East Gate, down Wall Road).
 | `?cull=off` | draw everything, for comparing against the measured visibility |
 | `?lod=off`, `?occlusion=off` | keep every tree a full model; stop hiding what is behind hills — both for A/B comparison |
 | `?fps=30` | override the preset's frame cap; `0` uncaps it |
+| `?bake=fresh` | ignore the texture cache and bake every surface again (and store the new bake) |
 
 Try `?room=3700` to start in the Mud School, `?room=7000` for the sewer or
 `?room=6500` for the dwarven kingdom.

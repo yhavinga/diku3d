@@ -415,6 +415,23 @@ choose.
   coplanar overlaps inside the `.glb` files. `instances.add` with an
   unknown model name places nothing and says nothing — the stone room kit's
   corner pillars were missing for that reason.
+- **Textures bake in workers and are cached under a hash of the whole of
+  `src/textures.js`** (`src/bakery.js`): any edit there invalidates every
+  entry, deliberately, because recipes lean on shared helpers. A bake must
+  stay deterministic — all 389 maps are byte-identical across bakes, worker
+  vs main thread, cache vs fresh — and `?bake=fresh` bypasses the cache.
+  A module worker has no import map: the worker imports the hashed text
+  from a Blob URL with `'three'` rewritten through `import.meta.resolve`.
+  Only ask IndexedDB for keys known to exist (a miss queues behind other
+  workers' writes: 69 s of worker time once), and write only after the
+  last bake. `buildScene`, grass and `populate` now run as generators in
+  100 ms slices (`inSlices`) so the bar climbs; keep new build work inside
+  them.
+- **Pixel-diffing two page loads measures noise unless three things are
+  frozen:** `Math.random`, the time uniforms injected through
+  `onBeforeCompile` (reachable only via `renderer.properties.get(m).uniforms`)
+  and the torch flicker in `quality.js` LightPool — 30–80% of pixels
+  otherwise differ between two loads of the same code.
 - Figures are skinned meshes: one draw each, no instancing, and a second pass if
   they cast shadows. They are kept out of the shadow map and culled past 46 m.
 - Large soft sprites are the most expensive thing per pixel in the scene. The
