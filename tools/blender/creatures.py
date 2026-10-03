@@ -220,8 +220,8 @@ def lizard():
                 patch=B.spots(0.025, seed=131), h=0.0045, tris=3600, mat="hide",
                 bones=M.arthro_bones(root, extra, legs), legs=M.arthro_legs(legs), root="body",
                 clips=lizard_clips, legtop=0.2, tail=tn,
-                gait=dict(walk_stride=0.26, walk_frames=20, walk_duty=0.68, lift=0.045, bend=13.0,
-                          run_stride=0.44, run_frames=10, run_duty=0.48, run_bend=17.0))
+                gait=dict(walk_stride=0.26, walk_frames=20, walk_duty=0.68, lift=0.045, bend=-13.0,
+                          run_stride=0.38, run_frames=10, run_duty=0.48, run_bend=-16.0))
 
 
 def lizard_clips(arm, spec):
@@ -305,7 +305,7 @@ def lizard_clips(arm, spec):
         fk["head"] = (4, fk["head"][1], 0)
         for i, nm in enumerate(tn):
             fk[nm] = (-3 if i < 3 else 0, fk[nm][1], 0)
-        return dict(fk=fk, loc=V((0, 0, height * 0.12 + 0.004 * wave(2 * t, 0.2))), ik=ik)
+        return dict(fk=fk, loc=V((0, 0, height * 0.04 + 0.004 * wave(2 * t, 0.2))), ik=ik)
     tracks = clip.run("run", N2, run, track=track)
     report["run"] = M.arthro_slip(tracks, S2, N2, duty2, LIZARD_WALK)
     key_locations(arm, N2, lambda t: {"tongue": V((0, 0, 0))})
@@ -841,9 +841,255 @@ def snail_clips(arm, spec):
     return {"clips": clip.report, "stride": {"walk": g["walk_stride"], "run": g["run_stride"]}, "hit": 0.5}
 
 
+# ============================================================ the beast
+
+
+def beast():
+    """'A beast tries to feed off of you. It looks mean. You'd better run.'
+    Something that feeds off you rather than eats you: a hairless, hunched
+    hunter the size of a big hyena -- the shoulders high and the hindquarters
+    low, gaunt legs on clawed feet, a thin bare tail, a ridge of spines down
+    the back -- whose face ends in a round sucking disc ringed with teeth,
+    like a lamprey's, under small burning eyes. The diploma beast ('hideous
+    ... this horrible creature') is the same thing bigger, warted and horned;
+    the horns are an optional part the viewer collapses on the plain one."""
+    L = dict(
+        spine=[(0, -0.4, 0.66), (0, -0.12, 0.75), (0, 0.2, 0.87), (0, 0.42, 0.88)],
+        neck=[(0, 0.42, 0.84), (0, 0.63, 0.83)],
+        nose=(0, 0.95, 0.7),
+        tail=[(0, -0.45, 0.64), (0, -0.6, 0.6), (0, -0.75, 0.5), (0, -0.88, 0.38), (0, -0.97, 0.26)],
+        hind=[(0.13, -0.34, 0.6), (0.15, -0.2, 0.38), (0.14, -0.38, 0.17),
+              (0.13, -0.34, 0.05), (0.13, -0.25, 0.012)],
+        fore=[(0.16, 0.38, 0.7), (0.15, 0.3, 0.42), (0.145, 0.36, 0.14),
+              (0.14, 0.4, 0.05), (0.14, 0.51, 0.012)],
+        scapula=(0.12, 0.26, 0.93),
+        extra={"ear*": ((0.09, 0.66, 0.93), (0.15, 0.6, 1.02), "head"),
+               "horn*": ((0.07, 0.72, 0.96), (0.15, 0.58, 1.14), "head")},
+    )
+    tail = L["tail"]
+    body = [
+        ell(P(0, 0.2, 0.68), (0.19, 0.3, 0.24), ("grad", "spine", "chest", P(0, 0.0, 0.7), P(0, 0.35, 0.7)), blend=0.07),
+        # The hump of the shoulders, the hunter's build.
+        ell(P(0, 0.28, 0.88), (0.15, 0.2, 0.1), "chest", blend=0.08),
+        cone(P(0, 0.0, 0.66), P(0, -0.32, 0.62), 0.14, 0.15, ("grad", "spine", "pelvis", P(0, 0.0, 0.66), P(0, -0.32, 0.62)), blend=0.07),
+        ell(P(0, -0.37, 0.62), (0.14, 0.13, 0.13), "pelvis", blend=0.06),
+        cone(P(0, 0.38, 0.8), P(0, 0.66, 0.83), 0.16, 0.12, ("chain", [("chest", P(0, 0.36, 0.8)), ("neck", P(0, 0.5, 0.82)),
+                                                                     ("head", P(0, 0.66, 0.83))]), blend=0.07),
+        # A big blunt head, heavy at the jowls, narrowing to the disc.
+        ell(P(0, 0.72, 0.84), (0.13, 0.14, 0.12), "head", blend=0.05),
+        cone(P(0, 0.76, 0.82), P(0, 0.88, 0.72), 0.12, 0.1, "head", blend=0.05, squash=(1.0, 1.0, 0.95)),
+        ell(P(0, 0.8, 0.76), (0.12, 0.1, 0.08), "head", blend=0.05),
+        # The disc: a thick lip standing round a mouth that is all opening,
+        # cut deep into the end of the face.
+        ell(P(0, 0.915, 0.705), (0.112, 0.04, 0.112), "head", blend=0.03),
+        ell(P(0, 0.95, 0.705), (0.082, 0.06, 0.082), "head", blend=0.015, neg=True),
+        # Brows over the eyes.
+        ell(P(0.07, 0.8, 0.9), (0.04, 0.06, 0.025), "head", blend=0.03),
+        ell(P(-0.07, 0.8, 0.9), (0.04, 0.06, 0.025), "head", blend=0.03),
+    ]
+    for i in range(len(tail) - 1):
+        body.append(cone(P(*tail[i]), P(*tail[i + 1]), 0.05 - i * 0.01, 0.042 - i * 0.01, "tail%d" % (i + 1),
+                         blend=0.03, group="tail"))
+    for side in (1, -1):
+        t = ".L" if side > 0 else ".R"
+        body += B.leg_solids(L, "hind", [0.095, 0.055, 0.038, 0.034, 0.0], 0.05, side, mask_low=0.3)
+        body += B.leg_solids(L, "fore", [0.09, 0.06, 0.04, 0.036, 0.0], 0.05, side, mask_low=0.3)
+        body.append(ell(P(side * 0.14, -0.33, 0.5), (0.08, 0.13, 0.15), "thigh" + t, blend=0.06))
+        body.append(ell(P(side * 0.16, 0.34, 0.6), (0.08, 0.1, 0.15), "upperarm" + t, blend=0.06))
+        body.append(ell(P(side * 0.14, 0.36, 0.3), (0.05, 0.06, 0.11), "forearm" + t, blend=0.04))
+        body.append(ell(P(side * 0.135, -0.29, 0.03), (0.045, 0.08, 0.03), "htoe" + t, blend=0.025))
+        body.append(ell(P(side * 0.14, 0.46, 0.03), (0.05, 0.08, 0.03), "ftoe" + t, blend=0.025))
+
+    def masks(co, n, pale, dark):
+        u = co[:, 2]
+        under = np.clip((-n[:, 2] - 0.15) / 0.5, 0, 1) * (u < 0.62)
+        back = np.clip((n[:, 2] - 0.5) / 0.4, 0, 1) * (u > 0.7)
+        return np.maximum(pale, under * 0.8), np.maximum(dark, back * 0.5)
+
+    def parts(body_solids):
+        out = []
+        # The disc's throat, and three rings of hooked teeth pointing in.
+        throat = [ell(P(0, 0.9, 0.705), (0.074, 0.02, 0.074), "head", blend=0.005)]
+        out.append(B.solid_part(throat, 0.004, 160, "maw", "horn", (0.32, 0.06, 0.06)))
+        teeth = []
+        for ring, (rr, n, ln, f) in enumerate(((0.078, 18, 0.03, 0.935), (0.058, 14, 0.026, 0.92), (0.038, 9, 0.02, 0.908))):
+            for k in range(n):
+                a = 2 * math.pi * (k + 0.5 * ring) / n
+                root = V((math.cos(a) * rr, f, 0.705 + math.sin(a) * rr))
+                tip = V((math.cos(a) * (rr - ln * 0.8), f - 0.006, 0.705 + math.sin(a) * (rr - ln * 0.8)))
+                teeth.append(cone(P(*root), P(*tip), 0.0065, 0.0012, "head", blend=0.001, group="t%d_%d" % (ring, k)))
+        out.append(B.solid_part(teeth, 0.0018, 1600, "teeth", "horn", (0.78, 0.74, 0.6), smooth=0))
+        # Small eyes deep under the brows, lit from inside.
+        for side in (1, -1):
+            at = B.surface_point(body_solids, P(side * 0.2, 0.84, 0.86), P(-side, -0.25, 0), sink=0.012)
+            out.append(B.solid_part([ell(tuple(at), (0.016, 0.02, 0.012), "head", blend=0.003)], 0.003, 70,
+                                    "eye", "glow", (1.0, 1.0, 1.0), smooth=0))
+        out += B.leaf_pair(L, "ear", 0.04, 0.012, (1.0, 0.35, 1.0), 0.005, tris=120, mat="hide", mask=(0, 0.4))
+        # Horns: swept back off the brow, ridged, for the diploma beast.
+        for side in (1, -1):
+            t = ".L" if side > 0 else ".R"
+            head, tail_, _ = L["extra"]["horn*"]
+            a, b = V(B.apply_side(head, side)), V(B.apply_side(tail_, side))
+            mid = a.lerp(b, 0.5) + V((side * 0.03, 0.03, 0.02))
+            out.append(B.solid_part([cone(P(*a), P(*mid), 0.035, 0.024, "horn" + t, blend=0.006, group="h"),
+                                     cone(P(*mid), P(*b), 0.024, 0.004, "horn" + t, blend=0.006, group="h")],
+                                    0.004, 220, "horn", "horn", (0.3, 0.27, 0.22)))
+        # The spines: a ridge of them down the back, longest at the hump.
+        spines = []
+        for i in range(16):
+            f = 0.55 - i * 0.07
+            top = B.surface_point(body_solids, P(0, f, 1.6), P(0, 0, -1), sink=0.03)
+            bone = "chest" if f > 0.2 else "spine" if f > -0.15 else "pelvis" if f > -0.42 else "tail1"
+            ln = 0.05 + 0.1 * math.exp(-((f - 0.28) / 0.3) ** 2)
+            spines.append(cone(tuple(top), tuple(top + V((0, 0.03, ln))), 0.024, 0.003, bone, blend=0.004, group="s%d" % i))
+        out.append(B.solid_part(spines, 0.004, 1000, "spines", "horn", (0.22, 0.2, 0.17), smooth=0))
+        out += B.claws(L, "fore", 4, 0.07, 0.014, 0.004)
+        out += B.claws(L, "hind", 4, 0.055, 0.012, 0.004)
+        return out
+
+    return dict(name="beast_beast", archetype="beast", L=L, body=body, masks=masks, parts=parts, mat="hide",
+                patch=B.spots(0.06, seed=171), h=0.01, tris=3600,
+                gait=dict(walk_stride=0.95, walk_frames=30, walk_duty=0.64, lift=0.08,
+                          run_stride=1.8, run_frames=16, run_duty=0.36, run_lift=0.14,
+                          gallop="rotary", wag=3.0, idle_wag=1, tail_pitch=-8.0, lie=0.26, arch=6.0,
+                          pastimes=["sniff", "snarl"], sniff_face=55.0, sniff_ground=0.12, sniff_most=70.0,
+                          flex={"hind": dict(lean=8, push=18, fold=34, curl=30),
+                                "fore": dict(lean=8, push=20, fold=70, curl=30, scap=12)}))
+
+
+# ============================================================ the blob
+
+
+def blob():
+    """'The blob is here, waiting to eat you up. He is big, he is bad.' A heap
+    of glistening green jelly as high as a man's chest and wider than it is
+    high, slumped on the floor in lobes, with a mouth that is only a fold
+    in the front of it until it opens, and two thick pseudopods it reaches
+    out with. Lumps of something it has not finished with show dark under
+    its skin (the patch channel)."""
+    rng = np.random.default_rng(181)
+    bones = [("base", P(0, -0.1, 0.05), P(0, 0.25, 0.05), None),
+             ("mid", P(0, 0.0, 0.1), P(0, 0.02, 0.6), "base"),
+             ("top", P(0, 0.02, 0.6), P(0, 0.06, 1.05), "mid"),
+             ("lip", P(0, 0.42, 0.4), P(0, 0.62, 0.32), "mid")]
+    pod = [(0.5, 0.15, 0.45), (0.78, 0.35, 0.3), (0.92, 0.6, 0.12)]
+    for side, tg in ((1, ".L"), (-1, ".R")):
+        q = [B.apply_side(p, side) for p in pod]
+        bones += [("pod1" + tg, P(*q[0]), P(*q[1]), "mid"), ("pod2" + tg, P(*q[1]), P(*q[2]), "pod1" + tg)]
+    grad = lambda b0, b1, z0, z1: ("grad", b0, b1, P(0, 0, z0), P(0, 0, z1))
+    body = [
+        # The heap: a broad slumped base, a mass on it, a crown.
+        ell(P(0, 0.0, 0.16), (0.82, 0.78, 0.2), "base", blend=0.2),
+        ell(P(0, 0.02, 0.45), (0.62, 0.58, 0.4), grad("base", "mid", 0.15, 0.6), blend=0.25),
+        ell(P(0, 0.04, 0.82), (0.4, 0.38, 0.3), grad("mid", "top", 0.6, 1.0), blend=0.22),
+        # The fold of the mouth, a lower lip hanging over it.
+        ell(P(0, 0.6, 0.44), (0.4, 0.3, 0.085), "mid", blend=0.05, neg=True),
+        ell(P(0, 0.56, 0.31), (0.34, 0.13, 0.08), "lip", blend=0.08),
+    ]
+    for side, tg in ((1, ".L"), (-1, ".R")):
+        q = [B.apply_side(p, side) for p in pod]
+        body += [cone(P(*q[0]), P(*q[1]), 0.2, 0.15, "pod1" + tg, blend=0.15, group="pod" + tg),
+                 cone(P(*q[1]), P(*q[2]), 0.15, 0.1, "pod2" + tg, blend=0.15, group="pod" + tg)]
+    # Lobes slumping down its sides.
+    for i in range(18):
+        ang = rng.uniform(0, 2 * math.pi)
+        z = rng.uniform(0.15, 0.85)
+        rr = (0.7 if z < 0.4 else 0.5) * rng.uniform(0.85, 1.0)
+        c = (math.cos(ang) * rr, 0.02 + math.sin(ang) * rr * 0.9, z)
+        r = rng.uniform(0.14, 0.24)
+        body.append(ell(P(*c), (r, r, r * 0.75), "base" if z < 0.3 else "mid" if z < 0.65 else "top", blend=0.14))
+
+    def masks(co, n, pale, dark):
+        u = co[:, 2]
+        # Paler where it is thin and the light comes through at the top;
+        # darker low down where it gathers and drags.
+        top = np.clip((u - 0.7) / 0.4, 0, 1) * np.clip(n[:, 2], 0, 1)
+        low = np.clip((0.25 - u) / 0.25, 0, 1)
+        return np.maximum(pale, top * 0.7), np.maximum(dark, low * 0.5)
+
+    def parts(body_solids):
+        out = []
+        maw = [ell(P(0, 0.48, 0.43), (0.37, 0.16, 0.085), {"mid": 0.6, "lip": 0.4}, blend=0.02)]
+        out.append(B.solid_part(maw, 0.01, 200, "maw", "horn", (0.18, 0.05, 0.05)))
+        return out
+
+    return dict(name="beast_blob", archetype="blob", body=body, masks=masks, parts=parts, bones=bones,
+                patch=B.spots(0.16, seed=183), h=0.02, tris=3000, mat="ooze", clips=jelly_clips, legtop=9.0,
+                gait=dict(walk_stride=0.55, walk_frames=48, run_stride=0.8, run_frames=36))
+
+
+def jelly_clips(arm, spec):
+    """A body of jelly: it wobbles. Standing, it heaves and sways and its
+    pseudopods feel about; going, it lurches -- the top of the heap leans out
+    ahead and the rest flows after it -- one surge a cycle, the stride being
+    how far each surge carries it. It eats by rearing back, gaping, and
+    falling forward over what it wants; it dies by slumping into a puddle."""
+    g = spec["gait"]
+    poser = B.Poser(arm, {})
+    clip = B.Clip(poser)
+    tgs = ((".L", 1), (".R", -1))
+
+    def pose(lean=0.0, sway=0.0, top=0.0, gape=0.0, reach=(0.0, 0.0), curl=(0.0, 0.0), spread=0.0):
+        fk = {"base": (0, 0, 0), "mid": (lean, 0, sway), "top": (top + lean * 0.6, 0, sway * 1.4),
+              "lip": (gape, 0, 0)}
+        for i, (tg, s_) in enumerate(tgs):
+            fk["pod1" + tg] = (-reach[i], 0, s_ * spread)
+            fk["pod2" + tg] = (-reach[i] * 0.5 + curl[i], 0, 0)
+        return fk
+
+    def idle(t):
+        heave = wave(2 * t)
+        fk = pose(lean=2 * heave, sway=3 * wave(t, 0.1) + 1.5 * wave(3 * t), top=-3 * heave + 2 * wave(5 * t),
+                  gape=4 * max(0.0, wave(t, 0.6)),
+                  reach=(10 * wave(t, 0.2), 10 * wave(t, 0.7)), curl=(15 * wave(2 * t), 15 * wave(2 * t, 0.4)))
+        return dict(fk=fk, loc=V((0.01 * wave(t, 0.3), 0, 0.012 * heave)))
+    clip.run("idle", 120, idle, step=2)
+
+    def surge(t, k=1.0):
+        lurch = 0.5 - 0.5 * math.cos(2 * math.pi * t)
+        fk = pose(lean=(10 * lurch + 4) * k, sway=5 * wave(t, 0.1) * k, top=8 * wave(t, 0.15) * k, gape=3 * lurch,
+                  reach=(20 * lurch * k, 20 * lurch * k), curl=(-10 * lurch, -10 * lurch), spread=6 * lurch)
+        loc = V((0, -0.05 * wave(t, 0.1) * k, -0.03 * lurch))
+        return dict(fk=fk, loc=loc)
+    clip.run("walk", g["walk_frames"], surge, step=2)
+    clip.run("run", g["run_frames"], lambda t: surge(t, 1.4))
+
+    def attack(t):
+        back = ease(t / 0.35) * (1 - ease((t - 0.4) / 0.08))
+        fall = ease((t - 0.38) / 0.12) * (1 - ease((t - 0.62) / 0.38))
+        gape = ease((t - 0.15) / 0.2) * (1 - ease((t - 0.5) / 0.08))
+        fk = pose(lean=-14 * back + 28 * fall, top=-12 * back + 15 * fall, gape=40 * gape,
+                  reach=(45 * back - 10 * fall, 45 * back - 10 * fall), spread=15 * back)
+        return dict(fk=fk, loc=V((0, -0.35 * fall, 0.08 * back - 0.08 * fall)))
+    clip.run("attack", 30, attack)
+
+    def hit(t):
+        k = math.sin(math.pi * min(1.0, t / 0.25)) if t < 0.25 else (1 - ease((t - 0.25) / 0.75)) * 0.8
+        j = math.sin(2 * math.pi * 5 * t) * k
+        fk = pose(lean=-10 * k, sway=8 * j, top=-10 * j, gape=10 * k)
+        return dict(fk=fk, loc=V((0, 0.12 * k, -0.04 * k)))
+    clip.run("hit", 16, hit)
+
+    def death(t):
+        k = ease(t / 0.85)
+        fk = pose(lean=25 * k, top=35 * k, gape=20 * ease(t / 0.3), reach=(-30 * k, -30 * k), spread=30 * k)
+        return dict(fk=fk, loc=V((0, 0.1 * k, -0.62 * k)))
+    clip.run("death", 54, death)
+
+    # -- quiver: a shudder that runs through it, the pseudopods drawn in.
+    def quiver(t):
+        k = ease(t / 0.15) * (1 - ease((t - 0.7) / 0.3))
+        j = math.sin(2 * math.pi * 9 * t)
+        fk = pose(sway=5 * j * k, top=-6 * j * k, gape=6 * k, reach=(-25 * k, -25 * k), curl=(30 * k, 30 * k))
+        return dict(fk=fk, loc=V((0.012 * j * k, 0, 0.01 * k)))
+    clip.run("quiver", 60, quiver)
+
+    return {"clips": clip.report, "stride": {"walk": g["walk_stride"], "run": g["run_stride"]}, "hit": 0.5}
+
+
 # ============================================================ library
 
-SPECS = [lizard, rabbit, snail]
+SPECS = [lizard, rabbit, snail, beast, blob]
 
 
 def build_one(spec, export=True):
