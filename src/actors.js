@@ -1248,9 +1248,21 @@ export function createPlayerFigure({
  * the dragon master, the Dragonknights and the attendant of the dragon are
  * people.
  */
-const NOT_A_BEAST = /\b(were(?!rats?\b)\w+|ettin|herald|horseman|horsehead|nebula|vampire|lamia|centaur|minotaur|master|dragonlord|dragonknight|hierophant|attendant)\b/;
+const NOT_A_BEAST = /\b(were(?!rats?\b)\w+|ettin|herald|horseman|horsehead|nebula|vampire|minotaur|master|dragonlord|dragonknight|hierophant|attendant)\b/;
 
 const BEASTS = [
+  // --- the taurs (tools/blender/hybrids.py): a person's top half where an
+  // animal's neck would be. The coat is the animal, pale the skin, points
+  // the hair (and a horse's tail and stockings). Wyvern's Tower's centaurs
+  // have 'the upper torso of a man and lower body of a horse' -- a woman's,
+  // for the two mares; the old ones and the chief keep their beards.
+  { test: /\bfemale centaurs?\b|\bcentaurs?\b.*\b(female|mare)\b/, asset: 'beast_centaur_f', scale: 0.96, coats: 'centaur', box: [1.2, 2.0, 'quad', 0x6a4226] },
+  { test: /\b(old|elder|chief)\b.*\bcentaurs?\b|\bcentaurs?\b.*\b(old|elder|chief)\b/, asset: 'beast_centaur', scale: 1.04, coats: 'centaur_old', box: [1.2, 2.0, 'quad', 0x6a4226] },
+  { test: /\bcentaur guards?\b/, asset: 'beast_centaur', scale: 1.06, coats: 'centaur', hide: ['beard'], temper: { alarm: ['alert', 4.5] }, box: [1.2, 2.0, 'quad', 0x6a4226] },
+  { test: /\bcentaurs?\b/, asset: 'beast_centaur', scale: 1.0, coats: 'centaur', hide: ['beard'], box: [1.2, 2.0, 'quad', 0x6a4226] },
+  // Thalos's: 'the upper torso of a beautiful woman, but the lower body of
+  // a four-legged beast' -- a lioness's, as the bestiary has it.
+  { test: /\blamias?\b/, asset: 'beast_lamia', scale: 1.1, coat: 0xa8834e, pale: 0xd2a684, points: 0x2a1c14, box: [0.9, 1.9, 'quad', 0xa8834e] },
   // --- the monsters (tools/blender/monsters.py). First, because their names
   // borrow the animals' words: a wolf spider and a bird spider are spiders.
   // Half drow, half spider: the skin is the pale channel, the hair the points.
@@ -1425,6 +1437,21 @@ const COATS = {
     { coat: 0x8a4a28, pale: 0xe2d8cc, points: 0x8a4a28, patch: 0xe8e2d8, cover: 0.35 }, // red and white
     { coat: 0xb89a70, pale: 0xe0d2bc, points: 0x8a7050 }, // fawn
   ],
+  // A centaur's horse and the man on it: bay, chestnut, dun, black and
+  // grey under skin from fair to dark, the hair dark, auburn or black.
+  centaur: [
+    { coat: 0x6a4226, pale: 0xc69a78, points: 0x1e1712 },
+    { coat: 0x8a4f26, pale: 0xd8b090, points: 0x5a2a14 },
+    { coat: 0xa88a5a, pale: 0xb88a64, points: 0x2a201a },
+    { coat: 0x2a2420, pale: 0x8a5e40, points: 0x141110 },
+    { coat: 0x9c9890, pale: 0xd0a888, points: 0x3a2e24 },
+  ],
+  // The old, the elders and the chief: grey in the beard and the tail.
+  centaur_old: [
+    { coat: 0x6a4226, pale: 0xc69a78, points: 0x8e877c },
+    { coat: 0x9c9890, pale: 0xd0a888, points: 0xb4aea4 },
+    { coat: 0x8a4f26, pale: 0xb88a64, points: 0x9a9286 },
+  ],
   hen: [
     { coat: 0x8a4a26, pale: 0x9a5a30, points: 0x3a2418 }, // russet
     { coat: 0xe8e4dc, pale: 0xf0ece6, points: 0xcfc8bc }, // white
@@ -1452,7 +1479,10 @@ const COAT_WORDS = [
 const TEMPERS = [
   [/\bhiss(es|ing)?\b|\bfur up\b|\bspits?\b/, { alarm: ['hiss', 3.0] }],
   [/\b(preen(s|ing)?|grooming|washing)\b|\blicking (?!(its|his|her) lips)/, { odds: { groom: 5 } }],
-  [/\b(lounging|lazily|lazy|resting|rests|asleep|sleeping|dozing|curled)\b/, { odds: { loaf: 4, coil: 3, bask: 2 } }],
+  [/\b(lounging|lazily|lazy|resting|rests|reclines|reclining|asleep|sleeping|dozing|curled)\b/, { odds: { loaf: 4, coil: 3, bask: 2 } }],
+  // The lamia 'waiting for her next meal' who 'looks at you greedily'
+  // crooks a finger at whoever comes near.
+  [/\bnext meal\b|\bgreedily\b/, { alarm: ['beckon', 5.0] }],
   [/\bcoil(s|ed)?\b/, { odds: { coil: 6 } }],
   [/\bsits? on (her|his|its|a|the) nest\b|\bnesting\b|\bbrooding\b/, { odds: { brood: 12 } }],
   [/\bflapping\b/, { odds: { flap: 8 } }],
@@ -1471,6 +1501,13 @@ export function temperOf(proto) {
     if (t.odds) out.odds = { ...(out.odds || {}), ...t.odds };
   }
   return out;
+}
+
+/** A breed's own temper (BEASTS `temper`), with the mobile's prose over it. */
+function mergeTemper(base, own) {
+  if (!base) return own;
+  if (!own) return base;
+  return { ...base, ...own, odds: { ...(base.odds || {}), ...(own.odds || {}) } };
 }
 
 export function beastKind(proto) {
@@ -1777,7 +1814,7 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const record = {
     group, headGroup: null, height, scale, mixer, actions, clips, stride,
     hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
-    afloat, indoor, temper: temperOf(proto),
+    afloat, indoor, temper: mergeTemper(spec.temper, temperOf(proto)),
   };
   // A bat under a roof hangs from it while it is idle: its `roost` clip,
   // moved up from the height it was authored at (`info.roost`, in the

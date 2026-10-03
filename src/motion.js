@@ -119,6 +119,10 @@ const PASTIMES = {
   // A frog calls, its throat blown out, and snaps at what flies past.
   croak: { odds: 2, once: true, gap: [3, 8], rate: 5 },
   snap: { odds: 1, once: true, gap: [3, 8], rate: 6 },
+  // A centaur paws the ground with a forehoof, arms folded, watching it;
+  // a lamia crooks a finger at whoever comes near (her prose's `temper`).
+  paw: { odds: 1, once: true, gap: [4, 10], rate: 4 },
+  beckon: { odds: 0.4, once: true, gap: [5, 12], rate: 4 },
 };
 const PASTIME_NAMES = Object.keys(PASTIMES);
 /**
