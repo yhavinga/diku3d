@@ -49,7 +49,7 @@ const MONSTERS = [
   ['zombie', W('zombies?|ghouls?|ghasts?|corpses?|mummy|mummies|undead|revenants?|wights?|draugr')],
   // Anything troll-shaped: the troll rig at the right size and in the right
   // hide. Giants are not in it: see GIANT.
-  ['troll', W('trolls?|ogres?|ogrillons?|ettins?|gnolls?|orcs?|orcish|hobgoblins?|bugbears?|goblins?|kobolds?|gargoyles?|swamp ?thing|trogs?|troglodytes?|yeti|sasquatch|slaads?|lizard ?m[ae]n|bullywugs?')],
+  ['troll', W('trolls?|ogres?|ogrillons?|ettins?|gnolls?|orcs?|orcish|hobgoblins?|bugbears?|goblins?|kobolds?|gargoyles?|swamp ?thing|trogs?|troglodytes?|yeti|sasquatch|slaads?|lizard ?m[ae]n|bullywugs?|fire ?newts?')],
 ];
 
 /**
@@ -78,6 +78,10 @@ const SCHOOL_BRUTE = [
 
 /** A troll-rigged monster's size and hide, by what it is called. */
 const TROLL_KINDS = [
+  // The fire newts are a people -- workers, guards, mothers, a priest -- of
+  // upright newts, the colour of the fire they live by; their young small.
+  [/\bfire ?newts?\b.*\bbab(y|ies)\b/i, { scale: 0.5, skin: 0xa0482a }],
+  [W('fire ?newts?'), { scale: 0.95, skin: 0x9a4426 }],
   [W('baby'), { scale: 0.75, skin: 0x6a7a55 }],
   [W('young'), { scale: 1.0, skin: 0x667452 }],
   // A giant or an ogre is one whatever marsh it lives in; a troll's size
@@ -226,7 +230,7 @@ const ARMED = new Set(['guard', 'knight', 'rogue', 'smith', 'troll', 'skeleton',
  * figure for these.
  */
 const CREATURE = W('beasts?|worms?|snakes?|serpents?|dragons?|drakes?|wyrms?|wyverns?|foxe?s?|deer|stags?|does|wargs?|wolf|wolves|will-o-wisp|wisps?|mounds?|slimes?|oozes?|jell(y|ies)|spiders?|scorpions?|beetles?|ants?|bats?|lizards?|toads?|frogs?|leeches?|eels?|fish|sharks?|crabs?|squids?|octopus|elementals?|golems?|hydras?|basilisks?|cockatrices?|griffons?|gryphons?|manticores?|chimaeras?|unicorns?|pegasus|centipedes?|slugs?|crocodiles?|alligators?|boars?|cows?|bulls?|horses?|pigs?|chickens?|hens?|roosters?|geese|goose|ducks?|ducklings?|swans?|sparrows?|birds?|crows?|ravens?|hawks?|eagles?|owls?|cats?|kittens?|dogs?|puppy|puppies|fido|beagles?|rottweilers?|bears?|rats?|mice|mouse|sheep|goats?|mules?|donkeys?|oxen|ox|calf|calves|lions?|tigers?|panthers?|apes?|monkeys?|gorillas?|' +
-  'rabbits?|bunn(y|ies)|chimeras?|rocs?|griffins?|minotaurs?|centaurs?|treants?|trees?|willows?|plants?|weeds|puddings?|blobs?|monsters?|creatures?|snails?|camels?|antelopes?|ewes?|beholders?|mimics?|mists?|mistlings?|horrors?|nightgaunts?|mi-go|fungi|myconoids?|lemures?|maggots?|morkoths?|mudmonsters?|homonculus|effreetis?|efreets?|djinn|does?|wasps?|harp(y|ies)|nagas?|ki-rin|mermaids?|stars?|nebulas?|comets?|supergiants?|flames?|hurricanes?|magneto|dolls?|brooms?|dancing|hands|eyes|quasits?|imps?|yochlols?|driders?|lamias?|dustdiggers?|puff|newts?|shadows?|dervish|daemons?|demons?|devils?|mindflayers?|dustdigger|chreffn|draco|pleiades|polaris|aries|taurus|gemini|cancer|leo|virgo|libra|scorpio|sagittarius|capricon|aquarius|it');
+  'rabbits?|bunn(y|ies)|chimeras?|rocs?|griffins?|minotaurs?|centaurs?|treants?|trees?|willows?|plants?|weeds|puddings?|blobs?|monsters?|creatures?|snails?|camels?|antelopes?|ewes?|beholders?|mimics?|mists?|mistlings?|horrors?|nightgaunts?|mi-go|fungi|myconoids?|lemures?|maggots?|morkoths?|mudmonsters?|homonculus|effreetis?|efreets?|djinn|does?|wasps?|harp(y|ies)|nagas?|ki-rin|mermaids?|stars?|nebulas?|comets?|supergiants?|flames?|hurricanes?|magneto|dolls?|brooms?|dancing|hands|eyes|quasits?|imps?|yochlols?|driders?|lamias?|dustdiggers?|puff|(?<!fire )newts?|shadows?|dervish|daemons?|demons?|devils?|mindflayers?|dustdigger|chreffn|draco|pleiades|polaris|aries|taurus|gemini|cancer|leo|virgo|libra|scorpio|sagittarius|capricon|aquarius|it');
 
 /**
  * People the creature words would take for beasts, or monsters with a face
