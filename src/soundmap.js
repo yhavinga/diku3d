@@ -33,6 +33,152 @@ export const SURFACE = {
   // 'cloud' (the air rooms) is deliberately absent: nobody walks there.
 };
 
+// ---------------------------------------------------------------- one-shots --
+
+/**
+ * Name -> the clips a call can draw from (a sheet is cut into variants, see
+ * tools/audio/generate.mjs; several sheets are one pool), and how loud. audio.js
+ * keeps its synthesised sound for each of these as what plays until the clip has
+ * loaded. Gains are against a footstep clip, which plays at 0.55: every clip here
+ * is peak-normalised, so the gain is also how loud the thing is meant to be.
+ */
+export const SOUNDS = {
+  hit_flesh: { clips: ['cmb_hit_flesh', 'cmb_hit_flesh_b'], gain: 1 },
+  hit_stab: { clips: ['cmb_hit_stab'], gain: 1 },
+  hit_claw: { clips: ['cmb_hit_claw'], gain: 1 },
+  hit_blunt: { clips: ['cmb_hit_blunt', 'cmb_hit_blunt_b'], gain: 1 },
+  hit_armour: { clips: ['cmb_hit_armour'], gain: 0.9 },
+  parry: { clips: ['cmb_parry', 'cmb_parry_b'], gain: 0.8 },
+  swing: { clips: ['cmb_swing', 'cmb_swing_b'], gain: 0.55 },
+  dodge: { clips: ['cmb_dodge'], gain: 0.7 },
+  death_human: { clips: ['cmb_death_human', 'cmb_death_human_b'], gain: 0.8 },
+  death_beast: { clips: ['cmb_death_beast'], gain: 0.8 },
+  death_small: { clips: ['cmb_death_small'], gain: 0.7 },
+  bodyfall: { clips: ['cmb_bodyfall'], gain: 0.9 },
+  pain: { clips: ['cmb_pain'], gain: 0.7 },
+  levelup: { clips: ['ui_levelup'], gain: 0.55 },
+  door_open: { clips: ['dr_open', 'dr_open_b'], gain: 0.8 },
+  door_close: { clips: ['dr_close', 'dr_close_b'], gain: 0.8 },
+  lock: { clips: ['dr_unlock'], gain: 0.7 },
+  lockpick: { clips: ['dr_lockpick'], gain: 0.7 },
+  coins: { clips: ['sv_coins', 'sv_coins_b'], gain: 0.6 },
+  pickup: { clips: ['sv_pickup'], gain: 0.8 },
+  drop: { clips: ['sv_drop'], gain: 0.9 },
+  eat: { clips: ['sv_eat'], gain: 0.7 },
+  drink: { clips: ['sv_drink'], gain: 0.8 },
+  fill: { clips: ['sv_fill'], gain: 0.7 },
+  shopbell: { clips: ['sv_shopbell'], gain: 0.5 },
+  page: { clips: ['ui_page'], gain: 0.6 },
+  bell: { clips: ['bell_toll_a', 'bell_toll_b'], gain: 0.5 },
+  thunder: { clips: ['wx_thunder', 'wx_thunder_b'], gain: 0.9 },
+  spell_gather: { clips: ['sp_gather'], gain: 0.6 },
+  spell_missile: { clips: ['sp_missile'], gain: 0.6 },
+  spell_fire: { clips: ['sp_fire'], gain: 0.8 },
+  spell_lightning: { clips: ['sp_lightning'], gain: 0.8 },
+  spell_frost: { clips: ['sp_frost'], gain: 0.6 },
+  spell_acid: { clips: ['sp_acid'], gain: 0.6 },
+  spell_heal: { clips: ['sp_heal'], gain: 0.55 },
+  spell_dark: { clips: ['sp_dark'], gain: 0.6 },
+  spell_rumble: { clips: ['sp_rumble'], gain: 0.9 },
+  spell_pop: { clips: ['sp_pop'], gain: 0.6 },
+  spell_fizzle: { clips: ['sp_fizzle'], gain: 0.5 },
+  spell_prism: { clips: ['sp_prism'], gain: 0.55 },
+  spell_portal: { clips: ['sp_portal'], gain: 0.6 },
+  spell_roar: { clips: ['cr_dragon'], gain: 0.8 },
+};
+
+/**
+ * Sounds loaded as soon as the game begins, in this order, one after another: all
+ * of them are heard often enough that a first blow or first fireball must not be a
+ * synth. Only thunder waits for a storm, and creatures for someone to be near.
+ */
+export const PRELOAD = Object.keys(SOUNDS).filter((name) => name !== 'thunder');
+
+// ----------------------------------------------------------------- creatures --
+
+/**
+ * Which mobiles have a voice, matched on keywords and short description (the
+ * words a builder wrote for what it is, unlike a room name there is no
+ * neighbouring prose to mistake it for). First match wins.
+ *   idle   clips for a call now and then while it is within `reach` metres
+ *   fight  clips while it is fighting; `death` the sound it makes dying
+ *   night  only after dark; `rate` pitch range (a lizard is a small snake)
+ * Silent on purpose: rabbits, worms, slimes, fish.
+ */
+export const CREATURES = [
+  { id: 'baby dragon', re: /\b(hatchling|baby|young|pet|fairy)\b.*\bdragon\b|\bdragon\b.*\b(hatchling|baby|pet)\b/, idle: ['cr_cat'], rate: [1.5, 1.8], gain: 0.5, every: [14, 40], reach: 12, death: 'death_small' },
+  { id: 'dragon', re: /\b(dragon|wyrm|wyvern|hydra)\b/, idle: ['cr_dragon'], fight: ['cr_dragon'], gain: 0.8, every: [30, 80], reach: 30, death: 'death_beast' },
+  { id: 'spider', re: /\b(spider|arachnos|arachnid|tarantula)\b/, idle: ['cr_spider'], fight: ['cr_spider'], gain: 0.55, every: [15, 50], reach: 14, death: 'death_small' },
+  { id: 'wolf', re: /\b(wolf|wolves|werewolf)\b/, idle: ['cr_wolf'], night: true, fight: ['cr_dog_growl'], gain: 0.7, every: [25, 70], reach: 45, rate: [0.9, 1.05], death: 'death_beast' },
+  { id: 'dog', re: /\b(dog|hound|fido|beagle|cooshee|pit ?bull|puppy)\b/, idle: ['cr_dog'], fight: ['cr_dog_growl', 'cr_dog'], gain: 0.7, every: [12, 40], reach: 20, death: 'death_beast' },
+  { id: 'fox', re: /\b(fox|jackal|coyote)\b/, idle: ['cr_dog'], fight: ['cr_dog_growl'], rate: [1.35, 1.5], gain: 0.5, every: [20, 60], reach: 14, death: 'death_small' },
+  { id: 'cat', re: /\b(cat|kitten|familiar|panther|lion|tiger|cougar|leopard)\b/, idle: ['cr_cat'], fight: ['cr_dog_growl'], gain: 0.6, every: [15, 45], reach: 12, death: 'death_small' },
+  { id: 'bear', re: /\b(bear|ursa)\b(?!.*\bteddy)/, idle: ['cr_bear'], fight: ['cr_bear'], gain: 0.8, every: [20, 60], reach: 22, death: 'death_beast' },
+  { id: 'horse', re: /\b(horse|pegasus|pony|mule|donkey|stallion|mare|unicorn)\b/, idle: ['cr_horse'], gain: 0.7, every: [15, 50], reach: 22, death: 'death_beast' },
+  { id: 'deer', re: /\b(deer|stag|antelope|elk|moose)\b/, idle: ['cr_deer'], gain: 0.55, every: [30, 90], reach: 30, death: 'death_beast' },
+  { id: 'goat', re: /\b(goat|sheep|ram|lamb)\b/, idle: ['cr_goat'], gain: 0.6, every: [12, 40], reach: 18, death: 'death_beast' },
+  { id: 'cow', re: /\b(cow|bull|ox|oxen|cattle|calf)\b/, idle: ['cr_cow'], gain: 0.7, every: [15, 50], reach: 22, death: 'death_beast' },
+  { id: 'pig', re: /\b(pig|boar|sow|hog|swine)\b/, idle: ['cr_pig'], fight: ['cr_pig'], gain: 0.65, every: [12, 40], reach: 18, death: 'death_beast' },
+  { id: 'chicken', re: /\b(chicken|hen|rooster|cock|chick)\b/, idle: ['cr_chicken'], gain: 0.55, every: [10, 35], reach: 16, death: 'death_small' },
+  { id: 'snake', re: /\b(snake|python|anaconda|serpent|viper|cobra|adder)\b/, idle: ['cr_snake'], fight: ['cr_snake'], gain: 0.55, every: [15, 45], reach: 10, death: 'death_small' },
+  { id: 'lizard', re: /\b(lizard|newt|gecko|salamander|basilisk|lamia)\b/, idle: ['cr_snake'], fight: ['cr_snake'], rate: [1.25, 1.45], gain: 0.5, every: [15, 45], reach: 10, death: 'death_small' },
+  { id: 'bat', re: /\b(bat)\b/, idle: ['cr_bat'], fight: ['cr_bat'], gain: 0.55, every: [12, 35], reach: 14, death: 'death_small' },
+  { id: 'rat', re: /\b(rat|wererat|mouse|mice|rodent)\b/, idle: ['cr_rat'], fight: ['cr_rat'], gain: 0.55, every: [10, 35], reach: 12, death: 'death_small' },
+  { id: 'frog', re: /\b(frog|toad)\b/, idle: ['cr_frog'], gain: 0.5, every: [8, 25], reach: 14, death: 'death_small' },
+  { id: 'beast', re: /\b(beast|ghoul|zombie|troll|ogre|minotaur|wraith|demon|fiend|gargoyle|golem|treant)\b/, idle: [], fight: ['cr_beast'], gain: 0.7, every: [20, 60], reach: 16, death: 'death_beast' },
+];
+
+// A "dragon master" or a "minotaur butler" is a person: no voice but a person's.
+const PERSON = /\b(master|attendant|keeper|butler|citizen|villager|mage|cleric|priest|shaman|sergeant|general|leader|captain|herald|knight|lord|slave|servant|guard|gatekeeper|chieftain|paladin|druid|ranger|thief|teddy|ettin|maker|gang)\b/;
+const creatureCache = new Map();
+/** The voice rule for a mobile's words, or null. Cached on the words. */
+export function creatureOf(words) {
+  const key = (words || '').toLowerCase();
+  if (!creatureCache.has(key)) creatureCache.set(key, (PERSON.test(key) ? null : CREATURES.find((c) => c.re.test(key))) || null);
+  return creatureCache.get(key);
+}
+
+// ------------------------------------------------------------ positional --
+
+/**
+ * Sounds that sit on a thing in the room and are panned from it. `reach` is how
+ * far off they are heard; a room names its hearth or its forge in its prose
+ * (build.js reads the same words to put one there), and the name is checked
+ * first because a description may mention the smithy next door.
+ */
+export const PLACE_LOOPS = {
+  fountain: { clip: 'pos_fountain', reach: 22, gain: 1.0 },
+  fire: { clip: 'pos_fire', reach: 11, gain: 0.8 },
+  forge: { clip: 'pos_forge', reach: 16, gain: 0.9 },
+};
+
+const FIRE = /\b(fireplace|hearth|campfire|bonfire|brazier)\b/i;
+const FORGE = /\b(forge|smithy|anvil|blacksmith|furnace)\b/i;
+// build.js puts a forge in a weapon shop; the name alone says so.
+const FORGE_NAME = /\b(forge|smithy|blacksmith|weapon ?shop|house of arms)\b/i;
+const WALL = /\b(north|south|east|west)(?:ern)?\s+(?:wall|side|end)\b/i;
+const TOWARD = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] };
+
+/**
+ * `{ kind, dx, dz }` for a room that has a fire or a forge in it (dx/dz: metres
+ * from the room's centre, towards the wall the prose names, else the middle,
+ * which is where the player arrives -- so offset a little anyway). Indoors only:
+ * an outdoor "forge" in a field is a name.
+ */
+export function placeLoopOf(room, openAir) {
+  if (openAir) return null;
+  const text = `${room.name}. ${room.description || ''}`;
+  const forge = FORGE_NAME.test(room.name) || (FORGE.test(room.description || '') && /\b(hammer|bellows|iron)\b/i.test(room.description || ''));
+  const fire = FIRE.test(text);
+  if (!forge && !fire) return null;
+  const kind = forge ? 'forge' : 'fire';
+  // The wall named closest after the word, as build.js's fitting reader takes it.
+  const hit = (forge ? FORGE : FIRE).exec(text);
+  const after = hit ? WALL.exec(text.slice(hit.index, hit.index + 140)) : null;
+  const [ux, uz] = after ? TOWARD[after[1].toLowerCase()] : [0.7, 0.7];
+  return { kind, dx: ux * 3.4, dz: uz * 3.4 };
+}
+
 // ------------------------------------------------------------------ ambience --
 
 const has = (re) => (p) => re.test(p.name);
