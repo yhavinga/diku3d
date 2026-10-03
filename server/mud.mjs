@@ -89,7 +89,7 @@ export async function startMud({
   const fingerprint = (() => {
     let h = 2166136261;
     const mix = (n) => { h ^= n; h = Math.imul(h, 16777619) >>> 0; };
-    for (const slot of game.mobs) { mix(slot.proto.vnum); mix(slot.roomVnum); }
+    for (const slot of game.mobs) { mix(slot.proto.vnum); mix(slot.originRoom ?? slot.roomVnum); }
     return { rooms: w.world.rooms.size, mobs: game.mobs.length, hash: h.toString(16) };
   })();
 

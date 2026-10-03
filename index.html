@@ -201,6 +201,37 @@
     border: 1px solid rgba(224,189,119,0.45); padding: 10px 22px; border-radius: 2px; }
   #continue:hover { background: rgba(224,189,119,0.08); }
   #continue[hidden] { display: none; }
+  /* The other door: a server (src/link-ui.js). Playing alone stays the big one. */
+  #connect-open { margin-top: 2px; pointer-events: auto; cursor: pointer; font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); background: transparent; border: none;
+    padding: 6px 0; opacity: 0.72; text-decoration: underline; text-decoration-color: rgba(224,189,119,0.35); text-underline-offset: 4px; }
+  #connect-open:hover { opacity: 1; }
+  #connect { pointer-events: auto; display: grid; gap: 8px; margin-top: 4px; width: min(420px, 80vw);
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; color: var(--gold);
+    background: rgba(8,7,6,0.62); border: 1px solid rgba(224,189,119,0.3); border-radius: 2px; padding: 14px 16px; }
+  #connect[hidden], #connect-new[hidden], #link-lost[hidden] { display: none; }
+  #connect label { display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 10px; text-transform: uppercase; opacity: 0.9; }
+  #connect input { font: 13px var(--mono); letter-spacing: 0.04em; color: #f4e7cb; background: rgba(0,0,0,0.45);
+    border: 1px solid rgba(224,189,119,0.32); border-radius: 2px; padding: 6px 8px; outline: none; }
+  #connect input:focus { border-color: rgba(224,189,119,0.85); }
+  #connect-new { display: grid; gap: 8px; }
+  #connect-confirm { margin: 2px 0; text-transform: none; letter-spacing: 0.04em; font-size: 12px; color: #f4e7cb; }
+  .connect-pick { display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 10px; text-transform: uppercase; }
+  .connect-pick button, .connect-actions button { font: inherit; letter-spacing: inherit; text-transform: uppercase; cursor: pointer;
+    color: var(--gold); background: rgba(8,7,6,0.4); border: 1px solid rgba(224,189,119,0.26); padding: 5px 9px; border-radius: 2px; margin-right: 4px; opacity: 0.7; }
+  .connect-pick button.on, .connect-pick button:hover, .connect-actions button:hover { opacity: 1; border-color: rgba(224,189,119,0.8); }
+  .connect-actions { display: flex; gap: 6px; margin-top: 4px; }
+  .connect-actions #connect-go { color: #0d0c0a; background: var(--gold); opacity: 1; }
+  .connect-actions #connect-go:disabled { opacity: 0.5; cursor: wait; }
+  #connect-status { margin: 0; min-height: 1.2em; text-transform: none; letter-spacing: 0.03em; font-size: 12px; line-height: 1.45; color: #f4e7cb; }
+  #connect-status.bad { color: #ffb3a1; }
+  /* Connecting, the page's own class row and saved game are not what is being chosen. */
+  #title.connecting #keys, #title.connecting #class-pick, #title.connecting #continue { display: none; }
+  #link-lost { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 40; display: flex; gap: 14px; align-items: center;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; color: #f4e7cb; background: rgba(20,8,6,0.88);
+    border: 1px solid rgba(255,160,130,0.5); padding: 10px 14px; border-radius: 2px; }
+  #link-lost p { margin: 0; }
+  #link-lost button { font: inherit; cursor: pointer; color: #0d0c0a; background: var(--gold); border: none; padding: 6px 12px; border-radius: 2px; }
   #keys {
     margin-top: 14px; display: grid; grid-template-columns: auto minmax(0, min(560px, 42vw)); gap: 5px 20px;
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; opacity: 0.8;
@@ -367,6 +398,7 @@
 
 <div id="fade"></div>
 <div id="hint">click to look around</div>
+<div id="link-lost" hidden><p id="link-lost-text"></p><button id="link-lost-reload" type="button">reload</button></div>
 
 <div id="title" class="hidden">
   <div id="title-veil"></div>
@@ -375,6 +407,20 @@
   <button id="enter">enter the temple</button>
   <div id="class-pick"><span>as a</span><button data-class="3" class="on">warrior</button><button data-class="0">mage</button><button data-class="1">cleric</button><button data-class="2">thief</button></div>
   <button id="continue" hidden></button>
+  <button id="connect-open" type="button">connect to a server</button>
+  <form id="connect" hidden autocomplete="on">
+    <label>server <input id="connect-address" spellcheck="false" autocapitalize="off" autocomplete="url"></label>
+    <label>name <input id="connect-name" maxlength="12" spellcheck="false" autocapitalize="off" autocomplete="username"></label>
+    <label>password <input id="connect-password" type="password" autocomplete="current-password"></label>
+    <div id="connect-new" hidden>
+      <p id="connect-confirm"></p>
+      <label>again <input id="connect-password2" type="password" autocomplete="new-password"></label>
+      <div class="connect-pick"><span>class</span><span id="connect-class"></span></div>
+      <div class="connect-pick"><span>sex</span><span id="connect-sex"></span></div>
+    </div>
+    <div class="connect-actions"><button type="submit" id="connect-go">connect</button><button type="button" id="connect-alone">play alone</button></div>
+    <p id="connect-status" role="status" aria-live="polite"></p>
+  </form>
   <div id="keys">
     <b>W A S D</b><span>walk · shift to run</span>
     <b>arrows</b><span>take the exit n / e / s / w · pg up, pg dn for up, down</span>

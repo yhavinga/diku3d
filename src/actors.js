@@ -984,6 +984,103 @@ function buildPerson(library, who, proto, instance) {
 
 
 /**
+ * Another player, in a page connected to a server: a person dressed the way
+ * people.js dresses a mobile of that trade (a warrior as a soldier, a mage
+ * in robes, a cleric as a priest, a thief as a rogue), holding what they
+ * wield, with their name over their head.
+ *
+ * Not one of motion.js's figures: those plan their own paths, and where a
+ * player stands is not this page's to decide. The body is put where the
+ * server says (src/link.js interpolates the reports) and its legs follow
+ * from how fast that point moves -- idle, walk or run, each clip played at
+ * the rate its own stride covers the ground, as motion.js times a walk.
+ *
+ * `roomAt(x, y, z)` is the drawn zone's room record at a point, for lighting
+ * the body as the room is lit (indoors, or underground).
+ */
+export function createPlayerFigure({
+  library, name, title = '', cls = 3, sex = 1, level = 1, weapon = 0, shield = 0, objProtos = null, roomAt = null,
+}) {
+  const trade = ['mage', 'cleric', 'thief', 'warrior'][cls] || 'warrior';
+  const gear = [[weapon, 16], [shield, 11]]
+    .map(([vnum, wearLoc]) => (vnum && objProtos && objProtos.get(vnum) ? { proto: objProtos.get(vnum), wearLoc } : null))
+    .filter(Boolean);
+  const proto = {
+    vnum: 0, keywords: `${name.toLowerCase()} ${trade} ${sex === 2 ? 'woman' : 'man'}`,
+    short: `${name}${title}`, long: '', description: '', level, sex, act: 0, equipment: gear,
+  };
+  const seed = Math.floor(strHash(name, 7) * 1e6);
+  const who = personOf(proto, ITEM, seed);
+  const made = who && library && library.has(who.file) ? buildPerson(library, who, proto, seed) : buildFigure(proto);
+  const group = new THREE.Group();
+  group.name = `player ${name}`;
+  group.add(made.group);
+  const label = makeLabel(name, 0.34);
+  label.position.y = made.height + 0.34;
+  group.add(label);
+
+  const actions = made.actions || null;
+  const natural = (clip, fallback) => (made.stride && made.clips && made.clips[clip] ? made.stride[clip] / made.clips[clip] : fallback);
+  const walkSpeed = natural('walk', 1.3);
+  const runSpeed = natural('run', 3.6);
+  const weights = { idle: 1, walk: 0, run: 0 };
+  let speed = 0;
+  let yawNow = null;
+  let lit = null;
+
+  /**
+   * One frame: stand at `feet`, face `yaw` (the camera's convention: forward
+   * is (-sin, -cos)), and move the legs for `pace` metres a second.
+   */
+  function update(dt, feet, yaw, pace) {
+    group.position.set(feet.x, feet.y, feet.z);
+    // A figure faces +Z at yaw 0; the camera looks down -Z.
+    const want = yaw + Math.PI;
+    if (yawNow === null) yawNow = want;
+    const turn = Math.atan2(Math.sin(want - yawNow), Math.cos(want - yawNow));
+    yawNow += turn * Math.min(1, dt * 10);
+    made.group.rotation.y = yawNow;
+    speed += (pace - speed) * Math.min(1, dt * 6);
+    if (roomAt && made.indoor) {
+      const info = roomAt(feet.x, feet.y, feet.z);
+      if (info) lit = { indoor: info.outdoor ? 0 : 1, buried: info.cell.level < 0 ? 1 : 0 };
+      if (lit) {
+        made.indoor.value += THREE.MathUtils.clamp(lit.indoor - made.indoor.value, -dt * 2, dt * 2);
+        if (made.buried) made.buried.value += THREE.MathUtils.clamp(lit.buried - made.buried.value, -dt * 2, dt * 2);
+      }
+    }
+    if (!actions || !made.mixer) return;
+    const runFrom = (walkSpeed * 1.25 + runSpeed) / 2;
+    const target = speed < 0.25 ? 'idle' : (speed < runFrom ? 'walk' : 'run');
+    for (const clip of ['idle', 'walk', 'run']) {
+      weights[clip] += ((clip === target ? 1 : 0) - weights[clip]) * Math.min(1, dt * 8);
+      actions[clip].setEffectiveWeight(weights[clip]);
+    }
+    actions.walk.timeScale = Math.max(0.4, speed / walkSpeed);
+    actions.run.timeScale = Math.max(0.6, speed / runSpeed);
+    made.mixer.update(dt);
+  }
+
+  /** A blow, or one taken: the clip once, over whatever the legs are doing. */
+  function perform(clip) {
+    const action = actions && actions[clip];
+    if (!action) return;
+    action.reset();
+    action.setEffectiveWeight(1);
+    action.fadeOut(0.5);
+    action.play();
+  }
+
+  return {
+    group, height: made.height, update, perform,
+    dispose() {
+      group.removeFromParent();
+      label.material.dispose();
+    },
+  };
+}
+
+/**
  * Not everything in a mud is a person. Midgaard alone has a swan, a sparrow, a
  * wolf, two puppies and a duckling; the Shire keeps cows, pigs, hens and
  * horses; Haon Dor has a bear, a deer, a fox and a pack of wolves.

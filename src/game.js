@@ -1074,8 +1074,9 @@ export const FAR = 1e7;
  */
 export function createGame({
   world, layout, built, actors = null, seed, classIndex = 3, nav = null, zoneOf = null,
-  server = null, puppet = false,
+  server = null, puppet: startAsPuppet = false,
 } = {}) {
+  let puppet = startAsPuppet;
   const rng = new Rng(seed);
   const events = [];
   const listeners = [];
@@ -3044,6 +3045,13 @@ export function createGame({
       if (!result.ok) emit({ kind: 'note', text: result.text });
       return result;
     },
+    /**
+     * The mobile in your crosshair and reach, as `attack` and an offensive
+     * `cast` pick it (facingTarget) -- for a page whose rules are a server's.
+     */
+    facingSlot: (reach = REACH, cone = 0.45) => facingTarget(reach, cone),
+    /** An event the server decided, into this game's stream (src/link.js). */
+    inject(event) { emit(event); },
     /** Start over as another class -- the title screen's choice, before you play. */
     chooseClass(index, { level = 1 } = {}) {
       if (state.fighting) return false;
@@ -3299,7 +3307,7 @@ export function createGame({
   // hitch in the first second of play -- so their spec_funs run unwatched.
   for (const slot of mobs) if (!slot.here) wake(slot, wanderRng);
 
-  installRules({
+  const kernel = {
     world, rng, wanderRng,
     // Whoever's turn it is (bind): read when used, or follow it with onBind.
     get state() { return state; },
@@ -3325,7 +3333,162 @@ export function createGame({
     gainCondition, unequipChar, equipChar, wearObj, getCost, canCarryN, canCarryW, carriedWeight,
     grace: (s) => { current.invulnerable = s; },
     invulnerable: () => current.invulnerable,
-  });
+  };
+  installRules(kernel);
+
+  // -- the page's copy of a server's game -----------------------------------
+  /**
+   * In a page connected to a server the rules are the server's: this game
+   * stops running them (`puppet`) and is told instead what the mud decided
+   * -- where each mobile is and whom it fights, what lies on the ground, what
+   * your character is now -- and keeps the bodies, the walking and the
+   * strolling, which are the page's. src/link.js is the one caller.
+   */
+  const remotes = new Map();
+  /** A reference off the wire ({ me }, { m }, { p }) to a character here. */
+  function resolveRef(ref) {
+    if (!ref) return null;
+    if (ref.me) return state;
+    if (ref.m !== undefined) { const slot = mobs[ref.m]; return slot && !slot.dead ? wake(slot) : null; }
+    if (ref.p !== undefined) return remotes.get(ref.p)?.ch || null;
+    return null;
+  }
+
+  /** One mobile as the server has it: [room, body, fighting, hp, max hp, level, travelling to, door]. */
+  function mirrorMob(index, [room, body, fighting, hp, maxHp, level, travelTo, door]) {
+    const slot = mobs[index];
+    if (!slot) throw new Error(`game.js: the server names mobile ${index}, and this world has ${mobs.length}`);
+    if (!slot.here) { slot.roomVnum = room; slot.dead = body > 0; if (body > 0) slot.instance = null; return; }
+    if (body > 0) {
+      if (!slot.dead) {
+        const mob = slot.instance;
+        if (state.fighting && state.fighting === mob) state.fighting = null;
+        slot.dead = true;
+        slot.instance = null;
+        slot.travel = null;
+        slot.task = null;
+        layOut(slot);
+      }
+      if (body === 2 && slot.order && slot.order.kind !== 'gone') removeBody(slot);
+      return;
+    }
+    // Back from the dead: an area reset on the server, the body walking in.
+    if (slot.dead) kernel.respawn(slot);
+    if (travelTo !== null) {
+      if (!slot.travel) {
+        if (slot.roomVnum !== room) standIn(slot, room);
+        moveMobile(slot, door);
+      }
+    } else if (!slot.travel && slot.roomVnum !== room) {
+      // The mud put it somewhere this page did not see it go.
+      standIn(slot, room);
+    }
+    const mob = wake(slot);
+    if (hp !== null) { mob.hit = hp; mob.maxHit = maxHp; mob.level = level; }
+    const foe = resolveRef(fighting);
+    mob.fighting = foe;
+    if (foe) mob.position = POS.FIGHTING;
+    else if (mob.position === POS.FIGHTING) mob.position = POS.STANDING;
+  }
+  function standIn(slot, room) {
+    if (!built.rooms.has(room) || built.rooms.get(room).unbuilt) { slot.roomVnum = room; return; }
+    const at = ringSpot(room, 1 + (mobs.indexOf(slot) % 5), 6);
+    slot.roomVnum = room;
+    embody(slot, at);
+    if (slot.figure && actors && actors.respawn) actors.respawn(slot.figure, at);
+    order(slot, { kind: 'stroll', room });
+  }
+
+  /**
+   * What lies in the drawn zone, by the server's ids. Scenery the reset table
+   * put here (a fountain, a desk) stays the page's own object -- actors.js
+   * drew it and E finds it by room, vnum and reset index -- and takes the
+   * server's id and contents; anything else is the server's word entirely.
+   */
+  const mirrored = new Map();
+  function mirrorObject(view, obj = null) {
+    if (!obj) {
+      const proto = world.objProtos.get(view.vnum);
+      obj = proto ? createObject(proto, view.level) : makeObject({});
+    }
+    obj.mirrorId = view.id;
+    for (const key of ['vnum', 'name', 'keywords', 'description', 'itemType', 'wearFlags', 'extraFlags', 'weight', 'cost', 'level', 'timer']) {
+      if (view[key] !== undefined) obj[key] = view[key];
+    }
+    obj.values = view.values.slice();
+    obj.contains = (view.contains || []).map((inner) => mirrorObject(inner, mirrored.get(inner.id) || null));
+    for (const inner of obj.contains) mirrored.set(inner.mirrorId, inner);
+    if (view.owner) obj.owner = view.owner;
+    return obj;
+  }
+  function mirrorGround(list) {
+    const keep = new Set();
+    for (const view of list) {
+      if (!built.rooms.has(view.inRoom)) continue;
+      let obj = mirrored.get(view.id);
+      if (!obj && view.resetIndex !== undefined) {
+        obj = ground.find((o) => o.mirrorId === undefined && o.inRoom === view.inRoom && o.vnum === view.vnum && o.resetIndex === view.resetIndex) || null;
+      }
+      const fresh = !obj || !ground.includes(obj);
+      obj = mirrorObject(view, obj);
+      mirrored.set(view.id, obj);
+      const scenery = view.resetIndex !== undefined && !(view.wearFlags & ITEM_TAKE);
+      if (!scenery || !obj.at) {
+        // The server's floor is the layout grid's; this page's may stand on a mound.
+        const info = built.rooms.get(view.inRoom);
+        const lift = info.center.y - info.cell.level * 7.6;
+        obj.at = { x: view.at.x, y: view.at.y + lift, z: view.at.z };
+      }
+      obj.inRoom = view.inRoom;
+      if (view.resetIndex !== undefined) obj.resetIndex = view.resetIndex;
+      if (view.radius) obj.radius = view.radius;
+      if (view.corpseOf !== undefined) { obj.slot = mobs[view.corpseOf]; obj.slot.corpse = obj; }
+      if (fresh) ground.push(obj);
+      keep.add(obj);
+    }
+    for (let i = ground.length - 1; i >= 0; i--) {
+      const obj = ground[i];
+      if (keep.has(obj) || !built.rooms.has(obj.inRoom)) continue;
+      ground.splice(i, 1);
+      obj.inRoom = null;
+      if (obj.mirrorId !== undefined) mirrored.delete(obj.mirrorId);
+    }
+  }
+
+  /** Your character as save.js writes it, with what a server adds (see server/mud.mjs sendSelf). */
+  const carried = new Map();
+  function carriedObject(view) {
+    const obj = mirrorObject(view, carried.get(view.id) || null);
+    obj.wearLoc = view.wearLoc;
+    obj.affects = obj.proto ? obj.proto.affects || [] : [];
+    obj.inRoom = null; obj.at = null;
+    carried.set(view.id, obj);
+    return obj;
+  }
+  function mirrorSelf(core, kit) {
+    for (const [key, value] of Object.entries(core)) {
+      if (key === 'room' || key === 'version' || key === 'fighting' || key === 'condition') continue;
+      state[key] = value;
+    }
+    state.condition = core.condition.slice();
+    state.displayName = core.name;
+    state.fighting = resolveRef(core.fighting);
+    if (kit) {
+      state.learned = { ...state.learned, ...kit.learned };
+      state.affected = kit.affected.map((af) => ({ ...af }));
+      state.inventory = kit.inventory.map(carriedObject);
+      state.equipment = kit.equipment.map((v) => (v ? carriedObject(v) : null));
+    }
+  }
+
+  game.mirror = {
+    mob: mirrorMob, ground: mirrorGround, self: mirrorSelf, resolve: resolveRef, remotes,
+    /** The weather the server's barometer is at. */
+    weather(w) { Object.assign(weather, w); },
+    /** Stop running the rules here: the server runs them. */
+    become() { puppet = true; },
+    get puppet() { return puppet; },
+  };
 
   state.hour = 12;
   game.grace(2);
