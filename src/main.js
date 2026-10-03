@@ -687,6 +687,10 @@ async function boot() {
   const options = createOptions({
     quality, applyTime: (n) => applyTime(n), applyWeather: (w) => applyWeather(w), audio, state,
   });
+  audio.onMusicToggle = (on) => {
+    if (on) options.values.sound = true;
+    options.set('music', on);
+  };
   await progress(bar.mud[0], 'waking the mud', `resets and mobiles in all ${files.length} areas`);
   // The whole mud, and the zone being drawn (see enterZone in game.js).
   const game = createGame({ world, layout, built, actors, zoneOf: (vnum) => plan.zoneOf(vnum) });

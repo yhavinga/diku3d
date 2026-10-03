@@ -267,6 +267,8 @@ export function createOptions({ quality, applyTime, applyWeather, audio, state }
       return root.classList.contains('open');
     },
     get open() { return root.classList.contains('open'); },
+    /** One setting from elsewhere (the title's music button), remembered like the rest. */
+    set(key, value) { values[key] = value; save(values); apply(); paint(); },
     close() { root.classList.remove('open'); },
     /** Applied once at boot, after the renderer and audio exist. */
     start() { apply(); paint(); },
