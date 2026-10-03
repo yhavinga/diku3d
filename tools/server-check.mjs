@@ -359,6 +359,121 @@ m = a.mark();
 a.say('goto 3001');
 await expect(a, /^Huh\?$/, 'a mortal has no goto', m);
 
+// ------------------------------------------------- the board and the site --
+console.log('\nNOTES, SNOOPING, SETTING, BANNING');
+{
+  m = a.mark();
+  a.say('note to boromir yeb');
+  a.say('note subject The pass');
+  a.say('note + The road through the pass is open.');
+  a.say('note + Bring rope.');
+  a.say('note show');
+  await expect(a, /^Arwen: The pass\nTo: boromir yeb$/, 'note show: the note in progress', m);
+  a.say('note post');
+  await pause(200);
+  m = b.mark();
+  b.say('note list');
+  await expect(b, /^\[  0\] Arwen: The pass$/, 'note list: Boromir sees the note to him', m);
+  m = third.mark();
+  third.say('note list');
+  third.say('note read 0');
+  await expect(third, /^No such note\.$/, '...and Gimli, whom it is not to, does not', m);
+  m = b.mark();
+  b.say('note read 0');
+  const read = await expect(b, /^\[  0\] Arwen: The pass\n\w{3} \w{3} [ \d]\d \d\d:\d\d:\d\d \d{4}\nTo: boromir yeb$/, "note read: header, ctime's date and the to-list", m);
+  await expect(b, /^The road through the pass is open\.\nBring rope\.$/, '...and the text', m);
+  void read;
+  const { createNotes, createSite } = await import('../server/store.mjs');
+  check(createNotes(data).list().length === 1 && createNotes(data).list()[0].subject === 'The pass', 'posting writes the board through to the data directory');
+  m = b.mark();
+  b.say('note remove 0');
+  await expect(b, /^Ok\.$/, 'a recipient removes it from their own list', m);
+  check(createNotes(data).list().length === 1 && createNotes(data).list()[0].to === 'yeb', '...which only strikes their name off it (note_remove)', JSON.stringify(createNotes(data).list()[0]?.to));
+  m = a.mark();
+  a.say('note remove 0');
+  await expect(a, /^Ok\.$/, 'the sender removes it from the board', m);
+  check(createNotes(data).list().length === 0, '...and it is gone from the file');
+  m = a.mark();
+  a.say('note');
+  await expect(a, /^Huh\?  Type 'help note' for usage\.$/, 'note alone is usage', m);
+
+  // snoop
+  m = y.mark();
+  y.say('snoop boromir');
+  await expect(y, /^Ok\.$/, 'snoop', m);
+  m = y.mark();
+  b.say('score');
+  await expect(y, /^% You are Boromir/, "...copies what the victim reads, after '% '", m);
+  m = a.mark();
+  a.say('snoop boromir');
+  await expect(a, /^Huh\?$/, 'a mortal cannot snoop', m);
+  m = y.mark();
+  y.say('snoop yeb');
+  await expect(y, /^Cancelling all snoops\.$/, 'snooping yourself cancels it', m);
+  m = y.mark();
+  b.say('score');
+  await pause(300);
+  check(!y.events.slice(m).some((e) => /^% /.test(e.text || '')), '...and nothing more comes through');
+
+  // mset, oset, rset
+  m = y.mark();
+  y.say('mset boromir str 17');
+  y.say('mset boromir str 19');
+  await expect(y, /^Strength range is 3 to 18\.$/, "mset's ranges", m);
+  check(pbp.ch.permStr === 17, 'mset boromir str 17 takes', pbp.ch.permStr);
+  m = y.mark();
+  y.say('mset boromir level 10');
+  await expect(y, /^Not on PC's\.$/, "...and level is not for players", m);
+  y.say('mset boromir title the Steward\'s son');
+  await pause(200);
+  check(pbp.ch.title === " the Steward's son", 'mset title', pbp.ch.title);
+  m = y.mark();
+  y.say('mset boromir');
+  await expect(y, /^  name short long description title spec$/, 'mset with too little is the usage', m);
+  const bag = pbp.ch.inventory[0] || null;
+  if (bag) {
+    const word = bag.keywords.split(' ')[0];
+    y.say(`oset ${word} cost 777`);
+    await pause(200);
+    check(bag.cost === 777, `oset ${word} cost 777`, bag.cost);
+  }
+  y.say(`rset ${QUIET} sector 2`);
+  await pause(200);
+  check(w.world.rooms.get(QUIET).sector === 2, 'rset sector', w.world.rooms.get(QUIET).sector);
+  y.say(`rset ${QUIET} sector 1`);
+
+  // ban and allow, and the wizlock, kept in the data directory
+  m = y.mark();
+  y.say('ban 0.0.1');
+  y.say('ban 0.0.1');
+  await expect(y, /^That site is already banned!$/, 'ban, twice', m);
+  m = y.mark();
+  y.say('ban');
+  await expect(y, /^Banned sites:\n0\.0\.1$/, 'ban alone lists the sites', m);
+  check(createSite(data).bans().includes('0.0.1'), '...kept in the data directory');
+  const banned = client('Banned');
+  const bye = await banned.waitFor((x) => x.messages.find((mm) => mm.t === 'bye'), 3000, 'bye').catch(() => null);
+  check(bye && bye.why === 'Your site has been banned from this Mud.', 'a connection from a banned site (a suffix of 127.0.0.1) is refused', bye && bye.why);
+  m = y.mark();
+  y.say('allow 0.0.1');
+  y.say('allow 0.0.1');
+  await expect(y, /^Site is not banned\.$/, 'allow, twice', m);
+  check(!createSite(data).bans().length, '...and the file forgets it');
+  m = y.mark();
+  y.say('wizlock');
+  await expect(y, /^Game wizlocked\.$/, 'wizlock', m);
+  check(createSite(data).wizlock === true, '...kept in the data directory, for the next boot');
+  const locked = client('Locked');
+  await locked.opened;
+  locked.send({ t: 'login', name: 'Gimli', password: 'axeaxe' });
+  const lockedReply = await locked.waitFor((x) => x.messages.find((mm) => mm.t === 'login'), 5000, 'login').catch(() => null);
+  check(lockedReply && lockedReply.why === 'The game is wizlocked.', 'a mortal cannot log in while it is', lockedReply && lockedReply.why);
+  locked.ws.close();
+  y.say('wizlock');
+  await pause(200);
+  check(createSite(data).wizlock === false, 'un-wizlocked, and the file says so');
+}
+
 // ------------------------------------------------------ the shop and gates --
 console.log('\nSHOPS AND GATES');
 {

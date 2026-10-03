@@ -37,6 +37,14 @@ export const ageOf = (ch, now = Date.now()) => 17 + Math.trunc(((ch.played || 0)
 /** nanny and advance_level: "the <title>" for the class, level and sex. */
 export const titleFor = (ch) => ` the ${TITLES[ch.class][Math.min(ch.level, MAX_LEVEL)][ch.sex === 2 ? 1 : 0]}`;
 
+/** ctime(3), as do_note stamps a note: "Sat Oct  3 14:58:00 2026". */
+export function ctime(date) {
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()];
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][date.getMonth()];
+  const two = (n) => String(n).padStart(2, '0');
+  return `${day} ${month} ${String(date.getDate()).padStart(2)} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())} ${date.getFullYear()}`;
+}
+
 /** handler.c: get_trust. */
 export const trustOf = (ch) => (ch.npc ? ch.level : (ch.trust || ch.level));
 
@@ -433,6 +441,92 @@ export function installComm(k) {
     toRoom(state.afk ? `${Name(state)} is away from the keyboard.` : `${Name(state)} is back.`);
   }
 
+  // -------------------------------------------------------------- notes --
+
+  /**
+   * act_comm.c: do_note -- the one board, for everyone it is addressed to:
+   * its sender, "all", "immortal" for heroes, or a name in the to-list. A
+   * note is written in pieces (to, subject, +) and posted whole; posting and
+   * removing write the board through (`k.server.notes`), where Merc
+   * appended to and rewrote notes.txt.
+   */
+  const notesOf = () => (k.server && k.server.notes ? k.server.notes : null);
+  function isNoteTo(note) {
+    if (note.sender.toLowerCase() === state.name.toLowerCase()) return true;
+    if (isName('all', note.to)) return true;
+    if (isHero(state) && isName('immortal', note.to)) return true;
+    return isName(state.name, note.to);
+  }
+  function noteAttach() {
+    if (!state.pnote) state.pnote = { sender: state.name, date: '', to: '', subject: '', text: '' };
+    return state.pnote;
+  }
+  function doNote(argument) {
+    const board = notesOf();
+    if (!board) return send('There are no notes here.');
+    const [arg, restRaw] = oneArgument(argument);
+    const rest = restRaw.replace(/~/g, '-');
+    const visible = () => board.list().filter(isNoteTo);
+    const pad = (n) => String(n).padStart(3);
+    if (arg === 'list') {
+      visible().forEach((note, i) => send(`[${pad(i)}] ${note.sender}: ${note.subject}`));
+      return undefined;
+    }
+    if (arg === 'read') {
+      const all = rest === 'all';
+      if (!all && !/^\d+$/.test(rest)) return send('Note read which number?');
+      const n = all ? 0 : Number(rest);
+      const notes = visible();
+      const note = notes[n];
+      if (!note) return send('No such note.');
+      send(`[${pad(n)}] ${note.sender}: ${note.subject}\n${note.date}\nTo: ${note.to}`);
+      return send(note.text.replace(/\n$/, ''));
+    }
+    if (arg === '+') {
+      const note = noteAttach();
+      if (note.text.length + rest.length >= 4096 - 4) return send('Note too long.');
+      note.text += `${rest}\n`;
+      return send('Ok.');
+    }
+    if (arg === 'subject') { noteAttach().subject = rest; return send('Ok.'); }
+    if (arg === 'to') { noteAttach().to = rest; return send('Ok.'); }
+    if (arg === 'clear') { state.pnote = null; return send('Ok.'); }
+    if (arg === 'show') {
+      const note = state.pnote;
+      if (!note) return send('You have no note in progress.');
+      send(`${note.sender}: ${note.subject}\nTo: ${note.to}`);
+      return send(note.text.replace(/\n$/, ''));
+    }
+    if (arg === 'post') {
+      const note = state.pnote;
+      if (!note) return send('You have no note in progress.');
+      note.date = ctime(new Date());
+      state.pnote = null;
+      board.post(note);
+      return send('Ok.');
+    }
+    if (arg === 'remove') {
+      if (!/^\d+$/.test(rest)) return send('Note remove which number?');
+      const note = visible()[Number(rest)];
+      if (!note) return send('No such note.');
+      noteRemove(board, note);
+      return send('Ok.');
+    }
+    return send("Huh?  Type 'help note' for usage.");
+  }
+  /**
+   * act_comm.c: note_remove -- a recipient takes only their own name off the
+   * to-list; the sender, or the last one it was for, removes the note.
+   */
+  function noteRemove(board, note) {
+    const others = note.to.split(/\s+/).filter((name) => name && name.toLowerCase() !== state.name.toLowerCase());
+    if (state.name.toLowerCase() !== note.sender.toLowerCase() && others.length) {
+      board.update(note, { to: others.join(' ') });
+      return;
+    }
+    board.remove(note);
+  }
+
   // ----------------------------------------------------- player killing --
 
   /**
@@ -632,6 +726,7 @@ export function installComm(k) {
   I.replace('description', doDescription);
   I.replace('config', doConfig);
   I.replace('report', doReport);
+  I.replace('note', doNote);
   I.replace('murde', () => send('If you want to MURDER, spell it out.'));
   I.replace('murder', doMurder);
   I.replace('password', (arg) => (k.server && k.server.password ? k.server.password(state, arg) : send('Ok.')));

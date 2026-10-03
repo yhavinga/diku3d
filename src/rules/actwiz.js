@@ -10,8 +10,8 @@
  *
  * What this engine cannot carry is left out rather than faked: mload (a
  * mobile here is one slot per reset line, and a new one has no body on any
- * client), switch and return (a player into a mobile's body), snoop, and
- * mset/oset/rset/ban/allow. See the server's report for the list.
+ * client), and switch and return (a player's descriptor into a mobile's
+ * body, which has no camera to look out of). See the server's report.
  */
 
 import { ITEM } from '../are.js';
@@ -511,6 +511,114 @@ export function installWiz(k) {
     send('Ok.');
   }
 
+  // ------------------------------------------------- the set commands --
+
+  /** act_wiz.c: do_mset's usage, sent whenever the arguments do not make a setting. */
+  const MSET_USAGE = ['Syntax: mset <victim> <field>  <value>', 'or:     mset <victim> <string> <value>', '',
+    'Field being one of:', '  str int wis dex con sex class level', '  gold hp mana move practice align',
+    '  thirst drunk full', 'String being one of:', '  name short long description title spec'];
+  /** smash_tilde, then arg1, arg2 and the rest as it was typed. */
+  function setArgs(argument) {
+    const [arg1, rest1] = oneArgument(argument.replace(/~/g, '-'));
+    const [arg2, rest2] = oneArgument(rest1);
+    return [arg1, arg2, rest2.trim()];
+  }
+  const isNumber = (text) => /^-?\d+$/.test(text);
+
+  /**
+   * act_wiz.c: do_mset -- a field on anyone in the world. Merc says nothing
+   * when a setting takes; neither does this. A player is saved once set.
+   */
+  function doMset(argument) {
+    const [arg1, arg2, arg3] = setArgs(argument);
+    if (!arg1 || !arg2 || !arg3) return MSET_USAGE.forEach((line) => send(line));
+    const found = k.getCharWorld(arg1);
+    if (!found) return send("They aren't here.");
+    const v = found.ch;
+    const value = isNumber(arg3) ? Number(arg3) : -1;
+    const pcOnly = () => (v.npc ? (send("Not on NPC's."), false) : true);
+    const npcOnly = () => (!v.npc ? (send("Not on PC's."), false) : true);
+    const ranged = (lo, hi, text) => (value < lo || value > hi ? (send(text), false) : true);
+    const stat = { str: ['permStr', 'Strength'], int: ['permInt', 'Intelligence'], wis: ['permWis', 'Wisdom'], dex: ['permDex', 'Dexterity'], con: ['permCon', 'Constitution'] }[arg2];
+    const done = () => { if (!v.npc && k.server && k.server.save) k.server.save(v); };
+    if (stat) {
+      if (!pcOnly() || !ranged(3, 18, `${stat[1]} range is 3 to 18.`)) return undefined;
+      v[stat[0]] = value; return done();
+    }
+    switch (arg2) {
+      case 'sex': if (!ranged(0, 2, 'Sex range is 0 to 2.')) return undefined; v.sex = value; return done();
+      case 'class': if (!ranged(0, 3, 'Class range is 0 to 3.')) return undefined; v.class = value; return done();
+      case 'level': if (!npcOnly() || !ranged(0, 50, 'Level range is 0 to 50.')) return undefined; v.level = value; return done();
+      case 'gold': v.gold = value; return done();
+      case 'hp': if (!ranged(-10, 30000, 'Hp range is -10 to 30,000 hit points.')) return undefined; v.maxHit = value; return done();
+      case 'mana': if (!ranged(0, 30000, 'Mana range is 0 to 30,000 mana points.')) return undefined; v.maxMana = value; return done();
+      case 'move': if (!ranged(0, 30000, 'Move range is 0 to 30,000 move points.')) return undefined; v.maxMove = value; return done();
+      case 'practice': if (!ranged(0, 100, 'Practice range is 0 to 100 sessions.')) return undefined; v.practice = value; return done();
+      case 'align': if (!ranged(-1000, 1000, 'Alignment range is -1000 to 1000.')) return undefined; v.alignment = value; return done();
+      case 'thirst': if (!pcOnly() || !ranged(0, 100, 'Thirst range is 0 to 100.')) return undefined; v.condition[2] = value; return done();
+      case 'drunk': if (!pcOnly() || !ranged(0, 100, 'Drunk range is 0 to 100.')) return undefined; v.condition[0] = value; return done();
+      case 'full': if (!pcOnly() || !ranged(0, 100, 'Full range is 0 to 100.')) return undefined; v.condition[1] = value; return done();
+      case 'name': if (!npcOnly()) return undefined; v.keywords = arg3; return undefined;
+      // A mobile's short description is the name it goes by here.
+      case 'short': if (v.npc) v.name = arg3; else v.shortDescr = arg3; return done();
+      case 'long': if (v.npc) v.long = arg3; else v.longDescr = arg3; return done();
+      case 'title': if (!pcOnly()) return undefined; v.title = /^[.,!?]/.test(arg3) ? arg3 : ` ${arg3}`; return done();
+      case 'spec':
+        if (!npcOnly()) return undefined;
+        if (!k.SPEC_FUNS[arg3]) return send('No such spec fun.');
+        // DIVERGES: the reset line's, so it outlives this body to the next reset.
+        found.slot.record.special = arg3;
+        return undefined;
+      default: return doMset('');
+    }
+  }
+
+  const OSET_USAGE = ['Syntax: oset <object> <field>  <value>', 'or:     oset <object> <string> <value>', '',
+    'Field being one of:', '  value0 value1 value2 value3', '  extra wear level weight cost timer', '',
+    'String being one of:', '  name short long ed'];
+  /** act_wiz.c: do_oset -- a field on any object in the world. */
+  function doOset(argument) {
+    const [arg1, arg2, arg3] = setArgs(argument);
+    if (!arg1 || !arg2 || !arg3) return OSET_USAGE.forEach((line) => send(line));
+    const obj = findNamed([...nested(state.inventory), ...state.equipment.filter(Boolean)], arg1) || getObjWorld(arg1);
+    if (!obj) return send('Nothing like that in hell, earth, or heaven.');
+    const value = Number.parseInt(arg3, 10) || 0;
+    const index = { value0: 0, v0: 0, value1: 1, v1: 1, value2: 2, v2: 2, value3: 3, v3: 3 }[arg2];
+    if (index !== undefined) { obj.values[index] = value; return undefined; }
+    const field = { extra: 'extraFlags', wear: 'wearFlags', level: 'level', weight: 'weight', cost: 'cost', timer: 'timer' }[arg2];
+    if (field) { obj[field] = value; return undefined; }
+    if (arg2 === 'name') { obj.keywords = arg3; return undefined; }
+    if (arg2 === 'short') { obj.name = arg3; return undefined; }
+    if (arg2 === 'long') { obj.description = arg3; return undefined; }
+    if (arg2 === 'ed') {
+      const [keyword, text] = oneArgument(arg3);
+      obj.extra = [{ keyword, description: text }, ...(obj.extra || [])];
+      return undefined;
+    }
+    return doOset('');
+  }
+
+  /** act_wiz.c: do_rset -- a room's flags or sector, by number. */
+  function doRset(argument) {
+    const [arg1, arg2, arg3] = setArgs(argument);
+    if (!arg1 || !arg2 || !arg3) return ['Syntax: rset <location> <field> value', '', 'Field being one of:', '  flags sector'].forEach((line) => send(line));
+    const room = findLocation(arg1);
+    if (!room) return send('No such location.');
+    if (!isNumber(arg3)) return send('Value must be numeric.');
+    if (arg2 === 'flags') { room.flags = Number(arg3); return undefined; }
+    if (arg2 === 'sector') { room.sector = Number(arg3); return undefined; }
+    return doRset('');
+  }
+
+  /** act_wiz.c: do_snoop's first half; the descriptors are the server's. */
+  function doSnoop(argument) {
+    const [arg] = oneArgument(argument);
+    if (!arg) return send('Snoop whom?');
+    const found = k.getCharWorld(arg);
+    if (!found) return send("They aren't here.");
+    return server('snoop', found.ch);
+  }
+
   /** The server's own: users, shutdown, disconnect, deny, wizlock, log. */
   const server = (name, ...args) => (k.server && k.server[name] ? k.server[name](state, ...args) : send('Not on this server.'));
 
@@ -521,8 +629,8 @@ export function installWiz(k) {
   I.insert(['wizhelp', doWizhelp, P, 36], 'areas');
   I.append([
     ['advance', doAdvance, P, 40], ['trust', doTrust, P, 40],
-    ['allow', () => send('Not on this server: there is no site list.'), P, 39],
-    ['ban', () => send('Not on this server: there is no site list.'), P, 39],
+    ['allow', (a) => server('allow', oneArgument(a)[0]), P, 39],
+    ['ban', (a) => server('ban', oneArgument(a)[0]), P, 39],
     ['deny', (a) => server('deny', oneArgument(a)[0]), P, 39],
     ['disconnect', (a) => server('disconnect', oneArgument(a)[0]), P, 39],
     ['freeze', toggle('freeze', PLR_MORE.FREEZE, "You can't do ANYthing!", 'You can play again.'), P, 39],
@@ -535,8 +643,9 @@ export function installWiz(k) {
     ['force', doForce, P, 38],
     ['noemote', toggle('noemote', PLR_MORE.NO_EMOTE, "You can't emote!", 'You can emote again.'), P, 38],
     ['notell', toggle('notell', PLR_MORE.NO_TELL, "You can't tell!", 'You can tell again.'), P, 38],
-    ['oload', doOload, P, 38],
-    ['pardon', doPardon, P, 38], ['purge', doPurge, P, 38], ['restore', doRestore, P, 38],
+    ['mset', doMset, P, 38],
+    ['oload', doOload, P, 38], ['oset', doOset, P, 38],
+    ['pardon', doPardon, P, 38], ['purge', doPurge, P, 38], ['restore', doRestore, P, 38], ['rset', doRset, P, 38],
     ['silence', toggle('silence', PLR_MORE.SILENCE, 'You have been silenced!', 'You can use channels again.'), P, 38],
     ['sla', () => send('If you want to SLAY, spell it out.'), P, 38], ['slay', doSlay, P, 38],
     ['sset', doSset, P, 38], ['transfer', doTransfer, P, 38],
@@ -547,7 +656,7 @@ export function installWiz(k) {
     ['invis', doInvis, P, 37], ['log', (a) => server('log', oneArgument(a)[0]), P, 37], ['memory', doMemory, P, 37],
     ['mfind', doMfind, P, 37], ['mstat', doMstat, P, 37], ['mwhere', doMwhere, P, 37], ['ofind', doOfind, P, 37],
     ['ostat', doOstat, P, 37], ['peace', doPeace, P, 37], ['recho', doRecho, P, 37], ['rstat', doRstat, P, 37],
-    ['slookup', doSlookup, P, 37],
+    ['slookup', doSlookup, P, 37], ['snoop', doSnoop, P, 37],
     ['stat', doStat, P, 37],
     ['immtalk', (a) => k.talkChannel(a, CHANNEL.IMMTALK, 'immtalk'), P, 36],
     [':', (a) => k.talkChannel(a, CHANNEL.IMMTALK, 'immtalk'), P, 36],

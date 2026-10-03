@@ -22,6 +22,7 @@ import { titleFor, trustOf, PLR_MORE } from '../src/rules/actcomm.js';
 import { PLR, AFF, nested } from '../src/rules/handler.js';
 import { EX_CLOSED } from '../src/are.js';
 import { bootWorld } from './world.mjs';
+import { createNotes, createSite } from './store.mjs';
 import {
   createAccounts, hashPassword, checkPassword, checkParseName, properName, EXTRA,
 } from './accounts.mjs';
@@ -48,6 +49,9 @@ export async function startMud({
   const started = Date.now();
   const w = bootWorld(root, { log });
   const accounts = createAccounts(dataDir);
+  const notes = createNotes(dataDir);
+  // The ban list and the wizlock, kept across reboots; `wizlock` is only the first boot's.
+  const site = createSite(dataDir, { wizlock });
   const sessions = new Set();
   const byPc = new Map();
   let nextPcId = 1;
@@ -62,7 +66,11 @@ export async function startMud({
     shutdown: (ch, text) => shutdown(text),
     disconnect: (ch, name) => disconnect(ch, name),
     deny: (ch, name) => deny(ch, name),
-    wizlock: (ch) => { wizlock = !wizlock; say(ch, wizlock ? 'Game wizlocked.' : 'Game un-wizlocked.'); },
+    wizlock: (ch) => { site.wizlock = !site.wizlock; say(ch, site.wizlock ? 'Game wizlocked.' : 'Game un-wizlocked.'); },
+    ban: (ch, arg) => ban(ch, arg),
+    allow: (ch, arg) => allow(ch, arg),
+    snoop: (ch, name) => snoop(ch, name),
+    notes,
     log: (ch, name) => toggleLog(ch, name),
   };
   const game = createGame({
@@ -136,6 +144,14 @@ export async function startMud({
       out: [], zone: null, seq: 0, posAt: null, played: 0, saveIn: AUTOSAVE_SECONDS, linkdead: null, logged: false,
       sent: { self: '', mobs: new Map(), ground: new Map(), roster: new Map(), weather: '' }, pending: null,
     };
+    // comm.c: new_descriptor -- a banned site hears why, and nothing else.
+    if (site.banned(s.host)) {
+      log(`${s.host}: banned site refused`);
+      send(s, { t: 'bye', why: 'Your site has been banned from this Mud.' });
+      s.open = false;
+      ws.close();
+      return;
+    }
     sessions.add(s);
     send(s, { t: 'hello', v: PROTOCOL, world: fingerprint, motd: 'Welcome to Merc Diku Mud.  May your visit here be ... Mercenary.' });
     ws.on('message', (data) => {
@@ -201,7 +217,8 @@ export async function startMud({
       log(`${name}@${s.host}: wrong password`);
       return send(s, { t: 'login', ok: false, why: 'Wrong password.' });
     }
-    if (wizlock && (record.char.level < 36)) return send(s, { t: 'login', ok: false, why: 'The game is wizlocked.' });
+    // IS_HERO: by trust, which is what lets an immortal past a wizlock.
+    if (site.wizlock && (record.char.trust || record.char.level) < 36) return send(s, { t: 'login', ok: false, why: 'The game is wizlocked.' });
     enter(s, record, false);
   }
 
@@ -211,7 +228,7 @@ export async function startMud({
     if (!checkParseName(name, w.world)) return send(s, { t: 'login', ok: false, why: 'Illegal name, try another.' });
     if (accounts.exists(name)) return send(s, { t: 'login', ok: false, why: 'That name is taken.' });
     if (String(password).length < 5) return send(s, { t: 'login', ok: false, new: true, name, why: 'Password must be at least five characters long.' });
-    if (wizlock) return send(s, { t: 'login', ok: false, why: 'The game is wizlocked.' });
+    if (site.wizlock) return send(s, { t: 'login', ok: false, why: 'The game is wizlocked.' });
     const classIndex = Number(cls);
     if (!(classIndex >= 0 && classIndex < CLASS_TABLE.length)) return send(s, { t: 'login', ok: false, new: true, name, why: "That's not a class." });
     const sexIndex = { m: 1, f: 2, n: 0 }[String(sex || 'm').toLowerCase()[0]] ?? 1;
@@ -511,6 +528,11 @@ export async function startMud({
 
   function flush(s) {
     if (!s.out.length) return;
+    // comm.c: process_output's snoop-o-rama -- everything the victim reads, after "% ".
+    const by = s.snoopBy;
+    if (by && by.pc && by.open) {
+      for (const e of s.out) if (e.text) by.out.push({ kind: 'snoop', text: `% ${e.text}` });
+    }
     send(s, { t: 'ev', e: s.out });
     s.out = [];
   }
@@ -745,6 +767,10 @@ export async function startMud({
   function extract(s, roomText) {
     const pc = s.pc;
     if (!pc) return;
+    // close_socket: whoever was snooping is told, and whatever this one snooped is let go.
+    if (s.snoopBy && s.snoopBy.pc) game.tell(s.snoopBy.pc.ch, { kind: 'out', text: 'Your victim has left the game.' });
+    s.snoopBy = null;
+    for (const o of sessions) if (o.snoopBy === s) o.snoopBy = null;
     saveSession(s);
     game.roomcast(pc.ch.roomVnum, { kind: 'room', text: roomText }, [pc.ch]);
     game.magic.forget(pc.ch);
@@ -806,6 +832,46 @@ export async function startMud({
     if (!s) return say(ch, "They aren't here.");
     s.logged = !s.logged;
     say(ch, s.logged ? 'LOG set.' : 'LOG removed.');
+  }
+
+  /** act_wiz.c: do_ban -- the list, or a site added to it. */
+  function ban(ch, arg) {
+    if (!arg) {
+      say(ch, ['Banned sites:', ...site.bans()].join('\n'));
+      return;
+    }
+    if (site.bans().some((b) => b.toLowerCase() === arg.toLowerCase())) { say(ch, 'That site is already banned!'); return; }
+    site.ban(arg);
+    say(ch, 'Ok.');
+  }
+
+  /** act_wiz.c: do_allow. */
+  function allow(ch, arg) {
+    if (!arg) { say(ch, 'Remove which site from the ban list?'); return; }
+    say(ch, site.allow(arg) ? 'Ok.' : 'Site is not banned.');
+  }
+
+  /**
+   * act_wiz.c: do_snoop, from get_char_world on -- a player's descriptor
+   * copied to yours, until you snoop yourself ("Cancelling all snoops.") or
+   * they leave. A mobile has no descriptor.
+   */
+  function snoop(ch, victim) {
+    const mine = sessionOf(ch);
+    const s = victim.npc ? null : byPc.get(game.pcOf(victim)?.id);
+    if (!s || !s.open) return say(ch, 'No descriptor to snoop.');
+    if (s === mine) {
+      say(ch, 'Cancelling all snoops.');
+      for (const o of sessions) if (o.snoopBy === mine) o.snoopBy = null;
+      return undefined;
+    }
+    if (s.snoopBy) return say(ch, 'Busy already.');
+    if (trustOf(victim) >= trustOf(ch)) return say(ch, 'You failed.');
+    for (let d = mine.snoopBy; d; d = d.snoopBy) {
+      if (d === s) return say(ch, 'No snoop loops.');
+    }
+    s.snoopBy = mine;
+    return say(ch, 'Ok.');
   }
 
   let closing = null;
