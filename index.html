@@ -214,6 +214,72 @@
     position: fixed; inset: 0; background: #05060a; opacity: 0; pointer-events: none;
     transition: opacity 260ms ease; z-index: 15;
   }
+
+  /* ------------------------------------------------------------- help -- */
+  #help {
+    position: fixed; inset: 0; z-index: 45; display: none; align-items: center; justify-content: center;
+    background: rgba(6, 6, 9, 0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    font-family: var(--serif); color: var(--ink);
+    /* Everything inside is in em, so the sheet grows with the window. */
+    font-size: clamp(12px, min(1.1vw, 1.8vh), 26px);
+  }
+  #help.open { display: flex; }
+  #help-panel {
+    width: min(78em, 94vw); max-height: 94vh; overflow-y: auto;
+    background: rgba(14, 12, 10, 0.94); border: 1px solid var(--edge); border-radius: 3px;
+    padding: 1.7em 2.3em 1.4em;
+  }
+  #help header { margin-bottom: 1.1em; padding-bottom: 0.7em; border-bottom: 1px solid rgba(224,189,119,0.13); }
+  #help h2 { margin: 0 0 0.15em; font-size: 2em; font-weight: 400; letter-spacing: 0.02em; }
+  #help .sub {
+    display: flex; justify-content: space-between; gap: 1em;
+    font-family: var(--mono); font-size: 0.78em; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--gold); opacity: 0.75;
+  }
+  .hp-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 2.4em; }
+  .hp-col { display: flex; flex-direction: column; gap: 1.2em; min-width: 0; }
+  .hp-group h3 {
+    margin: 0 0 0.55em; padding-bottom: 0.45em; border-bottom: 1px solid rgba(224,189,119,0.2);
+    font-family: var(--mono); font-weight: 400; font-size: 0.8em; letter-spacing: 0.17em;
+    text-transform: uppercase; color: var(--gold);
+    display: flex; justify-content: space-between; align-items: baseline; gap: 0.8em;
+  }
+  .hp-group h3 small { font-size: 0.85em; letter-spacing: 0.1em; opacity: 0.6; text-transform: none; color: var(--ink); }
+  .hp-row { display: flex; align-items: baseline; gap: 0.9em; padding: 0.2em 0; }
+  .hp-keys { flex: 0 0 7.4em; display: flex; flex-wrap: wrap; align-items: center; gap: 0.28em; }
+  .hp-text { font-size: 0.94em; line-height: 1.38; color: #e2d6bc; }
+  .hp-row.stack { flex-direction: column; align-items: flex-start; gap: 0.5em; }
+  .hp-row.stack .hp-keys { flex: none; }
+  .hp-row.note .hp-keys { flex: 1; font-size: 0.86em; opacity: 0.55; font-style: italic; }
+  .hp-row.note .hk-or { font-family: var(--serif); letter-spacing: 0; }
+  #help kbd, #help-hint kbd {
+    font-family: var(--mono); font-size: 0.8em; line-height: 1; letter-spacing: 0.04em;
+    min-width: 2em; padding: 0.5em 0.6em 0.45em; text-align: center; white-space: nowrap;
+    color: var(--gold); background: rgba(224,189,119,0.07);
+    border: 1px solid rgba(224,189,119,0.38); border-bottom-width: 2px; border-radius: 3px;
+  }
+  .hk-or { font-family: var(--mono); font-size: 0.7em; opacity: 0.5; padding: 0 0.15em; }
+  /* Your own class stands out; the other one recedes. */
+  #help[data-who="caster"] [data-who="fighter"], #help[data-who="fighter"] [data-who="caster"] { opacity: 0.38; }
+  #help [data-who] h3 small { opacity: 0.85; }
+  #help[data-who="caster"] [data-who="caster"] h3 small::before,
+  #help[data-who="fighter"] [data-who="fighter"] h3 small::before { content: '\25C6  '; color: var(--gold); }
+  #help[data-who="caster"] [data-who="caster"], #help[data-who="fighter"] [data-who="fighter"] {
+    margin: 0 -0.7em; padding: 0.5em 0.7em 0.3em; background: rgba(224,189,119,0.06);
+    border-left: 2px solid rgba(224,189,119,0.6);
+  }
+  @media (max-width: 900px) {
+    .hp-cols { grid-template-columns: minmax(0, 1fr); }
+    .hp-col { gap: 1.2em; margin-bottom: 1.2em; }
+  }
+  #help-hint {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 25; pointer-events: none;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+    background: rgba(14,12,10,0.55); border: 1px solid var(--edge); border-radius: 3px; padding: 6px 12px 6px 8px;
+    opacity: 0; transition: opacity 900ms ease; display: flex; align-items: center; gap: 9px;
+  }
+  #help-hint.on { opacity: 0.9; }
+  body.titling #help-hint { display: none; }
 </style>
 </head>
 <body>
@@ -268,6 +334,7 @@
     <b>enter</b><span>the command line — look, get all corpse, unlock gate …</span>
     <b>Z X / C</b><span>a caster's spells: choose / cast · a fighter's or thief's skills on Z X C H J L</span>
     <b>I B K · T R</b><span>inventory, trade, skills and training · take everything · rest</span>
+    <b>? · F1</b><span>every control, grouped — in the game, the same key closes it</span>
     <b>1 – 4 · F V M G</b><span>the hour · stats, noclip, sound, force every lock</span>
   </div>
   <div id="credit">
@@ -290,5 +357,6 @@
 }
 </script>
 <script type="module" src="./src/main.js"></script>
+<script type="module">import { createHelp } from './src/help.js'; createHelp();</script>
 </body>
 </html>
