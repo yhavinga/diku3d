@@ -38,13 +38,13 @@ be faithful to geometry that isn't there. It does this instead:
    nearby, keeping any move that joins up more exits than it breaks.
 3. **Spread** — rooms keep the even coordinates, so every cell between two rooms
    is free to build a street through.
-4. **Route** — each exit is walked through those free cells, at most six of them,
+4. **Route** — each exit is walked through those free cells, at most twelve of them,
    setting off in the direction the exit claims to go.
 
 What survives is a passage you walk. What doesn't is a stone archway with a
 shimmer in it that puts you where the exit says — honest about the fact that the
-mud's geography folds. For Midgaard that leaves **93% of exits walkable** and
-eight archways; across all 43 stock areas it averages 94%.
+mud's geography folds. For Midgaard that leaves **97% of exits walkable** and
+three archways; across all 43 stock areas it averages 95.4%.
 
 A cell is thirteen metres, which is far too wide for a street, so an open-air
 city room does not pave all of it: every side with no way out of it brings the

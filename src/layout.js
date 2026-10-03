@@ -218,8 +218,11 @@ function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = new Se
  * long street, which is what the mud says it is ("The road extends south
  * along the inside of the wall surrounding the city"). Nothing else moves:
  * every other area's placement is identical to the world without it.
+ * Miden'nir is laid whole for the same reason: placed room by room it moved
+ * 107 of Midgaard's rooms (the park, the river) to sit against both its
+ * links; whole, nothing moves and the Dump's link south is the long one.
  */
-const LAID_WHOLE = new Set(['hood.are']);
+const LAID_WHOLE = new Set(['hood.are', 'midennir.are']);
 
 export function layoutWorld(world, options = {}) {
   const {

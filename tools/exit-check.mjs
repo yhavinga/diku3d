@@ -41,7 +41,7 @@ const strict = process.argv.includes('--strict');
 const arg = process.argv.slice(2).find((a) => !a.startsWith('--'));
 const only = arg ? plan.zoneOf(Number(arg)) : null;
 if (arg && !only) throw new Error(`#${arg} is in no zone`);
-const CEILING = { wrongWall: 177, inRoom: 8 }; // 157 + 20 when Miden'nir joined the home zone
+const CEILING = { wrongWall: 52, inRoom: 8 }; // streets reach 12 cells and Miden'nir is laid whole (was 177)
 
 const total = { exits: 0, wrongWall: 0, inRoom: 0, noDoor: 0, oneWay: 0, oneWayOpen: 0 };
 for (const zone of only ? [only] : plan.zones) {
