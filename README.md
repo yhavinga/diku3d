@@ -122,7 +122,7 @@ No Man's Land (south from inside the East Gate, down Wall Road).
 | `Z` `X` / wheel, `C` / right mouse | mage and cleric: choose a spell, cast it |
 | `Z` `X` `C` `H` `J` `L` `N` | warrior and thief: the skill bar — kick, backstab, disarm, sneak, hide, steal, pick |
 | `tab` | show the room's full description again, or fold it (it folds by itself once there has been time to read it) |
-| `enter` | the mud's own command line: Merc's command table, abbreviations and all 90 socials; `enter` on an empty line closes it |
+| `enter` | the mud's own command line: Merc's command table, abbreviations and all 90 socials; `enter` on an empty line or `esc` closes it |
 | `?` / `F1` | every control on one screen, with your own class's rows lit and its skill bar read off the class; the same key closes it |
 | `O` | options; `O` again closes them and takes the mouse back |
 | `esc` | release the mouse; click the view to take it again. The game starts without it, so the title's *Enter* works even where pointer lock is refused |

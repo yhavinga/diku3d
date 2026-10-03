@@ -54,7 +54,7 @@ const GROUPS = [
     { title: 'Command line', rows: [
       [['Enter'], "the mud's own prompt: Merc's commands, abbreviations and socials"],
       [['Tab'], 'in the prompt: complete a command'],
-      [['Enter'], 'on an empty line: close it'],
+      [['Enter', '~or', 'Esc'], 'on an empty line: close it'],
     ] },
     { title: 'The world', rows: [
       [['1', '2', '3', '4'], 'dawn, noon, dusk, night'],

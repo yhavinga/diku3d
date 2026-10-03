@@ -160,6 +160,13 @@ export function createConsole({ root, game, onOpen = () => {}, onClose = () => {
     }
   });
   input.addEventListener('keyup', (event) => event.stopPropagation());
+  // With the mouse held, the browser eats the first Escape to release it and
+  // never delivers the keydown above -- so Escape seemed to do nothing but
+  // free the mouse. Losing the lock while the page still has focus is that
+  // Escape; losing it to another window (no focus) leaves the prompt open.
+  document.addEventListener('pointerlockchange', () => {
+    if (open && !document.pointerLockElement && document.hasFocus()) hide();
+  });
   // A click in the world while typing gives the mouse back to the world.
   input.addEventListener('blur', () => { if (open) requestAnimationFrame(() => { if (open && document.activeElement !== input) input.focus(); }); });
 
