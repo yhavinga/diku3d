@@ -41,7 +41,7 @@ const res = await page.evaluate(async (rooms) => {
   return Z.sweep({ filter: only ? (v) => only.has(v) : null });
 }, opt.rooms);
 if (opt.out) fs.writeFileSync(opt.out, JSON.stringify(res, null, 1));
-console.log('rooms', res.rows.length, 'visible flicker px', res.total, 'id ties', res.ties,
+console.log('rooms', res.rows.length, 'visible flicker px', res.total, 'id ties', res.ties, 'unstable (left out)', res.noise,
   'rooms with any', res.rows.filter((r) => r.total > 0).length);
 for (const p of res.pairs.slice(0, 40)) console.log(p.n, p.rooms, JSON.stringify(p.at), p.pair);
 await browser.close();

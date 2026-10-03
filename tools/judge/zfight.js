@@ -157,7 +157,7 @@ export function install() {
     r.setRenderTarget(target);
     const frames = [];
     try {
-      for (const n of [1, ...variants]) {
+      for (const n of [1, 1, ...variants]) {
         cam.near = prev.near * n; cam.updateProjectionMatrix();
         r.clear();
         r.render(d.scene, cam);
@@ -180,7 +180,7 @@ export function install() {
     r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = false;
     r.setRenderTarget(target);
     try {
-      for (const n of [1, ...variants]) {
+      for (const n of [1, 1, ...variants]) {
         cam.near = prev.near * n; cam.updateProjectionMatrix();
         r.clear();
         r.render(d.scene, cam);
@@ -191,9 +191,13 @@ export function install() {
       r.setRenderTarget(prev.target);
       r.shadowMap.autoUpdate = prev.sm; r.shadowMap.needsUpdate = prev.smn;
     }
-    const differs = (i) => {
+    // Render 1 repeats render 0 exactly. Anything that changes between those
+    // two -- a mesh whose onBeforeRender animates, an effect timed off the
+    // clock -- is not a depth tie, and is left out rather than counted.
+    const same = (a, b, i) => a[i] === b[i] && a[i + 1] === b[i + 1] && a[i + 2] === b[i + 2] && a[i + 3] === b[i + 3];
+    const differs = (i, from = 2, to = shades.length) => {
       const a = shades[0];
-      for (let k = 1; k < shades.length; k++) {
+      for (let k = from; k < to; k++) {
         const b = shades[k];
         for (let c = 0; c < 3; c++) {
           const x = a[i + c], y = b[i + c];
@@ -203,14 +207,15 @@ export function install() {
       return false;
     };
     const base = frames[0];
-    let flicker = 0, visible = 0;
+    let flicker = 0, visible = 0, unstable = 0;
     const pairs = new Map();
     const key = (b, i) => `${b[i]}|${b[i + 1]}|${b[i + 2]}`;
     const where = new Float32Array(w * h);
     for (let i = 0; i < base.length; i += 4) {
       if (base[i + 3] === 0) continue;
+      if (!same(base, frames[1], i) || differs(i, 1, 2)) { unstable++; continue; }
       let other = null;
-      for (let k = 1; k < frames.length; k++) {
+      for (let k = 2; k < frames.length; k++) {
         const f = frames[k];
         if (f[i] !== base[i] || f[i + 1] !== base[i + 1] || f[i + 2] !== base[i + 2] || f[i + 3] !== base[i + 3]) { other = [f, i]; break; }
       }
@@ -223,7 +228,7 @@ export function install() {
       const pk = a < b ? `${a}#${b}` : `${b}#${a}`;
       pairs.set(pk, (pairs.get(pk) || 0) + 1);
     }
-    const out = { flicker, visible, w, h, pct: +(100 * visible / (w * h)).toFixed(3) };
+    const out = { flicker, visible, unstable, w, h, pct: +(100 * visible / (w * h)).toFixed(3) };
     if (detail) {
       out.pairs = [...pairs.entries()].sort((p, q) => q[1] - p[1]).slice(0, 12)
         .map(([k, n]) => ({ n, a: describe(objects, k.split('#')[0]), b: describe(objects, k.split('#')[1]) }));
@@ -304,14 +309,14 @@ export function install() {
     d.state.benchmark = false;
     const sig = (x) => x.obj === null ? '?' : `${x.name}${x.model ? ' [' + x.model + ']' : ''}${x.geometry !== undefined ? ' g' + x.geometry + ' ' + x.size : ''} ${x.face}`;
     for (const [vnum] of rooms) {
-      let total = 0, worst = 0, ties = 0;
+      let total = 0, worst = 0, ties = 0, noise = 0;
       // Level and looking up: a ceiling, a cornice or a gable over a door is
       // out of a level view's frame entirely.
       for (const [yaw, pitch] of yaws.flatMap((y) => pitches.map((p) => [y, p]))) {
         d.goto(vnum, yaw, pitch);
         for (let i = 0; i < frames; i++) await frame();
         const m = Z.measure({ scale, detail: true });
-        total += m.visible; ties += m.flicker; worst = Math.max(worst, m.visible);
+        total += m.visible; ties += m.flicker; noise += m.unstable; worst = Math.max(worst, m.visible);
         for (const p of m.pairs) {
           const k = [sig(p.a), sig(p.b)].sort().join('  <>  ');
           const c = culprits.get(k) || { n: 0, rooms: 0, worst: 0, at: null };
@@ -321,12 +326,15 @@ export function install() {
         }
       }
       if (d.built !== built) throw new Error(`zfight: the drawn zone changed at room ${vnum}`);
-      rows.push({ vnum, name: built.rooms.get(vnum).room.name, total, worst, ties });
+      rows.push({ vnum, name: built.rooms.get(vnum).room.name, total, worst, ties, noise });
       if (log) log(rows.length, rooms.length);
     }
     d.state.paused = paused;
     const pairs = [...culprits.entries()].sort((a, b) => b[1].n - a[1].n).map(([k, c]) => ({ pair: k, ...c }));
-    return { rows, pairs, total: rows.reduce((s, r) => s + r.total, 0), ties: rows.reduce((s, r) => s + r.ties, 0) };
+    return {
+      rows, pairs, total: rows.reduce((s, r) => s + r.total, 0), ties: rows.reduce((s, r) => s + r.ties, 0),
+      noise: rows.reduce((s, r) => s + r.noise, 0),
+    };
   };
 
   return Z;
