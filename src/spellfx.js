@@ -381,14 +381,11 @@ const DECAL_FRAG = `
     } else if (uMode < 2.5) {
       a = exp(-r * r * 3.5);
     } else if (uMode > 7.5) {
-      // Sanctuary: a plain double ring and a pool of light on the ground,
-      // with fine ticks between the rings turning very slowly. uHeat is the
-      // breath, so it swells and settles with the mantle.
-      float turn = atan(vUv.y, vUv.x) + uTime * 0.12;
-      float ticks = smoothstep(0.55, 0.9, abs(sin(turn * 14.0))) * step(0.76, r) * step(r, 0.9);
-      float rings = band(r, 0.94, 0.028) + band(r, 0.7, 0.014) * 0.55;
-      a = (rings + ticks * 0.45) * (0.65 + 0.35 * uHeat) + exp(-r * r * 4.5) * 0.3 * (0.6 + 0.4 * uHeat);
-      a *= smoothstep(1.0, 0.9, r);
+      // Sanctuary: a soft pool of warm light on the ground with one very
+      // soft edge, swelling and settling with the mantle (uHeat is the
+      // breath). Light would cast this; a ring or ticks read as a UI marker.
+      a = (exp(-r * r * 3.4) * 0.55 + band(r, 0.86, 0.16) * 0.12) * (0.7 + 0.3 * uHeat);
+      a *= smoothstep(1.0, 0.8, r);
     } else {
       // The marks a spell leaves: ground cover (alpha, darkening what is
       // under it) and a little light of its own (colour) that dies first.
@@ -515,6 +512,7 @@ const AURA_VERT = `
   #include <common>
   #include <skinning_pars_vertex>
   uniform float uThick;
+  uniform float uBias;
   varying vec3 vN;
   varying vec3 vV;
   varying vec3 vW;
@@ -527,6 +525,11 @@ const AURA_VERT = `
     #include <skinning_vertex>
     transformed += normalize(objectNormal) * uThick;
     vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
+    // Sunk away from the eye along its own ray (so nothing shifts on screen):
+    // a bit of shell that has come to lie in front of another part of the
+    // body -- an arm over the chest, a fold of a lumpy monster -- then fails
+    // the depth test against it instead of scribbling over the interior.
+    mv.xyz *= 1.0 + uBias / length(mv.xyz);
     vN = normalize(normalMatrix * objectNormal);
     vV = normalize(-mv.xyz);
     vW = (modelMatrix * vec4(transformed, 1.0)).xyz;
@@ -2563,7 +2566,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       fragmentShader: AURA_FRAG,
       uniforms: {
         uColor: { value: new THREE.Color() }, uIntensity: { value: 0 }, uTime: { value: 0 },
-        uThick: { value: 0.03 }, uFlicker: { value: 0 }, uSoft: { value: 0 },
+        uThick: { value: 0.03 }, uBias: { value: 0 }, uFlicker: { value: 0 }, uSoft: { value: 0 },
         uGain: shared.uGain, uFogDensity: shared.uFogDensity,
       },
       transparent: true,
@@ -2705,7 +2708,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       fragmentShader: HALO_FRAG,
       uniforms: {
         uColor: { value: SANCT_COLOR.clone() }, uIntensity: { value: 0 }, uTime: { value: 0 },
-        uThick: { value: 0.1 }, uGain: shared.uGain, uFogDensity: shared.uFogDensity,
+        uThick: { value: 0.1 }, uBias: { value: 0.35 }, uGain: shared.uGain, uFogDensity: shared.uFogDensity,
       },
       transparent: true,
       depthWrite: false,
@@ -2748,18 +2751,22 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       if (on !== s.on) { for (const m of s.meshes) m.visible = on; s.on = on; }
       if (!on) { if (s.ground) { s.ground.life = 0; s.ground = null; } continue; }
       const k = smooth(s.level);
+      const dark = smooth(((renderer.toneMappingExposure || 1) - 0.15) / 0.4);
       const breath = 0.5 + 0.5 * Math.sin(clock * SANCT_BREATH + s.phase);
       const u = s.material.uniforms;
       // A fixed 8 cm is two pixels at 20 m, so the mantle stands further out
       // the further away it is looked at -- what has to read is the figure's
       // outline in light, not a measured shell.
-      u.uThick.value = clamp(0.07 + 0.012 * d, 0.07, 0.3) * (1 + 0.5 * s.flare);
-      u.uIntensity.value = 0.2 * k * (0.8 + 0.2 * breath + 1.2 * s.flare);
+      u.uThick.value = clamp(0.07 + 0.011 * d, 0.07, 0.24) * clamp(h / 1.7, 0.4, 1) * (1 + 0.5 * s.flare);
+      // Far off and in the dark the figure is a dark cut-out against any
+      // bright ring, so the mantle gives way with both.
+      const far = smooth((d - 6) / 16) * (0.45 + 0.55 * dark);
+      u.uIntensity.value = 0.2 * k * (1 - 0.6 * far) * (0.8 + 0.2 * breath + 1.2 * s.flare);
       u.uTime.value = clock + (slot.proto.vnum % 17);
       if (d < 32 && !(s.ground && s.ground.busy && s.ground.owner === s) && rings < SANCT_RINGS) {
         const g = decal({ x: px, y: py, z: pz }, 1.25, 8, SANCT_COLOR, 1e9, (dec, du) => {
           dec.mesh.position.set(fig.at.x, fig.at.y + 0.04, fig.at.z);
-          du.uAlpha.value = smooth(s.level) * (0.75 + 0.25 * Math.sin(clock * SANCT_BREATH + s.phase)) * (1 + 1.5 * s.flare) * 0.35;
+          du.uAlpha.value = smooth(s.level) * (0.75 + 0.25 * Math.sin(clock * SANCT_BREATH + s.phase)) * (1 + 1.5 * s.flare) * (0.12 + 0.3 * smooth(((renderer.toneMappingExposure || 1) - 0.15) / 0.4));
           du.uHeat.value = 0.5 + 0.5 * Math.sin(clock * SANCT_BREATH + s.phase);
         });
         if (g) { g.owner = s; s.ground = g; rings++; }
