@@ -8,6 +8,41 @@ is an opinion.
 
 ## 2026-10-03 — wave 8: a recipe's env, made to count
 
+### Sanctuary you can see from across the square (wave8-sanct)
+
+- The old aura was a soft rim on the body's own edge: a sticker-thin
+  outline that vanished on white clothing. Now a backface-only shell
+  pushed out along the normals makes a white-gold mantle just outside the
+  silhouette, a soft breathing pool of light on the ground (decal mode 8,
+  strength tied to exposure: ~0.12 at noon, ~0.42 at night), rising motes,
+  a swell on cast, a flare on an absorbed blow, a 1.6 s fade on expiry,
+  and a breathing screen-edge tint in your own view. RGB ≥ 250 inside the
+  figure box: 0–1 new pixels in every scene.
+- **A halo has to widen with distance.** A fixed 8 cm is two pixels at
+  20 m; 7 cm up to 24 cm, scaled down for small figures, and its intensity
+  falls up to 60% with distance × darkness, or a night figure becomes a
+  black cut-out in a white blob.
+- **A backface shell draws over the body's own folds** (bright scribbles
+  through the Mudmonster). The render targets have no stencil, so the
+  shell's vertex stage pushes it 0.35 m back along the view ray: any shell
+  in front of the body fails the depth test. Signed `n·v` keeps folded
+  pieces from lighting up.
+- The first ground ring had ticks and a hard double edge and read as an
+  RTS selection marker: light on the ground has to look like light.
+- `decal()` may steal any slot ≥ mode 3, so the ring checks ownership
+  every frame. A fade-out cannot be measured with one `update(0.016)`;
+  step the clock.
+
+### A help screen (wave8-help)
+
+- `?` and `F1` open `src/help.js`, a self-contained module with its own
+  capture-phase keydown listener (it swallows keys while open, holds
+  `state.paused`, re-locks through `player.requestLock()`). It touched no
+  existing module, which is what let it run beside two other agents.
+- The skill-bar rows are read from `game.actions()` at open time — the bar
+  is built per class, and the first version's hand-written "kick, backstab,
+  … in order" was wrong for every class.
+
 ### env on world materials (wave8-env)
 
 - **The bug.** Under r185 every material without its own envMap has its
