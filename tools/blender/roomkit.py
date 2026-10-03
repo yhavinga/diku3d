@@ -196,6 +196,18 @@ def build_temple_wall_door():
     return kit.deliver(p, "temple_wall_door")
 
 
+def _pier_band(z0, z1, out):
+    """A pier band's heights. A band that projects is carried 20 mm past
+    the panel's band at both ends -- the plinth 20 mm under the floor too:
+    the pier swallows the panel's ends in plan, but at the same heights the
+    panel's cornice soffit and the pier's lay in one plane, and so did their
+    tops and their feet -- they took turns to be drawn round every corner of
+    every stone room."""
+    if out > 0:
+        z0, z1 = z0 - 0.02, z1 + 0.02
+    return z0, z1
+
+
 def build_temple_corner():
     """The pier that closes two panels. Square in plan and detailed the same on
     all four faces, so it drops into any corner at any yaw. Its bands project
@@ -209,6 +221,7 @@ def build_temple_corner():
              (4.42, 4.92, 0.04), (4.92, H, 0.36)]
     for (z0, z1, out) in bands:
         s = PIER + 2 * out
+        z0, z1 = _pier_band(z0, z1, out)
         p.append(kit.slab((s, s, z1 - z0), (0, 0, (z0 + z1) / 2), mat="marble",
                           name="pier", width=0.045))
     # One triglyph on each face: the frieze has to run round the corner or the
@@ -382,13 +395,16 @@ def _stone_bands():
 def _buttresses(mat="stonewall"):
     """Two stages, the upper set back -- the profile is the whole point, and it
     is what stops 11.4 m of plain wall reading as a flat card."""
+    # Their backs stop 50 mm inside the wall. Taken through to the inner face
+    # they lay in its plane and flickered through the room side of the wall;
+    # 50 rather than 20 because the middle course is recessed 30 mm.
     objs = []
     for x in PIL_X:
-        objs.append(kit.timber((1.05, T + 0.62, 2.30), (x, -0.31, 1.15),
+        objs.append(kit.timber((1.05, T + 0.57, 2.30), (x, -0.335, 1.15),
                                (0, 0, 0), mat, 0.05, "buttress"))
-        objs.append(kit.timber((0.86, T + 0.40, 1.62), (x, -0.20, 2.30 + 0.81),
+        objs.append(kit.timber((0.86, T + 0.35, 1.62), (x, -0.225, 2.30 + 0.81),
                                (0, 0, 0), mat, 0.05, "buttress"))
-        objs.append(kit.slab((1.15, T + 0.72, 0.16), (x, -0.36, 2.38), mat=mat,
+        objs.append(kit.slab((1.15, T + 0.67, 0.16), (x, -0.385, 2.38), mat=mat,
                              name="weathering", width=0.04))
     return objs
 
@@ -418,6 +434,7 @@ def build_wall_corner():
              (4.06, 4.90, 0.00), (4.90, H, 0.26)]
     for (z0, z1, out) in bands:
         s = PIER + 2 * out
+        z0, z1 = _pier_band(z0, z1, out)
         p.append(kit.slab((s, s, z1 - z0), (0, 0, (z0 + z1) / 2), mat="stonewall",
                           name="pier", width=0.045))
     return kit.deliver(p, "wall_corner")

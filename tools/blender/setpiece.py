@@ -533,8 +533,10 @@ def build_gatehouse():
         for yy in (-1.1 - 0.6, -1.1 + 0.6):
             p.append(beam((0.3, 0.22, 2.0), (dx + sx * 0.05, yy, BRIDGE_DECK + 1.0), S, cham=0.03, name="jamb"))
         # Piers either side of the passage, back to the curtain's rear face.
+        # Their fronts stand 20 mm behind the spandrel's: flush, the two lay
+        # in one plane over the whole head of the gate and flickered.
         pw = tx - GATE_W / 2
-        p.append(beam((pw, y1 - y0, GATE_WALK), (sx * (GATE_W / 2 + pw / 2), (y0 + y1) / 2, GATE_WALK / 2), S,
+        p.append(beam((pw, y1 - y0 - 0.02, GATE_WALK), (sx * (GATE_W / 2 + pw / 2), (y0 + 0.02 + y1) / 2, GATE_WALK / 2), S,
                       cham=0.04, name="pier"))
         # The curtain, out to the cell's edge.
         cw = 6.5 - tx
@@ -552,8 +554,11 @@ def build_gatehouse():
     arch = pointed(w, zs, R, 8)
     skin = [(-tx + 0.2, zs), (-w, zs)] + arch[1:-1] + [(w, zs), (tx - 0.2, zs), (tx - 0.2, GATE_WALK), (-tx + 0.2, GATE_WALK)]
     p.append(plate(skin, y0, y0 + 0.4, S, "spandrel"))
-    p.append(plate(arch, y0 + 0.28, y1, S, "tympanum"))
-    p.append(beam((2 * tx - 0.4, y1 - y0 - 0.4, GATE_WALK - zs), (0, (y0 + 0.4 + y1) / 2, (zs + GATE_WALK) / 2), S,
+    # The tympanum fills only the arch's own depth, up to the core; carried
+    # through to the rear it shared the core's soffit over the passage and
+    # its back face. The core's back stands 20 mm inside the piers'.
+    p.append(plate(arch, y0 + 0.28, y0 + 0.4, S, "tympanum"))
+    p.append(beam((2 * tx - 0.4, y1 - y0 - 0.42, GATE_WALK - zs), (0, (y0 + 0.4 + y1 - 0.02) / 2, (zs + GATE_WALK) / 2), S,
                   cham=0.02, name="core"))
     p += arch_ring(w, zs, R, y0 - 0.06, 0.62, 0.42, S, n=6)
     p.append(beam((0.5, 0.74, 0.62), (0, y0 - 0.06, zs + math.sqrt(R * R - (R - w) ** 2) + 0.28), S, cham=0.05,
@@ -561,7 +566,8 @@ def build_gatehouse():
     for sx in (-1, 1):
         p.append(beam((0.62, 0.72, 0.26), (sx * (w + 0.22), y0 - 0.04, zs - 0.13), S, cham=0.04, name="impost"))
     # The town side of the passage: a lintel and a relieving arch over it.
-    p.append(beam((GATE_W + 0.9, 0.5, 0.42), (0, y1 + 0.05, zs + 0.21), "oak", cham=0.03, name="lintel"))
+    # Hung 20 mm below the passage's soffit, not in its plane.
+    p.append(beam((GATE_W + 0.9, 0.5, 0.42), (0, y1 + 0.05, zs + 0.19), "oak", cham=0.03, name="lintel"))
     p += arch_ring(w + 0.1, zs + 0.42, R + 0.1, y1 + 0.08, 0.3, 0.36, S, n=5, name="relieving")
     # Wall walk: parapet and merlons over the gate on the field side, a rail
     # on the town side.
@@ -691,7 +697,8 @@ def build_fortress():
     p.append(mesh("moat", [(-33, 0.2, 0.06), (33, 0.2, 0.06), (33, G + 1.5, 0.06), (-33, G + 1.5, 0.06)],
                   [(0, 1, 2, 3)], "bogwater"))
     p.append(beam((66.0, 0.7, 0.55), (0, 0.05, 0.18), "rubblewall", cham=0.05, name="quay"))
-    p.append(beam((6.6, 1.2, 0.42), (0, 0.3, 0.21), "stonewall", cham=0.04, name="abutment"))
+    # 20 mm proud of the quay's face: flush, the two lay in one plane.
+    p.append(beam((6.6, 1.22, 0.42), (0, 0.29, 0.21), "stonewall", cham=0.04, name="abutment"))
     for sx in (-1, 1):
         p.append(drum(sx * 3.05, 0.35, [(0, 0.26), (0.9, 0.22), (1.0, 0.16)], 10, "stonewall", "bollard"))
 

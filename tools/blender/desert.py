@@ -264,6 +264,9 @@ def heightfield(size, n, height_fn, name, mat, edge_zero=True):
     return lib.assign(obj, mat)
 
 
+SINK = 0.03
+
+
 def build_dune(name, seed, height, horns):
     """A barchan: a crescent of sand with a long gentle windward back and a
     short steep slip face in the lee, its horns trailing downwind. 13.6 m
@@ -307,7 +310,10 @@ def build_dune(name, seed, height, horns):
             wob = fbm3((x * 0.3, y * 0.3, 0.5), seed, 3) - 0.5
             z += wob * 0.18 * min(1.0, z)
             edge = min(1.0, (R - max(abs(x), abs(y))) / 1.4)
-            verts.append((x, y, max(0.0, z) * max(0.0, edge) if abs(x) < R and abs(y) < R else 0.0))
+            # Everything that would lie flat at 0 goes 30 mm under instead: the
+            # desert floor is a plane at 0, and a rim lying in it took turns
+            # with it to be drawn all round every dune.
+            verts.append((x, y, (max(0.0, z) * max(0.0, edge) if abs(x) < R and abs(y) < R else 0.0) - SINK))
     for i in range(nx):
         for j in range(cols - 1):
             a = i * cols + j
