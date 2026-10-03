@@ -2975,6 +2975,3139 @@
     "peak": -17,
     "lra": 10.3
    }
+  },
+  {
+   "id": "cmb_hit_flesh",
+   "file": "cmb_hit_flesh.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Six separate blows of a sword cutting into flesh and leather, each a short dull wet slash with a thump, one blow about every 1.2 seconds, close microphone, dry room, no voices. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.7
+   },
+   "duration": 7.22,
+   "bytes": 31413,
+   "steps": [
+    [
+     0.05,
+     0.25
+    ],
+    [
+     1.36,
+     0.21
+    ],
+    [
+     2.41,
+     0.24
+    ],
+    [
+     3.62,
+     0.18
+    ],
+    [
+     4.46,
+     0.22
+    ],
+    [
+     5.42,
+     0.14
+    ],
+    [
+     6.17,
+     0.22
+    ],
+    [
+     6.86,
+     0.27
+    ]
+   ],
+   "loudness": {
+    "lufs": -21.6,
+    "peak": -4,
+    "lra": 6.9
+   }
+  },
+  {
+   "id": "cmb_hit_blunt",
+   "file": "cmb_hit_blunt.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Six separate hits of a wooden club thudding into a body, each a heavy dull thump with a short crunch, one about every 1.2 seconds, close microphone, dry room, no voices. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.7
+   },
+   "duration": 7.16,
+   "bytes": 32303,
+   "steps": [
+    [
+     0.01,
+     0.23
+    ],
+    [
+     1.17,
+     0.21
+    ],
+    [
+     2.59,
+     0.21
+    ],
+    [
+     4.03,
+     0.21
+    ],
+    [
+     5.61,
+     0.21
+    ],
+    [
+     6.91,
+     0.21
+    ]
+   ],
+   "loudness": {
+    "lufs": -21.3,
+    "peak": -4,
+    "lra": 1.6
+   }
+  },
+  {
+   "id": "cmb_hit_armour",
+   "file": "cmb_hit_armour.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Six separate sword blows landing on a steel breastplate, each a short metallic clank with a dull thud underneath, with a full second of silence between blows, close microphone, dry room, no voices. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.8,
+    "stepMax": 0.9
+   },
+   "duration": 8,
+   "bytes": 38504,
+   "steps": [
+    [
+     0,
+     0.31
+    ],
+    [
+     0.72,
+     0.45
+    ],
+    [
+     1.81,
+     0.33
+    ],
+    [
+     2.32,
+     0.53
+    ],
+    [
+     3.21,
+     0.72
+    ],
+    [
+     4.48,
+     0.48
+    ]
+   ],
+   "loudness": {
+    "lufs": -16.9,
+    "peak": -4,
+    "lra": 4.4
+   }
+  },
+  {
+   "id": "cmb_parry",
+   "file": "cmb_parry.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Six separate clashes of two steel swords meeting, each a sharp bright strike with a ringing tail that fades, one about every 1.6 seconds, outdoors, close microphone, no voices. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1,
+    "stepMax": 1.4
+   },
+   "duration": 8.99,
+   "bytes": 41384,
+   "steps": [
+    [
+     0.01,
+     0.23
+    ],
+    [
+     0.94,
+     0.27
+    ],
+    [
+     1.72,
+     0.24
+    ],
+    [
+     2.56,
+     0.27
+    ],
+    [
+     3.79,
+     0.25
+    ],
+    [
+     4.76,
+     0.24
+    ],
+    [
+     5.93,
+     0.27
+    ],
+    [
+     6.85,
+     0.24
+    ],
+    [
+     7.55,
+     0.23
+    ],
+    [
+     8.66,
+     0.24
+    ]
+   ],
+   "loudness": {
+    "lufs": -21.2,
+    "peak": -4,
+    "lra": 1.4
+   }
+  },
+  {
+   "id": "cmb_swing",
+   "file": "cmb_swing.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Six separate quick sword swings through the air, each a thin swish of a blade, one about every second, close microphone, dry, no impact, no voices. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 6,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.6,
+    "stepMax": 0.5
+   },
+   "duration": 6,
+   "bytes": 25995,
+   "steps": [
+    [
+     0,
+     0.46
+    ],
+    [
+     1.03,
+     0.19
+    ],
+    [
+     1.38,
+     0.13
+    ],
+    [
+     1.87,
+     0.19
+    ],
+    [
+     2.53,
+     0.16
+    ],
+    [
+     2.95,
+     0.2
+    ],
+    [
+     3.83,
+     0.42
+    ],
+    [
+     4.86,
+     0.19
+    ],
+    [
+     5.37,
+     0.4
+    ]
+   ],
+   "loudness": {
+    "lufs": -26.7,
+    "peak": -4,
+    "lra": 1.8
+   }
+  },
+  {
+   "id": "cmb_dodge",
+   "file": "cmb_dodge.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Five separate quick sidesteps of a person on packed dirt, a scuff of boots and a brush of cloth, one about every second, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 5,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.6,
+    "stepMax": 0.5
+   },
+   "duration": 4.56,
+   "bytes": 18689,
+   "steps": [
+    [
+     0,
+     0.15
+    ],
+    [
+     0.98,
+     0.23
+    ],
+    [
+     2.65,
+     0.22
+    ],
+    [
+     4.04,
+     0.3
+    ]
+   ],
+   "loudness": {
+    "lufs": -23.2,
+    "peak": -4,
+    "lra": 2
+   }
+  },
+  {
+   "id": "cmb_death_human",
+   "file": "cmb_death_human.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Four separate death cries of a man struck down in a medieval fight, a short pained shout that trails into a last gasp, one about every 2.5 seconds, no words, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.5,
+    "stepMax": 1.8
+   },
+   "duration": 10,
+   "bytes": 52036,
+   "steps": [
+    [
+     0,
+     1.12
+    ],
+    [
+     1.12,
+     1.75
+    ],
+    [
+     2.87,
+     1.22
+    ],
+    [
+     5.17,
+     1.67
+    ],
+    [
+     6.84,
+     1.05
+    ],
+    [
+     8.57,
+     0.28
+    ]
+   ],
+   "loudness": {
+    "lufs": -12.1,
+    "peak": -4,
+    "lra": 19.5
+   }
+  },
+  {
+   "id": "cmb_death_beast",
+   "file": "cmb_death_beast.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Four separate dying cries of a large wild animal, a snarling roar that sinks into a low rattling breath, one about every 2.5 seconds, close microphone, dry, no words. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.5,
+    "stepMax": 1.8
+   },
+   "duration": 7.11,
+   "bytes": 40523,
+   "steps": [
+    [
+     0.02,
+     1.56
+    ],
+    [
+     1.58,
+     1.12
+    ],
+    [
+     2.7,
+     1.8
+    ],
+    [
+     4.5,
+     1.77
+    ],
+    [
+     6.27,
+     0.56
+    ]
+   ],
+   "loudness": {
+    "lufs": -16.3,
+    "peak": -4,
+    "lra": 12.3
+   }
+  },
+  {
+   "id": "cmb_death_small",
+   "file": "cmb_death_small.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Five separate short dying squeals of a small animal, rat or bird-sized, high and thin and cut off, one about every 1.2 seconds, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 6,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.8
+   },
+   "duration": 5.36,
+   "bytes": 29411,
+   "steps": [
+    [
+     0,
+     0.9
+    ],
+    [
+     1.15,
+     0.4
+    ],
+    [
+     1.77,
+     0.96
+    ],
+    [
+     2.88,
+     0.74
+    ],
+    [
+     3.62,
+     0.75
+    ],
+    [
+     4.37,
+     0.98
+    ]
+   ],
+   "loudness": {
+    "lufs": -17,
+    "peak": -4,
+    "lra": 5.5
+   }
+  },
+  {
+   "id": "cmb_bodyfall",
+   "file": "cmb_bodyfall.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Four separate sounds of a heavily armed man collapsing onto packed earth, a heavy thud then a short clatter of mail and metal, one about every 1.5 seconds, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 6,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.9,
+    "stepMax": 1
+   },
+   "duration": 5.22,
+   "bytes": 25911,
+   "steps": [
+    [
+     0.32,
+     0.18
+    ],
+    [
+     0.8,
+     0.88
+    ],
+    [
+     1.93,
+     0.54
+    ],
+    [
+     2.65,
+     0.73
+    ],
+    [
+     3.74,
+     1.21
+    ]
+   ],
+   "loudness": {
+    "lufs": -16.8,
+    "peak": -4,
+    "lra": 3.6
+   }
+  },
+  {
+   "id": "cmb_pain",
+   "file": "cmb_pain.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Five separate short grunts of a man struck in the body, a breathy hnh of pain, one about every 1.2 seconds, no words, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 6,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.6
+   },
+   "duration": 5.68,
+   "bytes": 25140,
+   "steps": [
+    [
+     0,
+     0.57
+    ],
+    [
+     2,
+     0.29
+    ],
+    [
+     2.69,
+     0.42
+    ],
+    [
+     4.53,
+     0.42
+    ],
+    [
+     5.12,
+     0.41
+    ]
+   ],
+   "loudness": {
+    "lufs": -15.3,
+    "peak": -4,
+    "lra": 4.5
+   }
+  },
+  {
+   "id": "ui_levelup",
+   "file": "ui_levelup.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "ui",
+   "loop": false,
+   "prompt": "A short medieval fanfare on two natural trumpets, three rising notes then a held fourth, bright and brief, outdoors, no drums, no other instruments. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 4,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 4,
+   "bytes": 24603,
+   "steps": null,
+   "loudness": {
+    "lufs": -9.2,
+    "peak": -4,
+    "lra": 0.7
+   }
+  },
+  {
+   "id": "dr_open",
+   "file": "dr_open.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "door",
+   "loop": false,
+   "prompt": "Three separate old wooden doors being opened, each a latch click then a slow creaking hinge ending in a soft bump, one about every 3 seconds, indoors, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.6,
+    "stepMax": 2.6
+   },
+   "duration": 9.32,
+   "bytes": 41246,
+   "steps": [
+    [
+     0,
+     0.96
+    ],
+    [
+     2.2,
+     0.19
+    ],
+    [
+     3.42,
+     0.42
+    ],
+    [
+     5.45,
+     0.62
+    ],
+    [
+     8.51,
+     0.81
+    ]
+   ],
+   "loudness": {
+    "lufs": -24.8,
+    "peak": -4,
+    "lra": 13.2
+   }
+  },
+  {
+   "id": "dr_close",
+   "file": "dr_close.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "door",
+   "loop": false,
+   "prompt": "Three separate heavy wooden doors being closed, each a creak then a solid thud and a latch click, one about every 2.5 seconds, indoors, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.4,
+    "stepMax": 2
+   },
+   "duration": 5.09,
+   "bytes": 21501,
+   "steps": [
+    [
+     0,
+     0.92
+    ],
+    [
+     3.46,
+     0.16
+    ],
+    [
+     4.88,
+     0.2
+    ]
+   ],
+   "loudness": {
+    "lufs": -20.4,
+    "peak": -4,
+    "lra": 13.2
+   }
+  },
+  {
+   "id": "dr_unlock",
+   "file": "dr_unlock.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "door",
+   "loop": false,
+   "prompt": "Four separate sounds of a large iron key turning in a lock, a scrape then a heavy clunk of the bolt, one about every 2 seconds, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.1,
+    "stepMax": 1.4
+   },
+   "duration": 6.94,
+   "bytes": 35134,
+   "steps": [
+    [
+     0.32,
+     1.21
+    ],
+    [
+     1.53,
+     0.92
+    ],
+    [
+     3.12,
+     0.39
+    ],
+    [
+     6.01,
+     0.83
+    ]
+   ],
+   "loudness": {
+    "lufs": -25.4,
+    "peak": -4,
+    "lra": 4.5
+   }
+  },
+  {
+   "id": "dr_lockpick",
+   "file": "dr_lockpick.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "door",
+   "loop": false,
+   "prompt": "Lockpicking: delicate metal scraping and tiny clicks of tumblers, ending with a lock springing open, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 5,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 4.68,
+   "bytes": 28830,
+   "steps": null,
+   "loudness": {
+    "lufs": -29.8,
+    "peak": -5,
+    "lra": 1
+   }
+  },
+  {
+   "id": "sv_coins",
+   "file": "sv_coins.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "verb",
+   "loop": false,
+   "prompt": "Five separate small handfuls of gold coins dropped into a leather purse, each a short bright jingle, one about every 1.2 seconds, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 6,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.8
+   },
+   "duration": 6,
+   "bytes": 29221,
+   "steps": [
+    [
+     0,
+     0.63
+    ],
+    [
+     0.63,
+     0.48
+    ],
+    [
+     1.62,
+     0.8
+    ],
+    [
+     2.42,
+     0.46
+    ],
+    [
+     3.2,
+     0.89
+    ],
+    [
+     4.24,
+     0.73
+    ],
+    [
+     4.97,
+     0.52
+    ]
+   ],
+   "loudness": {
+    "lufs": -18.8,
+    "peak": -4,
+    "lra": 3.2
+   }
+  },
+  {
+   "id": "sv_pickup",
+   "file": "sv_pickup.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "verb",
+   "loop": false,
+   "prompt": "Five separate sounds of picking an object up off a wooden table, a rustle of cloth and leather and a soft grasp, with two seconds of silence between each, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.6,
+    "stepMax": 0.6
+   },
+   "duration": 6.66,
+   "bytes": 29414,
+   "steps": [
+    [
+     0,
+     0.14
+    ],
+    [
+     2.23,
+     0.16
+    ],
+    [
+     4.48,
+     0.18
+    ],
+    [
+     5.49,
+     0.13
+    ]
+   ],
+   "loudness": {
+    "lufs": -31.5,
+    "peak": -4,
+    "lra": 5.9
+   }
+  },
+  {
+   "id": "sv_drop",
+   "file": "sv_drop.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "verb",
+   "loop": false,
+   "prompt": "Five separate sounds of dropping a leather pouch onto a stone floor, a soft thud and clack, with two seconds of silence between each, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.6,
+    "stepMax": 0.6,
+    "stepMin": 0.05
+   },
+   "duration": 5.42,
+   "bytes": 20982,
+   "steps": [
+    [
+     0.01,
+     0.09
+    ],
+    [
+     0.29,
+     0.07
+    ],
+    [
+     2.21,
+     0.46
+    ],
+    [
+     4.88,
+     0.11
+    ],
+    [
+     5.29,
+     0.08
+    ]
+   ],
+   "loudness": {
+    "lufs": -26.3,
+    "peak": -4,
+    "lra": 15.2
+   }
+  },
+  {
+   "id": "sv_eat",
+   "file": "sv_eat.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "verb",
+   "loop": false,
+   "prompt": "A person biting into a crisp apple and chewing, three bites, close microphone, dry, no speech. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 5,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 4.21,
+   "bytes": 20715,
+   "steps": null,
+   "loudness": {
+    "lufs": -22.5,
+    "peak": -5,
+    "lra": 20.2
+   }
+  },
+  {
+   "id": "sv_drink",
+   "file": "sv_drink.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "verb",
+   "loop": false,
+   "prompt": "A person drinking water from a wooden cup in three big gulps, close microphone, dry, no speech. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 4,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 3.76,
+   "bytes": 18486,
+   "steps": null,
+   "loudness": {
+    "lufs": -29.1,
+    "peak": -5,
+    "lra": 5.1
+   }
+  },
+  {
+   "id": "sv_fill",
+   "file": "sv_fill.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "verb",
+   "loop": false,
+   "prompt": "Water pouring and bubbling into a leather waterskin, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 4,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 3.72,
+   "bytes": 19032,
+   "steps": null,
+   "loudness": {
+    "lufs": -21.4,
+    "peak": -5,
+    "lra": 1.6
+   }
+  },
+  {
+   "id": "sv_shopbell",
+   "file": "sv_shopbell.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "verb",
+   "loop": false,
+   "prompt": "A small brass shop bell on a spring above a door, ringing twice, bright, indoors. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 3,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 2.57,
+   "bytes": 16178,
+   "steps": null,
+   "loudness": {
+    "lufs": -10.3,
+    "peak": -5,
+    "lra": 0
+   }
+  },
+  {
+   "id": "ui_page",
+   "file": "ui_page.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "ui",
+   "loop": false,
+   "prompt": "Four separate sounds of one thick parchment page being turned, a soft dry paper rustle and flap, with two seconds of silence between each, quiet room, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.8
+   },
+   "duration": 6.7,
+   "bytes": 30601,
+   "steps": [
+    [
+     0.04,
+     0.49
+    ],
+    [
+     0.53,
+     0.69
+    ],
+    [
+     1.22,
+     0.64
+    ],
+    [
+     4.52,
+     0.48
+    ],
+    [
+     5,
+     0.49
+    ],
+    [
+     5.49,
+     0.77
+    ],
+    [
+     6.26,
+     0.33
+    ]
+   ],
+   "loudness": {
+    "lufs": -25.5,
+    "peak": -4,
+    "lra": 15.8
+   }
+  },
+  {
+   "id": "bell_toll_a",
+   "file": "bell_toll_a.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "bell",
+   "loop": false,
+   "prompt": "A large church bell tolls once, a deep bronze strike with a long ringing decay, heard from far away across a medieval town, outdoors, wind, no other sounds. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 12,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -6,
+    "kbps": 40,
+    "mono": true,
+    "trimDb": -55
+   },
+   "duration": 12,
+   "bytes": 65165,
+   "steps": null,
+   "loudness": {
+    "lufs": -17.3,
+    "peak": -6,
+    "lra": 23.2
+   }
+  },
+  {
+   "id": "bell_toll_b",
+   "file": "bell_toll_b.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "bell",
+   "loop": false,
+   "prompt": "A medium church bell tolls once, a bronze strike with a long soft ringing decay, heard from a distance across rooftops, outdoors, no other sounds. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 12,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -6,
+    "kbps": 40,
+    "mono": true,
+    "trimDb": -55
+   },
+   "duration": 9.27,
+   "bytes": 47324,
+   "steps": null,
+   "loudness": {
+    "lufs": -21.2,
+    "peak": -6,
+    "lra": 31.3
+   }
+  },
+  {
+   "id": "sp_gather",
+   "file": "sp_gather.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "A rising magical shimmer with whispered arcane words and a soft airy swell that builds over two seconds, fantasy spell casting. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 3,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -6,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 2.25,
+   "bytes": 12890,
+   "steps": null,
+   "loudness": {
+    "lufs": -15.5,
+    "peak": -6,
+    "lra": 0
+   }
+  },
+  {
+   "id": "sp_missile",
+   "file": "sp_missile.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "A quick magical bolt zipping through the air with a bright whistle and a fizzing tail, short. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 2,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 1.53,
+   "bytes": 7705,
+   "steps": null,
+   "loudness": {
+    "lufs": -16,
+    "peak": -5,
+    "lra": 0
+   }
+  },
+  {
+   "id": "sp_fire",
+   "file": "sp_fire.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "A fireball bursting into flame with a roaring whoomph and crackling embers, outdoors, powerful. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 3,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 3,
+   "bytes": 11922,
+   "steps": null,
+   "loudness": {
+    "lufs": -13.4,
+    "peak": -4,
+    "lra": 20
+   }
+  },
+  {
+   "id": "sp_lightning",
+   "file": "sp_lightning.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "A sharp crack of lightning followed by rolling thunder, outdoors, close. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 4,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 4,
+   "bytes": 17059,
+   "steps": null,
+   "loudness": {
+    "lufs": -13.7,
+    "peak": -4,
+    "lra": 22.8
+   }
+  },
+  {
+   "id": "sp_frost",
+   "file": "sp_frost.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "Ice crystallising, a crackling freeze with glassy tinkling shards, cold, magical. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 3,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 2.62,
+   "bytes": 13758,
+   "steps": null,
+   "loudness": {
+    "lufs": -20.6,
+    "peak": -5,
+    "lra": 0
+   }
+  },
+  {
+   "id": "sp_acid",
+   "file": "sp_acid.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "Acid sizzling and hissing on stone with small bubbling pops, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 3,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 2.42,
+   "bytes": 10745,
+   "steps": null,
+   "loudness": {
+    "lufs": -13.7,
+    "peak": -5,
+    "lra": 0
+   }
+  },
+  {
+   "id": "sp_heal",
+   "file": "sp_heal.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "A soft warm chime of glass bell tones with a gentle ascending shimmer, healing magic, calm and bright. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 3,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -6,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 3,
+   "bytes": 17548,
+   "steps": null,
+   "loudness": {
+    "lufs": -16.6,
+    "peak": -6,
+    "lra": 20
+   }
+  },
+  {
+   "id": "sp_dark",
+   "file": "sp_dark.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "A low ominous magical rumble with a dark whispering swell that fades, a curse being cast. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 3,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -6,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 2.55,
+   "bytes": 11453,
+   "steps": null,
+   "loudness": {
+    "lufs": -21.3,
+    "peak": -6,
+    "lra": 0
+   }
+  },
+  {
+   "id": "sp_rumble",
+   "file": "sp_rumble.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "A deep rumble of the ground shaking with falling stones, an earthquake, outdoors. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 4,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 3.79,
+   "bytes": 17419,
+   "steps": null,
+   "loudness": {
+    "lufs": -19.7,
+    "peak": -4,
+    "lra": 0.9
+   }
+  },
+  {
+   "id": "sp_pop",
+   "file": "sp_pop.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "A short magical pop with a sparkling glint, like a soap bubble bursting, then silence. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 2,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 2,
+   "bytes": 9659,
+   "steps": null,
+   "loudness": {
+    "lufs": -26.1,
+    "peak": -5,
+    "lra": 0
+   }
+  },
+  {
+   "id": "sp_fizzle",
+   "file": "sp_fizzle.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "A spell fizzling out, a small sputtering spark and a thin hiss that dies. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 2,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -6,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 2,
+   "bytes": 9284,
+   "steps": null,
+   "loudness": {
+    "lufs": -17.7,
+    "peak": -6,
+    "lra": 0
+   }
+  },
+  {
+   "id": "sp_prism",
+   "file": "sp_prism.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "A bright cascade of glass chimes shimmering upward, magical. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 3,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -6,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 2.48,
+   "bytes": 11821,
+   "steps": null,
+   "loudness": {
+    "lufs": -15.1,
+    "peak": -6,
+    "lra": 0
+   }
+  },
+  {
+   "id": "sp_portal",
+   "file": "sp_portal.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "spell",
+   "loop": false,
+   "prompt": "A magical teleport, swirling air and a rising shimmer that ends in a soft pop. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 3,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 2.77,
+   "bytes": 13769,
+   "steps": null,
+   "loudness": {
+    "lufs": -12.5,
+    "peak": -5,
+    "lra": 0
+   }
+  },
+  {
+   "id": "cr_dog",
+   "file": "cr_dog.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Four separate barks of a medium-sized dog, sharp and clear, one about every 2 seconds, outdoors, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1,
+    "stepMax": 0.9
+   },
+   "duration": 7,
+   "bytes": 30698,
+   "steps": [
+    [
+     0.94,
+     0.26
+    ],
+    [
+     2.76,
+     0.5
+    ],
+    [
+     4.09,
+     0.84
+    ],
+    [
+     5.8,
+     0.27
+    ],
+    [
+     6.63,
+     0.26
+    ]
+   ],
+   "loudness": {
+    "lufs": -16.8,
+    "peak": -4,
+    "lra": 1.4
+   }
+  },
+  {
+   "id": "cr_dog_growl",
+   "file": "cr_dog_growl.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Three separate low growls and snarls of an angry dog, each about two seconds long, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.5,
+    "stepMax": 2
+   },
+   "duration": 7.38,
+   "bytes": 36179,
+   "steps": [
+    [
+     0.01,
+     1.54
+    ],
+    [
+     1.55,
+     1.43
+    ],
+    [
+     2.98,
+     1.84
+    ],
+    [
+     4.82,
+     2.49
+    ]
+   ],
+   "loudness": {
+    "lufs": -20.7,
+    "peak": -4,
+    "lra": 2.5
+   }
+  },
+  {
+   "id": "cr_wolf",
+   "file": "cr_wolf.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Two separate long howls of a lone wolf, rising and falling, about four seconds each with silence between, far away across open land at night. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 2.5,
+    "stepMax": 4.5,
+    "stepMin": 1
+   },
+   "duration": 9.35,
+   "bytes": 53101,
+   "steps": [
+    [
+     0.03,
+     4.02
+    ],
+    [
+     4.05,
+     1.91
+    ]
+   ],
+   "loudness": {
+    "lufs": -8.9,
+    "peak": -4,
+    "lra": 24.3
+   }
+  },
+  {
+   "id": "cr_cat",
+   "file": "cr_cat.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Four separate meows of a domestic cat, one about every 2 seconds, indoors, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1,
+    "stepMax": 1.2
+   },
+   "duration": 6.81,
+   "bytes": 29781,
+   "steps": [
+    [
+     0,
+     0.64
+    ],
+    [
+     1.99,
+     0.77
+    ],
+    [
+     4.2,
+     0.52
+    ],
+    [
+     6.08,
+     0.71
+    ]
+   ],
+   "loudness": {
+    "lufs": -20.1,
+    "peak": -4,
+    "lra": 12.1
+   }
+  },
+  {
+   "id": "cr_rat",
+   "file": "cr_rat.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Five separate squeaks of a rat, high and thin, with a tiny scrabble of claws, one about every 1.2 seconds, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 6,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.8
+   },
+   "duration": 5.47,
+   "bytes": 25918,
+   "steps": [
+    [
+     0,
+     0.39
+    ],
+    [
+     0.86,
+     0.44
+    ],
+    [
+     2.24,
+     0.41
+    ],
+    [
+     3.28,
+     0.38
+    ],
+    [
+     4.42,
+     0.16
+    ],
+    [
+     5.14,
+     0.32
+    ]
+   ],
+   "loudness": {
+    "lufs": -19.6,
+    "peak": -4,
+    "lra": 1.4
+   }
+  },
+  {
+   "id": "cr_bat",
+   "file": "cr_bat.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Five separate high shrill chitters and screeches of a bat, one about every 1.2 seconds, in a cave, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 6,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.8
+   },
+   "duration": 5.27,
+   "bytes": 26241,
+   "steps": [
+    [
+     0.01,
+     0.8
+    ],
+    [
+     0.81,
+     0.5
+    ],
+    [
+     1.31,
+     0.51
+    ],
+    [
+     1.82,
+     0.8
+    ],
+    [
+     2.62,
+     0.4
+    ],
+    [
+     3.27,
+     0.84
+    ],
+    [
+     4.52,
+     0.14
+    ]
+   ],
+   "loudness": {
+    "lufs": -13.4,
+    "peak": -4,
+    "lra": 1.9
+   }
+  },
+  {
+   "id": "cr_pig",
+   "file": "cr_pig.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Four separate grunts and squeals of a pig, one about every 2 seconds, farmyard, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1,
+    "stepMax": 1.2
+   },
+   "duration": 7.06,
+   "bytes": 37422,
+   "steps": [
+    [
+     0.06,
+     0.7
+    ],
+    [
+     1.07,
+     0.91
+    ],
+    [
+     1.98,
+     0.72
+    ],
+    [
+     2.7,
+     0.95
+    ],
+    [
+     3.65,
+     0.92
+    ],
+    [
+     4.94,
+     1.01
+    ],
+    [
+     5.95,
+     1.09
+    ]
+   ],
+   "loudness": {
+    "lufs": -14.9,
+    "peak": -4,
+    "lra": 3.1
+   }
+  },
+  {
+   "id": "cr_cow",
+   "file": "cr_cow.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Three separate low moos of a cow, each about two seconds long, one about every 3 seconds, farm field, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.5,
+    "stepMax": 2.4
+   },
+   "duration": 8.82,
+   "bytes": 44475,
+   "steps": [
+    [
+     0.3,
+     1.5
+    ],
+    [
+     1.8,
+     2.18
+    ],
+    [
+     4.84,
+     1.66
+    ]
+   ],
+   "loudness": {
+    "lufs": -12.4,
+    "peak": -4,
+    "lra": 10.5
+   }
+  },
+  {
+   "id": "cr_chicken",
+   "file": "cr_chicken.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "A hen clucking three times, then a rooster crowing once, farmyard, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.9,
+    "stepMax": 2.2
+   },
+   "duration": 7.27,
+   "bytes": 38537,
+   "steps": [
+    [
+     0,
+     0.18
+    ],
+    [
+     0.71,
+     0.16
+    ],
+    [
+     1.48,
+     0.16
+    ],
+    [
+     2.53,
+     0.16
+    ],
+    [
+     3.71,
+     1.55
+    ],
+    [
+     5.26,
+     1.81
+    ]
+   ],
+   "loudness": {
+    "lufs": -14.6,
+    "peak": -4,
+    "lra": 14.5
+   }
+  },
+  {
+   "id": "cr_horse",
+   "file": "cr_horse.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Three separate calls of a horse, a whinny, a snort and a neigh, each followed by three seconds of silence, stable, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 12,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.5,
+    "stepMax": 2.2
+   },
+   "duration": 3.25,
+   "bytes": 15543,
+   "steps": [
+    [
+     0.54,
+     1.53
+    ]
+   ],
+   "loudness": {
+    "lufs": -15.4,
+    "peak": -4,
+    "lra": 20
+   }
+  },
+  {
+   "id": "cr_snake",
+   "file": "cr_snake.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Four separate short hisses of a snake, each one second long, followed by two seconds of complete silence, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1,
+    "stepMax": 1.4
+   },
+   "duration": 8.82,
+   "bytes": 42581,
+   "steps": [
+    [
+     0.04,
+     1.13
+    ],
+    [
+     1.17,
+     1.37
+    ],
+    [
+     2.54,
+     0.43
+    ],
+    [
+     4.62,
+     0.95
+    ],
+    [
+     5.57,
+     1.07
+    ],
+    [
+     6.64,
+     1.33
+    ],
+    [
+     7.97,
+     0.84
+    ]
+   ],
+   "loudness": {
+    "lufs": -14.5,
+    "peak": -4,
+    "lra": 10.3
+   }
+  },
+  {
+   "id": "cr_bear",
+   "file": "cr_bear.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Three separate growls and roars of a large brown bear, each about two seconds long, one about every 3 seconds, forest, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.5,
+    "stepMax": 2.4
+   },
+   "duration": 8.5,
+   "bytes": 42592,
+   "steps": [
+    [
+     0.03,
+     2.02
+    ],
+    [
+     3.16,
+     1.43
+    ],
+    [
+     5.15,
+     1.05
+    ],
+    [
+     7.07,
+     1.23
+    ]
+   ],
+   "loudness": {
+    "lufs": -18.8,
+    "peak": -4,
+    "lra": 9.2
+   }
+  },
+  {
+   "id": "cr_dragon",
+   "file": "cr_dragon.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Three separate roars of a huge dragon, deep and rasping, each two seconds long and followed by two seconds of silence, in a large cave. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 14,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 2,
+    "stepMax": 3.4,
+    "stepMin": 0.8
+   },
+   "duration": 8.71,
+   "bytes": 41946,
+   "steps": [
+    [
+     0.11,
+     3.39
+    ],
+    [
+     3.5,
+     2.77
+    ]
+   ],
+   "loudness": {
+    "lufs": -12.7,
+    "peak": -4,
+    "lra": 20.5
+   }
+  },
+  {
+   "id": "cr_frog",
+   "file": "cr_frog.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Several separate croaks of a large frog, one about every 1.5 seconds, wet marsh, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.8,
+    "stepMax": 0.9
+   },
+   "duration": 6.96,
+   "bytes": 32795,
+   "steps": [
+    [
+     0.01,
+     0.82
+    ],
+    [
+     0.83,
+     0.34
+    ],
+    [
+     2.36,
+     0.61
+    ],
+    [
+     3.94,
+     0.85
+    ],
+    [
+     6.2,
+     0.71
+    ]
+   ],
+   "loudness": {
+    "lufs": -17.3,
+    "peak": -4,
+    "lra": 5.5
+   }
+  },
+  {
+   "id": "cr_goat",
+   "file": "cr_goat.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Four separate bleats of a goat, one about every 2 seconds, mountain pasture, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1,
+    "stepMax": 1.2
+   },
+   "duration": 7.69,
+   "bytes": 37889,
+   "steps": [
+    [
+     0.03,
+     1.28
+    ],
+    [
+     2.44,
+     0.89
+    ],
+    [
+     4.24,
+     0.94
+    ],
+    [
+     6.51,
+     1.17
+    ]
+   ],
+   "loudness": {
+    "lufs": -15.1,
+    "peak": -4,
+    "lra": 4.4
+   }
+  },
+  {
+   "id": "cr_deer",
+   "file": "cr_deer.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Three separate calls of a red deer stag, each a hoarse bellowing groan followed by two seconds of silence, forest, far away. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 12,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.4,
+    "stepMax": 2
+   },
+   "duration": 12,
+   "bytes": 59197,
+   "steps": [
+    [
+     0.15,
+     1.56
+    ],
+    [
+     1.71,
+     1.23
+    ]
+   ],
+   "loudness": {
+    "lufs": -9.3,
+    "peak": -4,
+    "lra": 11.8
+   }
+  },
+  {
+   "id": "cr_spider",
+   "file": "cr_spider.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Four separate sounds of a giant spider, a dry clicking chitter and a rasping hiss, one about every 2 seconds, in a cave, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1,
+    "stepMax": 1.2
+   },
+   "duration": 7.83,
+   "bytes": 37339,
+   "steps": [
+    [
+     0,
+     1.04
+    ],
+    [
+     1.04,
+     0.72
+    ],
+    [
+     1.76,
+     1.13
+    ],
+    [
+     2.89,
+     1.03
+    ],
+    [
+     3.92,
+     0.87
+    ],
+    [
+     4.79,
+     1.08
+    ],
+    [
+     5.87,
+     0.76
+    ],
+    [
+     6.63,
+     1.19
+    ]
+   ],
+   "loudness": {
+    "lufs": -13.9,
+    "peak": -4,
+    "lra": 0.8
+   }
+  },
+  {
+   "id": "cr_beast",
+   "file": "cr_beast.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Four separate growls and snarls of a monstrous beast, deep and wet, one about every 2 seconds, in a cave, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1,
+    "stepMax": 1.4
+   },
+   "duration": 6.49,
+   "bytes": 32458,
+   "steps": [
+    [
+     0,
+     0.96
+    ],
+    [
+     0.96,
+     1.05
+    ],
+    [
+     2.01,
+     1.25
+    ],
+    [
+     3.26,
+     1.39
+    ],
+    [
+     4.65,
+     1.38
+    ],
+    [
+     6.03,
+     0.41
+    ]
+   ],
+   "loudness": {
+    "lufs": -18.4,
+    "peak": -4,
+    "lra": 10.7
+   }
+  },
+  {
+   "id": "pos_fountain",
+   "file": "pos_fountain.ogg",
+   "kind": "ambience",
+   "api": "sfx",
+   "group": "place",
+   "loop": true,
+   "prompt": "A stone fountain in a town square, water falling and splashing into a basin, steady, close, outdoors, no voices. Steady, no sudden standout events, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 15,
+    "loop": true,
+    "prompt_influence": 0.4
+   },
+   "post": {
+    "lufs": -26,
+    "crossfade": 1.5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 13.5,
+   "bytes": 65032,
+   "steps": null,
+   "loudness": {
+    "lufs": -26,
+    "peak": -8.1,
+    "lra": 0.5
+   }
+  },
+  {
+   "id": "pos_fire",
+   "file": "pos_fire.ogg",
+   "kind": "ambience",
+   "api": "sfx",
+   "group": "place",
+   "loop": true,
+   "prompt": "A wood fire crackling and popping softly in a stone hearth, steady, close, indoors, no voices. Steady, no sudden standout events, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 15,
+    "loop": true,
+    "prompt_influence": 0.4
+   },
+   "post": {
+    "lufs": -29,
+    "crossfade": 1.5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 13.5,
+   "bytes": 62388,
+   "steps": null,
+   "loudness": {
+    "lufs": -29.6,
+    "peak": -1.2,
+    "lra": 5.1
+   }
+  },
+  {
+   "id": "pos_forge",
+   "file": "pos_forge.ogg",
+   "kind": "ambience",
+   "api": "sfx",
+   "group": "place",
+   "loop": true,
+   "prompt": "A blacksmith hammering iron on an anvil, rhythmic ringing blows, with the soft breath of a bellows and a forge fire, steady, indoors, no speech. Steady, no sudden standout events, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 15,
+    "loop": true,
+    "prompt_influence": 0.4
+   },
+   "post": {
+    "lufs": -26,
+    "crossfade": 1.5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 13.5,
+   "bytes": 70588,
+   "steps": null,
+   "loudness": {
+    "lufs": -27.2,
+    "peak": -12.1,
+    "lra": 3.4
+   }
+  },
+  {
+   "id": "cmb_hit_flesh_b",
+   "file": "cmb_hit_flesh_b.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Six separate heavy sword chops into a body, each a deep meaty thwack with a short wet tail, with a full second of silence between blows, close microphone, dry room, no voices. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.7
+   },
+   "duration": 8,
+   "bytes": 39280,
+   "steps": [
+    [
+     0,
+     0.7
+    ],
+    [
+     0.7,
+     0.42
+    ],
+    [
+     1.12,
+     0.7
+    ],
+    [
+     1.82,
+     0.53
+    ]
+   ],
+   "loudness": {
+    "lufs": -13.8,
+    "peak": -4,
+    "lra": 22.1
+   }
+  },
+  {
+   "id": "cmb_hit_blunt_b",
+   "file": "cmb_hit_blunt_b.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Six separate heavy mace blows against a body in leather, each a dull crunching thud, with a full second of silence between blows, close microphone, dry room, no voices. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.7
+   },
+   "duration": 6.1,
+   "bytes": 23280,
+   "steps": [
+    [
+     0.01,
+     0.31
+    ],
+    [
+     1.66,
+     0.17
+    ],
+    [
+     2.57,
+     0.32
+    ],
+    [
+     4.39,
+     0.31
+    ],
+    [
+     5.65,
+     0.32
+    ]
+   ],
+   "loudness": {
+    "lufs": -23.7,
+    "peak": -4,
+    "lra": 3.6
+   }
+  },
+  {
+   "id": "cmb_parry_b",
+   "file": "cmb_parry_b.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Five separate sword on sword parries, a quick scrape of steel and a short ring, each followed by a full second of silence, outdoors, close microphone, no voices. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1,
+    "stepMax": 1.2
+   },
+   "duration": 9.16,
+   "bytes": 44836,
+   "steps": [
+    [
+     0.16,
+     0.34
+    ],
+    [
+     0.66,
+     0.31
+    ],
+    [
+     1.36,
+     0.39
+    ],
+    [
+     2.04,
+     0.27
+    ],
+    [
+     2.55,
+     0.27
+    ],
+    [
+     3.58,
+     0.42
+    ],
+    [
+     4.2,
+     0.33
+    ],
+    [
+     4.99,
+     0.38
+    ],
+    [
+     5.73,
+     0.3
+    ],
+    [
+     6.75,
+     0.36
+    ],
+    [
+     7.38,
+     0.28
+    ],
+    [
+     8.04,
+     0.4
+    ],
+    [
+     8.78,
+     0.35
+    ]
+   ],
+   "loudness": {
+    "lufs": -18.7,
+    "peak": -4,
+    "lra": 2.2
+   }
+  },
+  {
+   "id": "cmb_swing_b",
+   "file": "cmb_swing_b.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Six separate heavy axe or sword swings through the air, a low whoosh of a big blade, each followed by a second of silence, close microphone, dry, no impact. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 6,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.6,
+    "stepMax": 0.6
+   },
+   "duration": 1.13,
+   "bytes": 5273,
+   "steps": [
+    [
+     0.05,
+     0.6
+    ],
+    [
+     0.65,
+     0.31
+    ]
+   ],
+   "loudness": {
+    "lufs": -21.6,
+    "peak": -4,
+    "lra": 0
+   }
+  },
+  {
+   "id": "cmb_death_human_b",
+   "file": "cmb_death_human_b.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Four separate groans of a dying man falling, a choked cry and a long exhale, each followed by two seconds of silence, no words, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.5,
+    "stepMax": 2
+   },
+   "duration": 7.85,
+   "bytes": 41767,
+   "steps": [
+    [
+     0,
+     1.46
+    ],
+    [
+     1.46,
+     2.3
+    ]
+   ],
+   "loudness": {
+    "lufs": -12.1,
+    "peak": -4,
+    "lra": 15.2
+   }
+  },
+  {
+   "id": "dr_open_b",
+   "file": "dr_open_b.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "door",
+   "loop": false,
+   "prompt": "Three separate heavy oak doors being pushed open, a low groan of dry hinges and a scrape on a stone floor, each followed by two seconds of silence, indoors, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.6,
+    "stepMax": 2.6
+   },
+   "duration": 8.38,
+   "bytes": 38091,
+   "steps": [
+    [
+     0,
+     2.65
+    ],
+    [
+     4.81,
+     2.59
+    ],
+    [
+     7.4,
+     0.77
+    ]
+   ],
+   "loudness": {
+    "lufs": -20.7,
+    "peak": -4,
+    "lra": 19
+   }
+  },
+  {
+   "id": "dr_close_b",
+   "file": "dr_close_b.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "door",
+   "loop": false,
+   "prompt": "Three separate wooden doors being shut firmly, a solid thunk of oak against a frame and a latch drop, each followed by two seconds of silence, indoors, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.4,
+    "stepMax": 2
+   },
+   "duration": 4.88,
+   "bytes": 19491,
+   "steps": [
+    [
+     0.16,
+     0.28
+    ],
+    [
+     4.1,
+     0.61
+    ]
+   ],
+   "loudness": {
+    "lufs": -22.4,
+    "peak": -4,
+    "lra": 23.8
+   }
+  },
+  {
+   "id": "sv_coins_b",
+   "file": "sv_coins_b.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "verb",
+   "loop": false,
+   "prompt": "Four separate sounds of a few gold coins being counted into a hand, a soft metallic clink, each followed by a second of silence, close microphone, dry. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.8
+   },
+   "duration": 8,
+   "bytes": 42149,
+   "steps": [
+    [
+     0.01,
+     0.8
+    ],
+    [
+     0.81,
+     0.57
+    ],
+    [
+     1.38,
+     0.51
+    ],
+    [
+     1.89,
+     0.66
+    ],
+    [
+     2.55,
+     0.76
+    ],
+    [
+     3.31,
+     0.53
+    ],
+    [
+     3.84,
+     0.55
+    ],
+    [
+     4.39,
+     0.56
+    ],
+    [
+     4.95,
+     0.53
+    ],
+    [
+     5.48,
+     0.64
+    ],
+    [
+     6.12,
+     0.79
+    ],
+    [
+     7.35,
+     0.65
+    ]
+   ],
+   "loudness": {
+    "lufs": -19.8,
+    "peak": -4,
+    "lra": 5.2
+   }
+  },
+  {
+   "id": "wx_thunder",
+   "file": "wx_thunder.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "weather",
+   "loop": false,
+   "prompt": "Three separate rolls of distant thunder over open land, each a low rumbling that swells and fades away slowly, with three seconds of silence between them, outdoors. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 14,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -6,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 2,
+    "stepMax": 6,
+    "stepMin": 1.5
+   },
+   "duration": 10.32,
+   "bytes": 41890,
+   "steps": [
+    [
+     0.14,
+     7.51
+    ]
+   ],
+   "loudness": {
+    "lufs": -24.8,
+    "peak": -6,
+    "lra": 21.5
+   }
+  },
+  {
+   "id": "wx_thunder_b",
+   "file": "wx_thunder_b.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "weather",
+   "loop": false,
+   "prompt": "Two separate heavy thunderclaps, each a sharp crack and a long rolling boom fading into the distance, with several seconds of silence between them, outdoors. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 14,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -6,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 2,
+    "stepMax": 8,
+    "stepMin": 1.5
+   },
+   "duration": 8.74,
+   "bytes": 37928,
+   "steps": [
+    [
+     0.04,
+     6.21
+    ]
+   ],
+   "loudness": {
+    "lufs": -21.5,
+    "peak": -6,
+    "lra": 21.3
+   }
+  },
+  {
+   "id": "wx_rain",
+   "file": "wx_rain.ogg",
+   "kind": "ambience",
+   "api": "sfx",
+   "group": "weather",
+   "loop": true,
+   "prompt": "Steady rain falling on grass, mud and cobblestones outdoors, a soft wide hiss with small drips, no thunder, no wind gusts, no voices. Steady, no sudden standout events, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 15,
+    "loop": true,
+    "prompt_influence": 0.4
+   },
+   "post": {
+    "lufs": -26,
+    "crossfade": 1.5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 13.5,
+   "bytes": 61223,
+   "steps": null,
+   "loudness": {
+    "lufs": -26,
+    "peak": -2.7,
+    "lra": 0.8
+   }
+  },
+  {
+   "id": "wx_rain_roof",
+   "file": "wx_rain_roof.ogg",
+   "kind": "ambience",
+   "api": "sfx",
+   "group": "weather",
+   "loop": true,
+   "prompt": "Steady rain falling on a wooden shingle roof heard from inside a room, a soft patter with muffled drips and gutters, no thunder, no voices. Steady, no sudden standout events, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 15,
+    "loop": true,
+    "prompt_influence": 0.4
+   },
+   "post": {
+    "lufs": -27,
+    "crossfade": 1.5,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 13.5,
+   "bytes": 61036,
+   "steps": null,
+   "loudness": {
+    "lufs": -27,
+    "peak": -9.2,
+    "lra": 0.8
+   }
+  },
+  {
+   "id": "cmb_hit_stab",
+   "file": "cmb_hit_stab.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Six separate stabs of a dagger into flesh and leather, each a quick sharp puncture with a small wet sound, with a full second of silence between stabs, close microphone, dry room, no voices. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.6
+   },
+   "duration": 7.04,
+   "bytes": 29338,
+   "steps": [
+    [
+     0.41,
+     0.16
+    ],
+    [
+     1.52,
+     0.17
+    ],
+    [
+     2.97,
+     0.16
+    ],
+    [
+     3.71,
+     0.15
+    ],
+    [
+     4.6,
+     0.14
+    ],
+    [
+     5.17,
+     0.13
+    ],
+    [
+     6.77,
+     0.25
+    ]
+   ],
+   "loudness": {
+    "lufs": -26.2,
+    "peak": -4,
+    "lra": 13.3
+   }
+  },
+  {
+   "id": "cmb_hit_claw",
+   "file": "cmb_hit_claw.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "Six separate attacks of a wild animal tearing with claws and teeth at leather and flesh, each a short ripping scratch and a snap, with a full second of silence between, close microphone, dry room, no growling. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 0.7,
+    "stepMax": 0.7
+   },
+   "duration": 7.32,
+   "bytes": 43396,
+   "steps": [
+    [
+     0.18,
+     0.51
+    ],
+    [
+     0.69,
+     0.66
+    ],
+    [
+     1.35,
+     0.68
+    ],
+    [
+     2.03,
+     0.46
+    ],
+    [
+     2.49,
+     0.63
+    ],
+    [
+     3.36,
+     0.15
+    ],
+    [
+     3.78,
+     0.3
+    ],
+    [
+     4.47,
+     0.61
+    ],
+    [
+     5.5,
+     0.44
+    ],
+    [
+     6.97,
+     0.22
+    ]
+   ],
+   "loudness": {
+    "lufs": -19.4,
+    "peak": -4,
+    "lra": 9.4
+   }
   }
  ]
 }

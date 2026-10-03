@@ -2,13 +2,17 @@
  * Sound. The one-shots of play (doors, blows, coins, spells), the rain and the
  * wind are synthesised on the spot -- noise through filters, a few sine
  * partials. Footsteps, the ambience of each kind of place and the music are
- * committed clips (assets/audio, see soundscape.js and music.js); the synth
- * footstep and wind bed stay as what plays until a clip has loaded, or if it
- * never does.
+ * committed clips (assets/audio, see soundscape.js, music.js and foley.js); the
+ * synth footstep, wind bed and one-shots stay as what plays until a clip has
+ * loaded, or if it never does.
  */
 import { Clips, Steps, Soundscape } from './soundscape.js';
 import { Music } from './music.js';
-import { placeOf } from './soundmap.js';
+import { Foley, Creatures, Places, Weather, listenToGame } from './foley.js';
+import { placeOf, creatureOf } from './soundmap.js';
+
+/** game.js ATTACK_TABLE words that cut or tear in a way of their own. */
+const FLESH_HITS = { stab: 'hit_stab', pierce: 'hit_stab', claw: 'hit_claw', bite: 'hit_claw' };
 
 export class Audio {
   constructor() {
@@ -19,6 +23,7 @@ export class Audio {
     this.hour = null;
     this.windScale = 1;
     this._outdoor = true;
+    this.rainScale = 1;
   }
 
   /**
@@ -36,6 +41,7 @@ export class Audio {
     this.noise = this.makeNoiseBuffer(4);
     this.clips = new Clips(this.ctx);
     this.steps = new Steps(this.clips);
+    this.foley = new Foley(this);
     this.music = new Music(this);
     this.music.setEnabled(this.musicOn);
     const wake = () => {
@@ -73,6 +79,11 @@ export class Audio {
     this.music.endTitle();
     this.soundscape = new Soundscape(this);
     this.steps.preload();
+    this.foley.preload();
+    this.creatures = new Creatures(this);
+    this.places = new Places(this);
+    this.weather = new Weather(this);
+    this.stopEvents = window.diku ? listenToGame(this, window.diku) : null;
     if (this.place) {
       this.soundscape.setPlace(this.place);
       this.music.setPlace(this.place);
@@ -129,7 +140,14 @@ export class Audio {
     if (!this.rainGain) return;
     const shelter = this._rainOutdoor ? 1 : 0.4;
     const target = this._rainLevel * 0.34 * shelter;
-    this.rainGain.gain.linearRampToValueAtTime(target, this.ctx.currentTime + 1.8);
+    this.rainGain.gain.linearRampToValueAtTime(target * this.rainScale, this.ctx.currentTime + 1.8);
+    if (this.weather) this.weather.rain(this._rainLevel, this._rainOutdoor);
+  }
+
+  /** The recorded rain is playing: the synthesised hiss drops to a texture under it. */
+  rainClips(on) {
+    this.rainScale = on ? 0.25 : 1;
+    this.applyRain();
   }
 
   makeNoiseBuffer(seconds) {
@@ -197,6 +215,7 @@ export class Audio {
 
   door(open, place = null) {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play(open ? 'door_open' : 'door_close', place || {})) return;
     const dest = place ? this.out(place) : this.master;
     const osc = this.ctx.createOscillator();
     osc.type = 'sawtooth';
@@ -226,6 +245,7 @@ export class Audio {
   /** A key turning (two dry clicks and a clunk), or a pick at work. */
   lock({ pan, gain, pick = false, failed = false } = {}) {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play(pick ? 'lockpick' : 'lock', { pan, gain: (gain ?? 1) * (failed ? 0.6 : 1) })) return;
     const dest = this.out({ pan, gain });
     const clicks = pick ? [0, 0.09, 0.16, 0.27, 0.34] : [0, 0.07];
     clicks.forEach((t, i) => this.noiseHit(dest, { frequency: 3600 + i * 300, q: 6, gain: 0.35, decay: 0.03, delay: t }));
@@ -236,8 +256,9 @@ export class Audio {
   }
 
   /** Coins into a purse: a few small rings, close together. */
-  coins({ one = false } = {}) {
+  coins({ one = false, delay = 0 } = {}) {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play('coins', { gain: one ? 0.6 : 1, delay })) return;
     const dest = this.out({ gain: 0.8 });
     const n = one ? 1 : 4;
     for (let i = 0; i < n; i++) {
@@ -250,6 +271,7 @@ export class Audio {
   /** Something taken up: cloth and leather, a short rustle. */
   pickup() {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play('pickup')) return;
     const dest = this.out({ gain: 0.7 });
     this.noiseHit(dest, { frequency: 2400, to: 1200, q: 0.8, gain: 0.3, attack: 0.02, decay: 0.12 });
     this.noiseHit(dest, { frequency: 700, q: 1, gain: 0.2, decay: 0.06, delay: 0.08 });
@@ -258,6 +280,10 @@ export class Audio {
   /** Something let fall at your feet; money rings as it lands. */
   drop(gold = false) {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play('drop')) {
+      if (gold) this.coins({ delay: 0.2 });
+      return;
+    }
     const dest = this.out({ gain: 0.8 });
     this.thump(dest, { from: 140, to: 60, gain: 0.08, decay: 0.12, delay: 0.18 });
     this.noiseHit(dest, { frequency: 600, type: 'lowpass', q: 0.7, gain: 0.3, decay: 0.08, delay: 0.18 });
@@ -267,6 +293,7 @@ export class Audio {
   /** Bites: three crisp, chewed bursts. */
   eat() {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play('eat')) return;
     const dest = this.out({ gain: 0.8 });
     for (let i = 0; i < 3; i++) {
       this.noiseHit(dest, { frequency: 1800 - i * 200, q: 1.3, gain: 0.35, attack: 0.008, decay: 0.07, delay: i * 0.32 });
@@ -277,6 +304,7 @@ export class Audio {
   /** Swallows -- a low glug, three times -- or water filling a skin. */
   drink({ fill = false } = {}) {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play(fill ? 'fill' : 'drink')) return;
     const dest = this.out({ gain: 0.8 });
     if (fill) {
       this.noiseHit(dest, { frequency: 900, to: 2200, q: 1.2, gain: 0.3, attack: 0.1, decay: 0.9 });
@@ -301,6 +329,7 @@ export class Audio {
 
   portal() {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play('spell_portal')) return;
     const osc = this.ctx.createOscillator();
     const now = this.ctx.currentTime;
     osc.type = 'sine';
@@ -317,6 +346,7 @@ export class Audio {
 
   bell() {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play('bell', { pan: (Math.random() - 0.5) * 0.4 })) return;
     const now = this.ctx.currentTime;
     for (const [ratio, gain] of [[1, 0.16], [2.01, 0.07], [2.98, 0.04], [4.2, 0.02]]) {
       const osc = this.ctx.createOscillator();
@@ -407,6 +437,8 @@ export class Audio {
   /** A blade or a fist through the air: a band of noise rising past you. */
   whoosh({ pan, gain, weight = 1, miss = false } = {}) {
     if (!this.ctx || this.muted) return;
+    // A fist is the same air, higher and lighter.
+    if (this.foley.play('swing', { pan, gain: (gain ?? 1) * (miss ? 1 : 0.8), rate: weight < 1 ? 1.3 : 1 })) return;
     const dest = this.out({ pan, gain });
     this.noiseHit(dest, {
       frequency: 380 * weight + 200, to: 1900 + 900 * weight, q: 1.6, gain: (miss ? 0.75 : 0.5) * (0.6 + weight * 0.4),
@@ -415,10 +447,15 @@ export class Audio {
   }
 
   /** A blow landing: `armour` clanks, `blunt` thuds, `flesh` is a dull cut. */
-  impact(kind, { pan, gain, strength = 0.6 } = {}) {
+  impact(kind, { pan, gain, strength = 0.6, onPlayer = false, attack = '' } = {}) {
     if (!this.ctx || this.muted) return;
-    const dest = this.out({ pan, gain });
     const s = Math.max(0.3, Math.min(1.4, strength));
+    // A blow on you also draws a grunt, not every time.
+    if (this.foley.play(kind === 'armour' ? 'hit_armour' : (FLESH_HITS[attack] || (kind === 'blunt' ? 'hit_blunt' : 'hit_flesh')), { pan, gain: (gain ?? 1) * (0.55 + 0.45 * s) })) {
+      if (onPlayer && Math.random() < 0.5) this.foley.play('pain', { delay: 0.06 });
+      return;
+    }
+    const dest = this.out({ pan, gain });
     // Levels are set against a footstep, metered offline: a blow lands about
     // 10 dB over one. The sine thump is most of that and needs very little.
     this.thump(dest, { from: 150, to: 52, gain: 0.1 * s, decay: 0.16 });
@@ -436,6 +473,7 @@ export class Audio {
   /** Steel meeting steel: a sharp strike, a ring, and a little scrape after. */
   clang({ pan, gain } = {}) {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play('parry', { pan, gain })) return;
     const dest = this.out({ pan, gain });
     this.noiseHit(dest, { frequency: 3400, q: 3, gain: 1.0, decay: 0.05 });
     this.ring(dest, { base: 820 + Math.random() * 160, ratios: [1, 1.51, 2.76, 4.07, 5.41], gain: 0.08, decay: 0.9 });
@@ -445,6 +483,7 @@ export class Audio {
   /** Stepping out of the way: cloth and a scuff of the foot. */
   dodge({ pan, gain } = {}) {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play('dodge', { pan, gain })) return;
     const dest = this.out({ pan, gain });
     this.noiseHit(dest, { frequency: 1500, to: 700, q: 0.9, gain: 0.4, attack: 0.03, decay: 0.16 });
     this.noiseHit(dest, { frequency: 700, q: 1.2, gain: 0.45, decay: 0.09, delay: 0.1 });
@@ -454,8 +493,11 @@ export class Audio {
    * A last breath: a falling, breathy tone through two formants. Quiet on
    * purpose -- the body hitting the ground (`bodyfall`) carries the moment.
    */
-  death({ pan, gain } = {}) {
+  death({ pan, gain, name = '' } = {}) {
     if (!this.ctx || this.muted) return;
+    // What dies is known by its short description: an animal cries as its own kind.
+    const rule = creatureOf(name);
+    if (this.foley.play(rule ? rule.death : 'death_human', { pan, gain })) return;
     const dest = this.out({ pan, gain });
     const now = this.ctx.currentTime;
     const voice = this.ctx.createOscillator();
@@ -482,11 +524,22 @@ export class Audio {
   /** A body meeting the ground, and what it was wearing a moment after. */
   bodyfall({ pan, gain } = {}) {
     if (!this.ctx || this.muted) return;
+    if (this.foley.play('bodyfall', { pan, gain })) return;
     const dest = this.out({ pan, gain });
     this.thump(dest, { from: 110, to: 38, gain: 0.14, decay: 0.3 });
     this.noiseHit(dest, { frequency: 300, type: 'lowpass', q: 0.7, gain: 0.5, decay: 0.2 });
     this.thump(dest, { from: 80, to: 40, gain: 0.06, decay: 0.18, delay: 0.16 });
     this.noiseHit(dest, { frequency: 2400, q: 2, gain: 0.15, decay: 0.12, delay: 0.14 });
+  }
+
+  /**
+   * A spell's sound, from spellfx.js: a clip of `kind` (soundmap.js SOUNDS has
+   * spell_<kind>) at `place` ({ pan, gain }). False while it has not loaded, and
+   * spellfx.js then plays the synth it had.
+   */
+  spell(kind, place, { rate = 1, gain = 1, delay = 0 } = {}) {
+    if (!this.ctx || this.muted) return true;
+    return this.foley.play(`spell_${kind}`, { pan: place.pan, gain: place.gain * gain, rate, delay });
   }
 
   /**
@@ -522,6 +575,9 @@ export class Audio {
       ambience: this.soundscape && this.soundscape.state(),
       music: this.music && this.music.state(),
       loaded: this.clips ? [...this.clips.buffers.keys()] : [],
+      places: this.places && this.places.state(),
+      weather: this.weather && this.weather.state(),
+      played: this.foley && this.foley.log.slice(-25),
     };
   }
 
@@ -545,6 +601,12 @@ export class Audio {
     }
     this.music.update();
     if (this.muted) return;
+    if (this.places && window.diku && window.diku.built && window.diku.game) {
+      const now = this.ctx.currentTime;
+      this.creatures.update(now, window.diku);
+      this.places.update(now, window.diku);
+      this.weather.update(now, window.diku);
+    }
     if (outdoorCity && this.ctx.currentTime > this.nextBell) {
       this.bell();
       this.nextBell = this.ctx.currentTime + 90 + Math.random() * 120;
