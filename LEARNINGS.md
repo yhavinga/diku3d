@@ -6,6 +6,30 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-03 — wave 11: the hills, and every exit a door
+
+### The flickering hills were GTAO (wave11-depth)
+
+- The user's still matched #3053 at dusk. Depth ties beyond 150 m over 40
+  views: 173 px in all (near 0.2: 133; 0.3: 117) — precision was never the
+  story. Frame-to-frame change of far pixels while turning 2 px/frame
+  (`Z.swim`): 33–49% with GTAO, 0.08–1.9% with the horizon out of the AO
+  pass; near 1.0 left it at 30%. Cause: the horizon ring always contains
+  the camera, so `AO_REACH` never excluded it; its up-facing strips read as
+  occluded and the screen-fixed noise swam over them.
+- Fix in `ScaledGTAOPass`: `horizon-*` hidden for the AO pass only.
+  Draw calls −2..−6, triangles −7k..−22k (the temple interior had been
+  drawing the horizon into AO too); the hills come out lighter and clean.
+- Reversed-Z was not built; reading r185 it would need float depth on the
+  composer targets, occlusion.js's depth copy reworked, and the decals'
+  `polygonOffsetUnits` (not flipped by three) fixed by hand.
+- Left for build.js: all horizon styles share `ridgeR`, so raised styles
+  tie at area seams. A lane per style (town 0, forest 4, hills 8, desert
+  12, marsh 16 m) measured 151 → 58 far tie px over six views.
+- A cross-load frame diff is invalid once a merge changes boot-time
+  `Math.random` use, even with the seeded harness: compare against main
+  with the change reverted.
+
 ## 2026-10-03 — wave 10: bake beside the page
 
 ### Workers and a cache for the texture bake (wave10-bake)
