@@ -49,6 +49,20 @@ export class Audio {
   startTitle() {
     this.init();
     this.music.startTitle();
+    // A browser keeps the context silent until a gesture, and the gesture
+    // most people make on the title is "enter", which ends the title music.
+    // So offer one that only wakes the sound.
+    const title = document.getElementById('title');
+    if (this.ctx.state !== 'suspended' || this.muted || !this.musicOn || !title) return;
+    const button = document.createElement('button');
+    button.textContent = '♪ music';
+    button.title = 'browsers stay silent until you click';
+    button.style.cssText = 'position:absolute;top:26px;right:30px;pointer-events:auto;cursor:pointer;'
+      + 'font-family:var(--mono);font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:var(--gold);'
+      + 'background:rgba(8,7,6,0.4);border:1px solid rgba(224,189,119,0.4);padding:6px 11px;border-radius:2px;';
+    button.addEventListener('click', () => this.ctx.resume());
+    title.appendChild(button);
+    this.ctx.addEventListener('statechange', () => { if (this.ctx.state === 'running') button.remove(); });
   }
 
   /** Browsers only allow this after a gesture, so it is called from the entry click. */
