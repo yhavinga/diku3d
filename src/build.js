@@ -15,7 +15,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { SECTOR, ROOM_INDOORS, EX_ISDOOR, EX_CLOSED, EX_LOCKED, DIR_STEP, DIR_NAME } from './are.js';
+import { SECTOR, ROOM_INDOORS, EX_ISDOOR, EX_CLOSED, EX_LOCKED, DIR_STEP, DIR_NAME, REVERSE_DIR } from './are.js';
 import { InstanceBatch, StaticBatches } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
 import { buildGrass } from './grass.js';
@@ -2200,6 +2200,7 @@ function* raise(world, layout, materials, assets = null) {
           flank: !!(mats.said && mats.said.marks && mats.said.marks.kind === 'mural'),
           outerH: shireOut === 'house' || shireOut === 'barn' ? SHIRE_WALL : shireOut === 'hill' ? 0 : shireOut === 'lower' ? LEVEL_H : null,
           innerH: shireOut === 'hill' ? SMIAL_TUNNEL_H : null,
+          arched: !!side && side.kind === 'portal' && !wellDown && !airborne && !deadExit(side.exit),
         });
       } else if (!airborne) {
         // Nothing walls a room under the canopy: `buildForest` stands a picket
@@ -2287,6 +2288,21 @@ function* raise(world, layout, materials, assets = null) {
         if (openAir && GRATE.test(side.exit.keyword || '')) {
           buildGrateRailing({ instances, model, chunk, pos, dir, addCollider });
         }
+      } else if (side && side.oneWay && !airborne && dir !== fort) {
+        // The far end of a one-way exit (layout.js): the street arrives here,
+        // but the mud has no way back along it. An iron gate, shut, that
+        // swings open only for someone coming down the street towards it
+        // (actors.js) -- the Mud School's entrance drops into the arena this
+        // way, and from inside the arena the way out is up.
+        doors.push({
+          x: wx + dx * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), y: pos.y,
+          z: wz + dz * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), rotY, dir,
+          width: tree ? TREE_DOOR_W : DOOR_W, height: tree ? TREE_DOOR_H : DOOR_H,
+          single: tree, round: false, shire: false, paint: null,
+          closed: true, locked: true, keyword: 'gate', grate: true, room: room.vnum, leaf: null,
+          oneWay: true,
+        });
+        if (openAir) buildGrateRailing({ instances, model, chunk, pos, dir, addCollider });
       }
     }
 
@@ -2297,15 +2313,20 @@ function* raise(world, layout, materials, assets = null) {
     if (openAir && !hood) buildStreetLamp({ room, cell, pos, decor, lights, addCollider, instances, chunk });
 
     // links that had no free wall left: an arch standing in the room itself
-    for (const link of layout.links) {
-      if (link.from !== cell || link.side !== null || link.kind === 'alley' || link.kind === 'stairs') continue;
+    for (const ref of layout.links) {
+      // The far end of a two-way level archway is an arch here too, when
+      // layout.js could not give it a wall (`backSide` null).
+      const back = ref.to === cell && ref.backSide === null && ref.kind === 'portal';
+      if (!back && (ref.from !== cell || ref.side !== null || ref.kind === 'alley' || ref.kind === 'stairs')) continue;
+      const link = back ? { kind: 'portal', exit: ref.exitBack, to: ref.from, dir: REVERSE_DIR[ref.dir] } : ref;
       if (deadExit(link.exit)) continue;
       if (airborne) continue;
       // Up out of the Temple Square is "In the air...", which is never built:
       // the arch stood in the middle of the square leading nowhere, a portal
       // to a room the game refuses to enter.
       if (link.to && link.to.room.sector === SECTOR.AIR) continue;
-      const angle = hash3(room.vnum, 5, 0, 1) * Math.PI * 2;
+      // Two arches standing in one room are not to stand in one spot.
+      const angle = hash3(room.vnum, 5, back ? 7 : 0, 1) * Math.PI * 2;
       const ax = pos.x + Math.cos(angle) * half * 0.4;
       const az = pos.z + Math.sin(angle) * half * 0.4;
       buildArch({ batcher, instances, model, chunk, x: ax, y: pos.y, z: az, rotY: -angle, sealed: link.kind === 'gate' });
@@ -3301,8 +3322,12 @@ function buildCeiling({ batcher, chunk, material, x, y, z, half, holes, tint = n
  * One wall of an indoor room: an inner skin you see from inside, an outer skin
  * that is the face of the building, and a doorway punched through both.
  */
-function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, instances, width, addCollider, dir, room, lights, decor, cellX, cellZ, breach = false, unlit = false, flank = false, outerH = null, innerH = null }) {
-  const gap = open ? DOOR_W : 0;
+function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, instances, width, addCollider, dir, room, lights, decor, cellX, cellZ, breach = false, unlit = false, flank = false, outerH = null, innerH = null, arched = false }) {
+  // An archway's `stone_arch` is 3.2 m clear between its posts, exactly the
+  // doorway, so the skins' jambs lay in the plane of the posts' inner faces
+  // and the two took turns to be drawn. A centimetre more each side and the
+  // jamb ends inside the post: the arch owns the joint.
+  const gap = open ? DOOR_W + (arched ? 0.02 : 0) : 0;
   const eave = CEIL + 1.1;
   const [dx, , dz] = DIR_STEP[dir];
   const along = dir === 1 || dir === 3;

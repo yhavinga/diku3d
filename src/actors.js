@@ -3928,6 +3928,15 @@ function* peopleOf(world, layout, built, options = {}) {
     // change of t, so without this a door that starts open drew shut.
     for (const p of pivots) p.node.rotation.y = p.base + p.sign * door.t * (Math.PI / 2) * 0.95;
     doors.push(door);
+    // The far end of a one-way exit: shut against the room, never a thing to
+    // open by hand, and swung by `update` for whoever comes down the street.
+    if (spec.oneWay) {
+      built.colliders.push({
+        x0: spec.x - 1.2, x1: spec.x + 1.2, z0: spec.z - 1.2, z1: spec.z + 1.2,
+        y0: spec.y, y1: spec.y + spec.height, door,
+      });
+      continue;
+    }
     // Scenery: the round door in a turf bank has solid ground behind it, so it
     // is not something to be opened. Left interactive, E would swing it to
     // reveal a wall, which is worse than a door that stays shut.
@@ -3951,6 +3960,26 @@ function* peopleOf(world, layout, built, options = {}) {
   }
 
   const doorLeaves = instanceDoorLeaves(doors, group);
+
+  /**
+   * A one-way gate opens for the eye coming at it from outside the room --
+   * down the street the mud's exit runs along -- and shuts again once the
+   * eye is well inside, past the collider's 1.2 m. From inside it never
+   * opens, so the room keeps the way the mud refuses shut, to the arrow keys
+   * (no exit) and to WASD (the collider) alike.
+   */
+  function oneWayGate(door, eye) {
+    const { spec } = door;
+    const [dx, , dz] = DIR_STEP4[spec.dir];
+    const out = (eye.x - spec.x) * dx + (eye.z - spec.z) * dz;
+    const lat = Math.abs((eye.x - spec.x) * dz - (eye.z - spec.z) * dx);
+    const level = Math.abs(eye.y - spec.y - 1.6) < 2.5;
+    if (!door.open) {
+      if (level && out > 0.3 && out < 7 && lat < 3.5) door.open = true;
+    } else if (!level || out < -1.9 || out > 9 || lat > 5) {
+      door.open = false;
+    }
+  }
 
   // --- per-frame ----------------------------------------------------------
 
@@ -4247,6 +4276,7 @@ function* peopleOf(world, layout, built, options = {}) {
     }
 
     for (const door of doors) {
+      if (door.spec.oneWay && camera) oneWayGate(door, camera.position);
       const want = door.open ? 1 : 0;
       if (Math.abs(door.t - want) > 0.001) {
         door.t += Math.sign(want - door.t) * Math.min(Math.abs(want - door.t), dt * 2.2);

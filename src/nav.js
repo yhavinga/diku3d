@@ -715,6 +715,8 @@ export function createNav({ layout, built, world }) {
     const back = dir < 6 ? REVERSE_DIR[dir] : -1;
     for (const door of doors) {
       const spec = door.spec;
+      // A one-way gate stands where the mud has no exit; it bars no exit.
+      if (spec.oneWay) continue;
       if ((spec.room === from && spec.dir === dir) || (spec.room === to && spec.dir === back)) {
         if (!door.open) return false;
       }

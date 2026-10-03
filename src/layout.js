@@ -109,7 +109,7 @@ function relax(world, cells, occupied, order, passes = 12) {
  * in the direction the exit claims to go, and refusing walls already spoken for
  * at either end.
  */
-function routePath(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Set(), forbidLast = new Set()) {
+function routeShortest(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Set(), forbidLast = new Set()) {
   const first = [nominalDir, ...[0, 1, 2, 3].filter((d) => d !== nominalDir)]
     .filter((d) => !forbidFirst.has(d));
   const queue = [{ x: from.x, z: from.z, cells: [], entryDir: null }];
@@ -134,6 +134,61 @@ function routePath(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Se
     }
   }
   return null;
+}
+
+/**
+ * Cheapest run of empty cells from one room to another, refusing walls
+ * already spoken for at either end. A cell costs 1; so does leaving or
+ * arriving through another wall than the one the exit names, and a wall
+ * the room needs for one of its own exits costs 3 more, because taking it
+ * is how that exit ended up with no door at all. A street two cells longer
+ * that leaves north out of the north wall is the better street.
+ * `cost(end, dir)` is that price for setting off (end 0) or arriving (end 1).
+ */
+function routePath(from, to, occupied, MAX = 6, cost = () => 0) {
+  // Breadth-first by length, but a state is the cell *and* the wall it left
+  // by: the same cell reached out of two walls is two different routes.
+  // Cells are kept as a chain back to the first, not copied at every step.
+  let frontier = [];
+  const seen = new Set();
+  for (const dir of [0, 1, 2, 3]) {
+    const c0 = cost(0, dir);
+    if (c0 === Infinity) continue;
+    const [dx, , dz] = DIR_STEP[dir];
+    const x = from.x + dx; const z = from.z + dz;
+    if ((x === to.x && z === to.z) || occupied.has(key(from.level, x, z))) continue;
+    seen.add(`${x},${z},${dir}`);
+    frontier.push({ x, z, back: null, entryDir: dir, c0 });
+  }
+  let best = null;
+  for (let len = 1; len <= MAX && frontier.length; len++) {
+    // Nothing longer can beat what is in hand: the ends cost nothing below 0.
+    if (best && len >= best.score) break;
+    const next = [];
+    for (const node of frontier) {
+      for (const dir of [0, 1, 2, 3]) {
+        const [dx, , dz] = DIR_STEP[dir];
+        const x = node.x + dx; const z = node.z + dz;
+        if (x === to.x && z === to.z) {
+          const c1 = cost(1, dir);
+          if (c1 === Infinity) continue;
+          const score = len + node.c0 + c1;
+          if (!best || score < best.score) best = { score, node, entryDir: node.entryDir, exitDir: dir };
+          continue;
+        }
+        if (len >= MAX) continue;
+        const seenKey = `${x},${z},${node.entryDir}`;
+        if (seen.has(seenKey) || occupied.has(key(from.level, x, z))) continue;
+        seen.add(seenKey);
+        next.push({ x, z, back: node, entryDir: node.entryDir, c0: node.c0 });
+      }
+    }
+    frontier = next;
+  }
+  if (!best) return null;
+  const cells = [];
+  for (let n = best.node; n; n = n.back) cells.unshift({ x: n.x, z: n.z });
+  return { score: best.score, cells, entryDir: best.entryDir, exitDir: best.exitDir };
 }
 
 /**
@@ -374,56 +429,246 @@ export function layoutWorld(world, options = {}) {
   // Every horizontal link now has to be walked through the cells between the
   // two rooms, and every passage needs a wall to come out of. Sides are handed
   // out here, once, so a room can never be asked to put two doors in one wall.
-  const sides = new Map();
-  for (const cell of order) sides.set(cell.vnum, [null, null, null, null]);
-  const free = (vnum, dir) => dir <= 3 && !sides.get(vnum)[dir];
-  const claim = (vnum, dir, entry) => {
-    if (!free(vnum, dir)) return false;
-    sides.get(vnum)[dir] = entry;
-    return true;
+  //
+  // Handed out a few ways (`allocate`), and the way that keeps the most
+  // passages walkable wins, then the one leaving fewest exits without a door
+  // of their own, then the fewest on the wrong wall. Greedy allocation is
+  // order-dependent and no one order is best everywhere: the cheapest-wall
+  // first pass fixes most of the Mud School and loses a street in the desert,
+  // the shortest-route first pass the other way round. Same input, same
+  // order of trials, same answer: deterministic, as a server and every client
+  // must agree.
+  const kinds = links.map((l) => l.kind);
+
+  // Which walls a room's own exits name. A wall that one exit names is no
+  // place for another exit's door, or for a staircase: the old order handed
+  // the Mud School's Center Room its west wall for the stair up, and its
+  // west exit was left with no wall at all -- and the room beyond it, which
+  // had only that exit, with no door.
+  // A one-way exit into a room names a wall of that room too: the Mud
+  // School's entrance goes south into the arena's north wall, and the stair
+  // up out of the arena had taken it.
+  const arriving = new Set();
+  for (const cell of order) {
+    for (let d = 0; d < 4; d++) {
+      const exit = cell.room.exits[d];
+      if (exit && cells.has(exit.to) && exit.to !== cell.vnum) arriving.add(`${exit.to}:${REVERSE_DIR[d]}`);
+    }
+  }
+  const wanted = (vnum, dir) => dir <= 3 && (!!cells.get(vnum).room.exits[dir] || arriving.has(`${vnum}:${dir}`));
+
+  // Whether the exit through this wall leads to the room the grid put right
+  // there, on the same level -- the exit that is surest to become a street.
+  const straight = (cell, dir) => {
+    const exit = cell.room.exits[dir];
+    const there = exit && cells.get(exit.to);
+    const [dx, , dz] = DIR_STEP[dir];
+    return !!there && there.level === cell.level && there.x === cell.x + 2 * dx && there.z === cell.z + 2 * dz;
   };
 
-  // A staircase runs along one wall, so that wall can't also hold a door.
-  const stairSide = new Map();
-  for (const link of links) {
-    if (link.kind !== 'stairs') continue;
-    const lower = link.dir === 4 ? link.from : link.to;
-    const dir = [3, 1, 0, 2].find((d) => free(lower.vnum, d));
-    if (dir === undefined) { link.kind = 'portal'; continue; }
-    claim(lower.vnum, dir, { kind: 'stair', link });
-    stairSide.set(link, dir);
-  }
+  const allocate = (firstPass, stairRule) => {
+    links.forEach((l, i) => {
+      l.kind = kinds[i];
+      delete l.path; delete l.entryDir; delete l.exitDir; delete l.side; delete l.backSide;
+    });
+    const sides = new Map();
+    for (const cell of order) sides.set(cell.vnum, [null, null, null, null]);
+    const free = (vnum, dir) => dir <= 3 && !sides.get(vnum)[dir];
+    const claim = (vnum, dir, entry) => {
+      if (!free(vnum, dir)) return false;
+      sides.get(vnum)[dir] = entry;
+      return true;
+    };
 
+    // A staircase runs along one wall, so that wall can't also hold a door.
+    // A wall no exit names, first; failing that (`stairRule` 'bent') a wall
+    // whose exit was not going to be a straight street anyway, or none --
+    // and then the flight is an archway up or down standing in the room.
+    const stairSide = new Map();
+    for (const link of links) {
+      if (link.kind !== 'stairs') continue;
+      const lower = link.dir === 4 ? link.from : link.to;
+      // 'legacy' is the order this always used: west, east, north, south,
+      // whatever they hold. Kept as a trial so no layout can come out with
+      // fewer walkable passages than it had before.
+      const ok = stairRule === 'legacy' ? [() => true] : [
+        (d) => !wanted(lower.vnum, d),
+        (d) => stairRule !== 'strict' && !straight(lower, d),
+      ];
+      let dir;
+      for (const test of ok) {
+        dir = [3, 1, 0, 2].find((d) => free(lower.vnum, d) && test(d));
+        if (dir !== undefined) break;
+      }
+      if (dir === undefined) { link.kind = 'portal'; continue; }
+      claim(lower.vnum, dir, { kind: 'stair', link });
+      stairSide.set(link, dir);
+    }
+
+    // What a street costs to leave or arrive through a wall, on top of its
+    // length (see `routePath`).
+    const routeCost = (link) => {
+      const ends = [link.from, link.to];
+      return (end, dir) => {
+        const room = ends[end];
+        const wall = end === 0 ? dir : REVERSE_DIR[dir];
+        if (!free(room.vnum, wall)) return Infinity;
+        let c = dir === link.dir ? 0 : 1;
+        // Another exit of this room names this wall. The exit this link walks
+        // is the one at `from`; at `to` it names the wall it arrives through,
+        // whether or not there is a way back.
+        const mine = end === 0 ? link.dir : REVERSE_DIR[link.dir];
+        if (wall !== mine && wanted(room.vnum, wall)) c += 3;
+        return c;
+      };
+    };
+    // The far end of a one-way exit is an opening the mud will not let you
+    // back through: build.js shuts it with a gate that opens only from the
+    // side that has the exit. A room with any exit back (by another
+    // direction, along a passage of its own) is not one-way.
+    const oneWay = (link) => !link.to.room.exits.some((e) => e && e.to === link.from.vnum);
+    const alleyEnd = (link, end) => (end === 0
+      ? { kind: 'alley', link, exit: link.exit, target: link.to }
+      : { kind: 'alley', link, exit: link.exitBack || null, target: link.from, oneWay: oneWay(link) });
+    const lay = (link, route) => {
+      link.kind = 'alley';
+      link.path = route.cells;
+      link.entryDir = route.entryDir;
+      link.exitDir = route.exitDir;
+      claim(link.from.vnum, route.entryDir, alleyEnd(link, 0));
+      claim(link.to.vnum, REVERSE_DIR[route.exitDir], alleyEnd(link, 1));
+    };
+    const reachOf = (link) => reach.get(pair(link.from.vnum, link.to.vnum)) || 6;
+    const level = (link) => link.kind === 'portal' && link.to && link.from.level === link.to.level;
+
+    // First pass: which exits become streets, greedily in link order --
+    // by the shortest route, as it always was, or by the cheapest.
+    const streets = [];
+    for (const link of links) {
+      if (!level(link)) continue;
+      let route;
+      if (firstPass === 'shortest') {
+        const forbidFirst = new Set([0, 1, 2, 3].filter((d) => !free(link.from.vnum, d)));
+        const forbidLast = new Set([0, 1, 2, 3].filter((d) => !free(link.to.vnum, REVERSE_DIR[d])));
+        route = routeShortest(link.from, link.to, link.dir, occupied, reachOf(link), forbidFirst, forbidLast);
+      } else {
+        route = routePath(link.from, link.to, occupied, reachOf(link), routeCost(link));
+      }
+      if (!route) continue;
+      lay(link, route);
+      streets.push(link);
+    }
+    // Then where each street leaves and arrives: each is taken up in turn
+    // and laid again at the cheapest cost with every other claim standing.
+    // Its old route is always still there, so no street is ever lost; and a
+    // wall one frees can let an exit that found no route become a street.
+    for (let pass = 0; pass < 4; pass++) {
+      let better = 0;
+      for (const link of links) {
+        if (!level(link)) continue;
+        const route = routePath(link.from, link.to, occupied, reachOf(link), routeCost(link));
+        if (!route) continue;
+        lay(link, route);
+        streets.push(link);
+        better++;
+      }
+      for (const link of streets) {
+        // Straight out of the wall it names, into the wall it names, as short
+        // as the grid allows: nothing to improve.
+        const shortest = Math.abs(link.to.x - link.from.x) + Math.abs(link.to.z - link.from.z) - 1;
+        if (link.entryDir === link.dir && link.exitDir === link.dir && link.path.length === shortest) continue;
+        const cost = routeCost(link);
+        sides.get(link.from.vnum)[link.entryDir] = null;
+        sides.get(link.to.vnum)[REVERSE_DIR[link.exitDir]] = null;
+        const now = link.path.length + cost(0, link.entryDir) + cost(1, link.exitDir);
+        const route = routePath(link.from, link.to, occupied, reachOf(link), cost);
+        if (route && route.score < now) {
+          lay(link, route);
+          better++;
+        } else {
+          claim(link.from.vnum, link.entryDir, alleyEnd(link, 0));
+          claim(link.to.vnum, REVERSE_DIR[link.exitDir], alleyEnd(link, 1));
+        }
+      }
+      if (!better) break;
+    }
+
+    // Whatever is left is an archway: a door onto somewhere the grid can't
+    // reach. The wall the exit names, else one no other exit of the room
+    // names, else any free one, else none -- an arch free-standing in the
+    // room. Level archways first, so a way up or down does not take the wall
+    // a level exit was about to need.
+    const wallFor = (vnum, dir) => {
+      if (dir <= 3 && free(vnum, dir)) return dir;
+      const spare = [0, 1, 2, 3].find((d) => free(vnum, d) && !wanted(vnum, d));
+      if (spare !== undefined) return spare;
+      const any = [0, 1, 2, 3].find((d) => free(vnum, d));
+      return any === undefined ? null : any;
+    };
+    const archways = links.filter((l) => l.kind === 'portal' || l.kind === 'gate');
+    for (const link of [...archways.filter((l) => l.dir <= 3), ...archways.filter((l) => l.dir > 3)]) {
+      const side = wallFor(link.from.vnum, link.dir);
+      link.side = side;
+      if (side !== null) claim(link.from.vnum, side, { kind: link.kind, link, exit: link.exit, target: link.to });
+      // A level archway described from both ends is an archway at both ends.
+      // It used to be drawn only where it was placed from, so the room at the
+      // other end had a wall where its exit should be.
+      if (link.kind !== 'portal' || !link.to || !link.twoWay || link.dir > 3) continue;
+      const back = wallFor(link.to.vnum, REVERSE_DIR[link.dir]);
+      link.backSide = back;
+      if (back !== null) claim(link.to.vnum, back, { kind: 'portal', link, exit: link.exitBack, target: link.from });
+    }
+
+    // The score: walkable links, then exits with no door, then wrong walls.
+    let walkable = 0;
+    for (const link of links) if (link.kind === 'alley' || link.kind === 'stairs') walkable++;
+    let doorless = 0; let wrong = 0;
+    for (const cell of order) {
+      const own = sides.get(cell.vnum);
+      for (let d = 0; d < 4; d++) {
+        const exit = cell.room.exits[d];
+        if (!exit || !cells.has(exit.to)) continue;
+        if (own[d] && own[d].target && own[d].target.vnum === exit.to) continue;
+        if (own.some((x) => x && x.target && x.target.vnum === exit.to)) wrong++;
+        else doorless++;
+      }
+    }
+    return {
+      sides, stairSide, score: [walkable, -doorless, -wrong],
+      state: links.map((l) => ({ kind: l.kind, path: l.path, entryDir: l.entryDir, exitDir: l.exitDir, side: l.side, backSide: l.backSide })),
+    };
+  };
+
+  // Lexicographic, and a tie keeps the earlier trial.
+  const ahead = (a, b) => {
+    const i = a.findIndex((v, k) => v !== b[k]);
+    return i >= 0 && a[i] > b[i];
+  };
+  // Over all 34 zones and 43 areas alone, these five are the only ones that
+  // ever win ('shortest'/'legacy' never has, and is kept so that no layout
+  // can lose a walkable passage to this).
+  let best = null;
+  for (const [firstPass, stairRule] of [['shortest', 'strict'], ['cheapest', 'strict'], ['cheapest', 'bent'],
+    ['cheapest', 'legacy'], ['shortest', 'legacy']]) {
+    const trial = allocate(firstPass, stairRule);
+    if (!best || ahead(trial.score, best.score)) best = trial;
+  }
+  links.forEach((l, i) => {
+    const st = best.state[i];
+    l.kind = st.kind;
+    for (const k of ['path', 'entryDir', 'exitDir', 'side', 'backSide']) {
+      if (st[k] === undefined) delete l[k]; else l[k] = st[k];
+    }
+  });
+  const { sides, stairSide } = best;
   const pathCells = new Set();
   const pathOwner = new Map(); // which passage runs through this cell
   for (const link of links) {
-    if (link.kind !== 'portal' || !link.to) continue;
-    if (link.from.level !== link.to.level) continue;
-    const forbidFirst = new Set([0, 1, 2, 3].filter((d) => !free(link.from.vnum, d)));
-    const forbidLast = new Set([0, 1, 2, 3].filter((d) => !free(link.to.vnum, REVERSE_DIR[d])));
-    const route = routePath(link.from, link.to, link.dir, occupied,
-      reach.get(pair(link.from.vnum, link.to.vnum)) || 6, forbidFirst, forbidLast);
-    if (!route) continue;
-    link.kind = 'alley';
-    link.path = route.cells;
-    link.entryDir = route.entryDir;
-    link.exitDir = route.exitDir;
-    claim(link.from.vnum, route.entryDir, { kind: 'alley', link, exit: link.exit, target: link.to });
-    claim(link.to.vnum, REVERSE_DIR[route.exitDir], { kind: 'alley', link, exit: link.exitBack || null, target: link.from });
-    for (const c of route.cells) {
+    if (link.kind !== 'alley') continue;
+    for (const c of link.path) {
       pathCells.add(key(link.from.level, c.x, c.z));
       pathOwner.set(key(link.from.level, c.x, c.z), link);
     }
-  }
-
-  // Whatever is left is an archway: a door onto somewhere the grid can't reach.
-  for (const link of links) {
-    if (link.kind !== 'portal' && link.kind !== 'gate') continue;
-    const entry = { kind: link.kind, link, exit: link.exit, target: link.to };
-    if (link.dir <= 3 && claim(link.from.vnum, link.dir, entry)) { link.side = link.dir; continue; }
-    const spare = [0, 1, 2, 3].find((d) => free(link.from.vnum, d));
-    if (spare !== undefined) { claim(link.from.vnum, spare, entry); link.side = spare; }
-    else link.side = null; // free-standing, in the middle of the room
   }
 
   let minX = Infinity; let maxX = -Infinity; let minZ = Infinity; let maxZ = -Infinity;

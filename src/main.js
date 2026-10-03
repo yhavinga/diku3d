@@ -1296,7 +1296,7 @@ async function boot() {
     if (!target || target.unbuilt) return refuse(`${name}: nothing built that way`, 'Alas, you cannot go that way.');
     // A door in the way behaves as it looks: what you see shut, you cannot walk
     // through. `door.open` is the live hinge, not the .are file's opinion.
-    const door = actors.doors.find((d) => d.spec.room === room.vnum && d.spec.dir === dir);
+    const door = actors.doors.find((d) => d.spec.room === room.vnum && d.spec.dir === dir && !d.spec.oneWay);
     if (door && !door.open) {
       const word = door.spec.keyword.split(/\s+/)[0] || 'door';
       return refuse(door.spec.locked ? `the ${word} is locked` : `the ${word} is closed`, `The ${word} is closed.`);
@@ -1318,6 +1318,17 @@ async function boot() {
         queuedStep = null;
         if (queued !== null) step(queued);
       };
+      // An archway: walk to it and through, and the portal does the rest.
+      // The far end of a two-way archway has its own arch now (layout.js
+      // `backSide`), so this is never a glide through a solid wall.
+      const arch = !layout.links.some((l) => l.kind === 'alley' && l.to
+        && ((l.from.vnum === room.vnum && l.to.vnum === exit.to) || (l.to.vnum === room.vnum && l.from.vnum === exit.to)))
+        && built.portals.find((p) => p.from === room.vnum && p.target === exit.to);
+      const toArch = arch && actors.nav.pathInRoom(room.vnum, player.position, { x: arch.x, z: arch.z }, 1);
+      if (toArch && toArch.length) {
+        player.glidePath(toArch, null, onArrive);
+        return { ok: true };
+      }
       if (Math.abs(oy) < 3.2 && flat > 6 && flat < 46 && along > 0.82 * flat) {
         player.glide(target.center.x, target.center.y, target.center.z, DIR_YAW[dir], onArrive);
         return { ok: true };
