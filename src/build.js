@@ -7302,10 +7302,14 @@ function closeCorners({ batcher, pos, dir, chunk, material, floor, ceiling, addC
   const c = sewerRect(pos, dir, SHELL - 0.05, HALF, -HALF, HALF);
   batcher.add(box(c.x1 - c.x0, SLAB, c.z1 - c.z0), ceiling,
     place((c.x0 + c.x1) / 2, y + CEIL + SLAB / 2, (c.z0 + c.z1) / 2), { chunk, ao: () => 0.6 });
+  // The posts stop under that ceiling strip, as the corridor's own walls do.
+  // Carried up through it to H, a post's face and the strip's end shared the
+  // plane SHELL - 0.05 for the slab's 0.45 m, and from the Temple Square the
+  // top of every post beside the Cleric's Guild flickered against the boards.
   for (const s of [-1, 1]) {
     const r = sewerRect(pos, dir, SHELL - 0.05, HALF, s * (SHELL - 0.05), s * HALF);
-    batcher.add(box(r.x1 - r.x0, H, r.z1 - r.z0), material,
-      place((r.x0 + r.x1) / 2, y + H / 2, (r.z0 + r.z1) / 2), { chunk, ao: wallAo(y) });
+    batcher.add(box(r.x1 - r.x0, CEIL, r.z1 - r.z0), material,
+      place((r.x0 + r.x1) / 2, y + CEIL / 2, (r.z0 + r.z1) / 2), { chunk, ao: wallAo(y) });
     addCollider(r.x0, r.x1, r.z0, r.z1, y, y + H);
   }
 }
@@ -10033,6 +10037,8 @@ const HORIZON_STYLE = {
   'eastern.are': 'desert', 'marsh.are': 'marsh',
 };
 const HORIZON_STYLES = ['town', 'forest', 'hills', 'desert', 'marsh'];
+/** Metres each style's skyline stands beyond the shared rings (see `lane`). */
+const HORIZON_LANE = { town: 0, forest: 4, hills: 8, desert: 12, marsh: 16 };
 /** Metres around the camera over which the areas' rooms vote on the skyline. */
 const HORIZON_REACH = 90;
 
@@ -10193,13 +10199,19 @@ function buildHorizon(group, bounds, groundY, layout) {
     { r: town + 165, low: 18, high: 38 },
   ];
   const ridgeR = town + 250;
+  // Each style keeps a lane of its own. Two skylines are up together for the
+  // width of a seam, and on one shared radius the town's ridge and the
+  // forest's, or the reeds and the roofs, were the same distance away on every
+  // bearing -- coplanar strips taking turns by depth rounding. A few metres
+  // apart is nothing at 400 m and settles every one of those ties.
+  const lane = (style) => HORIZON_LANE[style];
   const combs = (style, colourOf) => rings.forEach((ring, index) => {
     const points = [];
     const colors = [];
     const span = 2 * Math.PI * ring.r;
     for (let arc = 0; arc < span; arc += rnd(6, 10)) {
       const a = arc / ring.r;
-      const radius = ring.r + rnd(-12, 12);
+      const radius = ring.r + lane(style) + rnd(-12, 12);
       const px = cx + Math.cos(a) * radius;
       const pz = cz + Math.sin(a) * radius;
       // The ring's tangent, which seen from the town is also screen right --
@@ -10249,7 +10261,7 @@ function buildHorizon(group, bounds, groundY, layout) {
   // The ridge behind is forested mountain in daylight, not a dark cut-out: in
   // near-black rock, dissolved into a noon sky, it came out a flat band of mid
   // blue and was reported as the sea.
-  strip(ridgeR, 360, waves([[3, 16], [7, 9], [11, 4], [23, 2]], 62), drift(1.14, 0.92), litSlope(0x2e3f33),
+  strip(ridgeR + lane('forest'), 360, waves([[3, 16], [7, 9], [11, 4], [23, 2]], 62), drift(1.14, 0.92), litSlope(0x2e3f33),
     'horizon-forest-ridge', -3, 'forest');
 
   // ---------------------------------------------------------------- hills --
@@ -10263,7 +10275,7 @@ function buildHorizon(group, bounds, groundY, layout) {
     const span = 2 * Math.PI * ring.r;
     for (let arc = 0; arc < span; arc += rnd(5, 16)) {
       const a = arc / ring.r;
-      const radius = ring.r + rnd(-15, 15);
+      const radius = ring.r + lane('hills') + rnd(-15, 15);
       const px = cx + Math.cos(a) * radius; const pz = cz + Math.sin(a) * radius;
       const tx = -Math.sin(a); const tz = Math.cos(a);
       // A copse is a few crowns side by side; a hedge line is low and long.
@@ -10297,9 +10309,9 @@ function buildHorizon(group, bounds, groundY, layout) {
     lit.push({ material: copse, albedo: new THREE.Color(COPSE) });
     silhouette(points, colors, copse, 'horizon-hills-copses', 0, 'hills');
     // Two ranges of hills, the nearer greener, the further gone to haze.
-    strip(rings[1].r + 20, 256, waves([[4, 7], [7, 5], [13, 2.5]], 22), drift(1.1, 0.95),
+    strip(rings[1].r + 20 + lane('hills'), 256, waves([[4, 7], [7, 5], [13, 2.5]], 22), drift(1.1, 0.95),
       litSlope(0x3f5634), 'horizon-hills-near', -2, 'hills');
-    strip(ridgeR, 256, waves([[3, 12], [5, 8], [11, 3]], 44), drift(1.12, 0.94),
+    strip(ridgeR + lane('hills'), 256, waves([[3, 12], [5, 8], [11, 3]], 44), drift(1.12, 0.94),
       litSlope(0x4d5a52), 'horizon-hills-far', -3, 'hills');
   }
 
@@ -10360,8 +10372,8 @@ function buildHorizon(group, bounds, groundY, layout) {
       const k = faceOf(a) * band * (0.72 + 0.28 * talus);
       return [k * 1.02, k, k * 0.97];
     };
-    strip(ridgeR, SEG, mesa, strata, litSlope(0xd8a482, 0.55), 'horizon-desert-mesas', -3, 'desert', 8);
-    strip(rings[1].r, 256, waves([[11, 3], [17, 2], [29, 1.2]], 8), (a, top) => (top ? [1.05, 1.02, 0.96] : [0.86, 0.8, 0.74]),
+    strip(ridgeR + lane('desert'), SEG, mesa, strata, litSlope(0xd8a482, 0.55), 'horizon-desert-mesas', -3, 'desert', 8);
+    strip(rings[1].r + lane('desert'), 256, waves([[11, 3], [17, 2], [29, 1.2]], 8), (a, top) => (top ? [1.05, 1.02, 0.96] : [0.86, 0.8, 0.74]),
       litSlope(0xd2b48a, 0.55), 'horizon-desert-dunes', -2, 'desert');
   }
 
@@ -10370,7 +10382,7 @@ function buildHorizon(group, bounds, groundY, layout) {
   // line of a wall -- one strip whose crest traces the roofs, so the haze can
   // dissolve it like a ridge.
   {
-    const r = rings[0].r;
+    const r = rings[0].r + lane('town');
     const pts = [];
     for (let arc = 0; arc < 2 * Math.PI * r - 30;) {
       const a = arc / r;
@@ -10410,7 +10422,7 @@ function buildHorizon(group, bounds, groundY, layout) {
       haze(new THREE.MeshBasicMaterial({ color: 0x1a1d24, side: THREE.DoubleSide, vertexColors: true })),
       'horizon-town-roofs', -2, 'town');
     // Farmland and wooded hills beyond the walls, going blue with distance.
-    strip(ridgeR, 360, waves([[3, 14], [7, 8], [11, 4], [19, 2]], 48), drift(1.12, 0.94), litSlope(0x4a5a4c),
+    strip(ridgeR + lane('town'), 360, waves([[3, 14], [7, 8], [11, 4], [19, 2]], 48), drift(1.12, 0.94), litSlope(0x4a5a4c),
       'horizon-town-ridge', -3, 'town');
   }
 
@@ -10423,9 +10435,9 @@ function buildHorizon(group, bounds, groundY, layout) {
       const saw = Math.abs(((k % 2) + 2) % 2 - 1);
       return 3.2 + 1.8 * saw * (0.6 + 0.4 * Math.sin(a * 37)) + 1.2 * Math.sin(a * 13);
     };
-    strip(rings[0].r, 4800, reed, (a, top) => (top ? [1.0, 1.02, 0.94] : [0.8, 0.84, 0.78]),
+    strip(rings[0].r + lane('marsh'), 4800, reed, (a, top) => (top ? [1.0, 1.02, 0.94] : [0.8, 0.84, 0.78]),
       litSlope(0x4f5a3e), 'horizon-marsh-reeds', -2, 'marsh');
-    strip(ridgeR, 256, waves([[9, 3], [16, 2], [27, 1.4]], 12), drift(1.08, 0.96),
+    strip(ridgeR + lane('marsh'), 256, waves([[9, 3], [16, 2], [27, 1.4]], 12), drift(1.08, 0.96),
       litSlope(0x55605a), 'horizon-marsh-willows', -3, 'marsh');
   }
 
