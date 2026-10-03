@@ -1204,7 +1204,8 @@
    "post": {
     "lufs": -27,
     "crossfade": 2,
-    "kbps": 48
+    "kbps": 48,
+    "hum": 200
    },
    "duration": 23,
    "bytes": 123124,
@@ -1308,7 +1309,8 @@
    "post": {
     "lufs": -27,
     "crossfade": 2,
-    "kbps": 48
+    "kbps": 48,
+    "hum": 200
    },
    "duration": 23,
    "bytes": 136191,
@@ -1334,7 +1336,8 @@
    "post": {
     "lufs": -27,
     "crossfade": 2,
-    "kbps": 48
+    "kbps": 48,
+    "hum": 200
    },
    "duration": 23,
    "bytes": 120728,
@@ -1412,7 +1415,8 @@
    "post": {
     "lufs": -27,
     "crossfade": 2,
-    "kbps": 48
+    "kbps": 48,
+    "hum": 200
    },
    "duration": 23,
    "bytes": 122013,

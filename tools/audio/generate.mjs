@@ -228,6 +228,30 @@ function highpass(pcm, hz) {
   }
 }
 
+/**
+ * Notches at every harmonic of `hz`, twice. Some ambience comes back with a
+ * mains-like buzz -- the temple's room tone stood 20 dB over its own floor at
+ * every multiple of 200 Hz -- which the ear hears as something electric in a
+ * place that has no electricity. Measure with analyze.mjs before adding it.
+ */
+function dehum(pcm, hz) {
+  for (let pass = 0; pass < 2; pass++) {
+    for (let f = hz; f < SR / 2 - 200; f += hz) {
+      const w = 2 * Math.PI * f / SR; const cos = Math.cos(w); const alpha = Math.sin(w) / (2 * (f / 40));
+      const a0 = 1 + alpha;
+      const b0 = 1 / a0; const b1 = -2 * cos / a0; const b2 = b0; const a1 = b1; const a2 = (1 - alpha) / a0;
+      for (let c = 0; c < CH; c++) {
+        let x1 = 0; let x2 = 0; let y1 = 0; let y2 = 0;
+        for (let i = c; i < pcm.length; i += CH) {
+          const x0 = pcm[i];
+          const y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+          pcm[i] = y0; x2 = x1; x1 = x0; y2 = y1; y1 = y0;
+        }
+      }
+    }
+  }
+}
+
 /** Soft knee above `knee`: spiky ambience is tamed rather than left to set the level. */
 function softClip(pcm, knee = 0.5) {
   const span = 1 - knee;
@@ -241,6 +265,7 @@ function post(clip, rawFile) {
   let pcm = decode(rawFile);
   const p = clip.post || {};
   highpass(pcm, p.highpass ?? (clip.kind === 'ambience' ? 80 : 35));
+  if (p.hum) dehum(pcm, p.hum);
   if (clip.kind === 'footstep' || clip.kind === 'sfx') pcm = trim(pcm, p.trimDb ?? -48);
   if (clip.loop) pcm = loopify(pcm, p.crossfade ?? 1.5);
   else if (clip.kind === 'music') pcm = fade(trim(pcm, -55, 0.02), p.fadeIn ?? 0.05, p.fadeOut ?? 2.5);
