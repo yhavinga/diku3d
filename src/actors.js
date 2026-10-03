@@ -3069,6 +3069,13 @@ function* peopleOf(world, layout, built, options = {}) {
       // with the furniture, so it is switched off past FURNITURE_REACH
       // instead of drawing behind the walls from the street.
       case 'prop': if (furnishing) furnishing.add(item.name, item, chunkAt('furniture', item.x, item.y, item.z)); break;
+      // Something on a wall the mud has words for (clutter.js): E reads them.
+      case 'examine':
+        interactables.push({
+          position: new THREE.Vector3(item.x, item.y, item.z), radius: 2.0,
+          title: item.title, subtitle: '', body: item.body, kind: 'extra',
+        });
+        break;
       // A sealed gate gets no placard. "The way up lies beyond the map" is
       // the interface talking, and painted on planks it read as a prop the
       // mud never had; the ways-out panel says it, when you look that way.
