@@ -2043,6 +2043,9 @@ function* raise(world, layout, materials, assets = null) {
     // buildCeiling and the props, all of which add on this room's behalf.
     batcher.indoor = !openAir;
     const airborne = room.sector === SECTOR.AIR;
+    // Where this room's wall torches start in `decor` and `lights`, so the
+    // ones a ladder or a flight of steps took the wall from can be taken down.
+    const decorFrom = decor.length; const lightsFrom = lights.length;
     const mats = pickMaterials(room, room.area);
     // A park takes grass rather than the cobbles its CITY sector would hand it.
     // Here and not inside `pickMaterials`, because an alley routed out of a
@@ -2217,6 +2220,9 @@ function* raise(world, layout, materials, assets = null) {
     const corners = [];
     for (const d of [0, 1, 2, 3]) for (const sign of [1, -1]) corners.push({ d, sign });
     const used = new Set();
+    // The stretches of wall a way up or down stands against: [dir, a0, a1],
+    // along the wall to the right of someone facing it.
+    const claims = [];
     const cornerFor = (prefer) => {
       const order = [...corners].sort((a, b) => {
         const rank = (c) => (stairWalls.has(c.d) ? 8 : 0) + ((c.d - prefer + 4) % 4) * 2 + (c.sign > 0 ? 0 : 1);
@@ -2256,6 +2262,8 @@ function* raise(world, layout, materials, assets = null) {
         const e0 = CLIMB_LANDING + (CLIMB_STEPS - 1 - j) * CLIMB_TREAD;
         solid(along + run * e0, along + run * (e0 + CLIMB_TREAD), wall - 1.2, wall + 0.005, j * CLIMB_RISE);
       }
+      const reach = CLIMB_LANDING + (CLIMB_STEPS - 1) * CLIMB_TREAD;
+      claims.push([dir, Math.min(along - CLIMB_LANDING, along + run * reach) - 0.3, Math.max(along + CLIMB_LANDING, along + run * reach) + 0.3]);
       const door = at(wall - 0.5, along);
       buildArch({
         batcher, instances, model, chunk, x: door.x, y: pos.y + top, z: door.z, rotY, sealed: false,
@@ -2295,6 +2303,7 @@ function* raise(world, layout, materials, assets = null) {
         // the wall face.
         const p = at(wall, along);
         instances.add('sewer_ladder', { x: p.x, y: pos.y, z: p.z, rotY: FACE_ROT[dir] }, chunk);
+        claims.push([dir, along - 0.8, along + 0.8]);
         if (!crossing) portal(at(wall - 0.7, along), 1.2);
         ways.push({ room: room.vnum, dir: exitDir, how: 'ladder', x: p.x, y: pos.y, z: p.z, face: dir });
         return;
@@ -2319,6 +2328,7 @@ function* raise(world, layout, materials, assets = null) {
         veils: sealed ? null : veils, scale: small ? { x: 0.5, y: 0.8 } : null, out: [fx, fz],
       });
       if (exitDir > 3) ways.push({ room: room.vnum, dir: exitDir, how: sealed ? 'gate' : 'arch', x: p.x, y: pos.y, z: p.z, face: dir });
+      claims.push([dir, along - (small ? 1.4 : 2.5), along + (small ? 1.4 : 2.5)]);
       if (sealed || crossing) return;
       const q = at(depth - 0.8, along);
       portal(q, small ? 1.1 : 1.6);
@@ -2525,6 +2535,26 @@ function* raise(world, layout, materials, assets = null) {
         fixture({ way: 'level', dir: c.d, along: c.sign * CORNER, target: null, exitDir: ref.dir, sealed: true });
       } else {
         fixture({ way, dir: c.d, along: c.sign * CORNER, target: job.target, exitDir: job.exitDir });
+      }
+    }
+
+    // A torch the wall gave up to a ladder, a flight of steps or an arch is
+    // not hung through it: at the Mud School's arena corner one stood in the
+    // middle of the ladder's rungs.
+    if (claims.length) {
+      const taken = (x, z) => claims.some(([d, a0, a1]) => {
+        const [fx, , fz] = DIR_STEP[d];
+        const depth = (x - pos.x) * fx + (z - pos.z) * fz;
+        const a = (x - pos.x) * -fz + (z - pos.z) * fx;
+        return depth > (openAir ? HALF : ROOM / 2) - 1.6 && a > a0 && a < a1;
+      });
+      for (let i = decor.length - 1; i >= decorFrom; i--) {
+        const t = decor[i];
+        if (t.kind !== 'torch' || !taken(t.x, t.z)) continue;
+        decor.splice(i, 1);
+        for (let k = lights.length - 1; k >= lightsFrom; k--) {
+          if (lights[k].flicker && Math.hypot(lights[k].x - t.x, lights[k].z - t.z) < 0.7) { lights.splice(k, 1); break; }
+        }
       }
     }
 
@@ -3129,6 +3159,9 @@ function* raise(world, layout, materials, assets = null) {
     },
   });
 
+  // The ground the layout lifted, under it.
+  const hills = buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY });
+
   yield 0.288;
   // No tree grows through a room's walls. A forest fir is modelled with its
   // lowest boughs 3.6 m out and planted at up to 2.6x, so one standing a
@@ -3213,6 +3246,7 @@ function* raise(world, layout, materials, assets = null) {
   stats.meshes = batches.finish(zones.route);
   stats.clutter = clutter;
   stats.ways = ways;
+  stats.hills = hills;
   // Everything standing on a mound belongs to the level it rises from.
   for (const p of platforms) {
     for (const r of raised) {
@@ -7673,6 +7707,242 @@ const TENT_H = 5.6;
 
 /** Half the width of the passage through `massif_mouth`, less its rough. */
 const MOUTH_W = 2.0;
+
+// ------------------------------------------------------------------ hills ----
+
+/**
+ * Rooms that are up in the air by their own words: a watchtower's top, a web,
+ * a chain, a cloud, the Void, a constellation. By the name, and by a few
+ * phrases of the prose that cannot mean anything else -- "obscured by clouds"
+ * is said from the foot of Mahn-Tor's cliff, so a cloud in the prose is not one.
+ * Checked over every raised open-air room of the 45 areas.
+ */
+const ALOFT_NAME = /\b(webs?|strands?|tethers?|ether\w*|catwalk|turrets?|watchtower|clouds?|void|chains?|rope bridge|draco|dipper|polar star|throne|limb|tree ?top|trunk|floating|mid-?air|in the air|stairway|spider line)\b/i;
+const ALOFT_SAID = /\b(suspended|catwalk|strands? of webs?|tether|ether\w*|in mid-?air|constellation)\b/i;
+const isAloft = (room) => ALOFT_NAME.test(room.name) || ALOFT_SAID.test(room.description);
+/** Metres of hill flank per metre of height, and the bounds on its reach. */
+const HILL_SPREAD = 2.0;
+const HILL_REACH = [16, 140];
+/** How fast the ground may rise away from anything built lower down. */
+const HILL_GIVE = 1.2;
+const HILL_GRID = 3;
+/** Clear height left over a lower room before the rock overhangs it. */
+const HILL_OVERHANG = 9;
+
+/**
+ * The hill under ground the layout has lifted.
+ *
+ * A way up out of doors puts the room it reaches a level higher, and a town
+ * reached that way -- Mahn-Tor's streets, square and keep, five levels up from
+ * the marsh by "On the cliffside" -- stood on nothing: the whole city hung in
+ * the sky as boxes. What the prose says is a city on a cliff. So every raised
+ * open-air room with nothing built under it, the streets between them, the
+ * houses fronting those streets and the buildings among them, is carried on
+ * a hill: flat a few centimetres under their floors, falling away to the
+ * ground over a distance that grows with its height, in earth where it is
+ * gentle and rock where it is steep. The cliffside is a room of its own at
+ * its own level, so the hill passes through it and the climb is the steep
+ * side. Nothing built lower down is buried: the ground is held under each
+ * such cell and rises away from it no steeper than HILL_GIVE.
+ *
+ * Not under rooms that are aloft by their words (ALOFT_NAME): a group of
+ * raised rooms is a hill when fewer than a third of it is, and an area where
+ * two raised rooms in five are -- Arachnos's webs, the Machine Dreams, the
+ * Galaxy -- keeps all of its rooms where they hang.
+ */
+function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
+  const key = (l, x, z) => `${l}:${x},${z}`;
+  const below = (c) => layout.at(c.level - 1, c.x, c.z) !== undefined || layout.isPath(c.level - 1, c.x, c.z);
+  const built = (c) => { const info = rooms.get(c.vnum); return !!info && !info.unbuilt && c.room.sector !== SECTOR.AIR; };
+  const raised = layout.order.filter((c) => c.level > 0 && built(c) && isOpenAir(c.room) && !below(c));
+  if (!raised.length) return { cells: 0, triangles: 0 };
+
+  const share = new Map();
+  for (const c of raised) {
+    const a = share.get(c.room.areaFile) || [0, 0];
+    a[0]++; if (isAloft(c.room)) a[1]++;
+    share.set(c.room.areaFile, a);
+  }
+  // Groups joined by streets on one level.
+  const isRaised = new Set(raised.map((c) => c.vnum));
+  const group = new Map();
+  const groups = [];
+  for (const c of raised) {
+    if (group.has(c.vnum)) continue;
+    const g = [c]; group.set(c.vnum, g); groups.push(g);
+    for (let i = 0; i < g.length; i++) {
+      for (const l of layout.links) {
+        if (l.kind !== 'alley' || !l.to) continue;
+        const o = l.from === g[i] ? l.to : l.to === g[i] ? l.from : null;
+        if (o && isRaised.has(o.vnum) && !group.has(o.vnum)) { group.set(o.vnum, g); g.push(o); }
+      }
+    }
+  }
+  const support = new Map(); // cell key -> { x, z, top, floor }
+  const carry = (level, x, z, floor) => {
+    const k = key(level, x, z);
+    if (!support.has(k)) support.set(k, { x: x * CELL, z: z * CELL, level, top: level * LEVEL_H - 0.04, floor });
+  };
+  for (const g of groups) {
+    const area = share.get(g[0].room.areaFile);
+    if (area[1] / area[0] >= 0.4) continue;
+    if (g.filter((c) => isAloft(c.room)).length / g.length >= 1 / 3) continue;
+    for (const c of g) carry(c.level, c.x, c.z, true);
+  }
+  if (!support.size) return { cells: 0, triangles: 0 };
+  const held = (level, x, z) => support.has(key(level, x, z));
+  // The streets between them, and what fronts the streets and stands among them.
+  for (const l of layout.links) {
+    if (l.kind !== 'alley' || !l.to || alleyEnclosed(l)) continue;
+    if (!held(l.from.level, l.from.x, l.from.z) && !held(l.to.level, l.to.x, l.to.z)) continue;
+    for (const p of l.path) carry(l.from.level, p.x, p.z, true);
+  }
+  const near = (level, x, z, reach) => {
+    for (let dx = -reach; dx <= reach; dx++) {
+      for (let dz = -reach; dz <= reach; dz++) if ((dx || dz) && Math.abs(dx) + Math.abs(dz) <= reach && held(level, x + dx, z + dz)) return true;
+    }
+    return false;
+  };
+  for (const spot of frontage.values()) {
+    if (spot.level > 0 && near(spot.level, spot.x, spot.z, 1)) carry(spot.level, spot.x, spot.z, false);
+  }
+  for (const c of layout.order) {
+    if (c.level > 0 && built(c) && !isOpenAir(c.room) && !below(c) && near(c.level, c.x, c.z, 2)) carry(c.level, c.x, c.z, false);
+  }
+
+  // Everything else built at or above the ground holds the hill under it.
+  const holds = [];
+  const consider = (level, x, z) => {
+    if (level < 0 || held(level, x, z)) return;
+    holds.push({ x: x * CELL, z: z * CELL, limit: level * LEVEL_H - SLAB - 0.15 });
+  };
+  for (const c of layout.order) {
+    if (!built(c)) continue;
+    const mats = pickMaterials(c.room, c.room.area);
+    if (!isBuried(mats, c)) consider(c.level, c.x, c.z);
+  }
+  for (const l of layout.links) if (l.kind === 'alley') for (const p of l.path) consider(l.from.level, p.x, p.z);
+  for (const spot of frontage.values()) consider(spot.level, spot.x, spot.z);
+  // And a raised room lower than its neighbours holds the hill to its own
+  // floor: the cliffside is a ledge cut into the city's hill, not a room
+  // buried in its flank.
+  for (const sup of support.values()) holds.push({ x: sup.x, z: sup.z, limit: sup.top });
+
+  const props = [...support.values()].map((s) => {
+    // Something built lower down in the same column -- the layout keeps three
+    // levels clear over a way up from open ground, so Mahn-Tor's gate stands
+    // right over the cliffside it is climbed from. The hill there is held to
+    // that, and the cliff overhangs it.
+    let under = -Infinity;
+    for (const c of holds) if (Math.abs(c.x - s.x) < 1 && Math.abs(c.z - s.z) < 1 && c.limit < s.top - 1) under = Math.max(under, c.limit);
+    return { ...s, under, reach: THREE.MathUtils.clamp((s.top - groundY) * HILL_SPREAD, ...HILL_REACH) };
+  });
+  const square = (px, pz, cx, cz) => Math.hypot(Math.max(0, Math.abs(px - cx) - HALF), Math.max(0, Math.abs(pz - cz) - HALF));
+  let x0 = Infinity; let x1 = -Infinity; let z0 = Infinity; let z1 = -Infinity;
+  for (const s of props) {
+    x0 = Math.min(x0, s.x - HALF - s.reach); x1 = Math.max(x1, s.x + HALF + s.reach);
+    z0 = Math.min(z0, s.z - HALF - s.reach); z1 = Math.max(z1, s.z + HALF + s.reach);
+  }
+  const nx = Math.ceil((x1 - x0) / HILL_GRID) + 1; const nz = Math.ceil((z1 - z0) / HILL_GRID) + 1;
+  const H = new Float32Array(nx * nz);
+  const under = new Uint8Array(nx * nz); // 1: under a floor that covers it
+  const floor = groundY - 0.3;
+  for (let j = 0; j < nz; j++) {
+    const pz = z0 + j * HILL_GRID;
+    for (let i = 0; i < nx; i++) {
+      const px = x0 + i * HILL_GRID;
+      let h = floor;
+      for (const s of props) {
+        const d = square(px, pz, s.x, s.z);
+        if (d >= s.reach) continue;
+        const t = d / s.reach;
+        const fall = (s.top - groundY) * THREE.MathUtils.smoothstep(t, 0, 1);
+        // Broken up on the flank only: the top stays under the floors and
+        // the foot meets the ground.
+        const rough = (terrainNoise(px * 0.07, pz * 0.07, 811) - 0.5) * 2 * 3.2 * Math.sin(Math.PI * t);
+        h = Math.max(h, s.top - fall + rough);
+        if (d === 0 && s.floor && s.under === -Infinity) under[j * nx + i] = 1;
+      }
+      if (h > floor) {
+        for (const c of holds) {
+          const v = c.limit + HILL_GIVE * square(px, pz, c.x, c.z);
+          if (v < h) h = Math.max(floor, v);
+        }
+      }
+      // Under the cells it carries the hill is never cut away: where a lower
+      // room meets the plateau the ground between them is a cliff.
+      for (const s of props) {
+        if (s.under === -Infinity && square(px, pz, s.x, s.z) === 0) h = Math.max(h, s.top);
+      }
+      H[j * nx + i] = h;
+    }
+  }
+
+  // Normals from the field, so a flank is smooth and a crest is not faceted.
+  const at = (i, j) => H[Math.min(nz - 1, Math.max(0, j)) * nx + Math.min(nx - 1, Math.max(0, i))];
+  const normal = (i, j) => {
+    const gx = (at(i + 1, j) - at(i - 1, j)) / (2 * HILL_GRID); const gz = (at(i, j + 1) - at(i, j - 1)) / (2 * HILL_GRID);
+    const l = Math.hypot(gx, 1, gz);
+    return [-gx / l, 1 / l, -gz / l];
+  };
+  const earthOf = new Map();
+  for (const s of props) {
+    if (!s.floor) continue;
+    const cell = layout.cells.get(layout.at(s.level, Math.round(s.x / CELL), Math.round(s.z / CELL)));
+    const f = cell ? pickMaterials(cell.room, cell.room.area).floor : null;
+    if (f) earthOf.set(f, (earthOf.get(f) || 0) + 1);
+  }
+  const common = [...earthOf.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const earth = ['sand', 'duff', 'peat', 'snow'].includes(common) ? common : 'grass';
+  const bins = new Map(); // `${material}|${chunk}` -> [positions, normals]
+  let triangles = 0;
+  const push = (tri) => {
+    const [a, b, c] = tri;
+    const ys = [a[1], b[1], c[1]];
+    if (Math.max(...ys) <= floor + 0.01) return;
+    const ux = b[0] - a[0]; const uy = b[1] - a[1]; const uz = b[2] - a[2];
+    const vx = c[0] - a[0]; const vy = c[1] - a[1]; const vz = c[2] - a[2];
+    const fy = uz * vx - ux * vz; const fl = Math.hypot(uy * vz - uz * vy, fy, ux * vy - uy * vx);
+    const steep = fy / fl < 0.72;
+    const material = steep ? 'rock' : earth;
+    const cx = (a[0] + b[0] + c[0]) / 3; const cz = (a[2] + b[2] + c[2]) / 3; const cy = (ys[0] + ys[1] + ys[2]) / 3;
+    const chunk = chunkOf({ level: Math.max(0, Math.floor(cy / LEVEL_H)), x: Math.round(cx / CELL), z: Math.round(cz / CELL) });
+    const k = `${material}|${chunk}`;
+    if (!bins.has(k)) bins.set(k, { material, chunk, p: [], n: [] });
+    const bin = bins.get(k);
+    for (const v of tri) { bin.p.push(v[0], v[1], v[2]); bin.n.push(v[3], v[4], v[5]); }
+    triangles++;
+  };
+  const vert = (i, j) => [x0 + i * HILL_GRID, H[j * nx + i], z0 + j * HILL_GRID, ...normal(i, j)];
+  for (let j = 0; j < nz - 1; j++) {
+    for (let i = 0; i < nx - 1; i++) {
+      // Under a floor that covers the whole cell there is nothing to see.
+      if (under[j * nx + i] && under[j * nx + i + 1] && under[(j + 1) * nx + i] && under[(j + 1) * nx + i + 1]) continue;
+      const a = vert(i, j); const b = vert(i + 1, j); const c = vert(i, j + 1); const d = vert(i + 1, j + 1);
+      // Wound so the faces look up.
+      push([a, c, b]);
+      push([b, c, d]);
+    }
+  }
+  // The overhangs: rock from well over whatever is under a carried cell up
+  // to its floor.
+  for (const s of props) {
+    if (s.under === -Infinity) continue;
+    const y0 = s.under + HILL_OVERHANG; const y1 = s.top - 0.02;
+    if (y1 - y0 < 0.5) continue;
+    batcher.add(box(CELL, y1 - y0, CELL, 3, 3, 3), 'rock', place(s.x, (y0 + y1) / 2, s.z),
+      { chunk: chunkOf({ level: s.level, x: Math.round(s.x / CELL), z: Math.round(s.z / CELL) }) });
+    triangles += 108;
+  }
+  for (const { material, chunk, p, n } of bins.values()) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
+    batcher.add(geo, material, new THREE.Matrix4(), { chunk, normals: true, ao: () => 0.92, uvScale: material === 'grass' ? TURF_UV : null });
+    geo.dispose();
+  }
+  return { cells: support.size, triangles };
+}
 
 function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey }) {
   // The desert's caves wear its sandstone; a cave anywhere else -- the troll
