@@ -2749,6 +2749,7 @@ function* raise(world, layout, materials, assets = null) {
       batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
       materials: lowerMats,
       lowerCeil: ceilingOf(plan.lower.room, plan.lower, layout),
+      open: isOpenAir(plan.lower.room) && !isBuried(lowerMats, plan.lower),
       // Going down into the ground rather than up a storey: the opening wants
       // a parapet round it, and a lining through the earth between the room
       // below's ceiling and this floor -- unless the room below is a sewer
@@ -7756,6 +7757,12 @@ function convexPrism(batcher, toWorld, poly, c0, c1, material, options, grain = 
 
 /** Floors a flight is joinery in rather than masonry. */
 const WOODEN_FLOOR = new Set(['planks', 'boards', 'wood', 'sewerwood']);
+/**
+ * Floors nobody cuts a step from. A flight takes its room's floor, and in
+ * an open-air room that is the ground itself: the Void's down-stairs were
+ * flights of turf, and others came out in forest litter, sand or water.
+ */
+const GROUND_FLOOR = new Set(['grass', 'duff', 'sand', 'water', 'cloud', 'dirt', 'peat', 'mud', 'ash', 'turf', 'snow']);
 
 /**
  * The flight itself, as a joiner or a mason builds one.
@@ -7772,13 +7779,22 @@ const WOODEN_FLOOR = new Set(['planks', 'boards', 'wood', 'sewerwood']);
  * Only the look changes: the platforms and the rail colliders are
  * `buildStair`'s and stand exactly where they did.
  */
-function buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, materials, buried }) {
-  const wooden = WOODEN_FLOOR.has(materials.floor);
+function buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, materials, buried, open = false }) {
+  const wooden = !open && WOODEN_FLOOR.has(materials.floor);
+  // Under the sky there is no wall to carry a flight: it was the indoor stone
+  // flight, a slab with a soffit, hanging over the grass of the room below.
+  // Out of doors it is built solid up to head height and carried on a pier
+  // wall at its head, the way a garden stair rises to a terrace. Not solid
+  // all the way: it crosses the middle of the room, where you arrive, and
+  // there it has to stay four metres over your head.
+  const step = GROUND_FLOOR.has(materials.floor) ? 'stonewall' : materials.floor;
   const W = DOOR_W / 2;
   const S = STAIR_START; const E = STAIR_END;
   const slope = rise / STAIR_RUN;
   // Height of the line through the steps' inner corners: 0 at the foot, `rise` at the head.
   const pitch = (a) => (S - a) * slope;
+  const SOLID = 2.3; // pitch up to which an open-air flight is built down to the ground
+  const solidTo = S - SOLID / slope;
   const toWorld = (a, y, c) => [lower.x + (dx ? dx * a : c), lower.y + y, lower.z + (dz ? dz * a : c)];
   const solid = (poly, c0, c1, material, ao = null, grain = null) => convexPrism(batcher, toWorld, poly, c0, c1, material, { chunk, ao }, grain);
   const along = [-1 / Math.hypot(1, slope), slope / Math.hypot(1, slope)];
@@ -7792,27 +7808,34 @@ function buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, material
       solid([[front, riser * i], [front, y - 0.055], [front - 0.03, y - 0.055], [front - 0.03, riser * i]], -W + 0.01, W - 0.01, materials.floor, shade(i));
     } else {
       // Down to a soffit a third of a metre under the pitch line.
-      const foot = (a) => Math.max(0, pitch(a) - 0.34);
-      solid([[front, foot(front)], [back, foot(back)], [back, y], [front, y]], -W, W, materials.floor, shade(i));
+      const foot = (a) => (open && pitch(a) <= SOLID + 1e-6 ? 0 : Math.max(0, pitch(a) - 0.34));
+      solid([[front, foot(front)], [back, foot(back)], [back, y], [front, y]], -W, W, step, shade(i));
     }
   }
 
   // `timber` is the half-timbered facade -- lime-wash with oak braces on it --
   // and a string cut from it came out white. `wood` is the joiner's oak.
-  const frame = wooden ? 'wood' : materials.floor;
+  const frame = wooden ? 'wood' : step;
   // The strings: from the floor in front of the first step to the edge of the
   // opening, their top a hand above the nosings and their foot cut level.
   const below = wooden ? 0.12 : 0.36;
   const above = riser + 0.06;
-  const string = [
-    [S + above / slope, 0], [S - below / slope, 0], [E, rise - below], [E, rise], [E + above / slope, rise],
-  ];
+  // In the open the string comes down to the ground as far as the steps do.
+  const string = open
+    ? [[S + above / slope, 0], [solidTo, 0], [E, rise - below], [E, rise], [E + above / slope, rise]]
+    : [[S + above / slope, 0], [S - below / slope, 0], [E, rise - below], [E, rise], [E + above / slope, rise]];
   const T = wooden ? 0.07 : 0.16;
   for (const s of [-1, 1]) solid(string, s > 0 ? W : -W - T, s > 0 ? W + T : -W, frame, null, wooden ? along : null);
   if (wooden) {
     // The boarded underside, so the sawtooth of treads and risers is not
     // what you see from the room below.
     solid([[S, -0.1], [E, rise - 0.1], [E, rise - 0.06], [S, -0.06]], -W, W, materials.floor);
+  }
+  if (open) {
+    // The pier under its head. It stops 60 mm under the floor it arrives
+    // in: at level 0 that floor is the world's ground plane, and a top laid
+    // at its height would lie in its plane.
+    solid([[E, 0], [E - 0.3, 0], [E - 0.3, rise - SLAB - 0.06], [E, rise - SLAB - 0.06]], -W - T, W + T, step);
   }
 
   // The handrail: a newel at the foot and one at the head, the rail between
@@ -7836,7 +7859,7 @@ function buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, material
 }
 
 /** Straight flight from the lower room up through the opening in its ceiling. */
-function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform, materials, buried = false, shaftWalls = false, kerb = 'stonewall', lowerCeil = CEIL }) {
+function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform, materials, buried = false, shaftWalls = false, kerb = 'stonewall', lowerCeil = CEIL, open = false }) {
   const lower = worldOf(plan.lower);
   const chunk = chunkOf(plan.lower);
   const [dx, , dz] = DIR_STEP[plan.dir];
@@ -7853,7 +7876,14 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
     const d = dz !== 0 ? run : DOOR_W;
     addPlatform(cx - w / 2, cx + w / 2, cz - d / 2, cz + d / 2, y);
   }
-  buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, materials, buried });
+  buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, materials, buried, open });
+  if (open) {
+    // The pier under the head of an open-air flight (see `buildFlight`).
+    const a0 = STAIR_END - 0.3; const a1 = STAIR_END; const c = DOOR_W / 2 + 0.16;
+    const xs = dx ? [lower.x + dx * a0, lower.x + dx * a1] : [lower.x - c, lower.x + c];
+    const zs = dz ? [lower.z + dz * a0, lower.z + dz * a1] : [lower.z - c, lower.z + c];
+    addCollider(Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs), lower.y, lower.y + rise - SLAB);
+  }
 
   const segments = 6;
   for (const s of [-1, 1]) {
@@ -7880,7 +7910,10 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
     }
   }
 
-  if (!buried) return;
+  // A flight that stands in the open comes up through a hole in the floor
+  // above as well, and that hole gets the parapet a buried one has; there is
+  // no room's ceiling below it to line down to.
+  if (!buried && !open) return;
   const upper = worldOf(plan.upper);
   const upperChunk = chunkOf(plan.upper);
   // The opening, in the upper room's frame: `along` runs the stair's way.
@@ -7922,6 +7955,7 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
     [at(a0, c0 - 0.06), at(a1, c0 + L)], [at(a0, c1 - L), at(a1, c1 + 0.06)],
     [at(a1 - L, c0 - 0.06), at(a1 + 0.06, c1 + 0.06)],
   ]) slab(p, q, upper.y - SLAB - 0.02, upper.y - 0.005, kerb);
+  if (!buried) return;
   if (shaftWalls) {
     // A sewer shaft's walls run to the underside of the floor above, and
     // round the opening that underside is the ceiling you look up at -- it
