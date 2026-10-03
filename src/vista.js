@@ -207,15 +207,21 @@ export function createVistas({ world, plan, layoutOf, viewOf }) {
     return { trees, houses, pieces };
   }
 
-  /** The bridge cell's paving, in the neighbour's own grid so it joins the arrival room's floor: a geometry. */
+  /**
+   * The paving between the gate and the arrival room, in the neighbour's own
+   * grid so it joins that room's floor: one geometry, a cell wide and as
+   * long as the lane.
+   */
   function bridge(vista, floor) {
     const material = materials[floor];
     // The gate's facing, in the neighbour's grid: back from the arrival room towards it.
     const back = (vista.side - vista.turns + 6) % 4;
     const [bx, , bz] = DIR_STEP[back];
     const s = vista.start;
-    const cx = (s.x + bx) * CELL; const cz = (s.z + bz) * CELL; const y = s.level * LEVEL_H;
-    const geometry = new THREE.PlaneGeometry(CELL, CELL, 4, 4);
+    const n = vista.bridge.length;
+    const mid = (n + 1) / 2;
+    const cx = (s.x + bx * mid) * CELL; const cz = (s.z + bz * mid) * CELL; const y = s.level * LEVEL_H;
+    const geometry = new THREE.PlaneGeometry(bx ? CELL * n : CELL, bz ? CELL * n : CELL, bx ? 4 * n : 4, bz ? 4 * n : 4);
     geometry.rotateX(-Math.PI / 2);
     geometry.translate(cx, y, cz);
     return worldUv(geometry, material);

@@ -40,6 +40,8 @@ export const VISTA_NEAR_M = 80;
 /** And past this nothing of the neighbour is drawn at all: the skyline takes over. */
 export const VISTA_FAR_M = 300;
 const CELL_M = 13;
+/** Room-pitches past the gate the arrival room may be set, when the first is the drawn zone's. */
+export const VISTA_REACH = 3;
 
 const key = (level, x, z) => `${level}:${x},${z}`;
 
@@ -83,17 +85,29 @@ export function vistaSites(world, plan, here, zone, openAirOf) {
     if (!openHere(from.room) && !openAirOf(plan.byId.get(crossing.toZone))(arrive)) continue;
     const side = gate.side;
     const [sx, , sz] = DIR_STEP[side];
-    // The arrival room one room-pitch past the gate, on the gate's level --
-    // and nothing of the drawn zone's within a cell of it.
-    const ox = from.x + 2 * sx; const oz = from.z + 2 * sz;
-    if (near(from.level, ox, oz)) continue;
+    // The arrival room one room-pitch past the gate, on the gate's level,
+    // with nothing of the drawn zone's within a cell of it. Where the drawn
+    // zone has a room or a street there, a pitch or two further on, along a
+    // lane from the gate that crosses none of its rooms or streets -- only
+    // its frontage, which leaves the lane to the vista: a little further
+    // than the crossing walks, and seen, rather than a house past the gate.
+    let reach = 0;
+    for (let k = 1; k <= VISTA_REACH && !reach; k++) {
+      let lane = true;
+      for (let j = 1; j < 2 * k && lane; j++) if (solid.has(key(from.level, from.x + j * sx, from.z + j * sz))) lane = false;
+      if (!lane) break;
+      if (!near(from.level, from.x + 2 * k * sx, from.z + 2 * k * sz)) reach = 2 * k;
+    }
+    if (!reach) continue;
+    const ox = from.x + reach * sx; const oz = from.z + reach * sz;
     sites.push({
       crossing, zone: crossing.toZone, from: from.vnum, arrive: crossing.to, side,
       turns: (side - crossing.dir + 4) % 4,
       at: { level: from.level, x: ox, z: oz },
       fromCell: { level: from.level, x: from.x, z: from.z },
-      // The cell between the gate and the arrival room, which neither zone builds on.
-      bridge: { level: from.level, x: from.x + sx, z: from.z + sz },
+      // The cells between the gate and the arrival room, which neither zone
+      // builds on: the vista paves them.
+      bridge: Array.from({ length: reach - 1 }, (_, j) => ({ level: from.level, x: from.x + (j + 1) * sx, z: from.z + (j + 1) * sz })),
       near,
     });
   }
@@ -170,7 +184,7 @@ export function planVista(site, there, taken = null) {
 export function vistaCells(vistas) {
   const out = new Set();
   for (const v of vistas) {
-    out.add(key(v.bridge.level, v.bridge.x, v.bridge.z));
+    for (const b of v.bridge) out.add(key(b.level, b.x, b.z));
     const take = (level, x, z, ring) => {
       for (let a = -ring; a <= ring; a++) {
         for (let b = -ring; b <= ring; b++) {
