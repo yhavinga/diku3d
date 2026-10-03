@@ -614,6 +614,27 @@ export class Hud {
       ctx.closePath(); ctx.fill(); ctx.stroke();
     }
 
+    // A way up or down into another zone (the temple's stair to the Mud
+    // School): a gold arrowhead pointing up or down the map, in the corner of
+    // its room's square, since a stair has no side to sit on.
+    for (const link of this.layout.links) {
+      if (link.kind !== 'gate' || link.dir < 4 || link.exit.offMap || link.exit.to < 0) continue;
+      const home = link.from;
+      if (home.level !== level || !near(home)) continue;
+      const [rx, ry] = toScreen(home.x, home.z);
+      const r = home.vnum === roomVnum ? 5 : 3.6;
+      const s = link.dir === 4 ? -1 : 1;
+      const x1 = rx + r + 2.5; const y1 = ry - r + 1;
+      ctx.fillStyle = '#e0bd77';
+      ctx.strokeStyle = 'rgba(10,9,8,0.8)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1 + s * 3.5);
+      ctx.lineTo(x1 + 3, y1 - s * 2);
+      ctx.lineTo(x1 - 3, y1 - s * 2);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+
     // heading wedge. The map is north-up and the wedge is drawn pointing north,
     // so the bearing rotates it directly -- the old `yaw + PI` came out mirrored
     // and was only ever right facing north or south.
