@@ -75,7 +75,12 @@ export const isOutdoor = (room) => OUTDOOR.has(room.sector) && !(room.flags & RO
 // caves, an underground hallway, a temple, the inside of a tree -- real
 // interiors that happen to sit in a forest area. The name wins over the
 // sector code, the same move readFittings and the park already make.
-const CANOPY_NOT = /\b(cave|underground|temple|hall|inside|web|tunnel)\b/i;
+// The plurals and the rest of the burrow's words: "The many tunnels", "The
+// maze", "The hole", "The secret chamber" are Moria's -- FOREST and INDOORS
+// like Haon Dor's trails, and planted as a wood under rock, a fir standing in
+// a tunnel -- and "A Ladder", "A Hole" the gnomes', "Darker Caves" the
+// canyon's. Over all 45 areas this takes no room that reads as forest.
+const CANOPY_NOT = /\b(caves?|underground|temple|hall|inside|web|tunnels?|hole|maze|passage|chamber|ladder)\b/i;
 /**
  * A room that says it is *outside* one is not inside one. "Outside a cave in
  * the deep, dark forest" is the mouth of the Green Dragon's cave -- a path end
@@ -96,8 +101,30 @@ const CANOPY_OUTSIDE = /\boutside\b/i;
 // drain.", "The strange sewer" -- and every one carries ROOM_INDOORS, so the
 // canopy test took them for Haon Dor and planted firs seven metres under the
 // Dump.
-const isCanopy = (room) => room.sector === SECTOR.FOREST && !isOutdoor(room) && !isDeep(room)
+const canopyNamed = (room) => room.sector === SECTOR.FOREST && !isOutdoor(room) && !isDeep(room)
   && (CANOPY_OUTSIDE.test(room.name) || !CANOPY_NOT.test(room.name));
+const isCanopy = (room) => canopyNamed(room) && !enclosedForest.has(room);
+/**
+ * A wood is somewhere you can walk out of. A room the words let through is
+ * still an interior if no way out of it reaches open ground or another room
+ * that reads as forest: Moria's "At the sand bar" is wordless, and its only
+ * exit is the underground river -- it grew a fir under the mountain. One hop,
+ * by the words alone, so the answer does not depend on the order rooms come
+ * in. Over the stock areas this takes that sand bar, a dark room in the
+ * wyvern's tower, and one "Lost in the Mist" whose neighbours are all built
+ * as interiors already.
+ */
+const enclosedForest = new WeakSet();
+function classifyCanopy(world) {
+  for (const room of world.rooms.values()) {
+    if (!canopyNamed(room)) continue;
+    const open = room.exits.some((exit) => {
+      const next = exit && world.rooms.get(exit.to);
+      return next && (isOutdoor(next) || canopyNamed(next));
+    });
+    if (!open) enclosedForest.add(room);
+  }
+}
 
 /** No walls, no ceiling, no roof -- whatever the mud says about the sky. */
 // "Strange Glowing Sand" is INDOORS by its flags and "a vast desert" by its
@@ -1899,6 +1926,7 @@ function* raise(world, layout, materials, assets = null) {
   const addPlatform = (x0, x1, z0, z1, top) => platforms.push({ x0, x1, z0, z1, top });
 
   classifySewer(world);
+  classifyCanopy(world);
   classifyShells(world, (room) => room.sector !== SECTOR.AIR && !isOpenAir(room));
   const lifts = mounds(world, layout);
   // Ground raised under a building, which nav.js and motion.js stand
@@ -3030,6 +3058,39 @@ function* raise(world, layout, materials, assets = null) {
     const fits = room / CROWN;
     if (fits < 0.7) decor.splice(i, 1);
     else if ((d.scale || 1) > fits) d.scale = fits;
+  }
+  // Nor through anything built over it. A forest fir is 17.5 m at scale 1
+  // and planted at up to 2.5 (and up to 1.2 again in actors.js), so a tree
+  // reaches four or five levels: in the canyon one came up through the
+  // Overlook's floor, and under Moria's rock they stood through the tunnel
+  // above. A tree is kept short enough to clear the lowest room or passage
+  // over its crown, and one that would have to be a sapling is not planted.
+  const TREE_H = { conifer: 17.6, broadleaf: 12.7 }; // tallest model of each, metres at scale 1
+  const builtAbove = (level, x, z) => {
+    const v = layout.at(level, x, z);
+    if (v !== undefined) return !rooms.get(v)?.unbuilt;
+    const link = layout.passageAt(level, x, z);
+    return !!link && !rooms.get(link.from.vnum)?.unbuilt && !rooms.get(link.to?.vnum)?.unbuilt;
+  };
+  for (let i = decor.length - 1; i >= 0; i--) {
+    const d = decor[i];
+    if (d.kind !== 'tree') continue;
+    const unit = (d.conifer ? TREE_H.conifer : TREE_H.broadleaf) * 1.2;
+    const scale = d.scale || 1;
+    const reach = 1.5 * scale; // the upper crown, which is what meets a floor
+    const level = Math.floor((d.y + 0.5) / LEVEL_H);
+    let ceiling = Infinity;
+    for (let up = level + 1; up * LEVEL_H - SLAB < d.y + unit * scale && ceiling === Infinity; up++) {
+      for (let cx = Math.round((d.x - reach) / CELL); cx <= Math.round((d.x + reach) / CELL); cx++) {
+        for (let cz = Math.round((d.z - reach) / CELL); cz <= Math.round((d.z + reach) / CELL); cz++) {
+          if (builtAbove(up, cx, cz)) ceiling = up * LEVEL_H - SLAB - 0.3;
+        }
+      }
+    }
+    if (ceiling === Infinity) continue;
+    const fits = (ceiling - d.y) / unit;
+    if (fits < 0.5) decor.splice(i, 1);
+    else if (scale > fits) d.scale = fits;
   }
 
   yield 0.292;
