@@ -39,6 +39,7 @@ MODULES = [
     "people",
     "beasts",
     "monsters",
+    "creatures",
     "furniture",
     "clutter",
     "setpiece",

@@ -1079,7 +1079,9 @@ const BEASTS = [
   // metre with its tail.
   { test: /\b(gigantic|giant) rat\b|\brat (gigantic|giant)\b/, asset: 'beast_rodent', scale: 6.0, coat: 0x4a3f35, pale: 0x8a7e70, points: 0x4a3f35, box: [0.5, 0.9, 'quad', 0x4d453c] },
   { test: /\b(great|sewer) rats?\b/, asset: 'beast_rodent', scale: 2.4, coat: 0x4e4238, pale: 0x8a7e6e, points: 0x4e4238, box: [0.25, 0.5, 'quad', 0x4d453c] },
-  { test: /\b(rabbits?|hares?|bunny|bunnies)\b/, asset: 'beast_rodent', scale: 1.5, coat: 0x8a735a, pale: 0xd8ccb8, points: 0x5a4a3a, grow: { ear: 3.2, tail1: 0.2, head: 1.1 }, box: [0.2, 0.4, 'quad', 0x8a735a] },
+  // A rabbit is not a rat with long ears: it has its own body, crouched on
+  // long hind feet, and goes in hops (tools/blender/creatures.py).
+  { test: /\b(rabbits?|hares?|bunny|bunnies)\b/, asset: 'beast_rabbit', scale: 1.1, coat: 0x8a7458, pale: 0xe6ddd0, points: 0x4a3c2e, box: [0.2, 0.4, 'quad', 0x8a735a] },
   { test: /\b(rat|rats|rodent|vermin)\b/, asset: 'beast_rodent', scale: 1.2, coat: 0x5e5043, pale: 0x9e9180, points: 0x5e5043, box: [0.14, 0.26, 'quad', 0x4d453c] },
   // --- horses, and the deer, which is a lighter build of the same frame.
   // Horses vary coat by the mobile, so a stable of four is not one horse.
@@ -1116,6 +1118,11 @@ const BEASTS = [
   // idle is `lair`, which also keeps nine metres of it inside the room.
   { test: /\bred dragon\b/, asset: 'beast_dragon', scale: 0.95, coat: 0x7a2616, pale: 0xc08a4a, points: 0x3a100a, patch: 0x5a180e, cover: 0.3, lair: true, box: [1.7, 9, 'quad', 0x7a2616] },
   { test: /\bdragons?\b/, asset: 'beast_dragon', scale: 0.8, coat: 0x3a5a2a, pale: 0xa8a870, points: 0x1e2e16, patch: 0x2a3a1c, cover: 0.3, box: [1.7, 9, 'quad', 0x3a5a2a] },
+  // --- lizards (tools/blender/creatures.py): low, long-tailed, sprawling.
+  // A lizard man is a man (people.js); a fire lizard is red.
+  { test: /\bfire lizards?\b/, asset: 'beast_lizard', scale: 0.6, coat: 0x9a3418, pale: 0xe09a3a, points: 0x3a120a, patch: 0xd8661c, cover: 0.3, box: [0.12, 0.9, 'quad', 0x9a3418] },
+  { test: /\b(giant|huge) lizards?\b/, asset: 'beast_lizard', scale: 1.6, coat: 0x55553a, pale: 0xaaa480, points: 0x2a2a1c, patch: 0xbcb27a, cover: 0.25, box: [0.3, 2.3, 'quad', 0x55553a] },
+  { test: /\blizards?\b(?!\s*(m[ae]n|folk))/, asset: 'beast_lizard', scale: 0.9, coat: 0x5c5836, pale: 0xb4ac84, points: 0x2c2a1c, patch: 0xc4bb84, cover: 0.25, box: [0.18, 1.3, 'quad', 0x5c5836] },
   // --- serpents. A python is three metres; the marsh's anaconda is ten in the
   // mud's own words, and gets six, which is still the largest thing in it.
   { test: /\banaconda\b/, asset: 'beast_snake', scale: 2.0, coat: 0x4a5230, pale: 0x9a9468, points: 0x4a5230, patch: 0x1a1c12, cover: 0.4, box: [0.3, 6, 'quad', 0x4a5230] },
@@ -1123,6 +1130,9 @@ const BEASTS = [
   // Red, yellow and black in rings: laid on in bands along the body rather
   // than through the patch noise every other snake is mottled with.
   { test: /\bcoral snake\b|\bsnake coral\b/, asset: 'beast_snake', scale: 0.4, coat: 0xb02a18, pale: 0xb02a18, points: 0xb02a18, bands: [0xb02a18, 0xe0b830, 0x141212, 0xe0b830], band: 0.07, box: [0.08, 1, 'quad', 0xb02a18] },
+  // A snail big enough to be in the way: grey foot (coat), the shell its
+  // pale channel in tan, banded in the points' brown.
+  { test: /\bsnails?\b/, asset: 'beast_snail', scale: 1.0, coat: 0x7c7266, pale: 0xa88458, points: 0x4a3020, patch: 0x5e554a, cover: 0.3, box: [0.12, 0.5, 'quad', 0x8a7a66] },
   { test: /\bmaggots?\b/, asset: 'beast_worm', scale: 0.8, coat: 0xd8ccae, pale: 0xe6ddc6, points: 0xb8aa8a, patch: 0xc8b898, cover: 0.2, box: [0.14, 1.0, 'quad', 0xd8ccae] },
   { test: /\b(snake|snakes|serpent|viper|cobra|adder|asp)\b/, asset: 'beast_snake', scale: 0.55, coat: 0x5a5a3a, pale: 0xb8b490, points: 0x5a5a3a, patch: 0x26261a, cover: 0.35, box: [0.12, 1.5, 'quad', 0x5a5a3a] },
   { test: /\b(worm|worms|iceworm|slug)\b/, asset: 'beast_worm', scale: 1.0, coat: 0x8a6a62, pale: 0xb08a80, points: 0x8a6a62, patch: 0x6a4c46, cover: 0.3, box: [0.14, 1.3, 'quad', 0x8a6a62] },
