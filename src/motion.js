@@ -1464,6 +1464,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
           if (m.wait > 0) return;
           endTalk(fig);
         }
+        if (devotion(fig, player)) return;
         // Someone aggressive keeps an eye on you while standing about.
         if (fig.aggressive && player) {
           const pd = Math.hypot(player.x - fig.at.x, player.z - fig.at.z);
@@ -2638,6 +2639,44 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     if (fig.actions && fig.actions.idle2 && fig.rand() < 0.35) m.idle = m.idle === 'idle2' ? 'idle' : 'idle2';
     m.wait = 2.5 + fig.rand() * 4.5;
     return true;
+  }
+
+  /**
+   * What a person's trade has them do standing about, laid over the stance
+   * from the rig's own `cast` (people.py: a spell is gathered with both
+   * hands together before the chest and the head bowed over them, then
+   * released with the right arm out in front). Held on one frame of it:
+   *   a priest stops now and then and prays -- the gather, both hands;
+   *   a beggar holds out a hand to whoever comes close -- the release, the
+   *   right arm only, at little more than half its reach.
+   */
+  const ALMS = /^(neck|head|shoulderR|upperarmR|forearmR|handR)$/;
+  const PRAYER = { at: 0.42, hold: [5, 10] };
+  function holdLayer(fig, mask, at, seconds, gain) {
+    // A layer that stands on one frame: played at a thousandth of speed.
+    const slow = 0.001;
+    return playLayer(fig, 'cast', mask, { from: at, to: at + seconds * slow, timeScale: slow, gain });
+  }
+  function devotion(fig, player) {
+    const m = fig.m;
+    if (!fig.castPoint || !fig.actions || !fig.actions.cast || m.path || m.settle || m.talk || m.fighting) return false;
+    if (fig.archetype === 'beggar' && player) {
+      const d = Math.hypot(player.x - fig.at.x, player.z - fig.at.z);
+      if (d > 3.2 || d < 0.5) return false;
+      m.turnTo = Math.atan2(player.x - fig.at.x, player.z - fig.at.z);
+      if (!m.layer || m.layer.name !== 'cast') holdLayer(fig, ALMS, 0.62, 60, 0.72);
+      // Kept out for as long as you stand there, and let fall after.
+      if (m.layer) m.layer.until = m.layer.t + 0.6;
+      m.wait = Math.max(m.wait, 1.5);
+      return true;
+    }
+    if (fig.archetype === 'priest' && m.wait <= 0 && !m.layer && fig.rand() < 0.3) {
+      const seconds = PRAYER.hold[0] + fig.rand() * (PRAYER.hold[1] - PRAYER.hold[0]);
+      holdLayer(fig, UPPER, PRAYER.at, seconds, 0.9);
+      m.wait = seconds + 0.4;
+      return true;
+    }
+    return false;
   }
 
   /**
