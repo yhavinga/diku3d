@@ -69,6 +69,13 @@ function giantScale(prose) {
   return Math.min(1.9, Math.max(1.35, feet * 0.3048 / 1.75));
 }
 
+/** school.are's nameless brutes, by their keywords: [pattern, troll size and hide]. */
+const SCHOOL_BRUTE = [
+  [/^\s*monster\b.*\bwimpy\b/i, { scale: 0.78, skin: 0x6e7656 }],
+  [/^\s*monster\b/i, { scale: 0.9, skin: 0x5f6a4c }],
+  [/^\s*big creature\s*$/i, { scale: 1.5, skin: 0x5a5448 }],
+];
+
 /** A troll-rigged monster's size and hide, by what it is called. */
 const TROLL_KINDS = [
   [W('baby'), { scale: 0.75, skin: 0x6a7a55 }],
@@ -243,8 +250,13 @@ export function personOf(proto, ITEM, instance = 0) {
   // No Man's Land's "doll" is a woman in her finery; a doll anywhere else
   // is a doll, and has more words to its name than that.
   const special = /^\s*doll\s*$/i.test(proto.keywords) ? 'doll' : (SPECIALS.find(([re]) => re.test(w)) || [])[1];
+  // The Mud School's caged monsters -- "there is a monster leashed here. He
+  // looks mean" -- and the "big creature hulking over your form" in its dark
+  // room are said to be nothing more than that. Something man-sized and
+  // troll-shaped, then: the wimpy ones smaller, the big one a head over you.
+  const brute = !special && SCHOOL_BRUTE.find(([re]) => re.test(proto.keywords || ''));
   // A lizard man is a man; a "lizard" is a lizard.
-  if (!special && CREATURE.test(w) && !/\b(m[ae]n|wom[ae]n|folk)\b/i.test(w)) return null;
+  if (!special && !brute && CREATURE.test(w) && !/\b(m[ae]n|wom[ae]n|folk)\b/i.test(w)) return null;
   const seed = strHash(proto.keywords, proto.vnum);
   // The trade and the livery come from the prototype; the hair, the beard and
   // the colour of a tunic also from which one of them this is, so the twenty
@@ -278,6 +290,13 @@ export function personOf(proto, ITEM, instance = 0) {
   // little", and to the patrolman they are "these nasty kids". They were
   // dressed as ogres and trolls, 2.4 m and hairy, beside a human vandal.
   const gang = /\bgang\b/i.test(w) ? (/\bogres?\b/i.test(w) ? 'ogres' : (/\btrolls?\b/i.test(w) ? 'trolls' : 'gang')) : null;
+
+  if (brute) {
+    Object.assign(out, { kind: 'troll', file: 'troll', arch: 'troll', face: 'face_troll', scale: brute[1].scale,
+      tint: { skin: brute[1].skin, leather: 0x4a3a2a, linen: 0x8a7a5a, hair: 0x2a2418 } });
+    applyEquipment(out, proto, ITEM, seed);
+    return out;
+  }
 
   // Monsters.
   for (const [kind, re] of MONSTERS) {

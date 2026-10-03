@@ -1193,7 +1193,7 @@ def canine():
     return dict(name="beast_canine", archetype="canine", L=L, body=body, masks=masks, parts=parts, h=0.0055, tris=3000,
                 gait=dict(walk_stride=0.56, walk_frames=26, walk_duty=0.64, lift=0.05,
                           run_stride=1.5, run_frames=14, run_duty=0.34, run_lift=0.08,
-                          gallop="rotary", bite=True, lie=0.12))
+                          gallop="rotary", bite=True, lie=0.12, pastimes=["sniff", "haunch", "snarl", "howl"]))
 
 
 def feline():
@@ -1438,7 +1438,7 @@ def bear():
                 gait=dict(walk_stride=1.05, walk_frames=34, walk_duty=0.66, lift=0.1,
                           run_stride=1.7, run_frames=18, run_duty=0.4, run_lift=0.16,
                           gallop="rotary", wag=3.0, idle_wag=1, tail_pitch=-10.0, lie=0.3, arch=6.0,
-                          pant=0.0,
+                          pant=0.0, pastimes=["sniff", "rear"], sniff_face=40.0, sniff_ground=0.06,
                           flex={"hind": dict(lean=6, push=18, fold=30, curl=25),
                                 "fore": dict(lean=6, push=20, fold=55, curl=25, scap=10)}))
 
@@ -1801,7 +1801,13 @@ def pig():
         scapula=(0.1, 0.2, 0.66),
         hoof=0.032,
         extra={"ear*": ((0.07, 0.58, 0.66), (0.13, 0.7, 0.63), "head"),
-               "tusk*": ((0.04, 0.76, 0.43), (0.06, 0.79, 0.49), "jaw")},
+               "tusk*": ((0.04, 0.76, 0.43), (0.06, 0.79, 0.49), "jaw"),
+               # A wild boar's bristle crest, one bone a stretch of back so it
+               # bends with the neck when it roots; a farm pig collapses all four.
+               "mane1": ((0, 0.47, 0.6), (0, 0.5, 0.64), "neck"),
+               "mane2": ((0, 0.24, 0.66), (0, 0.26, 0.7), "chest"),
+               "mane3": ((0, 0.0, 0.67), (0, 0.02, 0.71), "spine"),
+               "mane4": ((0, -0.26, 0.65), (0, -0.24, 0.69), "pelvis")},
     )
     tail = L["tail"]
     body = [
@@ -1850,6 +1856,19 @@ def pig():
             out.append(solid_part([cone(P(*a), P(*b), 0.011, 0.003, "tusk" + t, blend=0.004)], 0.003, 60,
                                   "tusk", "horn", (0.8, 0.76, 0.66)))
         out += hooves(L, 0.003, L["hoof"], cloven=True, tris=90)
+        # The crest: stiff bristles standing up along the spine, longest over
+        # the shoulders and the nape, each root sunk into the skin.
+        bristles = []
+        for i in range(30):
+            f = 0.56 - i * 0.03
+            top = surface_point(body_solids, P(0, f, 1.2), P(0, 0, -1), sink=0.03)
+            length = 0.05 + 0.07 * math.exp(-((f - 0.35) / 0.22) ** 2)
+            bone = "mane1" if f > 0.4 else "mane2" if f > 0.12 else "mane3" if f > -0.14 else "mane4"
+            for k in (-1, 1):
+                lean = V((k * 0.012, 0.025, 0))
+                bristles.append(cone(tuple(top + V((k * 0.008, 0, 0))), tuple(top + V((0, 0, length)) + lean), 0.018, 0.004, bone,
+                                     blend=0.008, mask=(0, 0.9), group="b%d%d" % (i, k)))
+        out.append(sdf_part(bristles, 0.004, 900, "mane", "fur", smooth=1))
         return out
 
     return dict(name="beast_pig", archetype="pig", L=L, body=body, masks=masks, parts=parts,
@@ -1858,6 +1877,7 @@ def pig():
                           run_stride=1.2, run_frames=14, run_duty=0.38, run_lift=0.08,
                           gallop="transverse", wag=8.0, idle_wag=2, tail_pitch=0.0, lie=0.24, arch=4.0,
                           graze=dict(pitch=4.0, face=60.0, ground=0.01, chew=4.0, tug=3.0, most=120.0),
+                          pastimes=["root"],
                           flex={"hind": dict(lean=8, push=15, fold=35, curl=35),
                                 "fore": dict(lean=8, push=18, fold=70, curl=40, scap=8)}))
 
@@ -3263,10 +3283,211 @@ def quad_clips(arm, spec):
             return dict(fk=fk, loc=loc, ik={leg: planted(rest, leg) for leg in rest}, limp=1.0)
         clip.run("lair", 120, lair, step=2)
 
+    if g.get("pastimes"):
+        quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pitch, height, bones)
+
     report["clips"] = clip.report
     report["stride"] = {"walk": S, "run": S2}
     report["overreach"] = clip.reach
     return report
+
+
+def sit_drop(poser, rest, pitch, front_back, hind_only=False):
+    """How far the body has to come down, pitched `pitch` degrees front-up
+    about the hips, for the forefeet -- moved `front_back` metres back under
+    the chest -- to reach the floor. Bisected on the solved legs, like the
+    graze's reach: the hind legs fold to suit."""
+    rot = mathutils.Quaternion(V((1, 0, 0)), math.radians(-pitch))
+    h = rest["fore.L"]["hip"].z
+    ik = {leg: (planted(rest, leg, fwd=-front_back) if leg.startswith("fore") else planted(rest, leg, fwd=h * 0.18, meta=70))
+          for leg in rest}
+    if hind_only:
+        ik = {leg: v for leg, v in ik.items() if leg.startswith("hind")}
+    lo, hi = 0.0, rest["fore.L"]["hip"].z
+    for _ in range(22):
+        mid = (lo + hi) * 0.5
+        poser.overreach = 0.0
+        poser.solve({}, V((0, 0, -mid)), rot, ik)
+        if poser.overreach > 1e-4:
+            lo = mid
+        else:
+            hi = mid
+    poser.overreach = 0.0
+    return hi, rot, ik
+
+
+def quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pitch, height, bones):
+    """What a four-footed animal does standing about, beyond grazing, for
+    the rigs whose gait table names them (motion.js PASTIMES plays them):
+
+    sniff  -- nose down near the floor, sweeping side to side in short
+              snuffs; the canines and the bear.
+    haunch -- sitting on its haunches, forelegs straight, head up: the fox
+              that 'is here staring at you'.
+    snarl  -- head down and forward, lips back, ears flat, a snap; a wolf
+              that 'doesn't want to be bothered'.
+    howl   -- sits, points its muzzle at the sky and howls.
+    rear   -- up on the hind legs, forelegs hanging, a roar; the bear that
+              'must be bigger than you'.
+    root   -- the snout shoving through the earth; the boar.
+
+    The loops start and end in their own held pose and are crossfaded from
+    the idle; the displays (snarl, howl, rear) start and end at the idle's
+    pose, so they need no fade of their own."""
+    names = g["pastimes"]
+    sides = lambda d: {e: d for e in ears}
+
+    def flat():
+        return {leg: planted(rest, leg) for leg in rest}
+
+    if "sniff" in names:
+        # Nose towards the floor, not on it: a dog's neck is one joint here,
+        # and folded past ~65 degrees it crumples.
+        down = graze_reach(poser, rest, arm, necks, dict(pitch=4.0, face=g.get("sniff_face", 65.0),
+                                                         ground=g.get("sniff_ground", 0.1), most=g.get("sniff_most", 65.0)))
+        report["sniff"] = down["report"]
+
+        def sniff(t):
+            sweep = 14 * wave(t, 0.1) + 5 * wave(3 * t)
+            snuff = 2.0 * max(0.0, wave(7 * t))
+            fk = {"chest": (0.5 * wave(3 * t), 0, 0)}
+            for n in necks:
+                fk[n] = (down["neck"][n], sweep * down["share"][n], 0)
+            fk["head"] = (down["head"] + snuff, sweep * 0.3, 0)
+            if "jaw" in bones:
+                fk["jaw"] = (0, 0, 0)
+            fk.update(sides((-8, 0, 0)))
+            fk.update(tail_wave(tails, t, 10, freq=2, pitch=tail_pitch))
+            return dict(fk=fk, loc=V((0, 0, down["drop"])), rot=down["rot"], ik=flat())
+        clip.run("sniff", 120, sniff, step=2)
+
+    sit = g.get("sit", 44.0)
+    if "haunch" in names or "howl" in names:
+        drop, srot, sik = sit_drop(poser, rest, sit, height * 0.12)
+
+        def sik_at(k):
+            # Forefeet a little back under the chest; the hind feet come
+            # forward under the hips with the hocks laid down on the floor.
+            return {leg: (planted(rest, leg, fwd=-height * 0.12 * k) if leg.startswith("fore")
+                          else planted(rest, leg, fwd=height * 0.18 * k, meta=70 * k)) for leg in rest}
+
+        def seated(t, k, up=0.0):
+            """The sitting pose at weight k (0 standing, 1 sat)."""
+            rot = mathutils.Quaternion().slerp(srot, k)
+            ik = sik_at(k)
+            # The neck takes back most of the body's tilt, so the head is
+            # carried level -- looking at you, not at the ceiling -- unless
+            # it is pointed `up`.
+            fk = {}
+            for n in necks:
+                fk[n] = ((sit * 0.55 * k - up * 0.6) / len(necks), 0, 0)
+            fk["head"] = (sit * 0.35 * k - up * 0.4, 0, 0)
+            fk.update(tail_wave(tails, t, 4 * k, freq=1, pitch=tail_pitch * (1 - k) + 25 * k))
+            return fk, rot, ik
+
+    if "haunch" in names:
+        def haunch(t):
+            fk, rot, ik = seated(t, 1.0)
+            breath = wave(3 * t)
+            look = hold_steps_(t, [(0.12, 10.0), (0.45, -8.0), (0.75, 0.0)])
+            for n in necks:
+                fk[n] = (fk[n][0] + 1.0 * breath, look * 0.5 / len(necks), 0)
+            fk["head"] = (fk["head"][0], look * 0.5, 0)
+            if "jaw" in bones:
+                fk["jaw"] = (-g.get("pant", 0.0) * (0.5 + 0.5 * wave(6 * t)), 0, 0)
+            fk.update(sides((-6 * math.exp(-((t - 0.3) * 25) ** 2), 0, 0)))
+            return dict(fk=fk, loc=V((0, 0, -drop + 0.002 * breath)), rot=rot, ik=ik)
+        clip.run("haunch", 150, haunch, step=2)
+
+    if "howl" in names:
+        def howl(t):
+            k = ease(t / 0.15) * (1 - ease((t - 0.85) / 0.15))
+            cry = ease((t - 0.2) / 0.12) * (1 - ease((t - 0.72) / 0.1))
+            fk, rot, ik = seated(t, k, up=55 * cry)
+            if "jaw" in bones:
+                fk["jaw"] = (-18 * cry * (0.85 + 0.15 * wave(5 * t)), 0, 0)
+            fk.update(sides((35 * cry, 0, 0)))
+            return dict(fk=fk, loc=V((0, 0, -drop * k)), rot=rot, ik=ik)
+        clip.run("howl", 150, howl)
+
+    if "snarl" in names:
+        def snarl(t):
+            k = ease(t / 0.12) * (1 - ease((t - 0.82) / 0.18))
+            snap = math.exp(-((t - 0.5) * 18) ** 2)
+            fk = {"chest": (5 * k, 0, 0), "pelvis": (-2 * k, 0, 0)}
+            # Head low and thrust forward, the muzzle level: the neck goes
+            # down and the head comes back up on it.
+            for n in necks:
+                fk[n] = (26 * k / len(necks) - 8 * snap, 0, 0)
+            fk["head"] = (-20 * k - 6 * snap, 0, 0)
+            if "jaw" in bones:
+                fk["jaw"] = (-(12 + 4 * wave(4 * t)) * k - 18 * snap, 0, 0)
+            fk.update(sides((45 * k, 0, 0)))
+            fk.update(tail_wave(tails, t, 2 * k, pitch=tail_pitch - 25 * k))
+            ik = {leg: planted(rest, leg, meta=4 * k if rest[leg]["kind"] == "hind" else -3 * k) for leg in rest}
+            loc = V((0, -height * 0.06 * snap, -height * 0.06 * k))
+            return dict(fk=fk, loc=loc, ik=ik)
+        clip.run("snarl", 75, snarl)
+
+    if "rear" in names:
+        tall = g.get("rear_pitch", 68.0)
+
+        def rear(t):
+            k = ease(t / 0.25) * (1 - ease((t - 0.78) / 0.22))
+            roar = ease((t - 0.35) / 0.08) * (1 - ease((t - 0.62) / 0.1))
+            rot = mathutils.Quaternion(V((1, 0, 0)), math.radians(-tall * k))
+            fk = {"spine": (-6 * k, 0, 0), "chest": (-4 * k, 0, 0)}
+            for n in necks:
+                fk[n] = (tall * 0.5 * k / len(necks) + 10 * roar, 0, 0)
+            fk["head"] = (tall * 0.35 * k - 14 * roar, 8 * wave(t, 0.2) * k, 0)
+            if "jaw" in bones:
+                fk["jaw"] = (-30 * roar, 0, 0)
+            fk.update(sides((25 * roar, 0, 0)))
+            for tg in (".L", ".R"):
+                if "scapula" + tg in bones:
+                    fk["scapula" + tg] = (-10 * k, 0, 0)
+                # The forelegs hang in front of the chest, elbows out, paws
+                # dropped: a positive pitch swings a leg back towards the
+                # belly, which with the body upright is down.
+                fk["upperarm" + tg] = (45 * k - 15 * roar, 0, (8 if tg == ".L" else -8) * k)
+                fk["forearm" + tg] = (-55 * k - 20 * roar, 0, 0)
+                fk["wrist" + tg] = (35 * k, 0, 0)
+                fk["ftoe" + tg] = (25 * k, 0, 0)
+            ik = {leg: planted(rest, leg) for leg in rest if leg.startswith("hind")}
+            if k < 0.02:
+                ik = flat()
+            return dict(fk=fk, loc=V((0, 0, 0)), rot=rot, ik=ik)
+        clip.run("rear", 120, rear)
+
+    if "root" in names:
+        down = graze_reach(poser, rest, arm, necks, dict(pitch=5.0, face=70.0, ground=-0.01, most=125.0))
+        report["root"] = down["report"]
+
+        def root(t):
+            shove = max(0.0, wave(2 * t)) ** 2
+            toss = math.exp(-((t - 0.62) * 14) ** 2)
+            fk = {"chest": (1.0 * wave(2 * t), 0, 0)}
+            for n in necks:
+                fk[n] = (down["neck"][n] - 8 * toss * down["share"][n], 7 * wave(t, 0.2) * down["share"][n], 0)
+            fk["head"] = (down["head"] + 6 * shove - 10 * toss, 4 * wave(t, 0.45), 0)
+            if "jaw" in bones:
+                fk["jaw"] = (-3 * shove, 0, 0)
+            fk.update(sides((10 * wave(2 * t, 0.2), 0, 0)))
+            fk.update(tail_wave(tails, t, 18, freq=3, pitch=tail_pitch))
+            loc = V((0, -0.02 * shove * height, down["drop"]))
+            return dict(fk=fk, loc=loc, rot=down["rot"], ik={leg: planted(rest, leg) for leg in rest})
+        clip.run("root", 120, root, step=2)
+
+
+def hold_steps_(t, keys, snap=0.05):
+    """Held levels with quick changes between them, looping (as a head that
+    looks one way, holds, and looks another)."""
+    out = prev = keys[-1][1]
+    for (t0, v) in keys:
+        if t >= t0:
+            out = lerp(prev, v, ease((t - t0) / snap))
+        prev = v if t >= t0 else prev
+    return out
 
 
 def graze_reach(poser, rest, arm, necks, gz):

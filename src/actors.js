@@ -21,6 +21,7 @@ import { createNav } from './nav.js';
 import { createMotion } from './motion.js';
 import { personOf, carryOf, CLIP_FACTS, HIT_FRAME, LOOPS, CLIPS } from './people.js';
 import { dressedGeometry, personMaterial as dressMaterial } from './dress.js';
+import { litBeast } from './beastlight.js';
 
 const SKIN = [0xe8c39e, 0xd9a877, 0xb5834f, 0x8a5a33, 0x6d4526, 0xc9b7a0];
 const CLOTH = [
@@ -1121,6 +1122,14 @@ const BEASTS = [
   { test: /\bbeetles?\b/, asset: 'beast_beetle', scale: 2.2, coat: 0x1d1a19, pale: 0x3a302a, points: 0x0f0d0c, patch: 0x2a2420, cover: 0.2, box: [0.3, 1.1, 'quad', 0x1d1a19] },
   // A bat lives in the air: its idle is a hover and its walk is flight.
   { test: /\bbats?\b/, asset: 'beast_bat', scale: 1.8, coat: 0x4a3b30, pale: 0x7a6452, points: 0x241b16, air: true, box: [0.1, 0.2, 'bird', 0x3a2e27] },
+  // The Mud School's: "the beast" feeds off you through a lamprey's disc of
+  // teeth; the diploma beast, "hideous", is the same thing bigger, warted
+  // and horned (tools/blender/creatures.py).
+  { test: /\bdiploma beast\b/, asset: 'beast_beast', scale: 1.15, coat: 0x6e7a4c, pale: 0x9a9868, points: 0x2e3320, patch: 0x847a50, cover: 0.42, glow: 0xffb020, box: [1.0, 1.8, 'quad', 0x56603e] },
+  { test: /^\s*beast\s+the beast\s*$/, asset: 'beast_beast', scale: 1.0, coat: 0x7a625a, pale: 0xa88a80, points: 0x342622, patch: 0x5a4640, cover: 0.3, glow: 0xff3020, hide: ['horn'], box: [0.9, 1.6, 'quad', 0x7a625a] },
+  // A heap of jelly with a mouth: the school's caged blob, and a small blob of acid.
+  { test: /\bacid\b.*\bblob\b|\bblob\b.*\bacid\b/, asset: 'beast_blob', scale: 0.4, coat: 0x9aa636, pale: 0xd8e070, points: 0x5a6a1c, patch: 0x3a4214, cover: 0.2, box: [0.4, 0.6, 'quad', 0x9aa636] },
+  { test: /^(?!.*\blemure).*\bblobs?\b/, asset: 'beast_blob', scale: 1.0, coat: 0x5e8436, pale: 0x9ec268, points: 0x30441a, patch: 0x2c2a1a, cover: 0.22, box: [1.2, 1.6, 'quad', 0x5e8436] },
   // The mud thing and what else is made of something that is not flesh.
   { test: /\bmud ?monsters?\b/, asset: 'beast_mud', scale: 1.0, coat: 0x5e4a34, pale: 0x6a563e, points: 0x241a12, patch: 0x3a2c1c, cover: 0.45, glow: 0xff7020, box: [1.6, 1.0, 'quad', 0x4a3a28] },
   { test: /\blemures?\b/, asset: 'beast_mud', scale: 0.62, coat: 0x9a7466, pale: 0xb08a7a, points: 0x5a4038, patch: 0x7a5a50, cover: 0.4, glow: 0xffc830, box: [1.0, 0.8, 'quad', 0x9a7466] },
@@ -1176,7 +1185,9 @@ const BEASTS = [
   // metre with its tail.
   { test: /\b(gigantic|giant) rat\b|\brat (gigantic|giant)\b/, asset: 'beast_rodent', scale: 6.0, coat: 0x4a3f35, pale: 0x8a7e70, points: 0x4a3f35, box: [0.5, 0.9, 'quad', 0x4d453c] },
   { test: /\b(great|sewer) rats?\b/, asset: 'beast_rodent', scale: 2.4, coat: 0x4e4238, pale: 0x8a7e6e, points: 0x4e4238, box: [0.25, 0.5, 'quad', 0x4d453c] },
-  { test: /\b(rabbits?|hares?|bunny|bunnies)\b/, asset: 'beast_rodent', scale: 1.5, coat: 0x8a735a, pale: 0xd8ccb8, points: 0x5a4a3a, grow: { ear: 3.2, tail1: 0.2, head: 1.1 }, box: [0.2, 0.4, 'quad', 0x8a735a] },
+  // A rabbit is not a rat with long ears: it has its own body, crouched on
+  // long hind feet, and goes in hops (tools/blender/creatures.py).
+  { test: /\b(rabbits?|hares?|bunny|bunnies)\b/, asset: 'beast_rabbit', scale: 1.1, coat: 0x8a7458, pale: 0xe6ddd0, points: 0x4a3c2e, box: [0.2, 0.4, 'quad', 0x8a735a] },
   { test: /\b(rat|rats|rodent|vermin)\b/, asset: 'beast_rodent', scale: 1.2, coat: 0x5e5043, pale: 0x9e9180, points: 0x5e5043, box: [0.14, 0.26, 'quad', 0x4d453c] },
   // --- horses, and the deer, which is a lighter build of the same frame.
   // Horses vary coat by the mobile, so a stable of four is not one horse.
@@ -1193,8 +1204,10 @@ const BEASTS = [
   { test: /\b(calf|calves)\b/, asset: 'beast_bovine', scale: 0.55, coats: 'cow', hide: ['udder', 'horn'], grow: { head: 1.25, ear: 1.1 }, box: [0.8, 1.2, 'quad', 0x6d5a4a] },
   { test: /\b(cow|cows|cattle|heifer)\b/, asset: 'beast_bovine', scale: 1.0, coats: 'cow', grow: { horn: 0.7 }, box: [1.4, 2.15, 'quad', 0x6d5a4a] },
   // --- pigs.
-  { test: /\b(boar|boars|warthog)\b/, asset: 'beast_pig', scale: 1.0, coat: 0x3a3029, pale: 0x4a3e34, points: 0x1f1a16, grow: { tusk: 1.2 }, box: [0.62, 1.0, 'quad', 0x3a3029] },
-  { test: /\b(pig|pigs|hog|hogs|sow|swine|piglet)\b/, asset: 'beast_pig', scale: 1.0, sleek: true, coat: 0xd6a494, pale: 0xe8c4b6, points: 0xd6a494, hide: ['tusk'], box: [0.62, 1.0, 'quad', 0x9a7a6c] },
+  // A wild boar is grizzled grey-brown, not black, with the bristle crest
+  // standing along its back and tusks out of its jaw; a farm pig has neither.
+  { test: /\b(boar|boars|warthog)\b/, asset: 'beast_pig', scale: 1.0, coat: 0x6e5d4b, pale: 0x8e7e69, points: 0x2a221b, patch: 0x4e4234, cover: 0.45, grow: { tusk: 1.9 }, box: [0.62, 1.0, 'quad', 0x3a3029] },
+  { test: /\b(pig|pigs|hog|hogs|sow|swine|piglet)\b/, asset: 'beast_pig', scale: 1.0, sleek: true, coat: 0xd6a494, pale: 0xe8c4b6, points: 0xd6a494, hide: ['tusk', 'mane1', 'mane2', 'mane3', 'mane4'], box: [0.62, 1.0, 'quad', 0x9a7a6c] },
   // --- bears. The marsh's "huge hairy beast" is twenty feet of green-furred
   // claws, and a bear is the nearest thing the library has to one.
   // Its small kin, which 'cringes in terror': the same green-furred thing
@@ -1213,6 +1226,11 @@ const BEASTS = [
   // idle is `lair`, which also keeps nine metres of it inside the room.
   { test: /\bred dragon\b/, asset: 'beast_dragon', scale: 0.95, coat: 0x7a2616, pale: 0xc08a4a, points: 0x3a100a, patch: 0x5a180e, cover: 0.3, lair: true, box: [1.7, 9, 'quad', 0x7a2616] },
   { test: /\bdragons?\b/, asset: 'beast_dragon', scale: 0.8, coat: 0x3a5a2a, pale: 0xa8a870, points: 0x1e2e16, patch: 0x2a3a1c, cover: 0.3, box: [1.7, 9, 'quad', 0x3a5a2a] },
+  // --- lizards (tools/blender/creatures.py): low, long-tailed, sprawling.
+  // A lizard man is a man (people.js); a fire lizard is red.
+  { test: /\bfire lizards?\b/, asset: 'beast_lizard', scale: 0.6, coat: 0x9a3418, pale: 0xe09a3a, points: 0x3a120a, patch: 0xd8661c, cover: 0.3, box: [0.12, 0.9, 'quad', 0x9a3418] },
+  { test: /\b(giant|huge) lizards?\b/, asset: 'beast_lizard', scale: 1.6, coat: 0x55553a, pale: 0xaaa480, points: 0x2a2a1c, patch: 0xbcb27a, cover: 0.25, box: [0.3, 2.3, 'quad', 0x55553a] },
+  { test: /\blizards?\b(?!\s*(m[ae]n|folk))/, asset: 'beast_lizard', scale: 0.9, coat: 0x5c5836, pale: 0xb4ac84, points: 0x2c2a1c, patch: 0xc4bb84, cover: 0.25, box: [0.18, 1.3, 'quad', 0x5c5836] },
   // --- serpents. A python is three metres; the marsh's anaconda is ten in the
   // mud's own words, and gets six, which is still the largest thing in it.
   { test: /\banaconda\b/, asset: 'beast_snake', scale: 2.0, coat: 0x4a5230, pale: 0x9a9468, points: 0x4a5230, patch: 0x1a1c12, cover: 0.4, box: [0.3, 6, 'quad', 0x4a5230] },
@@ -1220,6 +1238,9 @@ const BEASTS = [
   // Red, yellow and black in rings: laid on in bands along the body rather
   // than through the patch noise every other snake is mottled with.
   { test: /\bcoral snake\b|\bsnake coral\b/, asset: 'beast_snake', scale: 0.4, coat: 0xb02a18, pale: 0xb02a18, points: 0xb02a18, bands: [0xb02a18, 0xe0b830, 0x141212, 0xe0b830], band: 0.07, box: [0.08, 1, 'quad', 0xb02a18] },
+  // A snail big enough to be in the way: grey foot (coat), the shell its
+  // pale channel in tan, banded in the points' brown.
+  { test: /\bsnails?\b/, asset: 'beast_snail', scale: 1.0, coat: 0x7c7266, pale: 0xa88458, points: 0x4a3020, patch: 0x5e554a, cover: 0.3, box: [0.12, 0.5, 'quad', 0x8a7a66] },
   { test: /\bmaggots?\b/, asset: 'beast_worm', scale: 0.8, coat: 0xd8ccae, pale: 0xe6ddc6, points: 0xb8aa8a, patch: 0xc8b898, cover: 0.2, box: [0.14, 1.0, 'quad', 0xd8ccae] },
   { test: /\b(snake|snakes|serpent|viper|cobra|adder|asp)\b/, asset: 'beast_snake', scale: 0.55, coat: 0x5a5a3a, pale: 0xb8b490, points: 0x5a5a3a, patch: 0x26261a, cover: 0.35, box: [0.12, 1.5, 'quad', 0x5a5a3a] },
   { test: /\b(worm|worms|iceworm|slug)\b/, asset: 'beast_worm', scale: 1.0, coat: 0x8a6a62, pale: 0xb08a80, points: 0x8a6a62, patch: 0x6a4c46, cover: 0.3, box: [0.14, 1.3, 'quad', 0x8a6a62] },
@@ -1457,6 +1478,9 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const look = beastLook(spec, proto, options.seed || 0);
   const group = new THREE.Group();
   const body = cloneSkinned(asset.scene);
+  // How far indoors it stands, eased by easeIndoor like a person's: the
+  // figure fill of beastlight.js.
+  const indoor = { value: 0 };
   body.traverse((node) => {
     if (!node.isMesh) return;
     // Out of the shadow map like the people, for the same reason: a skinned
@@ -1471,6 +1495,7 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     // against a tunnel wall lit at luma 14. Sunless, because a skinned body
     // takes no shadow and the noon sun reached it through the rock.
     if (options.buried) node.material = buriedTwin(node.material, { sunless: true });
+    node.material = litBeast(node.material, indoor);
     node.geometry = paintedGeometry(asset, node, tag, look);
   });
   const scale = (spec.scale || 1) * (0.94 + strHash(proto.short, 3) * 0.12);
@@ -1561,7 +1586,7 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const record = {
     group, headGroup: null, height, scale, mixer, actions, clips, stride,
     hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
-    afloat,
+    afloat, indoor,
   };
   // A bat under a roof hangs from it while it is idle: its `roost` clip,
   // moved up from the height it was authored at (`info.roost`, in the

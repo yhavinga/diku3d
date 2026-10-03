@@ -12,3 +12,4 @@ tools/judge/round-*/
 
 # The game server's player files and logs (server/): passwords live here, hashed.
 server/data/
+tools/audio/raw/

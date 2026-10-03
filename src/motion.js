@@ -58,7 +58,43 @@ const YOU = 0.9;
 /** How close an opponent closes for melee, centre to centre. */
 export const CLOSE = 1.55;
 
-const LOOP = ['idle', 'idle2', 'walk', 'run', 'fight', 'talk', 'graze'];
+const LOOP = ['idle', 'idle2', 'walk', 'run', 'fight', 'talk'];
+/**
+ * What an animal does with itself standing about, when its rig carries a
+ * clip for it (tools/blender/beasts.py and creatures.py): the deer grazes,
+ * the lizard basks and does its push-ups, the rabbit nibbles, washes and sits
+ * up to look round, the fox sits on its haunches and stares, the bear rears.
+ * `odds` weighs the choice between a rig's pastimes; `hold` and `gap` are
+ * seconds of doing it and of standing between; `rate` is how fast it comes
+ * in and goes out, per second -- a head down to the grass over a second or
+ * so, a push-up at once. A `once` pastime is a display with a start and an
+ * end: it plays from its first frame, for exactly its own length.
+ */
+const PASTIMES = {
+  graze: { odds: 3, hold: [5, 15], gap: [2.5, 6.5], rate: 1.6 },
+  bask: { odds: 3, hold: [12, 30], gap: [2, 6], rate: 0.9 },
+  display: { odds: 1, once: true, gap: [2, 6], rate: 6 },
+  nibble: { odds: 3, hold: [4, 10], gap: [1.5, 4], rate: 3 },
+  groom: { odds: 1, once: true, gap: [2, 6], rate: 5 },
+  situp: { odds: 1, once: true, gap: [2, 6], rate: 5 },
+  sniff: { odds: 2, hold: [2, 5], gap: [2, 6], rate: 2.5 },
+  haunch: { odds: 2, hold: [8, 20], gap: [3, 8], rate: 1.8 },
+  howl: { odds: 0.4, once: true, gap: [4, 10], rate: 4 },
+  snarl: { odds: 1, once: true, gap: [2, 6], rate: 5 },
+  rear: { odds: 1, once: true, gap: [4, 10], rate: 4 },
+  root: { odds: 3, hold: [5, 14], gap: [2, 5], rate: 1.8 },
+  feel: { odds: 3, hold: [4, 10], gap: [1, 4], rate: 2 },
+  withdraw: { odds: 1, once: true, gap: [3, 9], rate: 4 },
+  quiver: { odds: 2, once: true, gap: [2, 6], rate: 4 },
+};
+const PASTIME_NAMES = Object.keys(PASTIMES);
+/**
+ * What a rig does when you walk up to it, by archetype: [pastime, metres at
+ * scale 1]. The snail "trying to get out of your way" draws itself in; the
+ * rabbit sits up to see what you are; the lizard answers you with push-ups,
+ * which is what a lizard does at anything that comes onto its ground.
+ */
+const ALARM = { snail: ['withdraw', 2.2], lagomorph: ['situp', 4.5], lizard: ['display', 3.2] };
 /**
  * people.py's sit, in seconds: the first REST_LOOP of it is at rest and
  * breathing and comes back to its first frame, and SIP is the stretch where
@@ -537,6 +573,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
 
   for (const fig of figures) {
     prepareRig(fig);
+    fig.pastimes = fig.actions ? PASTIME_NAMES.filter((n) => fig.actions[n]) : [];
     fig.body = bodyOf(fig);
     fig.bones = fig.mixer && !fig.legs ? findBones(fig) : null;
     const seed = fig.seed || 1;
@@ -1854,16 +1891,21 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     // eased, and a walk faded in behind it is a planted foot sliding by the
     // part of the speed it does not carry. What the body does standing
     // (idle, idle2, guard, talk) crossfades as shares of the rest.
-    const want = { idle: 0, idle2: 0, fight: 0, talk: 0, graze: 0 };
+    const want = { idle: 0, idle2: 0, fight: 0, talk: 0 };
+    const pastimes = fig.pastimes || [];
+    for (const name of pastimes) want[name] = 0;
+    const doing = m.graze && m.graze.name;
     if (wFight > 0) want.fight = 1; else if (wTalk > 0) want.talk = 1;
-    else if (a.graze && m.graze && m.graze.want) want.graze = 1;
+    else if (doing && m.graze.want) want[doing] = 1;
     else want[m.idle === 'idle2' && a.idle2 ? 'idle2' : 'idle'] = 1;
     const base = m.base || (m.base = { idle: 1 });
     // A head goes down to the grass and comes up again over a second or so,
-    // not in the snap that suits a change of stance.
-    const rate = Math.min(1, dt * (a.graze && (want.graze || base.graze > 0.01) ? 1.6 : 7));
+    // not in the snap that suits a change of stance: each pastime eases in
+    // and out at its own rate.
+    const easing = doing && (want[doing] || base[doing] > 0.01) ? PASTIMES[doing].rate : 7;
+    const rate = Math.min(1, dt * easing);
     let shares = 0;
-    for (const name of ['idle', 'idle2', 'fight', 'talk', 'graze']) {
+    for (const name of ['idle', 'idle2', 'fight', 'talk', ...pastimes]) {
       if (!a[name]) { base[name] = 0; continue; }
       const w = base[name] || 0;
       base[name] = w + (want[name] - w) * rate;
@@ -1875,9 +1917,9 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     // Seated or against a wall on the rig's own clip: that clip, at exactly
     // the weight the settling says, and the standing loops under the rest.
     const held = settle ? (settle.clip === 'sit' ? m.sitW : m.leanW) : 0;
-    for (const name of LOOP) {
+    for (const name of [...LOOP, ...pastimes]) {
       if (!a[name]) continue;
-      const w = name === 'walk' ? wWalk : name === 'run' ? wRun : (base[name] / total) * still;
+      const w = name === 'walk' ? wWalk : name === 'run' ? wRun : ((base[name] || 0) / total) * still;
       a[name].setEffectiveWeight(w * (1 - over) * (1 - held));
     }
     for (const name of ['sit', 'lean']) {
@@ -2456,7 +2498,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       else animate(fig, dt);
       if (!fig.bones && fig.mixer) animalLife(fig, dt);
       if (fig.mixer) fig.mixer.update(dt);
-      if (!fig.bones && m.graze) lowerHead(fig);
+      if (!fig.bones && m.graze && !(fig.pastimes && fig.pastimes.length)) lowerHead(fig);
       const clipped = m.settle && m.settle.clip;
       if (!clipped) {
         if (fig.bones && (m.sitW > 0.001 || m.leanW > 0.001)) posture(fig); else m.drop = 0;
@@ -2469,6 +2511,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
         if (g !== null) { fig.at.y = g; m.onMound = true; } else if (m.onMound) { fig.at.y = fig.level * nav.LEVEL_H; m.onMound = false; }
       }
       placeObject(fig);
+      if (!fig.bones && fig.mixer) gaze(fig, dt, player);
       if (fig.bones) finishPose(fig, dt, dx * dx + dz * dz < 36 * 36);
     }
   }
@@ -2657,19 +2700,12 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       }
       return;
     }
-    const clip = fig.actions && fig.actions.graze;
-    const grazer = !!clip || GRAZERS.test(kind); const sniffer = !clip && SNIFFERS.test(kind);
+    const own = fig.pastimes && fig.pastimes.length ? fig.pastimes : null;
+    if (own) return pastimeLife(fig, dt, still, own);
+    const grazer = GRAZERS.test(kind); const sniffer = SNIFFERS.test(kind);
     if (!grazer && !sniffer) return;
-    if (clip && !clip.isRunning()) {
-      // Loaded as a one-shot like any clip the viewer does not know; it is a
-      // loop, weighted in by animate() as a share of standing still.
-      clip.setLoop(THREE.LoopRepeat, Infinity);
-      clip.setEffectiveWeight(0);
-      clip.time = fig.rand() * clip.getClip().duration;
-      clip.play();
-    }
-    if (fig.graze === undefined) fig.graze = clip ? null : measureGraze(fig, grazer);
-    if (!fig.graze && !clip) return;
+    if (fig.graze === undefined) fig.graze = measureGraze(fig, grazer);
+    if (!fig.graze) return;
     const g = m.graze || (m.graze = { w: 0, want: 0, next: fig.rand() * 3 });
     g.next -= dt;
     if (!still) g.want = 0;
@@ -2678,6 +2714,102 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       g.next = g.want ? (grazer ? 5 + fig.rand() * 10 : 1.5 + fig.rand() * 2.5) : (grazer ? 2.5 + fig.rand() * 4 : 3 + fig.rand() * 6);
     }
     g.w += clamp(g.want - g.w, -dt * 1.1, dt * 1.1);
+  }
+
+  /**
+   * A rig with pastimes of its own: stand a while, take one up -- chosen by
+   * its odds, never the same display twice running -- keep at it, stop. Its
+   * clip is weighted in by animate() as a share of standing still; moving
+   * off or a fight puts it down at once.
+   */
+  function pastimeLife(fig, dt, still, own) {
+    const m = fig.m;
+    const g = m.graze || (m.graze = { w: 0, want: 0, next: 0.5 + fig.rand() * 3, name: null });
+    g.next -= dt;
+    // Startled: someone coming close sets it off at once -- see ALARM.
+    const alarm = ALARM[fig.archetype];
+    if (alarm && fig.actions[alarm[0]]) {
+      const near = Math.hypot(_player.x - fig.at.x, _player.z - fig.at.z) < alarm[1] * (fig.scale || 1);
+      m.alarmed = Math.max(0, (m.alarmed || 0) - dt);
+      if (near && !m.wasNear && still && m.alarmed <= 0 && g.name !== alarm[0]) {
+        const action = fig.actions[alarm[0]];
+        action.time = 0;
+        g.name = alarm[0];
+        g.want = 1;
+        g.next = action.getClip().duration;
+        m.alarmed = 8;
+      }
+      m.wasNear = near;
+    }
+    if (!still) { if (g.want) g.next = Math.max(g.next, 0.6 + fig.rand()); g.want = 0; }
+    else if (g.next <= 0) {
+      if (g.want) {
+        g.want = 0;
+        const p = PASTIMES[g.name];
+        g.next = p.gap[0] + fig.rand() * (p.gap[1] - p.gap[0]);
+      } else {
+        let total = 0;
+        const odds = own.map((n) => {
+          const o = PASTIMES[n].odds * (PASTIMES[n].once && n === g.name ? 0.25 : 1);
+          total += o;
+          return o;
+        });
+        let r = fig.rand() * total;
+        let pick = own[own.length - 1];
+        for (let i = 0; i < own.length; i++) { r -= odds[i]; if (r <= 0) { pick = own[i]; break; } }
+        const p = PASTIMES[pick];
+        const action = fig.actions[pick];
+        // A loop picks up wherever it is; a display starts at its beginning
+        // and lasts exactly as long as it does.
+        if (p.once) action.time = 0;
+        else if (g.name !== pick) action.time = fig.rand() * action.getClip().duration;
+        g.name = pick;
+        g.want = 1;
+        g.next = p.once ? action.getClip().duration : p.hold[0] + fig.rand() * (p.hold[1] - p.hold[0]);
+      }
+    }
+    const rate = g.name ? PASTIMES[g.name].rate : 1.1;
+    g.w += clamp(g.want - g.w, -dt * rate, dt * rate);
+  }
+
+  /**
+   * An animal that has seen you keeps an eye on you: within a few metres and
+   * not behind it, the head comes round towards you -- most of the turn in
+   * the neck, the rest in the head -- and goes back when you leave. The fox
+   * "is here staring at you", the wolf snarling at you and the bear growling
+   * at you; so do the deer. Laid on after the mixer, about world up, so it
+   * holds through whatever the clip is doing with the head.
+   */
+  const GAZE_RANGE = 7;
+  const GAZE_MOST = 1.05;
+  function gaze(fig, dt, player) {
+    const m = fig.m;
+    if (fig.gazeBones === undefined) {
+      const necks = []; let head = null;
+      fig.object.traverse((n) => {
+        if (!n.isBone) return;
+        if (/^neck\d*$/.test(n.name)) necks.push(n);
+        else if (n.name === 'head') head = n;
+      });
+      fig.gazeBones = head ? { head, neck: necks[0] || null } : null;
+    }
+    if (!fig.gazeBones) return;
+    const dx = player.x - fig.at.x; const dz = player.z - fig.at.z;
+    const d = Math.hypot(dx, dz);
+    const busy = m.dead || m.fighting || m.speed > 0.6 || (m.graze && m.graze.w > 0.3) || m.overlay;
+    let want = 0;
+    if (!busy && d < GAZE_RANGE && d > 0.4) {
+      const off = wrap(Math.atan2(dx, dz) - fig.object.rotation.y);
+      // Behind it, it has not seen you.
+      if (Math.abs(off) < 2.0) want = clamp(off, -GAZE_MOST, GAZE_MOST);
+    }
+    const now = m.gaze || 0;
+    m.gaze = now + clamp(want - now, -dt * 2.4, dt * 2.4);
+    if (Math.abs(m.gaze) < 1e-3) return;
+    const { head, neck } = fig.gazeBones;
+    fig.object.updateMatrixWorld(true);
+    if (neck) turnWorld(neck, _qa.setFromAxisAngle(_yAxis, m.gaze * 0.6));
+    turnWorld(head, _qa.setFromAxisAngle(_yAxis, m.gaze * (neck ? 0.4 : 1)));
   }
 
   /** The bend `animalLife` asked for, on the neck the mixer has just posed. */
