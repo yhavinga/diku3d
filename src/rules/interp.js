@@ -59,7 +59,10 @@ export function act(format, ch, victim = null, extra = {}) {
 }
 
 export function installInterp(k) {
-  const { world, state, ground, mobs, emit, game } = k;
+  const { world, ground, mobs, emit, game } = k;
+  // Whoever's turn it is (game.js `bind`): Merc's `ch`.
+  let state = k.state;
+  k.onBind((ch) => { state = ch; });
   const { MERC } = game;
   const { POS } = MERC;
 
