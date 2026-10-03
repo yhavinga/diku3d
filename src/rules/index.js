@@ -10,6 +10,8 @@ import { installMove } from './actmove.js';
 import { installSkills } from './skills.js';
 import { installSpecials } from './specials.js';
 import { installInterp } from './interp.js';
+import { installComm } from './actcomm.js';
+import { installWiz } from './actwiz.js';
 
 export function installRules(k) {
   // The zone's bodies, whichever zone is drawn when it is called.
@@ -20,4 +22,7 @@ export function installRules(k) {
   installSkills(k);
   installSpecials(k);
   installInterp(k);
+  // A second player's half of the mud, on a server only (k.multi).
+  installComm(k);
+  installWiz(k);
 }

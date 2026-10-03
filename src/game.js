@@ -682,12 +682,27 @@ const heard = (ch, victim, m) => (!isNpc(ch) ? m.toChar : (!isNpc(victim) ? m.to
  * whether the blow lands on worn armour (a spark and a clank) or on cloth and
  * skin (a thud); `attack` is attack_table's word for the weapon.
  */
-function blow(ch, victim) {
+function blow(ch, victim, ctx = null) {
   const wield = ch.equipment[WEAR.WIELD];
   const attack = wield && wield.itemType === ITEM.WEAPON ? (ATTACK_TABLE[wield.values[3]] || 'hit') : 'hit';
   const metal = victim.equipment.some((obj) => obj && obj.itemType === ITEM.ARMOR
     && [WEAR.BODY, WEAR.HEAD, WEAR.SHIELD, WEAR.ARMS, WEAR.LEGS].includes(obj.wearLoc));
-  return { from: ch.slot || null, to: victim.slot || null, attack, armed: !!wield, metal };
+  const out = { from: ch.slot || null, to: victim.slot || null, attack, armed: !!wield, metal };
+  // On a server `from`/`to` null no longer means "you": name both sides.
+  if (ctx && ctx.multi) { out.fromCh = ch; out.toCh = victim; }
+  return out;
+}
+
+/**
+ * act()'s three audiences on a server (createGame's ctx.multi): `toChar` for
+ * a player who struck, `toVict` for a player struck, `toRoom` for everyone
+ * else in the room. In the page there is one reader and `heard` picks for it.
+ */
+function told(ctx, ch, victim, event, m) {
+  const reader = !isNpc(ch) ? ch : (!isNpc(victim) ? victim : null);
+  ctx.emit({ ...event, text: heard(ch, victim, m), pc: ctx.pcId(reader) });
+  if (!isNpc(ch) && !isNpc(victim) && ch !== victim) ctx.emit({ ...event, text: m.toVict, byPlayer: false, defended: undefined, pc: ctx.pcId(victim) });
+  if (reader) ctx.roomcast(victim, { kind: 'room', text: m.toRoom, combat: event.kind, ...blow(ch, victim, ctx) }, [ch, victim]);
 }
 
 /**
@@ -769,6 +784,13 @@ function checkParry(ch, victim, ctx) {
     chance = idiv(victim.learned.parry, 2);
   }
   if (ctx.rng.percent() >= chance + victim.level - ch.level) return false;
+  if (ctx.multi) {
+    told(ctx, ch, victim, { kind: 'parry', defended: !isNpc(victim) || undefined, ...blow(ch, victim, ctx) }, {
+      toChar: `${capitalise(victim.name)} parries your attack.`, toVict: `You parry ${ch.name}'s attack.`,
+      toRoom: `${capitalise(victim.name)} parries ${ch.name}'s attack.`,
+    });
+    return true;
+  }
   ctx.emit(isNpc(victim)
     ? { kind: 'parry', text: isNpc(ch) ? `${capitalise(victim.name)} parries ${ch.name}'s attack.` : `${capitalise(victim.name)} parries your attack.`, ...blow(ch, victim) }
     : { kind: 'parry', text: `You parry ${ch.name}'s attack.`, defended: true, ...blow(ch, victim) });
@@ -782,6 +804,13 @@ function checkDodge(ch, victim, ctx) {
     ? Math.min(60, 2 * victim.level)
     : idiv(victim.learned.dodge, 2);
   if (ctx.rng.percent() >= chance + victim.level - ch.level) return false;
+  if (ctx.multi) {
+    told(ctx, ch, victim, { kind: 'dodge', defended: !isNpc(victim) || undefined, ...blow(ch, victim, ctx) }, {
+      toChar: `${capitalise(victim.name)} dodges your attack.`, toVict: `You dodge ${ch.name}'s attack.`,
+      toRoom: `${capitalise(victim.name)} dodges ${ch.name}'s attack.`,
+    });
+    return true;
+  }
   ctx.emit(isNpc(victim)
     ? { kind: 'dodge', text: isNpc(ch) ? `${capitalise(victim.name)} dodges ${ch.name}'s attack.` : `${capitalise(victim.name)} dodges your attack.`, ...blow(ch, victim) }
     : { kind: 'dodge', text: `You dodge ${ch.name}'s attack.`, defended: true, ...blow(ch, victim) });
@@ -800,6 +829,12 @@ function damage(ch, victim, dam, dt, ctx) {
   if (dam > 1000) dam = 1000;
 
   if (victim !== ch) {
+    // fight.c: "Certain attacks are forbidden" -- is_safe and check_killer,
+    // which only ever have anything to say when both sides are players.
+    if (ctx.multi && !isNpc(ch) && !isNpc(victim)) {
+      if (ctx.isSafe(ch, victim)) return;
+      ctx.checkKiller(ch, victim);
+    }
     if (victim.position > POS.STUNNED) {
       if (!victim.fighting) ctx.setFighting(victim, ch);
       victim.position = POS.FIGHTING;
@@ -816,46 +851,54 @@ function damage(ch, victim, dam, dt, ctx) {
     }
 
     const message = damMessage(ch, victim, dam, dt);
-    ctx.emit({
+    const event = {
       kind: dam === 0 ? 'miss' : 'hit',
       text: heard(ch, victim, message),
       skill: typeof dt === 'string' ? dt : undefined,
       dam,
       byPlayer: !isNpc(ch),
       target: victim.name,
-      ...blow(ch, victim),
+      ...blow(ch, victim, ctx),
       hp: Math.max(0, victim.hit - dam),
       maxHp: victim.maxHit,
       // A spell's blow: spellfx.js draws it, and fx.js leaves the swing out.
       ...(typeof dt === 'string' ? { spell: dt } : null),
-    });
+    };
+    if (ctx.multi) told(ctx, ch, victim, event, message);
+    else ctx.emit(event);
   }
 
   victim.hit -= dam;
+  // An immortal is never brought below one hitpoint (fight.c).
+  if (!isNpc(victim) && victim.level >= LEVEL_IMMORTAL && victim.hit < 1) victim.hit = 1;
   updatePos(victim);
 
+  // The victim's own lines go to the victim; the room hears $n's (fight.c).
+  const said = (text, roomText) => {
+    if (!ctx.multi) { ctx.emit({ kind: 'state', text }); return; }
+    if (!isNpc(victim)) ctx.emit({ kind: 'state', text, pc: ctx.pcId(victim) });
+    if (roomText) ctx.roomcast(victim, { kind: 'room', text: roomText }, isNpc(victim) ? [] : [victim]);
+  };
+  const Victim = capitalise(victim.name);
   switch (victim.position) {
     case POS.MORTAL:
-      ctx.emit({ kind: 'state', text: isNpc(victim)
-        ? `${capitalise(victim.name)} is mortally wounded, and will die soon, if not aided.`
-        : 'You are mortally wounded, and will die soon, if not aided.' });
+      said(isNpc(victim) ? `${Victim} is mortally wounded, and will die soon, if not aided.`
+        : 'You are mortally wounded, and will die soon, if not aided.', `${Victim} is mortally wounded, and will die soon, if not aided.`);
       break;
     case POS.INCAP:
-      ctx.emit({ kind: 'state', text: isNpc(victim)
-        ? `${capitalise(victim.name)} is incapacitated and will slowly die, if not aided.`
-        : 'You are incapacitated and will slowly die, if not aided.' });
+      said(isNpc(victim) ? `${Victim} is incapacitated and will slowly die, if not aided.`
+        : 'You are incapacitated and will slowly die, if not aided.', `${Victim} is incapacitated and will slowly die, if not aided.`);
       break;
     case POS.STUNNED:
-      ctx.emit({ kind: 'state', text: isNpc(victim)
-        ? `${capitalise(victim.name)} is stunned, but will probably recover.`
-        : 'You are stunned, but will probably recover.' });
+      said(isNpc(victim) ? `${Victim} is stunned, but will probably recover.`
+        : 'You are stunned, but will probably recover.', `${Victim} is stunned, but will probably recover.`);
       break;
     case POS.DEAD:
       break;
     default:
       if (!isNpc(victim)) {
-        if (dam > idiv(victim.maxHit, 4)) ctx.emit({ kind: 'state', text: 'That really did HURT!' });
-        if (victim.hit < idiv(victim.maxHit, 4)) ctx.emit({ kind: 'state', text: 'You sure are BLEEDING!' });
+        if (dam > idiv(victim.maxHit, 4)) said('That really did HURT!');
+        if (victim.hit < idiv(victim.maxHit, 4)) said('You sure are BLEEDING!');
       }
       break;
   }
@@ -1029,14 +1072,30 @@ export const FAR = 1e7;
  *   wander and run their spec_funs, but have no body and no position until a
  *   zone holding their room is entered (`game.enterZone`).
  */
-export function createGame({ world, layout, built, actors = null, seed, classIndex = 3, nav = null, zoneOf = null } = {}) {
+export function createGame({
+  world, layout, built, actors = null, seed, classIndex = 3, nav = null, zoneOf = null,
+  server = null, puppet: startAsPuppet = false,
+} = {}) {
+  let puppet = startAsPuppet;
   const rng = new Rng(seed);
   const events = [];
   const listeners = [];
+  /**
+   * `server`: this game is the mud's, with char_list's players in it (see
+   * server/). Every path that only a second player can reach is gated on it,
+   * so the game in the page runs exactly the code it always ran. `puppet`:
+   * the page's copy of a game the server runs -- bodies, no rules (update).
+   */
+  const multi = !!server;
+  // char_list's players, and the one whose turn it is (Merc's `ch`): see bind.
+  const players = [];
+  let current = null;
   const emit = (event) => {
     // Stamped with the beat of the blow being resolved, if one is.
     if (event.delay === undefined && ctx.now !== undefined) event.delay = ctx.now;
     if (ctx.round && event.beat === undefined) event.beat = ctx.beat || 0;
+    // Whose screen it is for: send_to_char's `ch` is whoever's turn it is.
+    if (multi && event.pc === undefined && event.room === undefined && current) event.pc = current.id;
     events.push(event);
     if (events.length > 400) events.shift();
     for (const fn of listeners) fn(event);
@@ -1221,27 +1280,83 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     return mob;
   }
 
-  // -- the player -----------------------------------------------------------
-  const state = createCharacter(classIndex, { rng });
-  state.name = 'you';
-  const position = { x: 0, y: 0, z: 0 };
-  const facing = { x: 0, y: 0, z: -1 };
-  // `position` is your eye, 1.72 m up; a mobile's is its feet. Reach is
-  // measured feet to feet, as between two mobiles. Eye to feet, MELEE's 3.2 m
-  // was 2.7 m on the ground -- and the kick, which measures on the ground,
-  // still reached: from 2.7 to 3.2 m a fight was on, nobody swung, a sentinel
-  // never closed in, and the only thing that happened was the kick.
+  // -- the players ----------------------------------------------------------
+  /**
+   * comm.c's char_list, for its player half: each one a character and where
+   * its body is. `position` is the eye, 1.72 m up; a mobile's is its feet.
+   * Reach is measured feet to feet, as between two mobiles. Eye to feet,
+   * MELEE's 3.2 m was 2.7 m on the ground -- and the kick, which measures on
+   * the ground, still reached: from 2.7 to 3.2 m a fight was on, nobody
+   * swung, a sentinel never closed in, and the only thing that happened was
+   * the kick.
+   *
+   * Merc passes `ch` to every function; this port was written for one player
+   * and reads `state`, `position` and `facing` instead. Those are now whoever
+   * is bound (`bind`): in the page that is always the one player, so nothing
+   * changes there; on the server each player's turn binds it first.
+   */
+  const pcOfCh = new Map();
+  const pcOf = (ch) => (ch && !isNpc(ch) ? pcOfCh.get(ch) || null : null);
+  let nextPc = 1;
+  function makePc(ch, id = nextPc++) {
+    const pc = {
+      id, ch,
+      position: { x: 0, y: 0, z: 0 }, facing: { x: 0, y: 0, z: -1 }, feet: { x: 0, y: 0, z: 0 },
+      invulnerable: 0, restAt: null, focusSlot: null,
+    };
+    Object.defineProperty(ch, 'expToLevel', { get: () => expToLevel(ch), enumerable: true, configurable: true });
+    Object.defineProperty(ch, 'ac', { get: () => getAc(ch), enumerable: true, configurable: true });
+    // The mud calls these hit/max_hit and so does everything above; these are the
+    // names the rest of the world expects to read them under.
+    Object.defineProperty(ch, 'hp', { get: () => ch.hit, set: (v) => { ch.hit = v; }, configurable: true });
+    Object.defineProperty(ch, 'maxHp', { get: () => ch.maxHit, configurable: true });
+    Object.defineProperty(ch, 'carryWeight', { get: () => carriedWeight(ch), enumerable: true, configurable: true });
+    Object.defineProperty(ch, 'carryMax', { get: () => canCarryW(ch), enumerable: true, configurable: true });
+    pcOfCh.set(ch, pc);
+    return pc;
+  }
+  /** A player's feet, from its eye. */
+  const pcFeet = (pc) => { pc.feet.x = pc.position.x; pc.feet.y = pc.position.y - 1.72; pc.feet.z = pc.position.z; return pc.feet; };
+  /** Where anyone stands: a mobile's feet, a player's feet. */
+  const feetOf = (ch) => (isNpc(ch) ? ch.slot.pos : (pcOf(ch) ? pcFeet(pcOf(ch)) : null));
+
+  const pc0 = makePc(createCharacter(classIndex, { rng }), 0);
+  pc0.ch.name = 'you';
+  players.push(pc0);
+  let state = pc0.ch;
+  let position = pc0.position;
+  let facing = pc0.facing;
+  // Rules modules keep `state` in a closure; they register here to follow it.
+  const rebinders = [];
+  current = pc0;
+  /** Make `pc` the one whose turn it is: Merc's `ch` (null: nobody's). */
+  function bind(pc) {
+    if (pc === current) return;
+    current = pc;
+    state = pc ? pc.ch : null;
+    position = pc ? pc.position : null;
+    facing = pc ? pc.facing : null;
+    for (const fn of rebinders) fn(state, pc);
+  }
+  /** Run fn as `pc`'s turn. In the page there is only ever the one. */
+  function withPlayer(pc, fn) {
+    if (!multi || pc === current) return fn();
+    const prev = current;
+    bind(pc);
+    try { return fn(); } finally { bind(prev); }
+  }
+  /** send_to_char for a player who need not be the one whose turn it is. */
+  function tell(ch, event) {
+    const pc = pcOf(ch);
+    if (pc) emit({ ...event, pc: pc.id });
+  }
+  /** act(TO_ROOM): everyone awake in `vnum` but `except` (characters). */
+  function roomcast(vnum, event, except = []) {
+    if (!multi) return;
+    emit({ ...event, room: vnum, except: except.map((ch) => pcOf(ch)?.id).filter((id) => id !== undefined) });
+  }
   const feetAt = { x: 0, y: 0, z: 0 };
   const feet = () => { feetAt.x = position.x; feetAt.y = position.y - 1.72; feetAt.z = position.z; return feetAt; };
-
-  Object.defineProperty(state, 'expToLevel', { get: () => expToLevel(state), enumerable: true });
-  Object.defineProperty(state, 'ac', { get: () => getAc(state), enumerable: true });
-  // The mud calls these hit/max_hit and so does everything above; these are the
-  // names the rest of the world expects to read them under.
-  Object.defineProperty(state, 'hp', { get: () => state.hit, set: (v) => { state.hit = v; } });
-  Object.defineProperty(state, 'maxHp', { get: () => state.maxHit });
-  Object.defineProperty(state, 'carryWeight', { get: () => carriedWeight(state), enumerable: true });
-  Object.defineProperty(state, 'carryMax', { get: () => canCarryW(state), enumerable: true });
 
   // -- ground ---------------------------------------------------------------
   /**
@@ -1278,9 +1393,11 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   function dropSpot(from = position, ahead = facing) {
     dropCount += 1;
     const side = ((dropCount % 5) - 2) * 0.28;
+    // A player's position is the eye; anything else handed in is a floor.
+    const eye = from === position || players.some((pc) => pc.position === from);
     return {
       x: from.x + ahead.x * 0.9 - ahead.z * side,
-      y: (from === position ? position.y - 1.72 : from.y),
+      y: (eye ? from.y - 1.72 : from.y),
       z: from.z + ahead.z * 0.9 + ahead.x * side,
     };
   }
@@ -1351,6 +1468,10 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   const ctx = {
     rng,
     emit,
+    // On a server, who an act() line is for (see `told` and `blow`).
+    multi,
+    pcId: (ch) => (ch && !isNpc(ch) && pcOf(ch) ? pcOf(ch).id : null),
+    roomcast: (ch, event, except) => roomcast(isNpc(ch) ? ch.slot.roomVnum : ch.roomVnum, event, except),
     /** Seconds of game time, for spacing blows on screen (oneHit). */
     clock: 0,
     setFighting(ch, victim) {
@@ -1376,9 +1497,19 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (!ch.equipment[WEAR.WIELD] && rng.bits(1) === 0) return;
       unequipChar(victim, obj);
       if (isNpc(victim)) victim.inventory.push(obj);
-      else objToRoom(obj, state.roomVnum, dropSpot());
+      else {
+        const vpc = pcOf(victim);
+        objToRoom(obj, victim.roomVnum, dropSpot(vpc.position, vpc.facing));
+      }
       const text = !isNpc(victim) ? `${capitalise(ch.name)} disarms you!`
         : (!isNpc(ch) ? `You disarm ${victim.name}!` : `${capitalise(ch.name)} disarms ${victim.name}!`);
+      if (multi && !isNpc(victim)) {
+        // The one disarmed hears it; a player who did it hears their own line.
+        tell(victim, { kind: 'disarm', text, item: obj.name, ...blow(ch, victim) });
+        if (!isNpc(ch)) tell(ch, { kind: 'disarm', text: `You disarm ${victim.name}!`, item: obj.name });
+        roomcast(victim.roomVnum, { kind: 'room', text: `${capitalise(ch.name)} disarms ${victim.name}!` }, [ch, victim]);
+        return;
+      }
       emit({ kind: 'disarm', text, item: obj.name, ...blow(ch, victim) });
     },
     /**
@@ -1403,16 +1534,20 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
           return;
         }
       } else {
-        breakOff(true);
+        withPlayer(pcOf(ch), () => breakOff(true));
       }
     },
     kill(ch, victim) { deathHandler(ch, victim); },
+    // fight.c's is_safe and check_killer (rules/actcomm.js), which only ever
+    // have anything to say when both sides are players.
+    isSafe: (ch, victim) => (rules.isSafe ? rules.isSafe(ch, victim) : false),
+    checkKiller: (ch, victim) => { if (rules.checkKiller) rules.checkKiller(ch, victim); },
   };
 
   // -- magic ----------------------------------------------------------------
   // magic.js holds the spells; these are the places magic.c reaches back
   // into the rest of the mud, answered in metres.
-  const posOf = (ch) => (ch === state ? position : ch.slot.pos);
+  const posOf = (ch) => (isNpc(ch) ? ch.slot.pos : pcOf(ch).position);
   const magic = createMagic({
     rng, emit, ctx, player: state, damage, updatePos,
     gainExp: (ch, gain) => gainExp(ch, gain, rng),
@@ -1420,10 +1555,17 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     people(ch, radius) {
       const at = posOf(ch);
       const out = [];
-      if (state.position !== POS.DEAD && dist2(position, at) <= radius * radius) out.push(state);
+      for (const pc of players) {
+        if (pc.ch.position !== POS.DEAD && dist2(pc.position, at) <= radius * radius) out.push(pc.ch);
+      }
       for (const slot of mobsNear(at, radius)) if (slot.instance && !slot.dead) out.push(slot.instance);
       return out;
     },
+    // A player who is not the caster: their own lines, and the room's.
+    tell: multi ? tell : null,
+    roomcast: multi ? (actor, event) => roomcast(isNpc(actor) ? actor.slot.roomVnum : actor.roomVnum, event, [actor]) : null,
+    /** A spell set off on one player's turn lands on whoever's turn it is then. */
+    asCaster: (ch, fn) => withPlayer(isNpc(ch) ? current : pcOf(ch), fn),
     /**
      * do_cast's last act: the victim of an offensive spell fights back. As
      * with an aggressive mobile (aggrUpdate), out of reach it only picks the
@@ -1431,7 +1573,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
      */
     strikeBack(victim, ch) {
       if (victim.fighting || !isAwake(victim)) return;
-      if (dist2(victim === state ? feet() : victim.slot.pos, ch === state ? feet() : ch.slot.pos) > MELEE * MELEE) {
+      if (dist2(feetOf(victim), feetOf(ch)) > MELEE * MELEE) {
         ctx.setFighting(victim, ch);
         if (!ch.fighting) ctx.setFighting(ch, victim);
         return;
@@ -1439,26 +1581,19 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       ctx.round = { player: 0, npc: MOB_BEAT };
       try { multiHit(victim, ch, undefined, ctx); } finally { ctx.round = null; ctx.now = undefined; }
     },
-    recall(ch) { if (ch === state) recall(false); },
+    recall(ch) { if (!isNpc(ch)) withPlayer(pcOf(ch), () => recall(false)); },
     /**
      * spell_teleport: a random room, any room the mud has that is not private.
      * DIVERGES: only the player is ever moved -- a mobile's body walks, and
      * cannot be put down across the map -- and only to a room that was built.
      */
     teleport(ch) {
-      if (ch !== state) return false;
-      const rooms = [...built.rooms.values()]
-        .filter((info) => !info.unbuilt && info.room && !(info.room.flags & (ROOM_PRIVATE | ROOM_SOLITARY)));
-      if (!rooms.length) return false;
-      const info = rooms[rng.range(0, rooms.length - 1)];
-      if (state.fighting) ctx.stopFighting(state);
-      emit({ kind: 'teleport', x: info.center.x, y: info.center.y, z: info.center.z, vnum: info.room.vnum });
-      if (onTeleport) onTeleport(info.center.x, info.center.y, info.center.z, info.room.vnum);
-      return true;
+      if (isNpc(ch)) return false;
+      return withPlayer(pcOf(ch), () => teleport());
     },
     sky: () => weather.sky,
     outdoors(ch) {
-      const info = built.rooms.get(ch === state ? state.roomVnum : ch.slot.roomVnum);
+      const info = built.rooms.get(isNpc(ch) ? ch.slot.roomVnum : ch.roomVnum);
       return !!(info && info.outdoor);
     },
     extract(ch, obj) {
@@ -1468,11 +1603,24 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       throw new Error(`game.js: extract of ${obj.name}, which ${ch.name} does not have`);
     },
   });
+  rebinders.push((ch) => magic.bindPlayer(ch));
+
+  /** spell_teleport for the player whose turn it is. */
+  function teleport() {
+    const rooms = [...built.rooms.values()]
+      .filter((info) => !info.unbuilt && info.room && !(info.room.flags & (ROOM_PRIVATE | ROOM_SOLITARY)));
+    if (!rooms.length) return false;
+    const info = rooms[rng.range(0, rooms.length - 1)];
+    if (state.fighting) ctx.stopFighting(state);
+    emit({ kind: 'teleport', x: info.center.x, y: info.center.y, z: info.center.z, vnum: info.room.vnum });
+    if (onTeleport) onTeleport(info.center.x, info.center.y, info.center.z, info.room.vnum);
+    return true;
+  }
 
   // -- death ----------------------------------------------------------------
   deathHandler = function onDeath(killer, victim) {
     if (isNpc(victim)) return mobDied(killer, victim);
-    return playerDied(killer);
+    return withPlayer(pcOf(victim), () => playerDied(killer));
   };
 
   /**
@@ -1508,11 +1656,14 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   function mobDied(killer, mob) {
     const slot = mob.slot;
     ctx.stopFighting(mob);
-    if (state.fighting === mob) ctx.stopFighting(state);
+    for (const pc of players) if (pc.ch.fighting === mob) ctx.stopFighting(pc.ch);
 
     const cry = DEATH_CRIES[rng.bits(3) % DEATH_CRIES.length]
       .replace(/\$n/g, mob.name).replace(/\$s/g, mob.sex === 2 ? 'her' : 'his');
-    emit({ kind: 'death', text: capitalise(cry), name: mob.name, x: slot.pos.x, y: slot.pos.y, z: slot.pos.z });
+    emit({
+      kind: 'death', text: capitalise(cry), name: mob.name, x: slot.pos.x, y: slot.pos.y, z: slot.pos.z,
+      ...(multi ? { room: slot.roomVnum, except: [], slot } : null),
+    });
 
     const corpse = makeCorpse(mob);
     objToRoom(corpse, slot.roomVnum, slot.pos);
@@ -1521,21 +1672,30 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     slot.instance = null;
     layOut(slot);
 
-    // fight.c: group_gain -- only a player killing an NPC scores.
-    if (killer === state) {
+    // fight.c: group_gain -- only a player killing an NPC scores, and every
+    // member of the killer's group standing in the room shares it.
+    if (!isNpc(killer)) {
       const info = protoInfo.get(mob.proto.vnum);
-      const xp = xpComputeWith(state, mob, killTable, info.killed, rng);
+      const group = rules.groupGain ? rules.groupGain(killer) : [killer];
+      for (const gch of group) {
+        withPlayer(pcOf(gch), () => {
+          // "You are too high for this group." and the like: rules/actcomm.js.
+          if (rules.groupMayShare && !rules.groupMayShare(gch, killer)) return;
+          const xp = idiv(xpComputeWith(state, mob, killTable, info.killed, rng), group.length);
+          emit({ kind: 'xp', amount: xp, text: `You receive ${xp} experience points.` });
+          gainExp(state, xp, rng, (gains) => {
+            emit({
+              kind: 'level', level: state.level, gains,
+              title: titleFor(state),
+              text: `You raise a level!!  Your gain is: ${gains.hp} hp, ${gains.mana} m,`
+                + ` ${gains.move} mv, ${gains.prac} prac.`,
+            });
+          });
+        });
+      }
+      // raw_kill's count, after everyone's share was worked out on the old one.
       info.killed += 1;
       killTable[clamp(mob.level, 0, MAX_LEVEL - 1)].killed += 1;
-      emit({ kind: 'xp', amount: xp, text: `You receive ${xp} experience points.` });
-      gainExp(state, xp, rng, (gains) => {
-        emit({
-          kind: 'level', level: state.level, gains,
-          title: titleFor(state),
-          text: `You raise a level!!  Your gain is: ${gains.hp} hp, ${gains.mana} m,`
-            + ` ${gains.move} mv, ${gains.prac} prac.`,
-        });
-      });
     }
 
     let firstRoad = false;
@@ -1546,21 +1706,25 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (gate.outdoor && !roads.some((g) => g !== gate && g.open)) firstRoad = true;
     }
     if (opened.length) {
-      const ways = waysPhrase(opened, wayFrom(state.roomVnum));
+      const ways = waysPhrase(opened, wayFrom(state ? state.roomVnum : slot.roomVnum));
       emit({
         kind: 'gate', vnum: opened[0].vnum, to: opened[0].to, name: opened[0].name, gates: opened,
         text: `${capital(ways)} ${opened.length > 1 && ways.startsWith('the ways') ? 'are' : 'is'} no longer held.`,
+        // A gate is the world's, not the killer's: everyone's map opens it.
+        ...(multi ? { pc: null, all: true } : null),
       });
     }
     // One road out is the ending. Every road out is not: the gear this city
     // sells cannot beat the guildmasters or the executioner, so the rest of
     // that list is the horizon rather than the goal.
-    if (firstRoad) emit({ kind: 'ending', text: 'The road out of Midgaard is open.' });
+    if (firstRoad) emit({ kind: 'ending', text: 'The road out of Midgaard is open.', ...(multi ? { pc: null, all: true } : null) });
   }
 
   /** Merc's death penalty: half the way back to the level you were. */
   function playerDied(killer) {
     emit({ kind: 'death', text: 'You have been KILLED!!', player: true, by: killer ? killer.name : 'something' });
+    roomcast(state.roomVnum, { kind: 'room', text: `${capitalise(state.name)} is DEAD!!` }, [state]);
+    if (rules.playerKilled) rules.playerKilled(killer, state);
     if (state.exp > 1000 * state.level) {
       const lose = idiv(1000 * state.level - state.exp, 2);
       gainExp(state, lose, rng);
@@ -1569,6 +1733,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     for (const slot of mobs) {
       if (slot.instance && slot.instance.fighting === state) ctx.stopFighting(slot.instance);
     }
+    for (const pc of players) if (pc.ch.fighting === state) ctx.stopFighting(pc.ch);
     // fight.c: raw_kill for a PC -- affects stripped, armour back to 100,
     // resting, and one point of everything.
     state.fighting = null;
@@ -1650,10 +1815,10 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
    */
   function loseTouch() {
     const mob = state.fighting;
-    if (!mob || !mob.slot) return;
-    if (dist2(mob.slot.pos, position) <= BREAK * BREAK) return;
+    if (!mob || (isNpc(mob) ? !mob.slot : !pcOf(mob))) return;
+    if (dist2(isNpc(mob) ? mob.slot.pos : pcOf(mob).position, position) <= BREAK * BREAK) return;
     const here = world.rooms.get(state.roomVnum);
-    const there = world.rooms.get(mob.slot.roomVnum);
+    const there = world.rooms.get(isNpc(mob) ? mob.slot.roomVnum : mob.roomVnum);
     if (here && here === there) return;
     const joined = (a, b) => !!(a && b && a.exits.some((e) => e && e.to === b.vnum));
     if (joined(here, there) || joined(there, here)) return;
@@ -1665,7 +1830,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     const name = state.fighting.name;
     ctx.stopFighting(state);
     gainExp(state, -25, rng);
-    invulnerable = Math.max(invulnerable, 1.5);
+    current.invulnerable = Math.max(current.invulnerable, 1.5);
     emit({
       kind: 'flee',
       text: forced ? 'You flee from combat!  You lose 25 exps.' : `You break off from ${name}.  You lose 25 exps.`,
@@ -1804,6 +1969,14 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     // The weather changes whether or not anyone is under it, but only someone
     // outside and awake is told: the mud walks the descriptor list with
     // IS_OUTSIDE and IS_AWAKE before sending a line.
+    if (multi) {
+      for (const pc of players) {
+        const info = built.rooms.get(pc.ch.roomVnum);
+        if (!info || !info.outdoor || !isAwake(pc.ch)) continue;
+        for (const text of lines) tell(pc.ch, { kind: 'weather', text });
+      }
+      return;
+    }
     if (!lines.length || !room || !room.outdoor || !isAwake(state)) return;
     for (const text of lines) emit({ kind: 'weather', text });
   }
@@ -1813,7 +1986,6 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   let pulseViolence = PULSE_VIOLENCE;
   let pulsePoint = PULSE_TICK;
   let pulseMobile = PULSE_MOBILE;
-  let invulnerable = 0;
 
   /** fight.c: violence_update, with metres where the mud asks about rooms. */
   function violenceUpdate() {
@@ -1822,28 +1994,38 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   }
 
   function violenceRound() {
-    if (state.fighting) {
-      const mob = state.fighting;
-      // Below zero hitpoints you are stunned, and the mud stops your swings
-      // dead: IS_AWAKE is false and violence_update drops you out of the fight.
-      if (!isAwake(state)) ctx.stopFighting(state, false);
-      else if (mob.position === POS.DEAD || dist2(mob.slot.pos, position) > BREAK * BREAK) breakOff(true);
-      else if (dist2(mob.slot.pos, feet()) <= MELEE * MELEE) multiHit(state, mob, undefined, ctx);
-    }
+    for (const pc of players.slice()) withPlayer(pc, playerRound);
     for (const slot of mobs) {
       const mob = slot.instance;
       if (!mob || slot.dead || !mob.fighting) continue;
       if (!isAwake(mob)) { ctx.stopFighting(mob, false); continue; }
       // Whoever it is fighting: you, or -- a cityguard answering a scream -- another mobile.
       const victim = mob.fighting;
-      const there = victim === state ? feet() : (victim.slot && !victim.slot.dead ? victim.slot.pos : null);
+      const there = isNpc(victim) ? (victim.slot && !victim.slot.dead ? victim.slot.pos : null)
+        : (pcOf(victim) ? pcFeet(pcOf(victim)) : null);
       if (!there || victim.position === POS.DEAD) { ctx.stopFighting(mob, false); continue; }
       if (dist2(slot.pos, there) > BREAK * BREAK) { ctx.stopFighting(mob); continue; }
       if (dist2(slot.pos, there) > MELEE * MELEE) continue;
-      if (victim === state && invulnerable > 0) continue;
-      multiHit(mob, victim, undefined, ctx);
-      if (mob.fighting) assist(slot, mob, mob.fighting);
+      if (!isNpc(victim) && pcOf(victim).invulnerable > 0) continue;
+      // The blows land on the victim's screen when the victim is a player.
+      withPlayer(isNpc(victim) ? null : pcOf(victim), () => {
+        multiHit(mob, victim, undefined, ctx);
+        if (mob.fighting) assist(slot, mob, mob.fighting);
+      });
     }
+  }
+
+  /** The bound player's swings this round, at a mobile -- or another player. */
+  function playerRound() {
+    if (!state.fighting) return;
+    const mob = state.fighting;
+    const foe = isNpc(mob) ? mob.slot.pos : (pcOf(mob) ? pcFeet(pcOf(mob)) : null);
+    // Below zero hitpoints you are stunned, and the mud stops your swings
+    // dead: IS_AWAKE is false and violence_update drops you out of the fight.
+    if (!isAwake(state)) ctx.stopFighting(state, false);
+    else if (!foe || mob.position === POS.DEAD || dist2(foe, position) > BREAK * BREAK) breakOff(true);
+    else if (!isNpc(mob) && pcOf(mob).invulnerable > 0) return;
+    else if (dist2(foe, feet()) <= MELEE * MELEE) multiHit(state, mob, undefined, ctx);
   }
 
   /**
@@ -1860,8 +2042,8 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (slot.roomVnum !== fromSlot.roomVnum) continue;
       if (rch.proto !== ch.proto && rng.bits(3) !== 0) continue;
       if (!canSee(rch, victim)) continue;
-      if (victim === state && invulnerable > 0) continue;
-      const there = victim === state ? feet() : victim.slot.pos;
+      if (!isNpc(victim) && pcOf(victim).invulnerable > 0) continue;
+      const there = feetOf(victim);
       if (dist2(slot.pos, there) > MELEE * MELEE) {
         ctx.setFighting(rch, victim);
         if (!victim.fighting) ctx.setFighting(victim, rch);
@@ -1871,9 +2053,14 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     }
   }
 
-  /** update.c: aggr_update. ACT_WIMPY aggressives only jump you in your sleep. */
+  /** update.c: aggr_update, for every player. */
   function aggrUpdate() {
-    if (invulnerable > 0 || state.position === POS.DEAD) return;
+    for (const pc of players.slice()) withPlayer(pc, aggrOn);
+  }
+
+  /** ...and for the bound one. ACT_WIMPY aggressives only jump you in your sleep. */
+  function aggrOn() {
+    if (current.invulnerable > 0 || state.position === POS.DEAD) return;
     for (const slot of mobsNear(position, AGGRO)) {
       const mob = slot.instance;
       if (!mob || mob.fighting || !isAwake(mob)) continue;
@@ -1902,6 +2089,23 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
    * someone left incapacitated -- and hit_gain for every woken mobile.
    */
   function charUpdate() {
+    // The page's one player, as it always was: dead, nothing ticks.
+    if (!multi && state.position === POS.DEAD) return;
+    for (const pc of players.slice()) withPlayer(pc, charUpdatePlayer);
+
+    for (const slot of mobs) {
+      const mob = slot.instance;
+      if (!mob || slot.dead) continue;
+      if (!mob.fighting) mob.hit = Math.min(mob.maxHit, mob.hit + idiv(idiv(mob.level * 3, 2), (mob.affectedBy & AFF.POISON) ? 4 : 1));
+    }
+
+    // char_update's affect loop, then poison: the players and everyone woken.
+    for (const pc of players.slice()) withPlayer(pc, () => magic.tick(state));
+    for (const slot of mobs) if (slot.instance && !slot.dead) magic.tick(slot.instance);
+  }
+
+  /** char_update's player half, for the bound one. */
+  function charUpdatePlayer() {
     if (state.position === POS.DEAD) return;
     if (state.position >= POS.STUNNED) {
       if (state.hit < state.maxHit) state.hit += hitGain(state);
@@ -1928,16 +2132,6 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
     if (state.position === POS.INCAP) damage(state, state, 1, -1, ctx);
     else if (state.position === POS.MORTAL) damage(state, state, 2, -1, ctx);
-
-    for (const slot of mobs) {
-      const mob = slot.instance;
-      if (!mob || slot.dead) continue;
-      if (!mob.fighting) mob.hit = Math.min(mob.maxHit, mob.hit + idiv(idiv(mob.level * 3, 2), (mob.affectedBy & AFF.POISON) ? 4 : 1));
-    }
-
-    // char_update's affect loop, then poison: the player and everyone woken.
-    magic.tick(state);
-    for (const slot of mobs) if (slot.instance && !slot.dead) magic.tick(slot.instance);
   }
 
   /** update.c: gain_condition, with its three messages. */
@@ -1999,6 +2193,8 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     if (!route) return false;
     slot.travel = { from: slot.roomVnum, to, door, route, run };
     order(slot, { kind: 'travel', route, run, wait });
+    // Anyone following it goes the same way (rules/actcomm.js).
+    if (multi && rules.mobMoved) rules.mobMoved(slot, slot.roomVnum, to, door);
     return true;
   }
 
@@ -2024,7 +2220,9 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   function mobileUpdate() {
     const counts = new Map();
     for (const slot of mobs) if (!slot.dead) counts.set(slot.roomVnum, (counts.get(slot.roomVnum) || 0) + 1);
-    if (state.roomVnum !== undefined) counts.set(state.roomVnum, (counts.get(state.roomVnum) || 0) + 1);
+    for (const pc of players) {
+      if (pc.ch.roomVnum !== undefined) counts.set(pc.ch.roomVnum, (counts.get(pc.ch.roomVnum) || 0) + 1);
+    }
 
     for (const slot of mobs) {
       if (slot.dead || slot.travel) continue;
@@ -2080,7 +2278,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
         const exit = room.exits[door];
         const to = exit && !exit.offMap ? world.rooms.get(exit.to) : null;
         if (to && !(to.flags & ROOM_NO_MOB) && !roomIsPrivate(to.vnum, counts)
-          && state.roomVnum !== to.vnum) {
+          && !players.some((pc) => pc.ch.roomVnum === to.vnum)) {
           moveMobile(slot, door, true);
         }
       }
@@ -2091,9 +2289,10 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
    * comm.c/update.c: update_handler, one pulse.
    */
   let pulseArea = 0;
-  let restAt = null;
   function pulse() {
-    if (state.wait > 0 && --state.wait === 0 && rules.onWaitOver) rules.onWaitOver();
+    for (const pc of players.slice()) {
+      withPlayer(pc, () => { if (state.wait > 0 && --state.wait === 0 && rules.onWaitOver) rules.onWaitOver(); });
+    }
     if (--pulseArea <= 0) {
       pulseArea = wanderRng.range(idiv(PULSE_AREA, 2), idiv(3 * PULSE_AREA, 2));
       if (rules.areaUpdate) rules.areaUpdate();
@@ -2105,7 +2304,9 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       // do something else. Resting here means standing still watching a wall,
       // so resting runs the same clock four times as fast. The gains are the
       // mud's, only the waiting is compressed.
-      const resting = state.position === POS.RESTING || state.position === POS.SLEEPING;
+      // With more than one player, only when all of them are lying down.
+      const resting = players.length > 0
+        && players.every((pc) => pc.ch.position === POS.RESTING || pc.ch.position === POS.SLEEPING);
       pulsePoint = resting ? idiv(PULSE_TICK, 4) : PULSE_TICK;
       charUpdate();
       if (rules.objUpdate) rules.objUpdate();
@@ -2126,8 +2327,6 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     return next;
   }
 
-  /** The player as a target: feet on the ground, not the eye. */
-  const playerFeet = { x: 0, y: 0, z: 0 };
 
   /**
    * What every mobile's body should be doing this frame. The body itself --
@@ -2135,7 +2334,8 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
    * headless, `stepHeadless` stands in for it in straight lines.
    */
   function moveMobs(dt) {
-    playerFeet.x = position.x; playerFeet.z = position.z; playerFeet.y = position.y - 1.72;
+    // Every player as a target: feet on the ground, not the eye.
+    for (const pc of players) pcFeet(pc);
     for (const slot of mobs) {
       if (slot.dead) continue;
       if (!slot.here) {
@@ -2175,7 +2375,8 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       }
 
       if (mob && mob.fighting) {
-        const target = mob.fighting === state ? playerFeet : (mob.fighting.slot ? mob.fighting.slot.pos : playerFeet);
+        const foe = mob.fighting;
+        const target = isNpc(foe) ? foe.slot.pos : (pcOf(foe) ? pcOf(foe).feet : slot.pos);
         // ACT_SENTINEL never leaves its room in the mud; here it never leaves
         // the spot it was reset on, and you have to come to it.
         if (mob.act & ACT_SENTINEL) order(slot, { kind: 'face', target });
@@ -2185,7 +2386,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
         } else {
           // Close enough to cross blades with another mobile; with you, a
           // little further, or a figure 1.5 m from your eye fills the frame.
-          order(slot, { kind: 'chase', target, stop: target === playerFeet ? 2.0 : 1.5 });
+          order(slot, { kind: 'chase', target, stop: !isNpc(foe) ? 2.0 : 1.5 });
           if (!figure) step(slot, target, MOB_SPEED, MELEE * 0.68, dt);
         }
       } else if (slot.task) {
@@ -2230,11 +2431,15 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (slot.notice.left > 0) return true;
       slot.notice = null;
     }
-    if (!mob || !slot.figure || !isAwake(mob) || hasAff(state, AFF.SNEAK)) return false;
-    if (!canSee(mob, state) || dist2(slot.pos, playerFeet) > 3.4 * 3.4) return false;
-    if (facingAway(slot) < 0.2) return false;
-    slot.notice = { left: 3.5, order: { kind: 'hold', at: { ...slot.pos } } };
-    return true;
+    if (!mob || !slot.figure || !isAwake(mob)) return false;
+    for (const pc of players) {
+      if (hasAff(pc.ch, AFF.SNEAK)) continue;
+      if (!canSee(mob, pc.ch) || dist2(slot.pos, pc.feet) > 3.4 * 3.4) continue;
+      if (facingAway(slot, pc.feet) < 0.2) continue;
+      slot.notice = { left: 3.5, order: { kind: 'hold', at: { ...slot.pos } } };
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -2242,12 +2447,12 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
    * looking straight at you. A figure faces +Z at yaw 0 (motion.js turns it
    * with atan2(dx, dz)); headless there is no facing, and nobody has a back.
    */
-  function facingAway(slot) {
+  function facingAway(slot, from = current.feet) {
     const fig = slot.figure;
     if (!fig || !fig.object) return 1;
     const yaw = fig.object.rotation.y;
-    const dx = playerFeet.x - slot.pos.x;
-    const dz = playerFeet.z - slot.pos.z;
+    const dx = from.x - slot.pos.x;
+    const dz = from.z - slot.pos.z;
     const d = Math.hypot(dx, dz) || 1;
     return -(Math.sin(yaw) * dx + Math.cos(yaw) * dz) / d;
   }
@@ -2304,8 +2509,8 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
    * under a swamp troll's name could start a fight with the marsh wolf
    * beside it.
    */
-  let focusSlot = null;
   function facingTarget(reach = REACH, cone = 0.45) {
+    const focusSlot = current.focusSlot;
     if (focusSlot && focusSlot.instance && !focusSlot.dead
       && dist2(focusSlot.pos, position) <= (reach + 1.8) * (reach + 1.8)) return focusSlot;
     let best = null;
@@ -2326,7 +2531,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
 
   /** Whoever you are fighting, or whoever you are looking at. */
   function currentTarget() {
-    if (state.fighting && !state.fighting.slot.dead) return state.fighting;
+    if (state.fighting && (!isNpc(state.fighting) || !state.fighting.slot.dead)) return state.fighting;
     const slot = facingTarget();
     return slot ? slot.instance : null;
   }
@@ -2355,11 +2560,34 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     // fight.c do_kill refuses anyone at all while you are fighting, not just
     // the one you are fighting: a click on the troll in the crosshair must not
     // open a second fight beside the marsh wolf you are already in.
-    if (state.fighting && !state.fighting.slot.dead) return { ok: false, text: 'You do the best you can!' };
+    if (state.fighting && (!isNpc(state.fighting) || !state.fighting.slot.dead)) return { ok: false, text: 'You do the best you can!' };
     state.position = POS.STANDING;
     ctx.round = { player: CLICK_WINDUP, npc: MOB_BEAT };
     try { multiHit(state, mob, undefined, ctx); } finally { ctx.round = null; ctx.now = undefined; }
     return { ok: true, text: `You attack ${mob.name}.` };
+  }
+
+  /**
+   * do_kill on a KILLER or THIEF, and do_murder, once is_safe has let it
+   * through: WAIT_STATE, check_killer, and one round now. Out of reach the
+   * fight is on and the violence pulse swings once you are close -- a player
+   * is not walked to anyone, so close it yourself.
+   */
+  function attackPlayer(victim) {
+    const vpc = pcOf(victim);
+    if (!vpc || victim === state) return { ok: false, text: "They aren't here." };
+    if (state.position === POS.DEAD) return { ok: false, text: 'You are dead.' };
+    state.wait = Math.max(state.wait, PULSE_VIOLENCE);
+    ctx.checkKiller(state, victim);
+    if (dist2(pcFeet(vpc), feet()) > MELEE * MELEE) {
+      ctx.setFighting(state, victim);
+      if (!victim.fighting) ctx.setFighting(victim, state);
+      return { ok: true, text: `You attack ${victim.name}.` };
+    }
+    state.position = POS.STANDING;
+    ctx.round = { player: CLICK_WINDUP, npc: MOB_BEAT };
+    try { multiHit(state, victim, undefined, ctx); } finally { ctx.round = null; ctx.now = undefined; }
+    return { ok: true, text: '' };
   }
 
   /**
@@ -2541,30 +2769,55 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       facing.x = cameraDirection.x / d;
       facing.z = cameraDirection.z / d;
     }
-    if (invulnerable > 0) invulnerable -= dt;
+    if (current.invulnerable > 0) current.invulnerable -= dt;
     ctx.clock += dt;
+    const room = playerFrame();
+    worldFrame(dt, room);
+  }
 
+  /**
+   * The server's frame: each player's half, bound in turn, then the world's
+   * once. Positions are set beforehand from what each client reported.
+   */
+  function tick(dt) {
+    for (const pc of players.slice()) {
+      withPlayer(pc, () => {
+        if (current.invulnerable > 0) current.invulnerable -= dt;
+        playerFrame();
+      });
+    }
+    ctx.clock += dt;
+    worldFrame(dt, null);
+  }
+
+  /** The bound player's half of a frame: where you are, and what that ends. */
+  function playerFrame() {
     const room = nearestRoom(position);
+    const before = state.roomVnum;
     if (room) state.roomVnum = room.vnum;
-    loseTouch();
-
-    // Walking is the body's, not a typed command, so what a command would end
-    // ends when you walk: resting and sleeping (you get up) and hiding.
-    if (state.position === POS.RESTING || state.position === POS.SLEEPING) {
-      if (!restAt) restAt = { x: position.x, z: position.z };
-      else if (Math.hypot(position.x - restAt.x, position.z - restAt.z) > 0.6) {
-        state.position = POS.STANDING;
-        restAt = null;
-        emit({ kind: 'position', text: 'You stand up.', position: 'standing' });
-      }
-    } else restAt = null;
-    if (rules.moveUpdate) rules.moveUpdate();
+    // move_char's half that is not the walking: "$n leaves north." and the followers.
+    if (multi && rules.playerMoved && before !== undefined && before !== state.roomVnum) rules.playerMoved(before, state.roomVnum);
+    if (!puppet) {
+      loseTouch();
+      // Walking is the body's, not a typed command, so what a command would end
+      // ends when you walk: resting and sleeping (you get up) and hiding.
+      if (state.position === POS.RESTING || state.position === POS.SLEEPING) {
+        if (!current.restAt) current.restAt = { x: position.x, z: position.z };
+        else if (Math.hypot(position.x - current.restAt.x, position.z - current.restAt.z) > 0.6) {
+          state.position = POS.STANDING;
+          current.restAt = null;
+          emit({ kind: 'position', text: 'You stand up.', position: 'standing' });
+        }
+      } else current.restAt = null;
+      if (rules.moveUpdate) rules.moveUpdate();
+    }
 
     // You learn a gate is held by walking up to it and finding someone in it.
     // Nothing announces the list; it fills in as you cross the city.
     // Seen from the gate's own room or the warden's, which is where the guard
     // is standing -- and once per warden, however many exits it holds.
-    for (const gate of gates) {
+    // On a server the board is each client's own: it walks the same gates.
+    for (const gate of multi ? [] : gates) {
       if (gate.seen || gate.open) continue;
       // Not by distance: eighteen metres from the temple's stair reaches into
       // the Cleric's sanctum next door, which then announced the executioner.
@@ -2583,8 +2836,15 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     // until you could actually see it, so an unvisited quarter of the city
     // costs nothing.
     for (const slot of mobsNear(position, 48)) if (!slot.instance) wake(slot);
+    return room;
+  }
+
+  /** The world's half: bodies, spells in flight, the pulses, the sky. */
+  function worldFrame(dt, room) {
     moveMobs(dt);
     magic.update(dt);
+    // The page's copy of a server's game moves bodies; the rules are the server's.
+    if (puppet) return;
 
     pulseAccum += dt * PULSE_PER_SECOND;
     let guard = 0;
@@ -2658,7 +2918,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       disembody(slot);
     }
     figureSlot.clear();
-    focusSlot = null;
+    for (const pc of players) pc.focusSlot = null;
   }
 
   /**
@@ -2731,7 +2991,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   }
 
   const game = {
-    state,
+    get state() { return state; },
     world,
     events,
     gates,
@@ -2748,6 +3008,9 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     update,
     attack,
     attackSlot,
+    attackPlayer,
+    /** db.c's create_mobile for a slot, if it has not been yet: the mobile itself. */
+    wakeSlot: (slot) => wake(slot),
     get nav() { return ways; },
     /** Draw another zone (see enterZone); the rules keep running everywhere. */
     enterZone,
@@ -2782,6 +3045,13 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       if (!result.ok) emit({ kind: 'note', text: result.text });
       return result;
     },
+    /**
+     * The mobile in your crosshair and reach, as `attack` and an offensive
+     * `cast` pick it (facingTarget) -- for a page whose rules are a server's.
+     */
+    facingSlot: (reach = REACH, cone = 0.45) => facingTarget(reach, cone),
+    /** An event the server decided, into this game's stream (src/link.js). */
+    inject(event) { emit(event); },
     /** Start over as another class -- the title screen's choice, before you play. */
     chooseClass(index, { level = 1 } = {}) {
       if (state.fighting) return false;
@@ -2823,12 +3093,13 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     willSwing(slot) {
       const mob = slot.instance;
       return !!(mob && !slot.dead && mob.fighting === state && isAwake(mob)
-        && invulnerable <= 0 && dist2(slot.pos, feet()) <= MELEE * MELEE);
+        && current.invulnerable <= 0 && dist2(slot.pos, feet()) <= MELEE * MELEE);
     },
 
     /** Would you swing on the next round? */
     playerWillSwing() {
       const mob = state.fighting;
+      if (mob && !isNpc(mob)) return !!(isAwake(state) && pcOf(mob) && dist2(pcFeet(pcOf(mob)), feet()) <= MELEE * MELEE);
       return !!(mob && isAwake(state) && !mob.slot.dead && dist2(mob.slot.pos, feet()) <= MELEE * MELEE);
     },
 
@@ -2840,6 +3111,15 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
       loseTouch();
       const mob = currentTarget();
       if (!mob) return null;
+      if (!isNpc(mob)) {
+        // Another player, on a server: what the plate can say of them.
+        return {
+          name: mob.name, level: mob.level, hit: mob.hit, maxHit: mob.maxHit,
+          percent: mob.maxHit > 0 ? Math.max(0, idiv(100 * mob.hit, mob.maxHit)) : 0,
+          condition: condition(mob), fighting: state.fighting === mob, aggressive: false,
+          warden: null, holds: '', shop: false, focused: false, slot: null, player: true,
+        };
+      }
       return {
         name: mob.name, level: mob.level, hit: mob.hit, maxHit: mob.maxHit,
         percent: mob.maxHit > 0 ? Math.max(0, idiv(100 * mob.hit, mob.maxHit)) : 0,
@@ -2849,7 +3129,7 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
         warden: gates.find((g) => !g.open && g.warden === mob.slot.record) || null,
         holds: waysPhrase(gates.filter((g) => !g.open && g.warden === mob.slot.record), wayFrom(state.roomVnum)),
         shop: !!mob.slot.record.shop,
-        focused: mob.slot === focusSlot,
+        focused: mob.slot === current.focusSlot,
         slot: mob.slot,
       };
     },
@@ -2860,12 +3140,12 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
      * the prompt and the plate agree on who is meant.
      */
     focus(figure) {
-      focusSlot = figure ? (figureSlot.get(figure) || null) : null;
+      current.focusSlot = figure ? (figureSlot.get(figure) || null) : null;
     },
 
     /** The one the viewer is looking at, as `target()` describes it -- even mid-fight with someone else. */
     focused() {
-      const slot = focusSlot;
+      const slot = current.focusSlot;
       if (!slot || slot.dead || !slot.instance) return null;
       const mob = slot.instance;
       return {
@@ -2936,7 +3216,65 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     get onTeleport() { return onTeleport; },
 
     /** Seconds of grace after respawning, so nothing kills you as you land. */
-    grace(seconds = 3) { invulnerable = seconds; },
+    grace(seconds = 3) { current.invulnerable = seconds; },
+
+    // -- char_list --------------------------------------------------------
+    /** Every player in the world; `current` is the one whose turn it is. */
+    players,
+    get current() { return current; },
+    pcOf,
+    /** Run fn as `pc`'s turn: their commands, their screen. */
+    withPlayer,
+    /** The server's frame (see tick); the page calls update. */
+    tick,
+    tell,
+    roomcast,
+    feetOf,
+    /**
+     * char_to_room for a player logging in: a record for where its body is.
+     * `id` keys the events meant for it (`event.pc`).
+     */
+    addPlayer(ch, { id, at = null, facing: face = null } = {}) {
+      const pc = makePc(ch, id);
+      if (at) Object.assign(pc.position, at);
+      if (face) Object.assign(pc.facing, face);
+      players.push(pc);
+      return pc;
+    },
+    /** extract_char for a player leaving: every fight with them ends. */
+    removePlayer(pc) {
+      const ch = pc.ch;
+      if (rules.playerLeaving) withPlayer(pc, () => rules.playerLeaving(ch));
+      for (const slot of mobs) if (slot.instance && slot.instance.fighting === ch) ctx.stopFighting(slot.instance);
+      for (const other of players) if (other.ch.fighting === ch) ctx.stopFighting(other.ch);
+      if (ch.fighting) ctx.stopFighting(ch);
+      const i = players.indexOf(pc);
+      if (i >= 0) players.splice(i, 1);
+      pcOfCh.delete(ch);
+      if (current === pc) bind(null);
+    },
+    /**
+     * A player the page draws but does not run: someone else on the server.
+     * Their record gives the bodies a target to chase (`feetOf`); nothing in
+     * the rules ever binds it.
+     */
+    addRemote(ch, id) { return makePc(ch, id); },
+    /**
+     * char_from_room and char_to_room for a player the rules move (goto,
+     * transfer, at): stood in the room's middle, where everyone arrives. The
+     * 'teleport' event tells their own screen to follow. False when the room
+     * has nowhere to stand.
+     */
+    placePlayer(pc, vnum, { quiet = false } = {}) {
+      const info = built.rooms.get(vnum);
+      if (!info || info.unbuilt) return false;
+      pc.position.x = info.center.x; pc.position.y = info.center.y + 1.72; pc.position.z = info.center.z;
+      pc.ch.roomVnum = vnum;
+      pc.restAt = null;
+      if (!quiet) emit({ kind: 'teleport', x: info.center.x, y: info.center.y, z: info.center.z, vnum, pc: pc.id, placed: true });
+      return true;
+    },
+    removeRemote(pc) { pcOfCh.delete(pc.ch); },
 
   };
 
@@ -2947,9 +3285,15 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   function toRoom(actor, text, extra = {}) {
     const vnum = actor.roomVnum !== undefined ? actor.roomVnum : actor.inRoom;
     const at = actor.pos || actor.at || actor;
-    const near = at && at.x !== undefined
-      && Math.hypot(at.x - position.x, at.z - position.z) < 14 && Math.abs(at.y - (position.y - 1.72)) < 4;
-    if (vnum !== state.roomVnum && !near) return false;
+    const hears = (pc) => pc.ch.roomVnum === vnum || (at && at.x !== undefined
+      && Math.hypot(at.x - pc.position.x, at.z - pc.position.z) < 14 && Math.abs(at.y - (pc.position.y - 1.72)) < 4);
+    if (multi) {
+      // Everyone in the room, or near enough across a street (server/ asks hears()).
+      if (!players.some(hears)) return false;
+      emit({ kind: 'room', ...extra, text, room: vnum, near: at && at.x !== undefined ? { x: at.x, y: at.y, z: at.z } : null, except: [] });
+      return true;
+    }
+    if (!hears(current)) return false;
     emit({ kind: 'room', ...extra, text });
     return true;
   }
@@ -2963,8 +3307,18 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
   // hitch in the first second of play -- so their spec_funs run unwatched.
   for (const slot of mobs) if (!slot.here) wake(slot, wanderRng);
 
-  installRules({
-    world, rng, wanderRng, state, position, facing, playerFeet,
+  const kernel = {
+    world, rng, wanderRng,
+    // Whoever's turn it is (bind): read when used, or follow it with onBind.
+    get state() { return state; },
+    get position() { return position; },
+    get facing() { return facing; },
+    get playerFeet() { return current.feet; },
+    get pc() { return current; },
+    onBind(fn) { rebinders.push(fn); },
+    players, pcOf, withPlayer, tell, roomcast, multi, feetOf,
+    // What a descriptor list would give the rules: save, quit, the password.
+    server,
     // The zone being drawn, read when used: entering another one swaps them.
     get layout() { return layout; },
     get built() { return built; },
@@ -2977,11 +3331,168 @@ export function createGame({ world, layout, built, actors = null, seed, classInd
     damage: (ch, victim, dam, dt) => damage(ch, victim, dam, dt, ctx),
     multiHit: (ch, victim, dt) => multiHit(ch, victim, dt, ctx),
     gainCondition, unequipChar, equipChar, wearObj, getCost, canCarryN, canCarryW, carriedWeight,
-    grace: (s) => { invulnerable = s; },
-    invulnerable: () => invulnerable,
-  });
+    grace: (s) => { current.invulnerable = s; },
+    invulnerable: () => current.invulnerable,
+  };
+  installRules(kernel);
+
+  // -- the page's copy of a server's game -----------------------------------
+  /**
+   * In a page connected to a server the rules are the server's: this game
+   * stops running them (`puppet`) and is told instead what the mud decided
+   * -- where each mobile is and whom it fights, what lies on the ground, what
+   * your character is now -- and keeps the bodies, the walking and the
+   * strolling, which are the page's. src/link.js is the one caller.
+   */
+  const remotes = new Map();
+  /** A reference off the wire ({ me }, { m }, { p }) to a character here. */
+  function resolveRef(ref) {
+    if (!ref) return null;
+    if (ref.me) return state;
+    if (ref.m !== undefined) { const slot = mobs[ref.m]; return slot && !slot.dead ? wake(slot) : null; }
+    if (ref.p !== undefined) return remotes.get(ref.p)?.ch || null;
+    return null;
+  }
+
+  /** One mobile as the server has it: [room, body, fighting, hp, max hp, level, travelling to, door]. */
+  function mirrorMob(index, [room, body, fighting, hp, maxHp, level, travelTo, door]) {
+    const slot = mobs[index];
+    if (!slot) throw new Error(`game.js: the server names mobile ${index}, and this world has ${mobs.length}`);
+    if (!slot.here) { slot.roomVnum = room; slot.dead = body > 0; if (body > 0) slot.instance = null; return; }
+    if (body > 0) {
+      if (!slot.dead) {
+        const mob = slot.instance;
+        if (state.fighting && state.fighting === mob) state.fighting = null;
+        slot.dead = true;
+        slot.instance = null;
+        slot.travel = null;
+        slot.task = null;
+        layOut(slot);
+      }
+      if (body === 2 && slot.order && slot.order.kind !== 'gone') removeBody(slot);
+      return;
+    }
+    // Back from the dead: an area reset on the server, the body walking in.
+    if (slot.dead) kernel.respawn(slot);
+    if (travelTo !== null) {
+      if (!slot.travel) {
+        if (slot.roomVnum !== room) standIn(slot, room);
+        moveMobile(slot, door);
+      }
+    } else if (!slot.travel && slot.roomVnum !== room) {
+      // The mud put it somewhere this page did not see it go.
+      standIn(slot, room);
+    }
+    const mob = wake(slot);
+    if (hp !== null) { mob.hit = hp; mob.maxHit = maxHp; mob.level = level; }
+    const foe = resolveRef(fighting);
+    mob.fighting = foe;
+    if (foe) mob.position = POS.FIGHTING;
+    else if (mob.position === POS.FIGHTING) mob.position = POS.STANDING;
+  }
+  function standIn(slot, room) {
+    if (!built.rooms.has(room) || built.rooms.get(room).unbuilt) { slot.roomVnum = room; return; }
+    const at = ringSpot(room, 1 + (mobs.indexOf(slot) % 5), 6);
+    slot.roomVnum = room;
+    embody(slot, at);
+    if (slot.figure && actors && actors.respawn) actors.respawn(slot.figure, at);
+    order(slot, { kind: 'stroll', room });
+  }
+
+  /**
+   * What lies in the drawn zone, by the server's ids. Scenery the reset table
+   * put here (a fountain, a desk) stays the page's own object -- actors.js
+   * drew it and E finds it by room, vnum and reset index -- and takes the
+   * server's id and contents; anything else is the server's word entirely.
+   */
+  const mirrored = new Map();
+  function mirrorObject(view, obj = null) {
+    if (!obj) {
+      const proto = world.objProtos.get(view.vnum);
+      obj = proto ? createObject(proto, view.level) : makeObject({});
+    }
+    obj.mirrorId = view.id;
+    for (const key of ['vnum', 'name', 'keywords', 'description', 'itemType', 'wearFlags', 'extraFlags', 'weight', 'cost', 'level', 'timer']) {
+      if (view[key] !== undefined) obj[key] = view[key];
+    }
+    obj.values = view.values.slice();
+    obj.contains = (view.contains || []).map((inner) => mirrorObject(inner, mirrored.get(inner.id) || null));
+    for (const inner of obj.contains) mirrored.set(inner.mirrorId, inner);
+    if (view.owner) obj.owner = view.owner;
+    return obj;
+  }
+  function mirrorGround(list) {
+    const keep = new Set();
+    for (const view of list) {
+      if (!built.rooms.has(view.inRoom)) continue;
+      let obj = mirrored.get(view.id);
+      if (!obj && view.resetIndex !== undefined) {
+        obj = ground.find((o) => o.mirrorId === undefined && o.inRoom === view.inRoom && o.vnum === view.vnum && o.resetIndex === view.resetIndex) || null;
+      }
+      const fresh = !obj || !ground.includes(obj);
+      obj = mirrorObject(view, obj);
+      mirrored.set(view.id, obj);
+      const scenery = view.resetIndex !== undefined && !(view.wearFlags & ITEM_TAKE);
+      if (!scenery || !obj.at) {
+        // The server's floor is the layout grid's; this page's may stand on a mound.
+        const info = built.rooms.get(view.inRoom);
+        const lift = info.center.y - info.cell.level * 7.6;
+        obj.at = { x: view.at.x, y: view.at.y + lift, z: view.at.z };
+      }
+      obj.inRoom = view.inRoom;
+      if (view.resetIndex !== undefined) obj.resetIndex = view.resetIndex;
+      if (view.radius) obj.radius = view.radius;
+      if (view.corpseOf !== undefined) { obj.slot = mobs[view.corpseOf]; obj.slot.corpse = obj; }
+      if (fresh) ground.push(obj);
+      keep.add(obj);
+    }
+    for (let i = ground.length - 1; i >= 0; i--) {
+      const obj = ground[i];
+      if (keep.has(obj) || !built.rooms.has(obj.inRoom)) continue;
+      ground.splice(i, 1);
+      obj.inRoom = null;
+      if (obj.mirrorId !== undefined) mirrored.delete(obj.mirrorId);
+    }
+  }
+
+  /** Your character as save.js writes it, with what a server adds (see server/mud.mjs sendSelf). */
+  const carried = new Map();
+  function carriedObject(view) {
+    const obj = mirrorObject(view, carried.get(view.id) || null);
+    obj.wearLoc = view.wearLoc;
+    obj.affects = obj.proto ? obj.proto.affects || [] : [];
+    obj.inRoom = null; obj.at = null;
+    carried.set(view.id, obj);
+    return obj;
+  }
+  function mirrorSelf(core, kit) {
+    for (const [key, value] of Object.entries(core)) {
+      if (key === 'room' || key === 'version' || key === 'fighting' || key === 'condition') continue;
+      state[key] = value;
+    }
+    state.condition = core.condition.slice();
+    state.displayName = core.name;
+    state.fighting = resolveRef(core.fighting);
+    if (kit) {
+      state.learned = { ...state.learned, ...kit.learned };
+      state.affected = kit.affected.map((af) => ({ ...af }));
+      state.inventory = kit.inventory.map(carriedObject);
+      state.equipment = kit.equipment.map((v) => (v ? carriedObject(v) : null));
+    }
+  }
+
+  game.mirror = {
+    mob: mirrorMob, ground: mirrorGround, self: mirrorSelf, resolve: resolveRef, remotes,
+    /** The weather the server's barometer is at. */
+    weather(w) { Object.assign(weather, w); },
+    /** Stop running the rules here: the server runs them. */
+    become() { puppet = true; },
+    get puppet() { return puppet; },
+  };
 
   state.hour = 12;
   game.grace(2);
+  // A server starts with nobody in it: players come in through addPlayer.
+  if (multi) game.removePlayer(pc0);
   return game;
 }

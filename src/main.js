@@ -35,6 +35,8 @@ import { createVisibility } from './cull.js';
 import { createImpostors } from './impostor.js';
 import { createOcclusion } from './occlusion.js';
 import { createTitleReel } from './title.js';
+import { attachSocketLink } from './link.js';
+import { createConnectUi } from './link-ui.js';
 import { OUTDOOR_FILL } from './dress.js';
 
 const params = new URLSearchParams(location.search);
@@ -1739,6 +1741,41 @@ async function boot() {
   };
   continueButton.addEventListener('click', () => begin(true));
   dom.enter.addEventListener('click', () => begin(false));
+
+  // Or a server's world (src/link.js): this game becomes the server's copy,
+  // and these are the hands it borrows from the page to move you about.
+  let connected = null;
+  const linkHost = {
+    zoneId: () => zone.id,
+    actors: () => actors,
+    scene, library: assets, world,
+    eye: () => player.position,
+    yaw: () => camera.rotation.y,
+    crossing: () => !!state.crossing,
+    roomAt: (x, y, z) => built.rooms.get(actors.nav.roomAt(x, y, z)),
+    /** Where the server put you: a jump in the drawn zone, a crossing to another. */
+    teleport(vnum) {
+      if (plan.zoneOf(vnum) && plan.zoneOf(vnum) !== zone) { crossTo(vnum, { yaw: camera.rotation.y, why: 'recall' }); return; }
+      const info = built.rooms.get(vnum);
+      if (!info) throw new Error(`link: the server put you in #${vnum}, which this zone did not build`);
+      player.spawn(info.center.x, info.center.y, info.center.z, camera.rotation.y);
+    },
+    walk: (dir) => step(dir, true),
+    disconnected(why) {
+      document.getElementById('link-lost-text').textContent = `${why}  The world stays as it was; reload to play again.`;
+      document.getElementById('link-lost').hidden = false;
+    },
+  };
+  document.getElementById('link-lost-reload').addEventListener('click', () => window.location.reload());
+  createConnectUi({
+    game,
+    onAlone: () => begin(false),
+    onEnter(link, enter) {
+      begin(false);
+      connected = attachSocketLink(link, game, linkHost, enter);
+      window.diku.link = connected;
+    },
+  });
   dom.hint.addEventListener('click', () => player.requestLock());
   renderer.domElement.addEventListener('mousedown', (event) => {
     if (event.button !== 0 || state.paused || state.crossing) return;
@@ -1792,6 +1829,8 @@ async function boot() {
     if (reeling) titleReel.update(dt);
     camera.updateMatrixWorld();
     if (!state.paused) game.update(dt, player.position, camera.getWorldDirection(forward));
+    // Connected, the others and the sending go on with the mouse let go too.
+    if (connected) connected.update(dt);
     gameUi.update();
     items.update();
     updateHeldLight();

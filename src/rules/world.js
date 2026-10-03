@@ -34,7 +34,7 @@ export function resetSpot(proto, index, center) {
 const SCENERY_RADIUS = { [ITEM.FOUNTAIN]: 1.7, [ITEM.FURNITURE]: 0.9, [ITEM.CONTAINER]: 0.6, [ITEM.BOAT]: 1.2 };
 
 export function installWorld(k) {
-  const { world, state, ground, mobs, emit, game, rules } = k;
+  const { world, ground, mobs, emit, game, rules } = k;
   // The drawn zone's hinges -- only that zone has any.
   const hinges = () => (k.actors ? k.actors.doors : null);
 
@@ -190,7 +190,7 @@ export function installWorld(k) {
   }
 
   const areaOf = (vnum) => world.rooms.get(vnum)?.area;
-  const playerIn = (area) => areaOf(state.roomVnum) === area.name;
+  const playersIn = (area) => k.players.filter((pc) => areaOf(pc.ch.roomVnum) === area.name);
 
   /** pIndexData->count: the living mobiles of a prototype. */
   const countMob = (vnum) => mobs.reduce((n, s) => n + (!s.dead && s.proto.vnum === vnum ? 1 : 0), 0);
@@ -208,7 +208,7 @@ export function installWorld(k) {
   function resetArea(area) {
     let last = true;
     let level = 0;
-    const occupied = playerIn(area);
+    const occupied = playersIn(area).length > 0;
     for (const line of area.lines) {
       switch (line.command) {
         case 'M': {
@@ -274,9 +274,10 @@ export function installWorld(k) {
   function areaUpdate() {
     for (const area of areas) {
       if (++area.age < 3) continue;
-      const occupied = playerIn(area);
-      if (occupied && area.age === 14 && state.position > 4) {
-        emit({ kind: 'note', text: 'You hear the patter of little feet.' });
+      const inside = playersIn(area);
+      const occupied = inside.length > 0;
+      for (const pc of inside) {
+        if (area.age === 14 && pc.ch.position > 4) k.withPlayer(pc, () => emit({ kind: 'note', text: 'You hear the patter of little feet.' }));
       }
       if (!occupied || area.age >= 15) {
         resetArea(area);
@@ -373,19 +374,28 @@ export function installWorld(k) {
       }
     };
     walk(ground, 'room');
-    walk(state.inventory, 'carried');
-    walk(state.equipment.filter(Boolean), 'carried');
+    // What each player carries: `where` is whose it is.
+    for (const pc of k.players) {
+      walk(pc.ch.inventory, pc);
+      walk(pc.ch.equipment.filter(Boolean), pc);
+    }
     for (const { obj, where, list } of timed) {
       if (--obj.timer > 0) continue;
       const text = `${capitalise(obj.name)} ${DECAY[obj.itemType] || 'vanishes.'}`;
-      if (where === 'carried') emit({ kind: 'note', text });
-      else if (obj.inRoom !== null) k.toRoom(obj, text, { kind: 'decay', item: obj.name });
+      if (where !== 'room') {
+        k.withPlayer(where, () => {
+          emit({ kind: 'note', text });
+          extract(obj, list, where.ch);
+        });
+        continue;
+      }
+      if (obj.inRoom !== null) k.toRoom(obj, text, { kind: 'decay', item: obj.name });
       extract(obj, list);
     }
   }
 
-  /** handler.c: extract_obj, wherever the thing is. */
-  function extract(obj, list) {
+  /** handler.c: extract_obj, wherever the thing is (`owner` if carried). */
+  function extract(obj, list, owner = k.state) {
     if (obj.inRoom !== null && obj.inRoom !== undefined) {
       const at = obj.at;
       const vnum = obj.inRoom;
@@ -403,8 +413,8 @@ export function installWorld(k) {
     }
     const i = list.indexOf(obj);
     if (i >= 0) list.splice(i, 1);
-    const worn = state.equipment.indexOf(obj);
-    if (worn >= 0) k.unequipChar(state, obj);
+    const worn = owner.equipment.indexOf(obj);
+    if (worn >= 0) k.unequipChar(owner, obj);
   }
 
   // ------------------------------------------------------------- boot ----
@@ -422,7 +432,7 @@ export function installWorld(k) {
     areas,
     /** Reset an area now, by name (or the one you stand in): the debug path to a repopulation. */
     resetArea(name) {
-      const area = areas.find((a) => a.name === (name || areaOf(state.roomVnum)));
+      const area = areas.find((a) => a.name === (name || areaOf(k.state.roomVnum)));
       if (!area) throw new Error(`resetArea: no area ${JSON.stringify(name)}`);
       resetArea(area);
       return area.name;

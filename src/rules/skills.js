@@ -20,7 +20,10 @@ const MELEE = 3.2;
 const WINDUP = 0.28;
 
 export function installSkills(k) {
-  const { state, emit, game, ctx } = k;
+  const { emit, game, ctx } = k;
+  // Whoever's turn it is (game.js `bind`): Merc's `ch`.
+  let state = k.state;
+  k.onBind((ch) => { state = ch; });
   const { MERC } = game;
   const { POS, isNpc } = MERC;
   const out = (ok, text) => ({ ok, text });
@@ -196,19 +199,19 @@ export function installSkills(k) {
    * One command may wait behind a WAIT_STATE, the way the mud's input buffer
    * holds the next line: pressed early, it goes when the wait runs out.
    */
-  let queued = null;
+  // The line held behind a WAIT_STATE is each player's own (k.pc.queued).
   function use(id) {
     const action = actions().find((a) => a.id === id);
     if (!action) return out(false, 'Huh?');
     if (!action.known) return out(false, `You don't know how to ${action.label}.`);
     if (state.position < POS.RESTING) return out(false, "You can't do that right now.");
-    if (state.wait > 0) { queued = id; return out(true, ''); }
+    if (state.wait > 0) { k.pc.queued = id; return out(true, ''); }
     return action.run();
   }
   k.rules.onWaitOver = () => {
-    if (!queued) return;
-    const id = queued;
-    queued = null;
+    if (!k.pc.queued) return;
+    const id = k.pc.queued;
+    k.pc.queued = null;
     const r = use(id);
     if (r && !r.ok && r.text) emit({ kind: 'note', text: r.text });
   };
