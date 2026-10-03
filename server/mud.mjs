@@ -340,11 +340,14 @@ export async function startMud({
     const sx = x + local.offset;
     // The client stands on build.js's floor; the server's game on the grid.
     const sy = y - w.liftAt(sx, y - 1.72, z);
-    const why = refusal(s, pc, sx, sy, z, now);
+    const judged = judge(s, pc, sx, sy, z, now);
+    const why = judged.why;
     if (why) {
       stats.refused += 1;
       s.refused = (s.refused || 0) + 1;
-      if (s.refused <= 3 || s.refused % 50 === 0) log(`${pc.ch.name}@${s.host}: position refused (${why}), ${s.refused} so far`);
+      if (s.refused <= 3 || s.refused % 50 === 0) {
+        log(`${pc.ch.name}@${s.host}: position refused (${why}) at ${zone} ${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}, ${s.refused} so far`);
+      }
       return resync(s, why);
     }
     pc.position.x = sx; pc.position.y = sy; pc.position.z = z;
@@ -352,25 +355,40 @@ export async function startMud({
     s.zone = zone;
     s.yaw = yaw;
     s.posAt = now;
-    s.navRoom = w.nav.roomAt(sx, sy - 1.72, z);
+    s.navRoom = judged.room;
   }
 
-  /** Why a reported point cannot be where this player is, or null. */
-  function refusal(s, pc, x, y, z, now) {
+  /**
+   * Whether a reported point can be where this player is: { room } when it
+   * can -- the room it counts as standing in -- or { why } when it cannot.
+   */
+  function judge(s, pc, x, y, z, now) {
     const feet = y - 1.72;
-    const vnum = w.nav.roomAt(x, feet, z);
-    if (vnum === undefined || !w.built.rooms.has(vnum)) return 'off the map';
+    let vnum = w.nav.roomAt(x, feet, z);
+    if (vnum === undefined || !w.built.rooms.has(vnum)) return { why: 'off the map' };
     // The room of the last report believed, by the same rule as this one's;
     // after a jump, the room the server put the player in.
     const from = s.navRoom ?? pc.ch.roomVnum;
+    if (vnum !== from) {
+      const place = w.placeAt(x, feet, z);
+      if (place && place.exact) {
+        // Where two streets cross, the cell is on both: this room's, or a neighbour's, first.
+        if (place.candidates.has(from)) vnum = from;
+        else vnum = [...place.candidates].find((v) => adjacent(pc.ch, from, v)) ?? vnum;
+      } else if (place && [...place.near].some((v) => v === from || adjacent(pc.ch, from, v))) {
+        // Off the street, on a corner a glide cut: still where it was, if the
+        // street it is beside is one of this room's or a neighbour's.
+        vnum = from;
+      }
+    }
     // Just placed (enter, teleport, recall): the next report is the first.
-    if (s.posAt === null) return vnum === from || adjacent(pc.ch, from, vnum) ? null : `#${vnum} is not #${from}`;
-    if (vnum !== from) return adjacent(pc.ch, from, vnum) ? null : `no open way from #${from} to #${vnum}`;
+    if (s.posAt === null) return vnum === from || adjacent(pc.ch, from, vnum) ? { room: vnum } : { why: `#${vnum} is not #${from}` };
+    if (vnum !== from) return adjacent(pc.ch, from, vnum) ? { room: vnum } : { why: `no open way from #${from} to #${vnum}` };
     const dt = Math.max(0.05, (now - s.posAt) / 1000);
     const d = Math.hypot(x - pc.position.x, z - pc.position.z);
-    if (d > MAX_SPEED * dt + SPEED_SLACK) return `${d.toFixed(1)} m in ${dt.toFixed(2)} s`;
-    if (Math.abs(y - pc.position.y) > MAX_CLIMB * dt + SPEED_SLACK) return `${Math.abs(y - pc.position.y).toFixed(1)} m up or down in ${dt.toFixed(2)} s`;
-    return null;
+    if (d > MAX_SPEED * dt + SPEED_SLACK) return { why: `${d.toFixed(1)} m in ${dt.toFixed(2)} s` };
+    if (Math.abs(y - pc.position.y) > MAX_CLIMB * dt + SPEED_SLACK) return { why: `${Math.abs(y - pc.position.y).toFixed(1)} m up or down in ${dt.toFixed(2)} s` };
+    return { room: vnum };
   }
 
   /** move_char's question: an exit from `from` to `to`, not shut -- unless you pass doors. */

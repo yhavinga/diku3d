@@ -33,6 +33,34 @@ if (!(await page.isHidden('#connect-new'))) {
 await page.waitForFunction(() => window.diku && window.diku.link, null, { timeout: 10000 });
 await page.waitForTimeout(2000);
 
+/**
+ * Walk the page's player to room `to` by typed directions, a room at a time,
+ * the way a player would -- the server refuses a jump (server/mud.mjs
+ * `position`), so a driver cannot simply look() its way across the map.
+ */
+const walkTo = (page, to) => page.evaluate(async (to) => {
+  const { game, world, built } = window.diku;
+  const open = (e) => e && !e.offMap && built.rooms.has(e.to) && !built.rooms.get(e.to).unbuilt && !(e.locks & 2);
+  for (let guard = 0; guard < 60 && game.state.roomVnum !== to; guard++) {
+    const from = game.state.roomVnum;
+    const back = new Map([[from, null]]);
+    const queue = [from];
+    while (queue.length && !back.has(to)) {
+      const v = queue.shift();
+      world.rooms.get(v).exits.forEach((e, d) => { if (open(e) && !back.has(e.to)) { back.set(e.to, [v, d]); queue.push(e.to); } });
+    }
+    if (!back.has(to)) throw new Error(`walkTo: no open way from #${from} to #${to}`);
+    let v = to;
+    while (back.get(v)[0] !== from) v = back.get(v)[0];
+    const dir = back.get(v)[1];
+    game.interpret(['north', 'east', 'south', 'west', 'up', 'down'][dir]);
+    const until = performance.now() + 8000;
+    while (game.state.roomVnum === from && performance.now() < until) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return game.state.roomVnum;
+}, to);
+
 // The weakest mobile standing in the drawn zone, and a step beside it.
 const target = await page.evaluate(() => {
   const { game } = window.diku;
@@ -42,6 +70,8 @@ const target = await page.evaluate(() => {
   return { i, name: s.proto.short, level: s.proto.level, room: s.roomVnum, at: { ...s.figure.at } };
 });
 console.log('target', JSON.stringify(target));
+await page.evaluate(() => { window.diku.state.paused = false; });
+console.log('walked to', await walkTo(page, target.room));
 const result = await page.evaluate(async (t) => {
   const { game } = window.diku;
   const said = [];

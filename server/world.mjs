@@ -94,8 +94,60 @@ export function bootWorld(root, { log = () => {} } = {}) {
     return z.nav;
   };
 
+  /**
+   * What the layout says of a server point: `exact` when it lies in a room's
+   * own cell or a street's, and `near`, every room whose cell -- or whose
+   * street -- is that cell or one beside it. A glide cuts the corners of a
+   * bent street, and there nav's `roomAt` falls back to the nearest room
+   * centre, which can be a room the street never meets.
+   */
+  const placeAt = (x, y, z) => {
+    const zone = zoneAtX(x);
+    if (!zone) return null;
+    const L = zone.layout;
+    const level = Math.round(y / LEVEL_H);
+    const cx = Math.round((x - zone.offset) / CELL);
+    const cz = Math.round(z / CELL);
+    const exact = L.at(level, cx, cz) !== undefined || !!L.passageAt(level, cx, cz);
+    // Every room this point could be standing in: the room whose cell it is,
+    // and the nearer end of every street through the cell -- streets cross,
+    // and layout.passageAt keeps only one of them.
+    const candidates = new Set();
+    if (L.at(level, cx, cz) !== undefined) candidates.add(L.at(level, cx, cz));
+    for (const street of streetsAt(zone).get(`${level},${cx},${cz}`) || []) {
+      if (!street.to) { candidates.add(street.from.vnum); continue; }
+      const da = (street.from.x * CELL + zone.offset - x) ** 2 + (street.from.z * CELL - z) ** 2;
+      const db = (street.to.x * CELL + zone.offset - x) ** 2 + (street.to.z * CELL - z) ** 2;
+      candidates.add(da <= db ? street.from.vnum : street.to.vnum);
+    }
+    const near = new Set();
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const room = L.at(level, cx + dx, cz + dz);
+        if (room !== undefined) near.add(room);
+        const street = L.passageAt(level, cx + dx, cz + dz);
+        if (street) { near.add(street.from.vnum); if (street.to) near.add(street.to.vnum); }
+      }
+    }
+    return { exact, near, candidates };
+  };
+  /** Per zone, every street through each cell: "level,x,z" -> [link]. */
+  const streetsAt = (zone) => {
+    if (!zone.streets) {
+      zone.streets = new Map();
+      for (const link of zone.layout.links) {
+        for (const c of link.path || []) {
+          const key = `${link.from.level},${c.x},${c.z}`;
+          if (!zone.streets.has(key)) zone.streets.set(key, []);
+          zone.streets.get(key).push(link);
+        }
+      }
+    }
+    return zone.streets;
+  };
+
   return {
-    world, plan, zones, byId, built, zoneOfVnum, zoneAtX, lifts, liftAt,
+    world, plan, zones, byId, built, zoneOfVnum, zoneAtX, lifts, liftAt, placeAt,
     layout: { links, cells: new Map() },
     nav: compositeNav({ zones, zoneOfVnum, zoneAtX, navOf }),
     /** A client's zone-local point into the server's frame. */
