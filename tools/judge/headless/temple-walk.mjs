@@ -131,10 +131,16 @@ h = await settleCrossing();
 rows = await trace();
 await check('walk: through the doorway into #3700', h.room === 3700 && h.zone !== homeZone, { room: h.room, zone: h.zone, highest: top(rows) });
 
-// 2. Back down: PgDn in the Mud School stands you on the landing, facing down.
-await page.keyboard.press('PageDown');
-h = await waitCross(h.zone);
-await check('PgDn from #3700: arrive in #3001 on the landing', h.room === 3001 && Math.abs(h.feet - landing) < 0.05
+// 2. Back down, walked: the Mud School's way down is a shaft in its floor;
+// walking at it takes you down, and you arrive on the temple's landing at
+// the head of the steps, facing down them.
+const shaft = await page.evaluate(() => window.diku.built.decor.find((o) => o.kind === 'gateSign' && o.text === 'down'
+  && Math.hypot(o.x - window.diku.built.rooms.get(3700).center.x, o.z - window.diku.built.rooms.get(3700).center.z) < 9));
+await check('#3700 has a way down to walk into', !!shaft, shaft);
+await face(shaft.x, shaft.z);
+await hold(4000, (s) => s.crossing);
+h = await settleCrossing();
+await check('walk into #3700\'s shaft: arrive in #3001 on the landing', h.room === 3001 && Math.abs(h.feet - landing) < 0.05
   && Math.hypot(h.x - sill.x, h.z - sill.z) < 0.3, h);
 await trace();
 h = await hold(6000, (s) => Math.abs(s.feet - floor) < 0.02 && Math.hypot(s.x - foot.x, s.z - foot.z) < 0.6);
@@ -166,9 +172,11 @@ const climbed = rows.filter((r) => r[5] === homeZone);
 await check('PgUp: up the steps (landing reached before the crossing) into #3700', h.room === 3700 && top(climbed) > landing - 0.05,
   { room: h.room, highest: top(climbed) });
 
-// 5. Typed `up`, after coming back down the same way.
+// 5. Typed `up`, after coming back down with PgDn.
 await page.keyboard.press('PageDown');
 h = await waitCross(h.zone);
+await check('PgDn from #3700: arrive in #3001 on the landing', h.room === 3001 && Math.abs(h.feet - landing) < 0.05
+  && Math.hypot(h.x - sill.x, h.z - sill.z) < 0.3, h);
 await page.evaluate(() => { const c = window.diku.built.rooms.get(3001).center; window.diku.player.spawn(c.x - 2, c.y, c.z + 2, 0); });
 await page.waitForTimeout(300);
 await trace();
