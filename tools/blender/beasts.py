@@ -1279,7 +1279,14 @@ def feline():
                 patch=stripes, h=0.0028, tris=2800,
                 gait=dict(walk_stride=0.28, walk_frames=24, walk_duty=0.62, lift=0.03,
                           run_stride=0.75, run_frames=12, run_duty=0.33, run_lift=0.05,
-                          gallop="rotary", wag=6.0, idle_wag=1, tail_pitch=8.0, lie=0.055, arch=10.0))
+                          gallop="rotary", wag=6.0, idle_wag=1, tail_pitch=8.0, lie=0.055, arch=10.0,
+                          sit=48.0, sit_back=0.3,
+                          loaf=dict(hind=(-40, 80, -130, 90), fore=(30, -120, 0, 90), lie=0.065),
+                          groom_paw=dict(neck=34.0, head=30.0),
+                          hiss=dict(pelvis=12.0, hump=8.0, chest=45.0, lift=0.12, neck=22.0, head=-14.0,
+                                    tail=(85, -5, -10, -12, -10)),
+                          tail_wrap=[(-55, 0), (-20, 25), (0, 35), (0, 35), (0, 30)],
+                          pastimes=["haunch", "groom", "loaf", "stretch", "hiss"]))
 
 
 def rodent():
@@ -2417,7 +2424,7 @@ def songbird():
 # its own track.
 
 
-def serpent_bones(n, length, radius_at, head_len, jaw=True):
+def serpent_bones(n, length, radius_at, head_len, jaw=True, tongue=False):
     """Neck at the origin's front; `n` body bones running back to the tail
     tip, the head forward of the neck. Returns (bones, joint positions)."""
     front = length * 0.5
@@ -2431,14 +2438,19 @@ def serpent_bones(n, length, radius_at, head_len, jaw=True):
     b.append(("head", P(0, front, radius_at(0)), P(0, front + head_len, radius_at(0) * 0.8), "body1"))
     if jaw:
         b.append(("jaw", P(0, front + head_len * 0.1, radius_at(0) * 0.55), P(0, front + head_len * 0.92, radius_at(0) * 0.45), "head"))
+    if tongue:
+        # Lying in the floor of the mouth, on the head and not the jaw: a
+        # snake puts its tongue out through the notch in its lip with the
+        # mouth shut.
+        b.append(("tongue", P(0, front + head_len * 0.3, radius_at(0) * 0.62), P(0, front + head_len * 0.8, radius_at(0) * 0.6), "head"))
     return b, joints
 
 
-def serpent(name, archetype, length, girth, n, head_len, h, tris, gait, head=True, rings=0.0, mask=None):
+def serpent(name, archetype, length, girth, n, head_len, h, tris, gait, head=True, rings=0.0, mask=None, tongue=False):
     """A snake (or a worm, head=False) as one tube of round cones joint to
     joint. `girth(u)` is the radius at fraction u from neck (0) to tail (1)."""
     ground = lambda u: girth(u) * 0.82
-    bones, joints = serpent_bones(n, length, ground, head_len, jaw=head)
+    bones, joints = serpent_bones(n, length, ground, head_len, jaw=head, tongue=tongue)
     body = []
     for i in range(n):
         u0, u1 = i / n, (i + 1) / n
@@ -2484,11 +2496,21 @@ def serpent(name, archetype, length, girth, n, head_len, h, tris, gait, head=Tru
             out.append(solid_part(mouth, h, 100, "mouth", "horn", (0.35, 0.12, 0.12)))
             out += eye_pair(body_solids, (r * 2.5, front + head_len * 0.55, r * 1.05), (-1.0, 0.0, -0.1), r * 0.26,
                             colour=(0.3, 0.24, 0.05), sink=r * 0.12, h=h * 0.5, tris=60)
+            if tongue:
+                # Forked and nearly black, hidden in the mouth until it flicks.
+                z = ground(0) * 0.62
+                tw = r * 0.09
+                f0, f1 = front + head_len * 0.32, front + head_len * 0.78
+                tg = [cone(P(0, f0, z), P(0, f1, z), tw, tw * 0.8, "tongue", blend=tw * 0.4)]
+                for sd in (1, -1):
+                    tg.append(cone(P(0, f1 - tw, z), P(sd * tw * 2.6, f1 + head_len * 0.16, z - tw * 0.5), tw * 0.7,
+                                   tw * 0.25, "tongue", blend=tw * 0.2, group="f%d" % sd))
+                out.append(solid_part(tg, tw * 0.45, 140, "tongue", "horn", (0.12, 0.05, 0.07)))
         return out
 
     return dict(name=name, archetype=archetype, bones=bones, body=body, masks=masks, parts=parts,
                 patch=mask, h=h, tris=tris, mat="scales", gait=gait, clips=serpent_clips,
-                joints=joints, head_len=head_len, n=n)
+                joints=joints, head_len=head_len, n=n, girth=girth)
 
 
 def snake():
@@ -2497,7 +2519,8 @@ def snake():
     L = 3.0
     girth = lambda u: 0.022 + 0.052 * math.sin(math.pi * min(1.0, (u + 0.12) / 1.02)) ** 0.8 * (1 - u) ** 0.35
     return serpent("beast_snake", "serpent", L, girth, 16, 0.13, 0.006, 3000,
-                   dict(stride=1.0, frames=40, amp=0.16, lift=0.0), mask=spots(0.09, seed=17))
+                   dict(stride=1.0, frames=40, amp=0.16, lift=0.0, pastimes=["coil", "taste", "sway", "hiss"]),
+                   mask=spots(0.09, seed=17), tongue=True)
 
 
 def worm():
@@ -2574,7 +2597,7 @@ def serpent_clips(arm, spec):
 
     lengths = [poser.length[nm] for nm in names]
 
-    def pose_chain(pts, head_pitch=0.0, head_yaw=0.0, jaw=0.0, roll=0.0, anchor=None):
+    def pose_chain(pts, head_pitch=0.0, head_yaw=0.0, jaw=0.0, roll=0.0, anchor=None, tongue=0.0):
         """Bases for the chain lying along `pts`, then the head and jaw by FK.
         The bones keep their lengths, so the chain is rebuilt joint to joint
         along the directions `pts` give and then slid so that joint `anchor`
@@ -2615,7 +2638,9 @@ def serpent_clips(arm, spec):
                 chain = M[b.parent.name] @ rest[b.parent.name].inverted() @ rest[nm]
                 basis[nm] = ((chain.inverted() @ want).to_quaternion(), None)
             M[nm] = want
-        for nm, ang in (("head", (head_pitch, head_yaw, 0)), ("jaw", (-jaw, 0, 0))):
+        # A positive pitch drops the front of a bone: the jaw opens downwards.
+        # (It was negated, and every strike opened it up through the skull.)
+        for nm, ang in (("head", (head_pitch, head_yaw, 0)), ("jaw", (jaw, 0, 0))):
             if nm not in bones:
                 continue
             parent = arm.data.bones[nm].parent.name
@@ -2623,12 +2648,24 @@ def serpent_clips(arm, spec):
             q = fk_quat(ang)
             basis[nm] = (q, None)
             M[nm] = chain @ q.to_matrix().to_4x4()
+        if "tongue" in bones:
+            # Keyed in every clip, in or out, so no clip leaves it hanging
+            # out for the next one to inherit.
+            basis["tongue"] = (mathutils.Quaternion(), V((0, tongue * spec["head_len"] * 0.62, 0)))
         poser.M = M
         return basis
 
     report = {}
     frames = g["frames"]
     start = arc_w[np.searchsorted(ys, 0.0)] + (joints[0] - joints[-1]) * 0.0
+
+    def flicks(t, at, w=0.011):
+        """The tongue out and back in a fiftieth of a cycle, at each of `at`."""
+        out = 0.0
+        for c in at:
+            d = (t - c + 0.5) % 1.0 - 0.5
+            out = max(out, math.exp(-(d / w) ** 2))
+        return out
 
     def keyed(name, total, fn, step=1):
         act = new_action(arm, name, total)
@@ -2672,8 +2709,9 @@ def serpent_clips(arm, spec):
         pts = [p + offset for p in pts]
         breath = 0.003 * wave(3 * t)
         pts = [p + V((0, 0, breath * math.sin(math.pi * i / n))) for i, p in enumerate(pts)]
-        return pose_chain(pts, head_pitch=-8 + 4 * wave(2 * t), head_yaw=20 * wave(t, 0.1), anchor=n // 2)
-    keyed("idle", 120, idle, step=2)
+        return pose_chain(pts, head_pitch=-8 + 4 * wave(2 * t), head_yaw=20 * wave(t, 0.1), anchor=n // 2,
+                          tongue=flicks(t, (0.3, 0.34, 0.38)))
+    keyed("idle", 120, idle, step=1 if "tongue" in bones else 2)
 
     # -- attack: the front of the body draws back into an S and strikes.
     def attack(t):
@@ -2727,10 +2765,128 @@ def serpent_clips(arm, spec):
                           roll=100 * ease((t - 0.3) / 0.5), anchor=n // 2)
     keyed("death", 45, death)
 
+    if g.get("pastimes"):
+        serpent_pastimes(spec, g, keyed, lay, pose_chain, xs_i, arc_i, base_arc, joints, seg, n, flicks)
+
     report["clips"] = clip.report
     report["overreach"] = {}
     report["walk"] = 0.0
     return report
+
+
+def serpent_pastimes(spec, g, keyed, lay, pose_chain, xs_i, arc_i, base_arc, joints, seg, n, flicks):
+    """What a snake does with itself (motion.js PASTIMES plays them):
+
+    coil   -- the python that 'rests in a coil here': the body wound flat in
+              a spiral round itself, the head laid on top of the coils.
+    taste  -- head up off the floor, still, the tongue going in and out:
+              the snake that 'watches you with caution'.
+    sway   -- the front of the body reared in an S and swaying, the head
+              held level: 'it sways back and forth contemplating whether or
+              not to eat you'.
+    hiss   -- a display: reared up quickly, drawn back, the mouth open
+              wide, and down again. 'A brown snake hisses at you.'"""
+    names = g["pastimes"]
+    girth = spec["girth"]
+    front_n = max(3, n // 3)
+    scale = joints[0] / 1.5
+
+    def settle(pts):
+        offset = V((0, -joints[0], 0)) - pts[0]
+        offset.x = offset.z = 0.0
+        return [p + offset for p in pts]
+
+    if "coil" in names:
+        # Joints seg apart along a flat spiral wound from the tail tip at the
+        # middle outwards; the front `up` joints leave the outer turn and come
+        # back in across the top of the coils, the head resting on them.
+        r_in = girth(1.0) * 3.0
+        pitch = max(girth(u / 10.0) for u in range(11)) * 2.05
+        up = 5
+        rr = lambda a: r_in + pitch * a / (2 * math.pi)
+        a, d = 0.0, 0.0
+        marks = [0.0]
+        while len(marks) <= n - up:
+            a2 = a + 0.002
+            d += math.hypot(rr(a2) - rr(a), rr(a) * (a2 - a))
+            a = a2
+            if d >= seg * len(marks):
+                marks.append(a)
+        # marks[0] is the tail tip (joint n), the last the joint `up`.
+        flat = [V((rr(m) * math.cos(m), rr(m) * math.sin(m), 0.0)) for m in marks]
+        mid = sum(flat, V((0, 0, 0))) / len(flat)
+        mid.z = 0.0
+        flat = [p - mid for p in flat]
+        heights = [girth(i / n) * 0.82 for i in range(n + 1)]
+        outer = flat[-1]
+        top = max(girth(u / 10.0) for u in range(11)) * 1.7
+
+        def coil(t):
+            breath = 0.004 * wave(2 * t)
+            lift = 0.03 * ease((t - 0.55) / 0.08) * (1 - ease((t - 0.8) / 0.08))
+            pts = [None] * (n + 1)
+            for i in range(up, n + 1):
+                p = flat[n - i]
+                pts[i] = V((p.x, p.y, heights[i] + breath * math.sin(math.pi * i / n)))
+            # Up onto the coils: the front carries on round the way the
+            # spiral turns, drawn in to lie along the top of the turns below.
+            a0 = marks[-1]
+            r_mid = (r_in + rr(a0)) * 0.5
+            ang = a0
+            for i in range(up - 1, -1, -1):
+                k = (up - i) / up
+                r = lerp(rr(a0), r_mid, k)
+                ang += seg / r
+                cand = V((r * math.cos(ang) - mid.x, r * math.sin(ang) - mid.y,
+                          heights[i] + top * min(1.0, k * 1.6) + (lift if i == 0 else 0.0)))
+                pts[i] = pts[i + 1] + (cand - pts[i + 1]).normalized() * seg
+            return pose_chain(pts, head_pitch=8 - 30 * lift / 0.03, head_yaw=10 * wave(t, 0.3),
+                              tongue=flicks(t, (0.62, 0.66)))
+        keyed("coil", 180, coil, step=1)
+
+    if "taste" in names:
+        def taste(t):
+            look = 12 * wave(t, 0.1)
+
+            def lift(i):
+                return 0.07 * scale * max(0.0, 1 - i / 3.0) ** 1.4
+            pts = settle(lay(base_arc, xs_i, arc_i, lift=lift))
+            return pose_chain(pts, head_pitch=-6, head_yaw=look, anchor=n // 2,
+                              tongue=flicks(t, (0.1, 0.15, 0.2, 0.45, 0.5, 0.78, 0.83, 0.88)))
+        keyed("taste", 120, taste)
+
+    def reared(cock, side, draw):
+        """The front third up in an S: `cock` how far, `side` the sway in
+        metres at the head, `draw` the head drawn back."""
+        def lift(i):
+            if i > front_n:
+                return 0.0
+            k = 1 - i / front_n
+            return 0.46 * cock * k ** 0.9 * scale
+        pts = settle(lay(base_arc, xs_i, arc_i, lift=lift))
+        for i in range(front_n + 1):
+            k = 1 - i / front_n
+            # Drawn back over itself into a question mark, and kinked to one
+            # side in an S as seen from above.
+            pts[i] = pts[i] + V((0.14 * cock * math.sin(math.pi * k * 1.5) * scale + side * k ** 2,
+                                 (0.22 * cock * math.sin(math.pi * k) ** 2 + draw * k) * scale, 0))
+        return pts
+
+    if "sway" in names:
+        def sway(t):
+            side = 0.07 * scale * wave(t)
+            pts = reared(0.85, side, 0.0)
+            return pose_chain(pts, head_pitch=24, head_yaw=-14 * wave(t), anchor=n // 2,
+                              tongue=flicks(t, (0.2, 0.25, 0.7, 0.75)))
+        keyed("sway", 150, sway)
+
+    if "hiss" in names:
+        def hiss(t):
+            k = ease(t / 0.16) * (1 - ease((t - 0.8) / 0.2))
+            gape = ease((t - 0.18) / 0.08) * (1 - ease((t - 0.7) / 0.08))
+            pts = reared(k, 0.0, 0.05 * gape + 0.01 * wave(5 * t) * gape)
+            return pose_chain(pts, head_pitch=26 * k - 6 * gape, jaw=58 * gape, anchor=n // 2)
+        keyed("hiss", 75, hiss)
 
 
 def dragon():
@@ -3363,12 +3519,13 @@ def quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pi
 
     sit = g.get("sit", 44.0)
     if "haunch" in names or "howl" in names:
-        drop, srot, sik = sit_drop(poser, rest, sit, height * 0.12)
+        back_ = g.get("sit_back", 0.12)
+        drop, srot, sik = sit_drop(poser, rest, sit, height * back_)
 
         def sik_at(k):
             # Forefeet a little back under the chest; the hind feet come
             # forward under the hips with the hocks laid down on the floor.
-            return {leg: (planted(rest, leg, fwd=-height * 0.12 * k) if leg.startswith("fore")
+            return {leg: (planted(rest, leg, fwd=-height * back_ * k) if leg.startswith("fore")
                           else planted(rest, leg, fwd=height * 0.18 * k, meta=70 * k)) for leg in rest}
 
         def seated(t, k, up=0.0):
@@ -3382,7 +3539,17 @@ def quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pi
             for n in necks:
                 fk[n] = ((sit * 0.55 * k - up * 0.6) / len(necks), 0, 0)
             fk["head"] = (sit * 0.35 * k - up * 0.4, 0, 0)
-            fk.update(tail_wave(tails, t, 4 * k, freq=1, pitch=tail_pitch * (1 - k) + 25 * k))
+            wrap = g.get("tail_wrap")
+            if wrap:
+                # A sitting cat's tail goes down to the floor and round the
+                # feet: the root bends down, the rest curls forward along the
+                # ground, the tip lifting and settling.
+                for i, n in enumerate(tails):
+                    p_, y_ = wrap[min(i, len(wrap) - 1)]
+                    tip = 6 * wave(t, 0.2) if i == len(tails) - 1 else 0.0
+                    fk[n] = (lerp(tail_pitch, p_, k), y_ * k + tip * k, 0)
+            else:
+                fk.update(tail_wave(tails, t, 4 * k, freq=1, pitch=tail_pitch * (1 - k) + 25 * k))
             return fk, rot, ik
 
     if "haunch" in names:
@@ -3477,6 +3644,125 @@ def quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pi
             loc = V((0, -0.02 * shove * height, down["drop"]))
             return dict(fk=fk, loc=loc, rot=down["rot"], ik={leg: planted(rest, leg) for leg in rest})
         clip.run("root", 120, root, step=2)
+
+    # -- the cat's: what a cat does with an afternoon. The white cat 'is here
+    # preening its fur', Azreal 'licking himself', the grey cat 'lounging
+    # lazily', and the alley cat and the black cat hiss at you.
+    if "groom" in names:
+        # Sat on its haunches, one forepaw up to the mouth and licked, then
+        # wiped over the face from behind the ear to the whiskers, three
+        # times, and licked again. The paw is an IK target, so it leaves the
+        # floor and comes back to the very spot it left.
+        gr = g.get("groom_paw", {})
+
+        def groom(t):
+            k = ease(t / 0.14) * (1 - ease((t - 0.88) / 0.12))
+            fk, rot, ik = seated(t, k)
+            up = ease((t - 0.14) / 0.1) * (1 - ease((t - 0.8) / 0.08))
+            lick = ease((t - 0.22) / 0.06) * (1 - ease((t - 0.46) / 0.05)) + \
+                ease((t - 0.7) / 0.04) * (1 - ease((t - 0.78) / 0.04))
+            wipe = ease((t - 0.47) / 0.04) * (1 - ease((t - 0.68) / 0.04))
+            # Licks are quick upward strokes of the head down the inside of the
+            # paw; wipes are the paw itself going round over the ear.
+            stroke = max(0.0, wave(4.5 * t)) ** 1.5
+            rub = 0.5 + 0.5 * wave(3.0 * (t - 0.47) / 0.21 * 0.21 * 4.7)
+            for n in necks:
+                fk[n] = (fk[n][0] + (gr.get("neck", 18.0) * lick + 6 * wipe) / len(necks), 0, 0)
+            fk["head"] = (fk["head"][0] + gr.get("head", 22.0) * lick - 8 * stroke * lick - 6 * wipe,
+                          -14 * lick - 12 * wipe, -18 * wipe * rub)
+            # Where the paw goes is found from where the head is: the pose is
+            # solved without that leg, and the target set by the nose.
+            base = planted(rest, "fore.L", fwd=-height * back_ * k)
+            free = {leg: v for leg, v in ik.items() if leg != "fore.L"}
+            poser.solve(fk, V((0, 0, -drop * k)), rot, free)
+            nose = poser.world_of("head")
+            hd = poser.M["head"]
+            lick_at = nose + hd.col[2].xyz.normalized() * gr.get("under", 0.025) - hd.col[1].xyz.normalized() * gr.get("behind", 0.02)
+            ear = nose - hd.col[1].xyz.normalized() * gr.get("ear", 0.06) + V((gr.get("side", 0.025), 0, 0))
+            wipe_at = ear.lerp(lick_at, rub)
+            at = lick_at.lerp(wipe_at, wipe)
+            tip = V(base[0]).lerp(at, up)
+            ik["fore.L"] = (tip, rot_x(rest["fore.L"]["meta"], -gr.get("meta", 120.0) * up),
+                            rot_x(rest["fore.L"]["toe"], -gr.get("toe", 100.0) * up))
+            if "jaw" in bones:
+                fk["jaw"] = (-9 * lick * stroke, 0, 0)
+            fk.update(sides((-14 * wipe, 0, 0)))
+            loc = V((0, 0, -drop * k))
+            return dict(fk=fk, loc=loc, rot=rot, ik=ik)
+        clip.run("groom", 180, groom)
+
+    if "loaf" in names:
+        # Lying down with the paws tucked or out in front, the tail round
+        # beside it, the head up -- and now and then nodding off, the head
+        # sinking and coming back up. Legs by FK: nothing of it stands.
+        lo_ = g.get("loaf", {})
+        root_h = poser.rest["pelvis"].translation.z
+
+        def loaf(t):
+            breath = wave(2 * t)
+            doze = ease((t - 0.35) / 0.12) * (1 - ease((t - 0.62) / 0.06))
+            look = hold_steps_(t, [(0.08, 14.0), (0.25, -10.0), (0.7, 6.0), (0.88, 0.0)])
+            loc = V((0, 0, -(root_h - lo_.get("lie", 0.07)) + 0.002 * breath))
+            fk = {"pelvis": (lo_.get("pelvis", 0.0), 0, 0), "spine": (-1.0 * breath, 0, 0),
+                  "chest": (lo_.get("chest", -4.0) + 1.0 * breath, 0, 0)}
+            for n in necks:
+                fk[n] = ((lo_.get("neck", -28.0) + 14 * doze) / len(necks), look * 0.5 / len(necks), 0)
+            fk["head"] = (lo_.get("head", 18.0) + 16 * doze, look * 0.5, 0)
+            for i, n in enumerate(tails):
+                p_, y_ = lo_.get("tail", [(-25, 10), (0, 25), (0, 30), (0, 30), (0, 25)])[min(i, 4)]
+                fk[n] = (p_, y_ + (8 * wave(t, 0.1) if i == len(tails) - 1 else 0), 0)
+            fk.update(sides((-10 * doze, 0, 0)))
+            for leg, info in poser.legs.items():
+                up, lo, meta, toe = info["chain"]
+                key = "hind" if info["kind"] == "hind" else "fore"
+                a = lo_.get(key, (-50, 125, -85, 5) if key == "hind" else (25, -95, -5, 5))
+                fk[up], fk[lo], fk[meta], fk[toe] = (a[0], 0, 0), (a[1], 0, 0), (a[2], 0, 0), (a[3], 0, 0)
+            return dict(fk=fk, loc=loc, ik=None)
+        clip.run("loaf", 180, loaf, step=2)
+
+    if "stretch" in names:
+        # The bow: forepaws where they stand, chest down to them and the
+        # elbows out, rump and tail up, a yawn at the bottom of it.
+        st = g.get("stretch", {})
+
+        def stretch(t):
+            k = ease(t / 0.3) * (1 - ease((t - 0.7) / 0.3))
+            yawn = ease((t - 0.32) / 0.1) * (1 - ease((t - 0.58) / 0.1))
+            rot = mathutils.Quaternion(V((1, 0, 0)), math.radians(st.get("pitch", 22.0) * k))
+            fk = {"spine": (st.get("spine", -10.0) * k, 0, 0), "chest": (st.get("chest", 6.0) * k, 0, 0)}
+            for n in necks:
+                fk[n] = (-st.get("neck", 30.0) * k / len(necks), 0, 0)
+            fk["head"] = (-st.get("head", 8.0) * k - 22 * yawn, 0, 0)
+            if "jaw" in bones:
+                fk["jaw"] = (-st.get("yawn", 38.0) * yawn, 0, 0)
+            fk.update(sides((12 * yawn, 0, 0)))
+            fk.update(tail_wave(tails, t, 3, pitch=tail_pitch + 30 * k))
+            ik = {leg: planted(rest, leg, fwd=(st.get("reach", 0.0) * k if leg.startswith("fore") else 0.0),
+                               meta=(-st.get("wrist", 40.0) * k if leg.startswith("fore") else 4 * k)) for leg in rest}
+            return dict(fk=fk, loc=V((0, 0, -height * st.get("drop", 0.12) * k)), rot=rot, ik=ik)
+        clip.run("stretch", 120, stretch)
+
+    if "hiss" in names:
+        # The arch: up on stiff legs, the back humped, the head down and the
+        # ears flat, the mouth open, the tail up -- held, then let down.
+        hs = g.get("hiss", {})
+
+        def hiss(t):
+            k = ease(t / 0.14) * (1 - ease((t - 0.8) / 0.2))
+            spit = ease((t - 0.2) / 0.05) * (1 - ease((t - 0.62) / 0.08))
+            rot = mathutils.Quaternion(V((1, 0, 0)), math.radians(-hs.get("pelvis", 24.0) * k))
+            fk = {"spine": (-hs.get("hump", 12.0) * k, 0, 0), "chest": (hs.get("chest", 50.0) * k, 0, 0)}
+            for n in necks:
+                fk[n] = (hs.get("neck", 10.0) * k / len(necks), 0, 0)
+            fk["head"] = (hs.get("head", -6.0) * k - 8 * spit, 0, 0)
+            if "jaw" in bones:
+                fk["jaw"] = (-(30 + 4 * wave(6 * t)) * spit, 0, 0)
+            fk.update(sides((50 * k, 0, 0)))
+            for i, n in enumerate(tails):
+                fk[n] = (lerp(tail_pitch, hs.get("tail", (55, -10, -12, -10, -8))[min(i, 4)], k), 0, 0)
+            ik = {leg: planted(rest, leg, meta=-hs.get("stiff", 12.0) * k) for leg in rest}
+            return dict(fk=fk, loc=V((0, 0, height * hs.get("lift", 0.18) * k)), rot=rot, ik=ik)
+        clip.run("hiss", 75, hiss)
 
 
 def hold_steps_(t, keys, snap=0.05):

@@ -1432,6 +1432,36 @@ const COAT_WORDS = [
   [/\bgreen\b/, 0x3a5a2a], [/\bblue\b/, 0x34506e], [/\b(brass|bronze)\b/, 0x9a7a3a],
 ];
 
+/**
+ * What a creature's own prose says about its temper, for motion.js: whether
+ * it shows you a display when you come close (`alarm`, a clip and metres at
+ * scale 1; null for never) and which of its pastimes it is given to (`odds`,
+ * multipliers). The alley cat 'hisses at you', the white cat 'is here
+ * preening its fur', the grey cat is 'lounging lazily', the python 'rests in
+ * a coil' and the Moria python 'rears its head ... sways back and forth'.
+ * Read off the long description and the look-at text, never the name.
+ */
+const TEMPERS = [
+  [/\bhiss(es|ing)?\b|\bfur up\b|\bspits?\b/, { alarm: ['hiss', 3.0] }],
+  [/\b(preen(s|ing)?|grooming|washing)\b|\blicking (?!(its|his|her) lips)/, { odds: { groom: 5 } }],
+  [/\b(lounging|lazily|lazy|resting|rests|asleep|sleeping|dozing|curled)\b/, { odds: { loaf: 4, coil: 3, bask: 2 } }],
+  [/\bcoil(s|ed)?\b/, { odds: { coil: 6 } }],
+  [/\bsways?\b|\brears? (its|his|her) head\b/, { odds: { sway: 5 } }],
+  [/\b(watch(es|ing)? you|stares?|staring)\b/, { odds: { taste: 2, haunch: 2 } }],
+];
+
+export function temperOf(proto) {
+  const prose = `${proto.long || ''} ${proto.description || ''}`.toLowerCase();
+  let out = null;
+  for (const [re, t] of TEMPERS) {
+    if (!re.test(prose)) continue;
+    out = out || {};
+    if (t.alarm !== undefined) out.alarm = t.alarm;
+    if (t.odds) out.odds = { ...(out.odds || {}), ...t.odds };
+  }
+  return out;
+}
+
 export function beastKind(proto) {
   const words = `${proto.keywords} ${proto.short}`.toLowerCase();
   if (NOT_A_BEAST.test(words)) return null;
@@ -1729,7 +1759,7 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const record = {
     group, headGroup: null, height, scale, mixer, actions, clips, stride,
     hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
-    afloat, indoor,
+    afloat, indoor, temper: temperOf(proto),
   };
   // A bat under a roof hangs from it while it is idle: its `roost` clip,
   // moved up from the height it was authored at (`info.roost`, in the

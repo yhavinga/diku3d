@@ -86,6 +86,17 @@ const PASTIMES = {
   feel: { odds: 3, hold: [4, 10], gap: [1, 4], rate: 2 },
   withdraw: { odds: 1, once: true, gap: [3, 9], rate: 4 },
   quiver: { odds: 2, once: true, gap: [2, 6], rate: 4 },
+  // The cat lies down with its paws tucked and dozes, and stretches; the
+  // snake lies coiled, raises its head to taste the air with its tongue, and
+  // rears up and sways. A hiss is never chosen idly (odds 0): it is what the
+  // alley cat and the snake do when you come close (ALARM, and the prose's
+  // own `temper` in actors.js).
+  loaf: { odds: 2, hold: [12, 40], gap: [3, 8], rate: 1.2 },
+  stretch: { odds: 0.6, once: true, gap: [3, 8], rate: 4 },
+  coil: { odds: 3, hold: [15, 45], gap: [3, 8], rate: 0.8 },
+  taste: { odds: 2, hold: [4, 10], gap: [2, 6], rate: 2.5 },
+  sway: { odds: 1, hold: [5, 12], gap: [3, 8], rate: 1.5 },
+  hiss: { odds: 0, once: true, gap: [2, 5], rate: 6 },
 };
 const PASTIME_NAMES = Object.keys(PASTIMES);
 /**
@@ -94,7 +105,7 @@ const PASTIME_NAMES = Object.keys(PASTIMES);
  * rabbit sits up to see what you are; the lizard answers you with push-ups,
  * which is what a lizard does at anything that comes onto its ground.
  */
-const ALARM = { snail: ['withdraw', 2.2], lagomorph: ['situp', 4.5], lizard: ['display', 3.2] };
+const ALARM = { snail: ['withdraw', 2.2], lagomorph: ['situp', 4.5], lizard: ['display', 3.2], serpent: ['hiss', 2.4] };
 /**
  * people.py's sit, in seconds: the first REST_LOOP of it is at rest and
  * breathing and comes back to its first frame, and SIP is the stretch where
@@ -1489,10 +1500,14 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
         // swings round over a planted foot and drags it (0.3-0.9 m/s,
         // measured, on every guard that stopped to look at the player).
         const rate = turnRate(fig, TURN_STANDING * (m.fighting ? 1.4 : 0.7)) * (m.speed > 0.05 && !m.fighting ? clamp(m.speed / 1.0, 0.25, 1) * 0.4 : 1);
-        const step = turnsInto(fig, yaw + turnStep(m, err, rate, dt)) ? 0 : turnStep(m, err, rate, dt);
-        yaw += step;
-        m.turning = Math.abs(err) > 0.05 ? Math.sign(err) : 0;
-        if (Math.abs(err) < 0.02 && !m.fighting) m.turnTo = null;
+        const want = turnStep(m, err, rate, dt);
+        // A turn the wall will not allow is given up: kept wanted, the feet
+        // shuffled on the spot for good (the alley cat against its wall,
+        // a third of a walk under every pastime it took up).
+        const blocked = turnsInto(fig, yaw + want);
+        yaw += blocked ? 0 : want;
+        m.turning = !blocked && Math.abs(err) > 0.05 ? Math.sign(err) : 0;
+        if ((Math.abs(err) < 0.02 || blocked) && !m.fighting) m.turnTo = null;
       } else m.turning = 0;
       fig.object.rotation.y = yaw;
       if (m.speed > 0) moveAlong(fig, yaw, dt, player);
@@ -2701,7 +2716,10 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       return;
     }
     const own = fig.pastimes && fig.pastimes.length ? fig.pastimes : null;
-    if (own) return pastimeLife(fig, dt, still, own);
+    // Standing its ground and turned to you (game.js's notice is a 'hold'):
+    // no time for a pastime, but exactly the moment for a display.
+    const startled = still || (!m.path && m.speed < 0.05 && !m.fighting && !m.dead && !m.overlay && orderOf(fig).kind === 'hold');
+    if (own) return pastimeLife(fig, dt, still, own, startled);
     const grazer = GRAZERS.test(kind); const sniffer = SNIFFERS.test(kind);
     if (!grazer && !sniffer) return;
     if (fig.graze === undefined) fig.graze = measureGraze(fig, grazer);
@@ -2722,16 +2740,19 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
    * clip is weighted in by animate() as a share of standing still; moving
    * off or a fight puts it down at once.
    */
-  function pastimeLife(fig, dt, still, own) {
+  function pastimeLife(fig, dt, still, own, startled = still) {
     const m = fig.m;
     const g = m.graze || (m.graze = { w: 0, want: 0, next: 0.5 + fig.rand() * 3, name: null });
     g.next -= dt;
     // Startled: someone coming close sets it off at once -- see ALARM.
-    const alarm = ALARM[fig.archetype];
+    // The mobile's own prose can say otherwise: an alley cat that 'hisses at
+    // you' does, a cat in general does not.
+    const temper = fig.temper;
+    const alarm = temper && temper.alarm !== undefined ? temper.alarm : ALARM[fig.archetype];
     if (alarm && fig.actions[alarm[0]]) {
       const near = Math.hypot(_player.x - fig.at.x, _player.z - fig.at.z) < alarm[1] * (fig.scale || 1);
       m.alarmed = Math.max(0, (m.alarmed || 0) - dt);
-      if (near && !m.wasNear && still && m.alarmed <= 0 && g.name !== alarm[0]) {
+      if (near && !m.wasNear && startled && m.alarmed <= 0 && g.name !== alarm[0]) {
         const action = fig.actions[alarm[0]];
         action.time = 0;
         g.name = alarm[0];
@@ -2741,7 +2762,9 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       }
       m.wasNear = near;
     }
-    if (!still) { if (g.want) g.next = Math.max(g.next, 0.6 + fig.rand()); g.want = 0; }
+    // A display already under way plays out while it stands its ground.
+    const showing = g.want && PASTIMES[g.name] && PASTIMES[g.name].once && startled && g.name === (alarm && alarm[0]);
+    if (!still && !showing) { if (g.want) g.next = Math.max(g.next, 0.6 + fig.rand()); g.want = 0; }
     else if (g.next <= 0) {
       if (g.want) {
         g.want = 0;
@@ -2750,13 +2773,14 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       } else {
         let total = 0;
         const odds = own.map((n) => {
-          const o = PASTIMES[n].odds * (PASTIMES[n].once && n === g.name ? 0.25 : 1);
+          const o = PASTIMES[n].odds * (PASTIMES[n].once && n === g.name ? 0.25 : 1) * ((temper && temper.odds && temper.odds[n]) ?? 1);
           total += o;
           return o;
         });
         let r = fig.rand() * total;
-        let pick = own[own.length - 1];
-        for (let i = 0; i < own.length; i++) { r -= odds[i]; if (r <= 0) { pick = own[i]; break; } }
+        let pick = null;
+        for (let i = 0; i < own.length; i++) { if (odds[i] <= 0) continue; pick = own[i]; r -= odds[i]; if (r <= 0) break; }
+        if (!pick) { g.next = 2 + fig.rand() * 4; g.w += clamp(-g.w, -dt, dt); return; }
         const p = PASTIMES[pick];
         const action = fig.actions[pick];
         // A loop picks up wherever it is; a display starts at its beginning
