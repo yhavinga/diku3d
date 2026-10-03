@@ -57,7 +57,7 @@ exits leaves a lane between two terraces, and either way the facades finish
     node tools/layout-check.mjs 3001 midgaard.are  # one, from a given room
     node tools/parse-check.mjs                     # the reader, over everything
 
-The nine areas around Midgaard are the *home zone*. Every other stock area is
+The ten areas around Midgaard are the *home zone*. Every other stock area is
 loaded too — the rules engine runs all 44 in `area.lst`, resets, wandering
 mobiles and all — but each is drawn as a zone of its own (`src/zones.js`): take
 an exit into one (up from the temple into the Mud School, north from Haon Dor
@@ -103,11 +103,13 @@ opening the gates, and a character saved to the browser to continue from.
     node tools/people-check.mjs [--all]   # who every mobile is dressed as
     node tools/noun-check.mjs --placed f  # which nouns in the prose are built
 
-The default world is nine areas and 579 rooms: Midgaard, Haon Dor, the Shire,
+The default world is ten areas and 624 placed rooms: Midgaard, Haon Dor, the Shire,
 the marsh, the troll den, the graveyard, the sewer under the town (down
 through the Dump or the guild wells), the Great Eastern Desert (out through
 the river gate in the east wall) and Raff's Dangerous Neighborhood with its
-No Man's Land (south from inside the East Gate, down Wall Road).
+No Man's Land (south from inside the East Gate, down Wall Road), and
+Miden'nir, which the mud joins to Midgaard twice: east out of the East Gate
+and south over the bridge off the Dump.
 
 ## Controls
 
