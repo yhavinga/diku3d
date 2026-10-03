@@ -156,9 +156,10 @@ for (const area of areas) {
 // the combined graph, a genuinely different path from 43 separate ones (the
 // cross-area exits only resolve when both ends are loaded). So the default
 // set gets its own pass, with the viewer's own start room and cap.
-const DEFAULT_WORLD = ['midgaard.are', 'haon.are', 'shire.are', 'marsh.are',
-  'trollden.are', 'grave.are', 'sewer.are', 'eastern.are', 'hood.are'];
 // The home zone (src/zones.js), which is what main.js lays out by default.
+// It was a copy of the list here, and stayed at nine areas after Miden'nir
+// joined: the cap was being checked against a world 45 rooms smaller.
+const DEFAULT_WORLD = HOME_AREAS;
 const MAX_ROOMS = HOME_MAX_ROOMS;
 const defaultSet = areas.filter((a) => DEFAULT_WORLD.includes(a.file));
 if (defaultSet.length === DEFAULT_WORLD.length) {
