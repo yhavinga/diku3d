@@ -97,11 +97,11 @@ const TRADES = [
   ['knight', W('knights?|paladins?|templars?|crusaders?|cavaliers?|champions?')],
   ['guard', W('guards?|guardsman|guardsmen|cityguards?|soldiers?|watchman|watchmen|sentry|sentries|sentinels?|captains?|sergeants?|warriors?|mercenar(y|ies)|legionnaires?|militia|patrol|trainees?|battle ?masters?|swordsman|swordsmen|fighters?|gladiators?|shiriffs?|sheriffs?|constables?|bodyguards?|adventurers?|veterans?|recruits?|squires?|archers?|bowman|lancers?|infantry|troopers?|wardens?|gatekeepers?')],
   ['mage', W('wizards?|mages?|magicians?|sorcerer|sorceress|sorcerers|warlocks?|witch|witches|enchanter|enchantress|necromancers?|conjurers?|illusionists?|magus|magi|alchemists?|sages?|seers?|mystics?|diviners?|astrologers?|oracles?')],
-  ['priest', W('priests?|priestess|druidess(es)?|clerics?|monks?|acolytes?|nuns?|abbots?|abbess|bishops?|healers?|druids?|chaplains?|friars?|sextons?|shamans?|hermits?|pilgrims?|curates?|deacons?|vicars?|prophets?|templekeeper')],
+  ['priest', W('hierophants?|priests?|priestess|druidess(es)?|clerics?|monks?|acolytes?|nuns?|abbots?|abbess|bishops?|healers?|druids?|chaplains?|friars?|sextons?|shamans?|hermits?|pilgrims?|curates?|deacons?|vicars?|prophets?|templekeeper')],
   ['rogue', W('wanderers?|thief|thieves|rogues?|assassins?|cutpurses?|pickpockets?|bandits?|brigands?|robbers?|highwaym[ae]n|spies|spy|burglars?|smugglers?|dealers?|ruffians?|thugs?|cutthroats?|outlaws?|poachers?|rangers?|hunters?|scouts?|executioners?|headsm[ae]n')],
   ['beggar', W('slaves?|beggars?|vagabonds?|tramps?|drunks?|drunkards?|bums?|hobos?|paupers?|urchins?|lepers?|filthy|wretch(es)?|madm[ae]n|lunatics?|vagrants?|idiots?|fools?')],
   ['smith', W('smiths?|blacksmiths?|weaponsmiths?|armourers?|armorers?|farriers?|tanners?|leather ?workers?|cobblers?|coopers?|masons?|miners?')],
-  ['noble', W('kings?|queens?|princes?|princess(es)?|dukes?|duchess(es)?|lords?|lady|ladies|barons?|baroness(es)?|counts?|countess(es)?|earls?|mayors?|nobles?|nobleman|noblemen|noblewoman|thains?|guildmasters?|chancellors?|magistrates?|judges?|urbanites?|aristocrats?|courtiers?|criers?|diplomats?|ambassadors?|keepers?|masters?|governors?|regents?|emperors?|empress|elders?|chieftains?|chiefs?|heralds?|gods?|goddess(es)?|zeus|odin|hera|apollo|ares|hermes|poseidon|prometheus|hierophant|leaders?|commanders?|generals?|foremen|foreman')],
+  ['noble', W('kings?|queens?|princes?|princess(es)?|dukes?|duchess(es)?|lords?|lady|ladies|barons?|baroness(es)?|counts?|countess(es)?|earls?|mayors?|nobles?|nobleman|noblemen|noblewoman|thains?|guildmasters?|chancellors?|magistrates?|judges?|urbanites?|aristocrats?|courtiers?|criers?|diplomats?|ambassadors?|keepers?|masters?|governors?|regents?|emperors?|empress|elders?|chieftains?|chiefs?|heralds?|gods?|goddess(es)?|zeus|odin|hera|apollo|ares|hermes|poseidon|prometheus|leaders?|commanders?|generals?|foremen|foreman')],
   ['merchant', W('shopkeepers?|shopkeeps?|merchants?|grocers?|bakers?|butchers?|jewell?ers?|traders?|pedlars?|peddlers?|vendors?|tailors?|innkeepers?|barkeeps?|bartenders?|barmen|barman|waiters?|cooks?|chefs?|brewers?|vintners?|apothecar(y|ies)|herbalists?|clerks?|secretar(y|ies)|receptionists?|bankers?|moneychangers?|changers?|storekeepers?|hostelers?|landlords?|tavernkeepers?|fishmongers?|florists?|cartographers?|scribes?|librarians?|teachers?|tutors?|stewards?|butlers?|servants?')],
   ['peasant', W('peasants?|farmers?|labou?rers?|farmhands?|shepherds?|herdsm[ae]n|stablehands?|stableboys?|grooms?|fishermen|fisherman|sailors?|seam[ae]n|gardeners?|bumpkins?|serfs?|porters?|janitors?|sweepers?|lumberjacks?|woodcutters?|woodsm[ae]n|millers?|millworkers?|workers?|carpenters?|gravediggers?|diggers?|boatm[ae]n|ferrym[ae]n|drovers?|carters?|travell?ers?|citizens?|townsm[ae]n|townsfolk|villagers?|locals?|commoners?|youths?|boys?|lads?|m[ae]n|persons?|people|humans?|elves|elf|elven|hobbits?|halflings?|gamgees?|residents?|farmer|peasantry')],
 ];
@@ -118,6 +118,7 @@ const TODDLER = W('toddlers?|infants?|bab(y|ies)|newborns?|babes?');
 const HALFLING = /\b(halflings?|hobbits?)\b/i;
 const DWARF = W('dwarf|dwarves|dwarven|dwarfish');
 const ELF = W('elf|elves|elven|elvish|drow');
+const SELF_OLD = /^\s*(he|she|it) is an? (very |rather |quite )?(old|elderly|aged|ancient|wizened|venerable)(?![-\w])/i;
 const OLD = W('old|elder|elderly|aged|ancient|grey|gray|venerable|wizened|hag|crone|granny|grandmother|grandfather|grandpa|grandma');
 
 /** What an equipped weapon is, from its own keywords. Order matters: a
@@ -254,7 +255,9 @@ export function personOf(proto, ITEM, instance = 0) {
     file: 'person_male', arch: 'peasant', face: 'face_male', kind: 'person', scale: 1, headScale: 1,
     weapon: null, shield: null, pieces: [], tint: {}, sex: 'male',
   };
-  const old = OLD.test(w);
+  // The look-at text is written about the mobile itself, so its opening
+  // "He is a very old man" is safe to read where the rest of the prose is not.
+  const old = OLD.test(w) || SELF_OLD.test(proto.description || '');
   const hair = old ? pick(HAIR_OLD, seed2) : pick(HAIR, seed2);
 
   if (special && !['dervish', 'duergar', 'doll'].includes(special)) {
@@ -446,7 +449,7 @@ export function personOf(proto, ITEM, instance = 0) {
         out.weapon = out.weapon || 'weapon_staff';
         break;
       case 'priest': {
-        const druid = /\b(druids?|shamans?)\b/i.test(w);
+        const druid = /\b(druids?|druidess(es)?|shamans?|hierophants?)\b/i.test(w);
         out.tint = { ...out.tint, cloth: pick(druid ? ROBES.druid : ROBES.priest, seed), linen: 0xc8bca0 };
         P.push(pick(['hair_fringe', 'hood', 'hair_short', 'hair_fringe'], seed2));
         const b = beard();
@@ -547,9 +550,17 @@ function applyEquipment(out, proto, ITEM, seed) {
   out.weaponFromResets = false;
   out.shieldFromResets = false;
   for (const item of proto.equipment || []) {
-    if (ITEM && item.proto.itemType === ITEM.WEAPON && ARMED.has(out.arch)) {
+    // Anyone holds a staff the resets give them -- the Hierophant's is in
+    // grove.are; other weapons only where the trade fights.
+    if (ITEM && item.proto.itemType === ITEM.WEAPON) {
       const w = weaponOf(item.proto);
-      if (w) { out.weapon = w; out.weaponFromResets = true; }
+      if (w && (ARMED.has(out.arch) || w === 'weapon_staff')) { out.weapon = w; out.weaponFromResets = true; }
+    }
+    // A robe or gown the resets name in a colour is that colour.
+    if (ITEM && item.proto.itemType === ITEM.ARMOR) {
+      const name = `${item.proto.keywords || ''} ${item.proto.short || item.proto.shortDesc || ''}`;
+      const colour = /\b(robes?|gowns?|habits?|cloaks?|cassocks?)\b/i.test(name) && name.match(GARMENT_COLOUR);
+      if (colour) out.tint = { ...out.tint, cloth: GARMENT[colour[1].toLowerCase()] };
     }
     if (item.wearLoc === 11) {
       out.shield = out.arch === 'knight' ? 'shield_kite' : (out.shield || 'shield_round');
@@ -562,6 +573,13 @@ function applyEquipment(out, proto, ITEM, seed) {
   // Someone the size of a toddler carries nothing.
   if (out.scale < 0.55) { out.weapon = null; out.shield = null; }
 }
+
+/** Dyes a garment can be named in, muted the way a worn robe is. */
+const GARMENT = {
+  brown: 0x5a4330, black: 0x1e1c1a, white: 0xc9c2b2, grey: 0x6a6660, gray: 0x6a6660,
+  red: 0x6e2a22, blue: 0x2c3a5a, green: 0x3c4a2a, purple: 0x4a2e4e, yellow: 0x8a7a3a,
+};
+const GARMENT_COLOUR = new RegExp(`\\b(${Object.keys(GARMENT).join('|')})\\b`, 'i');
 
 /** The arm poses a carried thing needs in the standing and walking clips. */
 export function carryOf(person) {
