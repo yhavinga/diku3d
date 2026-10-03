@@ -412,16 +412,26 @@ const dom = {
   loading: document.getElementById('loading'),
   loadingText: document.getElementById('loading-text'),
   loadingBar: document.getElementById('loading-bar'),
+  loadingDetail: document.getElementById('loading-detail'),
   title: document.getElementById('title'),
   enter: document.getElementById('enter'),
   fade: document.getElementById('fade'),
   hint: document.getElementById('hint'),
 };
 
-const progress = (fraction, text) => {
+/**
+ * Say what is about to happen, then let a frame paint before it starts: the
+ * steps are synchronous, so a label set *after* one only ever showed during
+ * the next -- "laying out the streets" (27 ms) sat on screen through the 6.6 s
+ * texture bake. Fractions are where each step starts, weighted by measured
+ * time; the shimmer on the bar is a compositor animation and keeps moving
+ * while the main thread is busy.
+ */
+const progress = (fraction, text, detail = '') => {
   dom.loadingBar.style.width = `${Math.round(fraction * 100)}%`;
   if (text) dom.loadingText.textContent = text;
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  dom.loadingDetail.textContent = detail;
+  return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
 };
 
 const fetchText = async (url) => {
@@ -431,7 +441,7 @@ const fetchText = async (url) => {
 };
 
 async function boot() {
-  await progress(0.02, 'reading area files');
+  await progress(0, 'reading the area files');
   // The mud boots off area.lst, so does this: every area it lists, plus any
   // the home zone names that it does not.
   const listed = (await fetchText(`${AREA_URL}/area.lst`)).split(/\s+/).filter((f) => f.endsWith('.are'));
@@ -440,7 +450,7 @@ async function boot() {
   const areas = [];
   for (let i = 0; i < files.length; i++) {
     areas.push(parseArea(texts[i], files[i]));
-    if (i % 8 === 7) await progress(0.02 + 0.13 * ((i + 1) / files.length), `parsed ${files[i]}`);
+    if (i % 8 === 7) await progress(0.01 * ((i + 1) / files.length), 'reading the area files', `${i + 1} of ${files.length} · ${files[i]}`);
   }
 
   const world = buildWorld(areas);
@@ -450,7 +460,6 @@ async function boot() {
     homeStart: HOME_FILES.includes('midgaard.are') ? HOME_START : START_VNUM,
     homeMax: MAX_ROOMS,
   });
-  await progress(0.18, 'walking the exits');
 
   // Deterministic, so cached: the same zone is the same layout every time.
   const layouts = new Map();
@@ -466,29 +475,28 @@ async function boot() {
   // The zone the start room is in -- the home zone unless `?room=` says
   // otherwise. A saved character elsewhere crosses there from the title.
   let zone = plan.zoneOf(START_VNUM) || plan.home;
+  await progress(0.01, 'laying out the streets', `${world.rooms.size} rooms in ${files.length} areas`);
   let layout = layoutOf(zone);
-  await progress(0.24, 'laying out the streets');
 
+  await progress(0.02, 'baking stone, timber and thatch', 'every surface is generated here, not downloaded');
   const materials = createMaterials(512, () => {});
-  await progress(0.44, 'cutting stone and timber');
 
   // Modelled assets are optional: anything missing falls back to the
   // procedural geometry, so the viewer runs against a half-built library.
+  if (params.get('assets') !== 'off') await progress(0.56, 'carving the furniture', `${ASSET_NAMES.length} models`);
   const assets = params.get('assets') === 'off' ? null
     : await new AssetLibrary(materials).load(ASSET_NAMES);
   if (assets) {
-    await progress(0.54, 'carving the furniture');
     if (assets.unknownTags.size) {
       console.warn('assets: no material for tag(s)', [...assets.unknownTags].join(', '));
     }
   }
 
+  await progress(0.58, 'raising the town', `${layout.cells.size} rooms of ${zone.name || 'the town'}`);
   let built = buildScene(viewOf(zone), layout, materials, assets);
-  // Counts belong on the stats overlay (F), not on a screen a player waits at.
-  await progress(0.72, 'raising the town');
 
+  await progress(0.83, 'peopling the rooms', 'mobiles, their clothes and what they carry');
   let actors = populate(viewOf(zone), layout, built, { materials, assets });
-  await progress(0.86, 'populating rooms');
 
   // ---------------------------------------------------------------- scene --
 
@@ -616,6 +624,7 @@ async function boot() {
   const options = createOptions({
     quality, applyTime: (n) => applyTime(n), applyWeather: (w) => applyWeather(w), audio, state,
   });
+  await progress(0.9, 'waking the mud', `resets and mobiles in all ${files.length} areas`);
   // The whole mud, and the zone being drawn (see enterZone in game.js).
   const game = createGame({ world, layout, built, actors, zoneOf: (vnum) => plan.zoneOf(vnum) });
   /**
@@ -2276,6 +2285,7 @@ async function boot() {
     }
     console.info(`precompiled in ${(performance.now() - started).toFixed(0)} ms`);
   }
+  await progress(0.91, 'compiling shaders', 'every material, once, on your GPU');
   await precompile();
 
   await progress(1, 'ready');

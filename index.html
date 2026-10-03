@@ -160,7 +160,16 @@
   body.titling #hud, body.titling #game-ui { visibility: hidden; }
   #loading-text { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; color: var(--gold); opacity: 0.8; text-align: center; }
   #loading-track { width: min(360px, 60vw); height: 2px; background: rgba(224,189,119,0.16); }
-  #loading-bar { width: 2%; height: 100%; background: var(--gold); transition: width 220ms ease; }
+  #loading-bar { width: 0%; height: 100%; background: var(--gold); transition: width 220ms ease; }
+  /* A glint that crosses the track while a step runs. transform-only, so it
+     animates on the compositor and keeps moving when the main thread is busy
+     baking -- the bar itself cannot move until a step finishes. */
+  #loading-track { position: relative; overflow: hidden; }
+  #loading-track::after { content: ''; position: absolute; inset: 0; width: 30%;
+    background: linear-gradient(90deg, transparent, rgba(255,232,180,0.55), transparent);
+    animation: loading-glint 1.6s ease-in-out infinite; will-change: transform; }
+  @keyframes loading-glint { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+  #loading-detail { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; color: var(--gold); opacity: 0.45; text-align: center; min-height: 1.3em; }
 
   #title h1 {
     font-size: clamp(44px, 7vw, 96px); margin: 0 0 0 -0.04em; letter-spacing: 0.18em;
@@ -386,6 +395,7 @@
 <div id="loading">
   <div id="loading-text">reading area files</div>
   <div id="loading-track"><div id="loading-bar"></div></div>
+  <div id="loading-detail"></div>
 </div>
 
 <script type="importmap">
