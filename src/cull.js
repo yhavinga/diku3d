@@ -1139,6 +1139,20 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     state.stats.instancesKept += n;
   }
 
+  /**
+   * Static meshes joined the scene after the first frame (vista.js): index
+   * them with the rest. Every compacted buffer is put back first, because an
+   * index is read off the full instance set.
+   */
+  function reindex() {
+    for (const entry of instanced) restoreInstances(entry);
+    instanced.length = 0;
+    instancedBy.clear();
+    indexed = false;
+    grid = null;
+    wasValid = false;
+  }
+
   function restoreInstances(entry) {
     if (entry.full) return;
     const mesh = entry.mesh;
@@ -1433,7 +1447,7 @@ export function createVisibility({ renderer, scene, camera, world, sun, zones = 
     grid = null;
   }
 
-  return { begin, end, work, settle, state, cells, instanced, sensor, dispose, measure: (level, x, z) => {
+  return { begin, end, work, settle, state, cells, instanced, sensor, dispose, reindex, measure: (level, x, z) => {
     const cell = cellAt(level, x, z, true);
     while (!cell.done) step(true);
     return cell;
