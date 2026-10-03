@@ -2261,7 +2261,6 @@ function* raise(world, layout, materials, assets = null) {
       if (sealed) return;
       const q = at(depth - 0.8, along);
       portal(q, small ? 1.1 : 1.6);
-      lights.push({ x: p.x, y: pos.y + 2.2, z: p.z, color: 0x7fd8ff, intensity: small ? 3 : 5, radius: 10 });
     };
     const CORNER = openAir ? 4.2 : 3.8;
 
@@ -2340,7 +2339,6 @@ function* raise(world, layout, materials, assets = null) {
             x: ax - dx * 0.8, y: pos.y, z: az - dz * 0.8, radius: 1.6,
             target: side.target.vnum, from: room.vnum, label: side.target.room.name, dir,
           });
-          lights.push({ x: ax, y: pos.y + 2.2, z: az, color: 0x7fd8ff, intensity: 5, radius: 10 });
         } else {
           decor.push({
             kind: 'gateSign', x: ax - dx * 0.9, y: pos.y + 2.7, z: az - dz * 0.9, rotY, dx, dz,
@@ -6213,7 +6211,30 @@ const ARCH_IN = 1.7;
  * drifts its texture so it reads as something moving, not a painted board.
  */
 let veilMaterial = null;
-function thresholdMaterial() {
+/** The same threshold underground, where the hour must change nothing. */
+let veilDeep = null;
+// Dark stone and earth, a little cool at the heart. It was navy, #2c3c78
+// to #0a0c1c, which an unlit material tone-mapped at noon's exposure takes
+// to RGB 0 over most of the opening -- and the blue that read at night was
+// not this at all but a cyan point light hung in every portal arch, which
+// lit the intrados teal round it. That light is gone.
+const VEIL_HEART = '#3c3a40';
+const VEIL_MID = '#1d1b1c';
+const VEIL_EDGE = '#100e0d';
+/** Lifts the unlit threshold off black at noon (see `shimmer`). */
+const VEIL_GAIN = 9;
+/** How far below its noon look the threshold sits at night, and the warmth it takes there. */
+const VEIL_NIGHT = 0.5;
+const VEIL_NIGHT_TINT = [1.0, 0.86, 0.72];
+function thresholdMaterial(deep = false) {
+  if (deep) {
+    if (!veilDeep) {
+      const surface = thresholdMaterial();
+      veilDeep = new THREE.MeshBasicMaterial({ color: surface.color, map: surface.map });
+      veilDeep.name = 'threshold-deep';
+    }
+    return veilDeep;
+  }
   if (veilMaterial) return veilMaterial;
   const size = 128;
   const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(size, size) : null;
@@ -6221,22 +6242,25 @@ function thresholdMaterial() {
   if (canvas) {
     const g = canvas.getContext('2d');
     const grad = g.createRadialGradient(size / 2, size * 0.6, 4, size / 2, size * 0.6, size * 0.7);
-    grad.addColorStop(0, '#2c3c78');
-    grad.addColorStop(0.55, '#141a3a');
-    grad.addColorStop(1, '#0a0c1c');
+    grad.addColorStop(0, VEIL_HEART);
+    grad.addColorStop(0.55, VEIL_MID);
+    grad.addColorStop(1, VEIL_EDGE);
     g.fillStyle = grad;
     g.fillRect(0, 0, size, size);
     // Faint streaks, so the drift shows.
     for (let i = 0; i < 40; i++) {
       const x = hash3(i, 3, 0, 91) * size; const y = hash3(i, 5, 0, 91) * size;
-      g.fillStyle = `rgba(120,160,255,${0.04 + 0.06 * hash3(i, 7, 0, 91)})`;
+      g.fillStyle = `rgba(150,140,128,${0.04 + 0.06 * hash3(i, 7, 0, 91)})`;
       g.fillRect(x, y, 1 + 3 * hash3(i, 9, 0, 91), 6 + 18 * hash3(i, 11, 0, 91));
     }
     map = new THREE.CanvasTexture(canvas);
     map.colorSpace = THREE.SRGBColorSpace;
-    map.wrapS = map.wrapT = THREE.RepeatWrapping;
+    // Clamped, and swayed rather than scrolled (see `shimmer`): a radial
+    // gradient does not tile, and scrolled through a repeat its wrap was a
+    // hard level line across every opening.
+    map.wrapS = map.wrapT = THREE.ClampToEdgeWrapping;
   }
-  veilMaterial = new THREE.MeshBasicMaterial({ color: map ? 0xffffff : 0x141a3a, map });
+  veilMaterial = new THREE.MeshBasicMaterial({ color: map ? 0xffffff : VEIL_MID, map });
   veilMaterial.name = 'threshold';
   return veilMaterial;
 }
@@ -6282,7 +6306,7 @@ function buildThresholds(veils, zones) {
         return g;
       });
     }).flat();
-    const mesh = new THREE.Mesh(mergeGeometries(parts, false), thresholdMaterial());
+    const mesh = new THREE.Mesh(mergeGeometries(parts, false), thresholdMaterial(deep));
     for (const geo of parts) geo.dispose();
     mesh.name = 'thresholds';
     (deep ? zones.deep : zones.surface).add(mesh);
@@ -6293,13 +6317,20 @@ function buildThresholds(veils, zones) {
     /**
      * `exposure` is the hour's: an unlit surface is scaled by it like any
      * other, so the night's 0.62 against noon's 0.165 turned a dark
-     * threshold into a glowing blue sheet. Held near its noon look instead.
+     * threshold into a glowing blue sheet. Held to its noon look, and then
+     * taken down and warmed with the dark, because a doorway at night is
+     * darker than the stone round it, not as bright as it was at noon.
      */
     shimmer(time, exposure = NOON_EXPOSURE) {
       if (!veilMaterial) return;
-      veilMaterial.color.setScalar(Math.min(1, (NOON_EXPOSURE / Math.max(0.05, exposure)) ** 0.85));
+      const night = THREE.MathUtils.clamp((exposure - NOON_EXPOSURE) / (0.62 - NOON_EXPOSURE), 0, 1);
+      const k = VEIL_GAIN * (NOON_EXPOSURE / Math.max(0.05, exposure)) ** 0.85 * (1 + (VEIL_NIGHT - 1) * night);
+      veilMaterial.color.setRGB(...VEIL_NIGHT_TINT.map((t) => k * (1 + (t - 1) * night)));
+      // Below ground the exposure is cancelled exactly, the way the buried
+      // materials cancel it: a noon and a night frame of a cellar are one.
+      if (veilDeep) veilDeep.color.setScalar(VEIL_GAIN * NOON_EXPOSURE / Math.max(0.05, exposure));
       const map = veilMaterial.map;
-      if (map) map.offset.set(Math.sin(time * 0.13) * 0.06, time * 0.035);
+      if (map) map.offset.set(Math.sin(time * 0.13) * 0.05, Math.sin(time * 0.071) * 0.06);
     },
   };
 }
