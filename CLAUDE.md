@@ -441,6 +441,13 @@ choose.
   keeps `horizon-*` out of the AO pass. Measure turning flicker with
   `Z.swim()` (tools/judge/zfight.js), which corrects for the turn;
   `Z.measure({ all: true })` also counts alpha-cut and horizon surfaces.
+- **Wall allocation is greedy and depends on order** (`layout.js`
+  `allocate`): it tries five fixed orders and keeps the best by walkable
+  passages, then doorless exits, then wrong walls — and the old order is
+  always one of them, so walkability cannot drop. A one-way exit names a
+  wall in the room it *arrives* in too; count it when a stair picks its
+  wall. `tools/exit-check.mjs --strict` is the guard: 0 doorless exits,
+  every one-way opening barred, ≤157 wrong walls, ≤8 corner arches.
 - Figures are skinned meshes: one draw each, no instancing, and a second pass if
   they cast shadows. They are kept out of the shadow map and culled past 46 m.
 - Large soft sprites are the most expensive thing per pixel in the scene. The

@@ -8,6 +8,33 @@ is an opinion.
 
 ## 2026-10-03 — wave 11: the hills, and every exit a door
 
+### Every exit a doorway (wave11-exits)
+
+- exit-check over 34 zones: wrong wall 385 → 157, doorless 73 → 0 (plus
+  15 arches standing free → 8 in corners, all in The Void), one-way
+  openings 36 → 40, all now barred. Mud School: 0 of each. Midgaard 93%,
+  mean 94.567 (was 94.534), home zone 579 rooms, layouts deterministic;
+  laying out home 21 → 76 ms.
+- Causes: a stair took the first free wall west/east/north/south even when
+  an exit named it (#3702's stair took the west wall and #3704 looked
+  sealed); archways claimed a wall only at the end they were walked from;
+  `routePath` took the first shortest route and the greedy pass gave walls
+  in link order; the far end of a one-way street got an open doorway.
+- Fixes: `allocate()` over five orders; streets re-laid at a cost (length
+  +1 for a wrong wall, +3 for a wall another exit needs); archways claim
+  both ends; up/down links without a wall are ladders (`sewer_ladder`) or
+  shafts (`sewer_pit`) indoors; arches sit in a wall or corner with a dark
+  threshold that follows the half-circle, two front faces (one double-sided
+  plane was invisible to AO from one side), exposure-corrected, drifting.
+- One-way gates open only for the camera; mobiles still walk through them.
+- First round's arches stood free mid-room and showed the outdoors through
+  an indoor arena wall; the coordinator sent it back. Look at both sides.
+- rules-check (approved by the user): the janitor test now waits until he
+  has stopped travelling and drops the bottle at a free spot in his room.
+- Open: `wall_door`'s oak threshold is coplanar with its stone (the largest
+  school flicker); Void rooms have grass stair flights hanging through
+  them; Moria has a conifer in a tunnel and a tree through a cave ceiling.
+
 ### The flickering hills were GTAO (wave11-depth)
 
 - The user's still matched #3053 at dusk. Depth ties beyond 150 m over 40

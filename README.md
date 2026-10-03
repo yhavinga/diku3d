@@ -65,6 +65,12 @@ into the High Tower, the West Gate into Moria) and the old zone is taken down
 behind a title card while the new one is laid out and built. Only the sky area
 cannot be entered yet: its rooms are all sector AIR, which nothing builds.
 
+Every exit the mud names has a doorway in its room, on the wall it names
+wherever the graph allows (`node tools/exit-check.mjs --strict`). An archway is
+built at both ends, set in a wall or a corner and closed with a dark threshold;
+a way up or down with no wall of its own is a ladder or a shaft. A one-way exit
+ends in an iron gate that opens only for someone coming the way the mud allows.
+
 The people in it are the mud's mobiles, dressed by what the area file says
 they are: `src/people.js` reads keywords, flags and shops and picks one of
 seventeen archetypes — cityguard, knight, priest, mage, merchant, beggar,
