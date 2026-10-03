@@ -79,6 +79,22 @@ function keyHtml(token) {
   return `<kbd>${token}</kbd>`;
 }
 
+/** What a skill-bar slot does, in the words of the rows around it. */
+const SKILL_TEXT = {
+  kick: 'kick', backstab: 'backstab, from behind and before the fight', disarm: 'disarm your opponent',
+  sneak: 'sneak: move unannounced', hide: 'hide in the shadows', steal: 'steal gold from who you face', pickLock: 'pick the nearest lock',
+};
+
+/** The bar is built per class from rules/skills.js, so the slots are read, not written out. */
+function skillRows(game) {
+  const bar = game && game.actions ? game.actions().filter((a) => a.keyLabel) : [];
+  if (!bar.length) return '';
+  return bar.map((a) => `
+      <div class="hp-row${a.known ? '' : ' later'}">
+        <div class="hp-keys"><kbd>${a.keyLabel}</kbd></div><div class="hp-text">${SKILL_TEXT[a.id] || a.label}${a.known ? '' : ' <small>(later)</small>'}</div>
+      </div>`).join('');
+}
+
 function build() {
   const cols = GROUPS.map((groups) => `<div class="hp-col">${groups.map((g) => `
     <section class="hp-group"${g.who ? ` data-who="${g.who}"` : ''}>
@@ -126,6 +142,12 @@ export function createHelp() {
     const who = CASTERS.has(cls) ? 'caster' : 'fighter';
     root.dataset.who = cls ? who : '';
     root.querySelector('#help-class').textContent = cls ? `playing ${PRETTY[cls] || cls}` : '';
+    const rows = who === 'fighter' ? skillRows(d.game) : '';
+    if (rows) {
+      const group = root.querySelector('.hp-group[data-who="fighter"]');
+      group.querySelectorAll('.hp-row').forEach((r) => r.remove());
+      group.insertAdjacentHTML('beforeend', rows);
+    }
     hadLock = !!document.pointerLockElement;
     wasPaused = d.state.paused;
     d.state.paused = true;           // headless or refused lock: nothing else would hold the game
