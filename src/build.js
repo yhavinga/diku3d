@@ -1913,6 +1913,9 @@ function* raise(world, layout, materials, assets = null) {
   const lights = [];      // {x,y,z,color,intensity,radius,flicker}
   const portals = [];     // walk-through archways
   const veils = [];       // the dark thresholds in them: see `buildArch`
+  // What was built for each way up or down, by room and exit direction:
+  // tools/judge/headless/ways.mjs counts the ones nothing shows.
+  const ways = [];
   const doors = [];       // interactive door panels
   const rooms = new Map();// vnum -> {room, cell, center, outdoor, materials, sides}
   const decor = [];       // handed to actors.js
@@ -2104,7 +2107,7 @@ function* raise(world, layout, materials, assets = null) {
         batcher, instances, chunk, room, cell, pos, sides, layout,
         floorHoles: roomHoles.filter((h) => !h.ceiling),
         shaft: stairPlans.some((plan) => plan.lower === cell),
-        addCollider, addPlatform, lights, decor, portals, skyHoles,
+        addCollider, addPlatform, lights, decor, portals, skyHoles, ways,
       });
       // "An old and worn well from before this century": the stair down is
       // its shaft, and a windlass stands over it.
@@ -2223,7 +2226,62 @@ function* raise(world, layout, materials, assets = null) {
       used.add(`${pick.d}${pick.sign}`);
       return pick;
     };
-    const fixture = ({ way, dir, along, target, exitDir, sealed = false }) => {
+    /**
+     * Stone steps along a wall up to a landing, and a doorway on the landing
+     * with the dark threshold in it: the way up the prose describes as steps,
+     * and every way up out of doors, where there is no wall for a ladder.
+     * Solid to the floor, as an open-air flight is. A way into another zone
+     * gets no trigger: crossing is the game's, and `teleport` only knows the
+     * rooms drawn here.
+     */
+    const climb = ({ dir, along, target, exitDir, crossing }) => {
+      const [fx, , fz] = DIR_STEP[dir];
+      const tx = -fz; const tz = fx;
+      const wall = openAir ? HALF : ROOM / 2;
+      const at = (depth, a) => ({ x: pos.x + fx * depth + tx * a, z: pos.z + fz * depth + tz * a });
+      const rotY = (dir === 1 || dir === 3) ? Math.PI / 2 : 0;
+      const stone = GROUND_FLOOR.has(mats.floor) || WOODEN_FLOOR.has(mats.floor) ? 'stonewall' : mats.floor;
+      const top = CLIMB_RISE * CLIMB_STEPS;
+      // The flight runs from the landing towards the middle of the wall.
+      const run = along > 0 ? -1 : 1;
+      // Its back 5 mm inside the wall face, so nothing lies in that plane.
+      const solid = (a0, a1, d0, d1, h) => {
+        const c = at((d0 + d1) / 2, (a0 + a1) / 2);
+        batcher.add(box(Math.abs(a1 - a0), h, Math.abs(d1 - d0)), stone, place(c.x, pos.y + h / 2, c.z, rotY), { chunk, ao: wallAo(pos.y) });
+        const p0 = at(d0, a0); const p1 = at(d1, a1);
+        addPlatform(Math.min(p0.x, p1.x), Math.max(p0.x, p1.x), Math.min(p0.z, p1.z), Math.max(p0.z, p1.z), pos.y + h);
+      };
+      solid(along - CLIMB_LANDING, along + CLIMB_LANDING, wall - 1.4, wall + 0.005, top);
+      for (let j = 1; j < CLIMB_STEPS; j++) {
+        const e0 = CLIMB_LANDING + (CLIMB_STEPS - 1 - j) * CLIMB_TREAD;
+        solid(along + run * e0, along + run * (e0 + CLIMB_TREAD), wall - 1.2, wall + 0.005, j * CLIMB_RISE);
+      }
+      const door = at(wall - 0.5, along);
+      buildArch({
+        batcher, instances, model, chunk, x: door.x, y: pos.y + top, z: door.z, rotY, sealed: false,
+        veils, scale: { x: 0.5, y: 0.8 }, out: [fx, fz],
+      });
+      ways.push({ room: room.vnum, dir: exitDir, how: 'climb', x: door.x, y: pos.y, z: door.z, face: dir });
+      if (crossing || !target) return;
+      const foot = at(wall - 0.6, along + run * (CLIMB_LANDING + (CLIMB_STEPS - 1) * CLIMB_TREAD + 0.5));
+      portals.push({ x: foot.x, y: pos.y, z: foot.z, radius: 1.0, target: target.vnum, from: room.vnum, label: target.room.name, dir: exitDir });
+    };
+    /** Which way a way up or down is shown, by its words (see WAY_MAGIC). */
+    const wayShape = (exitDir) => {
+      const exit = room.exits[exitDir];
+      const said = `${exit?.description || ''} ${exit?.keyword || ''}`;
+      if (WAY_MAGIC.test(said) || WAY_MAGIC.test(room.name)) return 'arch';
+      if (exitDir === 5) return 'pit';
+      if (WAY_LADDER.test(said)) return openAir ? 'climb' : 'ladder';
+      if (WAY_STEPS.test(said) || WAY_STEPS.test(room.description)) return 'climb';
+      return openAir ? 'climb' : 'ladder';
+    };
+    const fixture = ({ way, dir, along, target, exitDir, sealed = false, crossing = false }) => {
+      if (way !== 'level' && !sealed) {
+        const shape = wayShape(exitDir);
+        if (shape === 'climb') { climb({ dir, along, target, exitDir, crossing }); return; }
+        if (shape === 'arch') way = 'level';
+      }
       const [fx, , fz] = DIR_STEP[dir];
       // Along the wall, to the right of someone facing it.
       const tx = -fz; const tz = fx;
@@ -2237,7 +2295,8 @@ function* raise(world, layout, materials, assets = null) {
         // the wall face.
         const p = at(wall, along);
         instances.add('sewer_ladder', { x: p.x, y: pos.y, z: p.z, rotY: FACE_ROT[dir] }, chunk);
-        portal(at(wall - 0.7, along), 1.2);
+        if (!crossing) portal(at(wall - 0.7, along), 1.2);
+        ways.push({ room: room.vnum, dir: exitDir, how: 'ladder', x: p.x, y: pos.y, z: p.z, face: dir });
         return;
       }
       if (way === 'down' && model(['sewer_pit'], 0)) {
@@ -2245,7 +2304,8 @@ function* raise(world, layout, materials, assets = null) {
         const p = at(wall - 1.55, along);
         instances.add('sewer_pit', { x: p.x, y: pos.y, z: p.z, rotY: FACE_ROT[dir] }, chunk);
         addCollider(p.x - 1.0, p.x + 1.0, p.z - 1.0, p.z + 1.0, pos.y, pos.y + 0.62);
-        portal(at(wall - 1.55 - PIT_REACH, along), 1.0);
+        if (!crossing) portal(at(wall - 1.55 - PIT_REACH, along), 1.0);
+        ways.push({ room: room.vnum, dir: exitDir, how: 'pit', x: p.x, y: pos.y, z: p.z, face: dir });
         return;
       }
       // An archway: full size in a wall of its own, narrower in a corner,
@@ -2258,7 +2318,8 @@ function* raise(world, layout, materials, assets = null) {
         batcher, instances, model, chunk, x: p.x, y: pos.y, z: p.z, rotY, sealed,
         veils: sealed ? null : veils, scale: small ? { x: 0.5, y: 0.8 } : null, out: [fx, fz],
       });
-      if (sealed) return;
+      if (exitDir > 3) ways.push({ room: room.vnum, dir: exitDir, how: sealed ? 'gate' : 'arch', x: p.x, y: pos.y, z: p.z, face: dir });
+      if (sealed || crossing) return;
       const q = at(depth - 0.8, along);
       portal(q, small ? 1.1 : 1.6);
     };
@@ -2290,7 +2351,10 @@ function* raise(world, layout, materials, assets = null) {
           width: ROOM + (WALL_IN + WALL_OUT) * 2, addCollider, dir, room, lights, decor,
           cellX: pos.x, cellZ: pos.z, breach: dir === breach,
           unlit: ruin || mats.shire === 'barn' || mats.smial || !!(mats.said && mats.said.plan),
-          flank: !!(mats.said && mats.said.marks && mats.said.marks.kind === 'mural'),
+          // A ladder, a pit or steps up to a door stand in the middle of
+          // their wall, where its one torch would hang: two either side.
+          flank: !!(mats.said && mats.said.marks && mats.said.marks.kind === 'mural')
+            || (!!side && !!side.link && side.link.dir > 3 && (side.kind === 'shaft' || side.kind === 'gate')),
           outerH: shireOut === 'house' || shireOut === 'barn' ? SHIRE_WALL : shireOut === 'hill' ? 0 : shireOut === 'lower' ? LEVEL_H : null,
           innerH: shireOut === 'hill' ? SMIAL_TUNNEL_H : null,
           arched: !!side && side.kind === 'portal' && !wellDown && !airborne && !deadExit(side.exit),
@@ -2320,6 +2384,7 @@ function* raise(world, layout, materials, assets = null) {
         const wx2 = pos.x + dx * (distance - 2.1);
         const wz2 = pos.z + dz * (distance - 2.1);
         instances.add('town_well', { x: wx2, y: pos.y, z: wz2, rotY: FACE_ROT[dir] }, chunk);
+        ways.push({ room: room.vnum, dir: side.link.dir, how: 'well' });
         addCollider(wx2 - 1.0, wx2 + 1.0, wz2 - 1.0, wz2 + 1.0, pos.y, pos.y + 0.62);
         portals.push({
           x: wx2 - dx * PIT_REACH, y: pos.y, z: wz2 - dz * PIT_REACH, radius: 1.0, target: side.target.vnum,
@@ -2327,6 +2392,13 @@ function* raise(world, layout, materials, assets = null) {
         });
       } else if (shaft && !openAir && !airborne && !deadExit(side.exit) && side.target) {
         fixture({ way: side.link.dir === 5 ? 'down' : 'up', dir, along: 0, target: side.target, exitDir: side.link.dir });
+      } else if (side && side.link && side.link.dir > 3 && (shaft || (side.kind === 'gate' && !side.exit.offMap))
+        && !airborne && !deadExit(side.exit)) {
+        // Out of doors, or into another zone: the same shapes as indoors.
+        fixture({
+          way: side.link.dir === 5 ? 'down' : 'up', dir, along: 0, target: side.target || null,
+          exitDir: side.link.dir, crossing: side.kind === 'gate',
+        });
       } else if (side && (side.kind === 'portal' || side.kind === 'gate' || shaft) && !airborne && !deadExit(side.exit)) {
         const ax = pos.x + dx * (distance - 0.1);
         const az = pos.z + dz * (distance - 0.1);
@@ -2334,6 +2406,7 @@ function* raise(world, layout, materials, assets = null) {
           batcher, instances, model, chunk, x: ax, y: pos.y, z: az, rotY, sealed: side.kind === 'gate',
           veils: side.kind === 'gate' ? null : veils, out: [dx, dz],
         });
+        if (side.link.dir > 3) ways.push({ room: room.vnum, dir: side.link.dir, how: side.kind === 'gate' ? 'gate' : 'arch' });
         if (side.kind !== 'gate') {
           portals.push({
             x: ax - dx * 0.8, y: pos.y, z: az - dz * 0.8, radius: 1.6,
@@ -2409,6 +2482,21 @@ function* raise(world, layout, materials, assets = null) {
     // gangs' fires.
     if (openAir && !hood) buildStreetLamp({ room, cell, pos, decor, lights, addCollider, instances, chunk });
 
+    // A way up or down that no passage carries. layout.js pairs an exit with
+    // the one coming back, once; the Void's rooms go up *and* down to the
+    // same room, and the second is left with no passage of its own -- an
+    // exit the room showed nothing for. In a corner, like the far ends below.
+    for (const exitDir of [4, 5]) {
+      const exit = room.exits[exitDir];
+      if (airborne || !exit || deadExit(exit) || exit.offMap) continue;
+      const carried = layout.links.some((l) => (l.from === cell && l.dir === exitDir)
+        || (l.to === cell && l.twoWay && l.kind !== 'alley' && REVERSE_DIR[l.dir] === exitDir));
+      const target = layout.cells.get(exit.to);
+      if (carried || !target || target.room.sector === SECTOR.AIR) continue;
+      const c = cornerFor(Math.floor(hash3(room.vnum, 6 + exitDir, 0, 1) * 4));
+      fixture({ way: exitDir === 4 ? 'up' : 'down', dir: c.d, along: c.sign * CORNER, target, exitDir });
+    }
+
     // Ways out with no wall of their own, and the far ends of ways up and
     // down: in a corner (`fixture`).
     for (const ref of layout.links) {
@@ -2431,7 +2519,9 @@ function* raise(world, layout, materials, assets = null) {
       }
       const way = job.exitDir === 4 ? 'up' : job.exitDir === 5 ? 'down' : 'level';
       const c = cornerFor(job.exitDir < 4 ? job.exitDir : Math.floor(hash3(room.vnum, 5, 0, 1) * 4));
-      if (ref.kind === 'gate') {
+      if (ref.kind === 'gate' && way !== 'level' && !job.exit.offMap) {
+        fixture({ way, dir: c.d, along: c.sign * CORNER, target: null, exitDir: job.exitDir, crossing: true });
+      } else if (ref.kind === 'gate') {
         fixture({ way: 'level', dir: c.d, along: c.sign * CORNER, target: null, exitDir: ref.dir, sealed: true });
       } else {
         fixture({ way, dir: c.d, along: c.sign * CORNER, target: job.target, exitDir: job.exitDir });
@@ -2742,6 +2832,8 @@ function* raise(world, layout, materials, assets = null) {
   }
 
   for (const plan of stairPlans) {
+    if (plan.lower.room.exits[4]?.to === plan.upper.vnum) ways.push({ room: plan.lower.vnum, dir: 4, how: 'flight' });
+    if (plan.upper.room.exits[5]?.to === plan.lower.vnum) ways.push({ room: plan.upper.vnum, dir: 5, how: 'flight' });
     const lowerMats = pickMaterials(plan.lower.room, plan.lower.room.area);
     buildStair({
       batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
@@ -3120,6 +3212,7 @@ function* raise(world, layout, materials, assets = null) {
   yield 0.934;
   stats.meshes = batches.finish(zones.route);
   stats.clutter = clutter;
+  stats.ways = ways;
   // Everything standing on a mound belongs to the level it rises from.
   for (const p of platforms) {
     for (const r of raised) {
@@ -6917,7 +7010,7 @@ const SEWER_GLOW = /\b(odd light|lit up|glitter\w*|glow\w*|strange light|some li
 
 function buildSewerChamber({
   batcher, instances, chunk, room, cell, pos, sides, layout, floorHoles, shaft,
-  addCollider, addPlatform, lights, decor, portals, skyHoles,
+  addCollider, addPlatform, lights, decor, portals, skyHoles, ways = [],
 }) {
   const y = pos.y;
   const sheet = floodOf(room);
@@ -7016,6 +7109,7 @@ function buildSewerChamber({
         x: trigger.x, y, z: trigger.z, radius: down ? 1.0 : 1.2, target: side.target.vnum,
         from: room.vnum, label: side.target.room.name, dir,
       });
+      ways.push({ room: room.vnum, dir: link.dir, how: down ? 'pit' : 'ladder' });
     }
   }
 
@@ -7026,18 +7120,24 @@ function buildSewerChamber({
   // The far end of a way up or down that the grid could not stack: the
   // layout hands its wall to the room it was walked from, so "the Dark Pit"
   // itself had no pit. It gets one against a blank wall, and a trigger.
+  // With no blank wall left -- the Quadruple Junction Under the Dump has a
+  // tunnel out of all four -- it goes on the 2.3 m of wall beside a mouth,
+  // which a ladder or a pit clears.
   for (const link of layout.links) {
-    if (link.kind !== 'portal' || link.to !== cell || link.dir < 4 || !link.twoWay || !blind.length) continue;
-    const dir = blind.shift();
+    if (link.kind !== 'portal' || link.to !== cell || link.dir < 4 || !link.twoWay) continue;
+    const blank = blind.length > 0;
+    const dir = blank ? blind.shift() : 0;
+    const beside = blank ? 0 : (hash3(room.vnum, 7, 0, 77) < 0.5 ? -1 : 1) * 3.35;
     const down = link.dir === 4; // walked up from below: this end is the top
-    const at = sewerAt(pos, dir, down ? SW_CA - 1.55 : SW_CA, 0);
+    const at = sewerAt(pos, dir, down ? SW_CA - 1.55 : SW_CA, beside);
     instances.add(down ? 'sewer_pit' : 'sewer_ladder', { x: at.x, y, z: at.z, rotY: FACE_ROT[dir] }, chunk);
     if (down) addCollider(at.x - 1.0, at.x + 1.0, at.z - 1.0, at.z + 1.0, y, y + 0.62);
-    const trigger = sewerAt(pos, dir, down ? SW_CA - 1.55 - PIT_REACH : SW_CA - 0.7, 0);
+    const trigger = sewerAt(pos, dir, down ? SW_CA - 1.55 - PIT_REACH : SW_CA - 0.7, beside);
     portals.push({
       x: trigger.x, y, z: trigger.z, radius: down ? 1.0 : 1.2, target: link.from.vnum,
       from: room.vnum, label: link.from.room.name, dir: link.dir === 4 ? 5 : 4,
     });
+    ways.push({ room: room.vnum, dir: link.dir === 4 ? 5 : 4, how: down ? 'pit' : 'ladder' });
   }
 
   instances.add(shaft ? 'sewer_shaft' : (air ? 'sewer_chamber_air' : 'sewer_chamber'), { x: pos.x, y, z: pos.z, rotY: 0 }, chunk);
@@ -7794,6 +7894,28 @@ const WOODEN_FLOOR = new Set(['planks', 'boards', 'wood', 'sewerwood']);
  * flights of turf, and others came out in forest litter, sand or water.
  */
 const GROUND_FLOOR = new Set(['grass', 'duff', 'sand', 'water', 'cloud', 'dirt', 'peat', 'mud', 'ash', 'turf', 'snow']);
+
+/**
+ * How a way up or down is shown, from what the mud says about it. A way up
+ * was a ladder indoors and an archway out of doors, or a barred gate when it
+ * led into another zone -- and neither an archway nor a gate says "up": the
+ * Temple of Midgaard's "equally large steps lead UP through a small door"
+ * was a portcullis in its east wall. Steps go up to a door now, a ladder
+ * stays a ladder where the words say ladder, and an archway is kept for what
+ * the words call magic.
+ */
+const WAY_MAGIC = /\b(portal|gateway|shimmer\w*|magic\w*|vortex|swirl\w*|teleport\w*|rift|ethereal|energy)\b/i;
+const WAY_STEPS = /\b(steps?|stairs?|staircase|stairway|flight)\b/i;
+const WAY_LADDER = /\b(ladder|rungs?|rope)\b/i;
+/**
+ * The steps up to a door: risers, and the landing the door stands on. 0.31,
+ * not 0.3: the temple kit's plinth finishes at 0.30 and the first step's
+ * tread lay in its top over the 0.24 m it stands proud of the wall.
+ */
+const CLIMB_RISE = 0.31;
+const CLIMB_STEPS = 6;
+const CLIMB_TREAD = 0.32;
+const CLIMB_LANDING = 1.1; // half its length along the wall
 
 /**
  * The flight itself, as a joiner or a mason builds one.
