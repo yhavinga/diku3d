@@ -32,6 +32,22 @@ is an opinion.
 - PvP is Merc 2.1's `is_safe`/`check_killer`, except that ROOM_SAFE refuses
   it (2.1 only reads the flag for summon), marked DIVERGES.
 
+### The server's second round (wave12-server2)
+
+- Shops, gates and positions come from the server now (protocol 2: `shop`,
+  `gates`, `at`). Position reports are judged against room cells, streets,
+  open exits and speed (45 m/s, 30 m/s vertical, +3 m slack): 210 typed
+  steps in a browser and 50 load-test walkers gave 0 refusals, after a fix —
+  `layout.passageAt` keeps one street per cell, so two crossing streets read
+  as an illegal jump (14 refusals in 60 steps). CPU for 50 walkers 21.3%
+  against 20.8%.
+- The temple mound's 1.2 m lift is replicated in `server/world.mjs` and must
+  come off a report before its room is worked out.
+- Notes, snoop, mset/oset/rset, ban/allow, wizlock, per-player resting,
+  reconnect by token, player corpses, backstab on players. Left out: mload,
+  switch/return (a mobile has no body of its own on the clients). Clicking
+  a player twice within 4 s murders them: DIVERGES, pending the owner.
+
 ### Sound from ElevenLabs (wave12-audio, wave12-audio2)
 
 - 112 clips, 14 MB of Opus/OGG: footsteps per surface, 23 ambience beds,

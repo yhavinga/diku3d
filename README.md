@@ -242,6 +242,13 @@ with KILLER and THIEF flags. The owner becomes implementor with
 on the terminal. Playing alone stays the default and needs no server.
 `node tools/server-check.mjs` logs four players in over real sockets.
 
+The server does not take a page's word for where its player is: a report
+off the streets, through a shut door, or faster than a glide is refused and
+the page put back. Notes, the ban list and the wizlock live in
+`server/data/`. A dropped link can be taken up again without a reload, and
+a player who dies leaves a corpse with their gear that only they, their
+group or an immortal may loot.
+
 ## Running the mud itself
 
 The Merc server in `merc21/` still compiles. On macOS it needs two flags and no
