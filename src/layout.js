@@ -164,6 +164,10 @@ export function layoutWorld(world, options = {}) {
     startVnum = 3001,
     maxRooms = Infinity,
     includeVnum = () => true,
+    // Rooms that must be placed even if the start cannot walk to them: where
+    // a crossing from another zone arrives (zones.js). Each one the walk
+    // missed is laid out with whatever it reaches and set down whole.
+    roots = [],
   } = options;
 
   const cells = new Map();      // vnum -> {x, level, z, room}
@@ -289,6 +293,35 @@ export function layoutWorld(world, options = {}) {
     if (rest || !waiting.length) break;
     rest = true;
     queue.push(...waiting);
+  }
+
+  // The parts of a zone its start cannot reach -- the High Tower's crossings
+  // land in rooms its first room never walks to -- each laid out on its own
+  // and set down east of everything placed, one empty ring clear, so nothing
+  // already placed moves.
+  for (const root of roots) {
+    if (cells.has(root) || !world.rooms.has(root) || !includeVnum(root)) continue;
+    const sub = layoutWorld(world, {
+      startVnum: root, compact: true, includeVnum: (v) => includeVnum(v) && !cells.has(v),
+    });
+    if (cells.size + sub.order.length > maxRooms) continue;
+    let eastmost = -Infinity;
+    for (const c of cells.values()) eastmost = Math.max(eastmost, c.x);
+    let westmost = Infinity;
+    for (const c of sub.order) westmost = Math.min(westmost, c.x);
+    const ox = eastmost + 3 - westmost;
+    const clear = (oz) => sub.order.every((c) => {
+      for (let a = -1; a <= 1; a++) {
+        for (let b = -1; b <= 1; b++) if (occupied.has(key(c.level, c.x + ox + a, c.z + oz + b))) return false;
+      }
+      return true;
+    });
+    for (let far = 0; far < 200; far++) {
+      const oz = far % 2 ? (far + 1) / 2 : -far / 2;
+      if (!clear(oz)) continue;
+      for (const c of sub.order) place(c.room, c.level, c.x + ox, c.z + oz);
+      break;
+    }
   }
 
   relax(world, cells, occupied, order);

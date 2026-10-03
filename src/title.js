@@ -121,6 +121,10 @@ export function createTitleReel({ camera, built, veil, viewer }) {
   function stop() {
     active = false;
     if (veil) veil.style.opacity = '0';
+    // The reel is over for good: let go of the world it was filmed in, or a
+    // crossing (main.js crossTo) could never free the zone it started in.
+    built = null;
+    shots.length = 0;
   }
 
   return {

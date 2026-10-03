@@ -551,6 +551,28 @@ export function createImpostors({ renderer, library, range = [80, 95] }) {
     root.add(group);
   }
 
+  /**
+   * The zone whose trees these cards stood in for is going (main.js crossTo):
+   * each card mesh, sized for that zone's copies, is dropped. `adopt` the
+   * next zone's to make new ones; the baked atlases and twins are kept.
+   */
+  function release() {
+    for (const model of models.values()) {
+      if (!model.mesh) continue;
+      group.remove(model.mesh);
+      model.mesh.geometry.dispose();
+      model.mesh = null;
+      model.n = 0;
+    }
+  }
+
+  /** Materials this owns and a zone's teardown must leave alone. */
+  function owns(material) {
+    for (const twin of twins.values()) if (twin === material) return true;
+    for (const model of models.values()) if (model.material === material) return true;
+    return false;
+  }
+
   // Filled by cull.js each frame, one model at a time.
   function begin(model) { model.n = 0; model.changed = false; }
   function push(model, x, y, z, scale, yaw) {
@@ -589,7 +611,7 @@ export function createImpostors({ renderer, library, range = [80, 95] }) {
   }
 
   return {
-    models, group, fade, adopt, begin, push, pushFrom, finish,
+    models, group, fade, adopt, release, owns, begin, push, pushFrom, finish,
     get enabled() { return enabled; },
     /** `?lod=off`, or a range: where the cards take over, and where they have. */
     setEnabled(on) {

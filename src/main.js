@@ -7,8 +7,11 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 
 import { createPipeline, SkyEnvironment, clampSkyHighlights, OVERLAY_LAYER } from './render.js';
-import { parseArea, buildWorld, DIR_STEP, DIR_NAME, SECTOR_NAME } from './are.js';
-import { layoutWorld } from './layout.js';
+import { parseArea, buildWorld, DIR_STEP, DIR_NAME, REVERSE_DIR, SECTOR, SECTOR_NAME, EX_CLOSED } from './are.js';
+import { AFF } from './magic.js';
+import { planZones, layoutZone, zoneWorld, arrivalYaw, HOME_AREAS, HOME_START, HOME_MAX_ROOMS } from './zones.js';
+import { createZoneCard, levelsOf, firstLine } from './zonecard.js';
+import { collectResources, disposeZoneGraph } from './teardown.js';
 import { createMaterials } from './textures.js';
 import { buildScene, CELL, LEVEL_H } from './build.js';
 import { populate } from './actors.js';
@@ -58,14 +61,20 @@ const params = new URLSearchParams(location.search);
 // two-way anchor #3041 <-> #2171 -- 579 rooms, 95%, Midgaard still 93%.
 // It shares its side of town with the desert, so layout.js lays it down
 // whole (see LAID_WHOLE) and Wall Road becomes the long street it says it is.
-const AREA_FILES = (params.get('areas') || 'midgaard,haon,shire,marsh,trollden,grave,sewer,eastern,hood')
-  .split(',').filter(Boolean).map((f) => (f.endsWith('.are') ? f : `${f}.are`));
+//
+// That set is now the *home zone* (zones.js HOME_AREAS). Every other area in
+// area.lst is loaded too -- the rules engine runs all of them -- and each is a
+// zone of its own, laid out alone and built when you cross into it. `?areas=`
+// names a different home zone; nothing else changes.
+const HOME_FILES = params.get('areas')
+  ? params.get('areas').split(',').filter(Boolean).map((f) => (f.endsWith('.are') ? f : `${f}.are`))
+  : HOME_AREAS;
 const START_VNUM = Number(params.get('room') || 3001);
 // A live trap: the breadth-first placement stops mid-walk at the cap, and
 // whole areas silently get zero rooms while their exits degrade to gates.
-// The default set is 579 rooms; anything bigger must raise ?max= with it.
+// The home zone is 579 rooms; anything bigger must raise ?max= with it.
 // tools/world-check.mjs guards this number for the shipping set.
-const MAX_ROOMS = Number(params.get('max') || 640);
+const MAX_ROOMS = Number(params.get('max') || HOME_MAX_ROOMS);
 const AREA_URL = params.get('areaDir') || 'merc21/area';
 
 /**
@@ -415,22 +424,49 @@ const progress = (fraction, text) => {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 };
 
+const fetchText = async (url) => {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`cannot read ${url}: HTTP ${response.status}`);
+  return response.text();
+};
+
 async function boot() {
   await progress(0.02, 'reading area files');
+  // The mud boots off area.lst, so does this: every area it lists, plus any
+  // the home zone names that it does not.
+  const listed = (await fetchText(`${AREA_URL}/area.lst`)).split(/\s+/).filter((f) => f.endsWith('.are'));
+  const files = [...listed, ...HOME_FILES.filter((f) => !listed.includes(f))];
+  const texts = await Promise.all(files.map((file) => fetchText(`${AREA_URL}/${file}`)));
   const areas = [];
-  for (let i = 0; i < AREA_FILES.length; i++) {
-    const file = AREA_FILES[i];
-    const response = await fetch(`${AREA_URL}/${file}`);
-    if (!response.ok) throw new Error(`cannot read ${file}: HTTP ${response.status}`);
-    const text = await response.text();
-    areas.push(parseArea(text, file));
-    await progress(0.02 + 0.13 * ((i + 1) / AREA_FILES.length), `parsed ${file}`);
+  for (let i = 0; i < files.length; i++) {
+    areas.push(parseArea(texts[i], files[i]));
+    if (i % 8 === 7) await progress(0.02 + 0.13 * ((i + 1) / files.length), `parsed ${files[i]}`);
   }
 
   const world = buildWorld(areas);
+  // `?areas=` without the temple keeps its old meaning: lay out from ?room.
+  const plan = planZones(world, {
+    home: HOME_FILES,
+    homeStart: HOME_FILES.includes('midgaard.are') ? HOME_START : START_VNUM,
+    homeMax: MAX_ROOMS,
+  });
   await progress(0.18, 'walking the exits');
 
-  const layout = layoutWorld(world, { startVnum: START_VNUM, maxRooms: MAX_ROOMS });
+  // Deterministic, so cached: the same zone is the same layout every time.
+  const layouts = new Map();
+  const views = new Map();
+  const layoutOf = (z) => {
+    if (!layouts.has(z.id)) layouts.set(z.id, layoutZone(world, plan, z));
+    return layouts.get(z.id);
+  };
+  const viewOf = (z) => {
+    if (!views.has(z.id)) views.set(z.id, zoneWorld(world, z));
+    return views.get(z.id);
+  };
+  // The zone the start room is in -- the home zone unless `?room=` says
+  // otherwise. A saved character elsewhere crosses there from the title.
+  let zone = plan.zoneOf(START_VNUM) || plan.home;
+  let layout = layoutOf(zone);
   await progress(0.24, 'laying out the streets');
 
   const materials = createMaterials(512, () => {});
@@ -447,11 +483,11 @@ async function boot() {
     }
   }
 
-  const built = buildScene(world, layout, materials, assets);
+  let built = buildScene(viewOf(zone), layout, materials, assets);
   // Counts belong on the stats overlay (F), not on a screen a player waits at.
   await progress(0.72, 'raising the town');
 
-  const actors = populate(world, layout, built, { materials, assets });
+  let actors = populate(viewOf(zone), layout, built, { materials, assets });
   await progress(0.86, 'populating rooms');
 
   // ---------------------------------------------------------------- scene --
@@ -528,11 +564,16 @@ async function boot() {
   // Out in the open, what the last frames' depth says is behind a hill.
   const occlusion = createOcclusion({ renderer, scene, camera, world: built.group });
   occlusion.state.enabled = params.get('occlusion') !== 'off';
-  const visibility = createVisibility({
-    renderer, scene, camera, world: built.group, sun, zones: built.zones, impostors, occlusion,
-    sky: [sky, stars, ...built.group.children.filter((o) => o.name.startsWith('horizon-'))],
-  });
-  visibility.state.enabled = params.get('cull') !== 'off';
+  // Per zone: what each cell sees is measured against that zone's walls.
+  const makeVisibility = () => {
+    const v = createVisibility({
+      renderer, scene, camera, world: built.group, sun, zones: built.zones, impostors, occlusion,
+      sky: [sky, stars, ...built.group.children.filter((o) => o.name.startsWith('horizon-'))],
+    });
+    v.state.enabled = params.get('cull') !== 'off';
+    return v;
+  };
+  let visibility = makeVisibility();
   pipeline.gtao.distant = () => (visibility.state.enabled ? visibility.state.aoFar : null);
   {
     const render = composer.render.bind(composer);
@@ -574,12 +615,28 @@ async function boot() {
   const options = createOptions({
     quality, applyTime: (n) => applyTime(n), applyWeather: (w) => applyWeather(w), audio, state,
   });
-  const game = createGame({ world, layout, built, actors });
-  const gameUi = createGameUi(game, { built });
-  const fx = createFx({
-    scene, camera, composer, actors, game, audio, player, library: assets, sun, hemi, built, lightPool,
+  // The whole mud, and the zone being drawn (see enterZone in game.js).
+  const game = createGame({ world, layout, built, actors, zoneOf: (vnum) => plan.zoneOf(vnum) });
+  /**
+   * The drawn zone's `built` and `actors` for the modules made once at boot
+   * that only ever read them when they act -- the effects, the overlay -- so
+   * a crossing does not have to rebuild them. Read through on every access.
+   */
+  const live = (get) => new Proxy({}, {
+    get(_, key) {
+      const target = get();
+      const value = target[key];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    has: (_, key) => key in get(),
   });
-  const spellfx = createSpellFx({ scene, camera, renderer, composer, game, actors, audio, player, quality, viewModel: fx.viewModel });
+  const liveBuilt = live(() => built);
+  const liveActors = live(() => actors);
+  const gameUi = createGameUi(game, { built: liveBuilt });
+  const fx = createFx({
+    scene, camera, composer, actors: liveActors, game, audio, player, library: assets, sun, hemi, built: liveBuilt, lightPool,
+  });
+  const spellfx = createSpellFx({ scene, camera, renderer, composer, game, actors: liveActors, audio, player, quality, viewModel: fx.viewModel });
   {
     // Screen position of a world point, for the foe plate and damage numbers.
     const p = new THREE.Vector3();
@@ -591,7 +648,14 @@ async function boot() {
       return { x: (p.x + 1) / 2 * window.innerWidth, y: (1 - p.y) / 2 * window.innerHeight };
     });
   }
-  game.onTeleport = (x, y, z) => player.spawn(x, y, z, camera.rotation.y);
+  // Recall and teleport: a room in the drawn zone is a jump, any other a crossing.
+  game.onTeleport = (x, y, z, vnum) => {
+    if (vnum !== undefined && plan.zoneOf(vnum) && plan.zoneOf(vnum) !== zone) {
+      crossTo(vnum, { yaw: camera.rotation.y, why: 'recall' });
+      return;
+    }
+    player.spawn(x, y, z, camera.rotation.y);
+  };
   game.setTimeOfDay(state.time);
 
   // The rest of the mud (src/rules): what lies on the ground, the command
@@ -600,7 +664,13 @@ async function boot() {
   installSave(game, {
     world,
     storage: window.localStorage,
+    // The room it was saved in, whichever zone that is: saved in the Mud
+    // School, continued in the Mud School.
     onRestore: (vnum) => {
+      if (plan.zoneOf(vnum) && plan.zoneOf(vnum) !== zone) {
+        crossTo(vnum, { yaw: arrivalYaw(world, vnum, null), why: 'continue' });
+        return;
+      }
       const info = built.rooms.get(vnum) || built.rooms.get(START_VNUM);
       if (info) player.spawn(info.center.x, info.center.y, info.center.z, camera.rotation.y);
     },
@@ -613,7 +683,7 @@ async function boot() {
   // A mobile that says something is seen to say it (motion.js `speak`).
   game.listen((event) => {
     // ...and so does a shopkeeper's reply, which comes as a `say` or a command's `out` with the keeper's slot.
-    if (event.slot && event.slot.figure && (event.kind === 'mobsay' || event.said)) actors.motion.speak(event.slot.figure, event.said || '');
+    if (event.slot && event.slot.figure && event.slot.here && (event.kind === 'mobsay' || event.said)) actors.motion.speak(event.slot.figure, event.said || '');
   });
   // A light you hold lights the way: one more candidate for the light pool,
   // moved with you, so it costs a pooled light rather than a new one.
@@ -749,7 +819,7 @@ async function boot() {
 
   applyTime(state.time);
 
-  function applyTime(name) {
+  function applyTime(name, { quiet = false } = {}) {
     const base = TIMES[name] || TIMES.dusk;
     // The single choke point, and the reason weather is a modifier rather than
     // a preset of its own: everything below reads `preset` and nothing below
@@ -891,7 +961,7 @@ async function boot() {
     });
 
     shadowAnchor.set(Infinity, Infinity, Infinity); // the sun moved: redraw shadows
-    hud.toast(state.weather === 'clear' ? `${name}` : `${name} · ${state.weather}`);
+    if (!quiet) hud.toast(state.weather === 'clear' ? `${name}` : `${name} · ${state.weather}`);
   }
 
   /**
@@ -921,13 +991,19 @@ async function boot() {
   const interactGrid = new Map();
   // Mobiles walk about, so they are looked up live rather than filed by where
   // they stood at boot.
-  const walkers = actors.interactables.filter((item) => item.figure);
-  for (const item of actors.interactables) {
-    if (item.figure) continue;
-    const key = `${Math.floor(item.position.x / 16)},${Math.floor(item.position.z / 16)}`;
-    if (!interactGrid.has(key)) interactGrid.set(key, []);
-    interactGrid.get(key).push(item);
+  let walkers = [];
+  /** The drawn zone's things to look at, filed by where they stand. */
+  function fileInteractables() {
+    interactGrid.clear();
+    walkers = actors.interactables.filter((item) => item.figure);
+    for (const item of actors.interactables) {
+      if (item.figure) continue;
+      const key = `${Math.floor(item.position.x / 16)},${Math.floor(item.position.z / 16)}`;
+      if (!interactGrid.has(key)) interactGrid.set(key, []);
+      interactGrid.get(key).push(item);
+    }
   }
+  fileInteractables();
   const forward = new THREE.Vector3();
   const toTarget = new THREE.Vector3();
 
@@ -1111,7 +1187,7 @@ async function boot() {
     // from the arrow keys it is a toast over the world.
     const refuse = (toast, mud) => { if (typed) return { ok: false, text: mud }; hud.toast(toast); return null; };
     if (player.gliding) { queuedStep = dir; return null; }
-    if (fadeTimer > 0) return null;
+    if (fadeTimer > 0 || crossing) return null;
     const here = currentRoom();
     const room = here && world.rooms.get(here);
     if (!room) return null;
@@ -1124,6 +1200,26 @@ async function boot() {
     // to find it -- The Dump's south is #3504 in midennir.are. Load it with
     // ?areas=midgaard,midennir and the exit works.
     if (exit.offMap) return refuse(`${name}: #${exit.to} is in an area not loaded`, `That way (#${exit.to}) lies in an area this world did not load.`);
+    // Into another zone: a crossing. The mud's refusals first -- a shut door,
+    // and act_move.c's "No way!" to anyone fighting, which would otherwise be
+    // a free way out of every fight.
+    const beyond = plan.zoneOf(exit.to);
+    if (beyond && beyond !== zone) {
+      if (exit.locks & EX_CLOSED) {
+        const word = (exit.keyword || 'door').split(/\s+/)[0] || 'door';
+        return refuse(`the ${word} is closed`, `The ${word} is closed.`);
+      }
+      if (game.state.fighting) return refuse('you are fighting', 'No way!  You are still fighting!');
+      // move_char's rule for the sky, and build.js does not build sky rooms
+      // at all: flying or not, there is nothing up there to stand in yet.
+      if (world.rooms.get(exit.to).sector === SECTOR.AIR) {
+        return (game.state.affectedBy & AFF.FLYING)
+          ? refuse(`${name}: nothing built that way`, 'Alas, you cannot go that way.')
+          : refuse("you can't fly", "You can't fly.");
+      }
+      crossTo(exit.to, { from: room.vnum, dir });
+      return { ok: true };
+    }
     const target = built.rooms.get(exit.to);
     if (!target || target.unbuilt) return refuse(`${name}: nothing built that way`, 'Alas, you cannot go that way.');
     // A door in the way behaves as it looks: what you see shut, you cannot walk
@@ -1202,6 +1298,218 @@ async function boot() {
       player.spawn(target.center.x, target.center.y, target.center.z, camera.rotation.y);
       dom.fade.style.opacity = '0';
     }, 260);
+  }
+
+  // ---------------------------------------------------------------- zones --
+
+  const zoneCard = createZoneCard();
+  let crossing = null;
+  const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+
+  /** The light pool's candidates from the drawn zone, filed as LightPool files them. */
+  function fileLights() {
+    lightPool.grid = new Map();
+    for (const candidate of built.lights.concat(actors.lights)) {
+      const key = `${Math.floor(candidate.x / 16)},${Math.floor(candidate.z / 16)}`;
+      if (!lightPool.grid.has(key)) lightPool.grid.set(key, []);
+      lightPool.grid.get(key).push(candidate);
+    }
+    heldLight.key = null;
+  }
+
+  /**
+   * Take the drawn zone apart: its measurements, its tree cards, its scene
+   * graph and everything on the GPU only it was using (teardown.js). The
+   * baked surfaces, the model library and the impostor atlases stay -- they
+   * are what makes the way back fast.
+   */
+  function unmountZone() {
+    visibility.dispose();
+    impostors?.release();
+    occlusion.setWorld(null);
+    spellfx.releaseZone();
+    // The AO prepass's lists of what to hide from it are the old zone's
+    // meshes until it next looks: forget them and have it look again.
+    pipeline.gtao.foliage.length = 0;
+    pipeline.gtao.unshaded.length = 0;
+    pipeline.gtao.unshadedAge = Infinity;
+    const keep = collectResources([materials, assets, impostors ? impostors.models : null]);
+    const freed = disposeZoneGraph([built.group, actors.group], keep, (m) => !!impostors && impostors.owns(m));
+    lightPool.grid = new Map();
+    heldLight.key = null;
+    lookTarget = null;
+    hud.hideExamine();
+    if (gameUi.sheet) gameUi.close();
+    return freed;
+  }
+
+  /** Hang the zone just built in the scene and point everything at it. */
+  function mountZone() {
+    scene.add(built.group);
+    scene.add(actors.group);
+    occlusion.setWorld(built.group);
+    if (impostors) impostors.adopt(scene);
+    visibility = makeVisibility();
+    fileLights();
+    player.setWorld(built);
+    hud.setLayout(layout);
+    gameUi.setBuilt(liveBuilt);
+    items.setBuilt(built);
+    game.enterZone({ layout, built, actors });
+    fileInteractables();
+    // The hour's light on this zone's mist, horizon and figures.
+    applyTime(state.time, { quiet: true });
+    state.worldStats = describeWorld();
+  }
+
+  /**
+   * Stand in `vnum` as a jump rather than a walk. Come in through a wall
+   * (`dir` the way you were going), you stand just inside the doorway you
+   * came through, facing into the room -- at the middle of a small room,
+   * facing on, the frame was the far wall. Out of doors, up or down, the
+   * middle of the room facing `yaw`.
+   */
+  function arriveAt(vnum, yaw, dir = null) {
+    const info = built.rooms.get(vnum);
+    if (!info || info.unbuilt) throw new Error(`#${vnum} was not built in zone ${zone.id}`);
+    let at = info.center;
+    if (dir !== null && dir < 4 && !info.outdoor) {
+      const back = world.rooms.get(vnum).exits[REVERSE_DIR[dir]];
+      const sides = layout.sides.get(vnum) || [];
+      const side = back ? sides.findIndex((entry) => entry && entry.exit === back) : -1;
+      if (side >= 0) {
+        const x = info.center.x + DIR_STEP[side][0] * 3;
+        const z = info.center.z + DIR_STEP[side][2] * 3;
+        if (actors.nav.sample(x, z, info.cell.level)) {
+          at = { x, y: info.center.y, z };
+          yaw = Math.atan2(DIR_STEP[side][0], DIR_STEP[side][2]);
+        }
+      }
+    }
+    player.spawn(at.x, at.y, at.z, yaw);
+    camera.rotation.set(0, yaw, 0);
+    state.roomVnum = null;
+    game.state.roomVnum = vnum;
+    built.horizon?.settle(camera.position);
+    shadowAnchor.set(Infinity, Infinity, Infinity);
+  }
+
+  /**
+   * Cross into the zone `vnum` is in: the card goes up, this zone is taken
+   * down, that one is built (its layout is cached -- the same files give the
+   * same coordinates), the hour's light is put on it, its programs are
+   * compiled, and you are stood in the arrival room facing on the way you
+   * came -- or, up and down having no heading, out of the room. The rules
+   * engine is not touched beyond telling it which zone is drawn: the mud ran
+   * the whole time, and your hit points, gear and affects are its, not the
+   * scene's. A crossing in progress swallows any other.
+   */
+  async function crossTo(vnum, { from = null, dir = null, yaw = null, why = 'exit' } = {}) {
+    const target = plan.zoneOf(vnum);
+    if (!target) throw new Error(`crossTo: #${vnum} is in no zone`);
+    if (crossing) return crossing;
+    crossing = (async () => {
+      const t0 = performance.now();
+      // The title's camera is not the player's; the reel ends here at the latest.
+      if (titleReel && titleReel.active) { titleReel.stop(); document.body.classList.remove('titling'); }
+      const timing = { from: zone.id, to: target.id, vnum };
+      state.crossing = true;
+      queuedStep = null;
+      player.keys.clear();
+      player.velocity.set(0, 0, 0);
+      const arrive = world.rooms.get(vnum);
+      const area = world.areas.find((a) => a.file === arrive.areaFile);
+      const leaving = from !== null ? world.rooms.get(from) : null;
+      await zoneCard.show({
+        name: area.name,
+        levels: levelsOf(area.credits),
+        way: leaving && dir !== null ? `${DIR_NAME[dir]} · from ${leaving.name}`
+          : ({ recall: 'you pray for transportation', continue: 'where you left off' })[why] || '',
+        room: arrive.name,
+        prose: firstLine(arrive.description),
+      });
+      timing.fadeIn = performance.now() - t0;
+      try {
+        let t = performance.now();
+        timing.freed = unmountZone();
+        timing.teardown = performance.now() - t;
+        await zoneCard.progress(0.12);
+        zone = target;
+        t = performance.now();
+        layout = layoutOf(zone);
+        timing.layout = performance.now() - t;
+        await zoneCard.progress(0.22);
+        t = performance.now();
+        built = buildScene(viewOf(zone), layout, materials, assets);
+        timing.build = performance.now() - t;
+        await zoneCard.progress(0.6);
+        t = performance.now();
+        actors = populate(viewOf(zone), layout, built, { materials, assets });
+        timing.populate = performance.now() - t;
+        await zoneCard.progress(0.78);
+        t = performance.now();
+        mountZone();
+        arriveAt(vnum, yaw ?? arrivalYaw(world, vnum, dir), dir);
+        timing.mount = performance.now() - t;
+        t = performance.now();
+        await precompile();
+        timing.compile = performance.now() - t;
+        await zoneCard.progress(1);
+      } catch (error) {
+        zoneCard.fail(String(error.message || error));
+        throw error;
+      }
+      state.crossing = false;
+      // A couple of frames behind the card, so the first one seen has its
+      // shadows and the cells round the eye measured.
+      await nextFrame();
+      await nextFrame();
+      timing.ready = performance.now() - t0;
+      await zoneCard.hide();
+      timing.total = performance.now() - t0;
+      state.lastCrossing = timing;
+      console.info(`crossed ${timing.from} -> ${timing.to} (#${vnum}): ready in ${timing.ready.toFixed(0)} ms`
+        + ` (teardown ${timing.teardown.toFixed(0)}, build ${timing.build.toFixed(0)}, populate ${timing.populate.toFixed(0)},`
+        + ` mount ${timing.mount.toFixed(0)}, compile ${timing.compile.toFixed(0)})`);
+      return timing;
+    })();
+    try { return await crossing; } finally { crossing = null; }
+  }
+
+  /**
+   * Walking into a crossing's archway takes it, as walking into a portal
+   * does: under its sign, facing out and pressing on. The arrow keys and the
+   * command line take it from anywhere in the room.
+   */
+  // Seconds pressed into an archway; below zero, the pause after one try,
+  // so a refusal (a shut gate, a fight) is said once and not every frame.
+  let pressing = 0;
+  function walkIntoCrossing(dt) {
+    if (pressing < 0) { pressing = Math.min(0, pressing + dt); return; }
+    const room = state.roomVnum !== null ? world.rooms.get(state.roomVnum) : null;
+    const info = room && built.rooms.get(room.vnum);
+    if (!info || !player.keys.has('KeyW')) { pressing = 0; return; }
+    const fx = -Math.sin(camera.rotation.y);
+    const fz = -Math.cos(camera.rotation.y);
+    for (let dir = 0; dir < 4; dir++) {
+      const exit = room.exits[dir];
+      const beyond = exit && !exit.offMap ? plan.zoneOf(exit.to) : null;
+      if (!beyond || beyond === zone) continue;
+      const sign = built.decor.find((d) => d.kind === 'gateSign' && d.text === DIR_NAME[dir]
+        && Math.hypot(d.x - info.center.x, d.z - info.center.z) < 9);
+      if (!sign || Math.hypot(player.position.x - sign.x, player.position.z - sign.z) > 1.5) continue;
+      if (fx * sign.dx + fz * sign.dz < 0.6) continue;
+      pressing += dt;
+      if (pressing > 0.25) { pressing = -1.5; step(dir); }
+      return;
+    }
+    pressing = 0;
+  }
+
+  /** What the build came to, for the stats overlay (F). */
+  function describeWorld() {
+    return `${zone.id} · ${layout.stats.placed} rooms · ${layout.stats.alleys + layout.stats.stairs} passages · `
+      + `${layout.stats.portals} archways · ${(built.stats.triangles / 1e6).toFixed(2)}M tris built`;
   }
 
   /**
@@ -1293,7 +1601,7 @@ async function boot() {
   dom.enter.addEventListener('click', () => begin(false));
   dom.hint.addEventListener('click', () => player.requestLock());
   renderer.domElement.addEventListener('mousedown', (event) => {
-    if (event.button !== 0 || state.paused) return;
+    if (event.button !== 0 || state.paused || state.crossing) return;
     // A click that is only taking the mouse back is not a swing -- unless
     // the mouse cannot be had at all, when a click is all there is.
     if (!document.pointerLockElement && begun && !options.open && !gameUi.sheet) {
@@ -1312,6 +1620,8 @@ async function boot() {
 
   function frame() {
     if (state.benchmark) { requestAnimationFrame(frame); return; } // measuring: nobody else draws
+    // Between two zones there is no world to draw or walk: the card is up.
+    if (state.crossing) { last = performance.now(); requestAnimationFrame(frame); return; }
     const now = performance.now();
     // Nothing here needs to run faster than the frame cap, and when the mouse
     // is released or the tab is in the background it barely needs to run at all.
@@ -1422,6 +1732,7 @@ async function boot() {
         if (Math.abs(dy) > 3) continue;
         if (dx * dx + dz * dz < portal.radius * portal.radius) { teleport(portal); break; }
       }
+      if (!player.gliding && fadeTimer <= 0) walkIntoCrossing(dt);
     }
     if (fadeTimer > 0) fadeTimer -= dt;
 
@@ -1453,7 +1764,18 @@ async function boot() {
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
     pipeline, environment, materials, wetness, assets, impostors, occlusion,
-    player, hud, layout, built, actors, world, applyTime, applyWeather, state, audio, visibility,
+    player, hud, world, applyTime, applyWeather, state, audio,
+    // The drawn zone's, so read through: a crossing replaces all four.
+    get layout() { return layout; },
+    get built() { return built; },
+    get actors() { return actors; },
+    get visibility() { return visibility; },
+    /** The zone being drawn, and every zone there is (zones.js). */
+    get zone() { return zone; },
+    plan,
+    /** Cross into the zone room `vnum` is in, as a crossing does; resolves with its timings. */
+    cross: (vnum, options) => crossTo(vnum, options),
+    zoneCard,
     times: TIMES, overcast: OVERCAST, rain,
     /**
      * Make it rain now, whatever the mud's barometer says.
@@ -1848,9 +2170,21 @@ async function boot() {
       // A jump is not a walk: the skyline should not be seen sinking.
       built.horizon?.settle(camera.position);
     },
+    /**
+     * Stand in room `vnum`. A room in another zone is crossed into first, so
+     * this returns a promise there -- `await diku.goto(3700)`.
+     */
     goto(vnum, yaw = 0, pitch = 0) {
+      const target = plan.zoneOf(vnum);
+      if (!target) return `room ${vnum} is not in the world`;
+      if (target !== zone) {
+        return crossTo(vnum, { yaw }).then(() => {
+          camera.rotation.set(pitch, yaw, 0);
+          return built.rooms.get(vnum)?.room.name ?? `room ${vnum} was not built`;
+        });
+      }
       const info = built.rooms.get(vnum);
-      if (!info) return `room ${vnum} is not in the world`;
+      if (!info) return `room ${vnum} is not built in this zone`;
       this.look(info.center.x, info.center.y, info.center.z, yaw, pitch);
       return info.room.name;
     },
@@ -1858,13 +2192,17 @@ async function boot() {
 
   options.start();
 
-  // Every material's program, now, behind the loading screen. three compiles
-  // a program the first time something wearing it is drawn, so walking
-  // into the desert or the sewer for the first time stalled a frame for the
-  // sand, the rock and the vaults -- 517 ms measured at #5028 -- and the
-  // far-tree cards stall the first time the forest is far enough off.
-  // Hidden things too: the zone that is not in view, the cards, the doors.
-  {
+  /**
+   * Every material's program, now, behind the loading screen (or a
+   * crossing's card). three compiles a program the first time something
+   * wearing it is drawn, so walking into the desert or the sewer for the
+   * first time stalled a frame for the sand, the rock and the vaults -- 517 ms
+   * measured at #5028 -- and the far-tree cards stall the first time the
+   * forest is far enough off. Hidden things too: the zone that is not in view,
+   * the cards, the doors. Programs already made are found in three's cache,
+   * so a zone seen before costs only the walk over its scene.
+   */
+  async function precompile() {
     const hidden = [];
     scene.traverse((o) => {
       // `placements` is a record for nav.js, never drawn.
@@ -1893,6 +2231,7 @@ async function boot() {
     }
     console.info(`precompiled in ${(performance.now() - started).toFixed(0)} ms`);
   }
+  await precompile();
 
   await progress(1, 'ready');
   dom.loading.classList.add('hidden');
@@ -1900,8 +2239,7 @@ async function boot() {
   // (F), not on the title, where it read as a spec sheet. The triangle count is
   // rounded because an indexed geometry's triangles are index.count/3 and the
   // sum is taken over position.count/3, so it comes out fractional.
-  state.worldStats = `${layout.stats.placed} rooms · ${layout.stats.alleys + layout.stats.stairs} passages · `
-    + `${layout.stats.portals} archways · ${(built.stats.triangles / 1e6).toFixed(2)}M tris built`;
+  state.worldStats = describeWorld();
   // The title card goes up over the world with a camera moving through it.
   titleReel = createTitleReel({
     camera, built, veil: document.getElementById('title-veil'), viewer: window.diku,

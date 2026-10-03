@@ -107,6 +107,12 @@ export class Player {
     window.addEventListener('blur', () => this.keys.clear());
   }
 
+  /** Another zone's floors and walls (main.js crossTo). */
+  setWorld(world) {
+    this.platforms = new SpatialGrid(world.platforms);
+    this.colliders = new SpatialGrid(world.colliders);
+  }
+
   /**
    * Ask for the mouse. Refusal is normal -- a headless browser never grants
    * it, and Chrome refuses for a second after Escape -- and the game plays on

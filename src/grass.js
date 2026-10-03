@@ -247,6 +247,11 @@ function injectGrass(shader, { uvTargets = [] } = {}) {
 
 /** The lit material: the baked atlas through the world's own lighting. */
 function dressLit(material) {
+  // The material is the baked one every zone shares (main.js crossTo builds
+  // grass once per zone): chained a second time, the shader declared every
+  // grass attribute twice and failed to compile.
+  if (material.userData.grassDressed) return;
+  material.userData.grassDressed = true;
   const base = material.onBeforeCompile;
   material.onBeforeCompile = (shader, renderer) => {
     base.call(material, shader, renderer);

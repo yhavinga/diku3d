@@ -5,7 +5,7 @@
  * looks like the map you'd sketch on paper while exploring.
  */
 
-import { SECTOR, SECTOR_NAME, DIR_NAME } from './are.js';
+import { SECTOR, SECTOR_NAME, DIR_NAME, DIR_STEP } from './are.js';
 
 const SECTOR_COLOUR = {
   [SECTOR.INSIDE]: '#8a7f6a',
@@ -358,6 +358,13 @@ export class Hud {
     this.toastTimer = 0;
   }
 
+  /** Another zone's grid for the map (main.js crossTo). */
+  setLayout(layout) {
+    this.layout = layout;
+    this.mapRoom = null;
+    this.currentVnum = null;
+  }
+
   setRoom(room) {
     if (!room || room.vnum === this.currentVnum) return;
     this.currentVnum = room.vnum;
@@ -542,6 +549,13 @@ export class Hud {
         const [x1, y1] = toScreen(link.from.x, link.from.z);
         ctx.fillStyle = '#7fd8ff';
         ctx.fillRect(x1 - 2, y1 - 2, 4, 4);
+      } else if (link.kind === 'gate' && link.exit.to >= 0 && link.dir < 4) {
+        // A way into another zone: a gold mark on the side it leaves by.
+        const [x1, y1] = toScreen(link.from.x + DIR_STEP[link.dir][0] * 0.9, link.from.z + DIR_STEP[link.dir][2] * 0.9);
+        ctx.fillStyle = '#e0bd77';
+        ctx.beginPath();
+        ctx.moveTo(x1, y1 - 3.5); ctx.lineTo(x1 + 3.5, y1); ctx.lineTo(x1, y1 + 3.5); ctx.lineTo(x1 - 3.5, y1);
+        ctx.closePath(); ctx.fill();
       }
     }
 

@@ -1696,6 +1696,8 @@ export function createGameUi(game, { built = null } = {}) {
     set onConsole(fn) { hooks.onConsole = fn; },
     /** fn() -> {x, z}: where the eye is, so speech from across the town stays unread. */
     setCamera(fn) { cameraAt = fn; },
+    /** Another zone (main.js crossTo): where each gate's sign stands is asked again. */
+    setBuilt(next) { built = next; gateSpots.clear(); },
     destroy() {
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('wheel', onWheel);
