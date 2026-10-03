@@ -1299,7 +1299,7 @@
    "kind": "ambience",
    "api": "sfx",
    "loop": true,
-   "prompt": "Inside a large stone temple, very quiet, faint reverberant room tone, distant soft footsteps echoing, flutter of candle flames, calm and still, steady, no sudden standout events, no traffic, no engines, no electronic hum, no music.",
+   "prompt": "Inside a large empty marble temple, very quiet, faint reverberant room tone, soft flutter of candle flames, a very faint distant breeze through high windows, calm and still, steady, no footsteps, no voices, no sudden standout events, no traffic, no engines, no electronic hum, no music.",
    "settings": {
     "duration_seconds": 25,
     "loop": true,
@@ -1311,12 +1311,12 @@
     "kbps": 48
    },
    "duration": 23,
-   "bytes": 122972,
+   "bytes": 136191,
    "steps": null,
    "loudness": {
     "lufs": -27,
-    "peak": -12.7,
-    "lra": 0.7
+    "peak": -11.8,
+    "lra": 1.2
    }
   },
   {

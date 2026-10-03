@@ -179,11 +179,11 @@ export class Soundscape {
     this.audio.clipsAmbient(true);
   }
 
-  /** Music is under the ambience, not over it: it gives way a little while a piece plays. */
+  /** While a piece plays the ambience steps back to half, or the temple's room tone and its organ drone sound like two things at once. */
   duck(on) {
     if (on === this.ducked) return;
     this.ducked = on;
-    this.bus.gain.setTargetAtTime(on ? 1.0 : 1.4, this.ctx.currentTime, 2);
+    this.bus.gain.setTargetAtTime(on ? 0.7 : 1.4, this.ctx.currentTime, 2);
   }
 
   state() {
