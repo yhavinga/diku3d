@@ -81,9 +81,10 @@ function measure(pcm) {
   return { lufs: num(/I:\s+(-?[\d.]+) LUFS/), lra: num(/LRA:\s+(-?[\d.]+) LU/), peak: num(/Peak:\s+(-?[\d.]+) dBFS/) };
 }
 
-function encode(pcm, out, kbps) {
+function encode(pcm, out, kbps, mono = false) {
+  // Mono for anything that is panned in the game: it halves the decoded size in memory too.
   const r = spawnSync('ffmpeg', ['-y', '-v', 'error', '-f', 'f32le', '-ar', String(SR), '-ac', String(CH), '-i', '-',
-    '-c:a', 'libopus', '-b:a', `${kbps}k`, '-vbr', 'on', '-application', 'audio', out],
+    ...(mono ? ['-ac', '1'] : []), '-c:a', 'libopus', '-b:a', `${kbps}k`, '-vbr', 'on', '-application', 'audio', out],
   { input: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength), maxBuffer: 1 << 28 });
   if (r.status !== 0) throw new Error(`ffmpeg encode ${out}: ${r.stderr}`);
 }
@@ -138,7 +139,7 @@ function fade(pcm, inS, outS) {
  * last sat `lead` dB under its peak (at most 0.12 s back) and ends at the next
  * step, at most 0.5 s on.
  */
-function findSteps(pcm, gap = 0.28, prominence = 7, lead = 14) {
+function findSteps(pcm, gap = 0.28, prominence = 7, lead = 14, maxLen = 0.5, minLen = 0.12) {
   const win = Math.round(0.01 * SR); const n = Math.floor(frames(pcm) / win);
   const db = new Float32Array(n);
   for (let w = 0; w < n; w++) {
@@ -167,8 +168,44 @@ function findSteps(pcm, gap = 0.28, prominence = 7, lead = 14) {
     let a = w; while (a > 0 && w - a < 12 && sm[a] > sm[w] - lead) a--;
     const start = Math.max(0, a * 0.01 - 0.01);
     const next = peaks[i + 1] !== undefined ? peaks[i + 1] * 0.01 - 0.09 : frames(pcm) / SR;
-    return [+start.toFixed(3), +Math.min(next - start, 0.5).toFixed(3)];
-  }).filter(([, d]) => d > 0.12);
+    return [+start.toFixed(3), +Math.min(next - start, maxLen).toFixed(3)];
+  }).filter(([, d]) => d > minLen);
+}
+
+/**
+ * Variants of a "sheet" by silence: runs where the 10 ms level is within `depth` dB
+ * of the loudest, joined across gaps shorter than `gap` s. The API does not keep
+ * the spacing it is asked for, but it does leave air between separate sounds. A run
+ * longer than `maxLen` (one continuous hiss) is cut into windows at its quietest points.
+ */
+function findRuns(pcm, gap = 0.2, depth = 32, maxLen = 2, minLen = 0.12) {
+  const win = Math.round(0.01 * SR); const n = Math.floor(frames(pcm) / win);
+  const db = new Float32Array(n);
+  for (let w = 0; w < n; w++) {
+    let s = 0;
+    for (let i = w * win; i < (w + 1) * win; i++) s += pcm[i * CH] ** 2 + pcm[i * CH + 1] ** 2;
+    db[w] = 10 * Math.log10(s / (win * CH) + 1e-12);
+  }
+  const top = Math.max(...db); const on = (w) => db[w] > top - depth;
+  const runs = [];
+  for (let w = 0; w < n; w++) {
+    if (!on(w)) continue;
+    const last = runs[runs.length - 1];
+    if (last && w - last[1] <= gap / 0.01) last[1] = w; else runs.push([w, w]);
+  }
+  const out = [];
+  for (const [a, b] of runs) {
+    let from = Math.max(0, a - 1);
+    const to = Math.min(n - 1, b + 5);
+    while ((to - from) * 0.01 > maxLen * 1.25) {
+      let cut = from + Math.round(maxLen * 0.6 / 0.01);
+      for (let w = cut; w <= from + Math.round(maxLen / 0.01); w++) if (db[w] < db[cut]) cut = w;
+      out.push([from * 0.01, (cut - from) * 0.01]);
+      from = cut;
+    }
+    out.push([from * 0.01, (to - from + 1) * 0.01]);
+  }
+  return out.filter(([, d]) => d > minLen).map(([s, d]) => [+s.toFixed(3), +d.toFixed(3)]);
 }
 
 /**
@@ -204,11 +241,14 @@ function post(clip, rawFile) {
   let pcm = decode(rawFile);
   const p = clip.post || {};
   highpass(pcm, p.highpass ?? (clip.kind === 'ambience' ? 80 : 35));
-  if (clip.kind === 'footstep' || clip.kind === 'sfx') pcm = trim(pcm);
+  if (clip.kind === 'footstep' || clip.kind === 'sfx') pcm = trim(pcm, p.trimDb ?? -48);
   if (clip.loop) pcm = loopify(pcm, p.crossfade ?? 1.5);
   else if (clip.kind === 'music') pcm = fade(trim(pcm, -55, 0.02), p.fadeIn ?? 0.05, p.fadeOut ?? 2.5);
   let steps = null;
-  if (clip.kind === 'footstep') steps = findSteps(pcm, p.stepGap ?? 0.28, p.stepRise, p.stepFloor);
+  // A "sheet" is one generation of several separate sounds (six sword blows, four
+  // barks) cut into variants the same way footsteps are: variety for the price of one clip.
+  if (p.sheet && !p.peaks) steps = findRuns(pcm, p.splitGap, p.splitDepth, p.stepMax, p.stepMin);
+  else if (clip.kind === 'footstep' || p.sheet) steps = findSteps(pcm, p.stepGap ?? 0.28, p.stepRise, p.stepFloor, p.stepMax, p.stepMin);
   const before = measure(pcm);
   let gainDb = 0;
   if (clip.kind === 'footstep' || clip.kind === 'sfx') gainDb = (p.peakDb ?? -4) - before.peak;
@@ -228,7 +268,7 @@ function post(clip, rawFile) {
   for (let i = 0; i < pcm.length; i++) pcm[i] *= g;
   const after = measure(pcm);
   const out = join(audioDir, clip.file);
-  encode(pcm, out, p.kbps ?? (clip.kind === 'music' ? 72 : 56));
+  encode(pcm, out, p.kbps ?? (clip.kind === 'music' ? 72 : 56), !!p.mono);
   return {
     duration: +(frames(pcm) / SR).toFixed(2), bytes: statSync(out).size, steps,
     loudness: { lufs: after.lufs, peak: after.peak, lra: after.lra },

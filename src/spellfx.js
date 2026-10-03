@@ -1561,8 +1561,9 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     /** The words: a breath of air and a rising shimmer, pitched by family. */
     gather(p, family, windup) {
       if (!S.ok()) return;
-      const dest = audio.out(where(p));
       const base = ({ fire: 180, lightning: 320, frost: 520, acid: 240, heal: 392, bless: 440, sanctuary: 523, dark: 110, harm: 98, poison: 150, faerie: 660, holy: 330, dispel: 470, missile: 280, ward: 349, refresh: 415, gas: 120 })[FAMILY[family]] || 300;
+      if (audio.spell('gather', where(p), { rate: clamp(Math.sqrt(base / 300) * (1.8 / Math.max(0.8, windup)) ** 0.4, 0.8, 1.25) })) return;
+      const dest = audio.out(where(p));
       audio.noiseHit(dest, { frequency: 900, to: 2600, q: 1.4, gain: 0.18, attack: windup * 0.7, decay: windup * 0.5, rate: 0.8 });
       for (const [r, g] of [[1, 0.05], [1.5, 0.03], [2.01, 0.02]]) {
         S.osc(dest, { from: base * r, to: base * r * 2, gain: g, attack: windup * 0.85, decay: 0.3 });
@@ -1570,18 +1571,21 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     },
     missile(p) {
       if (!S.ok()) return;
+      if (audio.spell('missile', where(p))) return;
       const dest = audio.out(where(p));
       S.osc(dest, { type: 'triangle', from: 1900, to: 520, gain: 0.07, attack: 0.005, decay: 0.28 });
       audio.noiseHit(dest, { frequency: 3000, to: 1200, q: 2, gain: 0.12, decay: 0.2, rate: 1.6 });
     },
     pop(p, pitch = 1) {
       if (!S.ok()) return;
+      if (audio.spell('pop', where(p), { rate: pitch })) return;
       const dest = audio.out(where(p));
       audio.thump(dest, { from: 420 * pitch, to: 120 * pitch, gain: 0.12, decay: 0.12 });
       audio.noiseHit(dest, { frequency: 2400 * pitch, q: 1.2, gain: 0.22, decay: 0.08 });
     },
     roar(p, duration) {
       if (!S.ok()) return;
+      if (audio.spell('roar', where(p))) return;
       const dest = audio.out(where(p));
       audio.noiseHit(dest, { frequency: 260, to: 900, q: 0.8, type: 'lowpass', gain: 0.6, attack: duration * 0.6, decay: duration * 0.6, rate: 0.7 });
       audio.noiseHit(dest, { frequency: 1400, q: 1.1, gain: 0.08, attack: duration * 0.5, decay: duration * 0.5, rate: 1.1 });
@@ -1589,6 +1593,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     boom(p, size = 1) {
       if (!S.ok()) return;
       const place = where(p);
+      if (audio.spell('fire', place, { gain: 1.6 * Math.min(1, size) })) return;
       const dest = audio.out({ pan: place.pan, gain: Math.min(1, place.gain * 1.6) });
       audio.thump(dest, { from: 95, to: 28, gain: 0.34 * size, decay: 0.9 });
       audio.noiseHit(dest, { frequency: 700, to: 120, q: 0.7, type: 'lowpass', gain: 1.0 * size, attack: 0.004, decay: 1.2, rate: 0.6 });
@@ -1598,6 +1603,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     crack(p, big = 1) {
       if (!S.ok()) return;
       const place = where(p);
+      if (audio.spell('lightning', place, { gain: 1.4 * Math.min(1, big) })) return;
       const dest = audio.out({ pan: place.pan, gain: Math.min(1, place.gain * 1.4) });
       audio.noiseHit(dest, { frequency: 4200, q: 0.6, type: 'highpass', gain: 0.9 * big, attack: 0.002, decay: 0.09 });
       audio.thump(dest, { from: 160, to: 40, gain: 0.2 * big, decay: 0.35 });
@@ -1606,18 +1612,21 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     },
     frost(p) {
       if (!S.ok()) return;
+      if (audio.spell('frost', where(p))) return;
       const dest = audio.out(where(p));
       audio.ring(dest, { base: 1680 + rand(0, 200), ratios: [1, 1.34, 2.11, 2.93, 3.87], gain: 0.05, decay: 1.1 });
       audio.noiseHit(dest, { frequency: 6000, q: 0.8, type: 'highpass', gain: 0.25, attack: 0.03, decay: 0.7 });
     },
     hiss(p, long = 1) {
       if (!S.ok()) return;
+      if (audio.spell('acid', where(p), { rate: 1 / Math.max(0.7, Math.min(1.4, long)) })) return;
       const dest = audio.out(where(p));
       audio.noiseHit(dest, { frequency: 5200, q: 0.7, type: 'highpass', gain: 0.4, attack: 0.02, decay: 0.9 * long });
       for (let i = 0; i < 9; i++) audio.noiseHit(dest, { frequency: rand(3000, 7000), q: 4, gain: rand(0.03, 0.08), decay: 0.04, delay: rand(0, 0.9 * long) });
     },
     chord(p, root = 392, bright = 1) {
       if (!S.ok()) return;
+      if (audio.spell('heal', where(p), { rate: clamp(root / 392, 0.8, 1.3), gain: 0.7 + 0.3 * bright })) return;
       const dest = audio.out(where(p));
       [[1, 0.05], [1.26, 0.04], [1.5, 0.035], [2, 0.025 * bright], [3, 0.012 * bright]].forEach(([r, g], i) => {
         S.osc(dest, { from: root * r, gain: g, attack: 0.08 + i * 0.03, decay: 1.6 });
@@ -1626,18 +1635,21 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     },
     prism(p) {
       if (!S.ok()) return;
+      if (audio.spell('prism', where(p))) return;
       const dest = audio.out(where(p));
       [1, 1.25, 1.5, 1.875, 2.25].forEach((r, i) => S.osc(dest, { from: 520 * r, to: 780 * r, gain: 0.035, attack: 0.02, decay: 0.45, delay: i * 0.025 }));
       audio.noiseHit(dest, { frequency: 3000, to: 6000, q: 1, gain: 0.2, attack: 0.03, decay: 0.3 });
     },
     dark(p) {
       if (!S.ok()) return;
+      if (audio.spell('dark', where(p))) return;
       const dest = audio.out(where(p));
       S.osc(dest, { type: 'sawtooth', from: 92, to: 46, gain: 0.07, attack: 0.15, decay: 1.1, q: { f: 380, q: 3 } });
       audio.noiseHit(dest, { frequency: 700, to: 300, q: 5, gain: 0.25, attack: 0.2, decay: 0.8 });
     },
     rumble(p) {
       if (!S.ok()) return;
+      if (audio.spell('rumble', { pan: 0, gain: 1 })) return;
       const dest = audio.out({ pan: 0, gain: 1 });
       audio.noiseHit(dest, { frequency: 90, to: 45, q: 0.8, type: 'lowpass', gain: 1.4, attack: 0.25, decay: 2.2, rate: 0.35 });
       audio.thump(dest, { from: 60, to: 30, gain: 0.3, decay: 1.4 });
@@ -1645,6 +1657,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     },
     fizzle(p) {
       if (!S.ok()) return;
+      if (audio.spell('fizzle', where(p))) return;
       const dest = audio.out(where(p));
       audio.noiseHit(dest, { frequency: 1800, to: 500, q: 1.5, gain: 0.15, decay: 0.3 });
     },

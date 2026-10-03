@@ -1140,7 +1140,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
           if (event.metal) spark(contact, away, strength);
           else flesh(contact, away, strength);
         }
-        audio.impact && audio.impact(event.metal ? 'armour' : (event.attack === 'pound' || event.attack === 'crush' || !event.armed ? 'blunt' : 'flesh'), { ...place, strength });
+        audio.impact && audio.impact(event.metal ? 'armour' : (event.attack === 'pound' || event.attack === 'crush' || !event.armed ? 'blunt' : 'flesh'), { ...place, strength, onPlayer: !event.to, attack: event.attack });
         if (!event.to) {
           player.shake(clamp(0.25 + strength * 0.4, 0.25, 0.85));
           vm.jolt = 0.25;
@@ -1196,7 +1196,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
       case 'death': {
         if (event.player) { player.shake(0.9); break; }
         const p = { x: event.x, y: event.y, z: event.z };
-        audio.death && audio.death(where(p));
+        audio.death && audio.death({ ...where(p), name: event.name });
         // The body meets the ground about three quarters of a second later.
         queue.push({ at: clock + 0.72, kind: 'fall', p });
         break;

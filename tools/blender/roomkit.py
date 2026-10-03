@@ -101,13 +101,19 @@ def _doorway(mat, frame, sill=True):
     """
     objs = []
     hw = DOOR_W / 2.0
+    # 0.42 off the wall line, not 0.41: that is where the stone kit's plinth
+    # finishes on the room side, and the architrave's foot shared its face
+    # for the plinth's 0.26 m -- the worst flicker in the Mud School, at every
+    # doorway, from inside. 10 mm proud of that plinth, 10 mm inside the
+    # temple's (0.43).
+    AT = T + 0.34
     for sx in (-1, 1):
         objs.append(kit.timber((0.30, T - 0.02, DOOR_H), (sx * (hw + 0.15), 0, DOOR_H / 2),
                                (0, 0, 0), mat, 0.03, "reveal"))
-        objs.append(kit.timber((0.40, T + 0.32, DOOR_H + 0.04),
+        objs.append(kit.timber((0.40, AT, DOOR_H + 0.04),
                                (sx * (hw + 0.30), 0, (DOOR_H + 0.04) / 2),
                                (0, 0, 0), frame, 0.045, "architrave"))
-    objs.append(kit.timber((DOOR_W + 1.0, T + 0.32, 0.36), (0, 0, DOOR_H + 0.22),
+    objs.append(kit.timber((DOOR_W + 1.0, AT, 0.36), (0, 0, DOOR_H + 0.22),
                            (0, 0, 0), frame, 0.045, "architrave"))
     if sill:
         objs.append(kit.slab((DOOR_W + 0.5, T + 0.55, 0.10), (0, 0, 0.0),
