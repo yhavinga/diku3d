@@ -350,12 +350,18 @@ choose.
 - **Cloning a material drops its `defines` and `onBeforeCompile`.** A
   clone of a buried surface loses `DIKU_BURIED` and reflects the sky
   underground. Copy defines, hooks and `defaultAttributeValues` explicitly.
-- **`env` in a recipe does nothing on world materials under three r185**
-  (it overwrites `envMapIntensity` with `scene.environmentIntensity` for
-  any material without its own envMap); only dress.js honours it, for
-  figures. Figures take the same sky share and indoor treatment as the
-  walls (`SHARED_LIGHT`); check a figure's torso against the wall behind it
-  after any material change.
+- **`env` in a recipe scales what a surface mirrors, through its own
+  uniform.** three r185 overwrites `envMapIntensity` with
+  `scene.environmentIntensity` for any material without its own envMap, so
+  `decorate()` and `honourEnv()` (textures.js) carry it as `dikuEnv` and
+  apply it to `radiance` only: it composes with the hour's preset and fx.js's
+  indoor cut, leaves the diffuse sky alone, and is skipped underground. A
+  new world material with its own hook calls `honourEnv()` *last*; a clone
+  loses it like every other hook. On dark rough surfaces the sky's sheen is
+  most of what lights the shade, so their `env` decides how black a forest
+  is at dusk. Figures take the same sky share as the walls (`SHARED_LIGHT`
+  in dress.js); check a torso against the wall behind it after any material
+  change.
 - **"Indoor" for a placed model comes from the walls (`openAir`), not the
   mud's INDOORS flag**, and indoor reflections lose the sky's hue — or
   metal reads blue.
