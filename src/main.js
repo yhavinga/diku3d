@@ -568,6 +568,7 @@ async function boot() {
   // --------------------------------------------------------------- player --
 
   const player = new Player(camera, renderer.domElement, built);
+  player.nav = actors.nav;   // so a compass step walks round furniture
   const hud = new Hud(document.body, layout);
   const audio = new Audio();
 

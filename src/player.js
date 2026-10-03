@@ -187,6 +187,7 @@ export class Player {
    * compass direction); otherwise you end up looking the way you walked.
    */
   glidePath(groundPoints, finalYaw = null, onArrive = null) {
+    groundPoints = this.roundObstacles(groundPoints);
     const pts = [this.position.clone()];
     for (const p of groundPoints) pts.push(new THREE.Vector3(p.x, p.y + EYE, p.z));
     // Resolve the destination BEFORE walking to it. Gliding to the raw room
@@ -216,6 +217,41 @@ export class Player {
     const move = THREE.MathUtils.clamp(total / 24, 0.55, Math.max(2.9, total / 40));
     this.velocity.set(0, 0, 0);
     this._glide = { pts, cum, total, fromYaw, toYaw: fromYaw + d, finalYaw, turn, move, t: 0, onArrive };
+  }
+
+  /**
+   * The same polyline, bent round whatever stands on it. A glide is a straight
+   * lerp with no collision, so a compass step across the Market Square walked
+   * straight through the fountain. The mobiles already plan round furniture on
+   * the nav grid (nav.js); the step asks it too, allowed only the cells the
+   * original line crosses, so it still walks the street the layout routed.
+   * Without a nav, or with no way through, the line is kept as it was.
+   */
+  roundObstacles(groundPoints) {
+    const nav = this.nav;
+    if (!nav || !groundPoints.length) return groundPoints;
+    const feetY = this.position.y - EYE;
+    const level = nav.levelOf(feetY);
+    if (groundPoints.some((p) => nav.levelOf(p.y) !== level)) return groundPoints;
+    const cells = new Map();
+    let ax = this.position.x; let az = this.position.z;
+    for (const p of groundPoints) {
+      const n = Math.max(1, Math.ceil(Math.hypot(p.x - ax, p.z - az) / 2));
+      for (let i = 0; i <= n; i++) {
+        const x = Math.round((ax + (p.x - ax) * i / n) / nav.CELL);
+        const z = Math.round((az + (p.z - az) * i / n) / nav.CELL);
+        cells.set(`${x},${z}`, { x, z });
+      }
+      ax = p.x; az = p.z;
+    }
+    const goal = groundPoints[groundPoints.length - 1];
+    const path = nav.findPath(level, { x: this.position.x, z: this.position.z }, goal, [...cells.values()]);
+    if (!path || !path.length) return groundPoints;
+    // findPath ends on the nearest open sample; land on the room's own point.
+    const end = path[path.length - 1];
+    if (Math.hypot(end.x - goal.x, end.z - goal.z) > 0.05) path.push({ x: goal.x, y: goal.y, z: goal.z });
+    else path[path.length - 1] = { x: goal.x, y: goal.y, z: goal.z };
+    return path;
   }
 
   updateGlide(dt) {
@@ -395,7 +431,10 @@ export class Player {
     // vertical
     const ground = this.groundAt(this.position.x, this.position.z, feetY);
     const targetFeet = ground === -Infinity ? feetY : ground;
-    if (feetY - targetFeet < 0.02 || (targetFeet > feetY && targetFeet - feetY < STEP_UP)) {
+    // Rising is never "standing": a jump leaves the ground only on the next
+    // frame, and judged by height alone that frame still reads as grounded --
+    // which zeroed the velocity and kept every jump at 0 cm.
+    if (this.velocity.y <= 0 && (feetY - targetFeet < 0.02 || (targetFeet > feetY && targetFeet - feetY < STEP_UP))) {
       // standing on, or stepping up onto, a surface
       this.onGround = true;
       this.velocity.y = 0;
