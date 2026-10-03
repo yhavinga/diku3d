@@ -21,7 +21,7 @@
 
 import * as THREE from 'three';
 import { DIR_STEP, SECTOR } from './are.js';
-import { raise, openAirIn, hash3, CELL, LEVEL_H } from './build.js';
+import { raise, openAirIn, hash3, sectorOf, CELL, LEVEL_H } from './build.js';
 import { InstanceBatch, StaticBatches } from './assets.js';
 import { plantTrees } from './actors.js';
 import { vistaSites, planVista, cutLayout, vistaCells } from './vistaplan.js';
@@ -198,7 +198,7 @@ export function createVistas({ world, plan, layoutOf, viewOf }) {
       const room = cell.room;
       const x = cell.x * CELL; const y = cell.level * LEVEL_H; const z = cell.z * CELL;
       const h = (k) => hash3(cell.x, cell.z, cell.level + k, 9137);
-      const sector = room.sector;
+      const sector = sectorOf(room);
       if (sector === SECTOR.FOREST && openAir(room)) {
         for (let i = 0; i < 6; i++) {
           trees.push({ kind: 'tree', conifer: true, x: x + (h(i) - 0.5) * CELL * 0.85, y, z: z + (h(i + 8) - 0.5) * CELL * 0.85, scale: 0.8 + h(i + 16) * 0.7 });

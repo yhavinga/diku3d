@@ -61,6 +61,35 @@ const OUTDOOR = new Set([
 export const isOutdoor = (room) => OUTDOOR.has(room.sector) && !(room.flags & ROOM_INDOORS);
 
 /**
+ * Country the mud sectored as town. Miden'nir's "The Plains" -- "a vast
+ * desolate place where the wind can howl undisturbed" -- and "The Lane",
+ * "lined on both sides by tall, stately trees", are CITY like the streets of
+ * Midgaard next door, and were built as streets: a stone frontage and a gate
+ * lodge on the plains, two rows of town houses along a tree-lined lane. The
+ * words win over the sector, as they do for the bog and the canopy.
+ *
+ * Measured over all 45 stock areas, CITY and not INDOORS: these take exactly
+ * #3500/#5365 (the plains) and #3501/#5363 (the lane), Old Thalos carrying a
+ * copy of each. What they must not take is as load-bearing. `avenue` alone
+ * takes Emerald Avenue and the neighborhood's avenues, which are streets;
+ * `field`/`plains`/`desolate` anywhere in the prose take the East Gate ("the
+ * plains stretch out in the distance"), a Thalos watchtower, the end of Impy
+ * Way, the Shire's pig pen and the Cross Roads ("to the north is a very
+ * desolate ...") -- every one of them pointing at country, none standing in
+ * it. So the name, or the prose saying *you are* on it.
+ *
+ * Only what is built reads this (`sectorOf`); the rules keep the mud's sector.
+ */
+const COUNTRY_NAME = /\b(plains|meadows?|moors?|moorland|heath|grassland|prairie|steppe)\b/i;
+const COUNTRY_SELF = /\byou are (?:standing |walking |strolling )?(?:on|in|across|upon) (?:the |a |an )?(?:vast |open |wide |grassy )*(?:plains?|fields?|meadows?|moors?|heath|grassland|prairie|steppe)\b/i;
+const AVENUE = /\blined (?:on both sides )?(?:by|with) [^.]{0,30}\btrees\b|\btree-lined\b|\bshady lane\b/i;
+const isTreeLined = (room) => room.sector === SECTOR.CITY && !(room.flags & ROOM_INDOORS) && AVENUE.test(room.description);
+const isCountryside = (room) => room.sector === SECTOR.CITY && !(room.flags & ROOM_INDOORS)
+  && (COUNTRY_NAME.test(room.name) || COUNTRY_SELF.test(room.description) || AVENUE.test(room.description));
+/** The sector a room is *built* as. */
+export const sectorOf = (room) => (isCountryside(room) ? SECTOR.FIELD : room.sector);
+
+/**
  * FOREST plus ROOM_INDOORS is the mud saying "no sky", not "inside a building".
  * Haon Dor's deep, dark forest is under the canopy -- "the crowns of the trees
  * must be very dense, as they leave the forest floor in utter darkness" -- and
@@ -222,7 +251,7 @@ const isBuried = (mats, cell) => mats.cave && (cell.level < 0 || !!mats.inRock);
  */
 const BOG = /\b(bogs?|marsh(?:es|y)?|swamps?|swampy|mire|fen|quagmire|quick ?sand|morass|oozing|peat)\b/i;
 const BOG_NOT = /\b(hills?|beach|shore|lake|river|cliff|bridge|gates?|keep|tower|road|street|inn|house)\b/i;
-const isBog = (room) => isOpenAir(room) && room.sector !== SECTOR.CITY
+const isBog = (room) => isOpenAir(room) && sectorOf(room) !== SECTOR.CITY
   && BOG.test(`${room.name} ${room.description}`)
   && (BOG.test(room.name) || !BOG_NOT.test(room.name));
 
@@ -381,7 +410,7 @@ const eastStyle = (room) => {
   if (EAST_TENT.test(room.name)) return 'tent';
   if (EAST_CAMP.test(room.name)) return 'camp';
   if (EAST_LEDGE.test(room.name)) return 'ledge';
-  if (room.sector === SECTOR.DESERT || /\bsand\b/i.test(room.name)) return 'desert';
+  if (sectorOf(room) === SECTOR.DESERT || /\bsand\b/i.test(room.name)) return 'desert';
   if (room.flags & ROOM_INDOORS) return 'cave';
   return 'desert';
 };
@@ -804,7 +833,11 @@ function pickMaterials(room, area, passage = false) {
   const name = `${room.name} ${area}`.toLowerCase();
   // `tomb` alongside `crypt`: the graveyard's thirteen tombs were reading as
   // ordinary rooms and coming out in plaster and floorboards.
-  let cave = /moria|sewer|catacomb|cavern|mine|tunnel|crypt|tomb|grotto|den|dungeon/.test(name);
+  // `den` as a word: as a substring it matched the *area*, "Miden'nir", and
+  // built every room in it as a cave -- the plains in rock, the Woodsman Inn
+  // a rock hall -- and garden, golden, wooden, hidden and residence besides:
+  // 108 rooms over the 45 areas, not one of them a den. The Troll Den keeps it.
+  let cave = /moria|sewer|catacomb|cavern|mine|tunnel|crypt|tomb|grotto|\bden\b|dungeon/.test(name);
   const holy = /temple|altar|sanctum|shrine|chapel|cathedral/.test(name);
   const wood = /inn|bar|tavern|pub|shop|store|smith|baker|grocer|hall|guild|house|cabin|room/.test(name);
 
@@ -822,7 +855,7 @@ function pickMaterials(room, area, passage = false) {
   else if (holy) { floor = 'marble'; wallIn = 'marble'; wallOut = 'marble'; roof = 'marble'; ceil = 'marble'; }
   else if (wood) { floor = 'planks'; wallIn = 'plaster'; wallOut = 'timber'; }
 
-  switch (room.sector) {
+  switch (sectorOf(room)) {
     case SECTOR.CITY: floor = 'cobble'; break;
     case SECTOR.FIELD: case SECTOR.HILLS: floor = 'grass'; break;
     // Not grass. Under a closed conifer canopy almost nothing reaches the
@@ -1950,7 +1983,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
 
   classifySewer(world);
   classifyCanopy(world);
-  classifyShells(world, (room) => room.sector !== SECTOR.AIR && !isOpenAir(room));
+  classifyShells(world, (room) => sectorOf(room) !== SECTOR.AIR && !isOpenAir(room));
   const lifts = mounds(world, layout);
   // Ground raised under a building, which nav.js and motion.js stand
   // people on (`platform.base`): see `mounds`.
@@ -2066,7 +2099,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     // the sky. Set here rather than threaded through buildFloor, buildIndoorWall,
     // buildCeiling and the props, all of which add on this room's behalf.
     batcher.indoor = !openAir;
-    const airborne = room.sector === SECTOR.AIR;
+    const airborne = sectorOf(room) === SECTOR.AIR;
     // Where this room's wall torches start in `decor` and `lights`, so the
     // ones a ladder or a flight of steps took the wall from can be taken down.
     const decorFrom = decor.length; const lightsFrom = lights.length;
@@ -2576,7 +2609,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       const carried = layout.links.some((l) => (l.from === cell && l.dir === exitDir)
         || (l.to === cell && l.twoWay && l.kind !== 'alley' && REVERSE_DIR[l.dir] === exitDir));
       const target = layout.cells.get(exit.to);
-      if (carried || !target || target.room.sector === SECTOR.AIR) continue;
+      if (carried || !target || sectorOf(target.room) === SECTOR.AIR) continue;
       const c = cornerFor(Math.floor(hash3(room.vnum, 6 + exitDir, 0, 1) * 4));
       fixture({ way: exitDir === 4 ? 'up' : 'down', dir: c.d, along: c.sign * CORNER, target, exitDir });
     }
@@ -2598,7 +2631,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       // Up out of the Temple Square is "In the air...", which is never built:
       // the arch stood in the middle of the square leading nowhere, a portal
       // to a room the game refuses to enter.
-      if (!job.target || job.target.room.sector === SECTOR.AIR) {
+      if (!job.target || sectorOf(job.target.room) === SECTOR.AIR) {
         if (job.target || ref.kind !== 'gate') continue;
       }
       const way = job.exitDir === 4 ? 'up' : job.exitDir === 5 ? 'down' : 'level';
@@ -2684,7 +2717,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       if (mats.said && mats.said.plan && kit === null) {
         buildPlanShape({
           plan: mats.said.plan, batcher, chunk, pos, sides, mats, materials, addCollider, decor, lights,
-          lit: room.sector === SECTOR.INSIDE && !isDeep(room),
+          lit: sectorOf(room) === SECTOR.INSIDE && !isDeep(room),
         });
       }
       buildShell({
@@ -2789,7 +2822,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       // and a stand of firs is not what grows in standing water.
       if (bog) buildBogFlora({ room, pos, sides, pools, instances, model, chunk });
       else if (isPark(room) && !hood) buildPark({ room, cell, pos, sides, instances, model, chunk, decor, addCollider });
-      else if (room.sector === SECTOR.FOREST) {
+      else if (sectorOf(room) === SECTOR.FOREST) {
         buildForest({
           room, pos, sides, instances, model, chunk, decor, addCollider, dense: canopy,
           // Nothing grows through the cabin. The shell sits at the cell edge and
@@ -2980,10 +3013,10 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     if (!frontage.has(k)) frontage.set(k, { level, x, z, sector, bog, shire, east, hood });
   };
   for (const cell of layout.order) {
-    if (!isOpenAir(cell.room) || cell.room.sector === SECTOR.AIR) continue;
+    if (!isOpenAir(cell.room) || sectorOf(cell.room) === SECTOR.AIR) continue;
     for (let dir = 0; dir < 4; dir++) {
       const [dx, , dz] = DIR_STEP[dir];
-      consider(cell.level, cell.x + dx, cell.z + dz, cell.room.sector, isBog(cell.room), isShire(cell.room),
+      consider(cell.level, cell.x + dx, cell.z + dz, sectorOf(cell.room), isBog(cell.room), isShire(cell.room),
         !!eastStyle(cell.room), !!hoodStyle(cell.room));
     }
   }
@@ -2995,7 +3028,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     for (const c of link.path) {
       for (let dir = 0; dir < 4; dir++) {
         const [dx, , dz] = DIR_STEP[dir];
-        consider(link.from.level, c.x + dx, c.z + dz, source.sector, isBog(source), isShire(source), !!eastStyle(source),
+        consider(link.from.level, c.x + dx, c.z + dz, sectorOf(source), isBog(source), isShire(source), !!eastStyle(source),
           !!hoodStyle(source));
       }
     }
@@ -3091,7 +3124,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         const vn = layout.at(spot.level, spot.x + dx, spot.z + dz);
         const link = vn === undefined ? layout.passageAt(spot.level, spot.x + dx, spot.z + dz) : null;
         const room = vn !== undefined ? world.rooms.get(vn) : (link ? (isOpenAir(link.from.room) ? link.from.room : link.to.room) : null);
-        if (room && isOpenAir(room) && COUNTRY.has(room.sector) && !isShire(room)) wild.push(dir);
+        if (room && isOpenAir(room) && COUNTRY.has(sectorOf(room)) && !isShire(room)) wild.push(dir);
       }
       if (wild.length) {
         const key = cellKey(spot.level, spot.x, spot.z);
@@ -3157,7 +3190,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   // these can see the gap, which is what keeps it a street feature.
   const streetCells = [];
   for (const cell of layout.order) {
-    if (isOpenAir(cell.room) && cell.room.sector === SECTOR.CITY) {
+    if (isOpenAir(cell.room) && sectorOf(cell.room) === SECTOR.CITY) {
       streetCells.push({ level: cell.level, x: cell.x, z: cell.z });
     }
   }
@@ -3165,7 +3198,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     if (link.kind !== 'alley' || alleyEnclosed(link)) continue;
     if (rooms.get(link.from.vnum)?.unbuilt || rooms.get(link.to.vnum)?.unbuilt) continue;
     const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
-    if (source.sector !== SECTOR.CITY) continue;
+    if (sectorOf(source) !== SECTOR.CITY) continue;
     for (const c of link.path) streetCells.push({ level: link.from.level, x: c.x, z: c.z });
   }
   buildPartyWalls({ batcher, frontage, addCollider, layout, rooms, streetCells });
@@ -3173,6 +3206,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     batcher, instances, layout, world, rooms, frontage, lifts, reserved, mountain, cellKey, chunkOf, worldOf,
     decor, lights, addCollider, streetClutter, pathWalls: edges.pathWalls,
   });
+  buildAvenues({ layout, rooms, decor, addCollider, worldOf });
 
   // --- the graveyard's railings --------------------------------------------
 
@@ -3394,8 +3428,8 @@ function grassBiome(room) {
   if (isShire(room)) return 'shire';
   if (room.areaFile === 'grave.are') return 'grave';
   if (isPark(room)) return 'park';
-  if (room.sector === SECTOR.HILLS) return 'hills';
-  if (room.sector === SECTOR.FIELD) return 'meadow';
+  if (sectorOf(room) === SECTOR.HILLS) return 'hills';
+  if (sectorOf(room) === SECTOR.FIELD) return 'meadow';
   return 'verge';
 }
 
@@ -3745,7 +3779,7 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
   // The sewer lights itself from its prose (`sewerDressing`): a torch on
   // every wall of every INSIDE room put four of them in "Mid-air", a cave
   // with nothing in it but the fall.
-  if (room.sector !== SECTOR.INSIDE || isDeep(room) || unlit) return;
+  if (sectorOf(room) !== SECTOR.INSIDE || isDeep(room) || unlit) return;
   const px = x - dx * 0.7;
   const pz = z - dz * 0.7;
   // A painted wall keeps its middle for the painting: the torches go on the
@@ -3782,7 +3816,7 @@ const SQUARE = /\b(square|plaza|piazza|courtyard|market|green|common|park|field|
 // shop fronts brought forward around a sty is not what the mud describes. It
 // gets a rail fence off `buildOutdoorEdge` instead, the way any other
 // unfronted open-air room gets its boundary.
-const wantsFrontage = (room) => room.sector === SECTOR.CITY && !SQUARE.test(room.name)
+const wantsFrontage = (room) => sectorOf(room) === SECTOR.CITY && !SQUARE.test(room.name)
   && !(isShire(room) && FARMYARD.test(room.name));
 /** Does `buildCityFrontage` stand houses either side of a crossing's lodge on side `dir`? */
 const frontsCrossing = (room, dir) => wantsFrontage(room) && !isShire(room) && dir !== hoodFenceDir(room);
@@ -4595,6 +4629,47 @@ function laneBend(cell, shut, ways) {
   return { amp: Math.abs(amp), at: (a) => amp * Math.cos(Math.PI * a / CELL) };
 }
 
+/**
+ * "The road is lined on both sides by tall, stately trees": a row of them
+ * either side of the way, through the room and along every passage out of it
+ * as far as the next room that is not an avenue too. Four metres out from
+ * the middle, so the road keeps its width, and a trunk every 6.5 m, the
+ * spacing an avenue is planted at -- never on a cell's centre line, where
+ * the player arrives.
+ */
+const AVENUE_SIDE = 4.0;
+function buildAvenues({ layout, rooms, decor, addCollider, worldOf }) {
+  const done = new Set();
+  const plant = (level, x, z, along) => {
+    const k = `${level}:${x},${z}`;
+    if (done.has(k)) return;
+    done.add(k);
+    const pos = worldOf({ level, x, z });
+    for (const side of [-1, 1]) {
+      for (const a of [-3.25, 3.25]) {
+        const r = (s) => hash3(x * 7 + side, z * 7 + Math.sign(a), level, s);
+        const lat = side * (AVENUE_SIDE + (r(301) - 0.5) * 0.5);
+        const tx = pos.x + (along ? lat : a); const tz = pos.z + (along ? a : lat);
+        decor.push({ kind: 'tree', x: tx, y: pos.y, z: tz, scale: 0.95 + r(302) * 0.3 });
+        addCollider(tx - 0.5, tx + 0.5, tz - 0.5, tz + 0.5, pos.y, pos.y + 8);
+      }
+    }
+  };
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || !link.to) continue;
+    const ends = [link.from, link.to];
+    if (!ends.some((e) => isTreeLined(e.room))) continue;
+    if (ends.some((e) => !rooms.get(e.vnum) || rooms.get(e.vnum).unbuilt)) continue;
+    const chain = [link.from, ...link.path, link.to];
+    chain.forEach((c, i) => {
+      if ((i === 0 || i === chain.length - 1) && !isTreeLined(c.room)) return;
+      const n = chain[i === chain.length - 1 ? i - 1 : i + 1];
+      // Which way the road runs through this cell: along z when it steps in z.
+      plant(link.from.level, c.x, c.z, n.x === c.x);
+    });
+  }
+}
+
 /** actors.js's street clutter, less the ladder (see `buildLanes`). */
 const LANE_PROPS = [
   'barrel', 'crate', 'sack', 'hay_bale', 'bench', 'trough', 'stacked_crates', 'barrel_stack', 'firewood_pile',
@@ -4638,7 +4713,7 @@ function buildLanes({ batcher, instances, layout, world, rooms, frontage, lifts,
     }
   }
   const walled = new Set(pathWalls.map(({ spot, dir }) => `${cellKey(spot.level, spot.x, spot.z)}|${dir}`));
-  const townEnd = (room) => !isOpenAir(room) || (room.sector === SECTOR.CITY && !isShire(room) && !hoodStyle(room)
+  const townEnd = (room) => !isOpenAir(room) || (sectorOf(room) === SECTOR.CITY && !isShire(room) && !hoodStyle(room)
     && !eastStyle(room) && !isBog(room));
   const squareAt = (level, x, z) => {
     const v = layout.at(level, x, z);
@@ -4774,7 +4849,7 @@ function buildLanes({ batcher, instances, layout, world, rooms, frontage, lifts,
  * 105 lamps, Midgaard to 48.
  */
 function buildStreetLamp({ room, cell, pos, decor, lights, addCollider, instances = null, chunk = '0' }) {
-  if (room.sector !== SECTOR.CITY) return;
+  if (sectorOf(room) !== SECTOR.CITY) return;
   const sx = hash3(cell.x, cell.z, 1, 6) > 0.5 ? 1 : -1;
   const sz = hash3(cell.x, cell.z, 2, 7) > 0.5 ? 1 : -1;
   // Against the kerb, not out in the road: with frontage brought forward the
@@ -5970,7 +6045,7 @@ const CHURCHYARD_H = 1.25;
 const CHURCHYARD_T = 0.55;
 
 function gateOf(room) {
-  if (room.sector !== SECTOR.CITY || !isOpenAir(room) || !OUTSIDE_GATE.test(room.name)) return -1;
+  if (sectorOf(room) !== SECTOR.CITY || !isOpenAir(room) || !OUTSIDE_GATE.test(room.name)) return -1;
   return room.exits.findIndex((e, d) => d < 4 && e && (e.locks & EX_ISDOOR) && /\bgate\b/i.test(e.keyword || ''));
 }
 
@@ -5983,7 +6058,7 @@ function townEdges(layout, world) {
   // Is this cell part of the town proper -- a street or room that is neither
   // outside a gate nor open country? The layout is not a plan, and a town
   // room can land on the far side of a gate's line: its neighbours stay town.
-  const outside = (room) => gateOf(room) >= 0 || COUNTRY.has(room.sector);
+  const outside = (room) => gateOf(room) >= 0 || COUNTRY.has(sectorOf(room));
   const town = (level, x, z) => {
     const v = layout.at(level, x, z);
     if (v !== undefined) return !outside(world.rooms.get(v));
@@ -6029,7 +6104,7 @@ function townEdges(layout, world) {
   // the reeds at #8315. They take the marsh's own ground instead.
   for (const cell of layout.order) {
     const room = cell.room;
-    if (room.sector !== SECTOR.MOUNTAIN || !isOpenAir(room) || isHood(room) || MOUNTAINOUS.test(room.name)) continue;
+    if (sectorOf(room) !== SECTOR.MOUNTAIN || !isOpenAir(room) || isHood(room) || MOUNTAINOUS.test(room.name)) continue;
     for (let dir = 0; dir < 4; dir++) {
       const x = cell.x + DIR_STEP[dir][0]; const z = cell.z + DIR_STEP[dir][2];
       if (walkable(cell.level, x, z) || edges.has(key(cell.level, x, z))) continue;
@@ -6577,10 +6652,10 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
   // waist-high grey rock kerb: a wet hollow fenced in dry stone. A cut peat
   // bank is the same barrier out of the ground the room is actually made of,
   // and low enough to see the next hollow over.
-  const h = room.sector === SECTOR.CITY ? 2.6 : (bog ? 0.9 : 1.4);
+  const h = sectorOf(room) === SECTOR.CITY ? 2.6 : (bog ? 0.9 : 1.4);
   // Out of town a boundary is a field wall of coursed rubble; it was `rock`,
   // crazy paving laid up on edge.
-  const material = bog ? 'peat' : (hood ? 'sootwall' : room.sector === SECTOR.CITY ? 'stonewall' : 'rubblewall');
+  const material = bog ? 'peat' : (hood ? 'sootwall' : sectorOf(room) === SECTOR.CITY ? 'stonewall' : 'rubblewall');
   // `wallAo` runs 0.58 -> 1.0 over 1.8 m, which on a 0.9 m bank never gets past
   // 0.79 -- the whole face shaded, hard. On rock that survives; on peat, the
   // darkest surface in the world, it was the *only* thing outdoors putting
@@ -6591,7 +6666,7 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
     : wallAo(pos.y);
   // Field and woodland are bounded by a bank, not a wall: the rubble kerb
   // down the sides of Haon Dor's trails read as masonry retaining walls.
-  const wild = !bog && !hood && [SECTOR.FIELD, SECTOR.FOREST, SECTOR.HILLS].includes(room.sector);
+  const wild = !bog && !hood && [SECTOR.FIELD, SECTOR.FOREST, SECTOR.HILLS].includes(sectorOf(room));
   if (bog || wild) {
     // Not a cut face: from inside the hollow a vertical metre of peat on
     // every closed side made the bog a pit dug in a field, which is what a
@@ -6601,7 +6676,7 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
     const out = dir === 1 || dir === 2 ? 1 : -1;       // local z towards the edge
     const geo = peatBank(CELL + 2.4, wild ? 1.2 : h, depth, out, room.vnum * 4 + dir);
     const c = { x: pos.x + dx * (HALF - depth / 2 + 0.9), z: pos.z + dz * (HALF - depth / 2 + 0.9) };
-    batcher.add(geo, bog ? 'peat' : (room.sector === SECTOR.FOREST ? 'duff' : 'grass'),
+    batcher.add(geo, bog ? 'peat' : (sectorOf(room) === SECTOR.FOREST ? 'duff' : 'grass'),
       place(c.x, pos.y - 0.04, c.z, along ? Math.PI / 2 : 0), { chunk, ao: bog ? shade : null, normals: true });
     geo.dispose();
     const fern = wild && instances ? ['fern', 'salal_bush'].find((n) => instances.library.get(n)) : null;
@@ -8400,7 +8475,7 @@ const HILL_OVERHANG = 9;
 function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
   const key = (l, x, z) => `${l}:${x},${z}`;
   const below = (c) => layout.at(c.level - 1, c.x, c.z) !== undefined || layout.isPath(c.level - 1, c.x, c.z);
-  const built = (c) => { const info = rooms.get(c.vnum); return !!info && !info.unbuilt && c.room.sector !== SECTOR.AIR; };
+  const built = (c) => { const info = rooms.get(c.vnum); return !!info && !info.unbuilt && sectorOf(c.room) !== SECTOR.AIR; };
   const raised = layout.order.filter((c) => c.level > 0 && built(c) && isOpenAir(c.room) && !below(c));
   if (!raised.length) return { cells: 0, triangles: 0 };
 
@@ -10901,7 +10976,7 @@ const REFUSE_PROPS = [
   'firewood_pile', 'stacked_crates', 'nettles',
 ];
 const wantsClutter = (room) => !GRAVEYARD.test(room.name)
-  && (room.sector === SECTOR.CITY || !!farmProps(room) || REFUSE.test(room.name));
+  && (sectorOf(room) === SECTOR.CITY || !!farmProps(room) || REFUSE.test(room.name));
 const clutterProps = (room) => farmProps(room) || (REFUSE.test(room.name) ? REFUSE_PROPS : null)
   || (isPark(room) ? PARK_PROPS : null);
 
