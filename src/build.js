@@ -2256,6 +2256,11 @@ function* raise(world, layout, materials, assets = null) {
         batcher.add(box(Math.abs(a1 - a0), h, Math.abs(d1 - d0)), stone, place(c.x, pos.y + h / 2, c.z, rotY), { chunk, ao: wallAo(pos.y) });
         const p0 = at(d0, a0); const p1 = at(d1, a1);
         addPlatform(Math.min(p0.x, p1.x), Math.max(p0.x, p1.x), Math.min(p0.z, p1.z), Math.max(p0.z, p1.z), pos.y + h);
+        // Solid to walk into as well as to stand on: without it the landing
+        // was a platform with nothing under it, and walking at its face from
+        // the hall put you inside the stone. A tread within a step of your
+        // feet is ignored by player.js, so the flight still climbs.
+        addCollider(Math.min(p0.x, p1.x), Math.max(p0.x, p1.x), Math.min(p0.z, p1.z), Math.max(p0.z, p1.z), pos.y, pos.y + h);
       };
       solid(along - CLIMB_LANDING, along + CLIMB_LANDING, wall - 1.4, wall + 0.005, top);
       for (let j = 1; j < CLIMB_STEPS; j++) {
@@ -2269,10 +2274,33 @@ function* raise(world, layout, materials, assets = null) {
         batcher, instances, model, chunk, x: door.x, y: pos.y + top, z: door.z, rotY, sealed: false,
         veils, scale: { x: 0.5, y: 0.8 }, out: [fx, fz],
       });
-      ways.push({ room: room.vnum, dir: exitDir, how: 'climb', x: door.x, y: pos.y, z: door.z, face: dir });
-      if (crossing || !target) return;
-      const foot = at(wall - 0.6, along + run * (CLIMB_LANDING + (CLIMB_STEPS - 1) * CLIMB_TREAD + 0.5));
-      portals.push({ x: foot.x, y: pos.y, z: foot.z, radius: 1.0, target: target.vnum, from: room.vnum, label: target.room.name, dir: exitDir });
+      // The way is taken at the top, in the doorway, and not at the foot: a
+      // trigger at the foot carried you off before the first tread, and a
+      // crossing had no trigger at all, so the flight led to a doorway that
+      // went nowhere ("I cannot go completely up", #3001). `route` is the
+      // walk a compass step glides -- round to the foot, up the treads, into
+      // the door -- so walking, PgUp and a typed `up` all climb the same steps.
+      const foot = at(wall - 0.6, along + run * (reach + 0.6));
+      const head = at(wall - 0.6, along + run * (CLIMB_LANDING - 0.3));
+      const sill = at(wall - 0.6, along);
+      const route = [
+        { x: foot.x, y: pos.y, z: foot.z },
+        { x: head.x, y: pos.y + top, z: head.z },
+        { x: sill.x, y: pos.y + top, z: sill.z },
+      ];
+      ways.push({ room: room.vnum, dir: exitDir, how: 'climb', x: door.x, y: pos.y, z: door.z, face: dir, top, route });
+      if (crossing) {
+        // What main.js `walkIntoCrossing` and the ways-out panel look for: the
+        // doorway, at the landing's height, facing out.
+        decor.push({ kind: 'gateSign', x: sill.x, y: pos.y + top + 2.7, z: sill.z, rotY, dx: fx, dz: fz, text: DIR_NAME[exitDir] });
+        return;
+      }
+      if (!target) return;
+      // `foot` is where a mobile walks to (nav.js): it cannot path onto the landing.
+      portals.push({
+        x: sill.x, y: pos.y + top, z: sill.z, radius: 0.8, target: target.vnum, from: room.vnum, label: target.room.name, dir: exitDir,
+        foot: { x: foot.x, z: foot.z },
+      });
     };
     /** Which way a way up or down is shown, by its words (see WAY_MAGIC). */
     const wayShape = (exitDir) => {
@@ -2298,6 +2326,11 @@ function* raise(world, layout, materials, assets = null) {
       const portal = (p, radius) => portals.push({
         x: p.x, y: pos.y, z: p.z, radius, target: target.vnum, from: room.vnum, label: target.room.name, dir: exitDir,
       });
+      // Into another zone there is no portal: the marker `walkIntoCrossing`
+      // (main.js) takes the crossing at, as at a gate in a wall.
+      const crossSign = (p) => decor.push({
+        kind: 'gateSign', x: p.x, y: pos.y + 2.7, z: p.z, rotY: (dir === 1 || dir === 3) ? Math.PI / 2 : 0, dx: fx, dz: fz, text: DIR_NAME[exitDir],
+      });
       if (way === 'up' && !openAir && model(['sewer_ladder'], 0)) {
         // "A ladder leads up": iron rungs to a dark round mouth, its back on
         // the wall face.
@@ -2305,6 +2338,7 @@ function* raise(world, layout, materials, assets = null) {
         instances.add('sewer_ladder', { x: p.x, y: pos.y, z: p.z, rotY: FACE_ROT[dir] }, chunk);
         claims.push([dir, along - 0.8, along + 0.8]);
         if (!crossing) portal(at(wall - 0.7, along), 1.2);
+        else crossSign(at(wall - 0.7, along));
         ways.push({ room: room.vnum, dir: exitDir, how: 'ladder', x: p.x, y: pos.y, z: p.z, face: dir });
         return;
       }
@@ -2314,6 +2348,7 @@ function* raise(world, layout, materials, assets = null) {
         instances.add('sewer_pit', { x: p.x, y: pos.y, z: p.z, rotY: FACE_ROT[dir] }, chunk);
         addCollider(p.x - 1.0, p.x + 1.0, p.z - 1.0, p.z + 1.0, pos.y, pos.y + 0.62);
         if (!crossing) portal(at(wall - 1.55 - PIT_REACH, along), 1.0);
+        else crossSign(at(wall - 1.55 - PIT_REACH, along));
         ways.push({ room: room.vnum, dir: exitDir, how: 'pit', x: p.x, y: pos.y, z: p.z, face: dir });
         return;
       }
@@ -2329,6 +2364,7 @@ function* raise(world, layout, materials, assets = null) {
       });
       if (exitDir > 3) ways.push({ room: room.vnum, dir: exitDir, how: sealed ? 'gate' : 'arch', x: p.x, y: pos.y, z: p.z, face: dir });
       claims.push([dir, along - (small ? 1.4 : 2.5), along + (small ? 1.4 : 2.5)]);
+      if (crossing && !sealed) crossSign(at(depth - 0.8, along));
       if (sealed || crossing) return;
       const q = at(depth - 0.8, along);
       portal(q, small ? 1.1 : 1.6);

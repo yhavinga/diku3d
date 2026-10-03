@@ -1313,6 +1313,7 @@ async function boot() {
           ? refuse(`${name}: nothing built that way`, 'Alas, you cannot go that way.')
           : refuse("you can't fly", "You can't fly.");
       }
+      if (climbTo(room.vnum, dir, () => crossTo(exit.to, { from: room.vnum, dir }))) return { ok: true };
       crossTo(exit.to, { from: room.vnum, dir });
       return { ok: true };
     }
@@ -1330,6 +1331,8 @@ async function boot() {
     // Anything else -- a portal, a stair, a layout that had to bend -- keeps
     // the fade, because gliding through a wall would say something false.
     const hereInfo = built.rooms.get(room.vnum);
+    // Steps up to a doorway: climbed, and the portal in the doorway takes you.
+    if (dir >= 4 && climbTo(room.vnum, dir, null)) return { ok: true };
     // A way up or down with a ladder or a shaft of its own (build.js
     // `fixture`): walk to its foot, and it carries you on.
     const shaft = dir >= 4 && hereInfo && built.portals.find((p) => p.from === room.vnum && p.target === exit.to);
@@ -1405,6 +1408,32 @@ async function boot() {
       dom.fade.style.opacity = '0';
     }, 120);
     return { ok: true };
+  }
+
+  /**
+   * Walk a way up's `route` (build.js `climb`): round to the foot of its
+   * flight, up the treads and into the doorway on the landing, then `then`.
+   * False if the way out of `vnum` in `dir` is not a flight of steps.
+   */
+  function climbTo(vnum, dir, then) {
+    const way = (built.stats.ways || []).find((w) => w.room === vnum && w.dir === dir && w.route);
+    if (!way) return false;
+    const [foot, ...rest] = way.route;
+    const done = () => {
+      const queued = queuedStep;
+      queuedStep = null;
+      if (then) then();
+      else if (queued !== null) step(queued);
+    };
+    // Already up on the landing: only the last few steps into the doorway.
+    if (player.position.y - 1.72 > foot.y + way.top - 0.3) {
+      player.glidePath(rest.slice(-1), null, done, { direct: true });
+      return true;
+    }
+    const toFoot = actors.nav.pathInRoom(vnum, player.position, foot, 1);
+    player.glidePath(toFoot && toFoot.length ? toFoot : [foot], null,
+      () => player.glidePath(rest, null, done, { direct: true }));
+    return true;
   }
 
   function teleport(portal) {
@@ -1505,6 +1534,20 @@ async function boot() {
           yaw = Math.atan2(DIR_STEP[side][0], DIR_STEP[side][2]);
         }
       }
+    }
+    // Come down from the Mud School into the temple: on the landing at the
+    // head of the steps that lead back up, facing down them -- not dropped
+    // in the middle of the hall with the doorway somewhere behind you.
+    const back = dir !== null && dir >= 4
+      && (built.stats.ways || []).find((w) => w.room === vnum && w.dir === REVERSE_DIR[dir] && w.route);
+    if (back) {
+      const [foot, head, sill] = back.route;
+      player.spawn(sill.x, sill.y, sill.z, Math.atan2(-(foot.x - head.x), -(foot.z - head.z)));
+      state.roomVnum = null;
+      game.state.roomVnum = vnum;
+      built.horizon?.settle(camera.position);
+      shadowAnchor.set(Infinity, Infinity, Infinity);
+      return;
     }
     // A room's middle can be inside something build.js stood there ("Inside
     // the Chapel": the timber round its stair), and the body is then shoved
@@ -1661,6 +1704,24 @@ async function boot() {
         && Math.hypot(d.x - info.center.x, d.z - info.center.z) < 9);
       if (!sign || Math.hypot(player.position.x - sign.x, player.position.z - sign.z) > 1.5) continue;
       if (fx * sign.dx + fz * sign.dz < 0.6) continue;
+      pressing += dt;
+      if (pressing > 0.25) { pressing = -1.5; step(dir); }
+      return;
+    }
+    // wave13-temple: up and down into another zone -- the temple's steps up
+    // to the Mud School end in a doorway, and walking into it has to take you
+    // through. Its marker (build.js `climb`, `fixture`) hangs 2.7 m over the
+    // floor it is reached from, so the doorway at the head of a flight is not
+    // taken from under the landing.
+    const feet = player.position.y - 1.72;
+    for (const dir of [4, 5]) {
+      const exit = room.exits[dir];
+      const beyond = exit && !exit.offMap ? plan.zoneOf(exit.to) : null;
+      if (!beyond || beyond === zone) continue;
+      const sign = built.decor.find((d) => d.kind === 'gateSign' && d.text === DIR_NAME[dir]
+        && Math.hypot(d.x - info.center.x, d.z - info.center.z) < 9);
+      if (!sign || Math.hypot(player.position.x - sign.x, player.position.z - sign.z) > 1.5) continue;
+      if (Math.abs(feet - (sign.y - 2.7)) > 0.9 || fx * sign.dx + fz * sign.dz < 0.6) continue;
       pressing += dt;
       if (pressing > 0.25) { pressing = -1.5; step(dir); }
       return;

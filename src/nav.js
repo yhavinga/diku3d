@@ -566,11 +566,14 @@ export function createNav({ layout, built, world }) {
         x: a.x * CELL + DIR_STEP[dir][0] * (ROOM / 2 - 1), z: a.z * CELL + DIR_STEP[dir][2] * (ROOM / 2 - 1),
       } : null);
     if (arch) {
-      const into = { x: arch.x, z: arch.z };
+      // A doorway at the head of a flight of steps (build.js `climb`) is
+      // walked to by its foot: the landing is no ground a mobile paths on.
+      const into = arch.foot || { x: arch.x, z: arch.z };
       const points = pathInRoom(from, start, into, 3);
       if (!points) return null;
       const back = (built.portals || []).find((p) => p.from === to && p.target === from);
-      const arrive = back ? { x: back.x, y: b.level * LEVEL_H, z: back.z } : randomSpot(to, rand);
+      const backAt = back && (back.foot || back);
+      const arrive = back ? { x: backAt.x, y: b.level * LEVEL_H, z: backAt.z } : randomSpot(to, rand);
       if (!arrive) return null;
       const goal = randomSpot(to, rand, { near: arrive, radius: 6 }) || randomSpot(to, rand);
       const after = goal ? (pathInRoom(to, arrive, goal) || []) : [];
