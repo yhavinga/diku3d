@@ -226,7 +226,17 @@
   #connect-status { margin: 0; min-height: 1.2em; text-transform: none; letter-spacing: 0.03em; font-size: 12px; line-height: 1.45; color: #f4e7cb; }
   #connect-status.bad { color: #ffb3a1; }
   /* Connecting, the page's own class row and saved game are not what is being chosen. */
-  #title.connecting #keys, #title.connecting #class-pick, #title.connecting #continue { display: none; }
+  /* The form has its own "play alone", which is the temple door. */
+  #title.connecting #keys, #title.connecting #class-pick, #title.connecting #continue, #title.connecting #enter { display: none; }
+  /* The form is tall with a new character's fields open: the title gives it
+     the room, from the top down, and the credits follow it rather than lie
+     over it -- on a short screen the title scrolls, and they are still there. */
+  #title.connecting { justify-content: flex-start; padding-top: max(14px, 3vh); gap: 10px; overflow-y: auto; }
+  #title.connecting h1 { font-size: clamp(34px, 5vw, 72px); }
+  #title.connecting #credit { position: static; margin: 4px 0 18px; }
+  #title.connecting #connect { gap: 6px; padding: 12px 14px; }
+  #title.connecting #connect input { padding: 5px 8px; }
+  #credit { pointer-events: none; }
   #link-lost { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 40; display: flex; gap: 14px; align-items: center;
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; color: #f4e7cb; background: rgba(20,8,6,0.88);
     border: 1px solid rgba(255,160,130,0.5); padding: 10px 14px; border-radius: 2px; }
