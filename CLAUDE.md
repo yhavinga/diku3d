@@ -432,6 +432,15 @@ choose.
   `onBeforeCompile` (reachable only via `renderer.properties.get(m).uniforms`)
   and the torch flicker in `quality.js` LightPool — 30–80% of pixels
   otherwise differ between two loads of the same code.
+- **A ring around the world is never "far".** The camera is always inside
+  the horizon's bounding sphere, so every distance-based exclusion (cull.js
+  `AO_REACH`, culling) misses it. Its strips face the camera with normals
+  straight up, GTAO called them occluded, and GTAO's screen-fixed noise
+  slid over the hills when turning — the "flickering hills" were that, not
+  depth precision (near 1.0 instead of 0.1 left 30% of it). `render.js`
+  keeps `horizon-*` out of the AO pass. Measure turning flicker with
+  `Z.swim()` (tools/judge/zfight.js), which corrects for the turn;
+  `Z.measure({ all: true })` also counts alpha-cut and horizon surfaces.
 - Figures are skinned meshes: one draw each, no instancing, and a second pass if
   they cast shadows. They are kept out of the shadow map and culled past 46 m.
 - Large soft sprites are the most expensive thing per pixel in the scene. The
