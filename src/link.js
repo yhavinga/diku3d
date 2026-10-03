@@ -20,6 +20,7 @@
 import { createPlayerFigure } from './actors.js';
 import { DIR_NAME } from './are.js';
 import { TAR } from './magic.js';
+import { PLR } from './rules/handler.js';
 
 /** The protocol this page speaks; the server says its own in `hello`. */
 export const PROTOCOL = 1;
@@ -263,6 +264,8 @@ const OPS = [
   'breakOff', 'useAction', 'kick', 'backstab', 'disarm', 'steal', 'rescue', 'drink', 'eat', 'fill', 'sacrifice',
   'dropGold', 'dropAll', 'wearAll', 'value', 'compare', 'attackSlot',
 ];
+/** How soon a second click on a player who was refused do_kill becomes do_murder. */
+const MURDER_WINDOW_MS = 4000;
 /** Typed at the command line, these move the body here: interp.c's first six, by its prefix rule. */
 const DIRS = ['north', 'east', 'south', 'west', 'up', 'down'];
 /** Combat lines: when another player is one side, the room reads them; nothing is "you". */
@@ -305,9 +308,57 @@ export function attachSocketLink(link, game, host, enter) {
   game.takeAll = (obj) => { link.send({ t: 'op', op: 'takeAll', a: [ref(obj)] }); return []; };
   game.attack = () => {
     const slot = game.facingSlot();
+    const remote = facingRemote();
+    const eye = host.eye();
+    const away = (p) => Math.hypot(p.x - eye.x, p.z - eye.z);
+    if (remote && (!slot || away(remote.pc.position) < away(slot.pos))) return strikePlayer(remote);
     if (slot) link.send({ t: 'op', op: 'attackSlot', a: [ref(slot)] });
     return pending;
   };
+  /**
+   * Another player in front of you and within reach, as `facingTarget` finds
+   * a mobile: the best of nearness and how square you face them.
+   */
+  function facingRemote(reach = 4.6, cone = 0.45) {
+    const eye = host.eye();
+    const yaw = host.yaw();
+    const fx = -Math.sin(yaw); const fz = -Math.cos(yaw);
+    let best = null;
+    let bestScore = -Infinity;
+    for (const r of remotes.values()) {
+      if (!r.figure.group.visible) continue;
+      const dx = r.pc.position.x - eye.x; const dz = r.pc.position.z - eye.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 1e-4 || d > reach || Math.abs(r.pc.position.y - eye.y) > 2.5) continue;
+      const dot = (dx / d) * fx + (dz / d) * fz;
+      if (dot < cone) continue;
+      const score = dot * 2 - d * 0.12;
+      if (score > bestScore) { bestScore = score; best = r; }
+    }
+    return best;
+  }
+  /**
+   * A click on a player is fight.c's do_kill, which refuses anyone not
+   * flagged KILLER or THIEF: "You must MURDER a player." -- the server says
+   * so. DIVERGES: a second click on the same player within a few seconds of
+   * that refusal is do_murder, the way typing it out would be; one click
+   * never makes you a KILLER.
+   */
+  let refusedKill = null;
+  function strikePlayer(r) {
+    const name = r.info.name.toLowerCase();
+    const now = performance.now();
+    if (refusedKill && refusedKill.id === r.id && now - refusedKill.at < MURDER_WINDOW_MS) {
+      refusedKill = null;
+      link.send({ t: 'cmd', line: `murder ${name}` });
+      return pending;
+    }
+    // The roster carries the two flags do_kill accepts.
+    const flagged = (r.info.flags & (PLR.KILLER | PLR.THIEF)) !== 0;
+    refusedKill = flagged ? null : { id: r.id, at: now, name: r.info.name, sex: r.info.sex };
+    link.send({ t: 'cmd', line: `kill ${name}` });
+    return pending;
+  }
   game.cast = (name, { target = null, obj = null } = {}) => {
     const options = {};
     // As game.cast does: an offensive spell with nobody named goes at whoever you face.
@@ -390,10 +441,17 @@ export function attachSocketLink(link, game, host, enter) {
       if (event.vnum !== undefined) host.teleport(event.vnum);
     }
     if (event.kind === 'follow') host.walk(event.dir);
+    if (refusedKill && event.text === 'You must MURDER a player.' && performance.now() - refusedKill.at < MURDER_WINDOW_MS) {
+      game.inject(event);
+      const them = refusedKill.sex === 2 ? 'her' : refusedKill.sex === 1 ? 'him' : 'it';
+      game.inject({ kind: 'note', text: `Click ${refusedKill.name} again to MURDER ${them}.` });
+      return;
+    }
     if (event.kind === 'emote' || event.kind === 'say' || event.kind === 'tell' || event.kind === 'channel' || event.kind === 'gtell') {
       event.heard = true;
-      const speaker = event.speaker && [...remotes.values()].find((r) => r.info.name === event.speaker);
-      if (speaker) speaker.said = { text: event.said || event.text, until: performance.now() + 4000 };
+      // Said aloud in the room: the words over the speaker's head as well as in the log.
+      const speaker = event.kind === 'say' && event.speaker && [...remotes.values()].find((r) => r.info.name === event.speaker);
+      if (speaker && event.said) speaker.figure.say(event.said);
     }
     game.inject(event);
   }

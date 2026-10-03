@@ -999,6 +999,78 @@ function buildPerson(library, who, proto, instance) {
  * `roomAt(x, y, z)` is the drawn zone's room record at a point, for lighting
  * the body as the room is lit (indoors, or underground).
  */
+/** Where the sun is for other players' figures: the drawn zone's setSun writes it. */
+const PLAYER_SUN = { x: 0.4, z: 0.4, elevation: 45, lift: 1 };
+let playerShadowKit = null;
+/**
+ * The contact patch and the cast smear for one player's figure: the same
+ * two quads, texture and opacities the zone's own figures get from
+ * `updateContactShadows`, one mesh each instead of an instance -- a player
+ * comes and goes with the server, not with the zone's build. Geometry and
+ * the two materials are shared by every player.
+ */
+function playerShadows() {
+  if (!playerShadowKit) {
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    geometry.rotateX(-Math.PI / 2);
+    const alphaMap = shadowAlphaTexture();
+    const material = (opacity) => new THREE.MeshBasicMaterial({
+      color: 0x000000, alphaMap, transparent: true, opacity, depthWrite: false, fog: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    });
+    playerShadowKit = { geometry, cast: material(0.34), contact: material(0.62) };
+  }
+  const make = (material, order) => {
+    const mesh = new THREE.Mesh(playerShadowKit.geometry, material);
+    mesh.renderOrder = order;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.frustumCulled = false;
+    mesh.layers.set(OVERLAY_LAYER); // out of the AO prepass, as the zone's are
+    return mesh;
+  };
+  return { cast: make(playerShadowKit.cast, 2), contact: make(playerShadowKit.contact, 3) };
+}
+
+/**
+ * What a player said, over their head for a few seconds: the name label's
+ * lettering, warmer, on no plate (see `labelTexture` for why not). Its own
+ * canvas, not the label cache -- every line said would stay in that.
+ */
+function speechSprite(text, height = 0.3) {
+  const said = text.length > 56 ? `${text.slice(0, 55)}\u2026` : text;
+  const size = 96;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const font = `italic ${size}px "Iowan Old Style", "Palatino Linotype", Georgia, serif`;
+  ctx.font = font;
+  const width = Math.ceil(ctx.measureText(`\u201c${said}\u201d`).width) + 40;
+  canvas.width = THREE.MathUtils.ceilPowerOfTwo(width);
+  canvas.height = THREE.MathUtils.ceilPowerOfTwo(size * 2);
+  ctx.font = font;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+  ctx.shadowBlur = 4;
+  ctx.lineWidth = Math.max(2, size * 0.085);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.strokeText(`\u201c${said}\u201d`, canvas.width / 2, canvas.height / 2 + 2);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#f6e7b8';
+  ctx.fillText(`\u201c${said}\u201d`, canvas.width / 2, canvas.height / 2 + 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, fog: false, toneMapped: false });
+  const sprite = new THREE.Sprite(material);
+  const aspect = canvas.width / canvas.height;
+  sprite.scale.set(height * aspect, height, 1);
+  sprite.layers.set(OVERLAY_LAYER);
+  return sprite;
+}
+
 export function createPlayerFigure({
   library, name, title = '', cls = 3, sex = 1, level = 1, weapon = 0, shield = 0, objProtos = null, roomAt = null,
 }) {
@@ -1019,6 +1091,11 @@ export function createPlayerFigure({
   const label = makeLabel(name, 0.34);
   label.position.y = made.height + 0.34;
   group.add(label);
+
+  const shadows = playerShadows();
+  group.add(shadows.cast, shadows.contact);
+  let speech = null;
+  let speechLeft = 0;
 
   const actions = made.actions || null;
   const natural = (clip, fallback) => (made.stride && made.clips && made.clips[clip] ? made.stride[clip] / made.clips[clip] : fallback);
@@ -1042,6 +1119,12 @@ export function createPlayerFigure({
     yawNow += turn * Math.min(1, dt * 10);
     made.group.rotation.y = yawNow;
     speed += (pace - speed) * Math.min(1, dt * 6);
+    placeShadows();
+    if (speech) {
+      speechLeft -= dt;
+      speech.material.opacity = Math.min(1, speechLeft / 0.6);
+      if (speechLeft <= 0) dropSpeech();
+    }
     if (roomAt && made.indoor) {
       const info = roomAt(feet.x, feet.y, feet.z);
       if (info) lit = { indoor: info.outdoor ? 0 : 1, buried: info.cell.level < 0 ? 1 : 0 };
@@ -1062,6 +1145,47 @@ export function createPlayerFigure({
     made.mixer.update(dt);
   }
 
+  /**
+   * updateContactShadows for one standing figure, in the group's frame (the
+   * feet): a dense patch under them, and a smear away from the sun as long as
+   * the figure's height over the tangent of the sun's elevation.
+   */
+  function placeShadows() {
+    const sun = PLAYER_SUN;
+    const height = made.height || 1.7;
+    const width = Math.max(0.5, height * 0.42);
+    const tan = Math.max(0.06, Math.tan(THREE.MathUtils.degToRad(Math.max(3, sun.elevation))));
+    shadows.contact.position.set(0, 0.02, 0);
+    shadows.contact.scale.set(width * 1.32, 1, width * 1.45);
+    const dirX = -sun.x;
+    const dirZ = -sun.z;
+    const length = width + (height / tan) * sun.lift;
+    shadows.cast.visible = sun.lift > 0.001;
+    shadows.cast.position.set(dirX * (length / 2 - width * 0.35), 0.02, dirZ * (length / 2 - width * 0.35));
+    shadows.cast.rotation.set(0, Math.atan2(dirX, dirZ), 0);
+    shadows.cast.scale.set(width, 1, length);
+    // Shared by every player, set to the same values by each: the zone's formula.
+    playerShadowKit.contact.opacity = 0.52 + 0.26 * sun.lift;
+    playerShadowKit.cast.opacity = (0.30 + 0.16 * sun.lift) * Math.min(1, 4 / (1 + tan * 6));
+  }
+
+  function dropSpeech() {
+    if (!speech) return;
+    speech.removeFromParent();
+    speech.material.map.dispose();
+    speech.material.dispose();
+    speech = null;
+  }
+
+  /** `say`: the words over the head for `seconds`, replacing any still there. */
+  function say(text, seconds = 4.5) {
+    dropSpeech();
+    speech = speechSprite(String(text));
+    speech.position.y = label.position.y + 0.36;
+    group.add(speech);
+    speechLeft = seconds;
+  }
+
   /** A blow, or one taken: the clip once, over whatever the legs are doing. */
   function perform(clip) {
     const action = actions && actions[clip];
@@ -1073,8 +1197,11 @@ export function createPlayerFigure({
   }
 
   return {
-    group, height: made.height, update, perform,
+    group, height: made.height, update, perform, say,
+    /** The meshes a click can land on: the body, not its shadow or its words. */
+    body: made.group,
     dispose() {
+      dropSpeech();
       group.removeFromParent();
       label.material.dispose();
     },
@@ -4151,6 +4278,8 @@ function* peopleOf(world, layout, built, options = {}) {
     // would still throw a hard smear across the paving on a sunless day.
     sun.lift = THREE.MathUtils.clamp((elevationDeg + 2) / 12, 0, 1) * fraction;
     refreshWater(); // the water's glitter is the sun's, so it moves with it
+    // Other players' figures are not this zone's (createPlayerFigure): they read it here.
+    Object.assign(PLAYER_SUN, sun);
   }
 
   /**
