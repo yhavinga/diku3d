@@ -1830,6 +1830,7 @@ async function boot() {
       const info = built.rooms.get(vnum);
       hud.setRoom(info.room);
       audio.setOutdoor(info.outdoor);
+      audio.setPlace(info, state.time);
     }
 
     // The sun follows so its shadow map always covers where you are, but it is
@@ -1859,7 +1860,7 @@ async function boot() {
     if (reeling) fx.viewModel.scene.visible = false; // no fists in the title's reel
     spellfx.update(state.paused ? 0 : dt);
     kick.update(dt);
-    audio.update(built.rooms.get(state.roomVnum)?.room.sector === 1);
+    audio.update(built.rooms.get(state.roomVnum)?.room.sector === 1, state.time);
 
     if (!state.paused) {
       lookTarget = findLookTarget();
@@ -2391,6 +2392,7 @@ async function boot() {
     camera, built, veil: document.getElementById('title-veil'), viewer: window.diku,
   });
   window.diku.title = titleReel;
+  audio.startTitle();
   if (titleReel.active) document.body.classList.add('titling');
   dom.title.classList.remove('hidden');
   frame();

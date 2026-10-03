@@ -9,3 +9,5 @@ tools/judge/round-*/
 .env
 .env.*
 !.env.example
+
+tools/audio/raw/
