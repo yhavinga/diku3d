@@ -1783,7 +1783,7 @@ const SURFACES = {
     const top = mix(rgb(0x4a3b30), rgb(0x7a6858), R.id * 0.5 + cork * 0.3 + fibre * 0.2);
     // The plate's shoulders go red-brown before they drop into the furrow.
     const face = mix(mix(rgb(0x6e4630), top, THREE.MathUtils.smoothstep(R.h, 0.75, 1)), rgb(0x8a8c7a), lichen * 0.55);
-    const furrow = mix(rgb(0x160e0a), rgb(0x6a3a24), clamp01(R.h * 2.2));
+    const furrow = mix(rgb(0x26180f), rgb(0x6a3a24), clamp01(R.h * 2.2));
     s.color = mix(furrow, face, R.top).map((c) => c * (0.84 + cork * 0.2 + fibre * 0.08));
     s.height = R.h * (0.88 + cork * 0.04);
     s.rough = 0.97;
@@ -2747,10 +2747,15 @@ function cutoutMips(data, size, cut) {
  * and wrong for a floor: planks, marble and most flagstone are indoors, and
  * the effect was putting rain puddles on the floorboards of a tavern.
  *
- * `env` is how much of the environment cube the surface believes. It is not a
- * cheat: a limewashed wall really does reflect less of the sky than wet
- * flagstones do, and with a real environment map the difference between 0.6
- * and 1.5 here is the difference between chalk and stone.
+ * `env` is how much of the sky the surface *mirrors*, on top of the hour's
+ * own strength (see `honourEnv`): a limewashed wall shows less of the sky in
+ * it than wet flagstones do. It does not touch the diffuse sky light, which
+ * albedo already accounts for. Until wave 8 it did nothing at all -- three
+ * overwrote it -- and the values below were never seen; they were re-tuned
+ * when it started to bite. On a pale wall it is a fraction of an sRGB step;
+ * on dark rough surfaces (bark, needles, duff) the sky's sheen is most of
+ * what lights the shade, so their numbers decide how black a forest is at
+ * dusk, and the foliage went up from the 0.3-0.45 it was written at.
  *
  * `wet` is how far the low-lying patches of an upward-facing surface polish
  * up. Streets hold water in their dips; walls do not.
@@ -2783,10 +2788,10 @@ const RECIPES = {
   rooftile: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0.35, detail: 0.5 },
   thatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7 },
   dirt: { surface: 'dirt', scale: 4.5, normalScale: 0.9, env: 0.7, wet: 0.3, detail: 0.6 },
-  grass: { surface: 'grass', scale: 5.5, normalScale: 0.2, env: 0.6, wet: 0, detail: 0.3 },
+  grass: { surface: 'grass', scale: 5.5, normalScale: 0.2, env: 0.85, wet: 0, detail: 0.3 },
   // The blades over it: an atlas of cards, not a tile (GRASS_CARDS), baked at
   // twice the usual size because a blade is a few millimetres wide.
-  grassblades: { surface: 'grassblades', size: 1024, scale: 1, normalScale: 0.15, env: 0.45, wet: 0, detail: 0, cutout: 0.5 },
+  grassblades: { surface: 'grassblades', size: 1024, scale: 1, normalScale: 0.15, env: 0.75, wet: 0, detail: 0, cutout: 0.5 },
   // The wettest recipe there is, and out of doors, which is where `wet`
   // belongs: damp standing in the low patches is the whole of what tells a bog
   // apart from a ploughed field.
@@ -2800,7 +2805,7 @@ const RECIPES = {
   // World-unit tile like everything else, so a crown at 80 m repeats at the
   // same physical size as one at 8 -- the per-model stretch was half of what
   // made the trees read as toys.
-  leaves: { surface: 'leaves', scale: 2.0, normalScale: 0.5, env: 0.4, wet: 0, detail: 0.35 },
+  leaves: { surface: 'leaves', scale: 2.0, normalScale: 0.5, env: 0.6, wet: 0, detail: 0.35 },
   // The walls that were `rock`: see the surface. Its tile is its own 3 m.
   rubblewall: { surface: 'rubblewall', scale: 3, normalScale: 0.9, env: 0.7, wet: 0, detail: 0.55 },
   rock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0.25, detail: 0.6 },
@@ -2812,7 +2817,7 @@ const RECIPES = {
   // and it sheds water rather than holding it in pools. Low `env` for the same
   // reason peat has it -- a forest floor sees a fraction of the dome, and a
   // full mirror of the sky turns brown litter grey.
-  duff: { surface: 'duff', scale: 3.2, normalScale: 0.45, env: 0.42, wet: 0, detail: 0.5 },
+  duff: { surface: 'duff', scale: 3.2, normalScale: 0.45, env: 0.55, wet: 0, detail: 0.5 },
   iron: { surface: 'iron', scale: 1.6, normalScale: 0.5, env: 1.4, wet: 0, detail: 0.3 },
   // Arms and armour. Tile sizes are the size of the things: a blade is 5 cm
   // across and a shield 70.
@@ -2823,29 +2828,29 @@ const RECIPES = {
   // closes its seam on, so the seam still falls on a tile edge -- and at half
   // the tile, on a Haon Dor giant scaled 2.5, a ridge is a hand wide and not
   // a paving slab.
-  bark: { surface: 'bark', scale: 0.8, normalScale: 0.5, env: 0.65, wet: 0, detail: 0.5 },
+  bark: { surface: 'bark', scale: 0.8, normalScale: 0.5, env: 0.75, wet: 0, detail: 0.5 },
   // The conifers. A needle card's UVs are the card, 0..1, so its tile is 1.
   // `cutout` is the alpha test: an alpha-*tested* card sorts and shadows like
   // anything opaque, where a blended one would need sorting per card.
-  needles: { surface: 'needles', scale: 1, normalScale: 0.5, env: 0.3, wet: 0, detail: 0, cutout: 0.4 },
+  needles: { surface: 'needles', scale: 1, normalScale: 0.5, env: 0.6, wet: 0, detail: 0, cutout: 0.4 },
   // The broadleaf cards, same arrangement as the needles: UVs are the card.
-  oakleaf: { surface: 'oakleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
-  shrubleaf: { surface: 'shrubleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
-  salal: { surface: 'salal', scale: 1, normalScale: 0.4, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
-  hedgeleaf: { surface: 'hedgeleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
-  nettleleaf: { surface: 'nettleleaf', scale: 1, normalScale: 0.35, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
-  brambleleaf: { surface: 'brambleleaf', scale: 1, normalScale: 0.4, env: 0.45, wet: 0, detail: 0, cutout: 0.5 },
-  weedleaf: { surface: 'weedleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
-  herbleaf: { surface: 'herbleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
-  blooms: { surface: 'blooms', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
+  oakleaf: { surface: 'oakleaf', scale: 1, normalScale: 0.35, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
+  shrubleaf: { surface: 'shrubleaf', scale: 1, normalScale: 0.35, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
+  salal: { surface: 'salal', scale: 1, normalScale: 0.4, env: 0.7, wet: 0, detail: 0, cutout: 0.5 },
+  hedgeleaf: { surface: 'hedgeleaf', scale: 1, normalScale: 0.35, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
+  nettleleaf: { surface: 'nettleleaf', scale: 1, normalScale: 0.35, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
+  brambleleaf: { surface: 'brambleleaf', scale: 1, normalScale: 0.4, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
+  weedleaf: { surface: 'weedleaf', scale: 1, normalScale: 0.3, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
+  herbleaf: { surface: 'herbleaf', scale: 1, normalScale: 0.3, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
+  blooms: { surface: 'blooms', scale: 1, normalScale: 0.3, env: 0.5, wet: 0, detail: 0, cutout: 0.5 },
   // A hobbit's door and window frames, in the four colours they are painted.
   doorgreen: { surface: 'doorgreen', scale: 1.1, normalScale: 0.45, env: 0.75, wet: 0, detail: 0.3 },
   doorblue: { surface: 'doorblue', scale: 1.1, normalScale: 0.45, env: 0.75, wet: 0, detail: 0.3 },
   dooryellow: { surface: 'dooryellow', scale: 1.1, normalScale: 0.45, env: 0.75, wet: 0, detail: 0.3 },
   doorred: { surface: 'doorred', scale: 1.1, normalScale: 0.45, env: 0.75, wet: 0, detail: 0.3 },
-  fernleaf: { surface: 'fernleaf', scale: 1, normalScale: 0.3, env: 0.35, wet: 0, detail: 0, cutout: 0.5 },
-  firbark: { surface: 'firbark', scale: 0.7, normalScale: 0.45, env: 0.35, wet: 0, detail: 0.5 },
-  cedarbark: { surface: 'cedarbark', scale: 0.6, normalScale: 0.45, env: 0.5, wet: 0, detail: 0.5 },
+  fernleaf: { surface: 'fernleaf', scale: 1, normalScale: 0.3, env: 0.6, wet: 0, detail: 0, cutout: 0.5 },
+  firbark: { surface: 'firbark', scale: 0.7, normalScale: 0.45, env: 0.6, wet: 0, detail: 0.5 },
+  cedarbark: { surface: 'cedarbark', scale: 0.6, normalScale: 0.45, env: 0.65, wet: 0, detail: 0.5 },
   water: { surface: 'water', scale: 7, normalScale: 0.5, env: 1.6, wet: 0, detail: 0.2 },
   // The sewer. `buried` hands their ambient, reflections and fog to the fixed
   // underground terms above instead of the sky, so `env` means nothing here.
@@ -2880,12 +2885,12 @@ const RECIPES = {
   // A boulder and a fallen log, with the moss grown on in the shader rather
   // than modelled as a cap: a green shell has an edge, and moss does not.
   mossrock: { surface: 'caverock', scale: 2.6, normalScale: 0.8, env: 0.6, wet: 0.2, detail: 0.6, triplanar: true, moss: 0.42 },
-  mossbark: { surface: 'bark', scale: 0.8, normalScale: 0.5, env: 0.65, wet: 0, detail: 0.5, moss: 0.4 },
+  mossbark: { surface: 'bark', scale: 0.8, normalScale: 0.5, env: 0.75, wet: 0, detail: 0.5, moss: 0.4 },
   // A full `env`: cloth this open lets the sky through, and at 0.4 a tent's
   // corners went to RGB 0 after dark however hard the lantern burned.
   tentcloth: { surface: 'tentcloth', scale: 4, normalScale: 0.5, env: 1.0, wet: 0, detail: 0.4 },
   rug: { surface: 'rug', scale: 3.4, normalScale: 0.3, env: 0.35, wet: 0, detail: 0.3 },
-  frond: { surface: 'frond', scale: 1.2, normalScale: 0.5, env: 0.5, wet: 0, detail: 0.3 },
+  frond: { surface: 'frond', scale: 1.2, normalScale: 0.5, env: 0.6, wet: 0, detail: 0.3 },
   rope: { surface: 'rope', scale: 0.3, normalScale: 0.6, env: 0.4, wet: 0, detail: 0.2 },
   cavewater: { surface: 'cavewater', scale: 4, normalScale: 0.3, env: 1, wet: 0, detail: 0.1, buried: true },
   // The Dangerous Neighborhood. `brokencobble` keeps the street's damp -- the
@@ -3132,6 +3137,7 @@ function createDecals(materials) {
     material.name = `decal_${name}`;
     material.userData.uvScale = 1;
     material.defaultAttributeValues = { aIndoor: [0] };
+    honourEnv(material);
     materials[material.name] = material;
   }
 }
@@ -4082,6 +4088,65 @@ const syncBuried = (renderer) => updateBuried(renderer.toneMappingExposure);
  * A material with a shader of someone else's (glass, water, glow) or no
  * lighting at all comes back as it is: none of those takes the sky's light.
  */
+/**
+ * A recipe's `env`, made to mean something.
+ *
+ * three overwrites the `envMapIntensity` uniform with
+ * `scene.environmentIntensity` on every draw of any material that has no
+ * envMap of its own, which is every material here: the sky is hung on
+ * `scene.environment`. So for as long as the town has had a baked sky, a
+ * recipe's `env` -- chalk 0.7, wet cobble 1.15, iron 1.4 -- moved not one
+ * pixel. The scene number is the hour's (and fx.js's indoor cut), and it has
+ * to stay scene-wide; the material's own number rides on top of it here, as a
+ * uniform of its own that three leaves alone.
+ *
+ * It scales what a surface *mirrors* -- `radiance` -- and not the diffuse sky
+ * that lights it. Diffuse sky light does not care what it lands on; albedo
+ * already says how much of it comes back. A limewashed wall and a wet flag
+ * differ in how much of the sky you can see *in* them, which is what this is.
+ * (dress.js has always done the same for figures.)
+ *
+ * Underground nothing is scaled: a buried surface mirrors the fixed sheen, and
+ * that was calibrated against the frame as it is.
+ */
+const envUniform = (material) => ({ get value() { return material.envMapIntensity; } });
+const ENV_DECL = 'uniform float dikuEnv;';
+const ENV_SCALE = '#ifndef DIKU_BURIED\n\tradiance *= dikuEnv;\n#endif';
+const envHooks = new WeakSet();
+const envOnly = new WeakSet();
+/**
+ * Make a material that decorate() does not dress honour its own
+ * `envMapIntensity`. Chains whatever hook it already has, so call it last.
+ */
+export function honourEnv(material) {
+  if (!material || !material.isMeshStandardMaterial) return material;
+  if (decorated.has(material.onBeforeCompile) || envHooks.has(material.onBeforeCompile)) return material;
+  const own = Object.prototype.hasOwnProperty.call(material, 'onBeforeCompile');
+  const previous = material.onBeforeCompile;
+  const hook = function honouredEnv(shader, renderer) {
+    previous.call(this, shader, renderer);
+    shader.uniforms.dikuEnv = envUniform(material);
+    const frag = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\n${ENV_DECL}`)
+      .replace('#include <lights_fragment_end>', `${ENV_SCALE}\n#include <lights_fragment_end>`);
+    if (!frag.includes(ENV_DECL) || !frag.includes('radiance *= dikuEnv')) {
+      throw new Error(`textures: the env injection missed on ${material.name || material.type}`);
+    }
+    shader.fragmentShader = frag;
+  };
+  envHooks.add(hook);
+  if (!own) envOnly.add(hook);
+  material.onBeforeCompile = hook;
+  // three's default key is the hook's own source, which would now be this
+  // wrapper's for every material wrapped -- the fountain's ripples and a
+  // tankard's pewter would share a program. Key on what was wrapped instead.
+  const key = material.customProgramCacheKey;
+  const stock = key === THREE.Material.prototype.customProgramCacheKey;
+  material.customProgramCacheKey = function () { return `${stock ? previous.toString() : key.call(this)}|env`; };
+  material.needsUpdate = true;
+  return material;
+}
+
 // By hook, not by material: a copy that carries decorate()'s hook over --
 // actors.js tints a door slab that way -- is decorated all the same.
 const decorated = new WeakSet();
@@ -4094,7 +4159,7 @@ export function buriedTwin(material, { sunless = false } = {}) {
   const base = twinOf.get(material) || material;
   if (!base || !base.isMeshStandardMaterial) return base;
   const own = Object.prototype.hasOwnProperty.call(base, 'onBeforeCompile');
-  if (own && !isDecorated(base)) return base;
+  if (own && !isDecorated(base) && !envOnly.has(base.onBeforeCompile)) return base;
   if (base.defines?.DIKU_BURIED && !sunless) return base;
   let pair = twins.get(base);
   if (!pair) { pair = {}; twins.set(base, pair); }
@@ -4175,6 +4240,7 @@ function decorate(material, recipe, macro, grain) {
     buriedUniforms(shader.uniforms);
     shader.uniforms.dikuTriScale = { value: 1 / recipe.scale };
     shader.uniforms.dikuMoss = { value: recipe.moss ?? 0 };
+    shader.uniforms.dikuEnv = envUniform(material);
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSurfacePos;\nattribute float aIndoor;\nvarying float vIndoor;')
@@ -4215,6 +4281,7 @@ function decorate(material, recipe, macro, grain) {
         ${BURIED_DECLS}
         uniform float dikuTriScale;
         uniform float dikuMoss;
+        uniform float dikuEnv;
         #if defined( DIKU_TRIPLANAR ) || defined( DIKU_MOSS )
           varying vec3 vDikuWorld;
         #endif
@@ -4237,6 +4304,8 @@ function decorate(material, recipe, macro, grain) {
             radiance *= 0.5 + 10.0 * smoothstep( 0.35, 0.95, dikuUpR );
           #endif
         #else
+          // The recipe's own share of the sky it mirrors: see honourEnv.
+          radiance *= dikuEnv;
           #ifdef DIKU_LIFT
             // The burnt district's sky light, by the hour: see setShadeLift.
             iblIrradiance *= dikuShadeLift;
