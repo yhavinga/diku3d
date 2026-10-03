@@ -1186,10 +1186,12 @@ def build_oven():
     lib.shade_smooth(dome, angle=50)
     fy = -D + 0.02
     fz0, fz1 = Hb + 0.08, Hb + 0.95
-    # the front: piers either side of the mouth and an arch-topped lintel
+    # the front: piers either side of the mouth and an arch-topped lintel.
+    # The piers stop under the lintel: run up through it, their fronts and
+    # tops lay in its planes and flickered with it.
     for s in (-1, 1):
-        p.append(tag(lib.box((0.42, 0.34, fz1 - fz0), (s * 0.44, fy + 0.17, (fz0 + fz1) / 2), mat="stonewall"),
-                     "firebrick"))
+        p.append(tag(lib.box((0.42, 0.34, fz1 - 0.33 - fz0), (s * 0.44, fy + 0.17, (fz0 + fz1 - 0.33) / 2),
+                             mat="stonewall"), "firebrick"))
     p.append(tag(lib.box((1.3, 0.34, 0.33), (0, fy + 0.17, fz1 - 0.165), mat="stonewall"), "firebrick"))
     ring = [(0.23 * math.cos(math.pi * k / 8), 0.2 + 0.23 * math.sin(math.pi * k / 8)) for k in range(9)]
     mouth = prism([(-0.23, 0.0), (0.23, 0.0)] + ring, fy + 0.15, fy + 0.34, m="soot", name="mouth",

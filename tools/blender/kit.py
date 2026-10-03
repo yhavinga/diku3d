@@ -215,11 +215,15 @@ def framing(w, h, t, loc, rot, posts=3, braces=True, rail=0.0, sill=True,
     # barely 50 mm out and at a low sun it cast nothing; this is the difference
     # between a frame drawn on a wall and a frame standing on one.
     d = t + 0.17
+    # The plates sit 5 mm inside the panel's height: flush, the sole plate's
+    # underside and the panel's lay in one plane under every jetty, and the
+    # wall plate's top in one plane with the panel's.
+    lift = 0.005
     if sill:
         for (lo, hi) in _spans(w, sill_skip):
-            objs.append(timber((hi - lo, d, size), at(loc, rot, (lo + hi) / 2, size / 2),
+            objs.append(timber((hi - lo, d, size), at(loc, rot, (lo + hi) / 2, size / 2 + lift),
                                (0, 0, rot), mat))
-    objs.append(timber((w, d, size), at(loc, rot, 0, h - size / 2), (0, 0, rot), mat))
+    objs.append(timber((w, d, size), at(loc, rot, 0, h - size / 2 - lift), (0, 0, rot), mat))
     if rail:
         for (lo, hi) in _spans(w, skip):
             objs.append(timber((hi - lo, d * 0.92, size * 0.8),
@@ -232,9 +236,15 @@ def framing(w, h, t, loc, rot, posts=3, braces=True, rail=0.0, sill=True,
         objs.append(timber((size, d * 0.92, inner_h), at(loc, rot, px, inner_z + inner_h / 2),
                            (0, 0, rot), mat))
     if corner:
+        # The post is the corner of the house, so it stands proud of the
+        # flank as well as the front. Stopped at w/2 its end lay in the plane
+        # of the flank's infill and of the plates' ends, and the three took
+        # turns to win the depth test: the flickering strip down every corner.
+        # 0.11 clears the flank studwork (0.085 proud) instead of meeting it.
+        wrap = 0.11
         for sx in (-1, 1):
-            objs.append(timber((size * 1.3, d * 1.05, h),
-                               at(loc, rot, sx * (w / 2 - size * 0.65), h / 2), (0, 0, rot), mat))
+            objs.append(timber((size * 1.3 + wrap, d * 1.05, h),
+                               at(loc, rot, sx * (w / 2 - size * 0.65 + wrap / 2), h / 2), (0, 0, rot), mat))
     if braces:
         run = min(w * 0.2, (h - 2 * size) * 0.55)
         for sx in (-1, 1):

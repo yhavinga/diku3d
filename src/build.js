@@ -2317,10 +2317,14 @@ export function buildScene(world, layout, materials, assets = null) {
 
     if (kit !== null) {
       // Corner piers close the four panels; the roof sits on the eaves, which
-      // is exactly where a panel's cornice ends.
+      // is exactly where a panel's cornice ends. The plain kit's prefix is
+      // '' and its pier is `wall_corner`: asked for as `corner` it was never
+      // found, `add` dropped it without a word, and every stone room stood
+      // with its panels' overlapping ends bare -- two cornices in one plane
+      // at each corner, flickering.
       for (const sx of [-1, 1]) {
         for (const sz of [-1, 1]) {
-          instances.add(`${kit}corner`, { x: pos.x + sx * KIT_LINE, y: pos.y, z: pos.z + sz * KIT_LINE, rotY: 0 }, chunk);
+          instances.add(`${kit || 'wall_'}corner`, { x: pos.x + sx * KIT_LINE, y: pos.y, z: pos.z + sz * KIT_LINE, rotY: 0 }, chunk);
         }
       }
       if (!ruin) instances.add(`${kit}roof`, { x: pos.x, y: pos.y + CEIL, z: pos.z, rotY: 0 }, chunk);
@@ -3179,22 +3183,33 @@ const alleyEnclosed = (link) => !isOpenAir(link.from.room) && !isOpenAir(link.to
 
 // ---------------------------------------------------------------- pieces ----
 
-function buildFloor({ batcher, chunk, material, x, y, z, half, holes, addPlatform, slab = true, shade = true, tint = null }) {
-  const emit = (cx, cz, w, d) => {
-    batcher.add(plane(w, d, Math.max(2, Math.round(w / 2))), material, place(cx, y, cz), {
-      tint,
-      // Darkening the perimeter is right in a room, where there is a wall all
-      // the way round it. Out of doors there is not, and the cell next door --
-      // a routed street, or a cell built on -- is painted flat, so the two meet
-      // at 0.55 against 1.0 and the join is a razor-straight rectangle on the
-      // ground, parallel to the world axes. That is the level editor showing
-      // through, and GTAO does the job properly anyway.
-      chunk, ao: (slab && shade) ? floorAo(x, z, half, half) : null,
-    });
+function buildFloor({ batcher, chunk, material, x, y, z, half, holes, addPlatform, slab = true, shade = true, tint = null, skin = 0 }) {
+  // `skin` draws the walking surface that much short of the slab's outer
+  // edge, for a floor whose edge runs on under a modelled floor at the same
+  // level: the two would lie in one plane and take turns to be drawn.
+  const edge = half - skin;
+  const emit = (b) => {
+    const w = b.x1 - b.x0; const d = b.z1 - b.z0;
+    const px0 = Math.max(b.x0, -edge); const px1 = Math.min(b.x1, edge);
+    const pz0 = Math.max(b.z0, -edge); const pz1 = Math.min(b.z1, edge);
+    if (px1 - px0 > 0.01 && pz1 - pz0 > 0.01) {
+      batcher.add(plane(px1 - px0, pz1 - pz0, Math.max(2, Math.round(w / 2))), material,
+        place(x + (px0 + px1) / 2, y, z + (pz0 + pz1) / 2), {
+          tint,
+          // Darkening the perimeter is right in a room, where there is a wall all
+          // the way round it. Out of doors there is not, and the cell next door --
+          // a routed street, or a cell built on -- is painted flat, so the two meet
+          // at 0.55 against 1.0 and the join is a razor-straight rectangle on the
+          // ground, parallel to the world axes. That is the level editor showing
+          // through, and GTAO does the job properly anyway.
+          chunk, ao: (slab && shade) ? floorAo(x, z, half, half) : null,
+        });
+    }
+    const cx = x + (b.x0 + b.x1) / 2; const cz = z + (b.z0 + b.z1) / 2;
     if (slab) batcher.add(box(w, SLAB, d), material, place(cx, y - SLAB / 2 - 0.01, cz), { chunk });
     addPlatform(cx - w / 2, cx + w / 2, cz - d / 2, cz + d / 2, y);
   };
-  if (!holes.length) { emit(x, z, half * 2, half * 2); return; }
+  if (!holes.length) { emit({ x0: -half, x1: half, z0: -half, z1: half }); return; }
   // Split the slab into strips around the opening a staircase passes through.
   const hole = unionRect(holes);
   for (const b of [
@@ -3203,9 +3218,8 @@ function buildFloor({ batcher, chunk, material, x, y, z, half, holes, addPlatfor
     { x0: -half, x1: hole.x0, z0: hole.z0, z1: hole.z1 },
     { x0: hole.x1, x1: half, z0: hole.z0, z1: hole.z1 },
   ]) {
-    const w = b.x1 - b.x0; const d = b.z1 - b.z0;
-    if (w <= 0.05 || d <= 0.05) continue;
-    emit(x + (b.x0 + b.x1) / 2, z + (b.z0 + b.z1) / 2, w, d);
+    if (b.x1 - b.x0 <= 0.05 || b.z1 - b.z0 <= 0.05) continue;
+    emit(b);
   }
 }
 
@@ -3248,20 +3262,30 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
   // A Shire house's outer skin stops under its eave and a smial has none --
   // the hill is its outside -- and a smial's inner skin only needs to reach
   // the spring of the vault lining in front of it (see `shireOutside`).
+  //
+  // Each skin stops where it meets the skins of the walls either side
+  // instead of running on through them. All four used to span the full
+  // width, so at every corner a wall's end faces lay in the plane of the
+  // next wall's outer face and the two took turns to be drawn -- plaster
+  // flickering through the street face of every building. The walls running
+  // north-south give way: their inner skin spans the room, their outer skin
+  // the room and both inner skins, and the east-west walls close the corners.
+  const inset = (WALL_OUT + (along ? WALL_IN : 0)) * 2;
   for (const skin of (kit !== null && kit !== undefined && instances ? [] : [
-    { name: mats.wallIn, t: WALL_IN, offset: WALL_IN / 2, height: innerH ?? CEIL, tint: mats.wallInTint },
+    { name: mats.wallIn, t: WALL_IN, offset: WALL_IN / 2, height: innerH ?? CEIL, tint: mats.wallInTint, span: width - inset },
     // `uv` is undefined for every room but a smial, and undefined falls through
     // to the material's own tile inside `Batcher.add`.
-    { name: mats.wallOut, t: WALL_OUT, offset: WALL_IN + WALL_OUT / 2, height: outerH ?? eave, uv: mats.wallUv },
+    { name: mats.wallOut, t: WALL_OUT, offset: WALL_IN + WALL_OUT / 2, height: outerH ?? eave, uv: mats.wallUv,
+      span: width - (along ? WALL_OUT * 2 : 0) },
   ].filter((skin) => skin.height > 0))) {
     const sx = x + dx * skin.offset;
     const sz = z + dz * skin.offset;
     if (!gap) {
-      batcher.add(box(width, skin.height, skin.t, 3, 4, 1), skin.name,
+      batcher.add(box(skin.span, skin.height, skin.t, 3, 4, 1), skin.name,
         place(sx, y + skin.height / 2, sz, rotY), { chunk, ao: wallAo(y), uvScale: skin.uv, tint: skin.tint });
       continue;
     }
-    const sideW = (width - gap) / 2;
+    const sideW = (skin.span - gap) / 2;
     for (const s of [-1, 1]) {
       const offset = s * (gap + sideW) / 2;
       batcher.add(box(sideW, skin.height, skin.t, 2, 4, 1), skin.name,
@@ -3352,12 +3376,15 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
   const graffiti = hood && HOOD_GRAFFITI.test(room.description);
   const features = hood ? hoodFeatures(room, sides) : new Map();
   const fenced = hoodFenceDir(room);
-  const block = (bx, bz, sx, sz, salt, face = -1) => {
-    const seed = hash3(cell.x * 7 + Math.round(bx), cell.z * 7 + Math.round(bz), cell.level, salt);
+  // `key` is where the block is hashed from: a block cut back to clear a
+  // corner keeps the height and the material it had at full length.
+  const heightAt = (kx, kz, salt) => 6.2 + hash3(cell.x * 7 + Math.round(kx), cell.z * 7 + Math.round(kz), cell.level, salt) * 4.6;
+  const block = (bx, bz, sx, sz, salt, face = -1, kx = bx, kz = bz) => {
+    const seed = hash3(cell.x * 7 + Math.round(kx), cell.z * 7 + Math.round(kz), cell.level, salt);
     const h = 6.2 + seed * 4.6;
     // In the neighborhood every front is masonry: a boarded window nailed
     // over half-timbering's painted braces read as a sticker.
-    const stone = hood || hash3(Math.round(bx), Math.round(bz), cell.level, 61) > 0.45;
+    const stone = hood || hash3(Math.round(kx), Math.round(kz), cell.level, 61) > 0.45;
     const marble = face >= 0 && features.get((face + 2) % 4) === 'marble';
     batcher.add(box(sx, h, sz, 3, 4, 3), marble ? 'marble' : stone ? (hood ? 'sootwall' : 'stonewall') : 'timber',
       place(bx, pos.y + h / 2, bz), { chunk, ao: wallAo(pos.y) });
@@ -3473,8 +3500,10 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
         const seed = (k) => hash3(cell.x * 13 + Math.round(a), cell.z * 13 + dir, i, 240 + k);
         const size = 1.6 + seed(0) * 2.2;
         const p = at(a + (seed(1) - 0.5) * len, inset - depth / 2 - seed(2) * 1.5);
+        // Each a few millimetres over the last: the patches overlap, and at
+        // one height the overlaps took turns to be drawn.
         batcher.add(plane(size, size, 2), 'grass',
-          place(p.x, pos.y + 0.02, p.z, seed(3) * Math.PI * 2), { chunk, uvScale: TURF_UV });
+          place(p.x, pos.y + 0.02 + i * 0.003, p.z, seed(3) * Math.PI * 2), { chunk, uvScale: TURF_UV });
       }
     };
     const chimney = (a) => {
@@ -3598,7 +3627,30 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
       buildIronFence({ instances, model, chunk, x: pos.x, y: pos.y, z: pos.z, dir, addCollider });
       continue;
     }
-    if (!shire) { block(bx, bz, sx, sz, 62 + dir, (dir + 2) % 4); continue; }
+    if (!shire) {
+      // Two closed sides meet in a corner both blocks used to fill, so the
+      // end of one lay in the plane of the other's street face, and its outer
+      // face in the plane of the other's end -- stone and half-timber taking
+      // turns down the corner of every building. The taller block keeps the
+      // corner; the lower one stops at the taller one's back wall, inside it,
+      // where nothing of it could be seen anyway.
+      let lo = -HALF; let hi = HALF;
+      const h = heightAt(bx, bz, 62 + dir);
+      for (const n of [(dir + 3) % 4, (dir + 1) % 4]) {
+        if (isOpen(n) || n === fenced) continue;
+        const [ndx, , ndz] = DIR_STEP[n];
+        // Which end of this block the neighbour's corner is at, along it.
+        const s = along ? ndz : ndx;
+        const nh = heightAt(pos.x + ndx * inset, pos.z + ndz * inset, 62 + n);
+        if (nh > h || (nh === h && !along)) {
+          if (s < 0) lo = -HALF + FRONTAGE_D; else hi = HALF - FRONTAGE_D;
+        }
+      }
+      const mid = (lo + hi) / 2; const len = hi - lo;
+      block(along ? bx : pos.x + mid, along ? pos.z + mid : bz, along ? sx : len, along ? len : sz,
+        62 + dir, (dir + 2) % 4, bx, bz);
+      continue;
+    }
     // Mostly bank, a cottage now and then -- a village of holes with a few
     // houses in it, which is what the Shire is.
     if (hash3(cell.x, cell.z, dir, 60) < 0.76) bank(dir);
@@ -4733,11 +4785,13 @@ const OLD_TOMB = /\bold tomb\b/i;
  * band of grass midway between every pair, which is the marsh's lesson.
  *
  * 3.4 m wide, not the cell: a thirteen-metre gravel road is a car park. The
- * lift is two centimetres, enough to clear the floor plane it lies on and far
- * too little to trip over.
+ * lift is four centimetres, enough to clear the floor plane it lies on and far
+ * too little to trip over. Not two: the grass aprons at the foot of a turf
+ * bank lie at two to three, and where one ran under the road the two took
+ * turns to be drawn.
  */
 const GRAVEL_W = 3.4;
-const GRAVEL_LIFT = 0.02;
+const GRAVEL_LIFT = 0.04;
 
 /** The gravel runs from the centre out to every way out; stones go on grass. */
 const GRAVE_PATH = 2.6;
@@ -6511,10 +6565,13 @@ function buildSewerChamber({
   const sheet = floodOf(room);
   const mud = !!sheet && sheet.material === 'sludge';
   const flood = !!sheet && !mud;
-  // Out to the middle of the wall, so the floor's edge is under masonry.
+  // The slab runs out to the middle of the wall, so its edge is under
+  // masonry; the paving stops at the wall face. Through a tunnel mouth the
+  // model's own walkway starts there, at the same level, and paving laid
+  // over it took turns with it in the depth test.
   buildFloor({
     batcher, chunk, material: 'sewerflag', x: pos.x, y, z: pos.z,
-    half: SW_CA + SW_CT / 2, holes: floorHoles, addPlatform,
+    half: SW_CA + SW_CT / 2, holes: floorHoles, addPlatform, skin: SW_CT / 2,
   });
   if ((mud || flood) && !floorHoles.length) {
     sewerSheet({ batcher, chunk, pos, dir: 0, from: -SW_CA, to: SW_CA, y, flood, sheet });
@@ -6933,6 +6990,7 @@ function closeDoorway({ batcher, pos, dir, chunk, material, addCollider }) {
   const y = pos.y;
   const H = CEIL + SLAB;
   const T = 0.3;
+  const R = 0.01;
   const add = (a0, a1, c0, c1, y0, y1) => {
     const r = sewerRect(pos, dir, a0, a1, c0, c1);
     batcher.add(box(r.x1 - r.x0, y1 - y0, r.z1 - r.z0), material,
@@ -6942,12 +7000,15 @@ function closeDoorway({ batcher, pos, dir, chunk, material, addCollider }) {
   for (const s of [-1, 1]) {
     const r = add(HALF - T, HALF, s * (DOOR_W / 2 + T), s * HALF, y, y + H);
     addCollider(r.x0, r.x1, r.z0, r.z1, y, y + H);
-    // The reveal: a jamb from the room's wall to the face.
-    const j = add(SHELL - 0.05, HALF - T, s * DOOR_W / 2, s * (DOOR_W / 2 + T), y, y + DOOR_H);
+    // The reveal: a jamb from the room's wall to the face. It starts inside
+    // the wall, so it stands 10 mm back from the wall's own reveal: flush,
+    // the two shared a plane for the 5 cm they overlap, and so did the
+    // soffit with the wall's lintel.
+    const j = add(SHELL - 0.05, HALF - T, s * (DOOR_W / 2 + R), s * (DOOR_W / 2 + T), y, y + DOOR_H);
     addCollider(j.x0, j.x1, j.z0, j.z1, y, y + DOOR_H);
   }
   add(HALF - T, HALF, -(DOOR_W / 2 + T), DOOR_W / 2 + T, y + DOOR_H, y + H);
-  add(SHELL - 0.05, HALF - T, -DOOR_W / 2, DOOR_W / 2, y + DOOR_H, y + DOOR_H + 0.3);
+  add(SHELL - 0.05, HALF - T, -DOOR_W / 2 - R, DOOR_W / 2 + R, y + DOOR_H + R, y + DOOR_H + 0.3);
 }
 
 /**
@@ -7514,10 +7575,13 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
   }
   // The opening's own edges: the slab it is cut through is whatever the room
   // above is floored with, and in the Dump that is turf, standing 0.45 m deep
-  // round the top of a brick shaft. Lined in the parapet's stone instead.
+  // round the top of a brick shaft. Lined in the parapet's stone instead --
+  // 20 mm proud into the opening, because a lining laid on the cut face lay
+  // in its plane and the two flickered all the way down the well.
+  const L = 0.02;
   for (const [p, q] of [
-    [at(a0, c0 - 0.06), at(a1, c0)], [at(a0, c1), at(a1, c1 + 0.06)],
-    [at(a1, c0 - 0.06), at(a1 + 0.06, c1 + 0.06)],
+    [at(a0, c0 - 0.06), at(a1, c0 + L)], [at(a0, c1 - L), at(a1, c1 + 0.06)],
+    [at(a1 - L, c0 - 0.06), at(a1 + 0.06, c1 + 0.06)],
   ]) slab(p, q, upper.y - SLAB - 0.02, upper.y - 0.005, kerb);
   if (shaftWalls) {
     // A sewer shaft's walls run to the underside of the floor above, and
@@ -7645,10 +7709,13 @@ function buildSmialVault({ batcher, chunk, pos, sides, addCollider }) {
  */
 function buildVaultLining({
   batcher, chunk, pos, sides, addCollider, spring, corner, surface, rib, ribW = 0.12, ribs = [-2.7, 2.7],
-  holes = [], inset = 0, shade = null,
+  holes = [], inset = 0.02, shade = null,
 }) {
+  // 20 mm clear of the room's own walls and ceiling, which stand behind it.
+  // Laid on their faces, the lining and the plaster behind it took turns to
+  // be drawn -- a smial's boards flickered with the wall they were fixed to.
   const H = ROOM / 2 - inset;
-  const cove = CEIL - spring;
+  const cove = CEIL - inset - spring;
   const straight = H - corner;
   // Profile: [inset from the wall face, height, normal tilt t (0 wall, pi/2 ceiling)]
   const profile = [0, VAULT_BOARDS, 2.1, DOOR_H].filter((h) => h < spring - 1e-6).map((h) => [0, h, 0]);
@@ -8270,20 +8337,27 @@ function buildSmialTunnel({ batcher, chunk, pos, along, y, a0, a1, addCollider, 
   // [x size, z size] of something `l` long down the corridor and `w` across it.
   const size = (l, w) => (ax ? [l, w] : [w, l]);
   const mid = (a0 + a1) / 2; const len = a1 - a0;
+  // An end that runs on into a room (past HALF) meets the room's inner skin.
+  // The walls and their boards stop 20 mm into that skin: ended on its face,
+  // their ends lay in its plane either side of the door and the boards
+  // flickered with the plaster.
+  const w0 = a0 < -HALF ? a0 + 0.02 : a0; const w1 = a1 > HALF ? a1 - 0.02 : a1;
+  const wmid = (w0 + w1) / 2; const wlen = w1 - w0;
   for (const s of [-1, 1]) {
-    const p = at(mid, s * (SMIAL_TUNNEL + 0.15));
-    const [w, d] = size(len, 0.3);
+    const p = at(wmid, s * (SMIAL_TUNNEL + 0.15));
+    const [w, d] = size(wlen, 0.3);
     batcher.add(box(w, SMIAL_TUNNEL_H, d, 4, 2, 1), wall, place(p.x, y + SMIAL_TUNNEL_H / 2, p.z), { chunk, ao: wallAo(y) });
     addCollider(p.x - w / 2, p.x + w / 2, p.z - d / 2, p.z + d / 2, y, y + CEIL);
-    const b = at(mid, s * (SMIAL_TUNNEL - 0.02));
-    const [bw, bd] = size(len, 0.04);
+    const b = at(wmid, s * (SMIAL_TUNNEL - 0.02));
+    const [bw, bd] = size(wlen, 0.04);
     batcher.add(box(bw, VAULT_BOARDS, bd, 4, 1, 1), 'planks', place(b.x, y + VAULT_BOARDS / 2, b.z), { chunk, ao: wallAo(y) });
   }
-  const c = at(mid, 0);
-  const [cw, cd] = size(len, SMIAL_TUNNEL * 2 + 0.6);
+  const c = at(wmid, 0);
+  const [cw, cd] = size(wlen, SMIAL_TUNNEL * 2 + 0.6);
   batcher.add(box(cw, 0.3, cd), 'plaster', place(c.x, y + SMIAL_TUNNEL_H + 0.15, c.z), { chunk, ao: () => 0.7 });
+  const f = at(mid, 0);
   const [fw, fd] = size(len, SMIAL_TUNNEL * 2);
-  batcher.add(plane(fw, fd, 4), 'planks', place(c.x, y + 0.012, c.z), { chunk });
+  batcher.add(plane(fw, fd, 4), 'planks', place(f.x, y + 0.012, f.z), { chunk });
   // Ribs across the ceiling and down the walls, as in the smials' halls.
   for (let a = a0 + 1.2; a < a1 - 0.8; a += 2.6) {
     const r = at(a, 0);
@@ -8300,9 +8374,13 @@ function buildSmialTunnel({ batcher, chunk, pos, along, y, a0, a1, addCollider, 
     // tucked under the houses' eaves.
     const indoor = batcher.indoor;
     batcher.indoor = false;
-    const r = at((cover0 + a1) / 2, 0);
+    // Its gable ends stop inside the house walls with the corridor's: ended
+    // on the inner face, a thatch triangle flickered through the plaster
+    // over every door of the mill.
+    const r0 = cover0 === a0 ? w0 : cover0;
+    const r = at((r0 + w1) / 2, 0);
     const span = SMIAL_TUNNEL * 2 + 1.5;
-    batcher.add(triPrism(span, 2.0, a1 - cover0), 'thatch', place(r.x, y + SMIAL_TUNNEL_H + 0.3, r.z, ax ? Math.PI / 2 : 0), { chunk });
+    batcher.add(triPrism(span, 2.0, w1 - r0), 'thatch', place(r.x, y + SMIAL_TUNNEL_H + 0.3, r.z, ax ? Math.PI / 2 : 0), { chunk });
     batcher.indoor = indoor;
     return;
   }

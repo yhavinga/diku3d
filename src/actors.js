@@ -3480,10 +3480,14 @@ export function populate(world, layout, built, options = {}) {
             // standing closest to a daylight opening, so it is the *best* lit
             // surface in the room, not the worst. Weathered oak catching light
             // off its own window.
+            // The jambs stand between the sill and the head, not through
+            // them: run past both, their ends lay in the plane of the head's
+            // top and front and of the sill's underside, and those faces took
+            // turns to be drawn -- the flicker under every upper window.
             for (const s of [-1, 1]) {
-              pushPart(surround, G.box(0.17, PANE_H + 0.34, REVEAL), 0xffffff,
+              pushPart(surround, G.box(0.17, PANE_H + 0.02, REVEAL), 0xffffff,
                 at(px + tx * s * (PANE_W / 2 + 0.085) + f.nx * (REVEAL / 2),
-                   y, pz + tz * s * (PANE_W / 2 + 0.085) + f.nz * (REVEAL / 2), 0, f.ry, 0));
+                   y - 0.01, pz + tz * s * (PANE_W / 2 + 0.085) + f.nz * (REVEAL / 2), 0, f.ry, 0));
             }
             pushPart(surround, G.box(PANE_W + 0.34, 0.17, REVEAL), 0xffffff,
               at(px + f.nx * (REVEAL / 2), y + PANE_H / 2 + 0.085, pz + f.nz * (REVEAL / 2), 0, f.ry, 0));

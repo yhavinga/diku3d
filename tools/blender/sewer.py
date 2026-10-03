@@ -56,6 +56,7 @@ KERB = 0.30          # dressed kerb along each lip of the channel
 SUMP = -0.32         # channel invert
 WATER = -0.16        # what stands in it
 RIB_AT = (-3.25, 3.25)  # transverse ribs, same pitch in every cell
+PROUD = 0.02         # dressed stone round a mouth, clear of the brick face
 # The town's iron as it is underground: see `buried` in src/textures.js.
 IRON = "rustiron"
 
@@ -561,7 +562,10 @@ def mouth_ring(y, name="ring"):
     ring 0.21 m bigger."""
     p = []
     n = 13
-    r0, r1 = A, A + 0.42
+    # The intrados stands 20 mm proud of the brick it rings. Cut flush, the
+    # first 0.3 m of the tunnel vault and the stones lay in one surface and
+    # took turns to be drawn -- the jambs the same on the walls below.
+    r0, r1 = A - PROUD, A + 0.42
     gap = 0.012
     mid = (r0 + r1) / 2
     for i in range(n):
@@ -583,7 +587,7 @@ def mouth_ring(y, name="ring"):
         p.append(mesh("%s_%d" % (name, i), verts, faces, None, "ashlar",
                       toward=lambda c, cx=cx, cy=cy, cz=cz: (2 * c[0] - cx, 2 * c[1] - cy, 2 * c[2] - cz)))
     for sx in (-1, 1):
-        lo, hi = sorted((sx * A, sx * (A + 0.42)))
+        lo, hi = sorted((sx * (A - PROUD), sx * (A + 0.42)))
         p.append(quad_box(lo, hi, y - 0.06, y + 0.3, 0.0, SPRING, name + "_jamb", "ashlar", 0.02))
     return p
 
@@ -657,7 +661,9 @@ def build_door_end():
     for sx in (-1, 1):
         lo, hi = sorted((sx * DOOR_W / 2, sx * (DOOR_W / 2 + 0.3)))
         p.append(quad_box(lo, hi, y - 0.02, y + 0.12, 0.0, DOOR_H, "de_jamb_stone", "ashlar", 0.02))
-    p.append(quad_box(-DOOR_W / 2, DOOR_W / 2, y0, y1, -0.3, 0.0, "de_sill", "sewerflag"))
+    # A centimetre under the walkways: a buried room paves out to its cell
+    # edge, over this same strip, and the two lay in one plane.
+    p.append(quad_box(-DOOR_W / 2, DOOR_W / 2, y0, y1, -0.31, -0.01, "de_sill", "sewerflag"))
     return deliver(p, "sewer_door_end")
 
 
