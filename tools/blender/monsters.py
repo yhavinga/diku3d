@@ -41,6 +41,7 @@ P = B.P
 cone, ell = B.cone, B.ell
 ease, lerp, wave = B.ease, B.lerp, B.wave
 FPS = B.FPS
+hold_steps_ = B.hold_steps_
 
 
 # ============================================================ rig with rolls
@@ -1319,7 +1320,7 @@ def mudmonster():
 
     return dict(name="beast_mud", archetype="blob", bones=bones, body=body, masks=masks, parts=parts,
                 patch=B.spots(0.12, seed=73), h=0.022, tris=3600, mat="ooze", clips=blob_clips,
-                gait=dict(walk_stride=0.9, walk_frames=40, run_stride=1.5, run_frames=26))
+                gait=dict(walk_stride=0.9, walk_frames=40, run_stride=1.5, run_frames=26, pastimes=["wallow"]))
 
 
 def blob_clips(arm, spec):
@@ -1386,6 +1387,23 @@ def blob_clips(arm, spec):
         fk["spine2"] = (50 * k, 0, 10 * k)
         return dict(fk=fk, loc=V((0, 0.2 * k, -1.2 * k)))
     clip.run("death", 50, death)
+
+    if "wallow" in g.get("pastimes", []):
+        # 'Slowly evolving from the mud': sunk back into the floor to the
+        # shoulders, the arms gone into the heap, the head and the surface
+        # of it heaving like something boiling. The viewer eases in and out
+        # of it slowly, which is the rising out of the mud.
+        def wallow(t):
+            boil = wave(3 * t) * 0.6 + wave(5 * t, 0.3) * 0.4
+            fk = pose(t, lean=18 + 3 * boil, sway=5 * wave(t), heave=5 * boil, curl=12,
+                      jaw=8 * max(0.0, wave(2 * t, 0.2)))
+            for tag, s_ in arms:
+                # Down into the heap: arms hanging straight, under the floor.
+                fk["arm1" + tag] = (-25, 0, s_ * 6)
+                fk["arm2" + tag] = (0, 0, 0)
+            fk["spine1"] = (30 + 2 * boil, 0, 4 * wave(t))
+            return dict(fk=fk, loc=V((0, 0.08, -g.get("sink", 0.9) + 0.03 * boil)))
+        clip.run("wallow", 120, wallow, step=2)
 
     return {"clips": clip.report, "stride": {"walk": g["walk_stride"], "run": g["run_stride"]}, "hit": 0.5}
 
@@ -1574,6 +1592,40 @@ def biped_clips(arm, spec):
                         ik=None, limp=1.0)
         clip.run("fly", g.get("fly_frames", 10), fly)
 
+    names = g.get("pastimes", [])
+    if "perch" in names:
+        # Crouched on its heels like the carving it might be, wings folded
+        # high, forearms on its knees, the head forward -- and still: the
+        # stone gargoyle that 'seems to shift and move' as you look at it.
+        def perch(t):
+            shift = math.exp(-((t - 0.6) * 18) ** 2)
+            fk = {"spine": (hunch * 0.5 + 26, 0, 0), "chest": (hunch * 0.5 + 10, 0, 0),
+                  "neck": (-hunch * 0.6 - 24, 6 * shift, 0), "head": (-hunch * 0.4 - 12, 18 * shift, 0)}
+            fk.update(arms(swing=-44, bend=60, spread=4))
+            fk.update(tail_fk(t, 1.5 * shift, pitch=-6))
+            fk.update(wings_fk(0.0, -6))
+            ik = {leg: B.planted(rest, leg, fwd=-hip * 0.02, meta=-g.get("perch_heel", 30.0)) for leg in rest}
+            return dict(fk=fk, loc=V((0, hip * 0.06, -hip * g.get("perch_drop", 0.42))), ik=ik)
+        clip.run("perch", 120, perch, step=2)
+
+    if "sniff" in names:
+        # A wererat at rest: hunched, paws held up together before its
+        # chest, nose lifted and going, head turning to whatever it smells.
+        def sniff(t):
+            twitch = wave(8 * t) * 0.5 + 0.5
+            look = 16 * hold_steps_(t, [(0.15, 1.0), (0.45, -0.7), (0.75, 0.2)])
+            fk = {"spine": (hunch * 0.5 + 6, 0, 0), "chest": (hunch * 0.5 + 4, look * 0.2, 0),
+                  "neck": (-hunch * 0.6 - 10, look * 0.3, 0), "head": (-hunch * 0.4 - 12 + 3 * twitch, look * 0.5, 0)}
+            for tag, s_ in ((".L", 1), (".R", -1)):
+                fk["uarm" + tag] = (-45, 0, -s_ * 4)
+                fk["farm" + tag] = (-85 + 6 * twitch * (1 if s_ > 0 else -1), 0, s_ * 18)
+                fk["hand" + tag] = (-25, 0, 0)
+            if "jaw" in bones:
+                fk["jaw"] = (-3 * twitch, 0, 0)
+            fk.update(tail_fk(t, 14, pitch=0))
+            return dict(fk=fk, loc=V((0, 0, -hip * 0.04)), ik={leg: B.planted(rest, leg) for leg in rest})
+        clip.run("sniff", 120, sniff, step=2)
+
     report["clips"] = clip.report
     report["stride"] = {"walk": S, "run": S2}
     report["overreach"] = clip.reach
@@ -1698,7 +1750,8 @@ def ratman():
 
     return dict(name="beast_ratman", archetype="ratman", bones=biped_bones(L), body=body, masks=masks, parts=parts,
                 patch=B.spots(0.06, seed=83), h=0.012, tris=3200, mat="fur", clips=biped_clips,
-                gait=dict(walk_stride=0.72, walk_frames=28, lift=0.08, run_stride=1.4, run_frames=18, hunch=18.0, lie=0.14))
+                gait=dict(walk_stride=0.72, walk_frames=28, lift=0.08, run_stride=1.4, run_frames=18, hunch=18.0, lie=0.14,
+                          pastimes=["sniff"]))
 
 
 def imp():
@@ -1767,7 +1820,8 @@ def imp():
 
     return dict(name="beast_imp", archetype="imp", bones=biped_bones(L), body=body, masks=masks, parts=parts,
                 patch=B.spots(0.02, seed=89), h=0.0028, tris=2400, mat="hide", clips=biped_clips,
-                gait=dict(walk_stride=0.2, walk_frames=20, lift=0.025, run_stride=0.4, run_frames=12, hunch=8.0, fly_frames=8))
+                gait=dict(walk_stride=0.2, walk_frames=20, lift=0.025, run_stride=0.4, run_frames=12, hunch=8.0, fly_frames=8,
+                          pastimes=["perch"]))
 
 
 # ============================================================ naga, sand worm

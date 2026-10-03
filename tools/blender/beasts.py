@@ -1595,7 +1595,7 @@ def equine():
                 gait=dict(walk_stride=1.6, walk_frames=34, walk_duty=0.62, lift=0.14,
                           run_stride=2.6, run_frames=18, run_duty=0.36, run_lift=0.22,
                           gallop="transverse", wag=4.0, idle_wag=1, tail_pitch=0.0, lie=0.34, arch=4.0,
-                          graze=dict(pitch=3.0, face=70.0, ground=0.02),
+                          graze=dict(pitch=3.0, face=70.0, ground=0.02), pastimes=["doze", "alert"],
                           flex={"hind": dict(lean=8, push=15, fold=35, curl=45),
                                 "fore": dict(lean=8, push=20, fold=80, curl=50, scap=10)}))
 
@@ -1692,7 +1692,7 @@ def cervid():
                 gait=dict(walk_stride=0.85, walk_frames=30, walk_duty=0.62, lift=0.09,
                           run_stride=2.0, run_frames=16, run_duty=0.34, run_lift=0.16,
                           gallop="transverse", wag=6.0, idle_wag=2, tail_pitch=10.0, lie=0.17, arch=6.0,
-                          graze=dict(pitch=4.0, face=75.0, ground=0.05, most=130.0),
+                          graze=dict(pitch=4.0, face=75.0, ground=0.05, most=130.0), pastimes=["alert"],
                           flex={"hind": dict(lean=8, push=15, fold=40, curl=40),
                                 "fore": dict(lean=8, push=20, fold=85, curl=45, scap=10)}))
 
@@ -1791,7 +1791,9 @@ def bovine():
                 gait=dict(walk_stride=1.25, walk_frames=38, walk_duty=0.64, lift=0.1,
                           run_stride=1.9, run_frames=20, run_duty=0.38, run_lift=0.14,
                           gallop="transverse", wag=5.0, idle_wag=1, tail_pitch=0.0, lie=0.36, arch=4.0,
-                          graze=dict(pitch=3.0, face=65.0, ground=0.05),
+                          graze=dict(pitch=3.0, face=65.0, ground=0.05), pastimes=["loaf"],
+                          loaf=dict(hind=(-55, 120, -150, 80), fore=(-10, -150, 160, 0), lie=0.52, neck=-38.0, head=22.0,
+                                    tail=[(-30, 25), (-20, 10), (0, 10), (0, 5), (0, 5)]),
                           flex={"hind": dict(lean=8, push=14, fold=30, curl=35),
                                 "fore": dict(lean=8, push=18, fold=70, curl=40, scap=10)}))
 
@@ -2675,7 +2677,7 @@ def worm():
     L = 1.3
     girth = lambda u: 0.07 * (1 - 0.55 * u ** 2) * (0.75 + 0.25 * math.sin(math.pi * min(1.0, u * 1.6 + 0.1)))
     return serpent("beast_worm", "worm", L, girth, 10, 0.06, 0.006, 2400,
-                   dict(stride=0.45, frames=36, amp=0.05, lift=0.0, worm=True), head=False, rings=1.0,
+                   dict(stride=0.45, frames=36, amp=0.05, lift=0.0, worm=True, pastimes=["coil", "feel"]), head=False, rings=1.0,
                    mask=spots(0.2, seed=23))
 
 
@@ -2999,6 +3001,22 @@ def serpent_pastimes(spec, g, keyed, lay, pose_chain, xs_i, arc_i, base_arc, joi
             return pose_chain(pts, head_pitch=-6, head_yaw=look, anchor=n // 2,
                               tongue=flicks(t, (0.1, 0.15, 0.2, 0.45, 0.5, 0.78, 0.83, 0.88)))
         keyed("taste", 120, taste)
+
+    if "feel" in names:
+        # A worm has no tongue and no eyes: it lifts its front end off the
+        # floor and swings it from side to side, feeling for food -- the
+        # fat worm 'looking for food', the maggot.
+        def feel(t):
+            sweep = wave(t) * 0.5 + 0.5 * wave(2 * t, 0.2) * 0.4
+
+            def lift(i):
+                return 0.34 * scale * max(0.0, 1 - i / 4.0) ** 1.3 * (0.75 + 0.25 * wave(2 * t, 0.3))
+            pts = settle(lay(base_arc, xs_i, arc_i, lift=lift))
+            for i in range(5):
+                k = max(0.0, 1 - i / 4.0)
+                pts[i] = pts[i] + V((0.12 * scale * sweep * k ** 1.5, 0, 0))
+            return pose_chain(pts, head_pitch=10 + 8 * wave(3 * t), anchor=n // 2)
+        keyed("feel", 120, feel)
 
     def reared(cock, side, draw):
         """The front third up in an S: `cock` how far, `side` the sway in
@@ -3886,6 +3904,45 @@ def quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pi
                                meta=(-st.get("wrist", 40.0) * k if leg.startswith("fore") else 4 * k)) for leg in rest}
             return dict(fk=fk, loc=V((0, 0, -height * st.get("drop", 0.12) * k)), rot=rot, ik=ik)
         clip.run("stretch", 120, stretch)
+
+    if "alert" in names:
+        # Something has been seen: the head comes right up, the ears go
+        # forward, the tail flags, and a forefoot stamps twice -- the deer
+        # that has noticed you and is deciding whether to go.
+        def alert(t):
+            k = ease(t / 0.1) * (1 - ease((t - 0.82) / 0.18))
+            stamp = sum(math.exp(-((t - c) * 22) ** 2) for c in (0.35, 0.55))
+            fk = {"chest": (-3 * k, 0, 0)}
+            for n in necks:
+                fk[n] = (-g.get("alert_neck", 22.0) * k / len(necks), 0, 0)
+            fk["head"] = (g.get("alert_neck", 22.0) * 0.6 * k, 0, 0)
+            fk.update(sides((-25 * k, 0, 0)))
+            flag = ease((t - 0.2) / 0.05) * (1 - ease((t - 0.7) / 0.1))
+            fk.update(tail_wave(tails, t, 6 * flag, freq=4, pitch=tail_pitch + 45 * flag))
+            ik = flat()
+            ik["fore.L"] = planted(rest, "fore.L", up=height * 0.12 * stamp, meta=25 * stamp, toe=20 * stamp)
+            return dict(fk=fk, loc=V((0, 0, 0.004 * k)), ik=ik)
+        clip.run("alert", 90, alert)
+
+    if "doze" in names:
+        # A horse at rest: weight off one hind leg, that hoof tipped up on
+        # its toe and the hip dropped over it, the head and the ears down,
+        # the tail swishing at the flies now and then.
+        dz = g.get("doze", {})
+
+        def doze(t):
+            breath = wave(2 * t)
+            swish = max(math.exp(-((t - 0.3) * 9) ** 2), math.exp(-((t - 0.72) * 11) ** 2))
+            fk = {"pelvis": (0, 0, dz.get("hip", 4.0)), "chest": (0.5 * breath, 0, 0)}
+            for n in necks:
+                fk[n] = (dz.get("neck", 16.0) / len(necks), 0, 0)
+            fk["head"] = (dz.get("head", 6.0) + 2 * wave(t, 0.2), 0, 0)
+            fk.update(sides((14, 0, 0)))
+            fk.update(tail_wave(tails, t, 4 + 28 * swish, freq=2, pitch=tail_pitch))
+            ik = flat()
+            ik["hind.L"] = planted(rest, "hind.L", fwd=height * 0.06, up=height * dz.get("lift", 0.035), meta=-12, toe=75)
+            return dict(fk=fk, loc=V((0, 0, -height * 0.012 + 0.003 * breath)), ik=ik)
+        clip.run("doze", 180, doze, step=2)
 
     if "situp" in names:
         # The rat that 'sits here': up on its haunches, the hind feet flat

@@ -107,6 +107,15 @@ const PASTIMES = {
   // its fangs only when you come close.
   lurk: { odds: 3, hold: [8, 30], gap: [3, 8], rate: 1.2 },
   threat: { odds: 0, once: true, gap: [3, 8], rate: 6 },
+  // The deer and the horse look up and stamp at someone coming; a horse at
+  // rest stands on three legs and dozes. (A cow lies down: `loaf`.)
+  alert: { odds: 0, once: true, gap: [3, 8], rate: 5 },
+  doze: { odds: 2, hold: [15, 45], gap: [4, 10], rate: 0.8 },
+  // The mudmonster 'slowly evolving from the mud': back down into it, and
+  // up out of it again, slowly.
+  wallow: { odds: 2, hold: [10, 30], gap: [6, 14], rate: 0.45 },
+  // A gargoyle (and an imp) crouches still as the carving it might be.
+  perch: { odds: 3, hold: [15, 40], gap: [4, 10], rate: 0.8 },
 };
 const PASTIME_NAMES = Object.keys(PASTIMES);
 /**
@@ -116,7 +125,8 @@ const PASTIME_NAMES = Object.keys(PASTIMES);
  * which is what a lizard does at anything that comes onto its ground.
  */
 const ALARM = { snail: ['withdraw', 2.2], lagomorph: ['situp', 4.5], lizard: ['display', 3.2], serpent: ['hiss', 2.4],
-  fowl: ['flap', 1.6], songbird: ['flap', 5], rodent: ['situp', 3], spider: ['threat', 2.2] };
+  fowl: ['flap', 1.6], songbird: ['flap', 5], rodent: ['situp', 3], spider: ['threat', 2.2],
+  cervid: ['alert', 7], equine: ['alert', 3] };
 /**
  * people.py's sit, in seconds: the first REST_LOOP of it is at rest and
  * breathing and comes back to its first frame, and SIP is the stretch where
