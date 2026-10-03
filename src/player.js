@@ -192,8 +192,10 @@ export class Player {
    * settle on over the last leg (a straight step ends exactly on the mud's
    * compass direction); otherwise you end up looking the way you walked.
    */
-  glidePath(groundPoints, finalYaw = null, onArrive = null) {
-    groundPoints = this.roundObstacles(groundPoints);
+  glidePath(groundPoints, finalYaw = null, onArrive = null, { direct = false } = {}) {
+    // `direct` for a flight of steps: the nav grid is one level's floor and
+    // would flatten the treads out of the line.
+    if (!direct) groundPoints = this.roundObstacles(groundPoints);
     const pts = [this.position.clone()];
     for (const p of groundPoints) pts.push(new THREE.Vector3(p.x, p.y + EYE, p.z));
     // Resolve the destination BEFORE walking to it. Gliding to the raw room
@@ -440,11 +442,17 @@ export class Player {
     // Rising is never "standing": a jump leaves the ground only on the next
     // frame, and judged by height alone that frame still reads as grounded --
     // which zeroed the velocity and kept every jump at 0 cm.
-    if (this.velocity.y <= 0 && (feetY - targetFeet < 0.02 || (targetFeet > feetY && targetFeet - feetY < STEP_UP))) {
+    // Down a step as well as up one. Without it every tread going down was
+    // a fall: at a walk a 0.32 m tread is crossed in 0.07 s and dropping its
+    // 0.31 m rise takes 0.16 s, so the temple's six steps were descended in
+    // one airborne arc -- no footfalls, no bob, landing at the bottom.
+    const stepDown = this.onGround && this.velocity.y <= 0 && !this.keys.has('Space')
+      && feetY > targetFeet && feetY - targetFeet < STEP_UP;
+    if (stepDown || (this.velocity.y <= 0 && (feetY - targetFeet < 0.02 || (targetFeet > feetY && targetFeet - feetY < STEP_UP)))) {
       // standing on, or stepping up onto, a surface
       this.onGround = true;
       this.velocity.y = 0;
-      const smooth = targetFeet > feetY ? Math.min(1, dt * 18) : 1;
+      const smooth = targetFeet > feetY || stepDown ? Math.min(1, dt * 18) : 1;
       this.position.y += (targetFeet + EYE - this.position.y) * smooth;
       if (this.keys.has('Space')) { this.velocity.y = 7.4; this.onGround = false; }
     } else {
