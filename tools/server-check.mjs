@@ -580,6 +580,79 @@ console.log('\nPOSITIONS');
   await a.at(QUIET, 1, 0); await b.at(QUIET, -1, 0);
 }
 
+// ---------------------------------------------- resting, corpses, backstab --
+console.log('\nRESTING, CORPSES, BACKSTAB');
+{
+  const { MERC } = await import('../src/game.js');
+  // Each player's char_update runs on its own clock: quick only for whoever lies down.
+  for (const p of [pa, pbp]) { p.ch.fighting = null; p.ch.position = MERC.POS.STANDING; p.ch.hit = 1; p.pulsePoint = 2; }
+  m = a.mark();
+  a.say('rest');
+  await expect(a, /^You (rest|sit down and rest)\.?/, 'Arwen rests; Boromir stands', m);
+  await pause(1200);
+  const quick = MERC.PULSE_TICK / 4;
+  check(pa.pulsePoint <= quick && pbp.pulsePoint > quick, "her point-pulse runs four times as fast, and his does not", `${pa.pulsePoint} vs ${pbp.pulsePoint} pulses to go`);
+  check(pa.ch.hit > 1 && pbp.ch.hit > 1, '...and both regained on their own tick', `${pa.ch.hit} and ${pbp.ch.hit} hp`);
+  a.say('stand');
+  for (const p of [pa, pbp]) p.ch.hit = p.ch.maxHit;
+
+  // A player's corpse: make_corpse, and do_get's rule for it.
+  const proto = [...w.world.objProtos.values()].find((o) => (o.wearFlags & 1) && o.itemType === 5);
+  const sword = MERC.createObject(proto, 1);
+  pbp.ch.inventory.push(sword);
+  await a.at(QUIET, 1, 0); await b.at(QUIET, -1, 0); await third.at(QUIET, 0, 2.5);
+  m = y.mark();
+  y.say(`at ${QUIET} slay boromir`);
+  await expect(y, /^You slay .* in cold blood!$/, 'the implementor slays Boromir', m);
+  const corpse = game.ground.find((o) => o.itemType === 24 && o.inRoom === QUIET);
+  check(corpse && corpse.name === 'corpse of Boromir' && corpse.contains.includes(sword), 'his corpse lies where he fell, holding what he carried', corpse && `${corpse.name}: ${corpse.contains.map((o) => o.name).join(', ')}; timer ${corpse.timer}`);
+  check(!pbp.ch.inventory.length && pbp.ch.roomVnum !== QUIET, '...and he is gone from it, with nothing', `#${pbp.ch.roomVnum}`);
+  const groundMsg = await a.waitFor((x) => [...x.messages].reverse().find((mm) => mm.t === 'ground' && mm.o.some((o) => o.itemType === 24)), 3000, 'ground').catch(() => null);
+  const view = groundMsg && groundMsg.o.find((o) => o.itemType === 24);
+  check(view && view.owner === 'Boromir' && view.look && view.look.cls === pbp.ch.class, "the clients are sent whose it is and how to draw him", view && JSON.stringify({ owner: view.owner, look: view.look }));
+  m = third.mark();
+  third.say('get all corpse');
+  await expect(third, /^You can't do that\.$/, "Gimli, not in his group, may not loot it", m);
+  m = third.mark();
+  third.send({ t: 'op', op: 'takeAll', a: [{ o: view.id }] });
+  await expect(third, /^You can't do that\.$/, '...not by the panel either', m);
+  check(corpse.contains.includes(sword), '...and it still holds his weapon');
+  m = a.mark();
+  a.say('get all corpse');
+  await expect(a, /^You get .* from corpse of Boromir\.$/, 'Arwen, his group leader, may', m);
+  check(pa.ch.inventory.includes(sword), '...and has his weapon');
+
+  // Backstab on a player.
+  const dagger = MERC.createObject([...w.world.objProtos.values()].find((o) => o.itemType === 5 && o.values[3] === 11), 1);
+  pa.ch.equipment[16] = dagger; dagger.wearLoc = 16;
+  pa.ch.learned.backstab = 100;
+  await b.at(QUIET, -1, 0);
+  const bLevel = pbp.ch.level;
+  pbp.ch.level = 1;
+  m = a.mark();
+  a.say('backstab boromir');
+  await expect(a, /^You may not attack a lower level player\.$/, 'backstab asks is_safe first', m);
+  pbp.ch.level = 10; pbp.ch.hit = pbp.ch.maxHit;
+  // Boromir faces west, away from her: she is east of him.
+  b.send({ t: 'pos', ...spot(QUIET, -1, 0), yaw: Math.PI / 2, seq: b.seq });
+  await pause(250);
+  m = a.mark();
+  const mb2 = b.mark();
+  a.say('backstab boromir');
+  await expect(a, /^Your backstab .* Boromir[.!]$/, 'a backstab from behind lands: "Your backstab ..."', m);
+  await expect(b, /^Arwen's backstab .* you[.!]$/, '...and he reads it as TO_VICT', mb2);
+  check(!!(pa.ch.act & PLR.KILLER), '...and an innocent backstabbed makes her a KILLER');
+  m = a.mark();
+  a.say('kick');
+  await expect(a, /kick|out of reach|aren't fighting/, 'and kick, with a player for an opponent, does not stumble', m);
+  check(!quiet.some((line) => /error handling/.test(line)), '...nor does anything else here', quiet.filter((line) => /error handling/.test(line))[0]);
+  y.say(`at ${QUIET} peace`);
+  y.say('pardon arwen killer');
+  y.say('restore arwen'); y.say('restore boromir');
+  await pause(300);
+  pbp.ch.level = bLevel;
+}
+
 // ---------------------------------------------------- quitting and links --
 console.log('\nLEAVING');
 m = y.mark();
@@ -601,6 +674,30 @@ b2.send({ t: 'login', name: 'Boromir', password: 'gondor1' });
 await b2.waitFor((x) => x.id !== null, 5000, 'enter');
 await expect(a, /^Boromir has reconnected\.$/, 'logging back in takes the body over', m);
 check(game.players.filter((p) => p.ch.name === 'Boromir').length === 1, '...one Boromir, not two');
+{
+  // Back in without the password: the token the last "enter" gave.
+  const enter2 = b2.messages.find((mm) => mm.t === 'enter');
+  check(typeof enter2.token === 'string' && enter2.token.length >= 24, "'enter' carries a reconnect token");
+  m = a.mark();
+  b2.ws.close();
+  await expect(a, /^Boromir has lost his link\.$/, 'his link drops again', m);
+  const wrong = client('Boromir, wrong token');
+  await wrong.opened;
+  wrong.send({ t: 'login', name: 'Boromir', token: 'not-the-token' });
+  const no = await wrong.waitFor((x) => x.messages.find((mm) => mm.t === 'login'), 3000, 'login').catch(() => null);
+  check(no && no.ok === false && /log in again/.test(no.why), 'a wrong token is refused', no && no.why);
+  wrong.ws.close();
+  const b3 = client('Boromir, resumed');
+  await b3.opened;
+  m = a.mark();
+  b3.send({ t: 'login', name: 'Boromir', token: enter2.token });
+  await b3.waitFor((x) => x.id !== null, 5000, 'enter');
+  await expect(a, /^Boromir has reconnected\.$/, 'the right one takes the body up again, no password asked', m);
+  await expect(b3, /^Reconnecting\.$/, "...and he reads 'Reconnecting.'", 0);
+  check(game.players.filter((p) => p.ch.name === 'Boromir').length === 1, '...still one Boromir');
+  const banned = b3.messages.find((mm) => mm.t === 'enter');
+  check(banned.token !== enter2.token, '...with a fresh token for next time');
+}
 
 // --------------------------------------------------------------- numbers --
 console.log('\nTRAFFIC');

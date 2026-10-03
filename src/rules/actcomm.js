@@ -589,6 +589,38 @@ export function installComm(k) {
   }
 
   /**
+   * fight.c: do_backstab on a player -- is_safe first, then a piercing
+   * weapon, a victim neither fighting nor hurt, check_killer, and the roll
+   * (none needed on a sleeper). DIVERGES, as for a mobile (rules/skills.js):
+   * from in front they see it coming and it misses; a player's back is the
+   * way their page faces.
+   */
+  function backstabPlayer(victim) {
+    if (isSafe(state, victim)) return undefined;
+    const wield = state.equipment[16];
+    if (!wield || wield.values[3] !== 11) return send('You need to wield a piercing weapon.');
+    if (victim.fighting) return send("You can't backstab a fighting person.");
+    if (victim.hit < victim.maxHit) return send(`${Name(victim)} is hurt and suspicious ... you can't sneak up.`);
+    const mine = k.feetOf(state);
+    const theirs = k.feetOf(victim);
+    const dx = mine.x - theirs.x;
+    const dz = mine.z - theirs.z;
+    const d = Math.hypot(dx, dz) || 1;
+    if (d > 3.2) return send(`${Name(victim)} is too far away to reach.`);
+    checkKiller(state, victim);
+    state.wait = Math.max(state.wait, 24);
+    const facing = k.pcOf(victim).facing;
+    const behind = -(facing.x * dx + facing.z * dz) / d > 0.35;
+    k.ctx.round = { player: 0.28, npc: 0.31 };
+    try {
+      if (behind && (!isAwake(victim) || k.rng.percent() < (state.learned.backstab || 0))) k.multiHit(state, victim, 'backstab');
+      else k.damage(state, victim, 0, 'backstab');
+    } finally { k.ctx.round = null; k.ctx.now = undefined; }
+    if (!behind) send(`${Name(victim)} turns and sees you coming.`);
+    return undefined;
+  }
+
+  /**
    * act_obj.c: do_steal from a player. 2.1 fails it every time -- the
    * `!IS_NPC(victim)` test sits in the failure branch -- so all a thief
    * gets from another player is caught, shouted at, and a THIEF flag.
@@ -673,6 +705,15 @@ export function installComm(k) {
     }
   }
 
+  /**
+   * act_obj.c: do_get from an ITEM_CORPSE_PC -- the third word of "corpse of
+   * <name>" must be you, or you an immortal, or someone playing in your group.
+   */
+  rules.mayLoot = (corpse) => {
+    const name = corpse.owner || corpse.name.split(/\s+/)[2] || '';
+    if (name.toLowerCase() === state.name.toLowerCase() || isImmortal(state)) return true;
+    return k.players.some((pc) => pc.ch.name.toLowerCase() === name.toLowerCase() && isSameGroup(state, pc.ch));
+  };
   rules.playerLeaving = (ch) => dieFollower(ch);
   rules.isSafe = isSafe;
   rules.checkKiller = checkKiller;
@@ -742,7 +783,7 @@ export function installComm(k) {
   for (const [name, level] of [['shout', 3], ['murder', 5], ['murde', 5]]) I.commands.find((c) => c[0] === name)[3] = level;
 
   Object.assign(k, {
-    killPlayer, stealFromPlayer, giveToPlayer, giveGoldToPlayer, rescuePlayer,
+    killPlayer, backstabPlayer, stealFromPlayer, giveToPlayer, giveGoldToPlayer, rescuePlayer,
     getCharWorld, isSameGroup, stopFollower, dieFollower, talkChannel, isSafe,
   });
   Object.assign(game, {

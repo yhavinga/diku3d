@@ -18,7 +18,7 @@
  */
 
 import { createPlayerFigure } from './actors.js';
-import { DIR_NAME } from './are.js';
+import { DIR_NAME, ITEM } from './are.js';
 import { TAR } from './magic.js';
 import { PLR } from './rules/handler.js';
 
@@ -170,6 +170,9 @@ export class SocketLink {
 
   create(name, password, cls, sex) { const reply = this.answer(); this.send({ t: 'create', name, password, cls, sex }); return reply; }
 
+  /** Back into a body whose link dropped, by the token its "enter" gave. */
+  resume(name, token) { const reply = this.answer(); this.send({ t: 'login', name, token }); return reply; }
+
   ping() { this.send({ t: 'ping', at: performance.now() }); }
 
   /** Hand on everything held since "enter", in order. */
@@ -255,6 +258,9 @@ export function timedRand(clock, index, roomOf) {
     return next();
   };
 }
+
+/** Per game, the methods the page had before a link wrapped them. */
+const pageOwn = new WeakMap();
 
 /** The page's verbs that are the server's to do, by the argument shapes game.js gives them. */
 const OPS = [
@@ -369,10 +375,12 @@ export function attachSocketLink(link, game, host, enter) {
     link.send({ t: 'op', op: 'cast', a: [name, options] });
     return { ok: true, text: '', pending: true };
   };
-  const setHour = game.setTimeOfDay;
+  // The page's own, from before any link wrapped them: a reconnect wraps again.
+  if (!pageOwn.has(game)) pageOwn.set(game, { setTimeOfDay: game.setTimeOfDay, focus: game.focus });
+  const setHour = pageOwn.get(game).setTimeOfDay;
   game.setTimeOfDay = (name) => { setHour(name); link.send({ t: 'op', op: 'setTimeOfDay', a: [name] }); };
   let focused = null;
-  const focus = game.focus;
+  const focus = pageOwn.get(game).focus;
   game.focus = (figure) => {
     focus(figure);
     const slot = mobs.find((s) => s.figure && s.figure === figure) || null;
@@ -459,7 +467,30 @@ export function attachSocketLink(link, game, host, enter) {
   offs.push(link.on('ev', (msg) => { for (const event of msg.e) receive(event); }));
   offs.push(link.on('self', (msg) => mirror.self(msg.c, msg.k || null)));
   offs.push(link.on('mob', (msg) => { for (const [i, ...view] of msg.m) mirror.mob(i, view); }));
-  offs.push(link.on('ground', (msg) => { if (msg.z === host.zoneId()) mirror.ground(msg.o); }));
+  offs.push(link.on('ground', (msg) => { if (msg.z === host.zoneId()) { mirror.ground(msg.o); layCorpses(); } }));
+  /**
+   * A player's corpse is a body, not a thing on the floor (items.js draws
+   * only what can be picked up): the dead player's figure, on its back
+   * where they fell, until the corpse decays or is carried off.
+   */
+  const corpses = new Map();
+  function layCorpses() {
+    const here = new Set();
+    for (const obj of game.ground) {
+      if (obj.itemType !== ITEM.CORPSE_PC || !obj.at || !obj.look) continue;
+      here.add(obj);
+      if (corpses.has(obj)) continue;
+      const figure = createPlayerFigure({
+        library: host.library, name: obj.owner || 'someone', cls: obj.look.cls, sex: obj.look.sex, level: obj.look.level,
+        objProtos: host.world.objProtos, roomAt: host.roomAt, lying: true,
+      });
+      host.scene.add(figure.group);
+      const yaw = ((obj.mirrorId * 2.399) % (Math.PI * 2));
+      figure.update(0, obj.at, yaw, 0);
+      corpses.set(obj, figure);
+    }
+    for (const [obj, figure] of corpses) if (!here.has(obj)) { figure.dispose(); corpses.delete(obj); }
+  }
   offs.push(link.on('weather', (msg) => mirror.weather(msg.w)));
   // The shop panel reads the server's keeper: its stock rolled there, its
   // prices and offers worked out there. Rolled here, the list showed a
@@ -485,7 +516,8 @@ export function attachSocketLink(link, game, host, enter) {
       }
     }
   }));
-  offs.push(link.on('enter', (msg) => { seq = msg.seq; id = msg.id; host.teleport(msg.room); }));
+  let token = enter.token;
+  offs.push(link.on('enter', (msg) => { seq = msg.seq; id = msg.id; token = msg.token; host.teleport(msg.room); }));
   // A report the server would not believe: back to where it has you.
   offs.push(link.on('at', (msg) => {
     seq = Math.max(seq, msg.seq);
@@ -509,8 +541,11 @@ export function attachSocketLink(link, game, host, enter) {
       if (r.samples.length > 12) r.samples.shift();
     }
   }));
-  offs.push(link.on('bye', (msg) => host.disconnected(msg.why === 'quit' ? 'You have left the game.' : msg.why)));
-  offs.push(link.on('closed', () => host.disconnected('The connection to the server was lost.')));
+  offs.push(link.on('bye', (msg) => { token = null; host.disconnected(msg.why === 'quit' ? 'You have left the game.' : msg.why); }));
+  // A lost link can be taken up again while the body stands (see server/mud.mjs login);
+  // a quit, a deny or another login cannot.
+  offs.push(link.on('closed', () => host.disconnected('The connection to the server was lost.',
+    token ? { url: link.url, name: enter.name, token } : null)));
 
   function addRemote(rid, info) {
     const ch = {
@@ -610,6 +645,8 @@ export function attachSocketLink(link, game, host, enter) {
       clearInterval(pinger);
       for (const off of offs) off();
       for (const rid of [...remotes.keys()]) dropRemote(rid);
+      for (const figure of corpses.values()) figure.dispose();
+      corpses.clear();
       link.close();
     },
     /** The direction words a typed line can walk, for anyone asking. */

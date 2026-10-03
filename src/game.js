@@ -1653,6 +1653,27 @@ export function createGame({
     });
   }
 
+  /**
+   * make_corpse for a player: limbo.are's #11, "corpse of %s", a timer of
+   * 25 to 40 ticks, and everything carried or worn -- taken off first, so
+   * its affects go with it. The gold stays with the player, as 2.1 has it.
+   * `owner` is the name do_get reads off the short description; `look` is
+   * for drawing the body.
+   */
+  function makePlayerCorpse(ch) {
+    const contains = [];
+    for (const obj of ch.equipment) if (obj) { unequipChar(ch, obj); contains.push(obj); }
+    for (const obj of ch.inventory) if (!(obj.extraFlags & X.INVENTORY)) contains.push(obj);
+    ch.inventory = [];
+    for (const obj of contains) obj.wearLoc = WEAR.NONE;
+    return makeObject({
+      vnum: OBJ_VNUM.CORPSE_PC, name: `corpse of ${ch.name}`, keywords: 'corpse',
+      description: `The corpse of ${ch.name} is lying here.`,
+      itemType: ITEM.CORPSE_PC, wearFlags: 0, values: [0, 0, 0, 1], weight: 100,
+      timer: rng.range(25, 40), contains, owner: ch.name, look: { cls: ch.class, sex: ch.sex, level: ch.level },
+    });
+  }
+
   function mobDied(killer, mob) {
     const slot = mob.slot;
     ctx.stopFighting(mob);
@@ -1734,8 +1755,11 @@ export function createGame({
       if (slot.instance && slot.instance.fighting === state) ctx.stopFighting(slot.instance);
     }
     for (const pc of players) if (pc.ch.fighting === state) ctx.stopFighting(pc.ch);
-    // fight.c: raw_kill for a PC -- affects stripped, armour back to 100,
-    // resting, and one point of everything.
+    // fight.c: raw_kill for a PC -- make_corpse first, on a server, where
+    // there is somebody else to come across it. DIVERGES: alone, the page
+    // keeps your gear on you, as it always has.
+    if (multi) objToRoom(makePlayerCorpse(state), state.roomVnum, feet());
+    // Then affects stripped, armour back to 100, resting, and one point of everything.
     state.fighting = null;
     magic.stripAll(state);
     state.armor = 100;
@@ -2104,6 +2128,16 @@ export function createGame({
     for (const slot of mobs) if (slot.instance && !slot.dead) magic.tick(slot.instance);
   }
 
+  /** char_update's half that is not the players': the mobiles' regain and their spells. */
+  function charUpdateWorld() {
+    for (const slot of mobs) {
+      const mob = slot.instance;
+      if (!mob || slot.dead) continue;
+      if (!mob.fighting) mob.hit = Math.min(mob.maxHit, mob.hit + idiv(idiv(mob.level * 3, 2), (mob.affectedBy & AFF.POISON) ? 4 : 1));
+    }
+    for (const slot of mobs) if (slot.instance && !slot.dead) magic.tick(slot.instance);
+  }
+
   /** char_update's player half, for the bound one. */
   function charUpdatePlayer() {
     if (state.position === POS.DEAD) return;
@@ -2304,12 +2338,25 @@ export function createGame({
       // do something else. Resting here means standing still watching a wall,
       // so resting runs the same clock four times as fast. The gains are the
       // mud's, only the waiting is compressed.
-      // With more than one player, only when all of them are lying down.
-      const resting = players.length > 0
+      const resting = !multi && players.length > 0
         && players.every((pc) => pc.ch.position === POS.RESTING || pc.ch.position === POS.SLEEPING);
       pulsePoint = resting ? idiv(PULSE_TICK, 4) : PULSE_TICK;
-      charUpdate();
+      // On a server the world keeps the mud's own clock; each player's half
+      // runs on that player's (below).
+      if (multi) charUpdateWorld(); else charUpdate();
       if (rules.objUpdate) rules.objUpdate();
+    }
+    // With more than one player, resting is each player's own: whoever lies
+    // down gets the quick clock -- regaining, hungering, their spells wearing
+    // off -- and nobody else's waiting is cut short by it.
+    if (multi) {
+      for (const pc of players.slice()) {
+        if (pc.pulsePoint === undefined) pc.pulsePoint = PULSE_TICK;
+        if (--pc.pulsePoint > 0) continue;
+        const lying = pc.ch.position === POS.RESTING || pc.ch.position === POS.SLEEPING;
+        pc.pulsePoint = lying ? idiv(PULSE_TICK, 4) : PULSE_TICK;
+        withPlayer(pc, () => { charUpdatePlayer(); if (pcOf(pc.ch)) magic.tick(state); });
+      }
     }
     aggrUpdate();
   }
@@ -2595,6 +2642,9 @@ export function createGame({
    * carry limits from str_app and dex, and money going straight into the purse.
    */
   function take(obj, container) {
+    if (container && container.itemType === ITEM.CORPSE_PC && rules.mayLoot && !rules.mayLoot(container)) {
+      return { ok: false, text: "You can't do that." };
+    }
     if (!canWear(obj, W.TAKE)) return { ok: false, text: "You can't take that." };
     if (obj.itemType !== ITEM.MONEY) {
       if (state.inventory.length + objNumber(obj) > canCarryN(state)) {
@@ -3170,6 +3220,7 @@ export function createGame({
       const holds = obj.itemType === ITEM.CONTAINER || obj.itemType === ITEM.CORPSE_NPC || obj.itemType === ITEM.CORPSE_PC;
       if (!holds) return [take(obj, null)];
       if (obj.values[1] & 4) return [{ ok: false, text: `The ${obj.keywords.split(' ')[0]} is closed.` }];
+      if (obj.itemType === ITEM.CORPSE_PC && rules.mayLoot && !rules.mayLoot(obj)) return [{ ok: false, text: "You can't do that." }];
       return obj.contains.slice().map((inner) => take(inner, obj));
     },
 
@@ -3423,6 +3474,7 @@ export function createGame({
     obj.contains = (view.contains || []).map((inner) => mirrorObject(inner, mirrored.get(inner.id) || null));
     for (const inner of obj.contains) mirrored.set(inner.mirrorId, inner);
     if (view.owner) obj.owner = view.owner;
+    if (view.look) obj.look = view.look;
     return obj;
   }
   function mirrorGround(list) {

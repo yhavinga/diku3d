@@ -1073,6 +1073,7 @@ function speechSprite(text, height = 0.3) {
 
 export function createPlayerFigure({
   library, name, title = '', cls = 3, sex = 1, level = 1, weapon = 0, shield = 0, objProtos = null, roomAt = null,
+  lying = false,
 }) {
   const trade = ['mage', 'cleric', 'thief', 'warrior'][cls] || 'warrior';
   const gear = [[weapon, 16], [shield, 11]]
@@ -1091,6 +1092,13 @@ export function createPlayerFigure({
   const label = makeLabel(name, 0.34);
   label.position.y = made.height + 0.34;
   group.add(label);
+  // A player's corpse (`lying`): the same body on its back, head away along
+  // -z of its own frame, no name over it and no shadow but the patch under it.
+  if (lying) {
+    made.group.rotation.x = -Math.PI / 2;
+    made.group.position.y = 0.14;
+    label.visible = false;
+  }
 
   const shadows = playerShadows();
   group.add(shadows.cast, shadows.contact);
@@ -1117,7 +1125,7 @@ export function createPlayerFigure({
     if (yawNow === null) yawNow = want;
     const turn = Math.atan2(Math.sin(want - yawNow), Math.cos(want - yawNow));
     yawNow += turn * Math.min(1, dt * 10);
-    made.group.rotation.y = yawNow;
+    if (lying) group.rotation.y = yawNow; else made.group.rotation.y = yawNow;
     speed += (pace - speed) * Math.min(1, dt * 6);
     placeShadows();
     if (speech) {
@@ -1155,6 +1163,12 @@ export function createPlayerFigure({
     const height = made.height || 1.7;
     const width = Math.max(0.5, height * 0.42);
     const tan = Math.max(0.06, Math.tan(THREE.MathUtils.degToRad(Math.max(3, sun.elevation))));
+    if (lying) {
+      shadows.contact.position.set(0, 0.02, -height * 0.45);
+      shadows.contact.scale.set(width * 1.32, 1, height * 1.05);
+      shadows.cast.visible = false;
+      return;
+    }
     shadows.contact.position.set(0, 0.02, 0);
     shadows.contact.scale.set(width * 1.32, 1, width * 1.45);
     const dirX = -sun.x;

@@ -51,10 +51,13 @@ export function installSkills(k) {
     if (state.level < skillLevel('kick')) return out(false, 'You better leave the martial arts to fighters.');
     const victim = state.fighting;
     if (!victim) return out(false, "You aren't fighting anyone.");
-    const d = Math.hypot(victim.slot.pos.x - k.position.x, victim.slot.pos.z - k.position.z);
+    // Whoever it is: a mobile's feet, or -- on a server -- another player's.
+    const at = k.feetOf(victim);
+    const d = Math.hypot(at.x - k.position.x, at.z - k.position.z);
     if (d > MELEE) return out(false, `${capitalise(victim.name)} is out of reach.`);
     state.wait = 8;
-    emit({ kind: 'kick', text: '', to: victim.slot, delay: 0 });
+    // A player struck is named (fromCh/toCh), as game.js `blow` names both sides on a server.
+    emit({ kind: 'kick', text: '', ...(victim.npc ? { to: victim.slot } : { from: null, to: null, fromCh: state, toCh: victim }), delay: 0 });
     strike(() => {
       const hit = k.rng.percent() < learned('kick');
       k.damage(state, victim, hit ? k.rng.range(1, state.level) : 0, 'kick');

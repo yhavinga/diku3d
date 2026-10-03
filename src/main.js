@@ -35,7 +35,7 @@ import { createVisibility } from './cull.js';
 import { createImpostors } from './impostor.js';
 import { createOcclusion } from './occlusion.js';
 import { createTitleReel } from './title.js';
-import { attachSocketLink } from './link.js';
+import { attachSocketLink, SocketLink } from './link.js';
 import { createConnectUi } from './link-ui.js';
 import { OUTDOOR_FILL } from './dress.js';
 
@@ -1766,12 +1766,39 @@ async function boot() {
       player.spawn(x, y, z, camera.rotation.y);
     },
     walk: (dir) => step(dir, true),
-    disconnected(why) {
-      document.getElementById('link-lost-text').textContent = `${why}  The world stays as it was; reload to play again.`;
+    /** The link is gone. `resume` ({ url, name, token }) when the body can be taken up again. */
+    disconnected(why, resume = null) {
+      lostResume = resume;
+      document.getElementById('link-lost-text').textContent = resume
+        ? `${why}  Your body stands where you left it for a few minutes.`
+        : `${why}  The world stays as it was; reload to play again.`;
+      document.getElementById('link-lost-reconnect').hidden = !resume;
       document.getElementById('link-lost').hidden = false;
     },
   };
+  let lostResume = null;
   document.getElementById('link-lost-reload').addEventListener('click', () => window.location.reload());
+  // comm.c's check_reconnect, without a reload: a new socket, the same body.
+  document.getElementById('link-lost-reconnect').addEventListener('click', async () => {
+    const resume = lostResume;
+    if (!resume) return;
+    const text = document.getElementById('link-lost-text');
+    text.textContent = `Reconnecting to ${resume.url} ...`;
+    try {
+      const next = new SocketLink(resume.url);
+      await next.open();
+      const reply = await next.resume(resume.name, resume.token);
+      if (!reply.ok) { next.close(); throw new Error(reply.why); }
+      if (connected) connected.close();
+      connected = attachSocketLink(next, game, linkHost, reply.enter);
+      window.diku.link = connected;
+      lostResume = null;
+      document.getElementById('link-lost').hidden = true;
+    } catch (error) {
+      text.textContent = `${error.message}  Reload to log in again.`;
+      document.getElementById('link-lost-reconnect').hidden = true;
+    }
+  });
   createConnectUi({
     game,
     onAlone: () => begin(false),

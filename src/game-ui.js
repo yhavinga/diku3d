@@ -1658,7 +1658,8 @@ export function createGameUi(game, { built = null } = {}) {
     document.body.classList.toggle('g-fighting', !!s.fighting);
 
     // The one bit of instruction, and only while it applies.
-    const pile = game.here().find((o) => (o.wearFlags & 1) || (o.itemType === 23 && o.contains.length));
+    // A player's corpse is offered to its owner; a groupmate may still type it.
+    const pile = game.here().find((o) => (o.wearFlags & 1) || ((o.itemType === 23 || (o.itemType === 24 && o.owner === s.name)) && o.contains.length));
     const shop = !sheetMode && game.shopHere();
     const prompts = [];
     if (f && !s.fighting) prompts.push('e — examine', 'click — attack');

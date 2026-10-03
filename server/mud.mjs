@@ -14,6 +14,7 @@
  * sends only what the mud decides -- rooms, fights, deaths, the ground.
  */
 
+import { randomBytes, timingSafeEqual } from 'crypto';
 import { WebSocketServer } from 'ws';
 
 import { createGame, createCharacter, POS, CLASS_TABLE } from '../src/game.js';
@@ -206,9 +207,17 @@ export async function startMud({
     }
   }
 
-  async function login(s, { name: raw = '', password = '' }) {
+  async function login(s, { name: raw = '', password = '', token = null }) {
     if (s.pc) return;
     const name = properName(String(raw).trim());
+    // A page whose link dropped asks for its body back with the token it was
+    // given on entering, not the password, which it never kept. Only while
+    // that body still stands in the world (LINKDEAD_SECONDS).
+    if (token !== null) {
+      const body = [...sessions].find((o) => o !== s && o.pc && o.pc.ch.name === name && o.token && sameToken(o.token, String(token)));
+      if (!body) return send(s, { t: 'login', ok: false, why: 'Your link is gone; log in again.' });
+      return enter(s, body.record, false);
+    }
     if (!checkParseName(name, w.world)) return send(s, { t: 'login', ok: false, why: 'Illegal name, try another.' });
     const record = accounts.load(name);
     if (!record) return send(s, { t: 'login', ok: false, new: true, name, why: `Did I get that right, ${name} (Y/N)?` });
@@ -256,6 +265,9 @@ export async function startMud({
       // new link takes the body over.
       if (old.open) { send(old, { t: 'bye', why: 'Someone logged in as you elsewhere.' }); old.open = false; old.ws.close(); }
       s.pc = old.pc; s.record = old.record; s.played = old.played; s.zone = old.zone; s.logged = old.logged;
+      // Snooping, either way, follows the descriptor over.
+      s.snoopBy = old.snoopBy || null;
+      for (const o of sessions) if (o.snoopBy === old) o.snoopBy = s;
       old.pc = null;
       sessions.delete(old);
       byPc.set(s.pc.id, s);
@@ -286,14 +298,17 @@ export async function startMud({
     welcome(s, '\nWelcome to Merc Diku Mud.  May your visit here be ... Mercenary.');
   }
 
+  const sameToken = (a, b) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+
   function welcome(s, text) {
     const pc = s.pc;
+    s.token = randomBytes(24).toString('base64url');
     s.seq += 1;
     s.posAt = null;
     s.navRoom = null;
     s.sent = { self: '', kit: '', mobs: new Map(), ground: new Map(), roster: new Map(), weather: '' };
     send(s, {
-      t: 'enter', id: pc.id, name: pc.ch.name, room: pc.ch.roomVnum, seq: s.seq, now: Date.now() - started,
+      t: 'enter', id: pc.id, name: pc.ch.name, room: pc.ch.roomVnum, seq: s.seq, now: Date.now() - started, token: s.token,
       trust: trustOf(pc.ch),
     });
     sendSelf(s);
@@ -618,6 +633,7 @@ export async function startMud({
       if (obj.radius) view.radius = obj.radius;
       if (obj.slot) view.corpseOf = slotIndex.get(obj.slot);
       if (obj.owner) view.owner = obj.owner;
+      if (obj.look) view.look = obj.look;
       list.push(view);
     }
     const text = JSON.stringify(list);

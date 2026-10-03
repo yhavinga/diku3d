@@ -209,7 +209,7 @@
   #connect { pointer-events: auto; display: grid; gap: 8px; margin-top: 4px; width: min(420px, 80vw);
     font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; color: var(--gold);
     background: rgba(8,7,6,0.62); border: 1px solid rgba(224,189,119,0.3); border-radius: 2px; padding: 14px 16px; }
-  #connect[hidden], #connect-new[hidden], #link-lost[hidden] { display: none; }
+  #connect[hidden], #connect-new[hidden], #link-lost[hidden], #link-lost button[hidden] { display: none; }
   #connect label { display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 10px; text-transform: uppercase; opacity: 0.9; }
   #connect input { font: 13px var(--mono); letter-spacing: 0.04em; color: #f4e7cb; background: rgba(0,0,0,0.45);
     border: 1px solid rgba(224,189,119,0.32); border-radius: 2px; padding: 6px 8px; outline: none; }
@@ -408,7 +408,7 @@
 
 <div id="fade"></div>
 <div id="hint">click to look around</div>
-<div id="link-lost" hidden><p id="link-lost-text"></p><button id="link-lost-reload" type="button">reload</button></div>
+<div id="link-lost" hidden><p id="link-lost-text"></p><button id="link-lost-reconnect" type="button" hidden>reconnect</button><button id="link-lost-reload" type="button">reload</button></div>
 
 <div id="title" class="hidden">
   <div id="title-veil"></div>

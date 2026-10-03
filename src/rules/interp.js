@@ -404,6 +404,8 @@ export function installInterp(k) {
     const container = getObjHere(arg2);
     if (!container) return send(`I see no ${arg2} here.`);
     if (!game.isContainer(container)) return send("That's not a container.");
+    // do_get's ITEM_CORPSE_PC case comes before anything is looked for inside.
+    if (container.itemType === ITEM.CORPSE_PC && k.rules.mayLoot && !k.rules.mayLoot(container)) return send("You can't do that.");
     if (!allArg(arg1)) {
       const obj = findNamed(container.contains, arg1);
       if (!obj) return send(`I see nothing like that in the ${arg2}.`);
@@ -611,7 +613,7 @@ export function installInterp(k) {
     const slot = getCharRoom(arg1);
     if (!slot) return send("They aren't here.");
     if (slot === 'self') return send('How can you sneak up on yourself?');
-    if (isPc(slot)) return send('You must MURDER a player.');
+    if (isPc(slot)) return k.backstabPlayer ? k.backstabPlayer(slot.ch) : send('You must MURDER a player.');
     if (Math.hypot(slot.pos.x - k.position.x, slot.pos.z - k.position.z) > 3.2) {
       return send(`${capitalise(slot.proto.short)} is too far away to reach.`);
     }

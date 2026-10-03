@@ -38,7 +38,10 @@ export function installObjects(k) {
   /** do_get's container half: `get <obj> <container>`. */
   function getFrom(obj, container) {
     if (!isContainer(container)) return out(false, "That's not a container.");
-    if (container.itemType === ITEM.CORPSE_PC && container.owner !== state.name) return out(false, "You can't do that.");
+    // do_get's ITEM_CORPSE_PC: yours, an immortal's, or a groupmate's (rules.mayLoot, on a server).
+    if (container.itemType === ITEM.CORPSE_PC && !(k.rules.mayLoot ? k.rules.mayLoot(container) : container.owner === state.name)) {
+      return out(false, "You can't do that.");
+    }
     if (closed(container)) return out(false, `The ${word(container)} is closed.`);
     if (!container.contains.includes(obj)) return out(false, `I see nothing like that in the ${word(container)}.`);
     return game.take(obj, container);
