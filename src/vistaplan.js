@@ -62,7 +62,8 @@ export function turn(x, z, q) {
 export function vistaSites(world, plan, here, zone, openAirOf) {
   // What the drawn zone stands on: its rooms and its streets.
   const solid = new Set();
-  for (const cell of here.cells.values()) solid.add(key(cell.level, cell.x, cell.z));
+  const roomCells = new Set();
+  for (const cell of here.cells.values()) { solid.add(key(cell.level, cell.x, cell.z)); roomCells.add(key(cell.level, cell.x, cell.z)); }
   for (const link of here.links) {
     if (link.kind !== 'alley' || !link.path) continue;
     for (const c of link.path) solid.add(key(link.from.level, c.x, c.z));
@@ -88,13 +89,14 @@ export function vistaSites(world, plan, here, zone, openAirOf) {
     // The arrival room one room-pitch past the gate, on the gate's level,
     // with nothing of the drawn zone's within a cell of it. Where the drawn
     // zone has a room or a street there, a pitch or two further on, along a
-    // lane from the gate that crosses none of its rooms or streets -- only
-    // its frontage, which leaves the lane to the vista: a little further
-    // than the crossing walks, and seen, rather than a house past the gate.
+    // lane from the gate that crosses none of its rooms -- its frontage
+    // gives way to the lane, and a street of its own is crossed: a little
+    // further than the crossing walks, and seen, rather than a house past
+    // the gate.
     let reach = 0;
     for (let k = 1; k <= VISTA_REACH && !reach; k++) {
       let lane = true;
-      for (let j = 1; j < 2 * k && lane; j++) if (solid.has(key(from.level, from.x + j * sx, from.z + j * sz))) lane = false;
+      for (let j = 1; j < 2 * k && lane; j++) if (roomCells.has(key(from.level, from.x + j * sx, from.z + j * sz))) lane = false;
       if (!lane) break;
       if (!near(from.level, from.x + 2 * k * sx, from.z + 2 * k * sz)) reach = 2 * k;
     }
@@ -106,8 +108,10 @@ export function vistaSites(world, plan, here, zone, openAirOf) {
       at: { level: from.level, x: ox, z: oz },
       fromCell: { level: from.level, x: from.x, z: from.z },
       // The cells between the gate and the arrival room, which neither zone
-      // builds on: the vista paves them.
-      bridge: Array.from({ length: reach - 1 }, (_, j) => ({ level: from.level, x: from.x + (j + 1) * sx, z: from.z + (j + 1) * sz })),
+      // builds on and the vista paves -- all but the drawn zone's own
+      // streets, which keep their paving. `back` counts from the arrival room.
+      bridge: Array.from({ length: reach - 1 }, (_, j) => ({ level: from.level, x: from.x + (j + 1) * sx, z: from.z + (j + 1) * sz, back: reach - 1 - j }))
+        .filter((b) => !solid.has(key(b.level, b.x, b.z))),
       near,
     });
   }

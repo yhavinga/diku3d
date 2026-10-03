@@ -92,7 +92,11 @@ export function createVistas({ world, plan, layoutOf, viewOf }) {
   function planFor(zone, layout) {
     const taken = new Set();
     const plans = [];
-    for (const site of vistaSites(world, plan, layout, zone, openAirOf)) {
+    // The ones right past their gates first: a vista set out along a lane
+    // takes what ground those leave, never the other way round.
+    const sites = vistaSites(world, plan, layout, zone, openAirOf);
+    sites.sort((a, b) => a.bridge.length - b.bridge.length);
+    for (const site of sites) {
       // A site whose arrival room lands on an earlier vista's ground is left
       // to that one.
       if (taken.has(`${site.at.level}:${site.at.x},${site.at.z}`)) continue;
@@ -140,7 +144,7 @@ export function createVistas({ world, plan, layoutOf, viewOf }) {
     // room is: neither zone builds on it (`bridgeCells`).
     const arriveInfo = built.rooms.get(site.arrive);
     if (arriveInfo && arriveInfo.materials && materials[arriveInfo.materials.floor]) {
-      extra.addStatic('vista', materials[arriveInfo.materials.floor], bridge(vista, arriveInfo.materials.floor));
+      for (const piece of bridge(vista, arriveInfo.materials.floor)) extra.addStatic('vista', materials[arriveInfo.materials.floor], piece);
     }
     extra.finish(() => root);
     // Where the neighbour's grid goes: its arrival cell onto the site, turned
@@ -209,8 +213,7 @@ export function createVistas({ world, plan, layoutOf, viewOf }) {
 
   /**
    * The paving between the gate and the arrival room, in the neighbour's own
-   * grid so it joins that room's floor: one geometry, a cell wide and as
-   * long as the lane.
+   * grid so it joins that room's floor: one plane per cell of the lane.
    */
   function bridge(vista, floor) {
     const material = materials[floor];
@@ -218,13 +221,13 @@ export function createVistas({ world, plan, layoutOf, viewOf }) {
     const back = (vista.side - vista.turns + 6) % 4;
     const [bx, , bz] = DIR_STEP[back];
     const s = vista.start;
-    const n = vista.bridge.length;
-    const mid = (n + 1) / 2;
-    const cx = (s.x + bx * mid) * CELL; const cz = (s.z + bz * mid) * CELL; const y = s.level * LEVEL_H;
-    const geometry = new THREE.PlaneGeometry(bx ? CELL * n : CELL, bz ? CELL * n : CELL, bx ? 4 * n : 4, bz ? 4 * n : 4);
-    geometry.rotateX(-Math.PI / 2);
-    geometry.translate(cx, y, cz);
-    return worldUv(geometry, material);
+    const y = s.level * LEVEL_H;
+    return vista.bridge.map((b) => {
+      const geometry = new THREE.PlaneGeometry(CELL, CELL, 4, 4);
+      geometry.rotateX(-Math.PI / 2);
+      geometry.translate((s.x + bx * b.back) * CELL, y, (s.z + bz * b.back) * CELL);
+      return worldUv(geometry, material);
+    });
   }
 
   /**
