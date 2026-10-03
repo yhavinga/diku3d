@@ -1446,6 +1446,8 @@ const TEMPERS = [
   [/\b(preen(s|ing)?|grooming|washing)\b|\blicking (?!(its|his|her) lips)/, { odds: { groom: 5 } }],
   [/\b(lounging|lazily|lazy|resting|rests|asleep|sleeping|dozing|curled)\b/, { odds: { loaf: 4, coil: 3, bask: 2 } }],
   [/\bcoil(s|ed)?\b/, { odds: { coil: 6 } }],
+  [/\bsits? on (her|his|its|a|the) nest\b|\bnesting\b|\bbrooding\b/, { odds: { brood: 12 } }],
+  [/\bflapping\b/, { odds: { flap: 8 } }],
   [/\bsways?\b|\brears? (its|his|her) head\b/, { odds: { sway: 5 } }],
   [/\b(watch(es|ing)? you|stares?|staring)\b/, { odds: { taste: 2, haunch: 2 } }],
 ];
@@ -1727,6 +1729,13 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     clips.idle = clips.float;
     clips.walk = clips.swim;
     if (stride.swim) stride.walk = stride.swim;
+    // Its pastimes too: preening and wing-beating at the waterline.
+    for (const name of ['preen', 'flap']) {
+      if (!actions[`${name}_float`]) continue;
+      actions[name] = actions[`${name}_float`];
+      clips[name] = clips[`${name}_float`];
+      delete actions[`${name}_float`];
+    }
   }
   // A dragon at home lies curled on its hoard: `lair` is its idle, and the
   // walk crossfades it up onto its feet when it has somewhere to go.

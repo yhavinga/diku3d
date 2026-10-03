@@ -385,11 +385,86 @@ def arthro_clips(arm, spec):
         return dict(fk=fk, loc=V((0, 0, -height * 0.55 * drop)), ik=ik)
     clip.run("death", 36, death)
 
+    if g.get("pastimes"):
+        arthro_pastimes(clip, rest, g, root, height, bones)
+
     report["clips"] = clip.report
     report["stride"] = {"walk": S, "run": S2}
     report["overreach"] = clip.reach
     report["hit"] = 0.5
     return report
+
+
+def arthro_pastimes(clip, rest, g, root, height, bones):
+    """What a spider does with its time (motion.js PASTIMES):
+
+    lurk   -- down on its knees, the body lowered to the floor and the legs
+              drawn in, still but for a palp: waiting for something to pass.
+    groom  -- each front leg in turn drawn in under the fangs and pulled
+              through them, the palps working: the Wolf Spider 'licking its
+              bloody fangs'.
+    threat -- up on the back legs, the front two pairs raised and spread,
+              the fangs open: what it shows you when you come too close."""
+    names = g["pastimes"]
+    flat = lambda: {leg: foot_at(rest, leg) for leg in rest}
+    palps = [b for b in ("palp.L", "palp.R") if b in bones]
+    fangs = [b for b in ("fang.L", "fang.R") if b in bones]
+
+    def mouthparts(fk, work=0.0, gape=0.0, t=0.0):
+        for i, b in enumerate(palps):
+            fk[b] = (-12 * work * max(0.0, wave(5 * t, 0.5 * i)), 0, 0)
+        for i, b in enumerate(fangs):
+            s_ = 1 if b.endswith(".L") else -1
+            fk[b] = (-25 * gape, s_ * 12 * gape, 0)
+        return fk
+
+    if "lurk" in names:
+        def lurk(t):
+            twitch = math.exp(-((t - 0.62) * 30) ** 2)
+            fk = {root: (2 + 0.4 * wave(t), 0, 0)}
+            mouthparts(fk, work=twitch, t=t)
+            ik = {leg: foot_at(rest, leg, out=-0.12 * rest[leg]["reach"], am=-8, at=-6) for leg in rest}
+            return dict(fk=fk, loc=V((0, 0, -height * g.get("lurk_drop", 0.55) + height * 0.005 * wave(t))), ik=ik)
+        clip.run("lurk", 120, lurk, step=2)
+
+    if "groom" in names:
+        def groom(t):
+            fk = {root: (4, 0, 0)}
+            ik = flat()
+            work = 0.0
+            for leg, t0 in (("leg1.L", 0.08), ("leg1.R", 0.5)):
+                u = (t - t0) / 0.38
+                if not 0 <= u <= 1:
+                    continue
+                # Lifted, folded in to the fangs, drawn out through them twice,
+                # and set down again where it was.
+                k = ease(u / 0.18) * (1 - ease((u - 0.82) / 0.18))
+                pull = 0.5 + 0.5 * math.cos(2 * math.pi * 2 * (u - 0.18) / 0.64) if 0.18 < u < 0.82 else 1.0
+                ik[leg] = foot_at(rest, leg, fwd=-rest[leg]["reach"] * 0.25 * k, up=height * (0.75 + 0.15 * pull) * k,
+                                  out=-rest[leg]["reach"] * (0.62 - 0.12 * pull) * k, am=-80 * k, at=-120 * k)
+                work = max(work, k)
+                fk[root] = (4 + 6 * k, 0, (1 if leg.endswith(".L") else -1) * 4 * k)
+            mouthparts(fk, work=work, gape=0.4 * work, t=t)
+            return dict(fk=fk, loc=V((0, 0, -height * 0.08)), ik=ik)
+        clip.run("groom", 150, groom)
+
+    if "threat" in names:
+        def threat(t):
+            k = ease(t / 0.15) * (1 - ease((t - 0.8) / 0.2))
+            sway = wave(2 * t) * k
+            fk = {root: (-g.get("threat_pitch", 28.0) * k, 4 * sway, 0)}
+            mouthparts(fk, work=k, gape=k, t=t)
+            ik = {}
+            for leg in rest:
+                n = int(leg[3])
+                if n <= 2:
+                    up = (1.15 if n == 1 else 0.7) * height * k
+                    ik[leg] = foot_at(rest, leg, fwd=height * (0.05 if n == 1 else 0.0) * k, up=up + height * 0.08 * sway,
+                                      out=-(0.12 if n == 1 else 0.08) * rest[leg]["reach"] * k, am=-50 * k, at=-60 * k)
+                else:
+                    ik[leg] = foot_at(rest, leg, out=0.04 * rest[leg]["reach"] * k)
+            return dict(fk=fk, loc=V((0, height * 0.1 * k, height * 0.35 * k)), ik=ik)
+        clip.run("threat", 75, threat)
 
 
 # ============================================================ spiders
@@ -490,7 +565,7 @@ def spider():
                 clips=arthro_clips,
                 gait=dict(walk_stride=0.22, walk_frames=14, walk_duty=0.6, lift=0.05,
                           run_stride=0.42, run_frames=10, run_duty=0.5,
-                          phases=tetrapod(), rear=1.0))
+                          phases=tetrapod(), rear=1.0, pastimes=["lurk", "groom", "threat"]))
 
 
 def tetrapod(lag=0.08):

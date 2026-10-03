@@ -832,6 +832,11 @@ def fk_quat(angles):
     if not angles:
         return mathutils.Quaternion()
     pitch, yaw, roll = (tuple(angles) + (0, 0, 0))[:3]
+    if len(angles) > 3:
+        # A spread wing beats about the body's long axis, which after the
+        # yaw that spreads it is the bone's own X -- so its pitch has to come
+        # before the roll that lays it flat: yaw, pitch, roll ('YXZ').
+        return mathutils.Euler((math.radians(pitch), math.radians(roll), math.radians(yaw)), angles[3]).to_quaternion()
     # Local axes: X pitch, Z yaw (for a bone lying along the body, Z is down, so
     # a positive yaw turns it to the animal's right), Y roll. Applied yaw
     # first, then roll about the bone as it now lies, then pitch -- Blender's
@@ -1349,7 +1354,9 @@ def rodent():
                 h=0.0015, tris=1700,
                 gait=dict(walk_stride=0.09, walk_frames=14, walk_duty=0.6, lift=0.012,
                           run_stride=0.26, run_frames=10, run_duty=0.35, run_lift=0.02,
-                          gallop="rotary", wag=10.0, idle_wag=1, tail_pitch=0.0, lie=0.03, arch=12.0))
+                          gallop="rotary", wag=10.0, idle_wag=1, tail_pitch=0.0, lie=0.03, arch=12.0,
+                          pastimes=["sniff", "situp"], situp=dict(with_=None, **{"with": ["groom"]}),
+                          sniff_face=60.0, sniff_ground=0.01, sniff_most=50.0))
 
 
 def claws(L, kind, count, length, radius, h, colour=(0.16, 0.14, 0.12), tris=40):
@@ -2060,7 +2067,8 @@ def duck():
         eye=((0.05, 0.172, 0.322), (-0.95, -0.2, 0.0), 0.0058, 0.0026, 0.0012),
         leg_r=0.0055, leg_h=0.0018, leg_colour=(0.78, 0.36, 0.08), web=True, shin_bare=True,
         gait=dict(walk_stride=0.14, walk_frames=18, lift=0.03, swim_stride=0.16, swim_frames=24,
-                  waterline=0.14, kind="waterfowl", fly_frames=10),
+                  waterline=0.14, kind="waterfowl", fly_frames=10,
+                  pastimes=["preen", "flap"], flap_lift=0.25, flap_beats=5),
     ))
 
 
@@ -2297,9 +2305,142 @@ def bird_clips(arm, spec):
                     limp=ease((t - 0.15) / 0.3))
     clip.run("death", 45, death)
 
+    if g.get("pastimes"):
+        bird_pastimes(clip, poser, rest, g, necks, height, kind)
+
     report["clips"] = clip.report
     report["overreach"] = clip.reach
     return report
+
+
+def bird_pastimes(clip, poser, rest, g, necks, height, kind):
+    """What a bird does between pecks (motion.js PASTIMES):
+
+    brood   -- the hen that 'sits on her nest': down on her belly with the
+               legs folded under, the feathers puffed out, the head drawn in.
+    scratch -- a hen raking the ground with one foot and then the other,
+               looking down at what she has turned up.
+    preen   -- the head turned back over the shoulder into the wing, the bill
+               working through the feathers.
+    flap    -- wings out and beaten, up on the toes: a hen startled, the
+               sparrow 'flapping around on the ground', a swan rising out of
+               the water to shake out its wings.
+
+    A water bird's are authored twice: on its feet, and at the waterline as
+    `preen_float` and `flap_float`, which the viewer swaps in on water the
+    way it swaps `float` for `idle`."""
+    names = g["pastimes"]
+    flat = lambda: {leg: planted(rest, leg) for leg in rest}
+    n_ = max(1, len(necks))
+    drop_w = g.get("waterline", 0.0) - 0.06
+
+    def floating(fk, t):
+        fk["body"] = (0.8 * wave(2 * t), 0, 1.2 * wave(t))
+        return V((0, 0, -drop_w + 0.004 * wave(2 * t))), {
+            leg: planted(rest, leg, fwd=0.02 * wave(t, 0.25 * (leg == "hind.R")), up=-drop_w * 0.3, meta=30, toe=40)
+            for leg in rest}
+
+    if "brood" in names:
+        bottom = g.get("belly", 0.155)
+
+        def brood(t):
+            look = 18 * hold_steps_(t, [(0.1, 1.0), (0.35, -0.6), (0.6, 0.2), (0.85, -1.0)], snap=0.06)
+            fk = wings(lift=0.18 + 0.02 * wave(2 * t))
+            fk["body"] = (-3 + 0.8 * wave(2 * t), 0, 0)
+            for n in necks:
+                # Drawn in: the neck folds back down into the shoulders.
+                fk[n] = (g.get("brood_neck", 14.0) / n_, 0, look * 0.4 / n_)
+            fk["head"] = (-g.get("brood_neck", 14.0) * 0.8, look * 0.7, 0)
+            fk["tail1"] = (-14, 0, 0)
+            ik = {leg: planted(rest, leg, fwd=-height * 0.25, meta=82, toe=-10) for leg in rest}
+            return dict(fk=fk, loc=V((0, 0, -(bottom - 0.012) + 0.002 * wave(2 * t))), ik=ik)
+        clip.run("brood", 150, brood, step=2)
+
+    if "scratch" in names:
+        rake = g.get("rake", height * 0.22)
+
+        def scratch(t):
+            # Two rakes with the left foot, two with the right, a look down
+            # and a peck at what was turned up.
+            ik = flat()
+            lean = 0.0
+            for leg, t0 in (("hind.L", 0.04), ("hind.R", 0.4)):
+                for k in range(2):
+                    u = (t - t0 - k * 0.14) / 0.14
+                    if 0 <= u <= 1:
+                        # Up and forward, down, dragged back past where it
+                        # stood, and home.
+                        fwd = rake * (0.35 * math.sin(math.pi * min(1, u / 0.35)) if u < 0.35 else
+                                      0.35 - 1.0 * ease((u - 0.35) / 0.4) + 0.65 * ease((u - 0.75) / 0.25))
+                        up = rake * 0.4 * (math.sin(math.pi * u / 0.35) if u < 0.35 else
+                                           0.0 if u < 0.75 else 0.5 * math.sin(math.pi * (u - 0.75) / 0.25))
+                        ik[leg] = planted(rest, leg, fwd=fwd, up=max(0.0, up), meta=-15 * (u < 0.35), toe=20 * (u < 0.35))
+                        lean = (1 if leg == "hind.R" else -1) * 4 * math.sin(math.pi * u)
+            look = ease((t - 0.72) / 0.06) * (1 - ease((t - 0.94) / 0.06))
+            peck = math.exp(-((t - 0.84) * 30) ** 2)
+            fk = wings()
+            fk["body"] = (6 * look + 8 * peck, 0, lean)
+            for n in necks:
+                fk[n] = ((14 * look + 18 * peck) / n_, 0, 0)
+            fk["head"] = (22 * look + 15 * peck, 0, 0)
+            fk["tail1"] = (6 * look, 0, 0)
+            return dict(fk=fk, loc=V((0, 0, 0)), ik=ik)
+        clip.run("scratch", 90, scratch)
+
+    def preen_pose(t, afloat):
+        k = ease(t / 0.15) * (1 - ease((t - 0.85) / 0.15))
+        side = 1
+        nib = 6 * wave(7 * t) * ease((t - 0.18) / 0.05) * (1 - ease((t - 0.8) / 0.05))
+        fk = wings()
+        for tg, s_ in ((".L", 1), (".R", -1)):
+            if s_ == side:
+                fk["wing1" + tg] = (10 * k, 0, s_ * 18 * k)
+        for i, n in enumerate(necks):
+            # Twisted about the neck's own length, which on a neck standing
+            # up is a turn about the vertical; down at the base for the
+            # long necks, so the bill reaches the back.
+            fk[n] = ((g.get("preen_bow", 30.0) * k) / n_, 0, -side * g.get("preen_twist", 200.0) * k / n_)
+        fk["head"] = (g.get("preen_head", 35.0) * k + nib, -side * 30 * k, 0)
+        fk["tail1"] = (0, 10 * k * wave(2 * t), 0)
+        if afloat:
+            loc, ik = floating(fk, t)
+            return dict(fk=fk, loc=loc, ik=ik)
+        return dict(fk=fk, loc=V((0, 0, 0)), ik=flat())
+
+    if "preen" in names:
+        clip.run("preen", 90, lambda t: preen_pose(t, False))
+        if kind == "waterfowl":
+            clip.run("preen_float", 90, lambda t: preen_pose(t, True))
+
+    def flap_pose(t, afloat):
+        k = ease(t / 0.12) * (1 - ease((t - 0.82) / 0.18))
+        beats = g.get("flap_beats", 4)
+        beat = wave(beats * t)
+        fk = {}
+        for side in (1, -1):
+            tag = ".L" if side > 0 else ".R"
+            fk["wing1" + tag] = (50 * beat * k, -side * 85 * k, -side * 80 * k, "YXZ")
+            fk["wing2" + tag] = (0, -side * (10 + 25 * max(0.0, wave(beats * t, -0.15))) * k, 0)
+        rise = g.get("flap_rise", 12.0)
+        fk["body"] = (-rise * k, 0, 0)
+        for n in necks:
+            fk[n] = (-6 * k / n_, 0, 0)
+        fk["head"] = (rise * 0.8 * k + 4 * beat * k, 0, 0)
+        fk["tail1"] = (-10 * k + 6 * beat * k, 0, 0)
+        if afloat:
+            loc, ik = floating(fk, t)
+            # Up out of the water on the beat, body raised.
+            loc = loc + V((0, 0, height * g.get("flap_lift", 0.35) * k))
+            fk["body"] = (-rise * 1.8 * k, 0, 0)
+            return dict(fk=fk, loc=loc, ik=ik)
+        hop = g.get("flap_hop", 0.0) * height * max(0.0, wave(beats * t * 0.5)) * k
+        ik = {leg: planted(rest, leg, up=hop, meta=-10 * k) for leg in rest}
+        return dict(fk=fk, loc=V((0, 0, hop + height * 0.04 * k)), ik=ik)
+
+    if "flap" in names:
+        clip.run("flap", g.get("flap_frames", 45), lambda t: flap_pose(t, False))
+        if kind == "waterfowl":
+            clip.run("flap_float", g.get("flap_frames", 45), lambda t: flap_pose(t, True))
 
 
 def swan():
@@ -2336,7 +2477,9 @@ def swan():
         extras=[(knob, 0.004, 120, (0.04, 0.035, 0.035))],
         gait=dict(walk_stride=0.34, walk_frames=28, lift=0.06, swim_stride=0.45, swim_frames=36,
                   waterline=0.34, kind="waterfowl", fly_frames=20, hover=1.3, threat=1.0,
-                  waddle=6.0, head_bob=2.0, lie=0.16),
+                  waddle=6.0, head_bob=2.0, lie=0.16,
+                  pastimes=["preen", "flap"], flap_frames=90, flap_beats=5, flap_lift=0.3, flap_rise=16.0,
+                  preen_twist=170.0, preen_bow=40.0),
     ))
 
 
@@ -2377,7 +2520,8 @@ def hen():
         leg_r=0.006, leg_h=0.002, leg_colour=(0.8, 0.62, 0.18),
         extras=[(comb, 0.0022, 180, (0.62, 0.06, 0.04)), (wattle, 0.0022, 80, (0.62, 0.06, 0.04))],
         gait=dict(walk_stride=0.16, walk_frames=18, lift=0.035, run_stride=0.36, run_frames=12,
-                  kind="fowl", fly_frames=8, hover=0.9, head_bob=9.0, waddle=3.0),
+                  kind="fowl", fly_frames=8, hover=0.9, head_bob=9.0, waddle=3.0,
+                  pastimes=["brood", "scratch", "preen", "flap"], belly=0.155, flap_hop=0.25),
     ))
 
 
@@ -2409,7 +2553,8 @@ def songbird():
         beak=beak, beak_h=0.0007, beak_tris=60, beak_colour=(0.14, 0.12, 0.1),
         eye=((0.03, 0.058, 0.094), (-0.95, -0.2, 0.0), 0.0033, 0.0013, 0.0006),
         leg_r=0.0017, leg_h=0.0007, leg_tris=180, leg_colour=(0.42, 0.3, 0.24), shin_bare=True,
-        gait=dict(walk_stride=0.12, walk_frames=16, lift=0.02, kind="hopper", fly_frames=6, hover=2.2),
+        gait=dict(walk_stride=0.12, walk_frames=16, lift=0.02, kind="hopper", fly_frames=6, hover=2.2,
+                  pastimes=["preen", "flap"], flap_beats=6, flap_frames=30, flap_hop=0.5),
     ))
 
 
@@ -3741,6 +3886,67 @@ def quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pi
                                meta=(-st.get("wrist", 40.0) * k if leg.startswith("fore") else 4 * k)) for leg in rest}
             return dict(fk=fk, loc=V((0, 0, -height * st.get("drop", 0.12) * k)), rot=rot, ik=ik)
         clip.run("stretch", 120, stretch)
+
+    if "situp" in names:
+        # The rat that 'sits here': up on its haunches, the hind feet flat
+        # from the heel, forepaws held up before the chest, the nose going.
+        # `situp` looks round and sniffs and comes down again; a rodent's
+        # `groom` is the same pose with both forepaws washing the face.
+        su = g.get("situp", {})
+        tall = su.get("pitch", 62.0)
+        low = height * su.get("drop", 0.35)
+
+        def sat_up(k, sniff=0.0, look=0.0):
+            rot = mathutils.Quaternion(V((1, 0, 0)), math.radians(-tall * k))
+            fk = {"spine": (-6 * k, 0, 0), "chest": (-4 * k, 0, 0)}
+            for n in necks:
+                fk[n] = (tall * 0.45 * k / len(necks), look * 0.5 / len(necks), 0)
+            fk["head"] = (tall * 0.4 * k + 3 * sniff, look * 0.5, 0)
+            for tg in (".L", ".R"):
+                if "scapula" + tg in bones:
+                    fk["scapula" + tg] = (-8 * k, 0, 0)
+                fk["upperarm" + tg] = (su.get("arm", 40.0) * k, 0, (6 if tg == ".L" else -6) * k)
+                fk["forearm" + tg] = (-su.get("fore", 80.0) * k, 0, 0)
+                fk["wrist" + tg] = (su.get("wrist", 30.0) * k, 0, 0)
+                fk["ftoe" + tg] = (20 * k, 0, 0)
+            ik = {leg: planted(rest, leg, fwd=height * 0.1 * k, meta=su.get("heel", 65.0) * k) for leg in rest if leg.startswith("hind")}
+            if k < 0.02:
+                ik = flat()
+            # The tail lies out along the floor behind, not down through it.
+            for i, n in enumerate(tails):
+                fk[n] = ((tall * 0.92 if i == 0 else -3.0) * k + tail_pitch * (1 - k), 0, 0)
+            return fk, rot, ik
+
+        def situp(t):
+            k = ease(t / 0.18) * (1 - ease((t - 0.8) / 0.2))
+            sniff = wave(9 * t) * k
+            look = 22 * hold_steps_(t, [(0.25, 1.0), (0.5, -1.0), (0.72, 0.0)], snap=0.05) * k
+            fk, rot, ik = sat_up(k, sniff, look)
+            fk.update(sides((-10 * k * max(0.0, wave(3 * t)), 0, 0)))
+            if tails:
+                fk[tails[-1]] = (fk[tails[-1]][0], 12 * wave(2 * t) * k, 0)
+            return dict(fk=fk, loc=V((0, 0, -low * k)), rot=rot, ik=ik)
+        clip.run("situp", 90, situp)
+
+        if "groom" in su.get("with", []):
+            def wash(t):
+                k = ease(t / 0.14) * (1 - ease((t - 0.86) / 0.14))
+                rub = ease((t - 0.16) / 0.06) * (1 - ease((t - 0.8) / 0.06))
+                fk, rot, ik = sat_up(k)
+                circle = 2 * math.pi * 3.5 * t
+                for tg, s_ in ((".L", 1), (".R", -1)):
+                    # Both forepaws up over the muzzle and round in small
+                    # circles, back over the ears on every other pass.
+                    fk["upperarm" + tg] = (lerp(fk["upperarm" + tg][0], su.get("wash_arm", -10.0) + 12 * math.sin(circle), rub),
+                                           0, s_ * 10 * k)
+                    fk["forearm" + tg] = (lerp(fk["forearm" + tg][0], -su.get("wash_fore", 120.0) + 14 * math.cos(circle), rub), 0, 0)
+                    fk["wrist" + tg] = (lerp(fk["wrist" + tg][0], 40.0, rub), 0, 0)
+                for n in necks:
+                    fk[n] = (fk[n][0] + 8 * rub / len(necks), 0, 0)
+                fk["head"] = (fk["head"][0] + 14 * rub + 6 * math.sin(circle) * rub, 0, 4 * math.cos(circle * 0.5) * rub)
+                fk.update(sides((-12 * rub * max(0.0, math.cos(circle)), 0, 0)))
+                return dict(fk=fk, loc=V((0, 0, -low * k)), rot=rot, ik=ik)
+            clip.run("groom", 120, wash)
 
     if "hiss" in names:
         # The arch: up on stiff legs, the back humped, the head down and the

@@ -97,6 +97,16 @@ const PASTIMES = {
   taste: { odds: 2, hold: [4, 10], gap: [2, 6], rate: 2.5 },
   sway: { odds: 1, hold: [5, 12], gap: [3, 8], rate: 1.5 },
   hiss: { odds: 0, once: true, gap: [2, 5], rate: 6 },
+  // Birds, between their pecks: the hen broods and scratches, every bird
+  // preens and now and then beats its wings.
+  brood: { odds: 0.6, hold: [20, 60], gap: [4, 10], rate: 0.9 },
+  scratch: { odds: 2, hold: [3, 9], gap: [2, 6], rate: 3 },
+  preen: { odds: 1, once: true, gap: [3, 8], rate: 4 },
+  flap: { odds: 0.3, once: true, gap: [4, 10], rate: 6 },
+  // A spider lies in wait more than it does anything else, and shows you
+  // its fangs only when you come close.
+  lurk: { odds: 3, hold: [8, 30], gap: [3, 8], rate: 1.2 },
+  threat: { odds: 0, once: true, gap: [3, 8], rate: 6 },
 };
 const PASTIME_NAMES = Object.keys(PASTIMES);
 /**
@@ -105,7 +115,8 @@ const PASTIME_NAMES = Object.keys(PASTIMES);
  * rabbit sits up to see what you are; the lizard answers you with push-ups,
  * which is what a lizard does at anything that comes onto its ground.
  */
-const ALARM = { snail: ['withdraw', 2.2], lagomorph: ['situp', 4.5], lizard: ['display', 3.2], serpent: ['hiss', 2.4] };
+const ALARM = { snail: ['withdraw', 2.2], lagomorph: ['situp', 4.5], lizard: ['display', 3.2], serpent: ['hiss', 2.4],
+  fowl: ['flap', 1.6], songbird: ['flap', 5], rodent: ['situp', 3], spider: ['threat', 2.2] };
 /**
  * people.py's sit, in seconds: the first REST_LOOP of it is at rest and
  * breathing and comes back to its first frame, and SIP is the stretch where
@@ -2705,7 +2716,16 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     const m = fig.m;
     const kind = fig.archetype || '';
     const still = !m.path && m.speed < 0.05 && !m.fighting && !m.dead && !m.overlay && orderOf(fig).kind === 'stroll';
+    const own = fig.pastimes && fig.pastimes.length ? fig.pastimes : null;
+    // Standing its ground and turned to you (game.js's notice is a 'hold'):
+    // no time for a pastime, but exactly the moment for a display.
+    const startled = still || (!m.path && m.speed < 0.05 && !m.fighting && !m.dead && !m.overlay && orderOf(fig).kind === 'hold');
     if (PECKERS.test(kind) && fig.actions && fig.actions.attack && !fig.afloat && !/swan|goose/i.test(fig.interactable ? fig.interactable.title : '')) {
+      // A bird with pastimes of its own pecks in the gaps between them.
+      if (own) {
+        pastimeLife(fig, dt, still, own, startled);
+        if (m.graze && (m.graze.want || m.graze.w > 0.05)) return;
+      }
       if (!still) return;
       m.peck = (m.peck ?? 1 + fig.rand() * 3) - dt;
       if (m.peck <= 0) {
@@ -2715,10 +2735,6 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       }
       return;
     }
-    const own = fig.pastimes && fig.pastimes.length ? fig.pastimes : null;
-    // Standing its ground and turned to you (game.js's notice is a 'hold'):
-    // no time for a pastime, but exactly the moment for a display.
-    const startled = still || (!m.path && m.speed < 0.05 && !m.fighting && !m.dead && !m.overlay && orderOf(fig).kind === 'hold');
     if (own) return pastimeLife(fig, dt, still, own, startled);
     const grazer = GRAZERS.test(kind); const sniffer = SNIFFERS.test(kind);
     if (!grazer && !sniffer) return;
