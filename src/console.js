@@ -2,8 +2,8 @@
  * The command line: interp.c's prompt in the corner of the world.
  *
  * Enter opens it and puts the caret in; Enter on an empty line closes it
- * again (the key that opened it, CLAUDE.md -- Escape works too but nothing
- * depends on it). The mouse stays yours while it is open: the world keeps
+ * again (the key that opened it, CLAUDE.md -- Escape, Ctrl-C and Ctrl-D work
+ * too, but nothing depends on them). The mouse stays yours while it is open: the world keeps
  * running and you keep looking about, as you would at a terminal. Up and down
  * walk the history, Tab completes a command.
  *
@@ -37,11 +37,11 @@ const CSS = `
 #g-console .row { display: flex; align-items: center; gap: 10px; padding: 9px 16px 11px;
   border-top: 1px solid rgba(224,189,119,0.14); }
 #g-console .row b { font-family: var(--mono); font-weight: 400; color: var(--gold); font-size: 13px; }
-#g-console input { flex: 1; background: transparent; border: 0; outline: 0; color: var(--ink);
+#g-console input { flex: 1; min-width: 0; text-overflow: ellipsis; background: transparent; border: 0; outline: 0; color: var(--ink);
   font-family: var(--mono); font-size: 13px; letter-spacing: 0.03em; caret-color: var(--gold); padding: 0; }
 #g-console input::placeholder { color: var(--dim); opacity: 0.45; }
 #g-console .row em { font-family: var(--mono); font-style: normal; font-size: 9.5px; letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--dim); opacity: 0.55; white-space: nowrap; }
+  text-transform: uppercase; color: var(--dim); opacity: 0.55; white-space: nowrap; flex-shrink: 0; }
 `;
 
 /** Mud text is hard-wrapped at 80 columns; the paragraph breaks are the indented lines. */
@@ -72,9 +72,9 @@ export function createConsole({ root, game, onOpen = () => {}, onClose = () => {
   input.type = 'text';
   input.spellcheck = false;
   input.autocomplete = 'off';
-  input.placeholder = "look · score · get all corpse · open gate · help";
+  input.placeholder = "look · score · open gate · help";
   const hint = document.createElement('em');
-  hint.textContent = 'enter on an empty line closes';
+  hint.textContent = 'esc closes';
   row.append(prompt, input, hint);
   box.append(scroll, row);
   root.appendChild(box);
@@ -143,6 +143,12 @@ export function createConsole({ root, game, onOpen = () => {}, onClose = () => {
       if (!line) { hide(); return; }
       run(line);
     } else if (event.key === 'Escape') {
+      hide();
+    } else if (event.ctrlKey && !event.metaKey && (event.key === 'c' || event.key === 'd')
+      && input.selectionStart === input.selectionEnd) {
+      // A terminal's ^C and ^D. With text selected, Ctrl-C is still copy.
+      event.preventDefault();
+      input.value = '';
       hide();
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
