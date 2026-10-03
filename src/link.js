@@ -541,7 +541,10 @@ export function attachSocketLink(link, game, host, enter) {
       if (r.samples.length > 12) r.samples.shift();
     }
   }));
-  offs.push(link.on('bye', (msg) => { token = null; host.disconnected(msg.why === 'quit' ? 'You have left the game.' : msg.why); }));
+  offs.push(link.on('bye', (msg) => {
+    token = null;
+    if (msg.why === 'quit') host.leaveToTitle(); else host.disconnected(msg.why);
+  }));
   // A lost link can be taken up again while the body stands (see server/mud.mjs login);
   // a quit, a deny or another login cannot.
   offs.push(link.on('closed', () => host.disconnected('The connection to the server was lost.',

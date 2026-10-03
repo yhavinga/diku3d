@@ -731,6 +731,18 @@ async function boot() {
   };
   game.setTimeOfDay(state.time);
 
+  // do_quit, and back to the title. The page is the simplest whole state to
+  // throw away: a reload brings the title up with "continue" from the save
+  // (or the connect form), where tearing down a zone, a mirror and a
+  // game in place would leave something of the last session behind.
+  let leaving = false;
+  function leaveToTitle() {
+    if (leaving) return;
+    leaving = true;
+    document.exitPointerLock?.();
+    setTimeout(() => window.location.reload(), 2500); // time to read do_quit's verse
+  }
+
   // The rest of the mud (src/rules): what lies on the ground, the command
   // line's walking, the save file, and the sounds and the boot of it all.
   const items = createItems({ scene, game, library: assets, built });
@@ -748,6 +760,12 @@ async function boot() {
       if (info) player.spawn(info.center.x, info.center.y, info.center.z, camera.rotation.y);
     },
   });
+  const mudQuit = game.quit;
+  game.quit = () => {
+    const r = mudQuit();
+    if (r.ok) leaveToTitle();
+    return r;
+  };
   game.walk = (dir) => step(dir, true);
   gameUi.onConsole = () => player.keys.clear();
   gameUi.setCamera(() => camera.position);
@@ -1766,8 +1784,10 @@ async function boot() {
       player.spawn(x, y, z, camera.rotation.y);
     },
     walk: (dir) => step(dir, true),
+    leaveToTitle,
     /** The link is gone. `resume` ({ url, name, token }) when the body can be taken up again. */
     disconnected(why, resume = null) {
+      if (leaving) return; // a quit closes the socket too
       lostResume = resume;
       document.getElementById('link-lost-text').textContent = resume
         ? `${why}  Your body stands where you left it for a few minutes.`

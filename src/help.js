@@ -55,6 +55,7 @@ const GROUPS = [
       [['Enter'], "the mud's own prompt: Merc's commands, abbreviations and socials"],
       [['Tab'], 'in the prompt: complete a command'],
       [['Esc', '~or', 'Ctrl-C'], 'close it (or Enter on an empty line)'],
+      [['quit'], 'typed there: save and go back to the title'],
     ] },
     { title: 'The world', rows: [
       [['1', '2', '3', '4'], 'dawn, noon, dusk, night'],
