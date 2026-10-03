@@ -68,7 +68,7 @@ const PAL = {
   refresh: { glow: C(0.7, 1.7, 1.3), mote: C(1.4, 3.0, 2.3), light: 0xa0ffd8 },
   ward: { glow: C(0.75, 1.0, 1.9), mote: C(1.4, 1.9, 3.2), light: 0xa8c8ff },
   bless: { glow: C(1.9, 1.5, 0.6), mote: C(3.2, 2.6, 1.1), light: 0xffe0a0 },
-  sanctuary: { glow: C(2.0, 1.9, 1.55), mote: C(3.6, 3.3, 2.5), light: 0xfff2d8 },
+  sanctuary: { glow: C(2.0, 1.85, 1.45), mote: C(3.6, 3.3, 2.4), light: 0xfff0d0 },
   dark: { glow: C(0.55, 0.12, 0.9), smoke: C(0.07, 0.03, 0.09), light: 0x7a3cff },
   harm: { glow: C(1.9, 0.18, 0.12), smoke: C(0.08, 0.01, 0.01), light: 0xff3a2a },
   poison: { glow: C(0.55, 1.5, 0.25), smoke: C(0.12, 0.2, 0.05), light: 0x7aff4a },
@@ -380,6 +380,15 @@ const DECAL_FRAG = `
       a = exp(-pow((r - front) / 0.06, 2.0)) * (1.0 - front * 0.6) + smoothstep(front, 0.0, r) * 0.12 * (1.0 - front);
     } else if (uMode < 2.5) {
       a = exp(-r * r * 3.5);
+    } else if (uMode > 7.5) {
+      // Sanctuary: a plain double ring and a pool of light on the ground,
+      // with fine ticks between the rings turning very slowly. uHeat is the
+      // breath, so it swells and settles with the mantle.
+      float turn = atan(vUv.y, vUv.x) + uTime * 0.12;
+      float ticks = smoothstep(0.55, 0.9, abs(sin(turn * 14.0))) * step(0.76, r) * step(r, 0.9);
+      float rings = band(r, 0.94, 0.028) + band(r, 0.7, 0.014) * 0.55;
+      a = (rings + ticks * 0.45) * (0.65 + 0.35 * uHeat) + exp(-r * r * 4.5) * 0.3 * (0.6 + 0.4 * uHeat);
+      a *= smoothstep(1.0, 0.9, r);
     } else {
       // The marks a spell leaves: ground cover (alpha, darkening what is
       // under it) and a little light of its own (colour) that dies first.
@@ -532,7 +541,6 @@ const AURA_FRAG = `
   uniform float uGain;
   uniform float uFlicker;
   uniform float uSoft;
-  uniform float uBand;
   varying vec3 vN;
   varying vec3 vV;
   varying vec3 vW;
@@ -544,21 +552,54 @@ const AURA_FRAG = `
     // Only the silhouette: facing surfaces add nothing, so the body stays
     // readable inside its halo even at arm's length.
     float f = pow(rim, 3.2);
-    // Soft (sanctuary): light along the body's own edge, the way a figure
-    // stands against a bright window. It used to be a broad band peaking
-    // *inside* a shell blown 6 cm off the body, and what that drew was a
-    // second, translucent, inflated copy of the whole figure over it: the
-    // executioner and the brass dragon read as ghosts in glass. The shell
-    // now sits a centimetre off the skin, so its outline is the body's.
-    // uBand widens how much of the turn lights up -- sanctuary's mantle
-    // needs to read at a glance, not just at the last few degrees of rim.
-    float soft = pow(rim, uBand) * 1.6 * (0.6 + 0.4 * smoothstep(0.8, 4.0, vDist));
+    // Soft (sanctuary): light along the body's own edge and nowhere else --
+    // rim light, the way a figure stands against a bright window. It used to
+    // be a broad band peaking *inside* a shell blown 6 cm off the body, and
+    // what that drew was a second, translucent, inflated copy of the whole
+    // figure over it: the executioner and the brass dragon read as ghosts in
+    // glass. The shell now sits a centimetre off the skin, so its outline is
+    // the body's, and only the last few degrees of the turn light up.
+    float soft = pow(rim, 5.0) * 1.6 * (0.6 + 0.4 * smoothstep(0.8, 4.0, vDist));
     f = mix(f, soft, uSoft);
     float n = vnoise(vW * 3.2 + vec3(0.0, -uTime * 1.3, 0.0));
     // A slow shimmer rising through it.
     n = mix(n, 0.5 + 0.5 * sin(vW.y * 9.0 - uTime * 3.0 + vnoise(vW * 2.0) * 5.0), uSoft * 0.5);
     float flick = mix(1.0, 0.6 + 0.8 * vnoise(vec3(uTime * 9.0, vW.y * 2.0, 0.0)), uFlicker);
     float a = f * 1.5 * (0.25 + 1.0 * n) * uIntensity * flick * fogT(vDist);
+    gl_FragColor = vec4(uColor * uGain * a, 0.0);
+  }
+`;
+
+/**
+ * Sanctuary's mantle: the *outside* of a figure. The shell is the body pushed
+ * out along its normals and drawn from behind, so the only part of it that
+ * ever shows is the ring between the body's silhouette and the shell's own
+ * edge, and there |n.v| falls from the body outwards -- bright where the
+ * light leaves the skin, gone at the rim. The inner-rim shell cannot do this:
+ * it lights the body's own edge, which is a one-pixel line at 20 m.
+ */
+const HALO_FRAG = `
+  uniform vec3 uColor;
+  uniform float uIntensity;
+  uniform float uTime;
+  uniform float uGain;
+  varying vec3 vN;
+  varying vec3 vV;
+  varying vec3 vW;
+  varying float vDist;
+  ${NOISE_GLSL}
+  ${FOG_GLSL}
+  void main() {
+    // Signed: a real far side of the body turns its normal away from the eye.
+    // A shard of shell that has folded in front of the body (flat-shaded
+    // normals pushed apart) still faces the eye, and must not draw.
+    float nv = max(0.0, -dot(normalize(vN), normalize(vV)));
+    float f = pow(nv, 2.0);
+    // Light drifting up through it, slowly.
+    float n = vnoise(vW * 2.4 + vec3(0.0, -uTime * 0.7, 0.0));
+    float rise = 0.5 + 0.5 * sin(vW.y * 4.0 - uTime * 1.3 + n * 3.0);
+    float shimmer = 0.72 + 0.28 * mix(n, rise, 0.5);
+    float a = f * shimmer * uIntensity * fogT(vDist);
     gl_FragColor = vec4(uColor * uGain * a, 0.0);
   }
 `;
@@ -1345,10 +1386,16 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   overlay.id = 'spell-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:11;opacity:1;';
   const edge = document.createElement('div');
-  edge.style.cssText = 'position:absolute;inset:0;transition:opacity 600ms ease, background 600ms ease;opacity:0;';
+  edge.style.cssText = 'position:absolute;inset:0;transition:opacity 600ms ease;opacity:0;';
+  // Its own layer so sanctuary can breathe without fighting the fade above.
+  const edgeGlow = document.createElement('div');
+  edgeGlow.style.cssText = 'position:absolute;inset:0;';
+  edge.appendChild(edgeGlow);
   const wash = document.createElement('div');
   wash.style.cssText = 'position:absolute;inset:0;opacity:0;mix-blend-mode:screen;';
   overlay.append(edge, wash);
+  const breatheFrames = [{ opacity: 0.55 }, { opacity: 1 }];
+  let breathing = null;
   document.body.appendChild(overlay);
   /** A wash over the frame. Held well short of opaque: a spell on you is felt, not a white-out. */
   function flashScreen(css, strength = 0.5, ms = 420) {
@@ -1627,6 +1674,19 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         const p = handPoint(who(e.from, e.fromPlayer), new THREE.Vector3());
         burst(light, p, 10, { speed: [0.3, 1.2], life: [0.2, 0.5], size: [0.03, 0.07], color: C(0.8, 0.8, 1.2), drag: 3, shape: 1 });
         S.fizzle(p);
+        return;
+      }
+      case 'hit': {
+        // Sanctuary halves it; show where. (A blow that did nothing is a 'miss'.)
+        // The rules resolve a round on one pulse; the blow is seen `delay` later.
+        const land = () => {
+          if (e.to) absorbed(e.to);
+          else if (e.from && (game.state.affectedBy & AFF.SANCTUARY)) {
+            flashScreen('radial-gradient(ellipse closest-side at 50% 50%, rgba(255,240,200,0) 40%, rgba(255,236,190,0.8) 100%)', 0.6, 520);
+          }
+        };
+        if (e.delay > 0.02) { const t0 = clock + e.delay; effects.push({ kind: 'custom', update() { if (clock < t0) return true; land(); return false; } }); }
+        else land();
         return;
       }
       case 'suffer': {
@@ -2299,7 +2359,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         decal(feet, strong ? 1.3 : 1.0, 1, palette.glow, 0.7, (d, u, t) => { u.uRadius.value = smooth(t / 0.6); u.uAlpha.value = 1 - t / 0.7; });
         takeLight(palette.light, (t) => (t < 0.9 ? { p: aim, intensity: (strong ? 16 : 7) * Math.sin(Math.PI * t / 0.9), distance: 7 } : null));
         S.chord(aim, strong ? 523 : f === 'bless' ? 440 : 349, strong ? 2 : 1);
-        if (w.player) flashScreen(strong ? 'radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0) 35%, rgba(245,248,255,0.85) 100%)' : 'radial-gradient(ellipse at 50% 50%, rgba(180,200,255,0) 45%, rgba(170,195,255,0.6) 100%)', 0.7, 900);
+        if (w.player) flashScreen(strong ? 'radial-gradient(ellipse closest-side at 50% 50%, rgba(255,244,214,0) 30%, rgba(255,240,205,0.9) 100%)' : 'radial-gradient(ellipse at 50% 50%, rgba(180,200,255,0) 45%, rgba(170,195,255,0.6) 100%)', 0.7, 900);
         break;
       }
       case 'curse': case 'hex': case 'weaken': case 'blind': case 'poison': {
@@ -2468,14 +2528,14 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     lingering.push({ anchor: id, until: clock + life, follow: w });
   }
 
-  /** A shaft of light standing on `feet` for `life` seconds, `scale` thinner/shorter than the cast burst. */
-  function column(feet, color, life, scale = 1) {
+  /** A shaft of light standing on `feet` for `life` seconds. */
+  function column(feet, color, life) {
     const t0 = clock;
-    const pts = [0, 0.25, 0.5, 0.75, 1].map((k) => ({ x: feet.x, y: feet.y + k * 5.5 * scale, z: feet.z }));
+    const pts = [0, 0.25, 0.5, 0.75, 1].map((k) => ({ x: feet.x, y: feet.y + k * 5.5, z: feet.z }));
     const tint = color.clone().multiplyScalar(0.35);
-    const width = (u) => 1.1 * scale * (1 - u * 0.3);
+    const width = (u) => 1.1 * (1 - u * 0.3);
     let a = 0;
-    const alpha = (u) => a * (1 - u) * (1 - u) * 0.9 * scale;
+    const alpha = (u) => a * (1 - u) * (1 - u) * 0.9;
     effects.push({ kind: 'custom', update() {
       const t = clock - t0;
       if (t > life) return false;
@@ -2490,10 +2550,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   const auras = new Map();   // figure -> { meshes, material, pulse }
   const AURA_KIND = [
     // flag or affect type, colour, intensity, thickness, flicker
-    // Sanctuary gets its own key (for the dissolve on loss), a wide band
-    // (a mantle, not a razor rim -- it has to read at 5 m and at 20 m) and
-    // a slow breathe so it looks cast, not static.
-    { key: 'sanctuary', test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.52, thick: 0.014, flicker: 0.05, soft: 1, band: 2.3, breathe: 0.3, breatheSpeed: 0.8, fadeLife: 1.4 },
+    { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.3, thick: 0.012, flicker: 0.05, soft: 1 },
     { test: (ch) => ch.affectedBy & AFF.FAERIE_FIRE, color: PAL.faerie.glow, intensity: 0.9, thick: 0.025, flicker: 0.6 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'shield' || a.type === 'stone skin'), color: PAL.ward.glow, intensity: 0.55, thick: 0.03, flicker: 0 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'armor' || a.type === 'protection'), color: PAL.ward.glow, intensity: 0.35, thick: 0.025, flicker: 0 },
@@ -2506,7 +2563,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       fragmentShader: AURA_FRAG,
       uniforms: {
         uColor: { value: new THREE.Color() }, uIntensity: { value: 0 }, uTime: { value: 0 },
-        uThick: { value: 0.03 }, uFlicker: { value: 0 }, uSoft: { value: 0 }, uBand: { value: 5.0 },
+        uThick: { value: 0.03 }, uFlicker: { value: 0 }, uSoft: { value: 0 },
         uGain: shared.uGain, uFogDensity: shared.uFogDensity,
       },
       transparent: true,
@@ -2517,11 +2574,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     });
   }
 
-  /** Shells over every mesh of a figure's body, sharing its skeleton. Built once. */
-  function auraFor(fig) {
-    let a = auras.get(fig);
-    if (a) return a;
-    const material = auraMaterial();
+  /** Shells over every mesh of a figure's body, sharing its skeleton. */
+  function shellsFor(fig, material, renderOrder) {
     const meshes = [];
     const sources = [];
     // The body, not what it holds or its buttons: a shell on every eye and
@@ -2544,13 +2598,21 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       shell.position.copy(o.position); shell.quaternion.copy(o.quaternion); shell.scale.copy(o.scale);
       shell.frustumCulled = false;
       shell.castShadow = false; shell.receiveShadow = false;
-      shell.renderOrder = 6;
+      shell.renderOrder = renderOrder;
       shell.layers.set(OVERLAY_LAYER);
       shell.visible = false;
       o.parent.add(shell);
       meshes.push(shell);
     }
-    a = { meshes, material, pulse: null, on: false };
+    return meshes;
+  }
+
+  /** The rim shell of a figure's affects. Built once. */
+  function auraFor(fig) {
+    let a = auras.get(fig);
+    if (a) return a;
+    const material = auraMaterial();
+    a = { meshes: shellsFor(fig, material, 6), material, pulse: null, on: false };
     auras.set(fig, a);
     return a;
   }
@@ -2575,82 +2637,38 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       let kind = null;
       if (ch && visible) kind = AURA_KIND.find((k) => k.test(ch)) || null;
       let a = auras.get(fig);
-      if (!kind && !(a && a.pulse)) {
-        // A lasting affect just ended: dissolve it over `fadeLife` rather
-        // than cutting the shell at the frame it clears -- "The white aura
-        // around your body fades" is a fade, not a vanish.
-        if (a && a.lastKind) {
-          const lk = a.lastKind;
-          a.pulse = { color: lk.color.clone(), intensity: Math.max(a.lastIntensity || 0, lk.intensity * 0.6), life: lk.fadeLife || 0.9, t: 0, soft: lk.soft || 0, band: lk.band, fadeOut: true };
-          if (lk.key === 'sanctuary') {
-            for (let k = 0; k < 10; k++) {
-              const ang = rand(0, TAU);
-              light.spawn({ x: fig.at.x + Math.cos(ang) * 0.3, y: fig.at.y + rand(0, fig.height * 0.8), z: fig.at.z + Math.sin(ang) * 0.3, vx: Math.cos(ang) * 0.3, vy: rand(0.6, 1.1), vz: Math.sin(ang) * 0.3, life: rand(0.6, 1.0), size: rand(0.03, 0.05), color: PAL.sanctuary.mote, shape: 1, drag: 0.6, fadeIn: 0.1, occ: 0.25 });
-            }
-          }
-          a.lastKind = null;
-        } else if (a && a.on) { for (const m of a.meshes) m.visible = false; a.on = false; }
-        continue;
-      }
+      if (!kind && !(a && a.pulse)) { if (a && a.on) { for (const m of a.meshes) m.visible = false; a.on = false; } continue; }
       a = a || auraFor(fig);
       const u = a.material.uniforms;
       let intensity = kind ? kind.intensity : 0;
-      if (kind) {
-        u.uColor.value.copy(kind.color); u.uThick.value = kind.thick; u.uFlicker.value = kind.flicker; u.uSoft.value = kind.soft || 0;
-        u.uBand.value = kind.band ?? 5.0;
-        if (kind.breathe) intensity *= 1 - kind.breathe + kind.breathe * (0.5 + 0.5 * Math.sin(time * (kind.breatheSpeed || 1) + (slot.proto.vnum % 13) * 0.5));
-        a.lastKind = kind;
-      }
+      if (kind) { u.uColor.value.copy(kind.color); u.uThick.value = kind.thick; u.uFlicker.value = kind.flicker; u.uSoft.value = kind.soft || 0; }
       if (a.pulse) {
         a.pulse.t += dt;
         const pu = a.pulse.t / a.pulse.life;
         if (pu >= 1) a.pulse = null;
         else {
-          const k = a.pulse.fadeOut ? (1 - pu) : Math.sin(Math.PI * Math.min(1, pu * 2.5)) * (1 - pu * 0.3);
+          const k = Math.sin(Math.PI * Math.min(1, pu * 2.5)) * (1 - pu * 0.3);
           if (!kind || a.pulse.intensity * k > intensity) {
             u.uColor.value.copy(a.pulse.color);
             u.uThick.value = a.pulse.soft ? 0.012 : 0.03;
             u.uFlicker.value = 0.1;
             u.uSoft.value = a.pulse.soft;
-            u.uBand.value = a.pulse.band ?? u.uBand.value;
             intensity = a.pulse.intensity * k;
           }
         }
       }
       u.uIntensity.value = intensity;
-      a.lastIntensity = intensity;
       u.uTime.value = time + (slot.proto.vnum % 17);
       const on = intensity > 0.01 && visible;
       if (on !== a.on) { for (const m of a.meshes) m.visible = on; a.on = on; }
 
       // Matter for the affects that are not a light: dark wisps of a curse,
-      // sickly bubbles of poison, a haze over blind eyes, sanctuary's motes.
+      // sickly bubbles of poison, a haze over blind eyes.
       if (!ch || !visible) continue;
       const near = distToCamera(fig.at) < 28;
       if (!near) continue;
       const rate = dt * budget.density;
       const px = fig.at.x; const py = fig.at.y; const pz = fig.at.z; const h = fig.height;
-      if (ch.affectedBy & AFF.SANCTUARY) {
-        // The light it stands in: soft sprites up the body, breathing out of
-        // step with each other -- the aura is this, not the shell, which
-        // only ever reads as an outline (and at arm's length as glass).
-        for (let k = 0; k < 3; k++) {
-          const br = 0.8 + 0.2 * Math.sin(time * 2.3 + k * 2.1 + px);
-          light.spawn({ x: px, y: py + h * (0.28 + k * 0.27), z: pz, life: 0.04, size: h * (0.95 - k * 0.12), color: PAL.sanctuary.glow, alpha: 0.11 * br, shape: 0, drag: 0, fadeIn: 0, occ: 0.2 });
-        }
-        // A column of light standing on the ground it protects, breathing
-        // in on the same slow cycle as the shell -- faint, so it reads as
-        // the aura reaching the ground and not as a beacon.
-        if (!a.nextColumn || clock >= a.nextColumn) {
-          const period = TAU / (kind ? kind.breatheSpeed || 0.8 : 0.8);
-          a.nextColumn = clock + period;
-          column({ x: px, y: py, z: pz }, PAL.sanctuary.mote, period * 0.82, 0.42);
-        }
-      }
-      if ((ch.affectedBy & AFF.SANCTUARY) && Math.random() < 9 * rate) {
-        const a2 = rand(0, TAU);
-        light.spawn({ x: px + Math.cos(a2) * 0.45, y: py + rand(0, h * 0.5), z: pz + Math.sin(a2) * 0.45, vx: 0, vy: rand(0.4, 0.8), vz: 0, life: rand(1, 1.6), size: rand(0.03, 0.05), color: PAL.sanctuary.mote, shape: 1, drag: 0.5, fadeIn: 0.3, occ: 0.2 });
-      }
       if ((ch.affectedBy & AFF.FAERIE_FIRE) && Math.random() < 8 * rate) {
         light.spawn({ x: px + rand(-0.3, 0.3), y: py + rand(0.2, h), z: pz + rand(-0.3, 0.3), vx: 0, vy: rand(0.1, 0.4), vz: 0, life: rand(0.5, 0.9), size: rand(0.02, 0.04), color: PAL.faerie.mote, shape: 2, drag: 1, fadeIn: 0.2 });
       }
@@ -2669,6 +2687,111 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     }
   }
 
+  // -- sanctuary ------------------------------------------------------------
+  // "A white aura around your body": a luminous mantle standing just off the
+  // figure (HALO_FRAG), a ring of light on the ground it protects, and
+  // motes rising through it, all breathing on one slow cycle. It swells in
+  // when cast, flares when a blow is absorbed and dissolves when it ends.
+  const sanct = new Map();   // figure -> { meshes, material, level, flare, on, was, ground, phase }
+  const SANCT_COLOR = PAL.sanctuary.glow;
+  const SANCT_BREATH = 1.0;  // rad/s: one breath every ~6 s
+  const SANCT_RINGS = 4;     // ground rings at once; the decal pool is shared with every spell
+
+  function sanctFor(fig) {
+    let s = sanct.get(fig);
+    if (s) return s;
+    const material = new THREE.ShaderMaterial({
+      vertexShader: AURA_VERT,
+      fragmentShader: HALO_FRAG,
+      uniforms: {
+        uColor: { value: SANCT_COLOR.clone() }, uIntensity: { value: 0 }, uTime: { value: 0 },
+        uThick: { value: 0.1 }, uGain: shared.uGain, uFogDensity: shared.uFogDensity,
+      },
+      transparent: true,
+      depthWrite: false,
+      side: THREE.BackSide,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.OneFactor,
+    });
+    s = { meshes: shellsFor(fig, material, 5), material, level: 0, flare: 0, on: false, was: false, ground: null, phase: rand(0, TAU) };
+    sanct.set(fig, s);
+    return s;
+  }
+
+  const sanctuaryOn = (slot) => { const ch = slot.instance; return !!(ch && !slot.dead && (ch.affectedBy & AFF.SANCTUARY)); };
+
+  function updateSanctuary(dt) {
+    const rate = dt * budget.density;
+    let rings = 0;
+    for (const s of sanct.values()) if (s.ground && s.ground.busy && s.ground.owner === s) rings++;
+    for (const slot of game.mobs) {
+      const fig = figureOf(slot);
+      if (!fig) continue;
+      const want = sanctuaryOn(slot) && fig.object.visible;
+      let s = sanct.get(fig);
+      if (!s) { if (!want) continue; s = sanctFor(fig); }
+      s.level = want ? Math.min(1, s.level + dt / 0.6) : Math.max(0, s.level - dt / 1.6);
+      s.flare = Math.max(0, s.flare - dt * 2.6);
+      const px = fig.at.x; const py = fig.at.y; const pz = fig.at.z; const h = fig.height;
+      const d = distToCamera(fig.at);
+      // It lifts off in a last handful of motes: the line the mud prints
+      // when it ends is "fades", and this is what fading looks like.
+      if (s.was && !sanctuaryOn(slot)) {
+        for (let k = 0; k < 12; k++) {
+          const ang = rand(0, TAU);
+          light.spawn({ x: px + Math.cos(ang) * 0.35, y: py + rand(0, h * 0.8), z: pz + Math.sin(ang) * 0.35, vx: Math.cos(ang) * 0.25, vy: rand(0.6, 1.2), vz: Math.sin(ang) * 0.25, life: rand(0.7, 1.2), size: rand(0.03, 0.05), color: PAL.sanctuary.mote, shape: 1, drag: 0.6, fadeIn: 0.1, occ: 0.25 });
+        }
+      }
+      s.was = want;
+      const on = s.level > 0.01 && d < 60;
+      if (on !== s.on) { for (const m of s.meshes) m.visible = on; s.on = on; }
+      if (!on) { if (s.ground) { s.ground.life = 0; s.ground = null; } continue; }
+      const k = smooth(s.level);
+      const breath = 0.5 + 0.5 * Math.sin(clock * SANCT_BREATH + s.phase);
+      const u = s.material.uniforms;
+      // A fixed 8 cm is two pixels at 20 m, so the mantle stands further out
+      // the further away it is looked at -- what has to read is the figure's
+      // outline in light, not a measured shell.
+      u.uThick.value = clamp(0.07 + 0.012 * d, 0.07, 0.3) * (1 + 0.5 * s.flare);
+      u.uIntensity.value = 0.2 * k * (0.8 + 0.2 * breath + 1.2 * s.flare);
+      u.uTime.value = clock + (slot.proto.vnum % 17);
+      if (d < 32 && !(s.ground && s.ground.busy && s.ground.owner === s) && rings < SANCT_RINGS) {
+        const g = decal({ x: px, y: py, z: pz }, 1.25, 8, SANCT_COLOR, 1e9, (dec, du) => {
+          dec.mesh.position.set(fig.at.x, fig.at.y + 0.04, fig.at.z);
+          du.uAlpha.value = smooth(s.level) * (0.75 + 0.25 * Math.sin(clock * SANCT_BREATH + s.phase)) * (1 + 1.5 * s.flare) * 0.35;
+          du.uHeat.value = 0.5 + 0.5 * Math.sin(clock * SANCT_BREATH + s.phase);
+        });
+        if (g) { g.owner = s; s.ground = g; rings++; }
+      } else if (s.ground && d >= 36) { s.ground.life = 0; s.ground = null; rings--; }
+      if (d < 28 && Math.random() < 8 * k * rate) {
+        const a2 = rand(0, TAU);
+        light.spawn({ x: px + Math.cos(a2) * 0.5, y: py + rand(0, h * 0.5), z: pz + Math.sin(a2) * 0.5, vx: 0, vy: rand(0.4, 0.8), vz: 0, life: rand(1.1, 1.7), size: rand(0.03, 0.05), color: PAL.sanctuary.mote, shape: 1, drag: 0.5, fadeIn: 0.3, occ: 0.25 });
+      }
+    }
+  }
+
+  /** Your own mantle, seen from inside: a few motes drifting up through the view. */
+  function updateOwnMantle(dt) {
+    if (!(game.state.affectedBy & AFF.SANCTUARY) || Math.random() >= 5 * dt * budget.density) return;
+    camera.getWorldDirection(_v);
+    const a2 = rand(0, TAU); const r = rand(1.2, 2.6);
+    light.spawn({ x: camera.position.x + Math.cos(a2) * r + _v.x * 0.8, y: camera.position.y + rand(-1.1, 0.2), z: camera.position.z + Math.sin(a2) * r + _v.z * 0.8, vx: 0, vy: rand(0.3, 0.6), vz: 0, life: rand(1.5, 2.4), size: rand(0.025, 0.04), color: PAL.sanctuary.mote, shape: 1, drag: 0.5, fadeIn: 0.4, occ: 0.25 });
+  }
+
+  /** A blow that sanctuary took half of: the mantle flares where it landed. */
+  function absorbed(slot) {
+    const fig = figureOf(slot);
+    const s = fig && sanct.get(fig);
+    if (!s || s.level < 0.5 || !sanctuaryOn(slot)) return;
+    s.flare = 1;
+    const h = fig.height;
+    for (let k = 0; k < 8; k++) {
+      const a2 = rand(0, TAU);
+      light.spawn({ x: fig.at.x + Math.cos(a2) * 0.3, y: fig.at.y + rand(0.3, h * 0.9), z: fig.at.z + Math.sin(a2) * 0.3, vx: Math.cos(a2) * 0.9, vy: rand(0.1, 0.7), vz: Math.sin(a2) * 0.9, life: rand(0.35, 0.6), size: rand(0.03, 0.05), color: PAL.sanctuary.mote, shape: 1, drag: 2, fadeIn: 0, occ: 0.2 });
+    }
+  }
+
   /** Your own affects: an edge to the frame for as long as they last. */
   let edgeKey = '';
   function updateEdge() {
@@ -2678,14 +2801,22 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     let op = 0;
     // Blind is a long affect (1 + level ticks), so it narrows the view rather than ending it.
     if (bits & AFF.BLIND) { css = 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0.3) 0%, rgba(4,2,8,0.72) 45%, rgba(0,0,0,0.95) 100%)'; op = 1; }
-    else if (bits & AFF.SANCTUARY) { css = 'radial-gradient(ellipse at 50% 50%, rgba(255,250,235,0) 50%, rgba(250,244,220,0.34) 83%, rgba(255,250,235,0.52) 100%)'; op = 1; }
+    else if (bits & AFF.SANCTUARY) { css = 'radial-gradient(ellipse closest-side at 50% 50%, rgba(255,246,222,0) 55%, rgba(252,240,206,0.34) 85%, rgba(255,246,220,0.68) 100%)'; op = 1; }
     else if (bits & AFF.FAERIE_FIRE) { css = 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 60%, rgba(255,110,200,0.38) 100%)'; op = 1; }
     else if (bits & AFF.POISON) { css = 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 55%, rgba(60,120,20,0.38) 100%)'; op = 1; }
     else if (bits & AFF.CURSE) { css = 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 55%, rgba(40,10,55,0.4) 100%)'; op = 1; }
+    // The glow breathes on the mantle's own cycle; it stops when it is gone.
+    const sanctuary = !(bits & AFF.BLIND) && (bits & AFF.SANCTUARY);
+    if (sanctuary && !breathing) breathing = edgeGlow.animate(breatheFrames, { duration: 3200, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' });
+    else if (!sanctuary && breathing && !breathing.ending) {
+      // Let the edge finish fading out (600 ms) before the breath stops under it.
+      const b = breathing; b.ending = true;
+      setTimeout(() => { b.cancel(); if (breathing === b) breathing = null; }, 700);
+    }
     const key = css + op;
     if (key === edgeKey) return;
     edgeKey = key;
-    if (css) edge.style.background = css;
+    if (css) edgeGlow.style.background = css;
     edge.style.opacity = String(op);
   }
 
@@ -2781,6 +2912,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     }
 
     updateAuras(dt);
+    updateSanctuary(dt);
+    updateOwnMantle(dt);
     updateEdge();
 
     light.update(dt, anchors);
