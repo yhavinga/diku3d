@@ -10184,7 +10184,10 @@ function buildLooseProps({ room, pos, sides, decor, mats, plan = null, trade = n
       decor.push({ kind: 'table', x: pos.x + tx, y: pos.y, z: pos.z + tz });
     }
   }
-  if (blank.length) {
+  // Nor barrels and crates stacked against them: a painted hall is no
+  // storeroom, and the temple's west wall got a crate stack in front of its
+  // mural the moment the plaque stopped holding that spot.
+  if (blank.length && !painted) {
     decor.push({
       kind: 'clutter', x: pos.x, y: pos.y, z: pos.z, half: SHELL,
       walls: blank, seed: hash3(room.vnum, 12, 0, 5), indoor: true,
