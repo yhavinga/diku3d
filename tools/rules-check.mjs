@@ -16,6 +16,7 @@ import { dirname, join } from 'path';
 import { parseArea, buildWorld, SECTOR, ROOM_INDOORS, ITEM, EX_CLOSED, EX_LOCKED } from '../src/are.js';
 import { layoutWorld } from '../src/layout.js';
 import { createGame, POS, WEAR } from '../src/game.js';
+import { createNav } from '../src/nav.js';
 import { installSave, serialize } from '../src/save.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -247,9 +248,17 @@ console.log('\nSPEC_FUNS');
     `at #${mayor.roomVnum}, path at ${t.game.mayorState().pos}`);
   // The janitor: drop a bottle in his room and wait.
   const janitor = t.game.mobs.find((s) => s.record.special === 'spec_janitor');
+  // Not while he is on his way out of the room: a wander already under way
+  // carries him off before his spec_fun next looks at the floor.
+  for (let i = 0; i < 600 && janitor.travel; i++) t.game.update(0.1, t.eye, t.look);
   t.stand(janitor.roomVnum);
   const bottle = t.obj(3001);
-  const at = { ...janitor.pos, x: janitor.pos.x + 2 };
+  // A free spot a few metres off in the room he is in now: two metres east
+  // of him could be over a stairwell, and the bottle fell into the room below.
+  let seed = 7;
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const at = createNav({ layout, built, world }).randomSpot(janitor.roomVnum, rand, { near: janitor.pos, radius: 4 });
+  if (!at) throw new Error(`rules-check: no free spot near the janitor in #${janitor.roomVnum}`);
   t.game.ground.push(Object.assign(bottle, { inRoom: janitor.roomVnum, at }));
   for (let i = 0; i < 400 && bottle.inRoom !== null; i++) t.game.update(0.1, t.eye, t.look);
   check(bottle.inRoom === null && janitor.instance.inventory.includes(bottle), 'the janitor walks over and picks up a bottle');
