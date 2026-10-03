@@ -1389,12 +1389,48 @@ async function boot() {
         }
       }
     }
+    // A room's middle can be inside something build.js stood there ("Inside
+    // the Chapel": the timber round its stair), and the body is then shoved
+    // out of it on the first frame -- facing a plank 0.4 m off.
+    const nav = actors.nav;
+    if (!nav.sample(at.x, at.z, info.cell.level)) {
+      const open = nav.nearestOpen(info.cell.level, at.x, at.z, 8);
+      if (open) at = { x: (open[0] + 0.5) * nav.NAV_RES, y: at.y, z: (open[1] + 0.5) * nav.NAV_RES };
+    }
+    yaw = openView(at, yaw, vnum);
     player.spawn(at.x, at.y, at.z, yaw);
     camera.rotation.set(0, yaw, 0);
     state.roomVnum = null;
     game.state.roomVnum = vnum;
     built.horizon?.settle(camera.position);
     shadowAnchor.set(Infinity, Infinity, Infinity);
+  }
+
+  /**
+   * `yaw`, unless the first thing in front of the eye is a wall or a pillar
+   * within a few metres -- "Inside the Chapel" faced on into the back of its
+   * own stair -- when it is the first of the room's level ways out, and then
+   * the eight points of the compass, that has room in front of it; failing
+   * all of those, whichever sees furthest.
+   */
+  const viewRay = new THREE.Raycaster();
+  function openView(at, yaw, vnum) {
+    const room = world.rooms.get(vnum);
+    const tries = [yaw,
+      ...[0, 1, 2, 3].filter((d) => room.exits[d]).map((d) => Math.atan2(-DIR_STEP[d][0], -DIR_STEP[d][2])),
+      ...Array.from({ length: 8 }, (_, i) => (i * Math.PI) / 4)];
+    const eye = new THREE.Vector3(at.x, at.y + 1.72, at.z);
+    let best = yaw;
+    let furthest = -1;
+    for (const t of tries) {
+      viewRay.set(eye, new THREE.Vector3(-Math.sin(t), 0, -Math.cos(t)));
+      viewRay.far = 30;
+      const hit = viewRay.intersectObject(built.group, true)[0];
+      const clear = hit ? hit.distance : 30;
+      if (clear >= 4) return t;
+      if (clear > furthest) { furthest = clear; best = t; }
+    }
+    return best;
   }
 
   /**
