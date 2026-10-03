@@ -487,7 +487,16 @@ half-built library still runs. `?assets=off` forces the fallback everywhere.
 ## Constraints
 
 - No dependencies beyond the vendored three.js in `vendor/`, which is committed
-  on purpose so a clone runs offline. Nothing is fetched at runtime, and every
-  texture and sound is still generated at boot.
+  on purpose so a clone runs offline. Nothing is fetched from outside the
+  repo at runtime. Every texture is still generated at boot; sounds and music
+  are not: footsteps, ambience and music are committed ElevenLabs clips in
+  `assets/audio/` (Opus in OGG, listed with their prompts in `manifest.json`),
+  loaded lazily after the game begins, and the synth in `audio.js` is what
+  plays until a clip has loaded or if it is missing (one console warning names
+  the file). Regenerate with `node tools/audio/generate.mjs [--force] [ids]`
+  (key in the gitignored `.env.elevenlabs`; `--post` redoes only the ffmpeg
+  stage from `tools/audio/raw/`, free); `tools/audio/analyze.mjs` and
+  `map-check.mjs` are the checks, since nobody can listen in CI. Which clip
+  plays where is the one table in `src/soundmap.js`.
 - The DikuMUD and Merc licences (in `merc21/`) forbid commercial use and require
   the credits to stay. They are reproduced on the title screen and in the README.

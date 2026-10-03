@@ -1,24 +1,68 @@
 /**
- * Sound, synthesised on the spot: wind through a lowpass, footsteps as filtered
- * noise bursts, a creak for doors and a bell for the temple quarter. No files.
+ * Sound. The one-shots of play (doors, blows, coins, spells), the rain and the
+ * wind are synthesised on the spot -- noise through filters, a few sine
+ * partials. Footsteps, the ambience of each kind of place and the music are
+ * committed clips (assets/audio, see soundscape.js and music.js); the synth
+ * footstep and wind bed stay as what plays until a clip has loaded, or if it
+ * never does.
  */
+import { Clips, Steps, Soundscape } from './soundscape.js';
+import { Music } from './music.js';
+import { placeOf } from './soundmap.js';
 
 export class Audio {
   constructor() {
     this.ctx = null;
     this.muted = false;
+    this.musicOn = true;
+    this.place = null;       // what setPlace was last told, kept for when the context exists
+    this.hour = null;
+    this.windScale = 1;
+    this._outdoor = true;
   }
 
-  /** Browsers only allow this after a gesture, so it is called from the entry click. */
-  start() {
+  /**
+   * The context and the master bus, once. The title music needs them before
+   * the entry click, when a browser leaves the context suspended; the first
+   * gesture of any kind wakes it.
+   */
+  init() {
     if (this.ctx) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     this.ctx = new Ctx();
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.55;
+    this.master.gain.value = this.muted ? 0 : 0.55;
     this.master.connect(this.ctx.destination);
-
     this.noise = this.makeNoiseBuffer(4);
+    this.clips = new Clips(this.ctx);
+    this.steps = new Steps(this.clips);
+    this.music = new Music(this);
+    this.music.setEnabled(this.musicOn);
+    const wake = () => {
+      this.ctx.resume();
+      for (const type of ['pointerdown', 'keydown', 'touchstart']) window.removeEventListener(type, wake, true);
+    };
+    for (const type of ['pointerdown', 'keydown', 'touchstart']) window.addEventListener(type, wake, true);
+  }
+
+  /** The title screen's music; the context is made here and starts sounding on the first gesture. */
+  startTitle() {
+    this.init();
+    this.music.startTitle();
+  }
+
+  /** Browsers only allow this after a gesture, so it is called from the entry click. */
+  start() {
+    this.init();
+    this.ctx.resume();
+    if (this.windGain) return;
+    this.music.endTitle();
+    this.soundscape = new Soundscape(this);
+    this.steps.preload();
+    if (this.place) {
+      this.soundscape.setPlace(this.place);
+      this.music.setPlace(this.place);
+    }
 
     // wind bed
     const wind = this.ctx.createBufferSource();
@@ -107,6 +151,21 @@ export class Audio {
   }
 
   footstep(surface, sprint) {
+    const step = this.steps && this.steps.pick(surface, sprint);
+    if (step && this.ctx && !this.muted) {
+      const now = this.ctx.currentTime;
+      const source = this.ctx.createBufferSource();
+      source.buffer = step.buffer;
+      source.playbackRate.value = step.rate;
+      const env = this.ctx.createGain();
+      // The clips are cut on the step, so the only envelope needed is a short release.
+      env.gain.setValueAtTime(sprint ? 0.8 : 0.55, now);
+      env.gain.setValueAtTime(sprint ? 0.8 : 0.55, now + step.duration - 0.04);
+      env.gain.linearRampToValueAtTime(0, now + step.duration);
+      source.connect(env).connect(this.master);
+      source.start(now, step.offset, step.duration * step.rate);
+      return;
+    }
     const table = {
       cobble: { frequency: 900, q: 1.6, decay: 0.1 },
       flagstone: { frequency: 750, q: 1.4, decay: 0.13 },
@@ -416,17 +475,62 @@ export class Audio {
     this.noiseHit(dest, { frequency: 2400, q: 2, gain: 0.15, decay: 0.12, delay: 0.14 });
   }
 
+  /**
+   * Where the player is: what the ambience and the music pick from. `info` is
+   * build.js's record for the room, `hour` the mud's hour of day (state.time).
+   */
+  setPlace(info, hour) {
+    this.hour = hour;
+    this.place = placeOf(info, hour);
+    if (!this.soundscape) return;
+    this.soundscape.setPlace(this.place);
+    this.music.setPlace(this.place);
+  }
+
+  /** A bed of clips is playing, so the synthesised wind drops to a trace under it. */
+  clipsAmbient(on) {
+    this.windScale = on ? 0.3 : 1;
+    this.setOutdoor(this._outdoor);
+  }
+
+  setMusic(on) {
+    this.musicOn = on;
+    if (this.music) this.music.setEnabled(on);
+  }
+
+  /** For the console and the harness: what is selected and how loud it is. */
+  debug() {
+    return {
+      time: this.ctx && +this.ctx.currentTime.toFixed(1),
+      state: this.ctx && this.ctx.state,
+      muted: this.muted,
+      place: this.place && { vnum: this.place.vnum, name: this.place.name, areaFile: this.place.areaFile, floor: this.place.floor },
+      ambience: this.soundscape && this.soundscape.state(),
+      music: this.music && this.music.state(),
+      loaded: this.clips ? [...this.clips.buffers.keys()] : [],
+    };
+  }
+
   /** Outdoors the wind opens up; indoors it drops to a hush. */
   setOutdoor(outdoor) {
     if (!this.ctx) return;
-    const target = outdoor ? 0.2 : 0.05;
+    this._outdoor = outdoor;
+    if (!this.windGain) return; // the title has a context but not yet the beds
+    const target = (outdoor ? 0.2 : 0.05) * this.windScale;
     this.windGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.8);
     this._rainOutdoor = outdoor ? 1 : 0;
     this.applyRain();
   }
 
-  update(outdoorCity) {
-    if (!this.ctx || this.muted) return;
+  update(outdoorCity, hour) {
+    if (!this.ctx) return;
+    if (this.soundscape && hour !== this.hour && this.place) {
+      this.hour = hour;
+      this.place.hour = hour;
+      this.soundscape.resolve();
+    }
+    this.music.update();
+    if (this.muted) return;
     if (outdoorCity && this.ctx.currentTime > this.nextBell) {
       this.bell();
       this.nextBell = this.ctx.currentTime + 90 + Math.random() * 120;
