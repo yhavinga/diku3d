@@ -1340,6 +1340,9 @@ const BEASTS = [
   { test: /\bpegasus\b/, asset: 'beast_equine', scale: 1.0, sleek: true, coat: 0xe9e5dd, pale: 0xe9e5dd, points: 0xcfcac2, box: [1.45, 2.1, 'quad', 0xe9e5dd] },
   { test: /\b(horse|horses|mare|stallion|steed|colt|foal)\b/, asset: 'beast_equine', scale: 1.0, coats: 'horse', sleek: true, box: [1.45, 2.1, 'quad', 0x6b4f36] },
   { test: /\b(stag|stags|elk)\b/, asset: 'beast_cervid', scale: 1.15, coat: 0x8c5c32, pale: 0xefe6d6, points: 0x3a2c20, patch: 0xefe6d6, cover: 0.14, box: [0.95, 1.4, 'quad', 0x8c5c32] },
+  // 'With horns and spots over coarse, brown hair': a deer's frame without
+  // the antlers, tawny and dappled.
+  { test: /\bantelopes?\b/, asset: 'beast_cervid', scale: 0.92, coat: 0xa8743e, pale: 0xefe6d6, points: 0x3a2c20, patch: 0xd8c4a0, cover: 0.3, hide: ['antler'], box: [0.8, 1.2, 'quad', 0xa8743e] },
   { test: /\b(deer|doe|fawn)\b/, asset: 'beast_cervid', scale: 1.0, coat: 0x9c6a3a, pale: 0xefe6d6, points: 0x3a2c20, patch: 0xefe6d6, cover: 0.18, hide: ['antler'], box: [0.85, 1.3, 'quad', 0x9c6a3a] },
   // --- cattle. `\bbull\b` would match hood.are's pitbull, which is why the
   // dogs come first. Cows have small horns, a bull big ones and no udder.
@@ -1383,6 +1386,11 @@ const BEASTS = [
   { test: /\bcoral snake\b|\bsnake coral\b/, asset: 'beast_snake', scale: 0.4, coat: 0xb02a18, pale: 0xb02a18, points: 0xb02a18, bands: [0xb02a18, 0xe0b830, 0x141212, 0xe0b830], band: 0.07, box: [0.08, 1, 'quad', 0xb02a18] },
   // A snail big enough to be in the way: grey foot (coat), the shell its
   // pale channel in tan, banded in the points' brown.
+  // The Rock Toad is 'about the size of a cow. Small horns grow all over its
+  // body': grey, warted. The killer frog 'rises up out of the water'.
+  { test: /\brock toads?\b|\btoads? rock\b/, asset: 'beast_frog', scale: 4.6, coat: 0x6c675c, pale: 0xa49d8e, points: 0x34312a, patch: 0x4a463c, cover: 0.55, box: [0.6, 1.4, 'quad', 0x6c675c] },
+  { test: /\bkiller frogs?\b/, asset: 'beast_frog', scale: 2.4, coat: 0x4c6a2c, pale: 0xd6cc98, points: 0x1c2612, patch: 0x2c3c18, cover: 0.42, box: [0.3, 0.7, 'quad', 0x4c6a2c] },
+  { test: /\b(frogs?|toads?)\b/, asset: 'beast_frog', scale: 1.0, coat: 0x5a6a32, pale: 0xd8d0a0, points: 0x22281a, patch: 0x34401e, cover: 0.4, box: [0.12, 0.3, 'quad', 0x5a6a32] },
   { test: /\bsnails?\b/, asset: 'beast_snail', scale: 1.0, coat: 0x7c7266, pale: 0xa88458, points: 0x4a3020, patch: 0x5e554a, cover: 0.3, box: [0.12, 0.5, 'quad', 0x8a7a66] },
   { test: /\bmaggots?\b/, asset: 'beast_worm', scale: 0.8, coat: 0xd8ccae, pale: 0xe6ddc6, points: 0xb8aa8a, patch: 0xc8b898, cover: 0.2, box: [0.14, 1.0, 'quad', 0xd8ccae] },
   { test: /\b(snake|snakes|serpent|viper|cobra|adder|asp)\b/, asset: 'beast_snake', scale: 0.55, coat: 0x5a5a3a, pale: 0xb8b490, points: 0x5a5a3a, patch: 0x26261a, cover: 0.35, box: [0.12, 1.5, 'quad', 0x5a5a3a] },
@@ -1448,6 +1456,7 @@ const TEMPERS = [
   [/\bcoil(s|ed)?\b/, { odds: { coil: 6 } }],
   [/\bsits? on (her|his|its|a|the) nest\b|\bnesting\b|\bbrooding\b/, { odds: { brood: 12 } }],
   [/\bflapping\b/, { odds: { flap: 8 } }],
+  [/\bcroak(s|ing)?\b/, { odds: { croak: 5 } }],
   [/\bsways?\b|\brears? (its|his|her) head\b/, { odds: { sway: 5 } }],
   [/\b(watch(es|ing)? you|stares?|staring)\b/, { odds: { taste: 2, haunch: 2 } }],
 ];

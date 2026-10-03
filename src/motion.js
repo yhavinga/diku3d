@@ -116,6 +116,9 @@ const PASTIMES = {
   wallow: { odds: 2, hold: [10, 30], gap: [6, 14], rate: 0.45 },
   // A gargoyle (and an imp) crouches still as the carving it might be.
   perch: { odds: 3, hold: [15, 40], gap: [4, 10], rate: 0.8 },
+  // A frog calls, its throat blown out, and snaps at what flies past.
+  croak: { odds: 2, once: true, gap: [3, 8], rate: 5 },
+  snap: { odds: 1, once: true, gap: [3, 8], rate: 6 },
 };
 const PASTIME_NAMES = Object.keys(PASTIMES);
 /**

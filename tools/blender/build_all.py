@@ -40,6 +40,7 @@ MODULES = [
     "beasts",
     "monsters",
     "creatures",
+    "fauna",
     "furniture",
     "clutter",
     "setpiece",
@@ -139,6 +140,8 @@ BUDGET = {
     # three toothed jaws and the crater it stands in.
     "beast_sandworm": 9800, "beast_basilisk": 6600,
     "beast_dustdigger": 3000, "beast_camel": 4600,
+    # fauna.py: the frogs and the Rock Toad, a cow-sized one seen whole.
+    "beast_frog": 3400,
     # Bones are all edges: a rib cage and a spine of knuckles do not decimate.
     "beast_dracolich": 9600,
     # furniture.py. Tables, benches and stools are placed a dozen to a tavern
