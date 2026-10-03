@@ -15,7 +15,10 @@ import {
 } from './handler.js';
 
 export function installObjects(k) {
-  const { state, ground, emit, game } = k;
+  const { ground, emit, game } = k;
+  // Whoever's turn it is (game.js `bind`): Merc's `ch`.
+  let state = k.state;
+  k.onBind((ch) => { state = ch; });
   const { MERC } = game;
   const { idiv } = MERC;
 

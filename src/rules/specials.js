@@ -17,36 +17,42 @@ const MOB_VNUM_CITYGUARD = 3060;
 const LEVEL_IMMORTAL = 37;
 
 export function installSpecials(k) {
-  const { state, ground, mobs, emit, game, SPEC_FUNS } = k;
+  const { ground, mobs, emit, game, SPEC_FUNS } = k;
   const { MERC } = game;
   const { POS, isAwake } = MERC;
 
-  /** Everyone in a mobile's room: you (if you are there) and the other mobiles. */
+  /** Everyone in a mobile's room: the players there, and the other mobiles. */
   function people(slot) {
     const list = mobs.filter((s) => s !== slot && !s.dead && s.instance && s.roomVnum === slot.roomVnum)
       .map((s) => s.instance);
-    if (state.roomVnum === slot.roomVnum || near(slot)) list.unshift(state);
+    const here = k.players.filter((pc) => pc.ch.roomVnum === slot.roomVnum || near(slot, pc.position));
+    list.unshift(...here.map((pc) => pc.ch));
     return list;
   }
-  const near = (slot) => Math.hypot(slot.pos.x - k.position.x, slot.pos.z - k.position.z) < 10;
+  /** The players in `people`, in the same order. */
+  const playersIn = (list) => list.filter((ch) => !ch.npc);
+  const near = (slot, at = k.position) => Math.hypot(slot.pos.x - at.x, slot.pos.z - at.z) < 10;
+  /** Heard where it was said: the room, or near enough to it (server/ routes it). */
+  const where = (slot) => (k.multi ? { room: slot.roomVnum, near: slot.pos, except: [] } : null);
+  const heardBy = (slot) => (k.multi ? true : k.state.roomVnum === slot.roomVnum || near(slot));
 
   const says = (slot, text) => {
     emit({ kind: 'mobsay', slot, speaker: slot.proto.short, said: text,
-      text: `${capitalise(slot.proto.short)} says '${text}'`, heard: state.roomVnum === slot.roomVnum || near(slot) });
+      text: `${capitalise(slot.proto.short)} says '${text}'`, heard: heardBy(slot), ...where(slot) });
   };
   const emotes = (slot, text) => {
     emit({ kind: 'emote', slot, speaker: slot.proto.short, said: null,
-      text: `${capitalise(slot.proto.short)} ${text}`, heard: state.roomVnum === slot.roomVnum || near(slot) });
+      text: `${capitalise(slot.proto.short)} ${text}`, heard: heardBy(slot), ...where(slot) });
   };
   const shouts = (slot, text) => {
     // do_shout reaches every player in the world who is awake.
     emit({ kind: 'mobsay', slot, speaker: slot.proto.short, said: text, shout: true,
-      text: `${capitalise(slot.proto.short)} shouts '${text}'`, heard: true });
+      text: `${capitalise(slot.proto.short)} shouts '${text}'`, heard: true, ...(k.multi ? { pc: null, all: true } : null) });
   };
 
   /** One round of multi_hit, timed as the aggressive mobiles' first swing is. */
   function attack(slot, victim) {
-    const there = victim === state ? k.position : victim.slot.pos;
+    const there = !victim.npc ? k.pcOf(victim).position : victim.slot.pos;
     if (Math.hypot(there.x - slot.pos.x, there.z - slot.pos.z) > 3.2) {
       // DIVERGES as aggr_update does: from across the room, it takes the
       // fight up and closes; the violence pulse swings once it is there.
@@ -54,8 +60,10 @@ export function installSpecials(k) {
       if (!victim.fighting) k.ctx.setFighting(victim, slot.instance);
       return;
     }
-    k.ctx.round = { player: 0, npc: 0.5 };
-    try { k.multiHit(slot.instance, victim); } finally { k.ctx.round = null; k.ctx.now = undefined; }
+    k.withPlayer(victim.npc ? null : k.pcOf(victim), () => {
+      k.ctx.round = { player: 0, npc: 0.5 };
+      try { k.multiHit(slot.instance, victim); } finally { k.ctx.round = null; k.ctx.now = undefined; }
+    });
   }
 
   // ---------------------------------------------------------- spec_guard --
@@ -71,9 +79,9 @@ export function installSpecials(k) {
     let maxEvil = 300;
     let ech = null;
     for (const victim of people(slot)) {
-      if (victim === state && (state.act & (PLR.KILLER | PLR.THIEF))) {
-        shouts(slot, `${capitalise(state.name)} is a ${state.act & PLR.KILLER ? 'KILLER' : 'THIEF'}!  PROTECT THE INNOCENT!!  BANZAI!!`);
-        attack(slot, state);
+      if (!victim.npc && (victim.act & (PLR.KILLER | PLR.THIEF))) {
+        shouts(slot, `${capitalise(victim.name)} is a ${victim.act & PLR.KILLER ? 'KILLER' : 'THIEF'}!  PROTECT THE INNOCENT!!  BANZAI!!`);
+        attack(slot, victim);
         return true;
       }
       if (victim.fighting && victim.fighting !== ch && victim.alignment < maxEvil) {
@@ -98,9 +106,10 @@ export function installSpecials(k) {
    */
   SPEC_FUNS.spec_executioner = (slot, ch) => {
     if (!isAwake(ch) || ch.fighting) return false;
-    if (!people(slot).includes(state) || !(state.act & (PLR.KILLER | PLR.THIEF))) return false;
-    shouts(slot, `${capitalise(state.name)} is a ${state.act & PLR.KILLER ? 'KILLER' : 'THIEF'}!  PROTECT THE INNOCENT!  MORE BLOOOOD!!!`);
-    attack(slot, state);
+    const crook = playersIn(people(slot)).find((victim) => victim.act & (PLR.KILLER | PLR.THIEF));
+    if (!crook) return false;
+    shouts(slot, `${capitalise(crook.name)} is a ${crook.act & PLR.KILLER ? 'KILLER' : 'THIEF'}!  PROTECT THE INNOCENT!  MORE BLOOOOD!!!`);
+    attack(slot, crook);
     if (k.summon) { k.summon(MOB_VNUM_CITYGUARD, slot.roomVnum); k.summon(MOB_VNUM_CITYGUARD, slot.roomVnum); }
     return true;
   };
@@ -178,25 +187,35 @@ export function installSpecials(k) {
   SPEC_FUNS.spec_thief = (slot, ch) => {
     if (ch.position !== POS.STANDING) return false;
     if (slot.task) return true;
-    if (!people(slot).includes(state) || state.level >= LEVEL_IMMORTAL) return false;
-    if (k.wanderRng.bits(2) !== 0 || !canSee(ch, state)) return false;
-    const target = k.playerFeet;
+    // As the mud walks the room's people: a player, mortal, the roll, seen.
+    let victim = null;
+    for (const vch of playersIn(people(slot))) {
+      if (vch.level >= LEVEL_IMMORTAL) continue;
+      if (k.wanderRng.bits(2) !== 0 || !canSee(ch, vch)) continue;
+      victim = vch;
+      break;
+    }
+    if (!victim) return false;
+    const pc = k.pcOf(victim);
+    const target = pc.feet;
     slot.task = {
       kind: 'pickpocket',
       order: { kind: 'go', to: target },
       reach: 1.4,
       onArrive: () => {
-        if (ch.fighting || slot.dead) return;
-        if (isAwake(state) && k.rng.range(0, ch.level) === 0) {
-          emit({ kind: 'caught', slot, text: `You discover ${ch.name}'s hands in your wallet!` });
-          return;
-        }
-        const gold = MERC.idiv(state.gold * k.rng.range(1, 20), 100);
-        ch.gold += MERC.idiv(7 * gold, 8);
-        state.gold -= gold;
-        // The mud tells you nothing. The purse is lighter; the log says so
-        // only because the number on screen would otherwise just drop.
-        if (gold > 0) emit({ kind: 'stolen', slot, amount: gold, text: '' });
+        if (ch.fighting || slot.dead || !k.pcOf(victim)) return;
+        k.withPlayer(pc, () => {
+          if (isAwake(victim) && k.rng.range(0, ch.level) === 0) {
+            emit({ kind: 'caught', slot, text: `You discover ${ch.name}'s hands in your wallet!` });
+            return;
+          }
+          const gold = MERC.idiv(victim.gold * k.rng.range(1, 20), 100);
+          ch.gold += MERC.idiv(7 * gold, 8);
+          victim.gold -= gold;
+          // The mud tells you nothing. The purse is lighter; the log says so
+          // only because the number on screen would otherwise just drop.
+          if (gold > 0) emit({ kind: 'stolen', slot, amount: gold, text: '' });
+        });
       },
     };
     return true;

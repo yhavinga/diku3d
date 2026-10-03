@@ -347,13 +347,22 @@ export const ROOM_REACH = 13;
  *   stopFighting(ch, both).
  */
 export function createMagic(deps) {
-  const { rng, emit, ctx, player } = deps;
+  const { rng, emit, ctx } = deps;
+  // The player whose turn it is (game.js `bind`): the one this reads as "you".
+  let player = deps.player;
   const pending = [];
   let clock = 0;
   let nextId = 1;
   // WAIT_STATE for the player, in seconds; mobiles casting through a spec_fun
-  // never wait, in the mud or here.
+  // never wait, in the mud or here. On a server, every other player's is kept
+  // in `waits` while it is not their turn.
   let wait = 0;
+  const waits = new Map();
+  function bindPlayer(ch) {
+    if (player) waits.set(player, wait);
+    player = ch;
+    wait = ch ? waits.get(ch) || 0 : 0;
+  }
 
   const slotOf = (ch) => (ch && ch !== player ? ch.slot || null : null);
   const nameOf = (ch) => (ch === player ? 'you' : ch.name);
@@ -362,10 +371,18 @@ export function createMagic(deps) {
 
   /** Text for the one reader there is: `tone` is how game-ui colours it. */
   function say(text, tone = 'faint') { emit({ kind: 'magic', text, tone }); }
-  /** send_to_char: only ever read if `to` is the player. */
-  function toChar(to, text, tone) { if (to === player) say(text, tone); }
+  /** send_to_char: read if `to` is the player -- or, on a server, any player. */
+  function toChar(to, text, tone) {
+    if (to === player) say(text, tone);
+    else if (deps.tell && to && !isNpc(to)) deps.tell(to, { kind: 'magic', text, tone });
+  }
   /** act(TO_ROOM) with `actor` as $n: read if you are there and are not $n. */
-  function toRoom(actor, text, tone) { if (actor !== player && nearPlayer(actor)) say(text, tone); }
+  function toRoom(actor, text, tone) {
+    if (deps.roomcast) { deps.roomcast(actor, { kind: 'magic', text, tone }); return; }
+    if (actor !== player && nearPlayer(actor)) say(text, tone);
+  }
+  /** Both sides of a spell by name, for a server to tell each reader apart. */
+  const sides = (ch, victim) => (deps.tell ? { fromCh: ch, toCh: victim } : null);
   /** The "Ok." a caster gets when the spell was on someone else. */
   function ok(ch, victim) { if (ch !== victim) toChar(ch, 'Ok.', 'faint'); }
 
@@ -694,7 +711,7 @@ export function createMagic(deps) {
         return false;
       }
       toRoom(victim, `${Name(victim)} slowly fades out of existence.`);
-      if (victim === player) say('You slowly fade into existence somewhere else.', 'gate');
+      toChar(victim, 'You slowly fade into existence somewhere else.', 'gate');
       return true;
     },
     weaken(level, ch, victim) {
@@ -817,6 +834,7 @@ export function createMagic(deps) {
       from: slotOf(ch), fromPlayer: ch === player,
       to: victim ? slotOf(victim) : undefined, toPlayer: victim === player, self: victim === ch,
       area: sp.target === TAR.IGNORE, windup, flight, text: words || '', item: item ? item.name : null,
+      ...sides(ch, victim),
     });
     pending.push({ id, sp, level, ch, vo, release: clock + windup, land: clock + windup + flight, released: false, offensiveCast, source });
     return id;
@@ -834,6 +852,7 @@ export function createMagic(deps) {
         from: slotOf(p.ch), fromPlayer: p.ch === player,
         to: victim ? slotOf(victim) : undefined, toPlayer: victim === player, self: victim === p.ch,
         hits, saved, failed: result === false,
+        ...sides(p.ch, victim),
       });
       hits = null;
     }
@@ -851,6 +870,9 @@ export function createMagic(deps) {
   function update(dt) {
     clock += dt;
     if (wait > 0) wait = Math.max(0, wait - dt);
+    for (const [ch, w] of waits) if (ch !== player && w > 0) waits.set(ch, Math.max(0, w - dt));
+    // Each spell lands on its caster's turn: their screen, their "you".
+    const asCaster = deps.asCaster || ((ch, fn) => fn());
     for (let i = 0; i < pending.length;) {
       const p = pending[i];
       if (!p.released && clock >= p.release) {
@@ -858,7 +880,7 @@ export function createMagic(deps) {
         // The words were never finished: stunned, or dead, mid-sentence.
         if (!alive(p.ch) || p.ch.position <= POS.STUNNED) {
           pending.splice(i, 1);
-          emit({ kind: 'spell-fizzle', id: p.id, from: slotOf(p.ch), fromPlayer: p.ch === player });
+          asCaster(p.ch, () => emit({ kind: 'spell-fizzle', id: p.id, from: slotOf(p.ch), fromPlayer: p.ch === player, ...sides(p.ch, null) }));
           continue;
         }
       }
@@ -866,10 +888,10 @@ export function createMagic(deps) {
         pending.splice(i, 1);
         const victim = p.vo && p.vo.npc !== undefined ? p.vo : null;
         if (victim && victim !== p.ch && !alive(victim)) {
-          emit({ kind: 'spell-fizzle', id: p.id, from: slotOf(p.ch), fromPlayer: p.ch === player, spent: true });
+          asCaster(p.ch, () => emit({ kind: 'spell-fizzle', id: p.id, from: slotOf(p.ch), fromPlayer: p.ch === player, spent: true, ...sides(p.ch, null) }));
           continue;
         }
-        run(p);
+        asCaster(p.ch, () => run(p));
         continue;
       }
       i++;
@@ -1152,7 +1174,7 @@ export function createMagic(deps) {
       if (n >= ADEPT.length) return false;
       const [word, name] = ADEPT[n];
       const words = `${Name(ch)} utters the word${n >= 4 ? 's' : ''} '${word}'.`;
-      if (nearPlayer(ch)) say(words, 'faint');
+      toRoom(ch, words, 'faint');
       invoke(SPELL[name], ch.level, ch, victim, { source: 'spec' });
       return true;
     },
@@ -1215,7 +1237,7 @@ export function createMagic(deps) {
     if (ch.affectedBy & AFF.POISON) {
       toRoom(ch, `${Name(ch)} shivers and suffers.`);
       toChar(ch, 'You shiver and suffer.', 'them');
-      emit({ kind: 'suffer', from: slotOf(ch), fromPlayer: ch === player });
+      emit({ kind: 'suffer', from: slotOf(ch), fromPlayer: ch === player, ...sides(ch, null) });
       deps.damage(ch, ch, 2, 'poison', ctx);
     }
   }
@@ -1243,6 +1265,10 @@ export function createMagic(deps) {
     },
     get wait() { return wait; },
     set wait(v) { wait = v; },
+    /** game.js `bind`: whose turn it is, and their WAIT_STATE with it. */
+    bindPlayer,
+    /** A player gone from the world: nothing more to count down for them. */
+    forget(ch) { waits.delete(ch); },
     specs: SPECS,
     SPELL, SPELLS,
   };

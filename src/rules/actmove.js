@@ -17,7 +17,10 @@ import {
 const ACT_TRAIN = 512;
 
 export function installMove(k) {
-  const { world, state, emit, game } = k;
+  const { world, emit, game } = k;
+  // Whoever's turn it is (game.js `bind`): Merc's `ch`.
+  let state = k.state;
+  k.onBind((ch) => { state = ch; });
   const { MERC } = game;
   const { POS } = MERC;
   const out = (ok, text) => ({ ok, text });
@@ -51,6 +54,10 @@ export function installMove(k) {
   function otherSide(vnum, dir, verb) {
     const exit = exitOf(vnum, dir);
     const back = exit && exitOf(exit.to, REVERSE_DIR[dir]);
+    if (k.multi && back && back.to === vnum) {
+      k.roomcast(exit.to, { kind: 'note', text: `The ${doorName(back.keyword)} ${verb}.` });
+      return;
+    }
     if (back && back.to === vnum && state.roomVnum === exit.to) {
       emit({ kind: 'note', text: `The ${doorName(back.keyword)} ${verb}.` });
     }
@@ -144,7 +151,10 @@ export function installMove(k) {
     const exit = exitOf(vnum, dir);
     const name = doorName(exit.keyword);
     if (who) k.toRoom(who, `${capitalise(who.proto.short)} ${verb} the ${name}.`, { kind: 'door', dir, vnum });
-    else emit({ kind: 'door', text: `You ${verb.replace(/s$/, '')} the ${name}. ${reply === 'Ok.' ? '' : reply}`.trim(), dir, vnum, verb });
+    else {
+      emit({ kind: 'door', text: `You ${verb.replace(/s$/, '')} the ${name}. ${reply === 'Ok.' ? '' : reply}`.trim(), dir, vnum, verb });
+      k.roomcast(vnum, { kind: 'door', text: `${capitalise(state.name)} ${verb} the ${name}.`, dir, vnum, verb }, [state]);
+    }
   }
 
   // --------------------------------------------------------- containers --
@@ -328,11 +338,10 @@ export function installMove(k) {
     state.wait = Math.max(state.wait, 12);
     if (k.rng.percent() < learned('hide')) {
       state.affectedBy |= AFF.HIDE;
-      hiddenAt = { x: k.position.x, z: k.position.z };
+      k.pc.hiddenAt = { x: k.position.x, z: k.position.z };
     }
     return out(true, 'You attempt to hide.');
   }
-  let hiddenAt = null;
 
   function visible() {
     affectStrip(state, 'invis');
@@ -386,10 +395,12 @@ export function installMove(k) {
 
   /** Walking off the spot you hid on gives you away, as a typed command would. */
   function update() {
-    if (!hiddenAt || !(state.affectedBy & AFF.HIDE)) { hiddenAt = null; return; }
-    if (Math.hypot(k.position.x - hiddenAt.x, k.position.z - hiddenAt.z) > 1.2) {
+    // Where you hid, per player: walking off it gives you away.
+    const pc = k.pc;
+    if (!pc.hiddenAt || !(state.affectedBy & AFF.HIDE)) { pc.hiddenAt = null; return; }
+    if (Math.hypot(k.position.x - pc.hiddenAt.x, k.position.z - pc.hiddenAt.z) > 1.2) {
       state.affectedBy &= ~AFF.HIDE;
-      hiddenAt = null;
+      pc.hiddenAt = null;
     }
   }
   k.rules.moveUpdate = update;

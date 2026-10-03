@@ -35,6 +35,7 @@ export const DEFAULTS = {
   time: 'dusk',
   weather: 'clear',
   sound: true,
+  music: true,
 };
 
 const FIELDS = [
@@ -102,6 +103,12 @@ const FIELDS = [
     key: 'sound',
     label: 'Sound',
     note: null,
+    options: [[true, 'on'], [false, 'off']],
+  },
+  {
+    key: 'music',
+    label: 'Music',
+    note: 'A few quiet pieces: the title, a tavern, a temple, now and then the area. Sound off silences it too.',
     options: [[true, 'on'], [false, 'off']],
   },
 ];
@@ -249,6 +256,7 @@ export function createOptions({ quality, applyTime, applyWeather, audio, state }
     // design, and comparing them would rebake the environment on every apply.
     if (values.weather !== state.weatherMode) applyWeather(values.weather);
     if (audio.muted === values.sound) audio.toggleMute();
+    audio.setMusic(values.music);
   }
 
   let costTimer = 0;
