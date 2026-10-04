@@ -250,6 +250,14 @@ files in `/srv/diku3d-data`) and nginx passes `wss://diku3d.com/ws` to it.
 "connect to a server" with an empty address connects there. It first boots
 wizlocked; an implementor opens it with `wizlock`.
 
+Visitor statistics come from the site's own nginx log, never from the
+visitor's browser: the config in `tools/deploy/` logs the real address
+(Cloudflare's `CF-Connecting-IP`, trusted from Cloudflare's ranges only) to
+`/var/log/nginx/diku3d.access.log`, and `tools/deploy/stats.sh` turns that
+log, rotated files included, into one GoAccess HTML page and opens it. Like
+`deploy.sh` it reads the host from the gitignored `.env`; nothing in the
+repository names the machine.
+
 ### Running a server, and becoming its implementor
 
     node server/main.mjs [--port 4011] [--host 127.0.0.1] [--data DIR] [--seed N]
