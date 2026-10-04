@@ -11,8 +11,10 @@
  *  - how the server is: tick time, traffic, memory, uptime, area resets;
  *  - actions, each run as the implementor's own typed command (goto,
  *    transfer, snoop, restore, wizlock), so interp.c's levels and act_wiz.c's
- *    refusals apply to them exactly as to a line in the console; and `follow`,
- *    a player's position at 10 Hz with their zone's map.
+ *    refusals apply to them exactly as to a line in the console;
+ *  - for the page's god view (src/godview.js): every zone's plan once
+ *    (`atlas`), every player's position at 10 Hz wherever they are (`pos`),
+ *    and every mobile's room, body and fight as they change (`m` in a batch).
  *
  * Tells are private in Merc. act_wiz.c's snoop already lets an implementor
  * read a player's whole screen, so the owner of the server sees them here
@@ -236,28 +238,62 @@ export function createDash({ game, w, byPc, stats, site, send, started, run }) {
     };
   }
 
-  function track(s) {
-    const t = s.dash && s.dash.follow != null ? byPc.get(s.dash.follow) : null;
-    if (!t || !t.pc) return;
-    const c = w.toClient(t.pc.position);
-    if (!c) return;
-    if (s.dash.mapZone !== c.zone) { s.dash.mapZone = c.zone; dashSend(s, { k: 'map', ...zoneMap(c.zone) }); }
-    dashSend(s, { k: 'track', id: t.pc.id, zone: c.zone, vnum: t.pc.ch.roomVnum, x: round(c.x), z: round(c.z), yaw: round(t.yaw || 0) });
+  /**
+   * Every player, wherever they are: [id, zone, x, y (feet, on build.js's
+   * floor), z, yaw, room], in their zone's own frame. Only those that moved
+   * since the last send; a new subscriber's snapshot has them all.
+   */
+  const posSent = new Map();
+  function positions(all) {
+    const out = [];
+    const seen = new Set();
+    for (const s of byPc.values()) {
+      if (!s.pc) continue;
+      const p = s.pc.position;
+      const c = w.toClient(p);
+      if (!c) continue;
+      const row = [s.pc.id, c.zone, round(c.x), round(p.y - 1.72 + w.liftAt(p.x, p.y - 1.72, p.z)), round(c.z), round(s.yaw || 0), s.pc.ch.roomVnum];
+      const key = row.join();
+      seen.add(s.pc.id);
+      if (!all && posSent.get(s.pc.id) === key) continue;
+      if (!all) posSent.set(s.pc.id, key);
+      out.push(row);
+    }
+    for (const id of [...posSent.keys()]) if (!seen.has(id)) posSent.delete(id);
+    return out;
   }
 
-  /** A zone's plan, in grid cells: rooms [vnum, x, z, level], streets as runs of cells. */
-  const maps = new Map();
-  function zoneMap(id) {
-    if (maps.has(id)) return maps.get(id);
-    const z = w.byId.get(id);
+  /**
+   * Every mobile as [room, body, fight]: body 0 standing, 1 a corpse, 2 gone;
+   * fight 0 none, 1 with a mobile, 2 with a player. The index is game.mobs's,
+   * which the page holds in the same order (the world fingerprint).
+   */
+  const mobView = (slot) => {
+    const mob = slot.instance;
+    return [slot.roomVnum, slot.dead ? (slot.corpse ? 1 : 2) : 0, mob && mob.fighting ? (mob.fighting.npc ? 1 : 2) : 0];
+  };
+  let mobSent = null;
+  function mobDiff() {
+    if (!mobSent) { mobSent = game.mobs.map((slot) => mobView(slot).join()); return []; }
+    const out = [];
+    game.mobs.forEach((slot, i) => {
+      const v = mobView(slot);
+      const key = v.join();
+      if (mobSent[i] !== key) { mobSent[i] = key; out.push([i, ...v]); }
+    });
+    return out;
+  }
+
+  /** A zone's plan, in grid cells: rooms [vnum, x, z, level], streets [level, x, z, x, z, ...]. */
+  function zoneMap(z) {
     const rooms = [...z.layout.cells].filter(([vnum]) => !w.built.rooms.get(vnum)?.unbuilt)
       .map(([vnum, cell]) => [vnum, cell.x, cell.z, cell.level]);
     const streets = z.layout.links.filter((l) => l.to && l.path && l.path.length)
       .map((l) => [l.from.level, l.from.x, l.from.z, ...l.path.flatMap((p) => [p.x, p.z]), l.to.x, l.to.z]);
-    const map = { zone: id, name: z.zone.name, cell: 13, rooms, streets };
-    maps.set(id, map);
-    return map;
+    return { zone: z.zone.id, name: z.zone.name, rooms, streets };
   }
+  let atlas = null;
+  const atlasOf = () => atlas || (atlas = { cell: 13, level: 7.6, zones: w.zones.map(zoneMap) });
 
   // ------------------------------------------------------------- the wire --
   function dashSend(s, msg) {
@@ -290,10 +326,19 @@ export function createDash({ game, w, byPc, stats, site, send, started, run }) {
     if (quarter) census();
     if (!subscribers.size) { pending = []; return; }
     let batch = null;
-    if (quarter && (pending.length || second)) batch = second ? { k: 'batch', ev: pending, who: who(), health: health() } : { k: 'batch', ev: pending };
+    if (quarter) {
+      const m = mobDiff();
+      if (pending.length || second || m.length) {
+        batch = { k: 'batch', ev: pending };
+        if (m.length) batch.m = m;
+        if (second) { batch.who = who(); batch.health = health(); }
+      }
+    }
+    const moved = fast ? positions(false) : [];
+    const pos = moved.length ? { k: 'pos', at: Date.now() - started, p: moved } : null;
     for (const s of [...subscribers]) {
       if (!isImplementor(s)) { drop(s, s.open ? 'Your trust no longer reaches the dashboard.' : null); continue; }
-      if (fast) track(s);
+      if (pos) dashSend(s, pos);
       if (batch) dashSend(s, batch);
     }
     if (quarter) pending = [];
@@ -321,19 +366,27 @@ export function createDash({ game, w, byPc, stats, site, send, started, run }) {
     }
     switch (msg.op) {
       case 'sub':
-        s.dash = { follow: null, mapZone: null };
+        s.dash = {};
         subscribers.add(s);
-        return dashSend(s, { k: 'snap', ev: events.slice(), who: who(), health: health(), zones: w.zones.map((z) => [z.zone.id, z.zone.name]) });
+        // The diff's baseline, the first time; later subscribers may be sent a change they already have.
+        if (!mobSent) mobDiff();
+        return dashSend(s, {
+          k: 'snap', ev: events.slice(), who: who(), health: health(), zones: w.zones.map((z) => [z.zone.id, z.zone.name]),
+          mobs: game.mobs.map(mobView), at: Date.now() - started, pos: positions(true),
+        });
       case 'unsub':
         return drop(s, null);
-      case 'follow': {
-        if (!s.dash) return dashSend(s, { k: 'did', op: 'follow', ok: false, lines: ['Subscribe first.'] });
-        const t = msg.id == null ? null : byPc.get(Number(msg.id));
-        s.dash.follow = t && t.pc ? t.pc.id : null;
-        s.dash.mapZone = null;
-        return dashSend(s, { k: 'did', op: 'follow', ok: true, id: s.dash.follow, lines: [] });
-      }
-      case 'goto': case 'transfer': case 'snoop': case 'restore':
+      case 'atlas':
+        return dashSend(s, { k: 'atlas', ...atlasOf() });
+      case 'goto':
+        // A room by number, checked to be one; or a player, by id.
+        if (msg.vnum !== undefined) {
+          const vnum = Number(msg.vnum);
+          if (!Number.isInteger(vnum) || !w.world.rooms.has(vnum)) return dashSend(s, { k: 'did', op: 'goto', ok: false, lines: ['No such location.'] });
+          return dashSend(s, { k: 'did', op: 'goto', ok: true, vnum, lines: run(s, `goto ${vnum}`) });
+        }
+        return act(s, 'goto', msg.id);
+      case 'transfer': case 'snoop': case 'restore':
         return act(s, msg.op, msg.id);
       case 'wizlock': {
         const want = !!msg.on;

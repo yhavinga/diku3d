@@ -761,16 +761,31 @@ console.log('\nTHE DASHBOARD');
   const { createSite: siteNow } = await import('../server/store.mjs');
   check(siteNow(data).wizlock === false, '...and off again');
 
-  // Following: her zone's map once, then where she is ten times a second.
+  // The god view's feed: every zone's plan, every player's position, every mobile.
   ym = y.messages.length;
-  y.send({ t: 'dash', op: 'follow', id: pa.id });
-  await pause(1100);
-  const map = dashOf(y, ym).find((mm) => mm.k === 'map');
-  const tracks = dashOf(y, ym).filter((mm) => mm.k === 'track');
-  check(!!map && map.zone === 'home' && map.rooms.length > 100, 'follow sends her zone\'s map', map && `${map.rooms.length} rooms, ${map.streets.length} streets, ${JSON.stringify(map).length} B`);
-  const ca = w.toClient(pa.position);
-  check(tracks.length >= 8 && tracks.every((t) => t.id === pa.id) && Math.abs(tracks.at(-1).x - ca.x) < 0.02, '...and her position at about 10 Hz', `${tracks.length} in 1.1 s`);
-  y.send({ t: 'dash', op: 'follow', id: null });
+  y.send({ t: 'dash', op: 'atlas' });
+  const atlas = await waitDash(y, (mm) => mm.k === 'atlas', ym, 'atlas');
+  const home = atlas && atlas.zones.find((z) => z.zone === 'home');
+  check(!!atlas && atlas.zones.length === w.zones.length && home.rooms.length > 100, "the atlas is every zone's plan", atlas && `${atlas.zones.length} zones, ${atlas.zones.reduce((n, z) => n + z.rooms.length, 0)} rooms, ${JSON.stringify(atlas).length} B`);
+  check(snap.mobs.length === game.mobs.length && snap.pos.length >= 3, '...the snapshot has every mobile and every player', snap && `${snap.mobs.length} mobiles, ${snap.pos.length} players`);
+  ym = y.messages.length;
+  const elsewhere = [...w.built.rooms.keys()].find((v) => w.zoneOfVnum(v)?.zone.id !== 'home' && !w.built.rooms.get(v).unbuilt);
+  mud.place(b.id, elsewhere);
+  for (let i = 0; i < 10; i++) { await a.at(QUIET, (i % 2) * 0.5, 0); await pause(100); }
+  const posMsgs = dashOf(y, ym).filter((mm) => mm.k === 'pos');
+  const ofA = posMsgs.flatMap((mm) => mm.p).filter((row) => row[0] === pa.id);
+  const ofB = posMsgs.flatMap((mm) => mm.p).filter((row) => row[0] === pbp.id);
+  check(ofA.length >= 7 && Math.abs(ofA.at(-1)[2] - w.toClient(pa.position).x) < 0.02, 'a walking player\'s position comes at about 10 Hz', `${ofA.length} reports in ${posMsgs.length} messages`);
+  check(ofB.length >= 1 && ofB.at(-1)[1] === w.zoneOfVnum(elsewhere).zone.id, '...and one in another zone, out of everyone\'s sight, is still there', ofB.length && JSON.stringify(ofB.at(-1)));
+  check(posMsgs.length <= 13, '...only what moved, no more often than 10 Hz', `${posMsgs.length} messages in ~1 s`);
+  ym = y.messages.length;
+  y.send({ t: 'dash', op: 'goto', vnum: 3014 });
+  await waitDash(y, (mm) => mm.k === 'did' && mm.op === 'goto', ym, 'goto room');
+  check(py.ch.roomVnum === 3014, 'goto a room by its number', `#${py.ch.roomVnum}`);
+  y.send({ t: 'dash', op: 'goto', vnum: 'quit' });
+  const bad = await waitDash(y, (mm) => mm.k === 'did' && mm.op === 'goto' && !mm.ok, ym, 'bad goto');
+  check(!!bad && py.ch.roomVnum === 3014, '...and nothing that is not a room number', bad && bad.lines[0]);
+  await b.at(QUIET);
 
   // A fight and a kill.
   const prey = game.mobs.find((s) => !s.dead && s.instance && s.proto.level <= 3 && w.zoneOfVnum(s.roomVnum)?.zone.id === 'home'
@@ -782,8 +797,12 @@ console.log('\nTHE DASHBOARD');
     const fought = await waitEv(y, /^Arwen fights /, ym);
     check(!!fought && fought.c === 'fight', 'a fight begun is reported', fought && fought.text);
     if (prey.instance) prey.instance.hit = 1;
-    const died = await waitEv(y, /dies at the hands of Arwen/, ym, 6000);
+    // The mobile has to close in before a blow lands: give it time.
+    const died = await waitEv(y, /dies at the hands of Arwen/, ym, 15000);
     check(!!died && died.c === 'death', "...and the kill, with the killer's name", died && died.text);
+    const idx = game.mobs.indexOf(prey);
+    const body = await y.waitFor((x) => dashOf(x, ym).flatMap((mm) => mm.m || []).find((row) => row[0] === idx && row[2] !== 0), 3000, 'mob diff').catch(() => null);
+    check(!!body, '...and the mobile\'s body changes in the next batch', body && JSON.stringify(body));
   } else check(false, 'a weak mobile to fight in the home zone');
 
   // Trust is read every time: below 40, the stream stops.

@@ -1,4 +1,4 @@
-// The implementor's dashboard, driven: one implementor page and two mortal
+// The implementor's dashboard (its god view), driven: one implementor page and two mortal
 // pages on one server. The mortals walk, say, tell, chat, fight, die and
 // quit; the implementor opens the dashboard (Backquote), uses its buttons
 // and follows a player, and each stage is shot from the implementor's page.
@@ -47,8 +47,8 @@ const say = (page, line) => page.evaluate((l) => window.diku.game.interpret(l), 
 const shot = async (page, name) => { await page.screenshot({ path: `${opt.out}/${name}.png` }); console.log('shot', `${opt.out}/${name}.png`); };
 const dashState = (page) => page.evaluate(() => ({
   open: window.diku.dashboard.open, allowed: window.diku.dashboard.allowed(),
-  rows: document.querySelectorAll('#dh-who tbody tr').length, events: document.querySelectorAll('#dh-log .dh-ev').length,
-  did: document.getElementById('dh-did').textContent,
+  rows: document.querySelectorAll('[data-player]').length, events: document.querySelectorAll('#dh-log .dh-ev').length,
+  did: document.querySelector('#dh-card .did')?.textContent || '',
 }));
 
 const y = await open('Yeb', { width: opt.w, height: opt.h });
@@ -64,11 +64,17 @@ await e.waitForTimeout(500);
 console.log('Eomer after `:', JSON.stringify(await dashState(e)));
 await shot(e, 'mortal-backquote');
 
-// The implementor opens it.
+// The implementor opens it: the god view, his own zone first.
 await y.keyboard.press('Backquote');
+await y.waitForFunction(() => window.diku.dashboard.view && window.diku.dashboard.view.ready, null, { timeout: 15000 });
 await y.waitForTimeout(2500);
-console.log('Yeb after `:', JSON.stringify(await dashState(y)));
-await shot(y, 'dash-open');
+console.log('Yeb after `:', JSON.stringify(await dashState(y)), JSON.stringify(await y.evaluate(() => window.diku.dashboard.view.census())));
+await shot(y, 'god-open');
+// The whole atlas, every zone.
+await y.evaluate(() => { const v = window.diku.dashboard.view; v.look.dist = 9000; v.look.pitch = 1.2; });
+await y.waitForTimeout(800);
+await shot(y, 'god-atlas');
+await y.evaluate(() => { const v = window.diku.dashboard.view; v.look.pitch = 0.95; });
 
 // Talk and walking.
 await say(e, 'say hail, the dashboard');
@@ -78,48 +84,73 @@ await say(e, 'north');
 await wait(2500);
 await say(e, 'south');
 await wait(1500);
-await shot(y, 'dash-talk');
 
-// A fight: a weak mobile of the home zone, Eomer put beside it by the implementor's console.
+// A fight: a weak mobile of the home zone, Eomer put beside it from the console.
 const prey = await y.evaluate(() => {
   const g = window.diku.game;
   const slot = g.mobs.find((s) => !s.dead && s.roomVnum && s.proto.level <= 3 && !/keeper|guard|master|mayor|cityguard/i.test(s.proto.short)
-    && window.diku.built.rooms.has(s.roomVnum) && !(window.diku.world.rooms.get(s.roomVnum).flags & 1024));
+    && window.diku.dashboard.view.roomAt(s.roomVnum) && window.diku.dashboard.view.roomAt(s.roomVnum).zone === 'home'
+    && !(g.world.rooms.get(s.roomVnum).flags & 1024));
   return slot ? { vnum: slot.roomVnum, kw: slot.proto.keywords.split(' ')[0], short: slot.proto.short } : null;
 });
 console.log('prey', JSON.stringify(prey));
-await y.evaluate(() => window.diku.dashboard.hide());
+await y.keyboard.press('Backquote');
 await say(y, `transfer eomer ${prey.vnum}`);
 await wait(2500);
 await say(e, `kill ${prey.kw}`);
 await say(y, 'dashboard');
-await wait(1200);
+await y.waitForTimeout(1500);
 console.log('Yeb after typed dashboard:', JSON.stringify(await dashState(y)));
-await wait(5000);
-await shot(y, 'dash-fight');
+// Pick Eomer in the list: the camera goes to him and his card comes up.
+await y.evaluate(() => [...document.querySelectorAll('[data-player]')].find((r) => /Eomer/.test(r.textContent)).click());
+await y.evaluate(() => { document.querySelector('#dh-card [data-act="look"]').click(); });
+await wait(4000);
+await shot(y, 'god-fight');
 await shot(e, 'mortal-fighting');
 
-// Follow Eomer: the map.
-await y.evaluate(() => {
-  const rows = [...document.querySelectorAll('#dh-who tbody tr')];
-  const row = rows.find((r) => /Eomer/.test(r.textContent));
-  row.querySelector('[data-act="follow"]').click();
-});
-await wait(2500);
+// Follow-camera on Eomer while he walks.
+await y.evaluate(() => document.querySelector('#dh-card [data-act="follow"]').click());
+await wait(1500);
 await say(e, 'south');
-await wait(3000);
-await shot(y, 'dash-follow');
+await wait(1200);
+await shot(y, 'god-follow-1');
+await wait(2000);
+await shot(y, 'god-follow-2');
+await y.evaluate(() => document.querySelector('#dh-card [data-act="follow"]').click());
+
+// Search: a room by name, flown to.
+await y.click('#dh-search');
+await y.keyboard.type('market');
+await wait(400);
+await shot(y, 'god-search');
+await y.keyboard.press('Enter');
+await wait(1500);
+await shot(y, 'god-search-flown');
+
+// Click in the view (what is under the middle of the screen), then a room's card, and goto from it.
+const clicked = await y.evaluate(() => {
+  const r = window.diku.renderer.domElement.getBoundingClientRect();
+  return window.diku.dashboard.view.pick(r.left + r.width / 2, r.top + r.height / 2);
+});
+console.log('picked at the centre:', JSON.stringify(clicked));
+await y.evaluate(() => window.diku.dashboard.select({ kind: 'room', vnum: 3014 }));
+await y.evaluate(() => document.querySelector('#dh-card [data-act="look"]').click());
+await wait(1200);
+await y.evaluate(() => document.querySelector('#dh-card [data-act="goto"]').click());
+await wait(1800);
+console.log('goto from the card:', await y.evaluate(() => document.querySelector('#dh-card .did').textContent));
+await shot(y, 'god-goto');
 
 // A player's death, a restore, a snoop, the wizlock, and a quit.
-await y.evaluate(() => window.diku.dashboard.hide());
+await y.keyboard.press('Backquote');
 await say(y, 'at theoden slay theoden');
 await wait(1500);
 await y.keyboard.press('Backquote');
-await wait(2500);
+await y.waitForTimeout(2000);
 await y.evaluate(() => {
-  const row = [...document.querySelectorAll('#dh-who tbody tr')].find((r) => /Eomer/.test(r.textContent));
-  row.querySelector('[data-act="restore"]').click();
-  row.querySelector('[data-act="snoop"]').click();
+  [...document.querySelectorAll('[data-player]')].find((r) => /Eomer/.test(r.textContent)).click();
+  document.querySelector('#dh-card [data-act="restore"]').click();
+  document.querySelector('#dh-card [data-act="snoop"]').click();
 });
 await wait(1200);
 await say(e, 'say does anyone read over my shoulder?');
@@ -128,19 +159,20 @@ await wait(1500);
 await say(t, 'quit');
 await wait(2500);
 console.log('Yeb at the end:', JSON.stringify(await dashState(y)));
-await shot(y, 'dash-death-quit');
-// Filters: only talk.
+await shot(y, 'god-death-quit');
+// Only talk, and the health strip folded away.
 await y.evaluate(() => {
   for (const b of document.querySelectorAll('[data-chip]')) if ((b.dataset.chip === 'talk') !== b.classList.contains('on')) b.click();
+  document.querySelector('[data-panel="health"]').click();
 });
 await wait(500);
-await shot(y, 'dash-filter-talk');
-await y.evaluate(() => document.querySelector('[data-act="wizlock"]').click());
+await shot(y, 'god-filter-talk');
+await y.evaluate(() => { document.querySelector('[data-panel="health"]').click(); document.querySelector('[data-act="wizlock"]').click(); });
 await wait(800);
-// Closed on the key that opened it.
+// Closed on the key that opened it: the world again.
 await y.keyboard.press('Backquote');
-await wait(800);
+await wait(1500);
 console.log('Yeb after closing:', JSON.stringify(await dashState(y)));
-await shot(y, 'dash-closed');
+await shot(y, 'god-closed');
 if (logs.length) console.log(logs.slice(0, 40).join('\n'));
 await browser.close();

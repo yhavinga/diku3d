@@ -2012,6 +2012,18 @@ async function boot() {
     if (state.benchmark) { requestAnimationFrame(frame); return; } // measuring: nobody else draws
     // Between two zones there is no world to draw or walk: the card is up.
     if (state.crossing) { last = performance.now(); requestAnimationFrame(frame); return; }
+    // The implementor's dashboard draws its god view in place of the world
+    // (dashboard.js): the world is neither updated nor drawn under it, only
+    // the link keeps going.
+    if (dashboard.open) {
+      const t = performance.now();
+      const dtd = Math.min(0.05, (t - last) / 1000);
+      last = t;
+      if (connected) connected.update(dtd);
+      dashboard.render(dtd);
+      requestAnimationFrame(frame);
+      return;
+    }
     const now = performance.now();
     // Nothing here needs to run faster than the frame cap, and when the mouse
     // is released or the tab is in the background it barely needs to run at all.
