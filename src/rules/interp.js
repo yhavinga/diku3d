@@ -838,7 +838,28 @@ export function installInterp(k) {
   }
 
   /** DIVERGES: help.are is not loaded; this is the list of what there is to type. */
-  function doHelp() {
+  /**
+   * act_info.c: do_help, for the entries the area files ship (help.are):
+   * the first whose keywords match, its text as written -- Merc's license
+   * needs `help merc` to show its entry unaltered. No topic, or none
+   * matching: the port's own summary of the commands.
+   */
+  function doHelp(arg = '') {
+    const topic = arg.trim().toLowerCase();
+    if (topic) {
+      for (const area of world.areas || []) {
+        for (const help of area.helps || []) {
+          if (help.level > state.level) continue;
+          const words = help.keyword.toLowerCase().replace(/'/g, '').split(/\s+/);
+          if (!words.some((w) => w.startsWith(topic) || w === topic)) continue;
+          // A leading '.' keeps a line's own leading spaces in Merc.
+          send(help.text.replace(/^\./, '').replace(/\r/g, '').replace(/\n+$/, ''));
+          return;
+        }
+      }
+      send('No help on that word.');
+      return;
+    }
     send('Moving: north east south west up down (n e s w u d), recall.');
     send('Looking: look, examine, exits, score, inventory, equipment, time, weather, where, who, consider.');
     send('Things: get, put, drop, give, wear, wield, hold, remove, eat, drink, fill, sacrifice, compare.');
