@@ -160,7 +160,21 @@ function classifyCanopy(world) {
 // words; the words win, as they do for the canopy.
 // The neighborhood's courtyards likewise: INDOORS, and "once it was the
 // courtyard of a beautiful building complex ... the plants all died".
-const isOpenAir = (room) => isOutdoor(room) || isCanopy(room)
+/**
+ * A building the mud left open to the sky. Thalos' "A small guard house"
+ * ("this small shack still stands guarding the entrance"), its "Tavern of the
+ * Sun" and "An impressive house" are CITY with no INDOORS flag, so they were
+ * built as streets lined with houses -- a guard house you stand in the
+ * middle of a lane to be inside. The name is the building itself: a head
+ * noun, at most two words after the article. Over all 45 areas that is those
+ * five rooms (two in each Thalos). What it must not take: "Lawn west of
+ * house" (Dylan's, outside one), "A collapsed home" (rubble and a crater),
+ * and the Smurfs' homes, whose roofs "you rip" off -- a giant standing over
+ * a toy village, open air on purpose -- which the apostrophe keeps out.
+ */
+const NAMED_BUILDING = /^(?:the |an? )?(?:\w+ ){0,2}(?:guard ?house|shack|barracks|hut|hovel|cottage|cabin|house|tavern|inn)\b/i;
+const roofedByName = (room) => room.sector === SECTOR.CITY && NAMED_BUILDING.test(room.name);
+const isOpenAir = (room) => (isOutdoor(room) && !roofedByName(room)) || isCanopy(room)
   || (!!eastStyle(room) && eastStyle(room) !== 'cave') || hoodStyle(room) === 'court';
 /** `isOpenAir` for a zone's rooms before that zone is built: what a vista (vista.js) is planned by. */
 export function openAirIn(world) {
