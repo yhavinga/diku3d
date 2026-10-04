@@ -1,0 +1,3 @@
+{ "name": "s13-fido", "room": 3014, "time": "noon", "seconds": 3.5,
+  "base": { "mob": "fido", "back": 2.0, "lift": -0.9, "aimDist": 2.0 },
+  "keys": [ { "t": 0, "local": [-0.3, 0, 0] }, { "t": 3.5, "local": [0.3, -0.05, 0.4] } ] }

@@ -1,0 +1,237 @@
+{
+ "about": "ElevenLabs clips for the promo (tools/promo/audio.mjs). Music is composed to the cut in tools/promo/edit.mjs: it enters at 7.5 s when the terminal gives way to the temple, so the plan's sections are the reveal, the wander, the company and the way home. Everything diegetic (fights, spells, guards, the mayor, ambience) is the game's own committed clips in assets/audio.",
+ "clips": [
+  {
+   "id": "sfx_modem",
+   "api": "sfx",
+   "prompt": "1990s dial-up modem connecting: a dial tone, touch-tone dialling, then the screeching handshake, hiss and warble, ending abruptly in silence. Heard from a small computer speaker in a quiet room.",
+   "settings": {
+    "duration_seconds": 6,
+    "prompt_influence": 0.6
+   }
+  },
+  {
+   "id": "sfx_modem_b",
+   "api": "sfx",
+   "prompt": "Classic 56k dial-up modem handshake sound, beeps then the famous screech and static, cut off sharply at the end, small tinny speaker",
+   "settings": {
+    "duration_seconds": 5,
+    "prompt_influence": 0.7
+   }
+  },
+  {
+   "id": "sfx_typing",
+   "api": "sfx",
+   "prompt": "Someone typing a few short words on an old clicky mechanical keyboard from the early 1990s, buckling-spring keys, small pauses between words, ending with a firm press of the enter key. Close, dry, quiet room.",
+   "settings": {
+    "duration_seconds": 5,
+    "prompt_influence": 0.6
+   }
+  },
+  {
+   "id": "sfx_gate",
+   "api": "sfx",
+   "prompt": "A heavy old wooden town gate slowly swinging open, deep creak of iron hinges, a chain rattling, then wind and birds outside. Medieval, outdoors.",
+   "settings": {
+    "duration_seconds": 5,
+    "prompt_influence": 0.55
+   }
+  },
+  {
+   "id": "music_bed",
+   "api": "music",
+   "settings": {
+    "composition_plan": {
+     "positive_global_styles": [
+      "medieval early music",
+      "small early-music ensemble of three players",
+      "lute",
+      "vielle (medieval fiddle)",
+      "alto recorder",
+      "Dorian mode",
+      "warm, nostalgic, gently wry",
+      "recorded live in a small wooden room, dry and intimate, historically informed, instrumental only"
+     ],
+     "negative_global_styles": [
+      "orchestra",
+      "orchestral strings",
+      "choir",
+      "vocals",
+      "singing",
+      "cinematic percussion",
+      "drums",
+      "drum kit",
+      "epic",
+      "trailer",
+      "film score",
+      "synthesizer",
+      "electronic",
+      "pads",
+      "modern",
+      "pop",
+      "rock",
+      "Celtic",
+      "bodhran",
+      "tin whistle",
+      "Irish pub",
+      "reverb hall",
+      "big crescendo",
+      "braams"
+     ],
+     "sections": [
+      {
+       "section_name": "Reveal",
+       "positive_local_styles": [
+        "solo lute arpeggio, slow, tender, as if opening a door",
+        "alto recorder enters softly on a long note at the end"
+       ],
+       "negative_local_styles": [
+        "drums",
+        "loud",
+        "fast"
+       ],
+       "duration_ms": 7000,
+       "lines": []
+      },
+      {
+       "section_name": "Wander",
+       "positive_local_styles": [
+        "the three play together, walking pace around 92 bpm",
+        "lute plucks a steady dance pulse, recorder carries a simple singable tune, vielle drones underneath",
+        "light-footed, curious"
+       ],
+       "negative_local_styles": [
+        "drums",
+        "percussion",
+        "heroic"
+       ],
+       "duration_ms": 15000,
+       "lines": []
+      },
+      {
+       "section_name": "Company",
+       "positive_local_styles": [
+        "same tune passed to the vielle, a little livelier, estampie-like dance rhythm in the lute",
+        "playful, a wink, companions on the road"
+       ],
+       "negative_local_styles": [
+        "drums",
+        "percussion",
+        "battle music",
+        "heroic"
+       ],
+       "duration_ms": 15000,
+       "lines": []
+      },
+      {
+       "section_name": "Homeward",
+       "positive_local_styles": [
+        "slowing down, the recorder plays the tune once more quietly over a held vielle drone",
+        "ends on a clear final cadence and one soft lute chord left ringing"
+       ],
+       "negative_local_styles": [
+        "drums",
+        "swell",
+        "crescendo",
+        "fade-out without ending"
+       ],
+       "duration_ms": 15500,
+       "lines": []
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "vo1",
+   "api": "tts",
+   "voice": "L1aJrPa7pLJEyYlh3Ilq",
+   "voiceName": "Oliver - Clean, British and Steady (ElevenLabs voice library)",
+   "text": "You walked these streets a thousand times. You just never saw them.",
+   "seed": 7,
+   "settings": {
+    "model_id": "eleven_v4",
+    "stability": 0.55,
+    "similarity_boost": 0.8,
+    "style": 0.3,
+    "speed": 0.95
+   }
+  },
+  {
+   "id": "vo2",
+   "api": "tts",
+   "voice": "L1aJrPa7pLJEyYlh3Ilq",
+   "voiceName": "Oliver - Clean, British and Steady (ElevenLabs voice library)",
+   "text": "Every room, every exit, every mob... built straight from the original area files.",
+   "seed": 7,
+   "settings": {
+    "model_id": "eleven_v4",
+    "stability": 0.55,
+    "similarity_boost": 0.8,
+    "style": 0.3,
+    "speed": 0.95
+   }
+  },
+  {
+   "id": "vo3",
+   "api": "tts",
+   "voice": "L1aJrPa7pLJEyYlh3Ilq",
+   "voiceName": "Oliver - Clean, British and Steady (ElevenLabs voice library)",
+   "text": "Group up with old friends. Follow the leader. Fight side by side, while the cleric mutters her words.",
+   "seed": 7,
+   "settings": {
+    "model_id": "eleven_v4",
+    "stability": 0.55,
+    "similarity_boost": 0.8,
+    "style": 0.3,
+    "speed": 0.95
+   }
+  },
+  {
+   "id": "vo4",
+   "api": "tts",
+   "voice": "L1aJrPa7pLJEyYlh3Ilq",
+   "voiceName": "Oliver - Clean, British and Steady (ElevenLabs voice library)",
+   "text": "The guards still shout. The fido still eats corpses. And yes... you are still hungry.",
+   "seed": 7,
+   "settings": {
+    "model_id": "eleven_v4",
+    "stability": 0.55,
+    "similarity_boost": 0.8,
+    "style": 0.3,
+    "speed": 0.95
+   }
+  },
+  {
+   "id": "vo5",
+   "api": "tts",
+   "voice": "L1aJrPa7pLJEyYlh3Ilq",
+   "voiceName": "Oliver - Clean, British and Steady (ElevenLabs voice library)",
+   "text": "Same mud. New eyes. Free, in your browser... and your friends can come too.",
+   "seed": 7,
+   "settings": {
+    "model_id": "eleven_v4",
+    "stability": 0.55,
+    "similarity_boost": 0.8,
+    "style": 0.3,
+    "speed": 0.95
+   }
+  },
+  {
+   "id": "vo6",
+   "api": "tts",
+   "voice": "L1aJrPa7pLJEyYlh3Ilq",
+   "voiceName": "Oliver - Clean, British and Steady (ElevenLabs voice library)",
+   "text": "Dee-koo three-D dot com. See you in Midgaard.",
+   "seed": 7,
+   "settings": {
+    "model_id": "eleven_v4",
+    "stability": 0.55,
+    "similarity_boost": 0.8,
+    "style": 0.3,
+    "speed": 0.95
+   },
+   "displayText": "diku3d.com. See you in Midgaard."
+  }
+ ]
+}

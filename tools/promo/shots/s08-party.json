@@ -1,0 +1,182 @@
+{
+ "name": "s08-party",
+ "room": 3014,
+ "time": "dusk",
+ "seconds": 5,
+ "preroll": 3,
+ "ease": false,
+ "mud": {
+  "port": 4051,
+  "camera": "Beorn",
+  "password": "promo1993",
+  "bots": [
+   "Thorne",
+   "Kestrel",
+   "Wren",
+   "Mordecai"
+  ]
+ },
+ "mudLog": true,
+ "keys": [
+  {
+   "t": 0,
+   "pos": [
+    3.3,
+    1.75,
+    -2.2
+   ],
+   "aim": [
+    2.5,
+    1.2,
+    4.5
+   ]
+  },
+  {
+   "t": 5,
+   "pos": [
+    3.1,
+    1.75,
+    -8.7
+   ],
+   "aim": [
+    2.5,
+    1.2,
+    -2
+   ]
+  }
+ ],
+ "events": [
+  {
+   "t": -2.6,
+   "bot": "Thorne",
+   "stand": [
+    2.5,
+    0,
+    1.5
+   ],
+   "face": [
+    2.5,
+    -20
+   ]
+  },
+  {
+   "t": -2.6,
+   "bot": "Kestrel",
+   "stand": [
+    1.7000000000000002,
+    0,
+    3.1
+   ],
+   "face": [
+    1.7000000000000002,
+    -20
+   ]
+  },
+  {
+   "t": -2.6,
+   "bot": "Wren",
+   "stand": [
+    3.4,
+    0,
+    3.3
+   ],
+   "face": [
+    3.4,
+    -20
+   ]
+  },
+  {
+   "t": -2.6,
+   "bot": "Mordecai",
+   "stand": [
+    2.5,
+    0,
+    4.8
+   ],
+   "face": [
+    2.5,
+    -20
+   ]
+  },
+  {
+   "t": -2.0,
+   "bot": "Thorne",
+   "cmd": "follow beorn"
+  },
+  {
+   "t": -1.75,
+   "bot": "Kestrel",
+   "cmd": "follow beorn"
+  },
+  {
+   "t": -1.5,
+   "bot": "Wren",
+   "cmd": "follow beorn"
+  },
+  {
+   "t": -1.25,
+   "bot": "Mordecai",
+   "cmd": "follow beorn"
+  },
+  {
+   "t": 0,
+   "bot": "Thorne",
+   "stand": [
+    2.5,
+    0,
+    1.5
+   ],
+   "walk": [
+    2.5,
+    0,
+    -5.0
+   ],
+   "seconds": 5
+  },
+  {
+   "t": 0,
+   "bot": "Kestrel",
+   "stand": [
+    1.7000000000000002,
+    0,
+    3.1
+   ],
+   "walk": [
+    1.7000000000000002,
+    0,
+    -3.4
+   ],
+   "seconds": 5
+  },
+  {
+   "t": 0,
+   "bot": "Wren",
+   "stand": [
+    3.4,
+    0,
+    3.3
+   ],
+   "walk": [
+    3.4,
+    0,
+    -3.2
+   ],
+   "seconds": 5
+  },
+  {
+   "t": 0,
+   "bot": "Mordecai",
+   "stand": [
+    2.5,
+    0,
+    4.8
+   ],
+   "walk": [
+    2.5,
+    0,
+    -1.7000000000000002
+   ],
+   "seconds": 5
+  }
+ ]
+}

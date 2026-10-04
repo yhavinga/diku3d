@@ -1,0 +1,28 @@
+{
+ "name": "x-nomansland",
+ "room": 2133,
+ "time": "night",
+ "seconds": 3.5,
+ "base": {
+  "shoot": 2133,
+  "aimDist": 8
+ },
+ "keys": [
+  {
+   "t": 0,
+   "local": [
+    -0.7,
+    0,
+    0
+   ]
+  },
+  {
+   "t": 3.5,
+   "local": [
+    0.7,
+    0.1,
+    0.9
+   ]
+  }
+ ]
+}

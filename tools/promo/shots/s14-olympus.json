@@ -1,0 +1,28 @@
+{
+ "name": "s14-olympus",
+ "room": 906,
+ "time": "dusk",
+ "seconds": 3.5,
+ "base": {
+  "shoot": 906,
+  "aimDist": 8
+ },
+ "keys": [
+  {
+   "t": 0,
+   "local": [
+    -0.7,
+    0,
+    0
+   ]
+  },
+  {
+   "t": 3.5,
+   "local": [
+    0.7,
+    0.1,
+    0.9
+   ]
+  }
+ ]
+}

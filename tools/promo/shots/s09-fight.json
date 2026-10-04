@@ -1,0 +1,150 @@
+{
+ "name": "s09-fight",
+ "room": 5028,
+ "time": "dusk",
+ "seconds": 8,
+ "preroll": 3,
+ "ease": false,
+ "mud": {
+  "port": 4051,
+  "camera": "Beorn",
+  "password": "promo1993",
+  "bots": [
+   "Kestrel",
+   "Thorne",
+   "Wren",
+   "Mordecai"
+  ]
+ },
+ "mudLog": true,
+ "base": {
+  "mob": "worm",
+  "shoot": 5028,
+  "back": 6.2,
+  "lift": 0.1,
+  "aimDist": 6.2,
+  "sunSide": 35
+ },
+ "keys": [
+  {
+   "t": 0,
+   "local": [
+    -1.2,
+    0,
+    0
+   ]
+  },
+  {
+   "t": 8,
+   "local": [
+    1.2,
+    0.2,
+    1.0
+   ]
+  }
+ ],
+ "events": [
+  {
+   "t": -2.8,
+   "bot": "Thorne",
+   "near": "worm",
+   "stand": [
+    -1.6,
+    0,
+    3.0
+   ],
+   "face": [
+    0,
+    0
+   ],
+   "orbit": [
+    -28,
+    2.8
+   ]
+  },
+  {
+   "t": -2.8,
+   "bot": "Wren",
+   "near": "worm",
+   "stand": [
+    2.2,
+    0,
+    2.4
+   ],
+   "face": [
+    0,
+    0
+   ],
+   "orbit": [
+    30,
+    2.6
+   ]
+  },
+  {
+   "t": -2.8,
+   "bot": "Kestrel",
+   "near": "worm",
+   "stand": [
+    -3.6,
+    0,
+    4.6
+   ],
+   "face": [
+    0,
+    0
+   ],
+   "orbit": [
+    -65,
+    4.2
+   ]
+  },
+  {
+   "t": -2.8,
+   "bot": "Mordecai",
+   "near": "worm",
+   "stand": [
+    3.8,
+    0,
+    5.0
+   ],
+   "face": [
+    0,
+    0
+   ],
+   "orbit": [
+    62,
+    4.4
+   ]
+  },
+  {
+   "t": -0.8,
+   "bot": "Thorne",
+   "cmd": "kill worm"
+  },
+  {
+   "t": -0.6,
+   "bot": "Wren",
+   "cmd": "kill worm"
+  },
+  {
+   "t": 0.6,
+   "bot": "Mordecai",
+   "cmd": "cast 'fireball' worm"
+  },
+  {
+   "t": 2.0,
+   "bot": "Kestrel",
+   "cmd": "cast 'heal' thorne"
+  },
+  {
+   "t": 4.0,
+   "bot": "Mordecai",
+   "cmd": "cast 'lightning bolt' worm"
+  },
+  {
+   "t": 5.5,
+   "bot": "Kestrel",
+   "cmd": "kill worm"
+  }
+ ]
+}
