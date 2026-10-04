@@ -2083,7 +2083,14 @@ def wings(open_=0.0, flap=0.0, lift=0.0):
     for side in (1, -1):
         t = ".L" if side > 0 else ".R"
         s = side
-        fk["wing1" + t] = (lift * 30 + flap * open_, -s * 85 * open_, s * -80 * open_ + s * lift * 25)
+        # Opened, the wing is swung out first and beats about the body's long
+        # axis, so its pitch comes between the yaw and the roll ('YXZ', see
+        # fk_quat). In the default order the pitch came first, about an axis
+        # the roll had stood upright: the 'flap' of every flying bird swept
+        # the wing fore and aft, and read as one wing twisting. Folded, the
+        # order makes no difference to the spread, and the clips stay as they were.
+        angles = (lift * 30 + flap * open_, -s * 85 * open_, s * -80 * open_ + s * lift * 25)
+        fk["wing1" + t] = angles + ("YXZ",) if open_ > 0 else angles
         fk["wing2" + t] = (0, -s * 10 * open_, 0)
     return fk
 

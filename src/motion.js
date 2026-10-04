@@ -119,6 +119,19 @@ const PASTIMES = {
   // A frog calls, its throat blown out, and snaps at what flies past.
   croak: { odds: 2, once: true, gap: [3, 8], rate: 5 },
   snap: { odds: 1, once: true, gap: [3, 8], rate: 6 },
+  // A centaur paws the ground with a forehoof, arms folded, watching it;
+  // a lamia crooks a finger at whoever comes near (her prose's `temper`).
+  paw: { odds: 1, once: true, gap: [4, 10], rate: 4 },
+  beckon: { odds: 0.4, once: true, gap: [5, 12], rate: 4 },
+  // A harpy screams at whatever comes near, wings flared (her prose's temper).
+  shriek: { odds: 0.3, once: true, gap: [4, 10], rate: 6 },
+  // A golem stands still; come close and its head comes round to you and
+  // its fists close (ALARM). Never idly.
+  wake: { odds: 0, once: true, gap: [3, 8], rate: 4 },
+  // A minotaur tosses its head and blows; one standing guard lowers its
+  // horns at you and paws the floor (its temper, people.js).
+  snort: { odds: 1, once: true, gap: [5, 14], rate: 5 },
+  charge: { odds: 0, once: true, gap: [4, 10], rate: 5 },
 };
 const PASTIME_NAMES = Object.keys(PASTIMES);
 /**
@@ -129,7 +142,7 @@ const PASTIME_NAMES = Object.keys(PASTIMES);
  */
 const ALARM = { snail: ['withdraw', 2.2], lagomorph: ['situp', 4.5], lizard: ['display', 3.2], serpent: ['hiss', 2.4],
   fowl: ['flap', 1.6], songbird: ['flap', 5], rodent: ['situp', 3], spider: ['threat', 2.2],
-  cervid: ['alert', 7], equine: ['alert', 3], dragon: ['rear', 7] };
+  cervid: ['alert', 7], equine: ['alert', 3], dragon: ['rear', 7], golem: ['wake', 4], caprine: ['alert', 5] };
 /**
  * people.py's sit, in seconds: the first REST_LOOP of it is at rest and
  * breathing and comes back to its first frame, and SIP is the stretch where
@@ -2536,7 +2549,9 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       tickDeath(fig, dt);
       if (fig.legs) animateLegs(fig, dt);
       else animate(fig, dt);
-      if (!fig.bones && fig.mixer) animalLife(fig, dt);
+      // A person with pastime clips of its own (a minotaur paws and snorts)
+      // takes them up as an animal does, when it is not sat or leaning.
+      if (fig.mixer && (!fig.bones || (fig.pastimes && fig.pastimes.length && !m.settle))) animalLife(fig, dt);
       if (fig.mixer) fig.mixer.update(dt);
       if (!fig.bones && m.graze && !(fig.pastimes && fig.pastimes.length)) lowerHead(fig);
       const clipped = m.settle && m.settle.clip;

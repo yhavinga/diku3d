@@ -562,7 +562,7 @@ function buildModelledFigure(asset, proto, library) {
 // mobile is; this dresses it.
 
 /** Every file the people come from. assets.js loads them with the rest. */
-export const PEOPLE_FILES = ['person_male', 'person_female', 'troll'];
+export const PEOPLE_FILES = ['person_male', 'person_female', 'troll', 'minotaur'];
 
 const RIGHT_ARM = ['upperarmR', 'forearmR', 'handR'];
 const LEFT_ARM = ['upperarmL', 'forearmL', 'handL'];
@@ -966,6 +966,14 @@ function buildPerson(library, who, proto, instance) {
     }
     actions[name] = action;
   }
+  // Clips a file has beyond the people's -- a minotaur's paw, snort and
+  // charge -- for motion.js's pastimes, which weights them in by name.
+  for (const [name, clip] of clipsOf(asset).base) {
+    if (actions[name] || name.startsWith('carry_')) continue;
+    actions[name] = mixer.clipAction(clip);
+    actions[name].setEffectiveWeight(0);
+    clips[name] = clip.duration;
+  }
   // Kept for update(), which times the walk against it.
   actions.walkCycle = clips.walk;
   // Stand them in the idle before anything draws: until a mixer update the
@@ -980,6 +988,8 @@ function buildPerson(library, who, proto, instance) {
     stride: { walk: facts.walk * scale * legK, run: facts.run * scale * legK },
     hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
     indoor: mesh.material.dikuIndoor, buried: mesh.material.dikuBuried,
+    // A minotaur's: what it does when you come near (people.js).
+    temper: who.temper || null,
   };
 }
 
@@ -1248,9 +1258,57 @@ export function createPlayerFigure({
  * the dragon master, the Dragonknights and the attendant of the dragon are
  * people.
  */
-const NOT_A_BEAST = /\b(were(?!rats?\b)\w+|ettin|herald|horseman|horsehead|nebula|vampire|lamia|centaur|minotaur|master|dragonlord|dragonknight|hierophant|attendant)\b/;
+const NOT_A_BEAST = /\b(were(?!rats?\b)\w+|ettin|herald|horseman|horsehead|nebula|vampire|minotaur|master|dragonlord|dragonknight|hierophant|attendant)\b/;
 
 const BEASTS = [
+  // --- the taurs (tools/blender/hybrids.py): a person's top half where an
+  // animal's neck would be. The coat is the animal, pale the skin, points
+  // the hair (and a horse's tail and stockings). Wyvern's Tower's centaurs
+  // have 'the upper torso of a man and lower body of a horse' -- a woman's,
+  // for the two mares; the old ones and the chief keep their beards.
+  { test: /\bfemale centaurs?\b|\bcentaurs?\b.*\b(female|mare)\b/, asset: 'beast_centaur_f', scale: 0.96, coats: 'centaur', box: [1.2, 2.0, 'quad', 0x6a4226] },
+  { test: /\b(old|elder|chief)\b.*\bcentaurs?\b|\bcentaurs?\b.*\b(old|elder|chief)\b/, asset: 'beast_centaur', scale: 1.04, coats: 'centaur_old', box: [1.2, 2.0, 'quad', 0x6a4226] },
+  { test: /\bcentaur guards?\b/, asset: 'beast_centaur', scale: 1.06, coats: 'centaur', hide: ['beard'], temper: { alarm: ['alert', 4.5] }, box: [1.2, 2.0, 'quad', 0x6a4226] },
+  { test: /\bcentaurs?\b/, asset: 'beast_centaur', scale: 1.0, coats: 'centaur', hide: ['beard'], box: [1.2, 2.0, 'quad', 0x6a4226] },
+  // Thalos's: 'the upper torso of a beautiful woman, but the lower body of
+  // a four-legged beast' -- a lioness's, as the bestiary has it.
+  // Dylan's harpies, 'caked in filth and grime', hair 'matted and greasy',
+  // and screaming: they shriek at whoever comes near.
+  { test: /\bharp(y|ies)\b.*\bleader\b|\bleader\b.*\bharp(y|ies)\b/, asset: 'beast_harpy', scale: 1.14, coat: 0x40362c, pale: 0x8e7a64, points: 0x1a1714, patch: 0x2e261c, cover: 0.42, temper: { alarm: ['shriek', 6.5] }, box: [0.6, 1.6, 'quad', 0x40362c] },
+  { test: /\bharp(y|ies)\b/, asset: 'beast_harpy', scale: 1.0, coat: 0x4a4034, pale: 0x9a8670, points: 0x1e1a16, patch: 0x342a20, cover: 0.45, temper: { alarm: ['shriek', 6.0] }, box: [0.5, 1.5, 'quad', 0x4a4034] },
+  // Golems (hybrids.py): one hulk of fitted blocks, made of whatever its
+  // prose says by the surface it wears -- `surface` maps the model's `hide`
+  // to a recipe -- tinted by the coat; its eyes are lit slits.
+  { test: /\bdiamond golems?\b|\bgolems?\b.*\bdiamond\b/, asset: 'beast_golem', scale: 1.08, surface: { hide: 'phial' }, coat: 0xcfe2ec, pale: 0xe8f2f6, points: 0x9ab4c4, glow: 0x9ad8ff, box: [1.0, 0.8, 'quad', 0xcfe2ec] },
+  { test: /\bgolems?\b.*\bwooden\b|\bwooden golems?\b/, asset: 'beast_golem', scale: 0.92, surface: { hide: 'wood' }, coat: 0xc8a47c, pale: 0xc8a47c, points: 0x6a4a30, glow: 0xffb040, box: [0.9, 0.7, 'quad', 0x8a6a48] },
+  { test: /\bgolems?\b.*\bgranite\b|\bgranite golems?\b/, asset: 'beast_golem', scale: 1.02, surface: { hide: 'rock' }, coat: 0xb4aca4, pale: 0xb4aca4, points: 0x5a5450, glow: 0xffa040, box: [1.0, 0.8, 'quad', 0x8a8480] },
+  { test: /\bgolems?\b.*\b(bronze|brass)\b|\b(bronze|brass) golems?\b/, asset: 'beast_golem', scale: 1.0, surface: { hide: 'brass' }, coat: 0xf0d4a8, pale: 0xf0d4a8, points: 0x7a5a30, glow: 0xffd060, box: [1.0, 0.8, 'quad', 0xa07a40] },
+  // 'A potpourri of different body parts': skin of several shades, the
+  // patch channel the pieces, seams dark.
+  { test: /\bgolems?\b.*\bflesh\b|\bflesh golems?\b/, asset: 'beast_golem', scale: 0.96, surface: { hide: 'skin' }, coat: 0xd8b8a0, pale: 0xd8b8a0, points: 0x5a3028, patch: 0x9a7466, cover: 0.45, glow: 0xffe0a0, box: [0.9, 0.7, 'quad', 0xb08a74] },
+  { test: /\bgolems?\b.*\bcloth\b|\bcloth golems?\b/, asset: 'beast_golem', scale: 0.9, surface: { hide: 'cloth' }, coat: 0xa49478, pale: 0xa49478, points: 0x4a4032, patch: 0x6e604c, cover: 0.5, glow: 0xffd080, box: [0.9, 0.7, 'quad', 0x8a7a60] },
+  // 'Forged of dark metal'.
+  { test: /\bgolems?\b.*\badamantite\b|\badamantite golems?\b/, asset: 'beast_golem', scale: 1.06, surface: { hide: 'iron' }, coat: 0x7a8088, pale: 0x7a8088, points: 0x30343a, glow: 0xff4020, box: [1.0, 0.8, 'quad', 0x40444a] },
+  // Clay, and Wyvern's lesser golem, 'made of some kind of clay'.
+  { test: /\bgolems?\b.*\b(clay|lesser)\b|\b(clay|lesser) golems?\b/, asset: 'beast_golem', scale: 0.94, surface: { hide: 'earthwall' }, coat: 0xd0a07a, pale: 0xd0a07a, points: 0x6a4a34, glow: 0xffa040, box: [0.9, 0.7, 'quad', 0x9a7458] },
+  // Stone, and the rest: 'a big chunk of rock ... formed into a giant stone creature'.
+  { test: /\bgolems?\b/, asset: 'beast_golem', scale: 1.04, surface: { hide: 'statuary' }, coat: 0xd2cec6, pale: 0xd2cec6, points: 0x6a6660, glow: 0xffa040, box: [1.0, 0.8, 'quad', 0x8a8680] },
+  // The fire newts' black mountain goats: a goat 'hungry and searching for
+  // food' grazes; the ewe 'watching her young'; the kid at half the size,
+  // with no horns or beard yet.
+  // The fire newts: a people of upright newts (hybrids.py), fire red over
+  // a yellow belly, black-spotted; the baby 'crawling and drooling' is a
+  // newt on all fours -- the lizard, small and red.
+  { test: /\bfire ?newts?\b.*\bbab(y|ies)\b/, asset: 'beast_lizard', scale: 0.42, coat: 0xa83a18, pale: 0xd8a030, points: 0x3a120a, patch: 0x241008, cover: 0.3, box: [0.1, 0.5, 'quad', 0xa83a18] },
+  { test: /\bfire ?newts?\b.*\b(guard|sergeant|general|leader)\b/, asset: 'beast_newt', scale: 1.06, coat: 0x9a3214, pale: 0xd0a02c, points: 0x3a120a, patch: 0x1e0c06, cover: 0.3, box: [0.5, 1.4, 'quad', 0x9a3214] },
+  { test: /\bfire ?newts?\b/, asset: 'beast_newt', scale: 0.98, coat: 0xa83a18, pale: 0xd8a830, points: 0x3a120a, patch: 0x1e0c06, cover: 0.3, box: [0.5, 1.4, 'quad', 0xa83a18] },
+  // Moria's centipedes, 'small' and 'looking for vegetation', one 'white'
+  // (the colour word paints it): a metre of banded segments at most.
+  { test: /\bcentipedes?\b/, asset: 'beast_centipede', scale: 0.8, coat: 0x6a3018, pale: 0xa07040, points: 0x2a1408, patch: 0x3a1a0c, cover: 0.5, box: [0.06, 0.8, 'quad', 0x6a3018] },
+  { test: /\bmountain kids?\b|\bkids?\b.*\bgoats?\b/, asset: 'beast_goat', scale: 0.52, coat: 0x2a2522, pale: 0x3a3430, points: 0x1a1715, hide: ['horn', 'beard'], grow: { head: 1.2, ear: 0.8 }, box: [0.35, 0.5, 'quad', 0x2a2522] },
+  { test: /\bewes?\b/, asset: 'beast_goat', scale: 0.92, coat: 0x2a2522, pale: 0x3a3430, points: 0x1a1715, grow: { horn: 0.6, beard: 0.6, ear: 0.7 }, box: [0.6, 0.9, 'quad', 0x2a2522] },
+  { test: /\b(goat|goats|billy)\b/, asset: 'beast_goat', scale: 1.0, coat: 0x2a2522, pale: 0x3a3430, points: 0x1a1715, grow: { ear: 0.7 }, box: [0.7, 1.0, 'quad', 0x2a2522] },
+  { test: /\blamias?\b/, asset: 'beast_lamia', scale: 1.1, coat: 0xa8834e, pale: 0xd2a684, points: 0x2a1c14, box: [0.9, 1.9, 'quad', 0xa8834e] },
   // --- the monsters (tools/blender/monsters.py). First, because their names
   // borrow the animals' words: a wolf spider and a bird spider are spiders.
   // Half drow, half spider: the skin is the pale channel, the hair the points.
@@ -1425,6 +1483,21 @@ const COATS = {
     { coat: 0x8a4a28, pale: 0xe2d8cc, points: 0x8a4a28, patch: 0xe8e2d8, cover: 0.35 }, // red and white
     { coat: 0xb89a70, pale: 0xe0d2bc, points: 0x8a7050 }, // fawn
   ],
+  // A centaur's horse and the man on it: bay, chestnut, dun, black and
+  // grey under skin from fair to dark, the hair dark, auburn or black.
+  centaur: [
+    { coat: 0x6a4226, pale: 0xc69a78, points: 0x1e1712 },
+    { coat: 0x8a4f26, pale: 0xd8b090, points: 0x5a2a14 },
+    { coat: 0xa88a5a, pale: 0xb88a64, points: 0x2a201a },
+    { coat: 0x2a2420, pale: 0x8a5e40, points: 0x141110 },
+    { coat: 0x9c9890, pale: 0xd0a888, points: 0x3a2e24 },
+  ],
+  // The old, the elders and the chief: grey in the beard and the tail.
+  centaur_old: [
+    { coat: 0x6a4226, pale: 0xc69a78, points: 0x8e877c },
+    { coat: 0x9c9890, pale: 0xd0a888, points: 0xb4aea4 },
+    { coat: 0x8a4f26, pale: 0xb88a64, points: 0x9a9286 },
+  ],
   hen: [
     { coat: 0x8a4a26, pale: 0x9a5a30, points: 0x3a2418 }, // russet
     { coat: 0xe8e4dc, pale: 0xf0ece6, points: 0xcfc8bc }, // white
@@ -1452,7 +1525,10 @@ const COAT_WORDS = [
 const TEMPERS = [
   [/\bhiss(es|ing)?\b|\bfur up\b|\bspits?\b/, { alarm: ['hiss', 3.0] }],
   [/\b(preen(s|ing)?|grooming|washing)\b|\blicking (?!(its|his|her) lips)/, { odds: { groom: 5 } }],
-  [/\b(lounging|lazily|lazy|resting|rests|asleep|sleeping|dozing|curled)\b/, { odds: { loaf: 4, coil: 3, bask: 2 } }],
+  [/\b(lounging|lazily|lazy|resting|rests|reclines|reclining|asleep|sleeping|dozing|curled)\b/, { odds: { loaf: 4, coil: 3, bask: 2 } }],
+  // The lamia 'waiting for her next meal' who 'looks at you greedily'
+  // crooks a finger at whoever comes near.
+  [/\bnext meal\b|\bgreedily\b/, { alarm: ['beckon', 5.0] }],
   [/\bcoil(s|ed)?\b/, { odds: { coil: 6 } }],
   [/\bsits? on (her|his|its|a|the) nest\b|\bnesting\b|\bbrooding\b/, { odds: { brood: 12 } }],
   [/\bflapping\b/, { odds: { flap: 8 } }],
@@ -1471,6 +1547,13 @@ export function temperOf(proto) {
     if (t.odds) out.odds = { ...(out.odds || {}), ...t.odds };
   }
   return out;
+}
+
+/** A breed's own temper (BEASTS `temper`), with the mobile's prose over it. */
+function mergeTemper(base, own) {
+  if (!base) return own;
+  if (!own) return base;
+  return { ...base, ...own, odds: { ...(base.odds || {}), ...(own.odds || {}) } };
 }
 
 export function beastKind(proto) {
@@ -1672,7 +1755,8 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     // hand in populate(), and knows how long the animal is.
     node.castShadow = false;
     const tag = node.material && node.material.name ? node.material.name.replace(/^MAT:/, '') : '';
-    node.material = tag === 'fur' && spec.sleek ? sleekFur(library) : library.materialFor(tag);
+    // `surface` dresses a tag in another recipe: a golem's hide is stone, clay or bronze.
+    node.material = tag === 'fur' && spec.sleek ? sleekFur(library) : library.materialFor((spec.surface && spec.surface[tag]) || tag);
     // Lit as the sewer's own surfaces are (textures.js `buriedTwin`): a
     // creature underground wore the sky's light, which under the street at
     // night is none -- the guardian naga was 88% under luma 8 at night
@@ -1777,7 +1861,7 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const record = {
     group, headGroup: null, height, scale, mixer, actions, clips, stride,
     hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
-    afloat, indoor, temper: temperOf(proto),
+    afloat, indoor, temper: mergeTemper(spec.temper, temperOf(proto)),
   };
   // A bat under a roof hangs from it while it is idle: its `roost` clip,
   // moved up from the height it was authored at (`info.roost`, in the

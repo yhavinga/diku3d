@@ -317,7 +317,8 @@ NOSE_PIVOT = (0.0, -0.086, 0.010)
 
 
 def spec_for(P):
-    return {"male": MALE, "female": FEMALE, "troll": TROLL}[P["name"]]
+    # A minotaur keeps a man's face bones under its bull's head (bull.py).
+    return {"male": MALE, "female": FEMALE, "troll": TROLL, "minotaur": MALE}[P["name"]]
 
 
 def canon_to_world(P, co):

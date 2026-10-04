@@ -28,6 +28,7 @@ export const CLIP_FACTS = {
   person_male: { walk: 1.200, run: 2.600 },
   person_female: { walk: 1.137, run: 2.464 },
   troll: { walk: 1.031, run: 2.234 },
+  minotaur: { walk: 1.200, run: 2.600 },
 };
 export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21, cast: 14 / 24 };
 // sit (5 s), lean (4 s) and talk (3 s) are loops for motion.js's settling:
@@ -111,7 +112,7 @@ const TRADES = [
   ['priest', W('hierophants?|priests?|priestess|druidess(es)?|clerics?|monks?|acolytes?|nuns?|abbots?|abbess|bishops?|healers?|druids?|chaplains?|friars?|sextons?|shamans?|hermits?|pilgrims?|curates?|deacons?|vicars?|prophets?|templekeeper')],
   ['rogue', W('wanderers?|thief|thieves|rogues?|assassins?|cutpurses?|pickpockets?|bandits?|brigands?|robbers?|highwaym[ae]n|spies|spy|burglars?|smugglers?|dealers?|ruffians?|thugs?|cutthroats?|outlaws?|poachers?|rangers?|hunters?|scouts?|executioners?|headsm[ae]n')],
   ['beggar', W('slaves?|beggars?|vagabonds?|tramps?|drunks?|drunkards?|bums?|hobos?|paupers?|urchins?|lepers?|filthy|wretch(es)?|madm[ae]n|lunatics?|vagrants?|idiots?|fools?')],
-  ['smith', W('smiths?|blacksmiths?|weaponsmiths?|armourers?|armorers?|farriers?|tanners?|leather ?workers?|cobblers?|coopers?|masons?|miners?')],
+  ['smith', W('smiths?|blacksmiths?|weaponsmiths?|armourers?|armorers?|farriers?|tanners?|leather ?workers?|cobblers?|coopers?|masons?|miners?|golem makers?')],
   ['noble', W('kings?|queens?|princes?|princess(es)?|dukes?|duchess(es)?|lords?|lady|ladies|barons?|baroness(es)?|counts?|countess(es)?|earls?|mayors?|nobles?|nobleman|noblemen|noblewoman|thains?|guildmasters?|chancellors?|magistrates?|judges?|urbanites?|aristocrats?|courtiers?|criers?|diplomats?|ambassadors?|keepers?|masters?|governors?|regents?|emperors?|empress|elders?|chieftains?|chiefs?|heralds?|gods?|goddess(es)?|zeus|odin|hera|apollo|ares|hermes|poseidon|prometheus|leaders?|commanders?|generals?|foremen|foreman')],
   ['merchant', W('shopkeepers?|shopkeeps?|merchants?|grocers?|bakers?|butchers?|jewell?ers?|traders?|pedlars?|peddlers?|vendors?|tailors?|innkeepers?|barkeeps?|bartenders?|barmen|barman|waiters?|cooks?|chefs?|brewers?|vintners?|apothecar(y|ies)|herbalists?|clerks?|secretar(y|ies)|receptionists?|bankers?|moneychangers?|changers?|storekeepers?|hostelers?|landlords?|tavernkeepers?|fishmongers?|florists?|cartographers?|scribes?|librarians?|teachers?|tutors?|stewards?|butlers?|servants?')],
   ['peasant', W('peasants?|farmers?|labou?rers?|farmhands?|shepherds?|herdsm[ae]n|stablehands?|stableboys?|grooms?|fishermen|fisherman|sailors?|seam[ae]n|gardeners?|bumpkins?|serfs?|porters?|janitors?|sweepers?|lumberjacks?|woodcutters?|woodsm[ae]n|millers?|millworkers?|workers?|carpenters?|gravediggers?|diggers?|boatm[ae]n|ferrym[ae]n|drovers?|carters?|travell?ers?|citizens?|townsm[ae]n|townsfolk|villagers?|locals?|commoners?|youths?|boys?|lads?|m[ae]n|persons?|people|humans?|elves|elf|elven|hobbits?|halflings?|gamgees?|residents?|farmer|peasantry')],
@@ -247,8 +248,71 @@ const SPECIALS = [
   [W('duergar'), 'duergar'],
 ];
 
+/**
+ * A minotaur (tools/blender/bull.py): a man's rig, a bull's girth and head,
+ * dressed for its trade the way its prose dresses it -- 'clad in heavy furs
+ * ... the gleam of his armor', 'blue plate armour', 'heavy red armor and
+ * wields a huge glaive', 'loose robes', 'green and brown leather', 'clad all
+ * in black'. Its own file, `minotaur.glb`, carries guard, knight, mage,
+ * priest, rogue, beggar and noble, and no hats: the horns are in the way.
+ */
+const MINOTAUR = W('minotaurs?');
+const FUR = [0x5a3e2a, 0x4a3426, 0x6a4a30, 0x3e2e22];
+const PLATE = { blue: 0x3a4c7e, red: 0x7a2420, crimson: 0x6e1a1e, black: 0x26262a, white: 0xc8c6c0 };
+
+function minotaurOf(proto, ITEM, instance, w) {
+  const prose = `${proto.long || ''} ${proto.description || ''}`.toLowerCase();
+  const all = `${w.toLowerCase()} ${prose}`;
+  const seed = strHash(proto.keywords, proto.vnum);
+  const seed2 = strHash(`${proto.short}#${instance}`, 31);
+  let arch = 'guard';
+  if (/\b(mage|archmage|robes)\b/.test(all) && !/\barmou?r\b/.test(all)) arch = /\bcleric|holy|white glowing\b/.test(all) ? 'priest' : 'mage';
+  if (/\b(cleric|druid)\b/.test(w.toLowerCase())) arch = 'priest';
+  else if (/\b(thief|ranger)\b/.test(w.toLowerCase())) arch = 'rogue';
+  else if (/\bbutler\b/.test(all)) arch = 'noble';
+  else if (/\bcitizen\b/.test(w.toLowerCase())) arch = 'beggar';
+  else if (/\b(plate|paladin|anti-paladin|grand master|royal|elite|high guard)\b/.test(all) || /\bheavy armou?r\b/.test(all)) arch = 'knight';
+  const out = {
+    file: 'minotaur', arch, face: 'face_minotaur', kind: 'minotaur', scale: 1.2, headScale: 1,
+    weapon: null, shield: null, pieces: [], sex: 'male',
+    tint: { skin: /\bblack fur\b/.test(prose) ? 0x2c2622 : pick(FUR, seed2), hair: 0x241a14, bone: 0xd8cbb0,
+      leather: 0x3a2a1c, linen: 0x8a7a5a, cloth: 0x5a4330, cloth2: pick(DARK, seed) },
+  };
+  const colour = /\b(blue|red|crimson|black|white)\b/.exec(prose);
+  if (arch === 'knight') {
+    out.tint.plate = colour ? PLATE[colour[1]] : (/\banti-paladin|dark aura\b/.test(all) ? PLATE.black : undefined);
+    if (/\bpaladin\b/.test(all) && !/anti-paladin/.test(all)) out.tint.plate = PLATE.white;
+    out.tint.cloth = /\bfurs?\b/.test(prose) ? 0x5a4330 : pick(RICH, seed);
+  }
+  if (arch === 'mage') out.tint.cloth = pick(ROBES.mage, seed);
+  if (arch === 'priest') out.tint.cloth = /\bdruid|leather\b/.test(all) ? 0x4a3a24 : 0xd8d2c0;
+  if (arch === 'rogue') out.tint.cloth = /\bgreen\b/.test(prose) ? 0x3a4a26 : 0x1e1c1a;
+  if (arch === 'noble') out.tint.cloth = 0x1e1c1a;
+  // What the prose puts in their hands.
+  if (/\bglaive\b/.test(prose)) out.weapon = 'weapon_spear';
+  else if (/\bmorningstar\b/.test(prose)) out.weapon = 'weapon_mace';
+  else if (/\baxe\b/.test(prose)) out.weapon = 'weapon_axe';
+  else if (/\bbrass knuckles\b/.test(prose)) out.weapon = null;
+  else if (arch === 'guard' || arch === 'knight') out.weapon = pick(['weapon_axe', 'weapon_mace', 'weapon_axe', 'weapon_spear'], seed);
+  else if (arch === 'mage' || (arch === 'priest' && seed < 0.6)) out.weapon = 'weapon_staff';
+  else if (arch === 'priest') out.weapon = 'weapon_mace';
+  else if (arch === 'rogue') out.weapon = 'weapon_dagger';
+  // How big: 'HUGE', 'towers above you', 'simply huge'; 'a small minotaur';
+  // 'tall and slender', 'agile and thin'.
+  if (/\b(towers above|simply huge)\b/.test(prose)) out.scale = 1.36;
+  else if (/\bhuge\b/i.test(prose)) out.scale = 1.3;
+  else if (/\bsmall minotaur\b/.test(prose)) out.scale = 1.04;
+  else if (/\b(slender|thin)\b/.test(prose)) out.scale = 1.14;
+  // The ones that stand guard lower their horns at whoever comes near; the
+  // rest only paw and snort (motion.js PASTIMES, the minotaur's own clips).
+  out.temper = arch === 'guard' || arch === 'knight' ? { alarm: ['charge', 4.5] } : { alarm: null };
+  applyEquipment(out, proto, ITEM, seed);
+  return out;
+}
+
 export function personOf(proto, ITEM, instance = 0) {
   const w = words(proto);
+  if (MINOTAUR.test(w)) return minotaurOf(proto, ITEM, instance, w);
   // A dracolich is a dragon, whatever it has of a lich.
   if (/\bdracolich/i.test(w)) return null;
   // No Man's Land's "doll" is a woman in her finery; a doll anywhere else
@@ -260,7 +324,8 @@ export function personOf(proto, ITEM, instance = 0) {
   // troll-shaped, then: the wimpy ones smaller, the big one a head over you.
   const brute = !special && SCHOOL_BRUTE.find(([re]) => re.test(proto.keywords || ''));
   // A lizard man is a man; a "lizard" is a lizard.
-  if (!special && !brute && CREATURE.test(w) && !/\b(m[ae]n|wom[ae]n|folk)\b/i.test(w)) return null;
+  // ...and the golem maker, 'chiseling some stone', is a man who makes them.
+  if (!special && !brute && CREATURE.test(w) && !/\b(m[ae]n|wom[ae]n|folk|makers?)\b/i.test(w)) return null;
   const seed = strHash(proto.keywords, proto.vnum);
   // The trade and the livery come from the prototype; the hair, the beard and
   // the colour of a tunic also from which one of them this is, so the twenty

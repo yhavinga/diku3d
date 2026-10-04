@@ -933,7 +933,7 @@ export const ASSET_NAMES = [
   'rubble_heap', 'charred_beams', 'barricade', 'barricade_stakes', 'burnt_cart', 'brazier', 'crow',
   'dracolich_idol', 'training_pell', 'khan_memorial', 'bramble', 'tall_weeds', 'collapsed_shed', 'dead_planter',
   'broken_stair', 'crystal_stump', 'boarded_window', 'boarded_door', 'barred_window', 'shoring', 'debris', 'city_wall',
-  'townsperson', 'person_male', 'person_female', 'troll',
+  'townsperson', 'person_male', 'person_female', 'troll', 'minotaur',
   'weapon_sword', 'weapon_dagger', 'weapon_axe', 'weapon_mace', 'weapon_spear',
   'weapon_staff', 'shield_round', 'shield_kite',
   // Animals, rigged and animated. One base mesh per build of body; the
@@ -949,6 +949,8 @@ export const ASSET_NAMES = [
   'beast_lizard', 'beast_rabbit', 'beast_snail', 'beast_beast', 'beast_blob',
   // Bodies for what was a townsperson in a tunic: tools/blender/fauna.py.
   'beast_frog',
+  // Half one thing and half another, and the made ones: tools/blender/hybrids.py.
+  'beast_centaur', 'beast_centaur_f', 'beast_lamia', 'beast_harpy', 'beast_golem', 'beast_goat', 'beast_newt', 'beast_centipede',
   // What a hobbit builds: tools/blender/shire.py.
   'shire_door_ring', 'shire_door_leaf', 'shire_fence', 'shire_flowerbed', 'shire_window_box',
   'shire_lantern_post', 'shire_waterwheel',

@@ -114,14 +114,23 @@ export const CREATURES = [
   { id: 'fox', re: /\b(fox|jackal|coyote)\b/, idle: ['cr_dog'], fight: ['cr_dog_growl'], rate: [1.35, 1.5], gain: 0.5, every: [20, 60], reach: 14, death: 'death_small' },
   { id: 'cat', re: /\b(cat|kitten|familiar|panther|lion|tiger|cougar|leopard)\b/, idle: ['cr_cat'], fight: ['cr_dog_growl'], gain: 0.6, every: [15, 45], reach: 12, death: 'death_small' },
   { id: 'bear', re: /\b(bear|ursa)\b(?!.*\bteddy)/, idle: ['cr_bear'], fight: ['cr_bear'], gain: 0.8, every: [20, 60], reach: 22, death: 'death_beast' },
+  // A centaur is a man from the waist: only now and then the horse in him.
+  { id: 'centaur', re: /\bcentaurs?\b/, idle: ['cr_horse'], rate: [0.92, 1.0], gain: 0.5, every: [40, 120], reach: 22, death: 'death_beast' },
+  // A lion's growl in a lamia's throat; no meow.
+  // No harpy's cry was recorded: a bat's screech, slowed, until one is.
+  { id: 'harpy', re: /\bharp(y|ies)\b/, idle: ['cr_bat'], fight: ['cr_bat'], rate: [0.5, 0.6], gain: 0.6, every: [15, 45], reach: 18, death: 'death_small' },
+  // A golem has no breath to make a sound with: silent but for its blows.
+  { id: 'minotaur', re: /\bminotaurs?\b/, idle: ['cr_cow'], fight: ['cr_beast'], rate: [0.62, 0.72], gain: 0.6, every: [30, 90], reach: 18, death: 'death_beast' },
+  { id: 'golem', re: /\bgolems?\b/, idle: [], gain: 0.7, every: [60, 120], reach: 16, death: 'death_beast' },
+  { id: 'lamia', re: /\blamias?\b/, idle: [], fight: ['cr_dog_growl'], rate: [0.72, 0.82], gain: 0.6, every: [20, 60], reach: 14, death: 'death_beast' },
   { id: 'horse', re: /\b(horse|pegasus|pony|mule|donkey|stallion|mare|unicorn)\b/, idle: ['cr_horse'], gain: 0.7, every: [15, 50], reach: 22, death: 'death_beast' },
   { id: 'deer', re: /\b(deer|stag|antelope|elk|moose|doe|fawn)\b/, idle: ['cr_deer'], gain: 0.55, every: [30, 90], reach: 30, death: 'death_beast' },
-  { id: 'goat', re: /\b(goat|sheep|ram|lamb|ewe)\b/, idle: ['cr_goat'], gain: 0.6, every: [12, 40], reach: 18, death: 'death_beast' },
+  { id: 'goat', re: /\b(goat|sheep|ram|lamb|ewe|mountain kid)\b/, idle: ['cr_goat'], gain: 0.6, every: [12, 40], reach: 18, death: 'death_beast' },
   { id: 'cow', re: /\b(cow|bull|ox|oxen|cattle|calf)\b/, idle: ['cr_cow'], gain: 0.7, every: [15, 50], reach: 22, death: 'death_beast' },
   { id: 'pig', re: /\b(pig|boar|sow|hog|swine)\b/, idle: ['cr_pig'], fight: ['cr_pig'], gain: 0.65, every: [12, 40], reach: 18, death: 'death_beast' },
   { id: 'chicken', re: /\b(chicken|hen|rooster|cock|chick)\b/, idle: ['cr_chicken'], gain: 0.55, every: [10, 35], reach: 16, death: 'death_small' },
   { id: 'snake', re: /\b(snake|python|anaconda|serpent|viper|cobra|adder)\b/, idle: ['cr_snake'], fight: ['cr_snake'], gain: 0.55, every: [15, 45], reach: 10, death: 'death_small' },
-  { id: 'lizard', re: /\b(lizard|newt|gecko|salamander|basilisk|lamia)\b/, idle: ['cr_snake'], fight: ['cr_snake'], rate: [1.25, 1.45], gain: 0.5, every: [15, 45], reach: 10, death: 'death_small' },
+  { id: 'lizard', re: /\b(lizard|newt|gecko|salamander|basilisk)\b/, idle: ['cr_snake'], fight: ['cr_snake'], rate: [1.25, 1.45], gain: 0.5, every: [15, 45], reach: 10, death: 'death_small' },
   { id: 'bat', re: /\b(bat)\b/, idle: ['cr_bat'], fight: ['cr_bat'], gain: 0.55, every: [12, 35], reach: 14, death: 'death_small' },
   { id: 'rat', re: /\b(rat|wererat|mouse|mice|rodent|morkoth)\b/, idle: ['cr_rat'], fight: ['cr_rat'], gain: 0.55, every: [10, 35], reach: 12, death: 'death_small' },
   { id: 'frog', re: /\b(frog|toad)\b/, idle: ['cr_frog'], gain: 0.5, every: [8, 25], reach: 14, death: 'death_small' },
@@ -134,7 +143,8 @@ const creatureCache = new Map();
 /** The voice rule for a mobile's words, or null. Cached on the words. */
 export function creatureOf(words) {
   const key = (words || '').toLowerCase();
-  if (!creatureCache.has(key)) creatureCache.set(key, (PERSON.test(key) ? null : CREATURES.find((c) => c.re.test(key))) || null);
+  // A minotaur is a person with a bull's throat: its bellow, whatever its trade.
+  if (!creatureCache.has(key)) creatureCache.set(key, (PERSON.test(key) && !/\bminotaurs?\b/.test(key) ? null : CREATURES.find((c) => c.re.test(key))) || null);
   return creatureCache.get(key);
 }
 

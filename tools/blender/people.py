@@ -344,6 +344,11 @@ TROLL = dict(
 )
 
 
+# A minotaur: a man's joints, a bull's girth and neck, a bull's head (bull.py).
+import bull as _bull
+MINOTAUR = _bull.body(MALE)
+
+
 def troll_bulk(P):
     """What a troll carries that the canon has no station for: the hump of
     trapezius the head sinks into, a belly slung in front, the swell of the
@@ -685,6 +690,9 @@ def head(P):
 
 
 def faces(P):
+    if P.get("bull"):
+        importlib.reload(_bull)
+        return [_bull.face(P)]
     import heads
     importlib.reload(heads)
     return [heads.face(S, P, name) for (name, S) in heads.FACES[P["name"]]]
@@ -695,6 +703,8 @@ def faces(P):
 def body_parts(P):
     CLAWS.clear()
     parts = [torso(P)] + shoulders(P) + (troll_bulk(P) if P.get("troll") else breasts(P))
+    if P.get("bull"):
+        parts += _bull.bulk(P, ellipsoid)
     for sx in (-1, 1):
         parts += arm(P, sx)
         parts += leg(P, sx)
@@ -858,6 +868,9 @@ FILES = {
                            "beggar", "noble", "knight", "zombie", "ghost", "skeleton", "nomad"]),
     "person_female": (FEMALE, ["woman", "maid", "crone", "lady", "guard", "priest", "mage", "rogue"]),
     "troll": (TROLL, ["troll", "brute"]),
+    # Every minotaur in the stock areas is dressed for a trade: guards in
+    # furs over armour, knights in plate, the masters in robes or leather.
+    "minotaur": (MINOTAUR, ["guard", "knight", "mage", "priest", "rogue", "beggar", "noble"]),
 }
 
 
@@ -907,7 +920,7 @@ def build_file(fname):
         box_uv(o)
         if o.parent is None:
             rig.bind_groups(arm, o)
-    info = rig.make_all(arm, P=P)
+    info = rig.make_all(arm, P=P, extra=_bull.CLIPS if P.get("bull") else ())
     for o in meshes:
         o.data.name = o.name
         o.data.validate()
@@ -988,15 +1001,19 @@ def select_mesh(o):
     bpy.context.view_layer.objects.active = o
 
 
-def build():
+def build(only=None):
     import json
     import os
     out = []
-    facts = {}
+    path = os.path.join(lib.ROOT, "tools", "blender", "people_clips.json")
+    # Built one file at a time, the facts of the others are kept as they were.
+    facts = json.load(open(path)) if only else {}
     for fname in FILES:
+        if only and fname not in only:
+            continue
         report, info = build_file(fname)
         out += report
         facts[fname] = info
-    with open(os.path.join(lib.ROOT, "tools", "blender", "people_clips.json"), "w") as f:
+    with open(path, "w") as f:
         json.dump(facts, f, indent=1, sort_keys=True)
     return "\n".join(out)

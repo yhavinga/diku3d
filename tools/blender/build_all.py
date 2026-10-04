@@ -41,6 +41,7 @@ MODULES = [
     "monsters",
     "creatures",
     "fauna",
+    "hybrids",
     "furniture",
     "clutter",
     "setpiece",
@@ -144,6 +145,20 @@ BUDGET = {
     "beast_frog": 3400,
     # Bones are all edges: a rib cage and a spine of knuckles do not decimate.
     "beast_dracolich": 9600,
+    # hybrids.py. A taur is a whole animal and a person to the waist, with a
+    # sculpted face and a head of hair: the drider's budget, which is the
+    # same thing on eight legs.
+    "beast_centaur": 12500, "beast_centaur_f": 12500, "beast_lamia": 12500,
+    # A woman to the hips on a bird's legs, and two ragged wings of quills.
+    "beast_harpy": 13000,
+    # Blocks fitted together, one hulk for every golem.
+    "beast_golem": 4200,
+    # The deer made a goat: a broader barrel, horns, a beard.
+    "beast_goat": 5400,
+    # An upright newt, tail and all.
+    "beast_newt": 4800,
+    # Twenty-eight legs, each two segments.
+    "beast_centipede": 5400,
     # furniture.py. Tables, benches and stools are placed a dozen to a tavern
     # and stay under the prop cap. The bar, its gantry and the shelving carry
     # everything that stands on them -- bottles, jugs, loaves, books -- and are
