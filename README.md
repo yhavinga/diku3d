@@ -244,6 +244,32 @@ with KILLER and THIEF flags. The owner becomes implementor with
 on the terminal. Playing alone stays the default and needs no server.
 `node tools/server-check.mjs` logs four players in over real sockets.
 
+On diku3d.com the server runs beside the site: `deploy.sh` syncs `server/`,
+installs the systemd unit in `tools/deploy/` (loopback port 4000, player
+files in `/srv/diku3d-data`) and nginx passes `wss://diku3d.com/ws` to it.
+"connect to a server" with an empty address connects there. It first boots
+wizlocked; an implementor opens it with `wizlock`.
+
+### Running a server, and becoming its implementor
+
+    node server/main.mjs [--port 4011] [--host 127.0.0.1] [--data DIR] [--seed N]
+    node server/main.mjs --make-implementor NAME [--class mage|cleric|thief|warrior] [--sex m|f|n] [--data DIR]
+
+`--data` is where player files, `notes.json` and `site.json` (bans and the
+wizlock) are kept; it defaults to `server/data/`, which git ignores.
+`--make-implementor` creates or promotes NAME to level 40, Merc 2.1's
+implementor, and asks for the password twice on the terminal (it refuses
+without one). Point it at the same `--data` as the running server; the
+server reads player files at login, so no restart is needed. On the public
+server that is
+
+    ssh -t <host> 'sudo -u diku3d node /srv/diku3d/server/main.mjs --make-implementor NAME --data /srv/diku3d-data'
+
+Logged in as implementor, `wizhelp` lists the wizard commands (goto,
+transfer, restore, stat, advance, snoop, mset/oset/rset, ban/allow, wizlock,
+shutdown and the rest). `wizlock` toggles whether mortals may log in; a
+fresh `site.json` written by `deploy.sh` starts with it on.
+
 The server does not take a page's word for where its player is: a report
 off the streets, through a shut door, or faster than a glide is refused and
 the page put back. Notes, the ban list and the wizlock live in

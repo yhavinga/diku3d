@@ -228,7 +228,7 @@ export class Places {
     const gain = ctx.createGain();
     gain.gain.value = 0;
     const pan = ctx.createStereoPanner();
-    source.connect(filter).connect(gain).connect(pan).connect(this.audio.master);
+    source.connect(filter).connect(gain).connect(pan).connect(this.audio.duckBus);
     source.start(0, Math.random() * buffer.duration);
     this.sources.set(f.key, { rule: f.rule, at: f.at, room: f.room, open: f.open, source, filter, gain, pan, level: 0 });
   }
@@ -282,7 +282,7 @@ export class Weather {
     source.loop = true;
     const gain = this.ctx.createGain();
     gain.gain.value = 0;
-    source.connect(gain).connect(this.audio.master);
+    source.connect(gain).connect(this.audio.duckBus);
     source.start(0, Math.random() * buffer.duration);
     this.beds[id] = { source, gain };
     this.apply();

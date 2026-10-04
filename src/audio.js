@@ -10,6 +10,7 @@ import { Clips, Steps, Soundscape } from './soundscape.js';
 import { Music } from './music.js';
 import { Foley, Creatures, Places, Weather, listenToGame } from './foley.js';
 import { placeOf, creatureOf } from './soundmap.js';
+import { Voices, listenToVoices } from './voices.js';
 
 /** game.js ATTACK_TABLE words that cut or tear in a way of their own. */
 const FLESH_HITS = { stab: 'hit_stab', pierce: 'hit_stab', claw: 'hit_claw', bite: 'hit_claw' };
@@ -19,6 +20,7 @@ export class Audio {
     this.ctx = null;
     this.muted = false;
     this.musicOn = true;
+    this.voicesOn = true;
     this.place = null;       // what setPlace was last told, kept for when the context exists
     this.hour = null;
     this.windScale = 1;
@@ -38,12 +40,17 @@ export class Audio {
     this.master = this.ctx.createGain();
     this.master.gain.value = this.muted ? 0 : 0.55;
     this.master.connect(this.ctx.destination);
+    // Music, ambience and places go through here so speech can sit them down (voices.js).
+    this.duckBus = this.ctx.createGain();
+    this.duckBus.connect(this.master);
     this.noise = this.makeNoiseBuffer(4);
     this.clips = new Clips(this.ctx);
     this.steps = new Steps(this.clips);
     this.foley = new Foley(this);
     this.music = new Music(this);
     this.music.setEnabled(this.musicOn);
+    this.voices = new Voices(this);
+    this.voices.setEnabled(this.voicesOn);
     const wake = () => {
       this.ctx.resume();
       for (const type of ['pointerdown', 'keydown', 'touchstart']) window.removeEventListener(type, wake, true);
@@ -94,7 +101,10 @@ export class Audio {
     this.creatures = new Creatures(this);
     this.places = new Places(this);
     this.weather = new Weather(this);
-    this.stopEvents = window.diku ? listenToGame(this, window.diku) : null;
+    const stopGame = window.diku ? listenToGame(this, window.diku) : null;
+    const stopVoices = window.diku ? listenToVoices(this, window.diku) : null;
+    this.stopEvents = () => { if (stopGame) stopGame(); if (stopVoices) stopVoices(); };
+    if (window.diku) this.voices.preloadOwn(window.diku.game.state.class, window.diku.game.state.sex);
     if (this.place) {
       this.soundscape.setPlace(this.place);
       this.music.setPlace(this.place);
@@ -571,6 +581,11 @@ export class Audio {
     this.setOutdoor(this._outdoor);
   }
 
+  setVoices(on) {
+    this.voicesOn = on;
+    if (this.voices) this.voices.setEnabled(on);
+  }
+
   setMusic(on) {
     this.musicOn = on;
     if (this.music) this.music.setEnabled(on);
@@ -589,6 +604,7 @@ export class Audio {
       places: this.places && this.places.state(),
       weather: this.weather && this.weather.state(),
       played: this.foley && this.foley.log.slice(-25),
+      voices: this.voices && this.voices.state(),
     };
   }
 

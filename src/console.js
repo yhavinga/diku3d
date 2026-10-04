@@ -121,6 +121,14 @@ export function createConsole({ root, game, onOpen = () => {}, onClose = () => {
     print(line, 'cmd');
     if (history[history.length - 1] !== line) history.push(line);
     if (history.length > 100) history.shift();
+    // The picture belongs to the client, not the mud: it must never reach the server.
+    const shot = /^(?:screenshot|shot)(?:\s+(hud))?$/i.exec(line);
+    if (shot) {
+      window.diku.screenshot({ hud: !!shot[1] }).then(
+        (r) => print(`saved ${r.name}`, 'faint'),
+        (e) => { console.error(e); print(e.message, 'them'); });
+      return;
+    }
     game.interpret(line);
   }
 

@@ -20,7 +20,7 @@ export class Music {
     this.ctx = audio.ctx;
     this.bus = this.ctx.createGain();
     this.bus.gain.value = 0.7;
-    this.bus.connect(audio.master);
+    this.bus.connect(audio.duckBus);
     this.enabled = true;
     this.current = null;        // { id, kind, gain, source }
     this.place = null;

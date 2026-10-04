@@ -36,6 +36,7 @@ export const DEFAULTS = {
   weather: 'clear',
   sound: true,
   music: true,
+  voices: true,
 };
 
 const FIELDS = [
@@ -109,6 +110,12 @@ const FIELDS = [
     key: 'music',
     label: 'Music',
     note: 'A few quiet pieces: the title, a tavern, a temple, now and then the area. Sound off silences it too.',
+    options: [[true, 'on'], [false, 'off']],
+  },
+  {
+    key: 'voices',
+    label: 'Voices',
+    note: 'Spells spoken aloud and the fixed lines of the guards, the mayor and the shopkeepers. Chat is never voiced.',
     options: [[true, 'on'], [false, 'off']],
   },
 ];
@@ -257,6 +264,7 @@ export function createOptions({ quality, applyTime, applyWeather, audio, state }
     if (values.weather !== state.weatherMode) applyWeather(values.weather);
     if (audio.muted === values.sound) audio.toggleMute();
     audio.setMusic(values.music);
+    audio.setVoices(values.voices);
   }
 
   let costTimer = 0;

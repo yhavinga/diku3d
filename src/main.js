@@ -21,6 +21,7 @@ import { Hud } from './hud.js';
 import { Audio } from './audio.js';
 import { Quality, LightPool, PRESETS, IDLE_SLEEP_MS } from './quality.js';
 import { createOptions } from './options.js';
+import { installScreenshot } from './screenshot.js';
 import { AssetLibrary, ASSET_NAMES } from './assets.js';
 import { createGame, SKY } from './game.js';
 import { createGameUi } from './game-ui.js';
@@ -2603,6 +2604,7 @@ async function boot() {
     },
   };
 
+  installScreenshot(window.diku);   // F2, Shift+F2, `shot` in the command line
   options.start();
 
   /**

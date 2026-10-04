@@ -4,7 +4,7 @@
  * Every control in one place, grouped, with the rows for your own class lit
  * and the other class's dimmed. The rows are written out by hand, but each
  * was read off the handler that owns the key: main.js (E, Tab, 1-4, O, F, P, V,
- * M, G, arrows, PgUp/PgDn, left mouse), game-ui.js (Z X C, I B K R T Q, Enter,
+ * M, G, F2 (screenshot.js), arrows, PgUp/PgDn, left mouse), game-ui.js (Z X C, I B K R T Q, Enter,
  * wheel, right mouse), dashboard.js (`), rules/skills.js (the Z X C H J L N skill bar) and
  * player.js (WASD, shift, space).
  *
@@ -65,6 +65,7 @@ const GROUPS = [
       [['M'], 'sound on or off'],
       [['G'], 'force every lock in the world'],
       [['O'], 'options'],
+      [['F2'], 'save a screenshot, without the HUD; Shift-F2 with it (or shot, shot hud)'],
     ] },
     { title: 'This screen', rows: [
       [['?', '~or', 'F1'], 'show or hide help — the same key closes it'],
