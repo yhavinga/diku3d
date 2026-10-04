@@ -4248,9 +4248,9 @@ const V3 = (p, y) => new THREE.Vector3(p.x, y, p.z);
 /**
  * A wall of any convex footprint, `pts` {x, z} round it either way. Sides
  * are split at 1.8 m over the foot so `wallAo`'s ramp has a vertex to stop
- * at; the top is capped, the bottom is the ground.
+ * at; the top is capped, and the bottom too when it is not on the ground.
  */
-function prismTris(pts, y0, y1) {
+function prismTris(pts, y0, y1, bottom = false) {
   const out = [];
   const mid = pts.reduce((m, p) => ({ x: m.x + p.x / pts.length, z: m.z + p.z / pts.length }), { x: 0, z: 0 });
   const inside = V3(mid, (y0 + y1) / 2);
@@ -4265,6 +4265,8 @@ function prismTris(pts, y0, y1) {
     }
   }
   for (let i = 1; i + 1 < pts.length; i++) facing(out, V3(pts[0], y1), V3(pts[i], y1), V3(pts[i + 1], y1), V3(mid, y0));
+  // A storey on a jetty is seen from below where it oversails the one under it.
+  if (bottom) for (let i = 1; i + 1 < pts.length; i++) facing(out, V3(pts[0], y0), V3(pts[i], y0), V3(pts[i + 1], y0), V3(mid, y1));
   return out;
 }
 
@@ -4514,7 +4516,7 @@ function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cel
     const flowers = instances && r(19) > 0.55 && instances.library.get('shire_window_box') ? 'shire_window_box' : null;
     storeys.forEach(([ya, yb, e], k) => {
       const fr = front(e);
-      addTris(batcher, chunk, k === 0 ? groundMat : upperMat, prismTris([fr.A, fr.B, backB, backA], y0 + ya, y0 + yb),
+      addTris(batcher, chunk, k === 0 ? groundMat : upperMat, prismTris([fr.A, fr.B, backB, backA], y0 + ya, y0 + yb, k > 0),
         { tint: k === 0 ? groundTint : tint, ao: k === 0 ? wallAo(y0) : null });
       // The street face's windows, and only that face's: the ends are party
       // walls against the next house, and the back is against the next cell.
