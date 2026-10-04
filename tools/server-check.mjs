@@ -686,8 +686,8 @@ console.log('\nTHE DASHBOARD');
   const snap = await waitDash(y, (mm) => mm.k === 'snap', ym, 'snapshot');
   check(!!snap && snap.who.some((p) => p.name === 'Arwen') && snap.who.some((p) => p.name === 'Boromir'), 'he is sent a snapshot: who is on', snap && snap.who.map((p) => `${p.name} L${p.level} ${p.cls} #${p.vnum} ${p.pos} ${p.host}`).join('; '));
   const arwen = snap && snap.who.find((p) => p.name === 'Arwen');
-  check(arwen && arwen.hp === pa.ch.hit && arwen.room === w.world.rooms.get(pa.ch.roomVnum).name && typeof arwen.idle === 'number' && arwen.zone === 'home',
-    "...each with vitals, room, zone, position and idle time", arwen && JSON.stringify({ hp: arwen.hp, room: arwen.room, zone: arwen.zone, pos: arwen.pos, idle: arwen.idle }));
+  check(arwen && arwen.hp === pa.ch.hit && arwen.room === w.world.rooms.get(pa.ch.roomVnum).name && typeof arwen.active === 'number' && arwen.zone === 'home',
+    "...each with vitals, room, zone, position and idle time", arwen && JSON.stringify({ hp: arwen.hp, room: arwen.room, zone: arwen.zone, pos: arwen.pos, active: arwen.active }));
   check(snap && snap.health.up >= 0 && snap.health.tickMean > 0 && snap.health.players >= 3 && snap.health.rss > 0, '...the server\'s health', snap && JSON.stringify({ up: snap.health.up, tick: snap.health.tickMean, max: snap.health.tickMax, players: snap.health.players, rss: snap.health.rss }));
   check(snap && snap.ev.some((e) => e.c === 'conn' && /Arwen/.test(e.text)), '...and what happened before he asked', snap && `${snap.ev.length} events kept`);
 
@@ -714,6 +714,8 @@ console.log('\nTHE DASHBOARD');
   const batches = dashOf(y, ym).filter((mm) => mm.k === 'batch');
   const rate = batches.length / secs;
   check(rate <= 4.5 && batches.length >= 3, 'events come in batches, at most four a second', `${batches.length} batches in ${secs.toFixed(1)} s for 8 says`);
+  const rowsSent = batches.flatMap((mm) => mm.who || []);
+  check(rowsSent.length <= 2 * batches.filter((mm) => mm.health).length, '...and of the roster only the rows that changed', `${rowsSent.length} rows in ${batches.filter((mm) => mm.health).length} roster sends`);
   check(batches.filter((mm) => mm.health).length >= 1 && batches.filter((mm) => mm.health).length <= Math.ceil(secs) + 1, '...the roster and health about once a second', `${batches.filter((mm) => mm.health).length} with health`);
 
   // Wizard commands and the site.

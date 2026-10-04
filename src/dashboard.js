@@ -163,6 +163,8 @@ export function createDashboard({ getLink }) {
   let lastDid = '';
 
   const diku = () => window.diku;
+  /** Seconds since a player last did anything, by the server's clock. */
+  const idle = (p) => Math.max(0, Math.round(((attached && attached.link ? attached.link.serverNow() : 0) - p.active) / 1000));
   const me = () => diku()?.game?.state?.name || null;
 
   /** Connected, as the implementor, to a server that has a dashboard. */
@@ -235,7 +237,15 @@ export function createDashboard({ getLink }) {
       case 'batch':
         if (msg.ev.length) { events.push(...msg.ev); if (events.length > KEEP) events.splice(0, events.length - KEEP); appendEvents(msg.ev); }
         if (msg.m && view) view.updateMobs(msg.m);
-        if (msg.who) { who = msg.who; renderWho(); if (view) view.setWho(who, me()); renderCard(); }
+        if (msg.who || msg.gone) {
+          // Only the rows that changed, and the ids that left.
+          const byId = new Map(who.map((p) => [p.id, p]));
+          for (const p of msg.who || []) byId.set(p.id, p);
+          for (const id of msg.gone || []) byId.delete(id);
+          who = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+          if (view && view.ready) view.setWho(who, me());
+        }
+        if (msg.health) { renderWho(); renderCard(); }
         if (msg.health) { health = msg.health; renderTiles(); }
         return;
       case 'did':
@@ -314,7 +324,7 @@ export function createDashboard({ getLink }) {
             <div class="dh-bar mn"><i style="width:${pct(p.mana, p.maxMana)}%"></i></div>
             <div class="dh-bar mv"><i style="width:${pct(p.move, p.maxMove)}%"></i></div></div></div>
         <div class="where">${esc(p.room)} <span class="m">#${p.vnum} · ${esc(p.zoneName)}</span></div>
-        <div class="m">${esc(p.pos)}${p.fighting ? ` vs ${esc(p.fighting)}` : ''} · idle ${ago(p.idle)} · ${esc(p.host)}${p.snoopedBy ? ` · snooped by ${esc(p.snoopedBy)}` : ''}</div>
+        <div class="m">${esc(p.pos)}${p.fighting ? ` vs ${esc(p.fighting)}` : ''} · idle ${ago(idle(p))} · ${esc(p.host)}${p.snoopedBy ? ` · snooped by ${esc(p.snoopedBy)}` : ''}</div>
       </div>`).join('');
   }
 
@@ -380,7 +390,7 @@ export function createDashboard({ getLink }) {
       const follow = view && view.follow === p.id;
       html = `<div class="ttl">${esc(p.name)} ${flags(p)}</div>
         <div class="m">L${p.level} ${esc(p.cls)} · ${p.hp}/${p.maxHp} hp ${p.mana}/${p.maxMana} mana ${p.move}/${p.maxMove} mv · ${esc(p.pos)}${p.fighting ? ` vs ${esc(p.fighting)}` : ''}<br>
-          ${esc(p.room)} #${p.vnum} · ${esc(p.zoneName)} · idle ${ago(p.idle)} · ${esc(p.host)}</div>
+          ${esc(p.room)} #${p.vnum} · ${esc(p.zoneName)} · idle ${ago(idle(p))} · ${esc(p.host)}</div>
         <button data-act="look" data-id="${p.id}">look</button><button data-act="follow" data-id="${p.id}" class="${follow ? 'on' : ''}">follow camera</button>
         ${self ? '' : `<button data-act="goto" data-id="${p.id}">goto</button><button data-act="transfer" data-id="${p.id}">transfer</button>
         <button data-act="snoop" data-id="${p.id}" class="${p.snoopedBy === me() ? 'on' : ''}">snoop</button><button data-act="restore" data-id="${p.id}">restore</button>`}`;

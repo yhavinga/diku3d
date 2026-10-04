@@ -189,31 +189,46 @@ export function createDash({ game, w, byPc, stats, site, send, started, run }) {
   }
 
   // ------------------------------------------------------------ the views --
-  function who() {
-    const now = Date.now();
+  /**
+   * The roster. Nothing in a row counts down by itself, so a row changes only
+   * when its player does: idle is when they last did something (server ms,
+   * to the 10 s), link-dead the seconds left (to the 10 s). `who(true)` is
+   * every row; otherwise the rows that changed, and `gone`, the ids that left.
+   */
+  const whoSent = new Map();
+  function who(all = true) {
     const list = [];
+    const seen = new Set();
     for (const s of byPc.values()) {
       if (!s.pc) continue;
       const ch = s.pc.ch;
       const zone = zoneOf(ch.roomVnum);
-      const c = w.toClient(s.pc.position);
-      list.push({
+      const row = {
         id: s.pc.id, name: ch.name, level: ch.level, trust: trustOf(ch), cls: CLASS_TABLE[ch.class]?.who || '?',
         hp: ch.hit, maxHp: ch.maxHit, mana: ch.mana, maxMana: ch.maxMana, move: ch.move, maxMove: ch.maxMove,
         vnum: ch.roomVnum, room: roomName(ch.roomVnum), zone: zone ? zone.id : null, zoneName: zone ? zone.name : '?',
         pos: POSITION[ch.position] || String(ch.position),
         fighting: ch.fighting ? nameOf(ch.fighting) : null,
-        idle: Math.round((now - Math.max(s.lastInput || 0, s.lastMoved || 0, s.since || 0)) / 1000),
-        linkdead: s.linkdead !== null ? Math.max(0, Math.round(s.linkdead)) : null,
+        active: Math.floor((Math.max(s.lastInput || 0, s.lastMoved || 0, s.since || 0) - started) / 10000) * 10000,
+        linkdead: s.linkdead !== null ? Math.max(0, Math.ceil(s.linkdead / 10) * 10) : null,
         host: s.host,
         flags: [ch.act & PLR.KILLER ? 'KILLER' : null, ch.act & PLR.THIEF ? 'THIEF' : null,
           ch.act & PLR_MORE.WIZINVIS ? 'WIZINVIS' : null, ch.act & PLR_MORE.FREEZE ? 'FROZEN' : null,
           ch.afk ? 'AFK' : null].filter(Boolean),
         snoopedBy: s.snoopBy && s.snoopBy.pc ? s.snoopBy.pc.ch.name : null,
-        x: c ? round(c.x) : null, z: c ? round(c.z) : null, yaw: round(s.yaw || 0),
-      });
+      };
+      seen.add(row.id);
+      if (!all) {
+        const key = JSON.stringify(row);
+        if (whoSent.get(row.id) === key) continue;
+        whoSent.set(row.id, key);
+      }
+      list.push(row);
     }
-    return list.sort((a, b) => a.name.localeCompare(b.name));
+    if (all) return list.sort((a, b) => a.name.localeCompare(b.name));
+    const gone = [...whoSent.keys()].filter((id) => !seen.has(id));
+    for (const id of gone) whoSent.delete(id);
+    return { rows: list, gone };
   }
 
   function health() {
@@ -331,7 +346,12 @@ export function createDash({ game, w, byPc, stats, site, send, started, run }) {
       if (pending.length || second || m.length) {
         batch = { k: 'batch', ev: pending };
         if (m.length) batch.m = m;
-        if (second) { batch.who = who(); batch.health = health(); }
+        if (second) {
+          const changed = who(false);
+          if (changed.rows.length) batch.who = changed.rows;
+          if (changed.gone.length) batch.gone = changed.gone;
+          batch.health = health();
+        }
       }
     }
     const moved = fast ? positions(false) : [];
