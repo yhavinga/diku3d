@@ -244,6 +244,12 @@ with KILLER and THIEF flags. The owner becomes implementor with
 on the terminal. Playing alone stays the default and needs no server.
 `node tools/server-check.mjs` logs four players in over real sockets.
 
+On diku3d.com the server runs beside the site: `deploy.sh` syncs `server/`,
+installs the systemd unit in `tools/deploy/` (loopback port 4000, player
+files in `/srv/diku3d-data`) and nginx passes `wss://diku3d.com/ws` to it.
+"connect to a server" with an empty address connects there. It first boots
+wizlocked; an implementor opens it with `wizlock`.
+
 The server does not take a page's word for where its player is: a report
 off the streets, through a shut door, or faster than a glide is refused and
 the page put back. Notes, the ban list and the wizlock live in
