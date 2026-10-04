@@ -21,6 +21,13 @@ import { PLR_MORE, CHANNEL, trustOf, ageOf } from './actcomm.js';
 const MAX_LEVEL = 40;
 const LEVEL_HERO = MAX_LEVEL - 4;
 
+/**
+ * Every immortal command's level, filled in when a server installs them:
+ * the server's dashboard (server/dash.mjs) reports a command as a wizard's
+ * by this table, rather than by a second list that could drift from it.
+ */
+export const WIZ_LEVEL = new Map();
+
 /** handler.c: affect_bit_name, for mstat. */
 const AFFECT_BITS = [
   [1, 'blind'], [2, 'invisible'], [4, 'detect_evil'], [8, 'detect_invis'], [16, 'detect_magic'],
@@ -619,15 +626,14 @@ export function installWiz(k) {
     return server('snoop', found.ch);
   }
 
-  /** The server's own: users, shutdown, disconnect, deny, wizlock, log. */
+  /** The server's own: users, shutdown, disconnect, deny, wizlock, log, dashboard. */
   const server = (name, ...args) => (k.server && k.server[name] ? k.server[name](state, ...args) : send('Not on this server.'));
 
   // ------------------------------------------------------------ the table --
 
   const P = MERC.POS.DEAD;
   // interp.c's immortal block, in its order and with its levels.
-  I.insert(['wizhelp', doWizhelp, P, 36], 'areas');
-  I.append([
+  const table = [
     ['advance', doAdvance, P, 40], ['trust', doTrust, P, 40],
     ['allow', (a) => server('allow', oneArgument(a)[0]), P, 39],
     ['ban', (a) => server('ban', oneArgument(a)[0]), P, 39],
@@ -660,6 +666,13 @@ export function installWiz(k) {
     ['stat', doStat, P, 37],
     ['immtalk', (a) => k.talkChannel(a, CHANNEL.IMMTALK, 'immtalk'), P, 36],
     [':', (a) => k.talkChannel(a, CHANNEL.IMMTALK, 'immtalk'), P, 36],
-  ]);
+    // Not Merc's: the server's dashboard (server/dash.mjs), opened on the page.
+    // Last, so wizhelp's order and every abbreviation above stay interp.c's.
+    ['dashboard', () => server('dashboard'), P, 40],
+  ];
+  const wizhelp = ['wizhelp', doWizhelp, P, 36];
+  I.insert(wizhelp, 'areas');
+  I.append(table);
+  for (const [name, , , level] of [wizhelp, ...table]) WIZ_LEVEL.set(name, level);
   void emit;
 }

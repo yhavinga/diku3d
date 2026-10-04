@@ -37,6 +37,7 @@ import { createOcclusion } from './occlusion.js';
 import { createTitleReel } from './title.js';
 import { createVistas } from './vista.js';
 import { attachSocketLink, SocketLink } from './link.js';
+import { createDashboard } from './dashboard.js';
 import { createConnectUi } from './link-ui.js';
 import { OUTDOOR_FILL } from './dress.js';
 
@@ -1919,6 +1920,8 @@ async function boot() {
   // Or a server's world (src/link.js): this game becomes the server's copy,
   // and these are the hands it borrows from the page to move you about.
   let connected = null;
+  // The implementor's dashboard (dashboard.js): bound only while connected as trust 40.
+  const dashboard = createDashboard({ getLink: () => connected });
   const linkHost = {
     zoneId: () => zone.id,
     actors: () => actors,
@@ -1968,6 +1971,7 @@ async function boot() {
       if (connected) connected.close();
       connected = attachSocketLink(next, game, linkHost, reply.enter);
       window.diku.link = connected;
+      dashboard.attach(connected);
       lostResume = null;
       document.getElementById('link-lost').hidden = true;
     } catch (error) {
@@ -1982,6 +1986,7 @@ async function boot() {
       begin(false);
       connected = attachSocketLink(link, game, linkHost, enter);
       window.diku.link = connected;
+      dashboard.attach(connected);
     },
   });
   dom.hint.addEventListener('click', () => player.requestLock());
@@ -2153,6 +2158,7 @@ async function boot() {
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
     pipeline, environment, materials, wetness, assets, impostors, occlusion,
+    dashboard,
     /** What the texture bake did: bakes, cache hits, ms, workers; `stored` resolves to the cache's bytes. */
     bake: bakeStats,
     player, hud, world, applyTime, applyWeather, state, audio,

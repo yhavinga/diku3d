@@ -4,8 +4,8 @@
  * WebSockets, and asserts what they see of each other -- arrivals, says,
  * tells, channels, socials, following and groups, Merc 2.1's player-killing
  * rules (refused in a safe room and by is_safe, allowed where 2.1 allows,
- * with the KILLER and THIEF flags), the implementor's commands, quitting and
- * a dropped link.
+ * with the KILLER and THIEF flags), the implementor's commands and dashboard,
+ * quitting and a dropped link.
  *
  *     (cd server && npm ci) && node tools/server-check.mjs
  *
@@ -651,6 +651,158 @@ console.log('\nRESTING, CORPSES, BACKSTAB');
   y.say('restore arwen'); y.say('restore boromir');
   await pause(300);
   pbp.ch.level = bLevel;
+}
+
+// -------------------------------------------------------------- dashboard --
+console.log('\nTHE DASHBOARD');
+{
+  const dashOf = (c, from = 0) => c.messages.slice(from).filter((mm) => mm.t === 'dash');
+  const evOf = (c, from = 0) => dashOf(c, from).flatMap((mm) => mm.ev || []);
+  const waitDash = (c, pred, from, what, ms = 3000) => c.waitFor((x) => dashOf(x, from).find(pred), ms, what).catch(() => null);
+  const waitEv = (c, re, from, ms = 3000) => c.waitFor((x) => evOf(x, from).find((e) => re.test(e.text)), ms, String(re)).catch(() => null);
+  check(hello.features && hello.features.includes('dash'), "hello lists the dashboard among the server's features", JSON.stringify(hello.features));
+
+  // A mortal: refused, every way in, and sent nothing of the mud.
+  const am = a.messages.length;
+  const roomA = pa.ch.roomVnum;
+  a.send({ t: 'dash', op: 'sub' });
+  a.send({ t: 'dash', op: 'goto', id: pbp.id });
+  a.send({ t: 'dash', op: 'wizlock', on: true });
+  a.send({ t: 'dash', op: 'follow', id: pbp.id });
+  await pause(1300);
+  const toA = dashOf(a, am);
+  check(toA.length === 4 && toA.every((mm) => mm.k === 'no' && Object.keys(mm).sort().join() === 'k,t,why'), "a mortal's every dashboard message is answered 'no', and with nothing else", JSON.stringify(toA.map((mm) => mm.k)));
+  check(pa.ch.roomVnum === roomA && mud.sessionNamed('Arwen').dash == null, '...her goto went nowhere and she holds no subscription');
+  m = a.mark();
+  a.say('dashboard');
+  await expect(a, /^Huh\?$/, "and to a mortal the 'dashboard' command is not there at all", m);
+
+  // The implementor: a snapshot, then batches.
+  let ym = y.messages.length;
+  y.say('dashboard');
+  await y.waitFor((x) => x.events.find((e) => e.kind === 'dashboard'), 3000, 'the dashboard event').catch(() => null);
+  check(y.events.some((e) => e.kind === 'dashboard'), "'dashboard' typed by the implementor tells his page to open it");
+  y.send({ t: 'dash', op: 'sub' });
+  const snap = await waitDash(y, (mm) => mm.k === 'snap', ym, 'snapshot');
+  check(!!snap && snap.who.some((p) => p.name === 'Arwen') && snap.who.some((p) => p.name === 'Boromir'), 'he is sent a snapshot: who is on', snap && snap.who.map((p) => `${p.name} L${p.level} ${p.cls} #${p.vnum} ${p.pos} ${p.host}`).join('; '));
+  const arwen = snap && snap.who.find((p) => p.name === 'Arwen');
+  check(arwen && arwen.hp === pa.ch.hit && arwen.room === w.world.rooms.get(pa.ch.roomVnum).name && typeof arwen.idle === 'number' && arwen.zone === 'home',
+    "...each with vitals, room, zone, position and idle time", arwen && JSON.stringify({ hp: arwen.hp, room: arwen.room, zone: arwen.zone, pos: arwen.pos, idle: arwen.idle }));
+  check(snap && snap.health.up >= 0 && snap.health.tickMean > 0 && snap.health.players >= 3 && snap.health.rss > 0, '...the server\'s health', snap && JSON.stringify({ up: snap.health.up, tick: snap.health.tickMean, max: snap.health.tickMax, players: snap.health.players, rss: snap.health.rss }));
+  check(snap && snap.ev.some((e) => e.c === 'conn' && /Arwen/.test(e.text)), '...and what happened before he asked', snap && `${snap.ev.length} events kept`);
+
+  // Talk.
+  ym = y.messages.length;
+  await a.at(pbp.ch.roomVnum === pa.ch.roomVnum ? pa.ch.roomVnum : QUIET);
+  a.say('say the dashboard hears this');
+  a.say('tell boromir only you and the owner');
+  a.say('chat on the chat channel');
+  const said = await waitEv(y, /^Arwen says 'the dashboard hears this'$/, ym);
+  check(!!said && said.c === 'talk' && said.vnum === pa.ch.roomVnum, 'a say comes through, with the room', said && JSON.stringify(said));
+  const told = await waitEv(y, /^Arwen tells Boromir 'only you and the owner'$/, ym);
+  check(!!told && told.priv === true, '...a tell, marked private', told && JSON.stringify(told));
+  const chat = await waitEv(y, /^Arwen chats 'on the chat channel'$/, ym);
+  check(!!chat, '...a channel', chat && chat.text);
+  check(!dashOf(a, am).some((mm) => mm.k !== 'no') && !dashOf(b).length, '...and neither mortal is sent any of it');
+
+  // Batches: four a second at most, who and health once a second.
+  ym = y.messages.length;
+  const t0 = Date.now();
+  for (let i = 0; i < 8; i++) { a.say(`say beat ${i}`); await pause(125); }
+  await pause(300);
+  const secs = (Date.now() - t0) / 1000;
+  const batches = dashOf(y, ym).filter((mm) => mm.k === 'batch');
+  const rate = batches.length / secs;
+  check(rate <= 4.5 && batches.length >= 3, 'events come in batches, at most four a second', `${batches.length} batches in ${secs.toFixed(1)} s for 8 says`);
+  check(batches.filter((mm) => mm.health).length >= 1 && batches.filter((mm) => mm.health).length <= Math.ceil(secs) + 1, '...the roster and health about once a second', `${batches.filter((mm) => mm.health).length} with health`);
+
+  // Wizard commands and the site.
+  ym = y.messages.length;
+  y.say('restore arwen');
+  const wiz = await waitEv(y, /^Yeb: restore arwen$/, ym);
+  check(!!wiz && wiz.c === 'wiz', 'a wizard command is reported, by whom', wiz && wiz.text);
+
+  // Actions, each by id.
+  ym = y.messages.length;
+  y.send({ t: 'dash', op: 'goto', id: pa.id });
+  const went = await waitDash(y, (mm) => mm.k === 'did' && mm.op === 'goto', ym, 'goto');
+  const py = game.players.find((p) => p.ch.name === 'Yeb');
+  check(!!went && py.ch.roomVnum === pa.ch.roomVnum, 'goto from the dashboard puts him in her room', went && `${went.lines[0]} -> #${py.ch.roomVnum}`);
+  await y.at(py.ch.roomVnum);
+  await b.at(3001);
+  ym = y.messages.length;
+  y.send({ t: 'dash', op: 'transfer', id: pbp.id });
+  await waitDash(y, (mm) => mm.k === 'did' && mm.op === 'transfer', ym, 'transfer');
+  check(pbp.ch.roomVnum === py.ch.roomVnum, 'transfer brings Boromir to him', `#${pbp.ch.roomVnum}`);
+  ym = y.messages.length;
+  y.send({ t: 'dash', op: 'snoop', id: pa.id });
+  await waitDash(y, (mm) => mm.k === 'did' && mm.op === 'snoop', ym, 'snoop');
+  check(mud.sessionNamed('Arwen').snoopBy === mud.sessionNamed('Yeb'), 'snoop from the dashboard snoops her');
+  ym = y.messages.length;
+  y.send({ t: 'dash', op: 'snoop', id: pa.id });
+  await waitDash(y, (mm) => mm.k === 'did' && mm.op === 'snoop', ym, 'snoop off');
+  check(!mud.sessionNamed('Arwen').snoopBy, '...and again lets her go');
+  pa.ch.hit = 1;
+  ym = y.messages.length;
+  y.send({ t: 'dash', op: 'restore', id: pa.id });
+  await waitDash(y, (mm) => mm.k === 'did' && mm.op === 'restore', ym, 'restore');
+  check(pa.ch.hit === pa.ch.maxHit, 'restore from the dashboard', `${pa.ch.hit}/${pa.ch.maxHit}`);
+  ym = y.messages.length;
+  y.send({ t: 'dash', op: 'wizlock', on: true });
+  await waitDash(y, (mm) => mm.k === 'did' && mm.op === 'wizlock', ym, 'wizlock');
+  const locked = await waitEv(y, /^Yeb wizlocked the game$/, ym);
+  check(mud.stats && locked && locked.c === 'site', 'wizlock on from the dashboard, and the stream says so', locked && locked.text);
+  ym = y.messages.length;
+  y.send({ t: 'dash', op: 'wizlock', on: true });
+  const again = await waitDash(y, (mm) => mm.k === 'did' && mm.op === 'wizlock', ym, 'wizlock again');
+  check(again && /Already/.test(again.lines[0]), '...on when it is on is no toggle', again && again.lines[0]);
+  y.send({ t: 'dash', op: 'wizlock', on: false });
+  await waitEv(y, /^Yeb lifted the wizlock$/, ym);
+  const { createSite: siteNow } = await import('../server/store.mjs');
+  check(siteNow(data).wizlock === false, '...and off again');
+
+  // Following: her zone's map once, then where she is ten times a second.
+  ym = y.messages.length;
+  y.send({ t: 'dash', op: 'follow', id: pa.id });
+  await pause(1100);
+  const map = dashOf(y, ym).find((mm) => mm.k === 'map');
+  const tracks = dashOf(y, ym).filter((mm) => mm.k === 'track');
+  check(!!map && map.zone === 'home' && map.rooms.length > 100, 'follow sends her zone\'s map', map && `${map.rooms.length} rooms, ${map.streets.length} streets, ${JSON.stringify(map).length} B`);
+  const ca = w.toClient(pa.position);
+  check(tracks.length >= 8 && tracks.every((t) => t.id === pa.id) && Math.abs(tracks.at(-1).x - ca.x) < 0.02, '...and her position at about 10 Hz', `${tracks.length} in 1.1 s`);
+  y.send({ t: 'dash', op: 'follow', id: null });
+
+  // A fight and a kill.
+  const prey = game.mobs.find((s) => !s.dead && s.instance && s.proto.level <= 3 && w.zoneOfVnum(s.roomVnum)?.zone.id === 'home'
+    && !(w.world.rooms.get(s.roomVnum).flags & 1024) && w.built.rooms.has(s.roomVnum) && !s.proto.shop && !/keeper|guard/i.test(s.proto.short));
+  if (prey) {
+    await a.at(prey.roomVnum);
+    ym = y.messages.length;
+    a.say(`kill ${prey.proto.keywords.split(' ')[0]}`);
+    const fought = await waitEv(y, /^Arwen fights /, ym);
+    check(!!fought && fought.c === 'fight', 'a fight begun is reported', fought && fought.text);
+    if (prey.instance) prey.instance.hit = 1;
+    const died = await waitEv(y, /dies at the hands of Arwen/, ym, 6000);
+    check(!!died && died.c === 'death', "...and the kill, with the killer's name", died && died.text);
+  } else check(false, 'a weak mobile to fight in the home zone');
+
+  // Trust is read every time: below 40, the stream stops.
+  ym = y.messages.length;
+  py.ch.trust = 39;
+  const off = await waitDash(y, (mm) => mm.k === 'off', ym, 'off');
+  check(!!off, 'an implementor whose trust drops is dropped from the stream', off && off.why);
+  const after = y.messages.length;
+  a.say('say nobody on the dashboard hears this');
+  await pause(700);
+  check(!dashOf(y, after).length, '...and sent nothing more');
+  y.send({ t: 'dash', op: 'sub' });
+  const no = await waitDash(y, (mm) => mm.k === 'no', after, 'no');
+  check(!!no, '...nor let back in', no && no.why);
+  py.ch.trust = 40;
+  // Back where the next section expects everyone: Park Road.
+  y.say(`at ${QUIET} peace`);
+  await a.at(QUIET); await y.at(QUIET);
+  check(!quiet.some((line) => /error handling/.test(line)), 'nothing on the dashboard threw', quiet.filter((line) => /error handling/.test(line))[0]);
 }
 
 // ---------------------------------------------------- quitting and links --

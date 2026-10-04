@@ -5,7 +5,7 @@
  * and the other class's dimmed. The rows are written out by hand, but each
  * was read off the handler that owns the key: main.js (E, Tab, 1-4, O, F, P, V,
  * M, G, arrows, PgUp/PgDn, left mouse), game-ui.js (Z X C, I B K R T Q, Enter,
- * wheel, right mouse), rules/skills.js (the Z X C H J L N skill bar) and
+ * wheel, right mouse), dashboard.js (`), rules/skills.js (the Z X C H J L N skill bar) and
  * player.js (WASD, shift, space).
  *
  * It is a module of its own that reaches the game only through `window.diku`,
@@ -56,6 +56,7 @@ const GROUPS = [
       [['Tab'], 'in the prompt: complete a command'],
       [['Esc', '~or', 'Ctrl-C'], 'close it (or Enter on an empty line)'],
       [['quit'], 'typed there: save and go back to the title'],
+      [['`', '~or', 'dashboard'], "the implementor's dashboard, on a server at trust 40 — the same key closes it"],
     ] },
     { title: 'The world', rows: [
       [['1', '2', '3', '4'], 'dawn, noon, dusk, night'],
