@@ -1369,7 +1369,51 @@ def newt():
                           pastimes=["sniff"]))
 
 
-SPECS = [centaur, centaur_f, lamia, harpy, golem, goat, newt]
+# ============================================================ the centipede
+
+
+def centipede():
+    """Moria's centipedes, 'looking for vegetation', 'crawling along the
+    cave floors': a metre of flat jointed body, plates over each segment,
+    a pair of legs off every one of them splayed out and down to the
+    floor, a flat head with feelers and a pair of poison claws curved in
+    under it. The body is beasts.serpent's chain and its slither, flattened
+    and kept low; the legs ride their segments."""
+    Ln, n = 1.0, 14
+    girth = lambda u: 0.034 * (1.0 - 0.45 * max(0.0, u - 0.75) / 0.25)
+    spec = B.serpent("beast_centipede", "centipede", Ln, girth, n, 0.06, 0.003, 2600,
+                     dict(stride=0.5, frames=30, amp=0.05, lift=0.0), head=False, rings=1.0,
+                     mask=lambda co: np.clip(np.sin((-co[:, 1]) * n / Ln * math.pi * 2) * 0.5 + 0.5, 0, 1))
+    joints = spec["joints"]
+    front = joints[0]
+    ground = lambda u: girth(u) * 0.82
+
+    def parts(body_solids):
+        out = []
+        legs = []
+        for i in range(n):
+            u = (i + 0.5) / n
+            f = lerp(joints[i], joints[i + 1], 0.5)
+            z = ground(u)
+            for side in (1, -1):
+                knee = (side * 0.075, f + 0.01, z + 0.03)
+                foot = (side * 0.11, f - 0.01, 0.002)
+                legs += [cone(P(side * 0.025, f, z), P(*knee), 0.008, 0.006, "body%d" % (i + 1), blend=0.003, group="l%d%d" % (i, side)),
+                         cone(P(*knee), P(*foot), 0.006, 0.002, "body%d" % (i + 1), blend=0.002, group="l%d%d" % (i, side))]
+        out.append(B.solid_part(legs, 0.0025, 1800, "legs", "horn", (0.38, 0.26, 0.15), smooth=0))
+        head = [ell(P(0, front + 0.03, 0.03), (0.04, 0.035, 0.018), "head", blend=0.01)]
+        for side in (1, -1):
+            head.append(cone(P(side * 0.015, front + 0.055, 0.035), P(side * 0.06, front + 0.17, 0.07), 0.004, 0.0015, "head",
+                             blend=0.002, group="a%d" % side))
+            head.append(cone(P(side * 0.02, front + 0.05, 0.018), P(side * 0.008, front + 0.085, 0.012), 0.006, 0.002, "head",
+                             blend=0.002, group="c%d" % side))
+        out.append(B.solid_part(head, 0.002, 500, "head", "horn", (0.42, 0.26, 0.16), smooth=0))
+        return out
+    spec.update(parts=parts, mat="chitin", h=0.004)
+    return spec
+
+
+SPECS = [centaur, centaur_f, lamia, harpy, golem, goat, newt, centipede]
 
 
 def build_one(spec, export=True):

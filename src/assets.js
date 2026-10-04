@@ -950,7 +950,7 @@ export const ASSET_NAMES = [
   // Bodies for what was a townsperson in a tunic: tools/blender/fauna.py.
   'beast_frog',
   // Half one thing and half another, and the made ones: tools/blender/hybrids.py.
-  'beast_centaur', 'beast_centaur_f', 'beast_lamia', 'beast_harpy', 'beast_golem', 'beast_goat', 'beast_newt',
+  'beast_centaur', 'beast_centaur_f', 'beast_lamia', 'beast_harpy', 'beast_golem', 'beast_goat', 'beast_newt', 'beast_centipede',
   // What a hobbit builds: tools/blender/shire.py.
   'shire_door_ring', 'shire_door_leaf', 'shire_fence', 'shire_flowerbed', 'shire_window_box',
   'shire_lantern_post', 'shire_waterwheel',

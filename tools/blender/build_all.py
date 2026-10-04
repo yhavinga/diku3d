@@ -157,6 +157,8 @@ BUDGET = {
     "beast_goat": 5400,
     # An upright newt, tail and all.
     "beast_newt": 4800,
+    # Twenty-eight legs, each two segments.
+    "beast_centipede": 5400,
     # furniture.py. Tables, benches and stools are placed a dozen to a tavern
     # and stay under the prop cap. The bar, its gantry and the shelving carry
     # everything that stands on them -- bottles, jugs, loaves, books -- and are
