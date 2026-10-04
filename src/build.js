@@ -4617,27 +4617,33 @@ function windowSpots(w, faceDir = 2) {
 }
 
 /**
- * The house on the corner between two ways out: low, so it is not the
- * free-standing tower a 3.2 m square block ten metres high was, and with its
- * corner to the street cut off. A square corner where two lanes meet is the
- * grid; a cut one is a corner house, with its door and windows on the cut
- * and a hipped roof over the five sides. The cut follows `CORNER_CUT` back
- * along both fronts, which is what lets a turning lane's outer row
- * (`turnFace`) run round a curve concentric with it.
+ * The house on the corner between two ways out, with its corner to the
+ * street cut off. A square corner where two lanes meet is the grid; a cut one
+ * is a corner house, with its door and windows on the cut and a hipped roof
+ * over the five sides -- under which a 3.2 m footprint at row height reads as
+ * a house, where a gabled 3.2 m block ten metres high read as a tower. In a
+ * lane that turns, the cut is `CORNER_CUT` back along both fronts, which is
+ * what lets the outer rows (`turnRows`) run round a curve concentric with it.
  */
 const CORNER_CUT = 2.2;
-function buildCornerHouse({ batcher, chunk, pos, dirA, dirB, cell, decor, addCollider }) {
+// At a junction or a room's corner the cut only takes the edge off: cut as
+// deep as a turn's, the four corners of a crossroads opened it into a little
+// square (cozy.js: lane 10.3 -> 12.4 m at #3013, sky 0.68 -> 0.69).
+const CORNER_CUT_JUNCTION = 1.2;
+function buildCornerHouse({ batcher, chunk, pos, dirA, dirB, cell, decor, addCollider, cut = CORNER_CUT_JUNCTION }) {
   const [ax, , az] = DIR_STEP[dirA];
   const [bx2, , bz2] = DIR_STEP[dirB];
   // The corner's diagonal, from the cell centre out to the cell's corner.
   const ux = ax + bx2; const uz = az + bz2;
   const R = (k) => hash3(cell.x * 13 + dirA, cell.z * 13 + k, cell.level, 87);
-  const h = 4.8 + R(0) * 2.4;
+  // As tall as the houses either side of it: a low house on the corner was
+  // a gap in the street's skyline at every junction.
+  const h = 5.8 + R(0) * 2.6;
   const plaster = R(1) < 0.4;
   const tint = plaster ? LIMEWASH[Math.floor(R(2) * LIMEWASH.length)] : null;
   const mat = R(3) < 0.5 ? 'stonewall' : plaster ? 'plaster' : 'timber';
   const at = (sx, sz) => ({ x: pos.x + ux * sx, z: pos.z + uz * sz });
-  const I = ROW_FACE; const O = HALF; const C = ROW_FACE + CORNER_CUT;
+  const I = ROW_FACE; const O = HALF; const C = ROW_FACE + cut;
   // Round the block: the two cut ends, then out to the cell's corner.
   const pts = [at(I, C), at(I, O), at(O, O), at(O, I), at(C, I)];
   addTris(batcher, chunk, mat, prismTris(pts, pos.y, pos.y + h), { tint: mat === 'stonewall' ? null : tint, ao: wallAo(pos.y) });
@@ -4650,7 +4656,7 @@ function buildCornerHouse({ batcher, chunk, pos, dirA, dirB, cell, decor, addCol
   box2(I, C, C, O);
   const n = 6;
   for (let i = 0; i < n; i++) {
-    const s0 = I + (CORNER_CUT * i) / n; const s1 = I + (CORNER_CUT * (i + 1)) / n;
+    const s0 = I + (cut * i) / n; const s1 = I + (cut * (i + 1)) / n;
     // The cut runs from (I, C) to (C, I): at sx, its other coordinate is I + C - sx.
     box2(s0, s1, I + C - (s0 + s1) / 2, C);
   }
@@ -5238,7 +5244,7 @@ function buildLanes({ batcher, instances, layout, world, rooms, frontage, lifts,
     for (const [dirA, dirB] of [[0, 1], [1, 2], [2, 3], [3, 0]]) {
       if (!dirs.has(dirA) || !dirs.has(dirB)) continue;
       tally.corners++;
-      buildCornerHouse({ batcher, chunk, pos, dirA, dirB, cell, decor, addCollider });
+      buildCornerHouse({ batcher, chunk, pos, dirA, dirB, cell, decor, addCollider, cut: turn ? CORNER_CUT : CORNER_CUT_JUNCTION });
     }
     // The barrels and crates against the new fronts, not out in the lane.
     const item = streetClutter.get(k);
