@@ -130,7 +130,7 @@ TEASER = dict(
     fade_out=(14.4, 0.6),
     title=(11.7, 15.0),
     mud=[(9.9, 11.6, 'The giant, purple sand worm is DEAD!!')],
-    vo=[('vo1', 2.9), ('vo6', 11.9)],
+    vo=[('vo1', 2.9), ('vo6', 10.3)],
     subs=[(2.95, 5.2, 'You walked these streets a thousand times.'), (5.3, 7.2, 'You just never saw them.')],
     music=(2.4, 31.5),
     amb=[(2.6, 6.5, 'amb_temple', -4), (6.5, 7.9, 'amb_forest', 0), (7.9, 9.5, 'amb_cave', 0),
@@ -382,9 +382,9 @@ def sound():
 
 def loudnorm(path):
     r = subprocess.run(['ffmpeg', '-hide_banner', '-nostats', '-i', path, '-af',
-                        'loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json', '-f', 'null', '-'], capture_output=True, text=True)
+                        'loudnorm=I=-14:TP=-2:LRA=11:print_format=json', '-f', 'null', '-'], capture_output=True, text=True)
     j = json.loads(r.stderr[r.stderr.rindex('{'):r.stderr.rindex('}') + 1])
-    return (f"loudnorm=I=-14:TP=-1.5:LRA=11:measured_I={j['input_i']}:measured_TP={j['input_tp']}:"
+    return (f"loudnorm=I=-14:TP=-2:LRA=11:measured_I={j['input_i']}:measured_TP={j['input_tp']}:"
             f"measured_LRA={j['input_lra']}:measured_thresh={j['input_thresh']}:offset={j['target_offset']}:linear=true")
 
 picture()
@@ -392,8 +392,8 @@ ass = subtitles()
 mix = sound()
 norm = loudnorm(mix)
 subprocess.run(['ffmpeg', '-y', '-v', 'error', '-i', f'{tmp}/picture.mp4', '-i', mix,
-                '-vf', f"subtitles={ass}:fontsdir={FONTS}", '-af', norm + ',alimiter=limit=0.79:level=false,aresample=48000',
-                '-c:v', 'libx264', '-profile:v', 'high', '-preset', 'veryfast' if a.fast else 'slow', '-crf', '18',
+                '-vf', f"subtitles={ass}:fontsdir={FONTS}", '-af', norm + ',alimiter=limit=0.7:level=false,aresample=48000',
+                '-c:v', 'libx264', '-profile:v', 'high', '-preset', 'veryfast' if a.fast else 'slow', '-crf', '20', '-maxrate', '14M', '-bufsize', '28M',
                 '-pix_fmt', 'yuv420p', '-r', str(FPS), '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
                 '-movflags', '+faststart', '-shortest', out], check=True)
 print('wrote', out, 'work in', tmp)
