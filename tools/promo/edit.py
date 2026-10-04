@@ -167,8 +167,8 @@ def load(path, crop_c):
     return np.asarray(im, np.float32)
 
 def title_card():
-    """The end card: name, promise, address, and the credits the DikuMUD and
-    Merc licences require, over the forest the gate opens on."""
+    """The end card: name, promise, address and one small credit line (the
+    full credits are on diku3d.com), over the forest the gate opens on."""
     img = Image.new('RGBA', (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     k = W / 1920 if a.fmt == '16x9' else 1080 / 1500
@@ -186,12 +186,8 @@ def title_card():
     centre(cy + 250 * k, 'THE MUD YOU KNOW, NOW IN 3D', mono(34), GOLD, spacing=6 * k)
     centre(cy + 320 * k, 'FREE IN YOUR BROWSER  ·  PLAY TOGETHER', mono(34), GOLD, spacing=6 * k)
     centre(cy + 410 * k, 'diku3d.com', garamond(96), INK)
-    small = mono(19 if a.fmt == '16x9' else 21)
-    lines = ['DikuMUD by Hans Henrik Stærfeldt, Katja Nyboe, Tom Madsen, Michael Seifert and Sebastian Hammer',
-             'Merc 2.1 by Furey, Hatchet and Kahn  ·  areas from the stock Merc 2.1 release  ·  non-commercial']
-    if a.fmt == '1x1':
-        lines = ['DikuMUD by Hans Henrik Stærfeldt, Katja Nyboe,', 'Tom Madsen, Michael Seifert and Sebastian Hammer',
-                 'Merc 2.1 by Furey, Hatchet and Kahn', 'areas from the stock Merc 2.1 release  ·  non-commercial']
+    small = mono(24 if a.fmt == "16x9" else 27)
+    lines = ['Built on DikuMUD (1990–91) and Merc 2.1  ·  full credits at diku3d.com']
     y = H - (len(lines) * 30 + 50) * (1 if a.fmt == '16x9' else 1.15)
     for line in lines:
         centre(y, line, small, (240, 227, 200, 200)); y += 30 * (1 if a.fmt == '16x9' else 1.15)

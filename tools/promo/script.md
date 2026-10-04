@@ -54,8 +54,7 @@ Times are in the 60 s cut (promo_60s_16x9.mp4 / promo_60s_1x1.mp4).
 ## End card (52.6–60 s)
 
 diku3d / THE MUD YOU KNOW, NOW IN 3D / FREE IN YOUR BROWSER · PLAY TOGETHER / diku3d.com
-DikuMUD by Hans Henrik Stærfeldt, Katja Nyboe, Tom Madsen, Michael Seifert and Sebastian Hammer.
-Merc 2.1 by Furey, Hatchet and Kahn · areas from the stock Merc 2.1 release · non-commercial.
+Small, at the bottom: Built on DikuMUD (1990–91) and Merc 2.1 · full credits at diku3d.com
 
 ## Teaser (teaser_15s_16x9.mp4)
 
