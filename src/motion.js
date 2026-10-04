@@ -123,6 +123,8 @@ const PASTIMES = {
   // a lamia crooks a finger at whoever comes near (her prose's `temper`).
   paw: { odds: 1, once: true, gap: [4, 10], rate: 4 },
   beckon: { odds: 0.4, once: true, gap: [5, 12], rate: 4 },
+  // A harpy screams at whatever comes near, wings flared (her prose's temper).
+  shriek: { odds: 0.3, once: true, gap: [4, 10], rate: 6 },
 };
 const PASTIME_NAMES = Object.keys(PASTIMES);
 /**

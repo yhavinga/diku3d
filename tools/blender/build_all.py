@@ -149,6 +149,8 @@ BUDGET = {
     # sculpted face and a head of hair: the drider's budget, which is the
     # same thing on eight legs.
     "beast_centaur": 12500, "beast_centaur_f": 12500, "beast_lamia": 12500,
+    # A woman to the hips on a bird's legs, and two ragged wings of quills.
+    "beast_harpy": 13000,
     # furniture.py. Tables, benches and stools are placed a dozen to a tavern
     # and stay under the prop cap. The bar, its gantry and the shelving carry
     # everything that stands on them -- bottles, jugs, loaves, books -- and are

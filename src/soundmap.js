@@ -117,6 +117,8 @@ export const CREATURES = [
   // A centaur is a man from the waist: only now and then the horse in him.
   { id: 'centaur', re: /\bcentaurs?\b/, idle: ['cr_horse'], rate: [0.92, 1.0], gain: 0.5, every: [40, 120], reach: 22, death: 'death_beast' },
   // A lion's growl in a lamia's throat; no meow.
+  // No harpy's cry was recorded: a bat's screech, slowed, until one is.
+  { id: 'harpy', re: /\bharp(y|ies)\b/, idle: ['cr_bat'], fight: ['cr_bat'], rate: [0.5, 0.6], gain: 0.6, every: [15, 45], reach: 18, death: 'death_small' },
   { id: 'lamia', re: /\blamias?\b/, idle: [], fight: ['cr_dog_growl'], rate: [0.72, 0.82], gain: 0.6, every: [20, 60], reach: 14, death: 'death_beast' },
   { id: 'horse', re: /\b(horse|pegasus|pony|mule|donkey|stallion|mare|unicorn)\b/, idle: ['cr_horse'], gain: 0.7, every: [15, 50], reach: 22, death: 'death_beast' },
   { id: 'deer', re: /\b(deer|stag|antelope|elk|moose|doe|fawn)\b/, idle: ['cr_deer'], gain: 0.55, every: [30, 90], reach: 30, death: 'death_beast' },

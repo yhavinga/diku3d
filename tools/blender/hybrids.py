@@ -750,7 +750,315 @@ def lamia():
         gait=dict(pastimes=["haunch", "loaf", "stretch"], extra=["beckon"], tail_pitch=-26.0)))
 
 
-SPECS = [centaur, centaur_f, lamia]
+# ============================================================ the harpy
+
+
+HARPY_HIP = 0.80
+HARPY_LEG = [(0.10, 0.0, 0.78), (0.125, 0.13, 0.50), (0.11, -0.07, 0.21), (0.11, 0.0, 0.035), (0.11, 0.13, 0.0)]
+
+
+def harpy():
+    """Dylan's harpies: 'the screaming, filthy harpy claws madly at your
+    face ... her entire body is caked in filth and grime ... her razor-sharp
+    talons flex', and the leader 'stretches her wings and you see insects
+    crawling around them. Her hair is matted and greasy.' A woman to the
+    hips -- face, long matted hair, arms -- on a vulture's feathered thighs
+    and bare scaled legs with hooked talons, and her arms are wings: long
+    feathers grow from the back of each arm and run out past the hand, so
+    folded they hang behind her like a ragged cloak and spread they are a
+    wing. A metre and a half to the crown.
+
+    Coat is the feathers, pale the skin, points the hair and the dark ends
+    of the flight feathers; the patch is grime, laid on the skin and the
+    feathers alike."""
+    hu = Human("f", 0.0, HARPY_HIP)
+    D = hu.D
+    feather = (0.0, 0.0)
+    legs = HARPY_LEG
+    body = hu.torso(blend_into="pelvis") + [
+        # Feathered hips and belly up to the navel, and the thighs in their
+        # 'trousers' of feathers down to the knee.
+        ell(P(0, -0.015, HARPY_HIP + 0.02), (0.17, 0.14, 0.13), "pelvis", blend=0.06, mask=feather),
+        ell(P(0, 0.02, HARPY_HIP + 0.1), (0.135, 0.1, 0.08), ("grad", "pelvis", "waist", P(0, 0, HARPY_HIP), P(0, 0, HARPY_HIP + 0.15)),
+            blend=0.05, mask=feather),
+    ]
+    for side, tag in ((1, ".L"), (-1, ".R")):
+        q = [V(B.apply_side(p, side)) for p in legs]
+        body += [ell(P(*q[0].lerp(q[1], 0.45)), (0.085, 0.1, 0.16), "thigh" + tag, blend=0.05, mask=feather),
+                 cone(P(*q[1]), P(*q[1].lerp(q[2], 0.55)), 0.07, 0.04, "shin" + tag, blend=0.04, mask=feather)]
+    bones = [("pelvis", P(0, 0, HARPY_HIP - 0.07), P(0, 0, HARPY_HIP + 0.03), None),
+             ("tail1", P(0, -0.08, HARPY_HIP - 0.02), P(0, -0.34, HARPY_HIP - 0.24), "pelvis")]
+    bones += hu.bones(parent="pelvis")
+    for side, tag in ((1, ".L"), (-1, ".R")):
+        q = [B.apply_side(p, side) for p in legs]
+        par = "pelvis"
+        for i, n in enumerate(B.LEG_BONES["hind"]):
+            bones.append((n + tag, P(*q[i]), P(*q[i + 1]), par))
+            par = n + tag
+
+    def masks(co, n, pale, dark):
+        return pale, dark
+
+    def grime(co):
+        return np.clip(B.patch_noise(co, cell=0.07, seed=53) * 1.2 - 0.1, 0, 1)
+
+    def wing(side):
+        """Feathers off the back of one arm, from the shoulder to past the
+        hand: a thin vane, broad at the elbow, the flight feathers fanned
+        at its end. Graded along the arm's bones so it folds with them."""
+        tag = ".L" if side > 0 else ".R"
+        a = hu.arm(side)
+        back = V((0, 1, 0))        # Blender +Y is behind her
+        tip = a[3] + (a[3] - a[2]).normalized() * 0.42
+        sq = (0.16, 1, 1)
+        g = lambda p, q, b1, b2: ("grad", b1, b2, p, q)
+        out = [
+            cone(a[0] + back * 0.06, a[1] + back * 0.2, 0.07, 0.13, g(a[0], a[1], "uarm" + tag, "farm" + tag), blend=0.03,
+                 squash=sq, mask=(0, 0.1)),
+            cone(a[1] + back * 0.2, a[2] + back * 0.24, 0.13, 0.13, g(a[1], a[2], "farm" + tag, "hand" + tag), blend=0.03,
+                 squash=sq, mask=(0, 0.25)),
+        ]
+        # The primaries: separate long feathers fanning out past the hand.
+        for i, k in enumerate((0.0, 0.25, 0.5, 0.75, 1.0)):
+            root = a[2].lerp(a[3], 0.4) + back * (0.03 + 0.17 * k)
+            end = tip + back * (0.06 + 0.36 * k) + V((side * 0.01 * i, 0, 0.1 * k))
+            out.append(cone(root, end, 0.05 - 0.005 * i, 0.012, "hand" + tag, blend=0.012, squash=sq,
+                            mask=(0, 0.75), group="p%d" % i))
+        return out
+
+    def parts(body_solids):
+        out = []
+        for side in (1, -1):
+            out.append(B.sdf_part(wing(side), 0.006, 900, "wing", "feather", smooth=1, patch_fn=grime))
+        out.append(B.sdf_part(hu.arms(), 0.006, 1100, "arms", "skin", smooth=1, patch_fn=grime))
+        out += hu.head("matted")
+        # The tail: a short fan of dark feathers.
+        tail = [cone(P(x, -0.08, HARPY_HIP - 0.02), P(x * 2.2, -0.36, HARPY_HIP - 0.22), 0.05, 0.035, "tail1", blend=0.02,
+                     squash=(1, 1, 0.25), mask=(0, 0.5), group="f%d" % i) for i, x in enumerate((-0.05, 0.0, 0.05))]
+        out.append(B.sdf_part(tail, 0.005, 400, "tail", "feather", smooth=1, patch_fn=grime))
+        # Bare scaled legs and feet: three toes forward and one back, every
+        # one ending in a hooked black talon.
+        for side, tag in ((1, ".L"), (-1, ".R")):
+            q = [V(B.apply_side(p, side)) for p in legs]
+            knee, ankle, foot = q[1], q[2], q[3]
+            r = 0.024
+            sol = [cone(P(*knee.lerp(ankle, 0.5)), P(*ankle), r * 1.2, r, "shin" + tag, blend=r, group="l"),
+                   cone(P(*ankle), P(*foot), r, r * 0.85, "hock" + tag, blend=r, group="l")]
+            claws = []
+            for k_, (ang, ln) in enumerate(((0.0, 0.15), (32.0, 0.12), (-32.0, 0.12), (180.0, 0.08))):
+                a_ = math.radians(ang) * side
+                end = V((foot.x + math.sin(a_) * ln, foot.y + math.cos(a_) * ln, 0.012))
+                bone = "htoe" + tag
+                sol.append(cone(P(*foot), P(*end), r * 0.75, r * 0.45, bone, blend=r * 0.5, group="t%d" % k_))
+                d = (end - foot).normalized()
+                claws.append(cone(P(*end), P(*(end + d * 0.035 + V((0, 0, -0.012)))), r * 0.42, 0.002, bone, blend=0.002,
+                                  group="c%d" % k_))
+            out.append(B.solid_part(sol, 0.004, 700, "leg", "horn", (0.42, 0.36, 0.2)))
+            out.append(B.solid_part(claws, 0.0015, 220, "talons", "horn", (0.035, 0.03, 0.03), smooth=0))
+        return out
+
+    return dict(name="beast_harpy", archetype="harpy", body=body, masks=masks, parts=parts, patch=grime,
+                h=0.008, tris=3600, mat="feather", bones=bones, legtop=HARPY_HIP - 0.25, human=hu,
+                clips=harpy_clips, split="feather",
+                gait=dict(walk_stride=0.62, walk_frames=24, run_stride=1.3, run_frames=18))
+
+
+def harpy_clips(arm, spec):
+    """idle (hunched, the head snapping from one thing to the next like a
+    bird's), walk and run in two-footed hops, attack (a leap with the
+    talons thrown forward and the wings beating), hit, death, and the
+    pastimes: perch, preen, flap and the shriek."""
+    g = spec["gait"]
+    poser = B.Poser(arm, M.BIPED_LEGS)
+    rest = B.leg_rest(poser)
+    clip = B.Clip(poser)
+    hip = poser.rest["pelvis"].translation.z
+    report = {}
+
+    def wings(fk, spread=0.0, beat=0.0, fold=1.0):
+        """Folded: arms hanging back and bent, the feathers a cloak behind.
+        Spread: out level, elbows straight; `beat` raises (+) or lowers."""
+        for s_ in (1, -1):
+            arm_pose(fk, s_, pitch=lerp(14, -10, spread), out=lerp(6, 84 + beat, spread),
+                     elbow=lerp(34 * fold, 6, spread), twist=lerp(0, -20, spread), wrist=0)
+
+    def trunk(fk, hunch=14.0, turn=0.0, nod=0.0, look=0.0, side=0.0):
+        fk["waist"] = (hunch * 0.5, side * 0.5, turn * 0.5)
+        fk["torso"] = (hunch * 0.5, side * 0.5, turn * 0.5)
+        fk["neck"] = (-hunch * 0.4 + nod * 0.4, 0, look * 0.4)
+        fk["head"] = (-hunch * 0.4 + nod * 0.6, 0, look * 0.6)
+
+    def snap_look(t, amp=35.0):
+        return hold(t, [(0.1, amp), (0.28, -amp * 0.6), (0.46, amp * 0.3), (0.63, -amp), (0.82, 0.0)], snap=0.03)
+
+    crouch_meta = 12.0
+
+    def idle(t):
+        breath = wave(3 * t)
+        fk = {"pelvis": (0, 0, 1.5 * wave(t)), "tail1": (6 * wave(2 * t), 0, 0)}
+        trunk(fk, hunch=16 + breath, look=snap_look(t), nod=4 * wave(2 * t, 0.3))
+        wings(fk, spread=0.04 + 0.03 * breath)
+        ik = {leg: B.planted(rest, leg, meta=crouch_meta) for leg in rest}
+        return dict(fk=fk, loc=V((0, 0, -hip * 0.05 + hip * 0.004 * breath)), ik=ik)
+    clip.run("idle", 120, idle, step=2)
+
+    def hop(t, S, flaps):
+        """Two hops a cycle. On the ground the feet stand still on it --
+        sliding back under the body at the travel speed -- while it crouches
+        and springs; in the air they swing forward for the landing."""
+        p = (2 * t) % 1.0
+        ground = 0.5
+        a = S / 8.0                  # each stance slides the feet S/4 back
+        if p < ground:
+            x = p / ground
+            fwd = a - 2 * a * x
+            lift = 0.0
+            crouch = math.sin(math.pi * x)
+            feet = 0.0
+        else:
+            x = (p - ground) / (1 - ground)
+            fwd = -a + 2 * a * ease(x)
+            lift = 4 * x * (1 - x) * S * 0.28
+            crouch = 0.0
+            feet = lift * 0.8
+        ik = {leg: B.planted(rest, leg, fwd=fwd, up=feet, meta=crouch_meta + 25 * crouch - 10 * (feet > 0),
+                             toe=30 * (feet > 0)) for leg in rest}
+        fk = {"tail1": (-14 * lift / max(1e-6, S * 0.28), 0, 0)}
+        trunk(fk, hunch=18 + 10 * crouch, nod=-6 * math.sin(2 * math.pi * p))
+        beat = 40 * math.sin(2 * math.pi * p) if flaps else 0.0
+        wings(fk, spread=(0.55 + 0.25 * math.sin(math.pi * p)) if flaps else 0.12 + 0.1 * crouch, beat=beat)
+        return dict(fk=fk, loc=V((0, 0, lift - hip * (0.05 + 0.12 * crouch))), ik=ik)
+    S, N = g["walk_stride"], g["walk_frames"]
+    track = {leg: poser.legs[leg]["chain"][3] for leg in poser.legs}
+    tracks = clip.run("walk", N, lambda t: hop(t, S, False), track=track)
+    S2, N2 = g["run_stride"], g["run_frames"]
+    clip.run("run", N2, lambda t: hop(t, S2, True))
+
+    def hover_fly(t):
+        beat = math.sin(2 * math.pi * t)
+        fk = {"tail1": (-20, 0, 0)}
+        trunk(fk, hunch=-6, nod=6)
+        wings(fk, spread=1.0, beat=45 * beat)
+        ik = {leg: B.planted(rest, leg, fwd=0.12, up=0.35 + 0.05 * beat, meta=60, toe=80) for leg in rest}
+        return dict(fk=fk, loc=V((0, 0, 0.45 + 0.06 * math.sin(2 * math.pi * t - 0.8))), ik=ik)
+    clip.run("fly", 14, hover_fly)
+
+    HIT = 0.5
+
+    def attack(t):
+        # Up off the ground on a beat of the wings, the talons swung forward
+        # at the face, raking at the hit frame, and down again.
+        up = ease(t / 0.35) * (1 - ease((t - 0.62) / 0.38))
+        rake = math.exp(-((t - HIT) * 9) ** 2)
+        beat = math.sin(2 * math.pi * 2 * t)
+        fk = {"tail1": (-25 * up, 0, 0)}
+        trunk(fk, hunch=16 - 30 * up, nod=10 * up)
+        wings(fk, spread=0.15 + 0.85 * up, beat=50 * beat * up)
+        ik = {leg: B.planted(rest, leg, fwd=0.32 * up + 0.12 * rake, up=0.42 * up + 0.08 * rake, meta=crouch_meta + 55 * up,
+                             toe=-30 * rake + 20 * up) for leg in rest}
+        return dict(fk=fk, loc=V((0, -0.25 * up, 0.5 * up - hip * 0.05 * (1 - up))), ik=ik)
+    clip.run("attack", 24, attack)
+    report["hit"] = HIT
+
+    def hit(t):
+        k = math.sin(math.pi * min(1.0, t / 0.3)) if t < 0.3 else (1 - ease((t - 0.3) / 0.7)) * 0.8
+        fk = {"tail1": (10 * k, 0, 0)}
+        trunk(fk, hunch=16 - 22 * k, nod=-14 * k, look=18 * k)
+        wings(fk, spread=0.5 * k, beat=-10 * k)
+        ik = {leg: B.planted(rest, leg, meta=crouch_meta) for leg in rest}
+        return dict(fk=fk, loc=V((0, hip * 0.1 * k, -hip * 0.05)), ik=ik)
+    clip.run("hit", 12, hit)
+
+    def death(t):
+        buckle = ease(t / 0.3)
+        fall = ease((t - 0.15) / 0.5)
+        fk = {"tail1": (-10 * fall, 0, 0)}
+        trunk(fk, hunch=16 - 30 * fall, nod=-20 * fall, look=30 * fall)
+        wings(fk, spread=0.7 * fall, beat=-20 * fall)
+        for tag in (".L", ".R"):
+            fk["thigh" + tag] = (-40 * buckle, 0, 0)
+            fk["shin" + tag] = (70 * buckle, 0, 0)
+            fk["hock" + tag] = (-50, 0, 0)
+            fk["htoe" + tag] = (60 * fall, 0, 0)
+        rot = mathutils.Quaternion(V((1, 0, 0)), math.radians(-85 * fall))
+        loc = V((0, 0, lerp(0.0, -(hip - 0.16), fall) - hip * 0.25 * buckle * (1 - fall)))
+        return dict(fk=fk, loc=loc, rot=rot, ik={leg: B.planted(rest, leg) for leg in rest}, limp=ease((t - 0.1) / 0.3))
+    clip.run("death", 40, death)
+
+    # -- perch: down on her heels, wings wrapped round, head low and still,
+    # the eyes going.
+    def perch(t):
+        fk = {"tail1": (8, 0, 0)}
+        trunk(fk, hunch=34, nod=-10 + 4 * wave(t, 0.2), look=snap_look(t, 20.0) * 0.6)
+        for s_ in (1, -1):
+            arm_pose(fk, s_, pitch=-8, out=-2, elbow=60, twist=10, wrist=0)
+        ik = {leg: B.planted(rest, leg, fwd=-0.02, meta=55) for leg in rest}
+        return dict(fk=fk, loc=V((0, 0.03, -hip * 0.3)), ik=ik)
+    clip.run("perch", 120, perch, step=2)
+
+    # -- preen: the head turned down into one wing, picking at it.
+    def preen(t):
+        k = ease(t / 0.15) * (1 - ease((t - 0.85) / 0.15))
+        pick = max(0.0, wave(5 * t)) * k
+        fk = {"tail1": (4 * k, 0, 0)}
+        trunk(fk, hunch=16 + 10 * k, turn=-14 * k, look=-55 * k, nod=24 * k + 6 * pick, side=-6 * k)
+        wings(fk, spread=0.04)
+        arm_pose(fk, 1, pitch=lerp(14, -30, k), out=lerp(6, 42, k), elbow=lerp(34, 50, k), twist=-30 * k)
+        ik = {leg: B.planted(rest, leg, meta=crouch_meta) for leg in rest}
+        return dict(fk=fk, loc=V((0, 0, -hip * 0.05)), ik=ik)
+    clip.run("preen", 90, preen)
+
+    # -- flap: wings thrown open and beaten, a hop up off the ground.
+    def flap(t):
+        k = ease(t / 0.12) * (1 - ease((t - 0.82) / 0.18))
+        beat = math.sin(2 * math.pi * 4 * t)
+        fk = {"tail1": (-14 * k, 0, 0)}
+        trunk(fk, hunch=16 - 10 * k, nod=-6 * k)
+        wings(fk, spread=k, beat=40 * beat * k)
+        hop_ = max(0.0, beat) * 0.08 * k
+        ik = {leg: B.planted(rest, leg, up=hop_, meta=crouch_meta) for leg in rest}
+        return dict(fk=fk, loc=V((0, 0, hop_ - hip * 0.05)), ik=ik)
+    clip.run("flap", 45, flap)
+
+    # -- shriek: what the 'screaming' harpies do at whoever comes near --
+    # crouched, wings flared high, the head thrust out at you.
+    def shriek(t):
+        k = ease(t / 0.1) * (1 - ease((t - 0.8) / 0.2))
+        cry = ease((t - 0.15) / 0.06) * (1 - ease((t - 0.7) / 0.1))
+        fk = {"tail1": (-18 * k, 0, 0)}
+        trunk(fk, hunch=16 + 14 * k, nod=-30 * k + 6 * wave(7 * t) * cry)
+        fk["neck"] = (fk["neck"][0] + 6 * cry, 0, 0)
+        wings(fk, spread=0.85 * k, beat=30 * k + 8 * wave(6 * t) * cry)
+        ik = {leg: B.planted(rest, leg, meta=crouch_meta + 20 * k) for leg in rest}
+        return dict(fk=fk, loc=V((0, -0.08 * cry, -hip * (0.05 + 0.08 * k))), ik=ik)
+    clip.run("shriek", 60, shriek)
+
+    report["clips"] = clip.report
+    report["stride"] = {"walk": S, "run": S2}
+    report["walk"] = hop_slip(tracks, S, N)
+    report["overreach"] = clip.reach
+    return report
+
+
+def hop_slip(tracks, stride, frames):
+    """Largest slide of a planted toe over the ground in a two-footed hop:
+    the first half of each hop is stance."""
+    worst = 0.0
+    for leg, pts in tracks.items():
+        anchor = None
+        for i, p in enumerate(pts):
+            t = i / frames
+            on = ((2 * t) % 1.0) < 0.5 - 1e-6
+            world = V((p.x, p.y - stride * t, p.z))
+            if on:
+                anchor = anchor or world
+                worst = max(worst, (world - anchor).length)
+            else:
+                anchor = None
+    return worst
+
+
+SPECS = [centaur, centaur_f, lamia, harpy]
 
 
 def build_one(spec, export=True):
@@ -759,7 +1067,7 @@ def build_one(spec, export=True):
     body = B.sdf_part(spec["body"], spec["h"], spec["tris"], "body", spec.get("mat", "fur"),
                       smooth=spec.get("smooth", 2), mask_fn=spec.get("masks"), patch_fn=spec.get("patch"))
     parts = [body]
-    if spec.get("archetype") == "taur":
+    if spec.get("archetype") == "taur" or spec.get("split"):
         fur, skin = split_skin(body)
         parts = [fur, skin]
     parts += spec["parts"](spec["body"])

@@ -1262,6 +1262,10 @@ const BEASTS = [
   { test: /\bcentaurs?\b/, asset: 'beast_centaur', scale: 1.0, coats: 'centaur', hide: ['beard'], box: [1.2, 2.0, 'quad', 0x6a4226] },
   // Thalos's: 'the upper torso of a beautiful woman, but the lower body of
   // a four-legged beast' -- a lioness's, as the bestiary has it.
+  // Dylan's harpies, 'caked in filth and grime', hair 'matted and greasy',
+  // and screaming: they shriek at whoever comes near.
+  { test: /\bharp(y|ies)\b.*\bleader\b|\bleader\b.*\bharp(y|ies)\b/, asset: 'beast_harpy', scale: 1.14, coat: 0x40362c, pale: 0x8e7a64, points: 0x1a1714, patch: 0x2e261c, cover: 0.42, temper: { alarm: ['shriek', 6.5] }, box: [0.6, 1.6, 'quad', 0x40362c] },
+  { test: /\bharp(y|ies)\b/, asset: 'beast_harpy', scale: 1.0, coat: 0x4a4034, pale: 0x9a8670, points: 0x1e1a16, patch: 0x342a20, cover: 0.45, temper: { alarm: ['shriek', 6.0] }, box: [0.5, 1.5, 'quad', 0x4a4034] },
   { test: /\blamias?\b/, asset: 'beast_lamia', scale: 1.1, coat: 0xa8834e, pale: 0xd2a684, points: 0x2a1c14, box: [0.9, 1.9, 'quad', 0xa8834e] },
   // --- the monsters (tools/blender/monsters.py). First, because their names
   // borrow the animals' words: a wolf spider and a bird spider are spiders.
