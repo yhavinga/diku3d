@@ -17,6 +17,21 @@ import {
 } from './handler.js';
 import { SOCIALS } from './socials.js';
 
+/**
+ * The credits, as license.doc requires them: the five creators of DikuMud,
+ * their addresses as the license gives them, and that they created it.
+ */
+const CREDITS = [
+  'DikuMud was created by Sebastian Hammer, Michael Seifert, Hans Henrik Staerfeldt, Tom Madsen and Katja Nyboe, at DIKU, Copenhagen, 1990-91.',
+  '  Sebastian Hammer, Prss. Maries Alle 15, 1, 1908 Frb. C., Denmark (quinn@freja.diku.dk)',
+  '  Michael Seifert, Nr. Soeg. 37C, 1, doer 3, 1370 Copenhagen K., Denmark (seifert@freja.diku.dk)',
+  '  Hans Henrik Staerfeldt, Langsoe 19, 3500 Vaerloese, Denmark (bombman@freja.diku.dk)',
+  '  Tom Madsen, Roede Mellemvej 94B, 64, 2300 Copenhagen S., Denmark (noop@freja.diku.dk)',
+  '  Katja Nyboe, Kildegaardsvej 2, 2900 Hellerup, Denmark (katz@freja.diku.dk)',
+  '  Merc Diku Mud 2.1 by Furey, Hatchet and Kahn (Michael Chastain, Michael Quan, Mitchell Tse), 1993.',
+  '  diku3d is the same mud in three dimensions; it is free, and may never be run for profit.',
+].join('\n');
+
 const WHERE_NAME = [
   '<used as light>     ', '<worn on finger>    ', '<worn on finger>    ', '<worn around neck>  ',
   '<worn around neck>  ', '<worn on body>      ', '<worn on head>      ', '<worn on legs>      ',
@@ -739,7 +754,9 @@ export function installInterp(k) {
     ['bug', notHere('Ok.  Thanks.'), P.DEAD],
     ['commands', () => { for (let i = 0; i < commands.length; i += 6) send(commands.slice(i, i + 6).map((c) => c[0].padEnd(12)).join('')); }, P.DEAD],
     ['compare', doCompare, P.RESTING], ['consider', doConsider, P.RESTING],
-    ['credits', notHere('Diku Mud by Hans Henrik Staerfeldt, Katja Nyboe, Tom Madsen, Michael Seifert and Sebastian Hammer. Merc 2.1 by Furey, Hatchet and Kahn.'), P.DEAD],
+    // license.doc: "the credits command shall always contain our name,
+    // addresses, and a notice which states we have created DikuMud."
+    ['credits', notHere(CREDITS), P.DEAD],
     ['equipment', doEquipment, P.DEAD], ['examine', (arg) => {
       const [arg1] = oneArgument(arg);
       if (!arg1) return send('Examine what?');
