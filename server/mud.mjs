@@ -425,7 +425,14 @@ export async function startMud({
     }
     // Just placed (enter, teleport, recall): the next report is the first.
     if (s.posAt === null) return vnum === from || adjacent(pc.ch, from, vnum) ? { room: vnum } : { why: `#${vnum} is not #${from}` };
-    if (vnum !== from) return adjacent(pc.ch, from, vnum) ? { room: vnum } : { why: `no open way from #${from} to #${vnum}` };
+    if (vnum !== from && adjacent(pc.ch, from, vnum)) return { room: vnum };
+    if (vnum !== from) {
+      // A street crossing joins rooms the mud keeps apart; the page lets you
+      // step across there, so the server does too -- only from or onto the
+      // shared cell itself, and still under the speed check below.
+      const was = { x: pc.position.x, y: pc.position.y - 1.72, z: pc.position.z };
+      if (!w.crossingStep(was, { x, y: feet, z }, from, vnum)) return { why: `no open way from #${from} to #${vnum}` };
+    }
     const dt = Math.max(0.05, (now - s.posAt) / 1000);
     const d = Math.hypot(x - pc.position.x, z - pc.position.z);
     if (d > MAX_SPEED * dt + SPEED_SLACK) return { why: `${d.toFixed(1)} m in ${dt.toFixed(2)} s` };

@@ -131,6 +131,27 @@ export function bootWorld(root, { log = () => {} } = {}) {
     }
     return { exact, near, candidates };
   };
+  /**
+   * Whether a step from one server point to the next crosses where a street
+   * of room `a` and a street of room `b` share a cell. The layout lets two
+   * streets share a cell even when the mud joins none of their rooms, and
+   * the page lets you walk from one onto the other there; until such
+   * crossings become bridges (PLAN_BRIDGES) the server accepts that step --
+   * only from or onto the shared cell, into a cell beside it, same level.
+   */
+  const crossingStep = (p, q, a, b) => {
+    const zone = zoneAtX(p.x);
+    if (!zone || zoneAtX(q.x) !== zone) return false;
+    const cell = (pt) => ({ level: Math.round(pt.y / LEVEL_H), x: Math.round((pt.x - zone.offset) / CELL), z: Math.round(pt.z / CELL) });
+    const cp = cell(p); const cq = cell(q);
+    if (cp.level !== cq.level || Math.max(Math.abs(cp.x - cq.x), Math.abs(cp.z - cq.z)) > 1) return false;
+    const touches = (link, v) => link.from.vnum === v || (link.to && link.to.vnum === v);
+    const joins = (c) => {
+      const streets = streetsAt(zone).get(`${c.level},${c.x},${c.z}`) || [];
+      return streets.some((l) => touches(l, a)) && streets.some((l) => touches(l, b));
+    };
+    return joins(cp) || joins(cq);
+  };
   /** Per zone, every street through each cell: "level,x,z" -> [link]. */
   const streetsAt = (zone) => {
     if (!zone.streets) {
@@ -147,7 +168,7 @@ export function bootWorld(root, { log = () => {} } = {}) {
   };
 
   return {
-    world, plan, zones, byId, built, zoneOfVnum, zoneAtX, lifts, liftAt, placeAt,
+    world, plan, zones, byId, built, zoneOfVnum, zoneAtX, lifts, liftAt, placeAt, crossingStep,
     layout: { links, cells: new Map() },
     nav: compositeNav({ zones, zoneOfVnum, zoneAtX, navOf }),
     /** A client's zone-local point into the server's frame. */
