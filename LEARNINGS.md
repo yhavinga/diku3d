@@ -6,6 +6,29 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-04 — wave 14: hybrids, and streets that bend
+
+- **Hybrids (wave14-hybrids):** a shared taur rig (centaurs ×14, lamias ×48),
+  harpies ×37 (hopping gait; feathered to the collarbone — a bare female
+  torso read as uncanny and was sent back), minotaurs ×30 as a fourth people
+  file (`minotaur.glb`), golems ×16 with a BEASTS `surface` per prose
+  material, goats, upright fire newts, centipedes. The bird `fly` clip beat
+  fore and aft: spread wings need yaw-pitch-roll order. +11.3 MB. Extra clips
+  in a people file need both `animalLife` and `buildPerson` to know them.
+- **Curves (wave14-curves):** houses are prisms over four corners following
+  a street-face function, party walls on the curve's normal (no sky wedges),
+  UVs in each face's own plane, colliders as thin axis-aligned strips. Room
+  middles stay pinned ±3.4 m (lamp, prose props, arrival). Lit windows take
+  a `rot`. Turning cells: median sightline 4.7 → 3.6 m.
+- **Rooms dressed by their own words:** `den` as a substring matched the
+  area name "Miden'nir" (pickMaterials tests name + area) and gave 108 rooms
+  the cave look; plains/tree-lined-lane prose now overrides a CITY sector,
+  and a building's name builds a room. Cloud rooms and Miden'nir's mountain
+  tunnels are still wrong.
+- **Process:** a hung headless Chrome stalls an agent for 600 s; wrap every
+  headless and Blender run in `timeout`. A git push of large assets once
+  hung for 20 min and went through at once on retry.
+
 ## 2026-10-03 — wave 13: the town closes in, and the world beyond the gates
 
 - **Layout (wave13-planar, Fable; wave13-reach):** `tools/planar-check.mjs`

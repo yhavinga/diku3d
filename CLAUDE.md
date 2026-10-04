@@ -466,6 +466,13 @@ choose.
 - **Sound needs a gesture, and "enter" is the wrong one.** Headless and
   devtools Chrome autoplay, so a silent title is only reproducible in a
   normal browser.
+- **A prose word is matched against name + area together** in
+  `pickMaterials`: `den` hit "Miden'nir" and turned 108 rooms into caves.
+  Whole words only, and run the vocabulary over all 45 areas.
+- **Room house rows are built late** (`rowJobs`, built by `buildLanes`):
+  anything reading a room cell's colliders before that will not see them.
+- **Wrap every headless and Blender run in `timeout`** (GNU timeout in
+  /opt/homebrew/bin); a hung headless Chrome never returns.
 - Figures are skinned meshes: one draw each, no instancing, and a second pass if
   they cast shadows. They are kept out of the shadow map and culled past 46 m.
 - Large soft sprites are the most expensive thing per pixel in the scene. The
