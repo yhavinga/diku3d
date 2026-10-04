@@ -144,9 +144,19 @@ export async function startMud({
   const address = wss.address();
   log(`listening on ws://${host}:${address.port}/ws`);
 
+  // Behind nginx and Cloudflare every socket comes from loopback; the
+  // player's own address is in the header nginx passes on. Only trusted
+  // from loopback, or anyone could claim any site past a ban.
+  const siteOf = (request) => {
+    const peer = request.socket.remoteAddress || '?';
+    const loopback = peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1';
+    const told = loopback && (request.headers['x-real-ip'] || '').trim();
+    return told || peer;
+  };
+
   wss.on('connection', (ws, request) => {
     const s = {
-      ws, open: true, host: request.socket.remoteAddress || '?', state: 'name', pc: null, record: null,
+      ws, open: true, host: siteOf(request), state: 'name', pc: null, record: null,
       out: [], zone: null, seq: 0, posAt: null, played: 0, saveIn: AUTOSAVE_SECONDS, linkdead: null, logged: false,
       sent: { self: '', mobs: new Map(), ground: new Map(), roster: new Map(), weather: '' }, pending: null,
     };
