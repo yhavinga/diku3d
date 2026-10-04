@@ -24,6 +24,7 @@ import { PLR, AFF, nested } from '../src/rules/handler.js';
 import { EX_CLOSED } from '../src/are.js';
 import { bootWorld } from './world.mjs';
 import { createNotes, createSite } from './store.mjs';
+import { createDash } from './dash.mjs';
 import {
   createAccounts, hashPassword, checkPassword, checkParseName, properName, EXTRA,
 } from './accounts.mjs';
@@ -61,7 +62,7 @@ export async function startMud({
   const sessions = new Set();
   const byPc = new Map();
   let nextPcId = 1;
-  const stats = { refused: 0, events: 0, routed: 0, dropped: 0, msgsOut: 0, bytesOut: 0, msgsIn: 0, ticks: 0, tickMs: 0 };
+  const stats = { refused: 0, events: 0, routed: 0, dropped: 0, msgsOut: 0, bytesOut: 0, msgsIn: 0, bytesIn: 0, dashBytes: 0, ticks: 0, tickMs: 0, tickMax: 0 };
 
   // -------------------------------------------------------------- the game --
   const hooks = {
@@ -72,12 +73,18 @@ export async function startMud({
     shutdown: (ch, text) => shutdown(text),
     disconnect: (ch, name) => disconnect(ch, name),
     deny: (ch, name) => deny(ch, name),
-    wizlock: (ch) => { site.wizlock = !site.wizlock; say(ch, site.wizlock ? 'Game wizlocked.' : 'Game un-wizlocked.'); },
+    wizlock: (ch) => {
+      site.wizlock = !site.wizlock;
+      say(ch, site.wizlock ? 'Game wizlocked.' : 'Game un-wizlocked.');
+      dash.record('site', `${ch.name} ${site.wizlock ? 'wizlocked the game' : 'lifted the wizlock'}`, { who: ch.name, lvl: 'warn' });
+    },
     ban: (ch, arg) => ban(ch, arg),
     allow: (ch, arg) => allow(ch, arg),
     snoop: (ch, name) => snoop(ch, name),
     notes,
     log: (ch, name) => toggleLog(ch, name),
+    // The page opens the dashboard on this; what it shows is asked for apart (dash.mjs).
+    dashboard: (ch) => game.tell(ch, { kind: 'dashboard' }),
   };
   const game = createGame({
     world: w.world, layout: w.layout, built: w.built, nav: w.nav, seed,
@@ -101,6 +108,7 @@ export async function startMud({
     else { pc.position.x = x; pc.position.y = y + 1.72; pc.position.z = z; pc.ch.roomVnum = vnum; }
   };
   game.listen(route);
+  const dash = createDash({ game, w, byPc, stats, site, send, started, run: runFor });
   game.listen((event) => {
     // advance_level saves the character (save.c); so does a level here.
     if (event.kind === 'level' && event.pc != null) { const s = byPc.get(event.pc); if (s) saveSession(s); }
@@ -135,7 +143,10 @@ export async function startMud({
       if ((s.saveIn -= dt) <= 0) { s.saveIn = AUTOSAVE_SECONDS; saveSession(s); }
     }
     if (fast) sendWeather();
-    stats.tickMs += performance.now() - t0;
+    const ms = performance.now() - t0;
+    stats.tickMs += ms;
+    stats.tickMax = Math.max(stats.tickMax, ms);
+    dash.tick(fast, ms, Math.round(1000 / tickMs));
   }, tickMs);
 
   // ------------------------------------------------------------- sockets --
@@ -163,21 +174,25 @@ export async function startMud({
     // comm.c: new_descriptor -- a banned site hears why, and nothing else.
     if (site.banned(s.host)) {
       log(`${s.host}: banned site refused`);
+      dash.record('site', `${s.host}: a banned site was refused`, { lvl: 'warn' });
       send(s, { t: 'bye', why: 'Your site has been banned from this Mud.' });
       s.open = false;
       ws.close();
       return;
     }
     sessions.add(s);
-    send(s, { t: 'hello', v: PROTOCOL, world: fingerprint, motd: 'Welcome to Merc Diku Mud.  May your visit here be ... Mercenary.' });
+    // `features`: what this server offers past the protocol; a page asks only for what is listed.
+    send(s, { t: 'hello', v: PROTOCOL, features: ['dash'], world: fingerprint, motd: 'Welcome to Merc Diku Mud.  May your visit here be ... Mercenary.' });
     ws.on('message', (data) => {
       stats.msgsIn += 1;
+      stats.bytesIn += data.length;
       let msg;
       try { msg = JSON.parse(data.toString()); } catch (error) { return sendError(s, `bad message: ${error.message}`); }
       // Not swallowed: a command that throws is logged with its stack and the
       // player is told where, and the mud goes on for everyone else.
       onMessage(s, msg).catch((error) => {
         log(`error handling ${msg && msg.t} from ${s.pc ? s.pc.ch.name : s.host}: ${error.stack}`);
+        dash.record('server', `error handling ${msg && msg.t} from ${s.pc ? s.pc.ch.name : s.host}: ${error.message} (${(error.stack || '').split('\n')[1]?.trim() || 'no stack'})`, { lvl: 'error' });
         sendError(s, `The mud stumbles: ${error.message} (${(error.stack || '').split('\n')[1]?.trim() || 'no stack'})`);
       }).finally(reap);
     });
@@ -190,7 +205,9 @@ export async function startMud({
         s.linkdead = LINKDEAD_SECONDS;
         saveSession(s);
         log(`${ch.name}@${s.host}: link lost`);
+        dash.record('conn', `${ch.name}@${s.host} lost the link`, { who: ch.name, sub: 'linkdead' });
       } else if (!s.pc) sessions.delete(s);
+      dash.forget(s);
     });
   });
 
@@ -218,6 +235,7 @@ export async function startMud({
       case 'pos': return position(s, msg);
       case 'cmd': return command(s, String(msg.line || '').slice(0, 400));
       case 'op': return operation(s, msg);
+      case 'dash': return dash.onMessage(s, msg);
       default: return sendError(s, `unknown message ${JSON.stringify(msg.t)}`);
     }
   }
@@ -239,6 +257,7 @@ export async function startMud({
     if (record.char.act & PLR_MORE.DENY) return send(s, { t: 'login', ok: false, why: 'You are denied access.' });
     if (!(await checkPassword(String(password), record.password))) {
       log(`${name}@${s.host}: wrong password`);
+      dash.record('conn', `${name}@${s.host}: wrong password`, { who: name, lvl: 'warn', sub: 'refused' });
       return send(s, { t: 'login', ok: false, why: 'Wrong password.' });
     }
     // IS_HERO: by trust, which is what lets an immortal past a wizlock.
@@ -283,6 +302,8 @@ export async function startMud({
       // Snooping, either way, follows the descriptor over.
       s.snoopBy = old.snoopBy || null;
       for (const o of sessions) if (o.snoopBy === old) o.snoopBy = s;
+      dash.forget(old);
+      s.since = old.since; s.lastInput = old.lastInput; s.lastMoved = old.lastMoved;
       old.pc = null;
       sessions.delete(old);
       byPc.set(s.pc.id, s);
@@ -290,6 +311,7 @@ export async function startMud({
       const ch = s.pc.ch;
       game.roomcast(ch.roomVnum, { kind: 'room', text: `${ch.name} has reconnected.` }, [ch]);
       log(`${name}@${s.host} reconnected.`);
+      dash.record('conn', `${name}@${s.host} reconnected`, { who: name, sub: 'reconnect' });
       welcome(s, 'Reconnecting.');
       return;
     }
@@ -309,6 +331,9 @@ export async function startMud({
     s.linkdead = null;
     byPc.set(pc.id, s);
     log(`${name}@${s.host} has ${fresh ? 'entered the game as a new player' : 'connected'}.`);
+    s.since = Date.now();
+    dash.record('conn', `${name}@${s.host} ${fresh ? 'entered the game as a new player' : 'logged in'} (L${ch.level} ${CLASS_TABLE[ch.class]?.who || '?'}) in #${vnum}`,
+      { who: name, vnum, sub: fresh ? 'new' : 'login' });
     game.roomcast(vnum, { kind: 'room', text: `${name} has entered the game.` }, [ch]);
     welcome(s, '\nWelcome to Merc Diku Mud.  May your visit here be ... Mercenary.');
   }
@@ -362,9 +387,11 @@ export async function startMud({
       s.refused = (s.refused || 0) + 1;
       if (s.refused <= 3 || s.refused % 50 === 0) {
         log(`${pc.ch.name}@${s.host}: position refused (${why}) at ${zone} ${x.toFixed(1)},${y.toFixed(1)},${z.toFixed(1)}, ${s.refused} so far`);
+        dash.record('server', `${pc.ch.name}: position refused (${why}), ${s.refused} so far`, { who: pc.ch.name, lvl: 'warn' });
       }
       return resync(s, why);
     }
+    if (Math.abs(sx - pc.position.x) + Math.abs(z - pc.position.z) > 0.05 || Math.abs(yaw - (s.yaw || 0)) > 0.02) s.lastMoved = Date.now();
     pc.position.x = sx; pc.position.y = sy; pc.position.z = z;
     pc.facing.x = -Math.sin(yaw); pc.facing.z = -Math.cos(yaw);
     s.zone = zone;
@@ -429,8 +456,18 @@ export async function startMud({
 
   function command(s, line) {
     const pc = s.pc;
+    s.lastInput = Date.now();
     if (pc.ch.act & PLR_MORE.LOG || s.logged) log(`Log ${pc.ch.name}: ${line}`);
-    game.withPlayer(pc, () => game.interpret(line));
+    const name = game.withPlayer(pc, () => game.interpret(line));
+    dash.command(s, line, name);
+  }
+
+  /** A line run as `s`'s own command, and what it told them: the dashboard's actions. */
+  function runFor(s, line) {
+    const lines = [];
+    const off = game.listen((event) => { if (event.pc === s.pc.id && event.text) lines.push(event.text); });
+    try { command(s, line); } finally { off(); }
+    return lines;
   }
 
   /**
@@ -449,6 +486,7 @@ export async function startMud({
   function operation(s, { op, a = [] }) {
     if (!OPS.has(op) || typeof game[op] !== 'function') return sendError(s, `no such action ${JSON.stringify(op)}`);
     const pc = s.pc;
+    if (op !== 'focus') s.lastInput = Date.now();
     if (pc.ch.act & PLR_MORE.FREEZE) return game.tell(pc.ch, { kind: 'note', text: "You're totally frozen!" });
     game.withPlayer(pc, () => {
       if (op === 'focus') { pc.focusSlot = a[0] && a[0].m !== undefined ? game.mobs[a[0].m] || null : null; return; }
@@ -827,6 +865,8 @@ export async function startMud({
     byPc.delete(pc.id);
     s.pc = null;
     sessions.delete(s);
+    dash.forget(s);
+    dash.record('conn', `${pc.ch.name}@${s.host} left the game${s.linkdead !== null ? ' (link dead too long)' : ''}`, { who: pc.ch.name, sub: 'quit' });
     log(`${roomText}`);
   }
 
@@ -891,13 +931,16 @@ export async function startMud({
     }
     if (site.bans().some((b) => b.toLowerCase() === arg.toLowerCase())) { say(ch, 'That site is already banned!'); return; }
     site.ban(arg);
+    dash.record('site', `${ch.name} banned ${arg}`, { who: ch.name, lvl: 'warn' });
     say(ch, 'Ok.');
   }
 
   /** act_wiz.c: do_allow. */
   function allow(ch, arg) {
     if (!arg) { say(ch, 'Remove which site from the ban list?'); return; }
-    say(ch, site.allow(arg) ? 'Ok.' : 'Site is not banned.');
+    const allowed = site.allow(arg);
+    say(ch, allowed ? 'Ok.' : 'Site is not banned.');
+    if (allowed) dash.record('site', `${ch.name} lifted the ban on ${arg}`, { who: ch.name });
   }
 
   /**
@@ -929,6 +972,7 @@ export async function startMud({
     if (closing) return closing;
     for (const s of byPc.values()) { if (s.pc) { game.tell(s.pc.ch, { kind: 'echo', text }); flush(s); } }
     log(text);
+    dash.record('server', text, { lvl: 'warn' });
     closing = close();
     return closing;
   }

@@ -38,6 +38,7 @@ import { createOcclusion } from './occlusion.js';
 import { createTitleReel } from './title.js';
 import { createVistas } from './vista.js';
 import { attachSocketLink, SocketLink } from './link.js';
+import { createDashboard } from './dashboard.js';
 import { createConnectUi } from './link-ui.js';
 import { OUTDOOR_FILL } from './dress.js';
 
@@ -1920,6 +1921,8 @@ async function boot() {
   // Or a server's world (src/link.js): this game becomes the server's copy,
   // and these are the hands it borrows from the page to move you about.
   let connected = null;
+  // The implementor's dashboard (dashboard.js): bound only while connected as trust 40.
+  const dashboard = createDashboard({ getLink: () => connected });
   const linkHost = {
     zoneId: () => zone.id,
     actors: () => actors,
@@ -1969,6 +1972,7 @@ async function boot() {
       if (connected) connected.close();
       connected = attachSocketLink(next, game, linkHost, reply.enter);
       window.diku.link = connected;
+      dashboard.attach(connected);
       lostResume = null;
       document.getElementById('link-lost').hidden = true;
     } catch (error) {
@@ -1983,6 +1987,7 @@ async function boot() {
       begin(false);
       connected = attachSocketLink(link, game, linkHost, enter);
       window.diku.link = connected;
+      dashboard.attach(connected);
     },
   });
   dom.hint.addEventListener('click', () => player.requestLock());
@@ -2008,6 +2013,18 @@ async function boot() {
     if (state.benchmark) { requestAnimationFrame(frame); return; } // measuring: nobody else draws
     // Between two zones there is no world to draw or walk: the card is up.
     if (state.crossing) { last = performance.now(); requestAnimationFrame(frame); return; }
+    // The implementor's dashboard draws its god view in place of the world
+    // (dashboard.js): the world is neither updated nor drawn under it, only
+    // the link keeps going.
+    if (dashboard.open) {
+      const t = performance.now();
+      const dtd = Math.min(0.05, (t - last) / 1000);
+      last = t;
+      if (connected) connected.update(dtd);
+      dashboard.render(dtd);
+      requestAnimationFrame(frame);
+      return;
+    }
     const now = performance.now();
     // Nothing here needs to run faster than the frame cap, and when the mouse
     // is released or the tab is in the background it barely needs to run at all.
@@ -2154,6 +2171,7 @@ async function boot() {
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
     pipeline, environment, materials, wetness, assets, impostors, occlusion,
+    dashboard,
     /** What the texture bake did: bakes, cache hits, ms, workers; `stored` resolves to the cache's bytes. */
     bake: bakeStats,
     player, hud, world, applyTime, applyWeather, state, audio,

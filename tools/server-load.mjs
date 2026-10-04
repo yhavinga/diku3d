@@ -5,7 +5,11 @@
  * second (the server checks each one; the count it refused is reported), has them talk now and then, and reports per player per second
  * what came back -- messages and bytes -- and the server's own CPU.
  *
- *     (cd server && npm ci) && node tools/server-load.mjs [N ...] [--seconds 20]
+ *     (cd server && npm ci) && node tools/server-load.mjs [N ...] [--seconds 20] [--dash]
+ *
+ * --dash adds an implementor with the dashboard open (server/dash.mjs),
+ * following the first walker, and reports what it was sent: run it with
+ * and without to see what the dashboard costs the server.
  *
  * Every N in the list is a fresh server and a fresh data directory.
  */
@@ -22,14 +26,16 @@ const require = createRequire(join(root, 'server/package.json'));
 const WebSocket = require('ws');
 const { bootWorld } = await import('../server/world.mjs');
 const { createAccounts, hashPassword } = await import('../server/accounts.mjs');
-const { createCharacter } = await import('../src/game.js');
+const { createCharacter, advanceLevel, Rng } = await import('../src/game.js');
 const { serialize } = await import('../src/save.js');
 
 const args = process.argv.slice(2);
 let seconds = 20;
+let withDash = false;
 const counts = [];
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--seconds') seconds = Number(args[++i]);
+  else if (args[i] === '--dash') withDash = true;
   else counts.push(Number(args[i]));
 }
 if (!counts.length) counts.push(1, 10, 50);
@@ -77,6 +83,13 @@ async function run(n) {
     const room = streets[(i * 7919 + 13) % streets.length].vnum;
     accounts.store({ version: 1, name, created: 'load', password: await hashPassword('walkwalk'), char: { ...serialize(ch), room } });
   }
+  if (withDash) {
+    const rng = new Rng(40);
+    const ch = createCharacter(0, { level: 36, sex: 1, rng });
+    while (ch.level < 40) { ch.level += 1; advanceLevel(ch, rng); }
+    ch.name = 'Overseer';
+    accounts.store({ version: 1, name: 'Overseer', created: 'load', password: await hashPassword('overseer'), char: { ...serialize(ch), room: 3001, trust: 40 } });
+  }
   const port = 4600 + n;
   const server = spawn(process.execPath, [join(root, 'server/main.mjs'), '--port', String(port), '--data', data], { stdio: ['ignore', 'pipe', 'inherit'] });
   await new Promise((resolve) => server.stdout.on('data', (chunk) => { if (/listening/.test(chunk.toString())) resolve(); }));
@@ -110,13 +123,32 @@ async function run(n) {
     clients.push(c);
   }
   while (!clients.every((c) => c.entered)) await new Promise((r) => setTimeout(r, 50));
+  let overseer = null;
+  if (withDash) {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    overseer = { ws, bytes: 0, msgs: 0, kinds: new Map(), entered: false, enterId: null };
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.t === 'enter') overseer.entered = true;
+      if (msg.t !== 'dash') return;
+      overseer.bytes += raw.length;
+      overseer.msgs += 1;
+      overseer.kinds.set(msg.k, (overseer.kinds.get(msg.k) || 0) + raw.length);
+      if (msg.k === 'snap') ws.send(JSON.stringify({ t: 'dash', op: 'follow', id: msg.who.find((p) => p.name !== 'Overseer').id }));
+    });
+    await new Promise((resolve) => ws.once('open', resolve));
+    ws.send(JSON.stringify({ t: 'login', name: 'Overseer', password: 'overseer' }));
+    while (!overseer.entered) await new Promise((r) => setTimeout(r, 50));
+    ws.send(JSON.stringify({ t: 'dash', op: 'sub' }));
+    await new Promise((r) => setTimeout(r, 500));
+  }
   // Each walks from the square to a neighbour, and on, at 1.6 m/s.
   for (const c of clients) {
     c.at = centre(c.room);
     c.to = next(c.room, c.rand);
     c.path = waypoints(c.room, c.to);
   }
-  for (const c of clients) { c.bytes = 0; c.msgs = 0; c.kinds.clear(); }
+  for (const c of [...clients, ...(overseer ? [overseer] : [])]) { c.bytes = 0; c.msgs = 0; c.kinds.clear(); }
   const cpu0 = cpuSeconds(server.pid);
   const t0 = Date.now();
   let talk = 0;
@@ -151,6 +183,11 @@ async function run(n) {
   console.log(`${String(n).padStart(4)} players: ${(msgs / n / secs).toFixed(1)} msgs and ${(bytes / n / secs / 1024).toFixed(2)} KB in`
     + ` per player per second (${share}); positions out 10/s each; server CPU ${(100 * cpu / secs).toFixed(1)}% of a core;`
     + ` ${clients.reduce((s, c) => s + c.refused, 0)} reports refused`);
+  if (overseer) {
+    console.log(`       the dashboard: ${(overseer.msgs / secs).toFixed(1)} msgs and ${(overseer.bytes / secs / 1024).toFixed(2)} KB a second`
+      + ` (${[...overseer.kinds].map(([k, b]) => `${k} ${(b / secs / 1024).toFixed(2)} KB/s`).join(', ')})`);
+    overseer.ws.close();
+  }
   for (const c of clients) c.ws.close();
   server.kill('SIGTERM');
   await new Promise((resolve) => server.once('exit', resolve));
