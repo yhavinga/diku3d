@@ -123,7 +123,7 @@ export class Soundscape {
     this.ctx = audio.ctx;
     this.bus = this.ctx.createGain();
     this.bus.gain.value = 1.4;
-    this.bus.connect(audio.master);
+    this.bus.connect(audio.duckBus);
     this.layers = new Map();
     this.wanted = null;
     this.place = null;

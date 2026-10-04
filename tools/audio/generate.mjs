@@ -45,7 +45,12 @@ async function balance() {
 async function call(clip) {
   const s = clip.settings;
   let url; let body;
-  if (clip.api === 'music') {
+  if (clip.api === 'tts') {
+    // Spoken words (tools/audio/add-voices.mjs): `clip.voice.id` speaks `clip.text`.
+    const { model_id: model, ...voice_settings } = s;
+    url = `https://api.elevenlabs.io/v1/text-to-speech/${clip.voice.id}?output_format=mp3_44100_128`;
+    body = { text: clip.text, model_id: model, voice_settings, ...(clip.seed !== undefined ? { seed: clip.seed } : null) };
+  } else if (clip.api === 'music') {
     url = 'https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128';
     // no `lines` in the plan means no vocals; force_instrumental is for prompt mode only
     body = { model_id: 'music_v1', ...s };
@@ -74,7 +79,8 @@ function decode(file) {
 
 function measure(pcm) {
   const r = spawnSync('ffmpeg', ['-hide_banner', '-nostats', '-f', 'f32le', '-ar', String(SR), '-ac', String(CH), '-i', '-',
-    '-af', 'ebur128=peak=true', '-f', 'null', '-'], { input: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength), maxBuffer: 1 << 28 });
+    '-af', 'ebur128=peak=true', '-f', 'null', '-'], { input: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength), maxBuffer: 1 << 28, timeout: 60000 });
+  if (r.error) throw new Error(`ffmpeg measure: ${r.error.message}`);
   const t = r.stderr.toString();
   const summary = t.slice(t.lastIndexOf('Summary:'));
   const num = (re) => { const m = summary.match(re); return m ? parseFloat(m[1]) : null; };
@@ -85,7 +91,7 @@ function encode(pcm, out, kbps, mono = false) {
   // Mono for anything that is panned in the game: it halves the decoded size in memory too.
   const r = spawnSync('ffmpeg', ['-y', '-v', 'error', '-f', 'f32le', '-ar', String(SR), '-ac', String(CH), '-i', '-',
     ...(mono ? ['-ac', '1'] : []), '-c:a', 'libopus', '-b:a', `${kbps}k`, '-vbr', 'on', '-application', 'audio', out],
-  { input: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength), maxBuffer: 1 << 28 });
+  { input: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength), maxBuffer: 1 << 28, timeout: 60000 });
   if (r.status !== 0) throw new Error(`ffmpeg encode ${out}: ${r.stderr}`);
 }
 
@@ -267,6 +273,8 @@ function post(clip, rawFile) {
   highpass(pcm, p.highpass ?? (clip.kind === 'ambience' ? 80 : 35));
   if (p.hum) dehum(pcm, p.hum);
   if (clip.kind === 'footstep' || clip.kind === 'sfx') pcm = trim(pcm, p.trimDb ?? -48);
+  // Speech: the API pads both ends; cut to the words and close them with a short fade so nothing clicks.
+  if (clip.kind === 'voice') pcm = fade(trim(pcm, p.trimDb ?? -45, 0.04), 0.01, 0.04);
   if (clip.loop) pcm = loopify(pcm, p.crossfade ?? 1.5);
   else if (clip.kind === 'music') pcm = fade(trim(pcm, -55, 0.02), p.fadeIn ?? 0.05, p.fadeOut ?? 2.5);
   let steps = null;
@@ -310,6 +318,20 @@ if (ids.length && wanted.length !== ids.length) throw new Error(`unknown id in $
 
 const start = flag('--dry') ? null : await balance();
 let spent = 0;
+// Speech clips are many and short: fetch the raw answers a few at a time, then the loop below only post-processes.
+if (!flag('--dry') && !flag('--post')) {
+  const todo = wanted.filter((c) => c.api === 'tts' && (flag('--force') || !existsSync(join(audioDir, c.file))) && (flag('--force') || !existsSync(join(rawDir, `${c.id}.mp3`))));
+  let next = 0;
+  const worker = async () => {
+    while (next < todo.length) {
+      const clip = todo[next++];
+      const { audio, cost } = await call(clip);
+      writeFileSync(join(rawDir, `${clip.id}.mp3`), audio);
+      spent += Number(cost) || 0;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, todo.length) }, worker));
+}
 for (const clip of wanted) {
   const out = join(audioDir, clip.file);
   const raw = join(rawDir, `${clip.id}.mp3`);
