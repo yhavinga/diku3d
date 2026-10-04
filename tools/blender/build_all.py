@@ -153,6 +153,10 @@ BUDGET = {
     "beast_harpy": 13000,
     # Blocks fitted together, one hulk for every golem.
     "beast_golem": 4200,
+    # The deer made a goat: a broader barrel, horns, a beard.
+    "beast_goat": 5400,
+    # An upright newt, tail and all.
+    "beast_newt": 4800,
     # furniture.py. Tables, benches and stools are placed a dozen to a tavern
     # and stay under the prop cap. The bar, its gantry and the shelving carry
     # everything that stands on them -- bottles, jugs, loaves, books -- and are

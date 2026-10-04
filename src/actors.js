@@ -1293,6 +1293,18 @@ const BEASTS = [
   { test: /\bgolems?\b.*\b(clay|lesser)\b|\b(clay|lesser) golems?\b/, asset: 'beast_golem', scale: 0.94, surface: { hide: 'earthwall' }, coat: 0xd0a07a, pale: 0xd0a07a, points: 0x6a4a34, glow: 0xffa040, box: [0.9, 0.7, 'quad', 0x9a7458] },
   // Stone, and the rest: 'a big chunk of rock ... formed into a giant stone creature'.
   { test: /\bgolems?\b/, asset: 'beast_golem', scale: 1.04, surface: { hide: 'statuary' }, coat: 0xd2cec6, pale: 0xd2cec6, points: 0x6a6660, glow: 0xffa040, box: [1.0, 0.8, 'quad', 0x8a8680] },
+  // The fire newts' black mountain goats: a goat 'hungry and searching for
+  // food' grazes; the ewe 'watching her young'; the kid at half the size,
+  // with no horns or beard yet.
+  // The fire newts: a people of upright newts (hybrids.py), fire red over
+  // a yellow belly, black-spotted; the baby 'crawling and drooling' is a
+  // newt on all fours -- the lizard, small and red.
+  { test: /\bfire ?newts?\b.*\bbab(y|ies)\b/, asset: 'beast_lizard', scale: 0.42, coat: 0xa83a18, pale: 0xd8a030, points: 0x3a120a, patch: 0x241008, cover: 0.3, box: [0.1, 0.5, 'quad', 0xa83a18] },
+  { test: /\bfire ?newts?\b.*\b(guard|sergeant|general|leader)\b/, asset: 'beast_newt', scale: 1.06, coat: 0x9a3214, pale: 0xd0a02c, points: 0x3a120a, patch: 0x1e0c06, cover: 0.3, box: [0.5, 1.4, 'quad', 0x9a3214] },
+  { test: /\bfire ?newts?\b/, asset: 'beast_newt', scale: 0.98, coat: 0xa83a18, pale: 0xd8a830, points: 0x3a120a, patch: 0x1e0c06, cover: 0.3, box: [0.5, 1.4, 'quad', 0xa83a18] },
+  { test: /\bmountain kids?\b|\bkids?\b.*\bgoats?\b/, asset: 'beast_goat', scale: 0.52, coat: 0x2a2522, pale: 0x3a3430, points: 0x1a1715, hide: ['horn', 'beard'], grow: { head: 1.2, ear: 0.8 }, box: [0.35, 0.5, 'quad', 0x2a2522] },
+  { test: /\bewes?\b/, asset: 'beast_goat', scale: 0.92, coat: 0x2a2522, pale: 0x3a3430, points: 0x1a1715, grow: { horn: 0.6, beard: 0.6, ear: 0.7 }, box: [0.6, 0.9, 'quad', 0x2a2522] },
+  { test: /\b(goat|goats|billy)\b/, asset: 'beast_goat', scale: 1.0, coat: 0x2a2522, pale: 0x3a3430, points: 0x1a1715, grow: { ear: 0.7 }, box: [0.7, 1.0, 'quad', 0x2a2522] },
   { test: /\blamias?\b/, asset: 'beast_lamia', scale: 1.1, coat: 0xa8834e, pale: 0xd2a684, points: 0x2a1c14, box: [0.9, 1.9, 'quad', 0xa8834e] },
   // --- the monsters (tools/blender/monsters.py). First, because their names
   // borrow the animals' words: a wolf spider and a bird spider are spiders.

@@ -125,7 +125,7 @@ export const CREATURES = [
   { id: 'lamia', re: /\blamias?\b/, idle: [], fight: ['cr_dog_growl'], rate: [0.72, 0.82], gain: 0.6, every: [20, 60], reach: 14, death: 'death_beast' },
   { id: 'horse', re: /\b(horse|pegasus|pony|mule|donkey|stallion|mare|unicorn)\b/, idle: ['cr_horse'], gain: 0.7, every: [15, 50], reach: 22, death: 'death_beast' },
   { id: 'deer', re: /\b(deer|stag|antelope|elk|moose|doe|fawn)\b/, idle: ['cr_deer'], gain: 0.55, every: [30, 90], reach: 30, death: 'death_beast' },
-  { id: 'goat', re: /\b(goat|sheep|ram|lamb|ewe)\b/, idle: ['cr_goat'], gain: 0.6, every: [12, 40], reach: 18, death: 'death_beast' },
+  { id: 'goat', re: /\b(goat|sheep|ram|lamb|ewe|mountain kid)\b/, idle: ['cr_goat'], gain: 0.6, every: [12, 40], reach: 18, death: 'death_beast' },
   { id: 'cow', re: /\b(cow|bull|ox|oxen|cattle|calf)\b/, idle: ['cr_cow'], gain: 0.7, every: [15, 50], reach: 22, death: 'death_beast' },
   { id: 'pig', re: /\b(pig|boar|sow|hog|swine)\b/, idle: ['cr_pig'], fight: ['cr_pig'], gain: 0.65, every: [12, 40], reach: 18, death: 'death_beast' },
   { id: 'chicken', re: /\b(chicken|hen|rooster|cock|chick)\b/, idle: ['cr_chicken'], gain: 0.55, every: [10, 35], reach: 16, death: 'death_small' },

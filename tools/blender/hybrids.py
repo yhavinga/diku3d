@@ -1257,7 +1257,119 @@ def golem_clips(arm, spec):
     return report
 
 
-SPECS = [centaur, centaur_f, lamia, harpy, golem]
+# ============================================================ the goat
+
+
+def goat():
+    """The fire newts' mountain goats, ewes and kids, 'black': the deer's
+    frame (beasts.cervid) made a goat -- a deeper, broader barrel on the
+    same fine legs, horns that sweep up and back off the poll in place of
+    antlers, a beard off the chin, a shaggy coat. The kid is this at half
+    the size with the horns and the beard taken off (`hide`)."""
+    spec = B.cervid()
+    L = spec["L"]
+    extra = dict(L["extra"])
+    extra.pop("antler*")
+    extra["horn*"] = ((0.03, 0.55, 1.1), (0.07, 0.42, 1.24), "head")
+    extra["beard"] = ((0, 0.66, 0.9), (0, 0.65, 0.8), "jaw")
+    L = dict(L, extra=extra)
+    body = list(spec["body"])
+    barrel = body[0]
+    body[0] = B.Solid(barrel.kind, barrel.blend, barrel.bind, barrel.mask, c=barrel.p["c"],
+                      r=(barrel.p["r"][0] * 1.22, barrel.p["r"][1], barrel.p["r"][2] * 1.1), m=barrel.p.get("m"))
+    old_parts = spec["parts"]
+
+    def parts(body_solids):
+        out = []
+        for o in old_parts(body_solids):
+            if o.name.startswith("antler"):
+                bpy.data.objects.remove(o, do_unlink=True)
+            else:
+                out.append(o)
+        for side in (1, -1):
+            t = ".L" if side > 0 else ".R"
+            x = side
+            pts = [(x * 0.03, 0.56, 1.09), (x * 0.045, 0.53, 1.17), (x * 0.065, 0.47, 1.22), (x * 0.08, 0.4, 1.21),
+                   (x * 0.085, 0.36, 1.16)]
+            horn = [cone(P(*pts[i]), P(*pts[i + 1]), 0.017 - i * 0.0035, 0.0145 - i * 0.0035, "horn" + t, blend=0.004,
+                         group="h") for i in range(4)]
+            out.append(B.solid_part(horn, 0.0025, 260, "horn", "horn", (0.16, 0.14, 0.12)))
+        beard = [cone(P(0, 0.665, 0.905), P(0, 0.655, 0.8), 0.022, 0.006, "beard", blend=0.01, squash=(0.7, 1, 1))]
+        out.append(B.sdf_part(beard, 0.004, 160, "beard", "fur", smooth=1,
+                              mask_fn=lambda co, n, p, d: (p * 0, np.ones(len(co)) * 0.7)))
+        return out
+
+    g = dict(spec["gait"])
+    g["pastimes"] = ["alert", "loaf"]
+    g["loaf"] = dict(lie=0.2, neck=-10, head=10)
+    return dict(spec, name="beast_goat", archetype="caprine", L=L, body=body, parts=parts,
+                patch=B.spots(0.03, seed=71), gait=g, clips=B.quad_clips, legtop=L["hind"][1][2])
+
+
+# ============================================================ the fire newt
+
+
+def newt():
+    """The fire newts: a people -- workers 'hot and sweaty', guards,
+    mothers, a priest, a general -- and, by their name, newts. A newt that
+    walks: upright on bent legs, the body leaning forward over them and
+    balanced by a long flat tail on the ground behind, a broad flat head
+    with a wide lipless mouth and small high eyes, smooth wet skin, four
+    fingers. They were trolls, tusks and hair and all. Coat is the back
+    (fire red), pale the belly (yellow), the patch the dark spots."""
+    hip = 0.74
+    L = dict(spine=[(0, -0.02, hip), (0, 0.04, 0.98), (0, 0.12, 1.2)], neck=[(0, 0.18, 1.3), (0, 0.24, 1.36)],
+             crown=(0, 0.48, 1.38), jaw=[(0, 0.26, 1.33), (0, 0.45, 1.31)], clavicle=(0.06, 0.13, 1.25),
+             arm=[(0.19, 0.13, 1.23), (0.25, 0.14, 0.99), (0.24, 0.32, 0.9), (0.24, 0.41, 0.86)],
+             leg=[(0.12, -0.02, hip - 0.04), (0.15, 0.16, 0.44), (0.14, -0.04, 0.15), (0.14, 0.05, 0.03), (0.14, 0.16, 0.0)],
+             tail=[(0, -0.12, 0.7), (0, -0.34, 0.5), (0, -0.56, 0.26), (0, -0.8, 0.08), (0, -1.06, 0.03), (0, -1.32, 0.03)])
+    body = [
+        ell(P(0, 0.0, 0.82), (0.18, 0.15, 0.19), ("grad", "pelvis", "spine", P(0, 0, 0.72), P(0, 0.04, 1.0)), blend=0.08),
+        ell(P(0, 0.08, 1.07), (0.19, 0.15, 0.19), ("grad", "spine", "chest", P(0, 0.04, 0.98), P(0, 0.12, 1.2)), blend=0.08),
+        ell(P(0, 0.13, 1.22), (0.17, 0.12, 0.1), "chest", blend=0.06),
+        cone(P(0, 0.15, 1.24), P(0, 0.25, 1.36), 0.11, 0.1, ("grad", "chest", "neck", P(0, 0.15, 1.26), P(0, 0.22, 1.35)), blend=0.05),
+        # A broad, flat head, wider than it is deep, the snout rounded.
+        ell(P(0, 0.32, 1.39), (0.135, 0.15, 0.08), "head", blend=0.04),
+        ell(P(0, 0.43, 1.37), (0.11, 0.085, 0.055), "head", blend=0.03),
+        ell(P(0, 0.09, 1.02), (0.15, 0.11, 0.15), "spine", blend=0.06, mask=(0.9, 0)),
+        ell(P(0, 0.06, 0.82), (0.14, 0.12, 0.12), "pelvis", blend=0.06, mask=(0.8, 0)),
+    ]
+    body += M.biped_limbs(L, [0.055, 0.042, 0.034, 0.028], [0.1, 0.065, 0.045, 0.04, 0.03], 0.04)
+    tail = L["tail"]
+    for i in range(len(tail) - 1):
+        body.append(cone(P(*tail[i]), P(*tail[i + 1]), 0.11 - i * 0.02, 0.095 - i * 0.02, "tail%d" % (i + 1), blend=0.03,
+                         group="tail", squash=(0.75, 1, 1)))
+    for side, tag in ((1, ".L"), (-1, ".R")):
+        body.append(ell(P(side * 0.12, 0.03, 0.6), (0.085, 0.12, 0.15), "thigh" + tag, blend=0.06))
+
+    def masks(co, n, pale, dark):
+        under = np.clip((-n[:, 1] - 0.2) / 0.5, 0, 1) * (co[:, 2] > 0.55) * (co[:, 2] < 1.3)
+        return np.maximum(pale * 0.6, under), dark
+
+    def parts(body_solids):
+        out = []
+        jaw = [cone(P(0, 0.27, 1.335), P(0, 0.47, 1.32), 0.085, 0.05, "jaw", blend=0.015, squash=(1.2, 1, 0.45))]
+        out.append(B.sdf_part(jaw, 0.004, 220, "jaw", "hide", smooth=1, mask_fn=lambda co, n, p, d: (np.maximum(p, 0.8), d)))
+        for side in (1, -1):
+            at = B.surface_point(body_solids, P(side * 0.07, 0.36, 1.5), P(0, 0, -1), sink=0.01)
+            out.append(B.solid_part([ell(tuple(at), (0.018, 0.02, 0.016), "head", blend=0.003)], 0.0025, 80, "eye", "horn",
+                                    (0.6, 0.42, 0.04), smooth=0))
+            # Four blunt fingers.
+            h = [V(B.apply_side(p, side)) for p in L["arm"]]
+            tag = ".L" if side > 0 else ".R"
+            fingers = [cone(P(h[3].x + side * 0.014 * (k - 1.5), h[3].y - 0.01, h[3].z + 0.01),
+                            P(h[3].x + side * 0.02 * (k - 1.5), h[3].y + 0.05, h[3].z - 0.03), 0.011, 0.008, "hand" + tag,
+                            blend=0.004, group="f%d" % k) for k in range(4)]
+            out.append(B.sdf_part(fingers, 0.003, 200, "fingers", "hide", smooth=1))
+        return out
+
+    return dict(name="beast_newt", archetype="newt", bones=M.biped_bones(L), body=body, masks=masks, parts=parts,
+                patch=B.spots(0.045, seed=13), h=0.011, tris=3400, mat="hide", clips=M.biped_clips, legtop=99.0,
+                gait=dict(walk_stride=0.7, walk_frames=28, lift=0.07, run_stride=1.3, run_frames=18, hunch=16.0, lie=0.16,
+                          pastimes=["sniff"]))
+
+
+SPECS = [centaur, centaur_f, lamia, harpy, golem, goat, newt]
 
 
 def build_one(spec, export=True):
@@ -1270,7 +1382,7 @@ def build_one(spec, export=True):
         fur, skin = split_skin(body)
         parts = [fur, skin]
     parts += spec["parts"](spec["body"])
-    arm = M.make_rig(spec["name"], spec["bones"])
+    arm = M.make_rig(spec["name"], spec.get("bones") or B.quad_bones(spec["L"]))
     meshes = B.bind(arm, parts, spec["name"], legtop=spec.get("legtop"))
     tris = lib.stats(meshes)
     bpy.context.view_layer.objects.active = arm
