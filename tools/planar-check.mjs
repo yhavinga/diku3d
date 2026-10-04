@@ -6,7 +6,8 @@
  *   node tools/planar-check.mjs 3040       # the zone holding #3040, every exit and crossing of it
  *   node tools/planar-check.mjs --strict   # exit 1 on any hard fault
  *   node tools/planar-check.mjs --try X    # a layout.js option against the baseline:
- *                                          # terrace, keepClear, midennirWhole, reach=12
+ *                                          # terrace, keepClear, midennirWhole, reach=12,
+ *                                          # crossings=forbid|raise
  *   node tools/planar-check.mjs --vertical # what bridges, tunnels, ramps and stacking could buy
  *
  * Hard faults (a bug in layout.js wherever they appear):
@@ -30,6 +31,13 @@
  *                       it when a change brings it down.
  *   load order          a zone that lays out differently when area.lst is
  *                       read backwards (a server and its clients must agree)
+ *   shortcut crossing   a cell two streets share whose end rooms the mud does
+ *                       not join: standing there you can walk from one
+ *                       street's room into the other's with no exit between
+ *                       them. The server refuses that step (mud.mjs judge:
+ *                       "no open way from #3015 to #3006") and the page lets
+ *                       you take it. Counted; --strict holds it at
+ *                       CEILING.shortcut.
  *
  * Measured, not faulted -- the graph is not Euclidean, see CLAUDE.md:
  *   fidelity            of every level exit between placed rooms, how many
@@ -39,6 +47,11 @@
  *                       wrong, archway)
  *   reciprocals         A north -> B while B says A is anywhere but south
  *   streets crossing    two routed streets through one cell
+ *   beside open ground  street cells beside an open-air room the street's
+ *                       rooms are not joined to: the same unexitted step
+ *                       without a second street, if build.js leaves that
+ *                       side open (it brings a city cell's frontage
+ *                       forward, so this over-counts in town)
  *   crossings           for each exit into another zone: the wall its gate
  *                       took, and whether a street or a room of the same
  *                       zone lies behind that wall -- which is what lets
@@ -61,8 +74,11 @@ const focus = Number(argv.find((a) => /^\d+$/.test(a))) || null;
 const trial = argv.includes('--try') ? argv[argv.indexOf('--try') + 1] : null;
 const vertical = argv.includes('--vertical');
 
-// 48 rooms in 12 zones, none in the home zone, as of wave 13.
-const CEILING = { roofed: 48 };
+// 48 rooms in 12 zones, none in the home zone, as of wave 13. Shortcuts:
+// 430 cells in all zones, 150 of them in the home zone, at reach 12 with
+// layout.js crossings 'allow' (wave 15); 0 with 'forbid' or 'raise', which
+// cost walkable passages -- see --try crossings=forbid.
+const CEILING = { roofed: 48, shortcut: 430 };
 const listed = readFileSync(join(areaDir, 'area.lst'), 'latin1').split(/\s+/).filter((f) => f.endsWith('.are'));
 const read = (f) => parseArea(readFileSync(join(areaDir, f), 'latin1'), f);
 
@@ -111,6 +127,39 @@ function audit(world, layout, inZone = () => true) {
     }
   }
   const crossingsOfStreets = [...owners.values()].filter((ls) => ls.length > 1).length;
+  // Which of those cells join rooms the mud does not: for two streets through
+  // one cell, every end room of one must be an end of the other or have an
+  // exit to and from each end of the other, else the cell is a shortcut.
+  const joined = (a, b) => a === b || (a.room.exits.some((e) => e && e.to === b.vnum) && b.room.exits.some((e) => e && e.to === a.vnum));
+  const harmless = (l, m) => [l.from, l.to].every((x) => [m.from, m.to].every((y) => joined(x, y)));
+  // A cell a raised street runs over (layout option crossings: 'raise')
+  // joins nothing to it.
+  const lifted = new Map(); // cell -> the street lifted over it
+  for (const b of layout.bridges || []) for (const c of b.cells) lifted.set(k3(b.level, c.x, c.z), b.link);
+  const shortcuts = [];
+  for (const [k, all] of owners) {
+    const ls = all.filter((l) => l !== lifted.get(k));
+    if (ls.length < 2) continue;
+    let bad = null;
+    for (let i = 0; i < ls.length && !bad; i++) for (let j = i + 1; j < ls.length; j++) if (!harmless(ls[i], ls[j])) { bad = [ls[i], ls[j]]; break; }
+    if (bad) shortcuts.push(`${k}: #${bad[0].from.vnum}-#${bad[0].to.vnum} and #${bad[1].from.vnum}-#${bad[1].to.vnum}`);
+  }
+  // A street cell beside the cell of an open-air room that is not one of its
+  // ends and not joined to them: open ground with no wall, so the same step
+  // is possible there without any second street.
+  let beside = 0;
+  for (const l of layout.links) {
+    if (l.kind !== 'alley') continue;
+    for (const c of l.path) {
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const v = layout.at(l.from.level, c.x + dx, c.z + dz);
+        if (v === undefined) continue;
+        const r = cells.get(v);
+        if (r === l.from || r === l.to || !openAir(r.room)) continue;
+        if (!joined(l.from, r) || !joined(l.to, r)) { beside++; break; }
+      }
+    }
+  }
 
   // Stairs are one level apart in the same column.
   for (const l of layout.links) {
@@ -217,7 +266,7 @@ function audit(world, layout, inZone = () => true) {
     });
   }
 
-  return { faults, fidelity, oddReciprocals, oddList, folded, crossingsOfStreets, roofed, roofedCount, sunk, openStairs };
+  return { faults, fidelity, oddReciprocals, oddList, folded, crossingsOfStreets, shortcuts, beside, bridges: (layout.bridges || []).length, roofed, roofedCount, sunk, openStairs };
 }
 
 /** What the layout put on the far side of a wall: the cell past it and the room cell beyond that. */
@@ -360,8 +409,9 @@ function runTrial(name) {
   // Several at once: --try midennirWhole,reach=6
   const opts = {};
   for (const part of name.split(',')) {
-    const o = TRIALS[part] || (part.startsWith('reach=') ? { reach: Number(part.slice(6)) } : null);
-    if (!o) throw new Error(`no trial ${part}: ${[...Object.keys(TRIALS), 'reach=N'].join(', ')}`);
+    const o = TRIALS[part] || (part.startsWith('reach=') ? { reach: Number(part.slice(6)) } : null)
+      || (part.startsWith('crossings=') ? { crossings: part.slice(10) } : null);
+    if (!o) throw new Error(`no trial ${part}: ${[...Object.keys(TRIALS), 'reach=N', 'crossings=allow|forbid|raise'].join(', ')}`);
     Object.assign(opts, o);
   }
   const world = buildWorld(listed.map(read));
@@ -386,7 +436,8 @@ function runTrial(name) {
       r.layouts.set(zone.id, L);
       r.walk += L.stats.alleys + L.stats.stairs; r.arch += L.stats.portals;
       const a = audit(world, L, (v) => plan.zoneOf(v) === zone);
-      r.roofed += a.roofed.length;
+      r.roofed += a.roofed.length; r.shortcut = (r.shortcut || 0) + a.shortcuts.length; r.beside = (r.beside || 0) + a.beside; r.bridges = (r.bridges || 0) + a.bridges;
+      if (zone.id === 'home') { r.homeShortcut = a.shortcuts.length; r.homeBeside = a.beside; r.homeBridges = a.bridges; }
       const freeArch = new Set();
       for (const l of L.links) if (l.to && (l.kind === 'portal' || l.kind === 'gate')) { if (l.side === null) freeArch.add(`${l.from.vnum}>${l.to.vnum}`); if (l.backSide === null) freeArch.add(`${l.to.vnum}>${l.from.vnum}`); }
       for (const [v, sides] of L.sides) {
@@ -408,7 +459,7 @@ function runTrial(name) {
   let moved = 0;
   for (const c of base.layouts.get('home').cells.values()) { const d = t.layouts.get('home').cells.get(c.vnum); if (!d || d.x !== c.x || d.z !== c.z || d.level !== c.level) moved++; }
   const changed = [...base.pa.keys()].filter((f) => Math.abs(t.pa.get(f) - base.pa.get(f)) > 0.05).map((f) => `${f.replace('.are', '')} ${base.pa.get(f).toFixed(0)}->${t.pa.get(f).toFixed(0)}`);
-  const line = (label, r) => `  ${label.padEnd(9)} per-area Midgaard ${r.midgaard.toFixed(1)}% mean ${r.mean.toFixed(2)}% | home ${home(r).pct.toFixed(1)}% walkable, ${home(r).arch} archways | all zones: walkable ${r.walk} archways ${r.arch}, wrong walls ${r.wrong}, corner ${r.corner}, no door ${r.noDoor} | open air roofed ${r.roofed} | own ground behind a crossing ${r.behind}`;
+  const line = (label, r) => `  ${label.padEnd(9)} per-area Midgaard ${r.midgaard.toFixed(1)}% mean ${r.mean.toFixed(2)}% | home ${home(r).pct.toFixed(1)}% walkable, ${home(r).arch} archways, shortcuts ${r.homeShortcut} (beside ${r.homeBeside}), raised streets ${r.homeBridges} | all zones: walkable ${r.walk} archways ${r.arch}, wrong walls ${r.wrong}, corner ${r.corner}, no door ${r.noDoor}, shortcuts ${r.shortcut} (beside ${r.beside}), raised streets ${r.bridges} | open air roofed ${r.roofed} | own ground behind a crossing ${r.behind}`;
   console.log(`trial ${name}:`);
   console.log(line('baseline', base));
   console.log(line(name, t));
@@ -513,7 +564,7 @@ if (trial) {
     const layout = layoutWorld(world, { startVnum: area.rooms[0].vnum, maxRooms: 600 });
     const r = audit(world, layout);
     for (const k in sum) sum[k] += r.fidelity[k];
-    console.log(`${file.padEnd(14)} ${fidelityLine(r.fidelity)}  streets crossing ${String(r.crossingsOfStreets).padStart(2)}  odd ${r.oddReciprocals}  folded ${r.folded}  open air sunk ${r.sunk}  stairs off open ground ${r.openStairs}  roofed ${r.roofed.length}${r.faults.length ? `  FAULTS ${r.faults.length}` : ''}`);
+    console.log(`${file.padEnd(14)} ${fidelityLine(r.fidelity)}  streets crossing ${String(r.crossingsOfStreets).padStart(2)} (shortcuts ${r.shortcuts.length})  odd ${r.oddReciprocals}  folded ${r.folded}  open air sunk ${r.sunk}  stairs off open ground ${r.openStairs}  roofed ${r.roofed.length}${r.faults.length ? `  FAULTS ${r.faults.length}` : ''}`);
     for (const f of r.faults) { hard++; console.log(`    ${f}`); }
     for (const f of r.roofed) console.log(`    roofed open air      ${f}`);
   }
@@ -527,20 +578,22 @@ if (trial) {
   const only = focus ? plan.zoneOf(focus) : null;
   if (focus && !only) throw new Error(`#${focus} is in no zone`);
   console.log(`${plan.zones.length} zones over ${listed.length} areas, ${plan.crossings.length} crossings\n`);
-  let oddTotal = 0; let crossTotal = 0; let roofedTotal = 0;
+  let oddTotal = 0; let crossTotal = 0; let roofedTotal = 0; let shortcutTotal = 0; let besideTotal = 0;
   for (const zone of only ? [only] : plan.zones) {
     const layout = layouts.get(zone.id);
     const r = audit(world, layout, (v) => plan.zoneOf(v) === zone);
     for (const k in sum) sum[k] += r.fidelity[k];
     oddTotal += r.oddReciprocals; crossTotal += r.crossingsOfStreets;
-    roofedTotal += r.roofed.length;
-    console.log(`${zone.id.padEnd(10)} rooms ${String(layout.cells.size).padStart(3)}  ${fidelityLine(r.fidelity)}  streets crossing ${String(r.crossingsOfStreets).padStart(2)}  odd ${r.oddReciprocals}  folded ${r.folded}  open air sunk ${r.sunk}  stairs off open ground ${r.openStairs}  roofed ${r.roofed.length}${r.faults.length ? `  FAULTS ${r.faults.length}` : ''}`);
+    roofedTotal += r.roofed.length; shortcutTotal += r.shortcuts.length; besideTotal += r.beside;
+    console.log(`${zone.id.padEnd(10)} rooms ${String(layout.cells.size).padStart(3)}  ${fidelityLine(r.fidelity)}  streets crossing ${String(r.crossingsOfStreets).padStart(2)} (shortcuts ${r.shortcuts.length}, beside open ground ${r.beside})  odd ${r.oddReciprocals}  folded ${r.folded}  open air sunk ${r.sunk}  stairs off open ground ${r.openStairs}  roofed ${r.roofed.length}${r.faults.length ? `  FAULTS ${r.faults.length}` : ''}`);
     for (const f of r.faults) { hard++; console.log(`    ${f}`); }
     for (const f of r.roofed) console.log(`    roofed open air      ${f}`);
+    if (only) for (const f of r.shortcuts) console.log(`    shortcut crossing    ${f}`);
     if (only) for (const o of r.oddList) console.log(`    odd reciprocal      ${o}`);
   }
-  console.log(`${'all zones'.padEnd(10)} ${''.padStart(10)} ${fidelityLine(sum)}  streets crossing ${crossTotal}  odd reciprocals ${oddTotal}  roofed open air ${roofedTotal} (ceiling ${CEILING.roofed})`);
+  console.log(`${'all zones'.padEnd(10)} ${''.padStart(10)} ${fidelityLine(sum)}  streets crossing ${crossTotal} (shortcuts ${shortcutTotal}, ceiling ${CEILING.shortcut}; beside open ground ${besideTotal})  odd reciprocals ${oddTotal}  roofed open air ${roofedTotal} (ceiling ${CEILING.roofed})`);
   if (!only && roofedTotal > CEILING.roofed) { hard++; console.log(`  roofed open air ${roofedTotal} is over the ceiling of ${CEILING.roofed}`); }
+  if (!only && shortcutTotal > CEILING.shortcut) { hard++; console.log(`  shortcut crossings ${shortcutTotal} is over the ceiling of ${CEILING.shortcut}`); }
 
   console.log('\ncrossings: the wall each gate took, and what the same zone put behind it');
   const rows = crossings(world, plan, layouts).filter((c) => !only || c.fromZone === only.id || c.toZone === only.id);

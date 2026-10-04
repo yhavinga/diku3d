@@ -116,7 +116,7 @@ function relax(world, cells, occupied, order, passes = 12, { terrace = false, re
  * in the direction the exit claims to go, and refusing walls already spoken for
  * at either end.
  */
-function routeShortest(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Set(), forbidLast = new Set(), blocked = new Set()) {
+function routeShortest(from, to, nominalDir, occupied, MAX = 6, forbidFirst = new Set(), forbidLast = new Set(), blocked = () => false) {
   const first = [nominalDir, ...[0, 1, 2, 3].filter((d) => d !== nominalDir)]
     .filter((d) => !forbidFirst.has(d));
   const queue = [{ x: from.x, z: from.z, cells: [], entryDir: null }];
@@ -135,7 +135,7 @@ function routeShortest(from, to, nominalDir, occupied, MAX = 6, forbidFirst = ne
       }
       const seenKey = `${x},${z}`;
       if (seen.has(seenKey)) continue;
-      if (occupied.has(key(from.level, x, z)) || blocked.has(key(from.level, x, z))) continue;
+      if (occupied.has(key(from.level, x, z)) || blocked(key(from.level, x, z))) continue;
       seen.add(seenKey);
       queue.push({ x, z, cells: [...node.cells, { x, z }], entryDir: node.entryDir ?? dir });
     }
@@ -152,7 +152,7 @@ function routeShortest(from, to, nominalDir, occupied, MAX = 6, forbidFirst = ne
  * that leaves north out of the north wall is the better street.
  * `cost(end, dir)` is that price for setting off (end 0) or arriving (end 1).
  */
-function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = new Set()) {
+function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = () => false) {
   // Breadth-first by length, but a state is the cell *and* the wall it left
   // by: the same cell reached out of two walls is two different routes.
   // Cells are kept as a chain back to the first, not copied at every step.
@@ -163,7 +163,7 @@ function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = new Se
     if (c0 === Infinity) continue;
     const [dx, , dz] = DIR_STEP[dir];
     const x = from.x + dx; const z = from.z + dz;
-    if ((x === to.x && z === to.z) || occupied.has(key(from.level, x, z)) || blocked.has(key(from.level, x, z))) continue;
+    if ((x === to.x && z === to.z) || occupied.has(key(from.level, x, z)) || blocked(key(from.level, x, z))) continue;
     seen.add(`${x},${z},${dir}`);
     frontier.push({ x, z, back: null, entryDir: dir, c0 });
   }
@@ -185,7 +185,7 @@ function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = new Se
         }
         if (len >= MAX) continue;
         const seenKey = `${x},${z},${node.entryDir}`;
-        if (seen.has(seenKey) || occupied.has(key(from.level, x, z)) || blocked.has(key(from.level, x, z))) continue;
+        if (seen.has(seenKey) || occupied.has(key(from.level, x, z)) || blocked(key(from.level, x, z))) continue;
         seen.add(seenKey);
         next.push({ x, z, back: node, entryDir: node.entryDir, c0: node.c0 });
       }
@@ -250,6 +250,16 @@ export function layoutWorld(world, options = {}) {
     // and wrong walls over all zones from 177 to 73, with no area losing a
     // passage (tools/planar-check.mjs --try reach=6 shows the way back).
     reach: reachDefault = 12,
+    // What a street does about a cell another street already runs through,
+    // when the two pairs of rooms are not joined by exits: standing there you
+    // could walk from one street's rooms into the other's, a step the mud has
+    // no exit for and the server refuses (mud.mjs judge). 'allow' shares the
+    // cell, as it always did; 'forbid' routes round it within reach or leaves
+    // the exit an archway; 'raise' routes round it, else runs the street a
+    // level up over it (`layout.bridges` -- measured only: build.js, nav.js
+    // and the server know nothing of raised streets yet). Measured in
+    // tools/planar-check.mjs --try crossings=forbid|raise.
+    crossings = 'allow',
   } = options;
 
   const cells = new Map();      // vnum -> {x, level, z, room}
@@ -516,11 +526,25 @@ export function layoutWorld(world, options = {}) {
     return !!there && there.level === cell.level && there.x === cell.x + 2 * dx && there.z === cell.z + 2 * dz;
   };
 
+  // Two streets may share a cell when every room at either end of one is
+  // a room at an end of the other or joined to it by exits both ways.
+  const exitTo = new Set();
+  for (const cell of order) cell.room.exits.forEach((e) => { if (e) exitTo.add(`${cell.vnum}>${e.to}`); });
+  const joined = (a, b) => a === b || (exitTo.has(`${a.vnum}>${b.vnum}`) && exitTo.has(`${b.vnum}>${a.vnum}`));
+  const harmless = (l, m) => [l.from, l.to].every((x) => [m.from, m.to].every((y) => joined(x, y)));
+
   const allocate = (firstPass, stairRule) => {
     links.forEach((l, i) => {
       l.kind = kinds[i];
-      delete l.path; delete l.entryDir; delete l.exitDir; delete l.side; delete l.backSide;
+      delete l.path; delete l.entryDir; delete l.exitDir; delete l.side; delete l.backSide; delete l.lifted;
     });
+    const streetCells = new Map(); // grid key -> the streets through it
+    const deck = new Set();        // a raised street's stair cells, and its cells a level up
+    const bridges = [];
+    const others = (link, k) => [...(streetCells.get(k) || [])].filter((o) => o !== link && !harmless(link, o));
+    const loose = (k) => blocked.has(k) || deck.has(k);
+    const keepOut = crossings === 'allow' ? (link) => (k) => blocked.has(k)
+      : (link) => (k) => loose(k) || others(link, k).length > 0;
     const sides = new Map();
     for (const cell of order) sides.set(cell.vnum, [null, null, null, null]);
     const free = (vnum, dir) => dir <= 3 && !sides.get(vnum)[dir];
@@ -581,6 +605,12 @@ export function layoutWorld(world, options = {}) {
       ? { kind: 'alley', link, exit: link.exit, target: link.to }
       : { kind: 'alley', link, exit: link.exitBack || null, target: link.from, oneWay: oneWay(link) });
     const lay = (link, route) => {
+      if (link.path) for (const c of link.path) streetCells.get(key(link.from.level, c.x, c.z))?.delete(link);
+      for (const c of route.cells) {
+        const k = key(link.from.level, c.x, c.z);
+        if (!streetCells.has(k)) streetCells.set(k, new Set());
+        streetCells.get(k).add(link);
+      }
       link.kind = 'alley';
       link.path = route.cells;
       link.entryDir = route.entryDir;
@@ -588,24 +618,53 @@ export function layoutWorld(world, options = {}) {
       claim(link.from.vnum, route.entryDir, alleyEnd(link, 0));
       claim(link.to.vnum, REVERSE_DIR[route.exitDir], alleyEnd(link, 1));
     };
+    // A raised street's cells between its stairs are a level up, not in the street below.
+    const sky = (link) => {
+      if (!link.lifted?.raised) return;
+      for (const c of link.lifted.cells) streetCells.get(key(link.from.level, c.x, c.z)).delete(link);
+    };
     const reachOf = (link) => reach.get(pair(link.from.vnum, link.to.vnum)) || reachDefault;
+    // 'raise', when there is no way round: the whole street a level up,
+    // climbing in its first cell and coming down in its last, both its own;
+    // the cells between run over whatever is below them, but never over a
+    // room, and nothing else may use them.
+    const up = (k) => { const [l, xz] = k.split(':'); return `${Number(l) + 1}:${xz}`; };
+    const skyway = (link) => {
+      const free = (k) => !loose(k) && !occupied.has(up(k)) && !streetCells.has(up(k)) && !deck.has(up(k));
+      const route = routePath(link.from, link.to, occupied, reachOf(link), routeCost(link), (k) => !free(k));
+      if (!route || route.cells.length < 3) return null;
+      const lv = link.from.level; const p = route.cells;
+      if (others(link, key(lv, p[0].x, p[0].z)).length || others(link, key(lv, p[p.length - 1].x, p[p.length - 1].z)).length) return null;
+      const b = { link, level: lv, cells: p.slice(1, -1), ramps: [p[0], p[p.length - 1]], raised: true };
+      for (const c of b.ramps) deck.add(key(lv, c.x, c.z));
+      for (const c of b.cells) deck.add(key(lv + 1, c.x, c.z));
+      bridges.push(b);
+      link.lifted = b;
+      return route;
+    };
+    const overpass = (link) => (crossings === 'raise' ? skyway(link) : null);
     const level = (link) => link.kind === 'portal' && link.to && link.from.level === link.to.level;
 
     // First pass: which exits become streets, greedily in link order --
     // by the shortest route, as it always was, or by the cheapest.
     const streets = [];
-    for (const link of links) {
+    // Nearest ends first ('near'): the cell between two rooms side by side is
+    // their own street's before a longer one that would share it comes by.
+    const span = (l) => (l.to ? Math.abs(l.to.x - l.from.x) + Math.abs(l.to.z - l.from.z) : Infinity);
+    for (const link of firstPass === 'near' ? [...links].sort((a, b) => span(a) - span(b)) : links) {
       if (!level(link)) continue;
       let route;
       if (firstPass === 'shortest') {
         const forbidFirst = new Set([0, 1, 2, 3].filter((d) => !free(link.from.vnum, d)));
         const forbidLast = new Set([0, 1, 2, 3].filter((d) => !free(link.to.vnum, REVERSE_DIR[d])));
-        route = routeShortest(link.from, link.to, link.dir, occupied, reachOf(link), forbidFirst, forbidLast, blocked);
+        route = routeShortest(link.from, link.to, link.dir, occupied, reachOf(link), forbidFirst, forbidLast, keepOut(link));
       } else {
-        route = routePath(link.from, link.to, occupied, reachOf(link), routeCost(link), blocked);
+        route = routePath(link.from, link.to, occupied, reachOf(link), routeCost(link), keepOut(link));
       }
+      route ||= overpass(link);
       if (!route) continue;
       lay(link, route);
+      sky(link);
       streets.push(link);
     }
     // Then where each street leaves and arrives: each is taken up in turn
@@ -616,9 +675,10 @@ export function layoutWorld(world, options = {}) {
       let better = 0;
       for (const link of links) {
         if (!level(link)) continue;
-        const route = routePath(link.from, link.to, occupied, reachOf(link), routeCost(link), blocked);
+        const route = routePath(link.from, link.to, occupied, reachOf(link), routeCost(link), keepOut(link)) || overpass(link);
         if (!route) continue;
         lay(link, route);
+        sky(link);
         streets.push(link);
         better++;
       }
@@ -627,11 +687,12 @@ export function layoutWorld(world, options = {}) {
         // as the grid allows: nothing to improve.
         const shortest = Math.abs(link.to.x - link.from.x) + Math.abs(link.to.z - link.from.z) - 1;
         if (link.entryDir === link.dir && link.exitDir === link.dir && link.path.length === shortest) continue;
+        if (link.lifted) continue;
         const cost = routeCost(link);
         sides.get(link.from.vnum)[link.entryDir] = null;
         sides.get(link.to.vnum)[REVERSE_DIR[link.exitDir]] = null;
         const now = link.path.length + cost(0, link.entryDir) + cost(1, link.exitDir);
-        const route = routePath(link.from, link.to, occupied, reachOf(link), cost, blocked);
+        const route = routePath(link.from, link.to, occupied, reachOf(link), cost, keepOut(link));
         if (route && route.score < now) {
           lay(link, route);
           better++;
@@ -688,6 +749,8 @@ export function layoutWorld(world, options = {}) {
     }
     return {
       sides, stairSide, score: [walkable, -doorless, -wrong],
+      // A raised street with nothing left under it to keep apart from is no bridge.
+      bridges: bridges.filter((b) => b.link.kind === 'alley' && b.cells.some((c) => others(b.link, key(b.level, c.x, c.z)).length)),
       state: links.map((l) => ({ kind: l.kind, path: l.path, entryDir: l.entryDir, exitDir: l.exitDir, side: l.side, backSide: l.backSide })),
     };
   };
@@ -701,8 +764,12 @@ export function layoutWorld(world, options = {}) {
   // ever win ('shortest'/'legacy' never has, and is kept so that no layout
   // can lose a walkable passage to this).
   let best = null;
-  for (const [firstPass, stairRule] of [['shortest', 'strict'], ['cheapest', 'strict'], ['cheapest', 'bent'],
-    ['cheapest', 'legacy'], ['shortest', 'legacy']]) {
+  // Streets kept apart lose most to the order they are laid in, so they
+  // try the nearest-first order too.
+  const trials = [['shortest', 'strict'], ['cheapest', 'strict'], ['cheapest', 'bent'],
+    ['cheapest', 'legacy'], ['shortest', 'legacy']];
+  if (crossings !== 'allow') trials.unshift(['near', 'strict'], ['near', 'bent']);
+  for (const [firstPass, stairRule] of trials) {
     const trial = allocate(firstPass, stairRule);
     if (!best || ahead(trial.score, best.score)) best = trial;
   }
@@ -713,7 +780,8 @@ export function layoutWorld(world, options = {}) {
       if (st[k] === undefined) delete l[k]; else l[k] = st[k];
     }
   });
-  const { sides, stairSide } = best;
+  for (const l of links) delete l.lifted;
+  const { sides, stairSide, bridges } = best;
   const pathCells = new Set();
   const pathOwner = new Map(); // which passage runs through this cell
   for (const link of links) {
@@ -741,7 +809,7 @@ export function layoutWorld(world, options = {}) {
   };
 
   return {
-    cells, links, order, pathCells, sides, stairSide, start: cells.get(start.vnum),
+    cells, links, order, pathCells, sides, stairSide, bridges, start: cells.get(start.vnum),
     bounds: { minX, maxX, minZ, maxZ, minLevel, maxLevel },
     stats,
     /** Which room, if any, sits in this cell. */
