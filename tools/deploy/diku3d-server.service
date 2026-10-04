@@ -1,0 +1,27 @@
+# The diku3d game server (server/main.mjs): Merc 2.1's rules for many players.
+# Installed by deploy.sh to /etc/systemd/system/diku3d-server.service.
+# Listens on loopback only; nginx passes wss://<site>/ws through to it.
+# Player files, notes, bans and the wizlock live in /srv/diku3d-data, outside
+# the deployed tree, so a deploy can never touch them.
+[Unit]
+Description=diku3d game server
+After=network.target
+
+[Service]
+Type=simple
+User=diku3d
+Group=diku3d
+WorkingDirectory=/srv/diku3d/server
+ExecStart=/usr/bin/node /srv/diku3d/server/main.mjs --port 4000 --host 127.0.0.1 --data /srv/diku3d-data
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/diku3d-data
+
+[Install]
+WantedBy=multi-user.target

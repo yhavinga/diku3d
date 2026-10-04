@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy de single-player-viewer naar de server uit .env (zie .env.example).
+# Deploy de viewer en de spelserver naar de server uit .env (zie .env.example).
 # Gebruik: ./deploy.sh — vanuit de repo-root of waar dan ook.
 # Volgorde: rooktest → nginx-config → rsync → revisienotitie → controles.
 #
@@ -33,7 +33,7 @@ echo "▸ Deploy $SHA → $SERVER:$DOCMAP"
 # --- 1. Rooktest. Er is geen build; dit zijn de goedkope checks uit CLAUDE.md
 # die een kapotte pagina tegenhouden (syntaxis, imports, alle 45 .are-bestanden).
 echo "▸ Rooktest"
-(cd "$ROOT" && node --check src/*.js src/rules/*.js \
+(cd "$ROOT" && node --check src/*.js src/rules/*.js server/*.mjs \
   && node tools/import-check.mjs >/dev/null \
   && node tools/parse-check.mjs >/dev/null)
 [ -f "$ROOT/merc21/area/midgaard.are" ] || { echo "✗  merc21/ is niet uitgecheckt (git submodule update --init)" >&2; exit 1; }
@@ -62,8 +62,8 @@ ssh "$SERVER" "set -e
 # ongewijzigde bestanden met een 304 afgaan.
 echo "▸ rsync"
 (cd "$ROOT" && rsync -rlptR --delete --rsync-path="sudo rsync" \
-  --exclude .DS_Store \
-  index.html src vendor assets merc21/area LICENSE \
+  --exclude .DS_Store --exclude /server/node_modules --exclude /server/data \
+  index.html src vendor assets merc21/area LICENSE server \
   merc21/doc/license.txt merc21/doc/license.doc \
   "$SERVER:$DOCMAP/")
 
@@ -72,6 +72,27 @@ echo "▸ rsync"
 ssh "$SERVER" "sudo tee $DOCMAP/REVISION >/dev/null" <<EOF
 $SHA $(date +%Y-%m-%dT%H:%M:%S)
 EOF
+
+# --- 4b. De spelserver (server/, systemd diku3d-server op 127.0.0.1:4000).
+# Spelersbestanden, notes, bans en de wizlock staan in $DATA, buiten de
+# gedeployde boom; bij de allereerste start staat de wizlock aan (alleen
+# immortals), tot een implementor hem met `wizlock` uitzet.
+DATA="${DEPLOY_DATA:-/srv/diku3d-data}"
+echo "▸ spelserver"
+ssh "$SERVER" "sudo tee /etc/systemd/system/diku3d-server.service.new >/dev/null" < "$ROOT/tools/deploy/diku3d-server.service"
+ssh "$SERVER" "set -e
+  id diku3d >/dev/null 2>&1 || sudo useradd --system --no-create-home --shell /usr/sbin/nologin diku3d
+  sudo install -d -o diku3d -g diku3d -m 750 $DATA
+  [ -f $DATA/site.json ] || echo '{ \"version\": 1, \"wizlock\": true, \"bans\": [] }' | sudo -u diku3d tee $DATA/site.json >/dev/null
+  cd $DOCMAP/server && sudo npm ci --omit=dev --no-audit --no-fund --silent
+  cd /etc/systemd/system
+  if ! sudo cmp -s diku3d-server.service.new diku3d-server.service; then
+    sudo mv diku3d-server.service.new diku3d-server.service && sudo systemctl daemon-reload && echo '  unit vernieuwd'
+  else sudo rm diku3d-server.service.new; fi
+  sudo systemctl enable --quiet diku3d-server
+  sudo systemctl restart diku3d-server
+  sleep 2
+  systemctl is-active --quiet diku3d-server || { sudo journalctl -u diku3d-server -n 30 --no-pager; exit 1; }"
 
 # --- 5. Van buitenaf, door Cloudflare: de pagina, de eerste module, een
 # gebied en een model moeten er zijn, en het gebied moet als tekst komen.
@@ -82,5 +103,13 @@ for pad in / /src/main.js /vendor/three/build/three.module.js /merc21/area/midga
 done
 TYPE="$(curl -sI "$DOMEIN/merc21/area/midgaard.are" | tr -d '\r' | awk -F': ' 'tolower($1)=="content-type"{print $2}')"
 case "$TYPE" in text/plain*) ;; *) echo "✗  .are komt als '$TYPE'" >&2; exit 1 ;; esac
+# De WebSocket moet door Cloudflare en nginx tot de server komen (101), en
+# de broncode van de server mag niet als website uitgeleverd worden.
+WS="$(curl -s --http1.1 --max-time 5 -o /dev/null -w '%{http_code}' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+  -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$DOMEIN/ws" || true)"
+[ "$WS" = "101" ] || { echo "✗  $DOMEIN/ws geeft $WS in plaats van 101" >&2; exit 1; }
+SRC="$(curl -s -o /dev/null -w '%{http_code}' "$DOMEIN/server/main.mjs")"
+[ "$SRC" = "404" ] || { echo "✗  $DOMEIN/server/main.mjs geeft $SRC in plaats van 404" >&2; exit 1; }
 
 echo "✓ Online: $DOMEIN (revisie $SHA)"
