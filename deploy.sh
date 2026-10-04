@@ -107,7 +107,7 @@ case "$TYPE" in text/plain*) ;; *) echo "✗  .are komt als '$TYPE'" >&2; exit 1
 # de broncode van de server mag niet als website uitgeleverd worden.
 WS="$(curl -s --http1.1 --max-time 5 -o /dev/null -w '%{http_code}' \
   -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
-  -H 'Sec-WebSocket-Key: ZGlrdTNkLWRlcGxveS1jaGs=' "$DOMEIN/ws" || true)"
+  -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' "$DOMEIN/ws" || true)"
 [ "$WS" = "101" ] || { echo "✗  $DOMEIN/ws geeft $WS in plaats van 101" >&2; exit 1; }
 SRC="$(curl -s -o /dev/null -w '%{http_code}' "$DOMEIN/server/main.mjs")"
 [ "$SRC" = "404" ] || { echo "✗  $DOMEIN/server/main.mjs geeft $SRC in plaats van 404" >&2; exit 1; }
