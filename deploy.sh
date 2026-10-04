@@ -41,6 +41,8 @@ echo "▸ Rooktest"
 # --- 2. nginx-config uit de repo; alleen herladen als hij veranderd is, en
 # nooit zonder dat `nginx -t` hem goedkeurt (de andere sites draaien mee).
 echo "▸ nginx"
+# GoAccess leest de eigen log van de site uit (tools/deploy/stats.sh).
+ssh "$SERVER" "command -v goaccess >/dev/null || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq goaccess >/dev/null"
 ssh "$SERVER" "sudo tee /etc/nginx/sites-available/$SITE.new >/dev/null" < "$ROOT/tools/deploy/nginx-diku3d.conf"
 ssh "$SERVER" "set -e
   cd /etc/nginx/sites-available
