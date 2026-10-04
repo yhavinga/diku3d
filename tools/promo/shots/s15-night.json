@@ -2,7 +2,7 @@
  "name": "s15-night",
  "room": 3005,
  "time": "night",
- "seconds": 3.5,
+ "seconds": 4.5,
  "base": {
   "shoot": 3005,
   "aimDist": 8
@@ -17,7 +17,7 @@
    ]
   },
   {
-   "t": 3.5,
+   "t": 4.5,
    "local": [
     0.7,
     0.1,

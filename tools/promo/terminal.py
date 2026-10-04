@@ -2,7 +2,7 @@
 
 Renders frames of a green-phosphor terminal from a script of typed and
 received text. The received text is the real Merc 2.1 server's output,
-captured over telnet from merc21/src/merc (see tools/promo/README.md); the
+captured over telnet from merc21/src/merc run on port 4400 (script.md); the
 paragraphs are re-wrapped to the terminal's width the way a client would.
 
     python3 tools/promo/terminal.py --w 1920 --h 1080 --out DIR [--size 52]
