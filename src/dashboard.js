@@ -450,6 +450,10 @@ export function createDashboard({ getLink }) {
     if (at) view.flyTo(at, close ? 110 : view.look.dist);
   }
   $('dh-search').addEventListener('input', showResults);
+  // Leaving the box puts the list away.
+  $('dh-search').addEventListener('blur', () => $('dh-results').classList.remove('on'));
+  // A press on the list keeps the box focused, so the list is still there for the click.
+  $('dh-results').addEventListener('mousedown', (e) => e.preventDefault());
   $('dh-search').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && results.length) { e.preventDefault(); goToResult(results[0]); }
     if (e.key === 'Escape') { $('dh-results').classList.remove('on'); $('dh-search').blur(); }
@@ -511,6 +515,8 @@ export function createDashboard({ getLink }) {
     if (view) { view.follow = null; view.keys.clear(); }
     card = null;
     $('dh-search').blur();
+    $('dh-search').value = '';
+    $('dh-results').classList.remove('on');
     if (!hadLock) d.state.paused = wasPaused;
     d.player.requestLock();
   }

@@ -75,6 +75,19 @@ await y.evaluate(() => { const v = window.diku.dashboard.view; v.look.dist = 900
 await y.waitForTimeout(800);
 await shot(y, 'god-atlas');
 await y.evaluate(() => { const v = window.diku.dashboard.view; v.look.pitch = 0.95; });
+// The camera by hand: wheel in towards a point, drag to turn, right-drag to pan, W to fly.
+const lookNow = () => y.evaluate(() => { const l = window.diku.dashboard.view.look; return { d: +l.dist.toFixed(1), yaw: +l.yaw.toFixed(3), pitch: +l.pitch.toFixed(3), x: +l.target.x.toFixed(1), z: +l.target.z.toFixed(1) }; });
+console.log('camera before:', JSON.stringify(await lookNow()));
+await y.mouse.move(900, 500);
+for (let i = 0; i < 5; i++) { await y.mouse.wheel(0, -300); await wait(60); }
+console.log('after wheel in:', JSON.stringify(await lookNow()));
+await y.mouse.down(); await y.mouse.move(980, 520, { steps: 6 }); await y.mouse.up();
+console.log('after drag:', JSON.stringify(await lookNow()));
+await y.mouse.down({ button: 'right' }); await y.mouse.move(860, 460, { steps: 6 }); await y.mouse.up({ button: 'right' });
+console.log('after right-drag:', JSON.stringify(await lookNow()));
+await y.keyboard.down('KeyW'); await wait(400); await y.keyboard.up('KeyW');
+console.log('after W:', JSON.stringify(await lookNow()));
+await shot(y, 'god-hand');
 
 // Talk and walking.
 await say(e, 'say hail, the dashboard');
@@ -123,8 +136,9 @@ await y.click('#dh-search');
 await y.keyboard.type('market');
 await wait(400);
 await shot(y, 'god-search');
-await y.keyboard.press('Enter');
+await y.click('[data-result="1"]');
 await wait(1500);
+console.log('search card:', await y.evaluate(() => document.querySelector('#dh-card .ttl')?.textContent), 'list open:', await y.evaluate(() => document.getElementById('dh-results').classList.contains('on')));
 await shot(y, 'god-search-flown');
 
 // Click in the view (what is under the middle of the screen), then a room's card, and goto from it.
