@@ -4169,6 +4169,167 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
   }
 }
 
+// --- polygons with their own UVs ---------------------------------------------
+
+const _ident = new THREE.Matrix4();
+/**
+ * Triangles in world space, UVs laid in each face's own plane: across a
+ * vertical face along its horizontal, up a roof along its eave and up its
+ * slope, flat on anything near level. `Batcher`'s axis projection is right
+ * only for faces square to the grid -- a front turned 12 degrees stretches
+ * its stone 2%, a 45-degree chamfer 41%, and a roof's tile courses would run
+ * at the grid's angle instead of the eave's.
+ */
+function addTris(batcher, chunk, mat, tris, opts = {}) {
+  const material = batcher.materials[mat];
+  if (!material) throw new Error(`build: unknown material ${mat}`);
+  const s = opts.uvScale ?? material.userData.uvScale;
+  const pos = new Float32Array(tris.length * 9);
+  const uv = new Float32Array(tris.length * 6);
+  const e1 = new THREE.Vector3(); const e2 = new THREE.Vector3(); const n = new THREE.Vector3();
+  const h = new THREE.Vector3(); const up = new THREE.Vector3();
+  tris.forEach(([a, b, c], i) => {
+    e1.subVectors(b, a); e2.subVectors(c, a); n.crossVectors(e1, e2).normalize();
+    const flat = Math.abs(n.y) > 0.95;
+    if (!flat) {
+      h.set(-n.z, 0, n.x).normalize();
+      if (Math.abs(h.x) >= Math.abs(h.z) ? h.x < 0 : h.z < 0) h.negate();
+      up.crossVectors(n, h);
+      if (up.y < 0) up.negate();
+    }
+    [a, b, c].forEach((p, k) => {
+      pos[i * 9 + k * 3] = p.x; pos[i * 9 + k * 3 + 1] = p.y; pos[i * 9 + k * 3 + 2] = p.z;
+      uv[i * 6 + k * 2] = (flat ? p.x : p.dot(h)) * s;
+      uv[i * 6 + k * 2 + 1] = (flat ? p.z : p.dot(up)) * s;
+    });
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  batcher.add(geo, mat, _ident, { ...opts, chunk, keepUv: true, uvScale: undefined });
+  geo.dispose();
+}
+
+/** Wound so its normal points away from `inside` (a convex solid's middle). */
+function facing(list, a, b, c, inside) {
+  const n = new THREE.Vector3().crossVectors(new THREE.Vector3().subVectors(b, a), new THREE.Vector3().subVectors(c, a));
+  const m = new THREE.Vector3().add(a).add(b).add(c).multiplyScalar(1 / 3).sub(inside);
+  list.push(n.dot(m) >= 0 ? [a, b, c] : [a, c, b]);
+}
+
+const V3 = (p, y) => new THREE.Vector3(p.x, y, p.z);
+
+/**
+ * A wall of any convex footprint, `pts` {x, z} round it either way. Sides
+ * are split at 1.8 m over the foot so `wallAo`'s ramp has a vertex to stop
+ * at; the top is capped, the bottom is the ground.
+ */
+function prismTris(pts, y0, y1) {
+  const out = [];
+  const mid = pts.reduce((m, p) => ({ x: m.x + p.x / pts.length, z: m.z + p.z / pts.length }), { x: 0, z: 0 });
+  const inside = V3(mid, (y0 + y1) / 2);
+  const ys = [y0];
+  if (y1 - y0 > 2.4) ys.push(y0 + 1.8);
+  ys.push(y1);
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i]; const q = pts[(i + 1) % pts.length];
+    for (let k = 0; k + 1 < ys.length; k++) {
+      const a = V3(p, ys[k]); const b = V3(q, ys[k]); const c = V3(q, ys[k + 1]); const d = V3(p, ys[k + 1]);
+      facing(out, a, b, c, inside); facing(out, a, c, d, inside);
+    }
+  }
+  for (let i = 1; i + 1 < pts.length; i++) facing(out, V3(pts[0], y1), V3(pts[i], y1), V3(pts[i + 1], y1), V3(mid, y0));
+  return out;
+}
+
+const sub2 = (p, q) => ({ x: p.x - q.x, z: p.z - q.z });
+const add2 = (p, q, s = 1) => ({ x: p.x + q.x * s, z: p.z + q.z * s });
+const len2 = (p) => Math.hypot(p.x, p.z);
+const unit2 = (p) => { const l = len2(p) || 1; return { x: p.x / l, z: p.z / l }; };
+const mid2 = (p, q) => ({ x: (p.x + q.x) / 2, z: (p.z + q.z) / 2 });
+
+/**
+ * `gableRoof` over any four-cornered house: eaves along a1-b1 and a2-b2, a
+ * gable over a1-a2 and one over b1-b2. The ends are set back `recess` along
+ * the eaves and the eaves stand out `overhang`; each gable is a triangle of
+ * wall 5 cm outside the roof's own end, so the end of a house is wall with
+ * the tile round it as a verge -- as `gableRoof` does it, and for the same
+ * reason (a gable in the plane of the roof's end ties with it).
+ */
+function quadRoof(batcher, chunk, [a1, a2], [b1, b2], y, rise, overhang, recess, roofMat, wallMat, tint) {
+  const ea1 = unit2(sub2(b1, a1)); const ea2 = unit2(sub2(b2, a2));
+  const ar1 = add2(a1, ea1, recess); const ar2 = add2(a2, ea2, recess);
+  const br1 = add2(b1, ea1, -recess); const br2 = add2(b2, ea2, -recess);
+  const ga = unit2(sub2(ar2, ar1)); const gb = unit2(sub2(br2, br1));
+  const A1 = add2(ar1, ga, -overhang); const A2 = add2(ar2, ga, overhang);
+  const B1 = add2(br1, gb, -overhang); const B2 = add2(br2, gb, overhang);
+  const ma = mid2(ar1, ar2); const mb = mid2(br1, br2);
+  const inside = V3(mid2(ma, mb), y + rise * 0.3);
+  const T = [];
+  const [pA1, pA2, pB1, pB2] = [V3(A1, y), V3(A2, y), V3(B1, y), V3(B2, y)];
+  const [rA, rB] = [V3(ma, y + rise), V3(mb, y + rise)];
+  facing(T, pA1, pB1, rB, inside); facing(T, pA1, rB, rA, inside);
+  facing(T, pA2, rA, rB, inside); facing(T, pA2, rB, pB2, inside);
+  facing(T, pA1, rA, pA2, inside); facing(T, pB1, rB, pB2, inside);
+  facing(T, pA1, pA2, pB2, inside); facing(T, pA1, pB2, pB1, inside);
+  addTris(batcher, chunk, roofMat, T);
+  // The wall in each gable, at the pitch of the roof, under it.
+  const W = [];
+  for (const [p, q, e, sgn] of [[ar1, ar2, ea1, -1], [br1, br2, ea1, 1]]) {
+    const cross = len2(sub2(q, p));
+    const apexH = rise * cross / (cross + 2 * overhang);
+    const off = { x: e.x * sgn * 0.05, z: e.z * sgn * 0.05 };
+    const P = add2(p, off); const Q = add2(q, off); const M = add2(mid2(p, q), off);
+    // Outward is away from the other end.
+    const away = V3(add2(mid2(p, q), e, -sgn), y);
+    facing(W, V3(P, y), V3(Q, y), V3(M, y + apexH), away);
+  }
+  addTris(batcher, chunk, wallMat, W, { tint, ao: () => 0.92 });
+}
+
+/** A hipped roof over a convex footprint: every eave up to one apex. */
+function hipRoof(batcher, chunk, pts, y, rise, overhang, roofMat) {
+  const n = pts.length;
+  const c = pts.reduce((m, p) => ({ x: m.x + p.x / n, z: m.z + p.z / n }), { x: 0, z: 0 });
+  // Each eave pushed out `overhang` from the centre's side: for a convex
+  // footprint the offset lines meet in a convex ring.
+  const lines = pts.map((p, i) => {
+    const q = pts[(i + 1) % n];
+    const t = unit2(sub2(q, p));
+    let nrm = { x: t.z, z: -t.x };
+    if ((p.x - c.x) * nrm.x + (p.z - c.z) * nrm.z < 0) nrm = { x: -nrm.x, z: -nrm.z };
+    return { p: add2(p, nrm, overhang), t };
+  });
+  const ring = lines.map((l, i) => {
+    const m = lines[(i + n - 1) % n];
+    const den = m.t.x * l.t.z - m.t.z * l.t.x;
+    if (Math.abs(den) < 1e-6) return l.p;
+    const s = ((l.p.x - m.p.x) * l.t.z - (l.p.z - m.p.z) * l.t.x) / den;
+    return add2(m.p, m.t, s);
+  });
+  const apex = V3(c, y + rise);
+  const inside = V3(c, y + rise * 0.3);
+  const T = [];
+  for (let i = 0; i < n; i++) facing(T, V3(ring[i], y), V3(ring[(i + 1) % n], y), apex, inside);
+  for (let i = 1; i + 1 < n; i++) facing(T, V3(ring[0], y), V3(ring[i], y), V3(ring[i + 1], y), apex);
+  addTris(batcher, chunk, roofMat, T);
+}
+
+/** Axis-aligned colliders for a stretch of front from (a0, o0) to (a1, o1), back to `oBack`, in a row's frame. */
+function frontColliders(F, addCollider, y0, y1, a0, o0, a1, o1, oBack) {
+  const span = a1 - a0;
+  if (span <= 0.01) return;
+  const k = Math.abs((o1 - o0) / span);
+  // Each strip takes the front at its middle: within 0.1 m of the face either way.
+  const n = Math.max(1, Math.ceil(span / Math.max(0.25, Math.min(span, k > 1e-4 ? 0.2 / k : span))));
+  for (let i = 0; i < n; i++) {
+    const aL = a0 + (span * i) / n; const aR = a0 + (span * (i + 1)) / n;
+    const o = o0 + (o1 - o0) * ((i + 0.5) / n);
+    const p = F.at(aL, o); const q = F.at(aR, oBack);
+    addCollider(Math.min(p.x, q.x), Math.max(p.x, q.x), Math.min(p.z, q.z), Math.max(p.z, q.z), y0, y1);
+  }
+}
+
 /**
  * A row of town houses along one closed side of an open-air city cell.
  *
@@ -4180,11 +4341,17 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
  * eaves, fronts that do not line up, and upper storeys built out over the lane
  * on jetties so the strip of sky narrows as it goes up. None of that moves a
  * room or a doorway: every house stands inside the frontage strip the old slab
- * stood in, and steps *back* from its street face, never forward, at ground
- * level -- except along a routed lane that bends (`laneBend`), where the row
- * facing the bend comes forward by what the other gives back, and the lane
- * keeps its width. Above head height (a jetty starts at 2.9 m) a storey may
- * oversail the street by up to 1.1 m.
+ * stood in, and steps *back* from its street face, never forward. Above head
+ * height (a jetty starts at 2.9 m) a storey may oversail the street by up to
+ * 1.1 m.
+ *
+ * The street face is `face`: `f(a)` how far out from the cell centre it runs
+ * at `a`, `k(a)` its slope. Straight is the old line; a street that bends
+ * (`planStreets`) hands in a curve. Each house's front is the chord of that
+ * curve between its two ends, so it is a box turned to follow the street, and
+ * its party walls lie along the curve's normal at those ends: the neighbours'
+ * walls are the same line, so a turned row has no wedge of sky between two
+ * houses and no corner poking through the next front.
  *
  * Local frame: `a` runs along the street, `o` outwards from the cell centre.
  * The base street face is at `HALF - FRONTAGE_D`, the back at the cell edge.
@@ -4193,6 +4360,9 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
  */
 const ROW_FACE = HALF - FRONTAGE_D;
 const JETTY_Y = 2.9;
+/** The shallowest a house may get where a bend takes its front back. */
+const MIN_HOUSE_D = 1.0;
+const STRAIGHT = { f: () => ROW_FACE, k: () => 0 };
 // Limewash, as the houses of Colmar and Rothenburg wear it: muted, never
 // saturated -- multiplied into the plaster's own off-white.
 const LIMEWASH = [[1, 0.98, 0.93], [1, 0.9, 0.72], [0.98, 0.86, 0.8], [0.88, 0.93, 0.83], [0.86, 0.9, 0.95], [1, 1, 1], [0.96, 0.92, 0.84]];
@@ -4236,10 +4406,11 @@ function gableRoof(batcher, chunk, c, y, cross, overhang, ridge, rise, rot, roof
     place(c.x, y, c.z, rot), { chunk, tint, ao: () => 0.92 });
 }
 
-function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cell, salt, decor, lights, addCollider, fixLo = false, fixHi = false, bareLo = false, bareHi = false, bend = null, room = false }) {
+function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cell, salt, decor, lights, addCollider, fixLo = false, fixHi = false, bareLo = false, bareHi = false, face = STRAIGHT, room = false }) {
   const F = rowFrame(pos, dir);
   const y0 = pos.y;
   const street = (dir + 2) % 4;
+  const [sdx, , sdz] = DIR_STEP[street];
   const R = (i, k) => hash3(cell.x * 31 + i * 7 + dir, cell.z * 31 + k, cell.level, salt);
 
   // Narrow houses, three and a half to six metres: the width a burgage plot
@@ -4256,19 +4427,22 @@ function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cel
   let lastH = -1;
   const houses = [];
   plots.forEach(([s0, s1], i) => {
-    const L = s1 - s0;
-    const am = (s0 + s1) / 2;
     const r = (k) => R(i, 10 + k);
     const atEnd = (i === 0 && fixLo) || (i === plots.length - 1 && fixHi);
+    const fc0 = face.f(s0); const fc1 = face.f(s1);
+    const k0 = face.k(s0); const k1 = face.k(s1);
     // A room's own cell keeps its street face where it always was: the prose
     // stands its fountain, well or statue against it, measured off the
     // colliders, and a stepped front gave those a notch to straddle -- the
-    // fountain at #3141 stood with its bowl in the next house.
-    const back = atEnd || room ? 0 : (r(0) < 0.5 ? 0 : (r(0) - 0.5) * 1.4);
-    // `bend` is where the lane's middle has wandered to, towards +x or +z:
-    // the row on that side steps back by as much, the row facing it forward.
-    const f = ROW_FACE + back + (bend ? (dir === 1 || dir === 2 ? 1 : -1) * bend(am) : 0);
-    const D = HALF - f;
+    // fountain at #3141 stood with its bowl in the next house. On a bend the
+    // step is smaller: the curve is the thing to read, not a sawtooth on it.
+    const curved = Math.abs(k0) > 0.02 || Math.abs(k1) > 0.02;
+    let back = atEnd || room ? 0 : (r(0) < 0.5 ? 0 : (r(0) - 0.5) * (curved ? 0.5 : 1.4));
+    back = Math.max(0, Math.min(back, HALF - Math.max(fc0, fc1) - MIN_HOUSE_D));
+    // A point on party wall 0 or 1 -- through the curve at that end, along
+    // the curve's normal -- at distance `q` out from the cell centre.
+    const pw = (end, q) => (end ? { a: s1 - k1 * (q - fc1), o: q } : { a: s0 - k0 * (q - fc0), o: q });
+    const W = (p) => F.at(p.a, p.o);
     let h = 5.8 + r(1) * 3.8;
     // Two neighbours of one height share a roof plane: one of them steps.
     if (lastH >= 0 && Math.abs(h - lastH) < 0.5) h = h + (h < 8.0 ? 0.8 : -0.8);
@@ -4290,37 +4464,48 @@ function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cel
     const J1 = jetty ? 0.4 + r(7) * 0.3 : 0;
     const yJ2 = yJ + 2.6;
     const J2 = jetty && h - yJ2 > 2.0 ? 0.25 + r(8) * 0.15 : 0;
-    const top = f - J1 - J2;
-    const Dt = HALF - top;
+    const L = s1 - s0;
     const door = L >= 3.4 && r(15) < 0.8;
 
-    // Storeys, bottom up: [y from, y to, street face].
+    // Storeys, bottom up: [y from, y to, how far out past the ground floor].
     const storeys = jetty
-      ? (J2 ? [[0, yJ, f], [yJ, yJ2, f - J1], [yJ2, h, top]] : [[0, yJ, f], [yJ, h, f - J1]])
-      : [[0, h, f]];
-    houses.push({ s0, s1, storeys });
+      ? (J2 ? [[0, yJ, 0], [yJ, yJ2, J1], [yJ2, h, J1 + J2]] : [[0, yJ, 0], [yJ, h, J1]])
+      : [[0, h, 0]];
+    // The front of storey `e`: its two corners and the chord between them.
+    const front = (e) => {
+      const p = pw(0, fc0 + back - e); const q = pw(1, fc1 + back - e);
+      const A = W(p); const B = W(q);
+      const t = unit2(sub2(B, A));
+      // The way the front faces: square to it, and out into the street.
+      let ns = { x: t.z, z: -t.x };
+      if (ns.x * sdx + ns.z * sdz < 0) ns = { x: -ns.x, z: -ns.z };
+      // Somewhere on the front: `c` metres along it from its middle, `w` out.
+      const on = (c, w = 0) => add2(add2(mid2(A, B), t, c), ns, w);
+      return { p, q, A, B, t, ns, len: len2(sub2(B, A)), on, rot: Math.atan2(-t.z, t.x), faceRot: Math.atan2(ns.x, ns.z) };
+    };
+    const backA = W(pw(0, HALF)); const backB = W(pw(1, HALF));
+    houses.push({ s0, s1, storeys, front });
     const flowers = instances && r(19) > 0.55 && instances.library.get('shire_window_box') ? 'shire_window_box' : null;
-    storeys.forEach(([ya, yb, face], k) => {
-      const dep = HALF - face;
-      const c = F.at(am, (face + HALF) / 2);
-      const [sx, sz] = F.span(L, dep);
-      batcher.add(box(sx, yb - ya, sz, 2, k ? 1 : 2, 2), k === 0 ? groundMat : upperMat,
-        place(c.x, y0 + (ya + yb) / 2, c.z), { chunk, tint: k === 0 ? groundTint : tint, ao: k === 0 ? wallAo(y0) : null });
+    storeys.forEach(([ya, yb, e], k) => {
+      const fr = front(e);
+      addTris(batcher, chunk, k === 0 ? groundMat : upperMat, prismTris([fr.A, fr.B, backB, backA], y0 + ya, y0 + yb),
+        { tint: k === 0 ? groundTint : tint, ao: k === 0 ? wallAo(y0) : null });
       // The street face's windows, and only that face's: the ends are party
       // walls against the next house, and the back is against the next cell.
+      // Laid out on a box turned with the front (its local +z is the street).
+      const c = fr.on(0, -0.5);
       const win = {
-        kind: 'windows', x: c.x, y: y0 + (k === 0 ? 0 : ya - 0.5), z: c.z, w: sx, d: sz,
+        kind: 'windows', x: c.x, y: y0 + (k === 0 ? 0 : ya - 0.5), z: c.z, w: fr.len, d: 1.0, rot: fr.faceRot,
         h: k === 0 ? yb : yb - ya + 0.5, seed: r(20 + k), frame: k === 0 && stoneGround ? 'stone' : 'timber',
-        only: [street], doorSides: k === 0 && door ? true : undefined,
+        only: [2], doorSides: k === 0 && door ? true : undefined,
       };
       decor.push(win);
       // Flowers on the sills of the upper floors of some: in front of the
       // reveal, standing on the sill, where a window box sits.
       if (flowers) {
-        for (const p of windowSpots(win, street)) {
+        for (const p of windowSpots(win)) {
           if (p.y < y0 + JETTY_Y + 0.5) continue;
-          const [ox, , oz] = DIR_STEP[street];
-          instances.add(flowers, { x: p.x + ox * 0.34, y: p.y - 0.69, z: p.z + oz * 0.34, rotY: FACE_ROT[street] }, chunk);
+          instances.add(flowers, { x: p.x + fr.ns.x * 0.34, y: p.y - 0.69, z: p.z + fr.ns.z * 0.34, rotY: Math.atan2(-fr.ns.x, -fr.ns.z) }, chunk);
         }
       }
       if (k === 0) return;
@@ -4329,65 +4514,61 @@ function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cel
       // touches points the other way and can never tie with it, while one
       // sunk 2 cm draws a line where the two cross (tools/judge/zfight.js
       // counts those, and they flicker along the edge).
-      const prev = storeys[k - 1][2];
-      const bc = F.at(am, face + 0.09);
-      const [bx, bz] = F.span(L - 0.04, 0.24);
-      batcher.add(box(bx, 0.24, bz), 'wood', place(bc.x, y0 + ya - 0.12, bc.z), { chunk, tint: FRAME_OAK });
-      const n = Math.max(2, Math.floor(L / 0.7));
+      const J = e - storeys[k - 1][2];
+      const bc = fr.on(0, -0.09);
+      batcher.add(box(fr.len - 0.04, 0.24, 0.24), 'wood', place(bc.x, y0 + ya - 0.12, bc.z, fr.rot), { chunk, tint: FRAME_OAK });
+      const n = Math.max(2, Math.floor(fr.len / 0.7));
       for (let j = 0; j < n; j++) {
-        const a = s0 + (j + 0.5) * (L / n);
-        const jc = F.at(a, (face + 0.21 + prev) / 2);
-        const [jx, jz] = F.span(0.13, prev - face - 0.21);
-        batcher.add(box(jx, 0.15, jz), 'wood', place(jc.x, y0 + ya - 0.075, jc.z), { chunk, tint: FRAME_OAK });
+        const jc = fr.on(-fr.len / 2 + (j + 0.5) * (fr.len / n), -(0.21 + J) / 2);
+        batcher.add(box(0.13, 0.15, J - 0.21), 'wood', place(jc.x, y0 + ya - 0.075, jc.z, fr.rot), { chunk, tint: FRAME_OAK });
       }
     });
     // The ground storey is all a person can walk into.
     {
-      const c = F.at(am, (f + HALF) / 2);
-      const [sx, sz] = F.span(L, D);
-      addCollider(c.x - sx / 2, c.x + sx / 2, c.z - sz / 2, c.z + sz / 2, y0, y0 + h);
+      const p = pw(0, fc0 + back); const q = pw(1, fc1 + back);
+      frontColliders(F, addCollider, y0, y0 + h, p.a, p.o, q.a, q.o, HALF);
     }
 
     // Gable to the street on most of the narrow ones, the way a street of
     // burgage plots reads; eaves to the street on the wide ones.
     const roofMat = r(9) > 0.88 ? 'thatch' : 'rooftile';
     const gableFront = L < 5.4 ? r(11) > 0.3 : r(11) > 0.75;
-    const topC = F.at(am, (top + HALF) / 2);
-    const rise = gableFront ? (L / 2 + 0.25) * (1.2 + r(12) * 0.5) : (Dt / 2 + 0.35) * (1.0 + r(12) * 0.35);
-    if (gableFront) gableRoof(batcher, chunk, topC, y0 + h, L, 0.25, Dt, rise, F.ridgeAcross, roofMat, upperMat, tint, 0.05);
-    else gableRoof(batcher, chunk, topC, y0 + h, Dt, 0.35, L, rise, F.ridgeAlong, roofMat, upperMat, tint);
+    const top = front(storeys[storeys.length - 1][2]);
+    const Dt = (len2(sub2(backA, top.A)) + len2(sub2(backB, top.B))) / 2;
+    const rise = gableFront ? (top.len / 2 + 0.25) * (1.2 + r(12) * 0.5) : (Dt / 2 + 0.35) * (1.0 + r(12) * 0.35);
+    if (gableFront) quadRoof(batcher, chunk, [top.A, top.B], [backA, backB], y0 + h, rise, 0.25, 0.05, roofMat, upperMat, tint);
+    else quadRoof(batcher, chunk, [top.A, backA], [top.B, backB], y0 + h, rise, 0.35, 0, roofMat, upperMat, tint);
     // A chimney stack on some, off the ridge towards the back, standing clear
     // of the ridge whatever the pitch.
     if (r(13) > 0.62) {
-      const cc = F.at(s0 + L * (0.25 + r(14) * 0.5), HALF - 0.9);
+      const u = 0.25 + r(14) * 0.5;
+      const f0 = add2(top.A, sub2(top.B, top.A), u); const b0 = add2(backA, sub2(backB, backA), u);
+      const cc = add2(f0, sub2(b0, f0), 0.8);
       const ch = rise + 1.1;
-      batcher.add(box(0.62, ch, 0.62, 1, 2, 1), 'stonewall', place(cc.x, y0 + h - 0.5 + ch / 2, cc.z), { chunk });
+      batcher.add(box(0.62, ch, 0.62, 1, 2, 1), 'stonewall', place(cc.x, y0 + h - 0.5 + ch / 2, cc.z, top.rot), { chunk });
     }
 
     // A door in most of them, painted in some, and a lantern by a few.
     if (door) {
+      const fr = front(0);
       const leafMat = DOOR_PAINT[Math.floor(r(16) * DOOR_PAINT.length)];
       // Leaf, jambs and head all seated on the wall's face, as the jetty's
       // timbers are.
-      const dc = F.at(am, f - 0.03);
-      const [lx, lz] = F.span(1.0, 0.06);
-      batcher.add(box(lx, 2.1, lz), leafMat, place(dc.x, y0 + 1.05, dc.z), { chunk });
+      const dc = fr.on(0, 0.03);
+      batcher.add(box(1.0, 2.1, 0.06), leafMat, place(dc.x, y0 + 1.05, dc.z, fr.rot), { chunk });
       for (const sgn of [-1, 1]) {
-        const jc = F.at(am + sgn * 0.6, f - 0.065);
-        const [jx, jz] = F.span(0.18, 0.13);
-        batcher.add(box(jx, 2.3, jz), 'wood', place(jc.x, y0 + 1.15, jc.z), { chunk, tint: FRAME_OAK });
+        const jc = fr.on(sgn * 0.6, 0.065);
+        batcher.add(box(0.18, 2.3, 0.13), 'wood', place(jc.x, y0 + 1.15, jc.z, fr.rot), { chunk, tint: FRAME_OAK });
       }
-      const hc = F.at(am, f - 0.075);
-      const [hx, hz] = F.span(1.5, 0.15);
-      batcher.add(box(hx, 0.2, hz), 'wood', place(hc.x, y0 + 2.4, hc.z), { chunk, tint: FRAME_OAK });
+      const hc = fr.on(0, 0.075);
+      batcher.add(box(1.5, 0.2, 0.15), 'wood', place(hc.x, y0 + 2.4, hc.z, fr.rot), { chunk, tint: FRAME_OAK });
       const lantern = instances && r(17) > 0.72 ? 'wall_lantern' : null;
       if (lantern && instances.library.get(lantern)) {
         const side = r(18) > 0.5 ? 1 : -1;
-        const lc = F.at(am + side * 1.05, f);
+        const lc = fr.on(side * 1.05, 0);
         // The model's arm reaches out along +z from a plate on the wall.
-        instances.add(lantern, { x: lc.x, y: y0, z: lc.z, rotY: FACE_ROT[street] + Math.PI }, chunk);
-        const [ox, , oz] = DIR_STEP[street];
-        lights.push({ x: lc.x + ox * 0.4, y: y0 + 2.8, z: lc.z + oz * 0.4, color: 0xffb566, intensity: 5, radius: 7, flicker: true, outdoor: true });
+        instances.add(lantern, { x: lc.x, y: y0, z: lc.z, rotY: fr.faceRot }, chunk);
+        lights.push({ x: lc.x + fr.ns.x * 0.4, y: y0 + 2.8, z: lc.z + fr.ns.z * 0.4, color: 0xffb566, intensity: 5, radius: 7, flicker: true, outdoor: true });
       }
     }
   });
@@ -4397,15 +4578,18 @@ function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cel
 /**
  * Where actors.js puts the windows of a `windows` decor item on one face --
  * the same rows and columns, worked out the same way (its lit-window loop).
- * Change one and change the other.
+ * Change one and change the other. A box with `rot` is turned that much
+ * about its centre and has its windows on its local +z face (`faceDir` 2).
  */
-function windowSpots(w, faceDir) {
+function windowSpots(w, faceDir = 2) {
   const [nx, , nz] = DIR_STEP[faceDir];
   const tx = nz; const tz = -nx;
   const span = nx ? w.d : w.w;
   const cols = Math.max(1, Math.floor(span / 3.0));
   const rows = Math.max(1, Math.floor((w.h - 1.4) / 2.6));
-  const cx = w.x + nx * (w.w / 2); const cz = w.z + nz * (w.d / 2);
+  const cs = Math.cos(w.rot || 0); const sn = Math.sin(w.rot || 0);
+  // three's turn about y: local (x, z) -> (x cos + z sin, -x sin + z cos).
+  const turn = (lx, lz) => ({ x: w.x + lx * cs + lz * sn, z: w.z - lx * sn + lz * cs });
   const out = [];
   for (let row = 0; row < rows; row++) {
     const y = w.y + 1.8 + row * 2.6;
@@ -4413,7 +4597,8 @@ function windowSpots(w, faceDir) {
     for (let c = 0; c < cols; c++) {
       const spread = (c - (cols - 1) / 2) * (span / cols);
       if (row === 0 && Math.abs(spread) < 1.5 && w.doorSides) continue;
-      out.push({ x: cx + tx * spread, y, z: cz + tz * spread });
+      const p = turn(nx * (w.w / 2) + tx * spread, nz * (w.d / 2) + tz * spread);
+      out.push({ x: p.x, y, z: p.z });
     }
   }
   return out;
@@ -4421,30 +4606,65 @@ function windowSpots(w, faceDir) {
 
 /**
  * The house on the corner between two ways out: low, so it is not the
- * free-standing tower a 3.2 m square block ten metres high was, with windows
- * on both of its street faces and its roof turned whichever way.
+ * free-standing tower a 3.2 m square block ten metres high was, and with its
+ * corner to the street cut off. A square corner where two lanes meet is the
+ * grid; a cut one is a corner house, with its door and windows on the cut
+ * and a hipped roof over the five sides. The cut follows `CORNER_CUT` back
+ * along both fronts, which is what lets a turning lane's outer row
+ * (`turnFace`) run round a curve concentric with it.
  */
+const CORNER_CUT = 2.2;
 function buildCornerHouse({ batcher, chunk, pos, dirA, dirB, cell, decor, addCollider }) {
   const [ax, , az] = DIR_STEP[dirA];
   const [bx2, , bz2] = DIR_STEP[dirB];
-  const inset = HALF - FRONTAGE_D / 2;
-  const x = pos.x + (ax + bx2) * inset;
-  const z = pos.z + (az + bz2) * inset;
+  // The corner's diagonal, from the cell centre out to the cell's corner.
+  const ux = ax + bx2; const uz = az + bz2;
   const R = (k) => hash3(cell.x * 13 + dirA, cell.z * 13 + k, cell.level, 87);
   const h = 4.8 + R(0) * 2.4;
   const plaster = R(1) < 0.4;
   const tint = plaster ? LIMEWASH[Math.floor(R(2) * LIMEWASH.length)] : null;
   const mat = R(3) < 0.5 ? 'stonewall' : plaster ? 'plaster' : 'timber';
-  batcher.add(box(FRONTAGE_D, h, FRONTAGE_D, 2, 2, 2), mat, place(x, pos.y + h / 2, z),
-    { chunk, tint: mat === 'stonewall' ? null : tint, ao: wallAo(pos.y) });
-  addCollider(x - FRONTAGE_D / 2, x + FRONTAGE_D / 2, z - FRONTAGE_D / 2, z + FRONTAGE_D / 2, pos.y, pos.y + h);
-  const rot = R(4) > 0.5 ? Math.PI / 2 : 0;
-  gableRoof(batcher, chunk, { x, z }, pos.y + h, FRONTAGE_D, 0.3, FRONTAGE_D, (FRONTAGE_D / 2 + 0.3) * (1.1 + R(5) * 0.4),
-    rot, R(6) > 0.88 ? 'thatch' : 'rooftile', mat === 'stonewall' ? 'stonewall' : mat, mat === 'stonewall' ? null : tint, 0.05);
+  const at = (sx, sz) => ({ x: pos.x + ux * sx, z: pos.z + uz * sz });
+  const I = ROW_FACE; const O = HALF; const C = ROW_FACE + CORNER_CUT;
+  // Round the block: the two cut ends, then out to the cell's corner.
+  const pts = [at(I, C), at(I, O), at(O, O), at(O, I), at(C, I)];
+  addTris(batcher, chunk, mat, prismTris(pts, pos.y, pos.y + h), { tint: mat === 'stonewall' ? null : tint, ao: wallAo(pos.y) });
+  // Colliders: the two arms of the block and the cut's triangle in strips.
+  const box2 = (sx0, sx1, sz0, sz1) => {
+    const p = at(sx0, sz0); const q = at(sx1, sz1);
+    addCollider(Math.min(p.x, q.x), Math.max(p.x, q.x), Math.min(p.z, q.z), Math.max(p.z, q.z), pos.y, pos.y + h);
+  };
+  box2(C, O, I, O);
+  box2(I, C, C, O);
+  const n = 6;
+  for (let i = 0; i < n; i++) {
+    const s0 = I + (CORNER_CUT * i) / n; const s1 = I + (CORNER_CUT * (i + 1)) / n;
+    // The cut runs from (I, C) to (C, I): at sx, its other coordinate is I + C - sx.
+    box2(s0, s1, I + C - (s0 + s1) / 2, C);
+  }
+  hipRoof(batcher, chunk, pts, pos.y + h, 1.6 + R(5) * 0.9, 0.3, R(6) > 0.88 ? 'thatch' : 'rooftile');
+  // Windows and a door on the cut.
+  const P = pts[0]; const Q = pts[4];
+  const t = unit2(sub2(Q, P));
+  let ns = { x: t.z, z: -t.x };
+  if (ns.x * ux + ns.z * uz > 0) ns = { x: -ns.x, z: -ns.z };
+  const m = mid2(P, Q);
   decor.push({
-    kind: 'windows', x, y: pos.y, z, w: FRONTAGE_D, d: FRONTAGE_D, h, seed: R(7),
-    frame: mat === 'stonewall' ? 'stone' : 'timber', only: [(dirA + 2) % 4, (dirB + 2) % 4],
+    kind: 'windows', x: m.x - ns.x * 0.5, y: pos.y, z: m.z - ns.z * 0.5, w: len2(sub2(Q, P)), d: 1.0,
+    rot: Math.atan2(ns.x, ns.z), h, seed: R(7), frame: mat === 'stonewall' ? 'stone' : 'timber', only: [2],
+    doorSides: R(8) < 0.6 ? true : undefined,
   });
+  if (R(8) < 0.6) {
+    const rot = Math.atan2(-t.z, t.x);
+    const dc = add2(m, ns, 0.03);
+    batcher.add(box(1.0, 2.1, 0.06), DOOR_PAINT[Math.floor(R(9) * DOOR_PAINT.length)], place(dc.x, pos.y + 1.05, dc.z, rot), { chunk });
+    for (const sgn of [-1, 1]) {
+      const jc = add2(add2(m, t, sgn * 0.6), ns, 0.065);
+      batcher.add(box(0.18, 2.3, 0.13), 'wood', place(jc.x, pos.y + 1.15, jc.z, rot), { chunk, tint: FRAME_OAK });
+    }
+    const hc = add2(m, ns, 0.075);
+    batcher.add(box(1.5, 0.2, 0.15), 'wood', place(hc.x, pos.y + 2.4, hc.z, rot), { chunk, tint: FRAME_OAK });
+  }
 }
 
 /**
@@ -4568,7 +4788,10 @@ function washingLine({ batcher, chunk, pos, rows, seed }) {
     const h = houses.find((q) => a >= q.s0 + 0.4 && a <= q.s1 - 0.4);
     const st = h && h.storeys.find(([ya, yb]) => y >= ya + 0.3 && y <= yb - 0.3);
     if (!st) return null;
-    const p = F.at(a, st[2]);
+    // On that storey's front, which on a bend is not square to the cell.
+    const fr = h.front(st[2]);
+    const o = fr.p.o + ((a - fr.p.a) / (fr.q.a - fr.p.a)) * (fr.q.o - fr.p.o);
+    const p = F.at(a, o);
     return new THREE.Vector3(p.x, pos.y + y, p.z);
   });
   if (!ends[0] || !ends[1]) return false;
@@ -4626,7 +4849,17 @@ function laneBend(cell, shut, ways) {
   const r = hash3(t, across, cell.level, 191);
   if (r < 0.2) return null;
   const amp = (0.8 + hash3(t, across, cell.level, 192) * 0.6) * (r < 0.6 ? 1 : -1);
-  return { amp: Math.abs(amp), at: (a) => amp * Math.cos(Math.PI * a / CELL) };
+  return {
+    amp: Math.abs(amp), at: (a) => amp * Math.cos(Math.PI * a / CELL),
+    slope: (a) => -amp * (Math.PI / CELL) * Math.sin(Math.PI * a / CELL),
+  };
+}
+
+/** A row's street face along a lane offset by `g(a)` towards +x or +z, slope `k(a)`. */
+function offsetFace(dir, g, k) {
+  // The row on the side the lane moves towards steps back, the other forward.
+  const s = dir === 1 || dir === 2 ? 1 : -1;
+  return { f: (a) => ROW_FACE + s * g(a), k: (a) => s * k(a) };
 }
 
 /**
@@ -4797,13 +5030,13 @@ function buildLanes({ batcher, instances, layout, world, rooms, frontage, lifts,
       if (dir === 1 || dir === 3) {
         built[dir] = buildHouseRow({
           batcher, instances, chunk, pos, dir, cell, salt: 162 + dir, decor, lights, addCollider,
-          a0: shut[0] ? -HALF + FRONTAGE_D : -HALF, a1: shut[2] ? HALF - FRONTAGE_D : HALF, bend: bend && bend.at,
+          a0: shut[0] ? -HALF + FRONTAGE_D : -HALF, a1: shut[2] ? HALF - FRONTAGE_D : HALF, face: bend ? offsetFace(dir, bend.at, bend.slope) : STRAIGHT,
           bareLo: toRoom(0), bareHi: toRoom(2),
         });
       } else {
         built[dir] = buildHouseRow({
           batcher, instances, chunk, pos, dir, cell, salt: 162 + dir, decor, lights, addCollider,
-          a0: -HALF, a1: HALF, fixLo: shut[3], fixHi: shut[1], bend: bend && bend.at,
+          a0: -HALF, a1: HALF, fixLo: shut[3], fixHi: shut[1], face: bend ? offsetFace(dir, bend.at, bend.slope) : STRAIGHT,
           bareLo: toRoom(3), bareHi: toRoom(1),
         });
       }

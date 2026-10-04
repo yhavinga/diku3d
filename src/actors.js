@@ -3766,11 +3766,19 @@ function* peopleOf(world, layout, built, options = {}) {
       const rows = Math.max(1, Math.floor((w.h - 1.4) / 2.6));
       for (const f of FACES) {
         if (w.only && !w.only.includes(f.dir)) continue;
-        const tx = f.nz; const tz = -f.nx;
+        // A box may come turned (`rot`, a house front following a bending
+        // street): the face is laid out in the box's own frame and turned
+        // with it, as build.js's `windowSpots` does.
+        const cs = Math.cos(w.rot || 0); const sn = Math.sin(w.rot || 0);
+        const turn = (x, z) => [x * cs + z * sn, -x * sn + z * cs];
+        const [fnx, fnz] = turn(f.nx, f.nz);
+        const fry = f.ry + (w.rot || 0);
+        const [tx, tz] = turn(f.nz, -f.nx);
         const span = (f.nx ? w.d : w.w);
         const cols = Math.max(1, Math.floor(span / 3.0));
-        const cx = w.x + f.nx * (w.w / 2);
-        const cz = w.z + f.nz * (w.d / 2);
+        const [ocx, ocz] = turn(f.nx * (w.w / 2), f.nz * (w.d / 2));
+        const cx = w.x + ocx;
+        const cz = w.z + ocz;
         for (let row = 0; row < rows; row++) {
           const y = w.y + 1.8 + row * 2.6;
           if (y > w.y + w.h - 0.9) continue;
@@ -3779,7 +3787,7 @@ function* peopleOf(world, layout, built, options = {}) {
             if (row === 0 && Math.abs(spread) < 1.5 && w.doorSides) continue; // that is the doorway
             const px = cx + tx * spread;
             const pz = cz + tz * spread;
-            const out = (o) => at(px + f.nx * o, y, pz + f.nz * o, 0, f.ry, 0);
+            const out = (o) => at(px + fnx * o, y, pz + fnz * o, 0, fry, 0);
             const lit = hash3(Math.round(px * 4), Math.round(y * 4), Math.round(pz * 4), 71) > 0.42;
             if (w.round) {
               pushPart(lit ? panes : dark, roundPane, lit ? 0xffc47e : 0xffffff, out(0.03));
@@ -3789,12 +3797,12 @@ function* peopleOf(world, layout, built, options = {}) {
               for (const part of ringParts) pushPart(ring, part, 0xffffff, out(0));
               if (instances) {
                 instances.add('shire_window_box', {
-                  x: px + f.nx * 0.02, y: y - ROUND_R - 0.34, z: pz + f.nz * 0.02, rotY: FACE_ROT_OF[f.dir],
+                  x: px + fnx * 0.02, y: y - ROUND_R - 0.34, z: pz + fnz * 0.02, rotY: FACE_ROT_OF[f.dir] + (w.rot || 0),
                 }, chunkAt('props', px, y, pz));
               }
               if (lit) {
                 windowLights.push({
-                  x: px + f.nx * 0.9, y, z: pz + f.nz * 0.9,
+                  x: px + fnx * 0.9, y, z: pz + fnz * 0.9,
                   color: 0xffb063, intensity: 5.0, radius: 9.0, flicker: false, outdoor: true,
                 });
               }
@@ -3833,15 +3841,15 @@ function* peopleOf(world, layout, built, options = {}) {
             // turns to be drawn -- the flicker under every upper window.
             for (const s of [-1, 1]) {
               pushPart(surround, G.box(0.17, PANE_H + 0.02, REVEAL), 0xffffff,
-                at(px + tx * s * (PANE_W / 2 + 0.085) + f.nx * (REVEAL / 2),
-                   y - 0.01, pz + tz * s * (PANE_W / 2 + 0.085) + f.nz * (REVEAL / 2), 0, f.ry, 0));
+                at(px + tx * s * (PANE_W / 2 + 0.085) + fnx * (REVEAL / 2),
+                   y - 0.01, pz + tz * s * (PANE_W / 2 + 0.085) + fnz * (REVEAL / 2), 0, fry, 0));
             }
             pushPart(surround, G.box(PANE_W + 0.34, 0.17, REVEAL), 0xffffff,
-              at(px + f.nx * (REVEAL / 2), y + PANE_H / 2 + 0.085, pz + f.nz * (REVEAL / 2), 0, f.ry, 0));
+              at(px + fnx * (REVEAL / 2), y + PANE_H / 2 + 0.085, pz + fnz * (REVEAL / 2), 0, fry, 0));
             // The sill oversails the reveal and is what the rain runs off.
             pushPart(surround, G.box(PANE_W + 0.56, 0.15, REVEAL + 0.14), 0xe8e2d8,
-              at(px + f.nx * (REVEAL / 2 + 0.05), y - PANE_H / 2 - 0.095,
-                 pz + f.nz * (REVEAL / 2 + 0.05), 0, f.ry, 0));
+              at(px + fnx * (REVEAL / 2 + 0.05), y - PANE_H / 2 - 0.095,
+                 pz + fnz * (REVEAL / 2 + 0.05), 0, fry, 0));
             // A window bright enough to see from thirty metres is spilling
             // light on the wall under it. One candidate per lit pane; the pool
             // only ever lights the nearest handful, so this costs nothing until
@@ -3855,7 +3863,7 @@ function* peopleOf(world, layout, built, options = {}) {
             // dark and nothing at noon, which is what a window does.
             if (lit) {
               windowLights.push({
-                x: px + f.nx * 0.9, y, z: pz + f.nz * 0.9,
+                x: px + fnx * 0.9, y, z: pz + fnz * 0.9,
                 color: 0xffb063, intensity: 5.0, radius: 9.0, flicker: false,
                 outdoor: true,
               });
