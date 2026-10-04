@@ -1266,6 +1266,23 @@ const BEASTS = [
   // and screaming: they shriek at whoever comes near.
   { test: /\bharp(y|ies)\b.*\bleader\b|\bleader\b.*\bharp(y|ies)\b/, asset: 'beast_harpy', scale: 1.14, coat: 0x40362c, pale: 0x8e7a64, points: 0x1a1714, patch: 0x2e261c, cover: 0.42, temper: { alarm: ['shriek', 6.5] }, box: [0.6, 1.6, 'quad', 0x40362c] },
   { test: /\bharp(y|ies)\b/, asset: 'beast_harpy', scale: 1.0, coat: 0x4a4034, pale: 0x9a8670, points: 0x1e1a16, patch: 0x342a20, cover: 0.45, temper: { alarm: ['shriek', 6.0] }, box: [0.5, 1.5, 'quad', 0x4a4034] },
+  // Golems (hybrids.py): one hulk of fitted blocks, made of whatever its
+  // prose says by the surface it wears -- `surface` maps the model's `hide`
+  // to a recipe -- tinted by the coat; its eyes are lit slits.
+  { test: /\bdiamond golems?\b|\bgolems?\b.*\bdiamond\b/, asset: 'beast_golem', scale: 1.08, surface: { hide: 'phial' }, coat: 0xcfe2ec, pale: 0xe8f2f6, points: 0x9ab4c4, glow: 0x9ad8ff, box: [1.0, 0.8, 'quad', 0xcfe2ec] },
+  { test: /\bgolems?\b.*\bwooden\b|\bwooden golems?\b/, asset: 'beast_golem', scale: 0.92, surface: { hide: 'wood' }, coat: 0xc8a47c, pale: 0xc8a47c, points: 0x6a4a30, glow: 0xffb040, box: [0.9, 0.7, 'quad', 0x8a6a48] },
+  { test: /\bgolems?\b.*\bgranite\b|\bgranite golems?\b/, asset: 'beast_golem', scale: 1.02, surface: { hide: 'rock' }, coat: 0xb4aca4, pale: 0xb4aca4, points: 0x5a5450, glow: 0xffa040, box: [1.0, 0.8, 'quad', 0x8a8480] },
+  { test: /\bgolems?\b.*\b(bronze|brass)\b|\b(bronze|brass) golems?\b/, asset: 'beast_golem', scale: 1.0, surface: { hide: 'brass' }, coat: 0xf0d4a8, pale: 0xf0d4a8, points: 0x7a5a30, glow: 0xffd060, box: [1.0, 0.8, 'quad', 0xa07a40] },
+  // 'A potpourri of different body parts': skin of several shades, the
+  // patch channel the pieces, seams dark.
+  { test: /\bgolems?\b.*\bflesh\b|\bflesh golems?\b/, asset: 'beast_golem', scale: 0.96, surface: { hide: 'skin' }, coat: 0xd8b8a0, pale: 0xd8b8a0, points: 0x5a3028, patch: 0x9a7466, cover: 0.45, glow: 0xffe0a0, box: [0.9, 0.7, 'quad', 0xb08a74] },
+  { test: /\bgolems?\b.*\bcloth\b|\bcloth golems?\b/, asset: 'beast_golem', scale: 0.9, surface: { hide: 'cloth' }, coat: 0xa49478, pale: 0xa49478, points: 0x4a4032, patch: 0x6e604c, cover: 0.5, glow: 0xffd080, box: [0.9, 0.7, 'quad', 0x8a7a60] },
+  // 'Forged of dark metal'.
+  { test: /\bgolems?\b.*\badamantite\b|\badamantite golems?\b/, asset: 'beast_golem', scale: 1.06, surface: { hide: 'iron' }, coat: 0x7a8088, pale: 0x7a8088, points: 0x30343a, glow: 0xff4020, box: [1.0, 0.8, 'quad', 0x40444a] },
+  // Clay, and Wyvern's lesser golem, 'made of some kind of clay'.
+  { test: /\bgolems?\b.*\b(clay|lesser)\b|\b(clay|lesser) golems?\b/, asset: 'beast_golem', scale: 0.94, surface: { hide: 'earthwall' }, coat: 0xd0a07a, pale: 0xd0a07a, points: 0x6a4a34, glow: 0xffa040, box: [0.9, 0.7, 'quad', 0x9a7458] },
+  // Stone, and the rest: 'a big chunk of rock ... formed into a giant stone creature'.
+  { test: /\bgolems?\b/, asset: 'beast_golem', scale: 1.04, surface: { hide: 'statuary' }, coat: 0xd2cec6, pale: 0xd2cec6, points: 0x6a6660, glow: 0xffa040, box: [1.0, 0.8, 'quad', 0x8a8680] },
   { test: /\blamias?\b/, asset: 'beast_lamia', scale: 1.1, coat: 0xa8834e, pale: 0xd2a684, points: 0x2a1c14, box: [0.9, 1.9, 'quad', 0xa8834e] },
   // --- the monsters (tools/blender/monsters.py). First, because their names
   // borrow the animals' words: a wolf spider and a bird spider are spiders.
@@ -1713,7 +1730,8 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     // hand in populate(), and knows how long the animal is.
     node.castShadow = false;
     const tag = node.material && node.material.name ? node.material.name.replace(/^MAT:/, '') : '';
-    node.material = tag === 'fur' && spec.sleek ? sleekFur(library) : library.materialFor(tag);
+    // `surface` dresses a tag in another recipe: a golem's hide is stone, clay or bronze.
+    node.material = tag === 'fur' && spec.sleek ? sleekFur(library) : library.materialFor((spec.surface && spec.surface[tag]) || tag);
     // Lit as the sewer's own surfaces are (textures.js `buriedTwin`): a
     // creature underground wore the sky's light, which under the street at
     // night is none -- the guardian naga was 88% under luma 8 at night

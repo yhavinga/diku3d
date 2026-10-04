@@ -125,6 +125,9 @@ const PASTIMES = {
   beckon: { odds: 0.4, once: true, gap: [5, 12], rate: 4 },
   // A harpy screams at whatever comes near, wings flared (her prose's temper).
   shriek: { odds: 0.3, once: true, gap: [4, 10], rate: 6 },
+  // A golem stands still; come close and its head comes round to you and
+  // its fists close (ALARM). Never idly.
+  wake: { odds: 0, once: true, gap: [3, 8], rate: 4 },
 };
 const PASTIME_NAMES = Object.keys(PASTIMES);
 /**
@@ -135,7 +138,7 @@ const PASTIME_NAMES = Object.keys(PASTIMES);
  */
 const ALARM = { snail: ['withdraw', 2.2], lagomorph: ['situp', 4.5], lizard: ['display', 3.2], serpent: ['hiss', 2.4],
   fowl: ['flap', 1.6], songbird: ['flap', 5], rodent: ['situp', 3], spider: ['threat', 2.2],
-  cervid: ['alert', 7], equine: ['alert', 3], dragon: ['rear', 7] };
+  cervid: ['alert', 7], equine: ['alert', 3], dragon: ['rear', 7], golem: ['wake', 4] };
 /**
  * people.py's sit, in seconds: the first REST_LOOP of it is at rest and
  * breathing and comes back to its first frame, and SIP is the stretch where

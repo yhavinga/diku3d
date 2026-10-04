@@ -111,7 +111,7 @@ const TRADES = [
   ['priest', W('hierophants?|priests?|priestess|druidess(es)?|clerics?|monks?|acolytes?|nuns?|abbots?|abbess|bishops?|healers?|druids?|chaplains?|friars?|sextons?|shamans?|hermits?|pilgrims?|curates?|deacons?|vicars?|prophets?|templekeeper')],
   ['rogue', W('wanderers?|thief|thieves|rogues?|assassins?|cutpurses?|pickpockets?|bandits?|brigands?|robbers?|highwaym[ae]n|spies|spy|burglars?|smugglers?|dealers?|ruffians?|thugs?|cutthroats?|outlaws?|poachers?|rangers?|hunters?|scouts?|executioners?|headsm[ae]n')],
   ['beggar', W('slaves?|beggars?|vagabonds?|tramps?|drunks?|drunkards?|bums?|hobos?|paupers?|urchins?|lepers?|filthy|wretch(es)?|madm[ae]n|lunatics?|vagrants?|idiots?|fools?')],
-  ['smith', W('smiths?|blacksmiths?|weaponsmiths?|armourers?|armorers?|farriers?|tanners?|leather ?workers?|cobblers?|coopers?|masons?|miners?')],
+  ['smith', W('smiths?|blacksmiths?|weaponsmiths?|armourers?|armorers?|farriers?|tanners?|leather ?workers?|cobblers?|coopers?|masons?|miners?|golem makers?')],
   ['noble', W('kings?|queens?|princes?|princess(es)?|dukes?|duchess(es)?|lords?|lady|ladies|barons?|baroness(es)?|counts?|countess(es)?|earls?|mayors?|nobles?|nobleman|noblemen|noblewoman|thains?|guildmasters?|chancellors?|magistrates?|judges?|urbanites?|aristocrats?|courtiers?|criers?|diplomats?|ambassadors?|keepers?|masters?|governors?|regents?|emperors?|empress|elders?|chieftains?|chiefs?|heralds?|gods?|goddess(es)?|zeus|odin|hera|apollo|ares|hermes|poseidon|prometheus|leaders?|commanders?|generals?|foremen|foreman')],
   ['merchant', W('shopkeepers?|shopkeeps?|merchants?|grocers?|bakers?|butchers?|jewell?ers?|traders?|pedlars?|peddlers?|vendors?|tailors?|innkeepers?|barkeeps?|bartenders?|barmen|barman|waiters?|cooks?|chefs?|brewers?|vintners?|apothecar(y|ies)|herbalists?|clerks?|secretar(y|ies)|receptionists?|bankers?|moneychangers?|changers?|storekeepers?|hostelers?|landlords?|tavernkeepers?|fishmongers?|florists?|cartographers?|scribes?|librarians?|teachers?|tutors?|stewards?|butlers?|servants?')],
   ['peasant', W('peasants?|farmers?|labou?rers?|farmhands?|shepherds?|herdsm[ae]n|stablehands?|stableboys?|grooms?|fishermen|fisherman|sailors?|seam[ae]n|gardeners?|bumpkins?|serfs?|porters?|janitors?|sweepers?|lumberjacks?|woodcutters?|woodsm[ae]n|millers?|millworkers?|workers?|carpenters?|gravediggers?|diggers?|boatm[ae]n|ferrym[ae]n|drovers?|carters?|travell?ers?|citizens?|townsm[ae]n|townsfolk|villagers?|locals?|commoners?|youths?|boys?|lads?|m[ae]n|persons?|people|humans?|elves|elf|elven|hobbits?|halflings?|gamgees?|residents?|farmer|peasantry')],
@@ -260,7 +260,8 @@ export function personOf(proto, ITEM, instance = 0) {
   // troll-shaped, then: the wimpy ones smaller, the big one a head over you.
   const brute = !special && SCHOOL_BRUTE.find(([re]) => re.test(proto.keywords || ''));
   // A lizard man is a man; a "lizard" is a lizard.
-  if (!special && !brute && CREATURE.test(w) && !/\b(m[ae]n|wom[ae]n|folk)\b/i.test(w)) return null;
+  // ...and the golem maker, 'chiseling some stone', is a man who makes them.
+  if (!special && !brute && CREATURE.test(w) && !/\b(m[ae]n|wom[ae]n|folk|makers?)\b/i.test(w)) return null;
   const seed = strHash(proto.keywords, proto.vnum);
   // The trade and the livery come from the prototype; the hair, the beard and
   // the colour of a tunic also from which one of them this is, so the twenty

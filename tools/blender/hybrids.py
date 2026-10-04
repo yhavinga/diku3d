@@ -1058,7 +1058,206 @@ def hop_slip(tracks, stride, frames):
     return worst
 
 
-SPECS = [centaur, centaur_f, lamia, harpy]
+# ============================================================ the golem
+
+
+class Box(B.Solid):
+    """A rounded box, for things that were cut or cast rather than grown:
+    centre c, half-extents h, corner radius r, turned by rot (degrees)."""
+
+    def __init__(self, c, h, r, bind, blend=0.02, mask=(0, 0), rot=None, group=None):
+        m = None
+        if rot:
+            R = mathutils.Euler([math.radians(x) for x in rot]).to_matrix()
+            m = np.array([list(R.col[0]), list(R.col[1]), list(R.col[2])]).T
+        super().__init__("box", blend, bind, mask, group=group, c=tuple(c), h=tuple(h), r=r, m=m)
+
+    def bounds(self):
+        c = np.array(self.p["c"])
+        e = float(np.linalg.norm(self.p["h"])) + self.p["r"]
+        pad = self.blend + 0.01
+        return c - e - pad, c + e + pad
+
+    def dist(self, q):
+        p = self.p
+        local = q - np.array(p["c"])
+        if p["m"] is not None:
+            local = local @ p["m"]
+        d = np.abs(local) - (np.array(p["h"]) - p["r"])
+        out = np.linalg.norm(np.maximum(d, 0.0), axis=1) + np.minimum(d.max(axis=1), 0.0)
+        return out - p["r"]
+
+
+def box_between(a, b, w, d, bind, r=0.03, blend=0.015, mask=(0, 0), group=None):
+    """A box along a limb from a to b (Blender points), w wide and d deep."""
+    a, b = V(a), V(b)
+    axis = (b - a)
+    L = axis.length
+    q = axis.to_track_quat("Z", "Y")
+    e = q.to_euler()
+    return Box(tuple((a + b) * 0.5), (w, d, L * 0.5 + r), r, bind, blend=blend, mask=mask,
+               rot=tuple(math.degrees(x) for x in e), group=group)
+
+
+def golem():
+    """A golem: 'a big chunk of rock that has been magically formed into a
+    giant stone creature', 'like a statue, until you see it shamble towards
+    you'. Two and a quarter metres of blocks fitted together -- a chest
+    like a lintel, shoulders like boulders, a small head sunk between them
+    with two lit slits for eyes, fists the size of a man's head, legs like
+    pillars -- with the joints left showing as joints. Built once; the
+    viewer makes it of stone, granite, clay, bronze, iron, wood, flesh,
+    rags or crystal by the surface it wears (BEASTS `surface`)."""
+    hip = 1.0
+    L = dict(spine=[(0, 0, hip), (0, 0, 1.25), (0, 0.02, 1.5)], neck=[(0, 0.05, 1.74), (0, 0.08, 1.84)],
+             crown=(0, 0.08, 2.08), clavicle=(0.1, 0.02, 1.7),
+             arm=[(0.44, 0.0, 1.68), (0.52, 0.02, 1.27), (0.54, 0.1, 0.9), (0.54, 0.15, 0.7)],
+             leg=[(0.17, 0, hip - 0.02), (0.19, 0.06, 0.56), (0.19, -0.02, 0.15), (0.19, 0.12, 0.05), (0.19, 0.26, 0.0)])
+    bind = lambda a, b, pa, pb: ("grad", a, b, P(*pa), P(*pb))
+    body = [
+        Box(P(0, 0, hip + 0.02), (0.27, 0.18, 0.15), 0.05, "pelvis", blend=0.02),
+        Box(P(0, 0.0, 1.27), (0.24, 0.16, 0.13), 0.05, bind("pelvis", "spine", (0, 0, 1.1), (0, 0, 1.35)), blend=0.03),
+        Box(P(0, 0.02, 1.56), (0.38, 0.23, 0.2), 0.07, "chest", blend=0.03, rot=(6, 0, 0)),
+        ell(P(0, -0.08, 1.66), (0.3, 0.16, 0.14), "chest", blend=0.06),
+        Box(P(0, 0.08, 1.86), (0.12, 0.13, 0.13), 0.04, "head", blend=0.02),
+        # A brow like a beam over the eyes, and a jaw like a step.
+        Box(P(0, 0.17, 1.92), (0.135, 0.04, 0.03), 0.015, "head", blend=0.01),
+        Box(P(0, 0.15, 1.77), (0.1, 0.05, 0.04), 0.02, "head", blend=0.012),
+        Box(P(0, 0.05, 1.76), (0.09, 0.08, 0.05), 0.03, bind("chest", "head", (0, 0, 1.7), (0, 0, 1.82)), blend=0.03),
+    ]
+    for side, tag in ((1, ".L"), (-1, ".R")):
+        a = [B.apply_side(p, side) for p in L["arm"]]
+        q = [B.apply_side(p, side) for p in L["leg"]]
+        body += [
+            ell(P(*B.apply_side((0.43, 0.0, 1.73), side)), (0.19, 0.19, 0.17), "uarm" + tag, blend=0.025),
+            box_between(P(*a[0]), P(*a[1]), 0.12, 0.13, "uarm" + tag, blend=0.012, group="a" + tag),
+            box_between(P(*a[1]), P(*a[2]), 0.14, 0.15, "farm" + tag, blend=0.012, group="b" + tag),
+            Box(P(*a[3]), (0.11, 0.12, 0.13), 0.04, "hand" + tag, blend=0.015),
+            ell(P(*a[1]), (0.11, 0.11, 0.1), ("grad", "uarm" + tag, "farm" + tag, P(*a[1]) + V((0, 0, 0.05)), P(*a[1]) - V((0, 0, 0.05))), blend=0.01),
+            box_between(P(*q[0]), P(*q[1]), 0.15, 0.16, "thigh" + tag, blend=0.012, group="c" + tag),
+            box_between(P(*q[1]), P(*q[2]), 0.13, 0.14, "shin" + tag, blend=0.012, group="d" + tag),
+            ell(P(*q[1]), (0.12, 0.12, 0.1), ("grad", "thigh" + tag, "shin" + tag, P(*q[1]) + V((0, 0, 0.05)), P(*q[1]) - V((0, 0, 0.05))), blend=0.01),
+            Box(P(q[3][0], 0.09, 0.075), (0.13, 0.19, 0.075), 0.03, "hock" + tag, blend=0.012),
+        ]
+
+    def masks(co, n, pale, dark):
+        # Darker in the joints and the undersides, where a statue's grime
+        # gathers: the points channel.
+        under = np.clip((-n[:, 2] - 0.2) / 0.6, 0, 1)
+        return pale, np.maximum(dark, under * 0.6)
+
+    def parts(body_solids):
+        out = []
+        for side in (1, -1):
+            at = B.surface_point(body_solids, P(side * 0.055, 0.5, 1.865), P(0, -1, 0), sink=0.012)
+            out.append(B.solid_part([Box(tuple(at), (0.03, 0.012, 0.009), 0.004, "head", blend=0.002)], 0.003, 60,
+                                    "eye", "glow", (1.0, 1.0, 1.0), smooth=0))
+        return out
+
+    return dict(name="beast_golem", archetype="golem", bones=M.biped_bones(L), body=body, masks=masks, parts=parts,
+                patch=B.spots(0.09, seed=61), h=0.014, tris=3600, mat="hide", clips=golem_clips, legtop=99.0,
+                gait=dict(walk_stride=0.95, walk_frames=44, lift=0.07, run_stride=1.5, run_frames=30))
+
+
+def golem_clips(arm, spec):
+    """A golem has no breath to take: its idle is stillness, with the head
+    turning now and then in a grinding stop-start. It walks with the whole
+    weight on each foot in turn, the body rolling over it, and strikes with
+    both fists from overhead. It dies by toppling forward."""
+    g = spec["gait"]
+    poser = B.Poser(arm, M.BIPED_LEGS)
+    rest = B.leg_rest(poser)
+    clip = B.Clip(poser)
+    hip = poser.rest["pelvis"].translation.z
+    offsets = {"hind.L": 0.0, "hind.R": 0.5}
+    flex = {"hind": dict(lean=6, push=12, fold=35, curl=20)}
+    report = {}
+
+    def arms(fk, swing=0.0, out=10.0, elbow=18.0, raise_=0.0):
+        for tag, s in ((".L", 1), (".R", -1)):
+            fk["uarm" + tag] = (swing * s - raise_, 0, -s * out)
+            fk["farm" + tag] = (-elbow - raise_ * 0.2, 0, 0)
+            fk["hand" + tag] = (0, 0, 0)
+
+    def grind(t):
+        # Held still, turning in short stiff jerks with a pause between.
+        return hold(t, [(0.15, 22.0), (0.2, 26.0), (0.55, -14.0), (0.6, -18.0), (0.85, 0.0)], snap=0.06)
+
+    def idle(t):
+        look = grind(t)
+        fk = {"chest": (2, look * 0.15, 0), "neck": (0, 0, 0), "head": (-2, 0, look * 0.8)}
+        arms(fk)
+        return dict(fk=fk, loc=V((0, 0, 0)), ik={leg: B.planted(rest, leg) for leg in rest})
+    clip.run("idle", 120, idle, step=2)
+
+    def stomp(t, S, duty, lift, run):
+        ik, _ = B.gait_targets(rest, t, S, duty, lift, offsets, flex)
+        sway = wave(t, 0.25)
+        # The weight comes down on each foot: a drop and a jar at the strike.
+        jar = sum(math.exp(-((((t - c) % 1.0) - 0.0) * 30) ** 2) for c in (0.0, 0.5))
+        fk = {"pelvis": (0, 0, 5 * sway), "spine": (3 if run else 1, 0, -3 * sway), "chest": (4 if run else 2, -4 * wave(t), -2 * sway),
+              "neck": (0, 0, 0), "head": (2 * jar, 0, 3 * sway)}
+        arms(fk, swing=(10 if not run else 18) * wave(t), out=12, elbow=20 if not run else 40)
+        loc = V((0.05 * sway, 0, -hip * (0.025 + 0.02 * jar) - (0.04 * hip if run else 0)))
+        return dict(fk=fk, loc=loc, ik=ik)
+    S, N = g["walk_stride"], g["walk_frames"]
+    track = {leg: poser.legs[leg]["chain"][3] for leg in poser.legs}
+    tracks = clip.run("walk", N, lambda t: stomp(t, S, 0.7, g["lift"], False), track=track)
+    report["walk"] = B.foot_slip(tracks, S, N, 0.7, offsets)
+    S2, N2 = g["run_stride"], g["run_frames"]
+    tracks = clip.run("run", N2, lambda t: stomp(t, S2, 0.55, g["lift"] * 1.4, True), track=track)
+    report["run"] = B.foot_slip(tracks, S2, N2, 0.55, offsets)
+
+    HIT = 0.55
+
+    def attack(t):
+        up = ease(t / 0.42) * (1 - ease((t - 0.46) / 0.1))
+        down = ease((t - 0.46) / 0.09) * (1 - ease((t - 0.7) / 0.3))
+        fk = {"spine": (-8 * up + 18 * down, 0, 0), "chest": (-10 * up + 16 * down, 0, 0), "neck": (0, 0, 0),
+              "head": (8 * up - 10 * down, 0, 0)}
+        arms(fk, out=8 - 6 * up, elbow=lerp(18, 60, up) - 40 * down, raise_=170 * up + 70 * down * (1 - up))
+        loc = V((0, -hip * 0.12 * down, -hip * 0.06 * down))
+        return dict(fk=fk, loc=loc, ik={leg: B.planted(rest, leg) for leg in rest})
+    clip.run("attack", 36, attack)
+    report["hit"] = HIT
+
+    def hit(t):
+        k = math.sin(math.pi * min(1.0, t / 0.3)) if t < 0.3 else (1 - ease((t - 0.3) / 0.7)) * 0.8
+        fk = {"spine": (-5 * k, 0, 0), "chest": (-4 * k, 3 * k, 0), "neck": (0, 0, 0), "head": (-6 * k, 0, 10 * k)}
+        arms(fk, swing=-8 * k, out=10 + 6 * k)
+        return dict(fk=fk, loc=V((0, hip * 0.04 * k, 0)), ik={leg: B.planted(rest, leg) for leg in rest})
+    clip.run("hit", 12, hit)
+
+    def death(t):
+        buckle = ease(t / 0.35)
+        fall = ease((t - 0.25) / 0.45) ** 1.6
+        fk = {"spine": (8 * buckle, 0, 0), "chest": (6 * buckle, 0, 0), "neck": (0, 0, 0), "head": (10 * fall, 0, 0)}
+        arms(fk, swing=-20 * fall, out=10 + 30 * fall, elbow=10)
+        for tag in (".L", ".R"):
+            fk["thigh" + tag] = (-25 * buckle, 0, 0)
+            fk["shin" + tag] = (40 * buckle, 0, 0)
+        rot = mathutils.Quaternion(V((1, 0, 0)), math.radians(86 * fall))
+        loc = V((0, -hip * 0.4 * fall, lerp(0.0, -(hip - 0.27), fall) - hip * 0.15 * buckle * (1 - fall)))
+        return dict(fk=fk, loc=loc, rot=rot, ik={leg: B.planted(rest, leg) for leg in rest}, limp=ease((t - 0.15) / 0.3))
+    clip.run("death", 40, death)
+
+    # -- wake: what a golem 'standing guard' does when you come close: the
+    # head comes round and down to you, the fists close and lift a little,
+    # and it settles back. Nothing else stirs.
+    def wake(t):
+        k = ease(t / 0.15) * (1 - ease((t - 0.8) / 0.2))
+        fk = {"chest": (4 * k, 0, 0), "neck": (6 * k, 0, 0), "head": (6 * k, 0, 0)}
+        arms(fk, swing=-14 * k, out=14, elbow=18 + 40 * k)
+        return dict(fk=fk, loc=V((0, 0, -hip * 0.03 * k)), ik={leg: B.planted(rest, leg) for leg in rest})
+    clip.run("wake", 60, wake)
+
+    report["clips"] = clip.report
+    report["stride"] = {"walk": S, "run": S2}
+    report["overreach"] = clip.reach
+    return report
+
+
+SPECS = [centaur, centaur_f, lamia, harpy, golem]
 
 
 def build_one(spec, export=True):
