@@ -419,19 +419,27 @@ def taur(name, lower, sex, extras=None):
 
 
 def _top(hu, mat, colour):
-    """What a taur woman wears over her breasts: a band of cloth (a lamia's
-    of beaten gold) wrapped round the chest, just off the skin."""
+    """What a taur woman wears: a sleeveless bodice from just under the
+    collarbone to the waist, a little off the skin -- cloth for the mare,
+    for the lamia cloth under bands of gold. A band over the breasts alone
+    read at ten metres as bare skin."""
     D = hu.D
     H = hu.at
     cw, cd, ch = D["chest_r"]
     z = D["chest"]
-    solids = [ell(H(0, 0.0, z), (cw * 1.14, cd * 1.22, ch * 1.05), "torso", blend=0.02)]
+    wr = D["waist_r"]
+    sz = D["shoulder"][1]
+    solids = [ell(H(0, 0.0, z), (cw * 1.12, cd * 1.2, ch * 1.06), "torso", blend=0.03),
+              cone(H(0, 0.005, D["hip"] + 0.05), H(0, 0.0, z - 0.04), wr * 1.1, cw * 1.02,
+                   ("grad", "waist", "torso", H(0, 0, D["waist"] - 0.02), H(0, 0, z - 0.04)), blend=0.05, squash=(1, 0.8, 1)),
+              ell(H(0, -0.03, z - 0.02), (cw * 1.0, cd * 0.85, ch * 1.0), "torso", blend=0.04)]
     for side in (1, -1):
-        solids.append(ell(H(side * 0.064, 0.078, z - 0.005), (0.072, 0.066, 0.066), "torso", blend=0.03))
-    # Cut to a band: everything above the top edge and below the bottom one away.
-    solids.append(ell(H(0, 0.0, z + 0.585), (0.5, 0.5, 0.5), "torso", blend=0.012, neg=True))
-    solids.append(ell(H(0, 0.0, z - 0.63), (0.5, 0.5, 0.5), "torso", blend=0.012, neg=True))
-    return B.solid_part(solids, 0.004, 900, "top", mat, colour, smooth=1)
+        solids.append(ell(H(side * 0.064, 0.076, z - 0.005), (0.07, 0.064, 0.064), "torso", blend=0.03))
+    # Cut off above, just under the collarbone, and below at the waist.
+    top = sz - 0.045
+    solids.append(ell(H(0, 0.0, top + 0.5), (0.5, 0.5, 0.5), "torso", blend=0.012, neg=True))
+    solids.append(ell(H(0, 0.0, D["hip"] + 0.07 - 0.5), (0.5, 0.5, 0.5), "torso", blend=0.012, neg=True))
+    return B.solid_part(solids, 0.004, 1100, "top", mat, colour, smooth=1)
 
 
 # ============================================================ taur clips
@@ -734,7 +742,7 @@ def centaur():
 def centaur_f():
     """'The upper torso of a woman and lower body of a horse'."""
     return taur("beast_centaur_f", "equine", "f", dict(
-        hair="long", top="cloth", top_colour=(0.34, 0.2, 0.1), tris=4400,
+        hair="long", top="cloth", top_colour=(0.14, 0.28, 0.14), tris=4400,
         gait=dict(pastimes=["doze", "alert", "rear", "loaf"], extra=["paw"],
                   loaf=dict(hind=(-55, 130, -95, 10), fore=(30, -80, 160, 20), lie=0.5, neck=0, head=0,
                             tail=[(-25, 10), (0, 15), (0, 15), (0, 15), (0, 10)]),
@@ -746,7 +754,7 @@ def lamia():
     body of a four-legged beast': a lioness's body, a woman from the waist,
     long dark hair and a band of gold."""
     return taur("beast_lamia", "feline", "f", dict(
-        hair="long", top="gold", top_colour=(1.0, 1.0, 1.0), tris=4200, upper="lamia",
+        hair="long", top="cloth", top_colour=(0.42, 0.1, 0.08), tris=4200, upper="lamia",
         gait=dict(pastimes=["haunch", "loaf", "stretch"], extra=["beckon"], tail_pitch=-26.0)))
 
 
@@ -775,7 +783,23 @@ def harpy():
     D = hu.D
     feather = (0.0, 0.0)
     legs = HARPY_LEG
-    body = hu.torso(blend_into="pelvis") + [
+    # Feathered from the collarbone down -- breast, belly, back -- into the
+    # feathered thighs: only the neck, the shoulders and the arms are skin.
+    # (A bare woman's torso on bird legs read as exactly that.) The torso's
+    # waist, chest and back solids keep their shape and lose the skin mask;
+    # the breasts go, for one plump bird's breast, and a ruff of feathers
+    # marks where the skin ends.
+    torso = hu.torso(blend_into="pelvis")[:6]
+    for i in (0, 1, 2, 3):
+        torso[i].mask = feather
+    cw, cd, ch = D["chest_r"]
+    sx, sz = D["shoulder"]
+    torso += [ell(hu.at(0, 0.03, D["chest"] + 0.01), (cw * 0.98, cd * 1.05, ch * 0.95), "torso", blend=0.05, mask=feather),
+              ell(hu.at(0, 0.0, sz - 0.075), (cw * 1.04, cd * 1.08, 0.045), "torso", blend=0.03, mask=feather),
+              # Plumage fills the waist out: a bird's barrel, not a woman's.
+              ell(hu.at(0, 0.02, D["waist"]), (cw * 0.98, cd * 1.05, 0.15), ("grad", "waist", "torso", hu.at(0, 0, D["hip"]),
+                  hu.at(0, 0, D["chest"])), blend=0.06, mask=feather)]
+    body = torso + [
         # Feathered hips and belly up to the navel, and the thighs in their
         # 'trousers' of feathers down to the knee.
         ell(P(0, -0.015, HARPY_HIP + 0.02), (0.17, 0.14, 0.13), "pelvis", blend=0.06, mask=feather),
@@ -853,7 +877,7 @@ def harpy():
                 d = (end - foot).normalized()
                 claws.append(cone(P(*end), P(*(end + d * 0.035 + V((0, 0, -0.012)))), r * 0.42, 0.002, bone, blend=0.002,
                                   group="c%d" % k_))
-            out.append(B.solid_part(sol, 0.004, 700, "leg", "horn", (0.42, 0.36, 0.2)))
+            out.append(B.solid_part(sol, 0.004, 700, "leg", "horn", (0.3, 0.26, 0.15)))
             out.append(B.solid_part(claws, 0.0015, 220, "talons", "horn", (0.035, 0.03, 0.03), smooth=0))
         return out
 
