@@ -1971,6 +1971,8 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   const ways = [];
   const doors = [];       // interactive door panels
   const rooms = new Map();// vnum -> {room, cell, center, outdoor, materials, sides}
+  // Room cells' house rows, built after the street plan (`buildLanes`).
+  const rowJobs = [];
   const decor = [];       // handed to actors.js
   const mistCells = [];   // cell centres the ground mist lies over
   const skyHoles = [];    // the tops of the sewer's air shafts
@@ -2475,7 +2477,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         } else if (dir === 3) {
           buildCityFrontage({
             batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors,
-            lights, decals, turf: hood ? turfAt(cell.z) : null, gateSide,
+            lights, decals, turf: hood ? turfAt(cell.z) : null, gateSide, rowJobs,
           });
         }
       }
@@ -3204,7 +3206,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   buildPartyWalls({ batcher, frontage, addCollider, layout, rooms, streetCells });
   const lanes = buildLanes({
     batcher, instances, layout, world, rooms, frontage, lifts, reserved, mountain, cellKey, chunkOf, worldOf,
-    decor, lights, addCollider, streetClutter, pathWalls: edges.pathWalls,
+    decor, lights, addCollider, streetClutter, pathWalls: edges.pathWalls, rowJobs,
   });
   buildAvenues({ layout, rooms, decor, addCollider, worldOf });
 
@@ -3829,7 +3831,7 @@ const frontsCrossing = (room, dir) => wantsFrontage(room) && !isShire(room) && d
  * inside the 5-9 m a real town street runs to, and the buildings now touch
  * their neighbours in the cells behind instead of standing free on paving.
  */
-function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors, lights = [], decals = null, turf = null, gateSide = -1 }) {
+function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors, lights = [], decals = null, turf = null, gateSide = -1, rowJobs = null }) {
   if (!wantsFrontage(room)) return;
   // A crossing's side is a frontage like any closed one, with the gate's
   // lodge in a gap in the middle of it (`buildCrossing`): left open, it was
@@ -4143,10 +4145,20 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
         // A room's own cell: no jetties and no stepped fronts. Its street
         // lamp stands 0.7 m off this front with its lantern at 4.3 m, and the
         // prose stands its well, its statue or its ladder against it.
-        buildHouseRow({
-          batcher, instances, chunk, pos, dir, a0: lo, a1: hi, cell, salt: 62 + dir, decor, lights, addCollider,
-          fixLo: builtLo && lo === -HALF, fixHi: builtHi && hi === HALF, room: true,
-        });
+        // Built once the street plan knows whether this street bends
+        // (`buildLanes`): only the cell's ends may follow it.
+        const build = (face = STRAIGHT) => {
+          const was = batcher.indoor;
+          batcher.indoor = false;
+          buildHouseRow({
+            batcher, instances, chunk, pos, dir, a0: lo, a1: hi, cell, salt: 62 + dir, decor, lights, addCollider,
+            fixLo: builtLo && lo === -HALF, fixHi: builtHi && hi === HALF, room: true, face,
+          });
+          batcher.indoor = was;
+        };
+        if (rowJobs) {
+          rowJobs.push({ level: cell.level, x: cell.x, z: cell.z, dir, vnum: room.vnum, full: lo === -HALF && hi === HALF && !builtLo && !builtHi, build });
+        } else build();
       }
       continue;
     }
@@ -4827,32 +4839,106 @@ function washingLine({ batcher, chunk, pos, rows, seed }) {
 }
 
 /**
- * A lane that does not run dead straight through its cell.
+ * Streets that bend: where a street runs straight through several cells --
+ * houses both sides, the way through at both ends and nowhere else -- its
+ * middle line wanders, and the house fronts either side follow it.
  *
- * Only a straight run -- houses on both sides, the way through at both ends
- * and nowhere else -- and only between the ends: the offset is a half wave,
- * nothing at either cell edge and `amp` in the middle, so a lane leaves a
- * cell exactly where it entered it and meets the next cell, a crossing or a
- * room's doorway, square on. Cells take their side by hash, so a run of them
- * wanders: an S where two neighbours lean opposite ways, a long bow where
- * they agree. One cell in five keeps straight. 0.8-1.4 m at the middle is a
- * bend you see down a street -- the facades close the view a little further
- * on -- and never one that takes the lane off the room's middle, where the
- * player arrives.
+ * A run is cut into spans by the rooms on it. A room's own cell keeps its
+ * street face exactly where it was for `STREET_PIN` either side of its middle
+ * -- its lamp stands 2.6 m along, the prose's props and the clutter within
+ * 3.3, and the player arrives in the middle -- so a span runs from one room's
+ * pinned middle to the next, through the outer parts of both room cells and
+ * every routed cell between, or to the end of the run. Over each span the
+ * offset is a bow, or on a long one an S, that starts and ends at zero with
+ * no slope: it meets a pinned middle, a junction, a doorway or a crossing
+ * square on, and the curve has no kink anywhere. The lane keeps its width:
+ * the row on the side it bends towards steps back as far as the other comes
+ * forward.
+ *
+ * How far: a front turned more than 0.26 (15 degrees) stops reading as a
+ * street following a bend and starts reading as houses set askew, and no
+ * house may be left shallower than `MIN_HOUSE_D`. On the 20 m span between
+ * two rooms a cell apart that is a 1.65 m bow; on longer ones up to 2.0.
  */
-function laneBend(cell, shut, ways) {
-  const ew = shut[0] && shut[2] && ways.has(1) && ways.has(3) && ways.size === 2;
-  const ns = shut[1] && shut[3] && ways.has(0) && ways.has(2) && ways.size === 2;
-  if (!ew && !ns) return null;
-  const t = ew ? cell.x : cell.z;
-  const across = ew ? cell.z : cell.x;
-  const r = hash3(t, across, cell.level, 191);
-  if (r < 0.2) return null;
-  const amp = (0.8 + hash3(t, across, cell.level, 192) * 0.6) * (r < 0.6 ? 1 : -1);
+const STREET_PIN = 3.4;
+const BEND_SLOPE = 0.26;
+const BEND_MAX = 2.0;
+const SPAN_MIN = 8;
+
+function planSpan(u0, u1, seed) {
+  const L = u1 - u0;
+  if (L < SPAN_MIN || seed(0) < 0.15) return null;
+  const sign = seed(1) < 0.5 ? 1 : -1;
+  // sin(pi t) sin(2 pi t) peaks at 0.770 and its slope at 2 pi.
+  if (L >= 30 && seed(2) < 0.4) {
+    const A = sign * Math.min(BEND_MAX, (BEND_SLOPE * L * 0.77) / (2 * Math.PI)) * (0.75 + seed(3) * 0.25);
+    return {
+      g: (u) => { const t = (u - u0) / L; return t <= 0 || t >= 1 ? 0 : (A / 0.77) * Math.sin(Math.PI * t) * Math.sin(2 * Math.PI * t); },
+      k: (u) => {
+        const t = (u - u0) / L;
+        if (t <= 0 || t >= 1) return 0;
+        return (A / 0.77 / L) * Math.PI * (Math.cos(Math.PI * t) * Math.sin(2 * Math.PI * t) + 2 * Math.sin(Math.PI * t) * Math.cos(2 * Math.PI * t));
+      },
+    };
+  }
+  const A = sign * Math.min(BEND_MAX, (BEND_SLOPE * L) / Math.PI) * (0.75 + seed(3) * 0.25);
   return {
-    amp: Math.abs(amp), at: (a) => amp * Math.cos(Math.PI * a / CELL),
-    slope: (a) => -amp * (Math.PI / CELL) * Math.sin(Math.PI * a / CELL),
+    g: (u) => { const t = (u - u0) / L; return t <= 0 || t >= 1 ? 0 : (A / 2) * (1 - Math.cos(2 * Math.PI * t)); },
+    k: (u) => { const t = (u - u0) / L; return t <= 0 || t >= 1 ? 0 : (A / 2) * (2 * Math.PI / L) * Math.sin(2 * Math.PI * t); },
   };
+}
+
+/**
+ * `through`: Map of cell key -> { level, x, z, axis: 'x' | 'z', room } for
+ * every cell a straight street runs through. Returns key -> { axis, g, k },
+ * g and k as functions of the world coordinate along the street.
+ */
+function planStreets(through, cellKey) {
+  const lines = new Map();
+  for (const c of through.values()) {
+    const line = `${c.level}|${c.axis}|${c.axis === 'x' ? c.z : c.x}`;
+    if (!lines.has(line)) lines.set(line, []);
+    lines.get(line).push(c);
+  }
+  const plan = new Map();
+  for (const cells of lines.values()) {
+    const along = (c) => (cells[0].axis === 'x' ? c.x : c.z);
+    cells.sort((p, q) => along(p) - along(q));
+    for (let i = 0; i < cells.length;) {
+      let j = i;
+      while (j + 1 < cells.length && along(cells[j + 1]) === along(cells[j]) + 1) j++;
+      const run = cells.slice(i, j + 1);
+      i = j + 1;
+      // The anchors where the offset is held at zero: the run's two ends and
+      // every room's pinned middle.
+      const stops = [[along(run[0]) * CELL - HALF, along(run[0]) * CELL - HALF]];
+      for (const c of run) if (c.room) stops.push([along(c) * CELL - STREET_PIN, along(c) * CELL + STREET_PIN]);
+      const end = along(run[run.length - 1]) * CELL + HALF;
+      stops.push([end, end]);
+      const spans = [];
+      for (let s = 0; s + 1 < stops.length; s++) {
+        const u0 = stops[s][1]; const u1 = stops[s + 1][0];
+        const c = run[0];
+        const seed = (k) => hash3(Math.round(u0 * 10), c.axis === 'x' ? c.z : c.x, c.level * 2 + (c.axis === 'x' ? 0 : 1), 211 + k);
+        const sp = planSpan(u0, u1, seed);
+        if (sp) spans.push({ u0, u1, ...sp });
+      }
+      if (!spans.length) continue;
+      const g = (u) => { for (const s of spans) if (u > s.u0 && u < s.u1) return s.g(u); return 0; };
+      const k = (u) => { for (const s of spans) if (u > s.u0 && u < s.u1) return s.k(u); return 0; };
+      for (const c of run) plan.set(cellKey(c.level, c.x, c.z), { axis: c.axis, g, k, u: along(c) * CELL });
+    }
+  }
+  return plan;
+}
+
+/** The street face of row `dir` in a cell of a planned street, or null for a straight one. */
+function plannedFace(plan, key, dir) {
+  const p = plan.get(key);
+  if (!p) return null;
+  // Rows face across the street: an x-street's rows are its north and south.
+  if ((p.axis === 'x') !== (dir === 0 || dir === 2)) return null;
+  return offsetFace(dir, (a) => p.g(p.u + a), (a) => p.k(p.u + a));
 }
 
 /** A row's street face along a lane offset by `g(a)` towards +x or +z, slope `k(a)`. */
@@ -4860,6 +4946,46 @@ function offsetFace(dir, g, k) {
   // The row on the side the lane moves towards steps back, the other forward.
   const s = dir === 1 || dir === 2 ? 1 : -1;
   return { f: (a) => ROW_FACE + s * g(a), k: (a) => s * k(a) };
+}
+
+/**
+ * A lane that turns a corner turns it on a curve. The house on the inside
+ * corner has its corner cut back `CORNER_CUT` along both fronts
+ * (`buildCornerHouse`); the two rows on the outside run round an arc about
+ * the same centre, `2 * ROW_FACE` further out, so the lane keeps its width
+ * all the way round. Each row is straight up to the arc's tangent point and
+ * follows the arc to the diagonal, where it meets the other row; the
+ * diagonal house's end wall runs out to the cell's corner.
+ *
+ * `ways`: the two adjacent sides the lane leaves by. Returns, per closed
+ * side, `{ face, a0, a1, split }` -- `split` the end at the diagonal.
+ */
+function turnRows(ways) {
+  const [wa, wb] = ways;
+  const ux = DIR_STEP[wa][0] + DIR_STEP[wb][0];
+  const uz = DIR_STEP[wa][2] + DIR_STEP[wb][2];
+  const r = CORNER_CUT;
+  const R = r + 2 * ROW_FACE;
+  const cx = (ROW_FACE + r) * ux; const cz = (ROW_FACE + r) * uz;
+  const out = {};
+  for (const dir of [(wa + 2) % 4, (wb + 2) % 4]) {
+    const along = dir === 1 || dir === 3;
+    const [dx, , dz] = DIR_STEP[dir];
+    // The centre in this row's frame: `a` along it, `o` out from the cell's middle.
+    const aC = along ? cz : cx;
+    const oC = along ? dx * cx : dz * cz;
+    // Towards the other row: the arc lies on that side of the tangent point.
+    const sg = -Math.sign(aC);
+    const arcAt = (a) => (a - aC) * sg > 0;
+    const root = (a) => Math.sqrt(Math.max(1e-6, R * R - (a - aC) * (a - aC)));
+    const face = {
+      f: (a) => (arcAt(a) ? oC + root(a) : ROW_FACE),
+      k: (a) => (arcAt(a) ? -(a - aC) / root(a) : 0),
+    };
+    const split = aC + sg * R / Math.SQRT2;
+    out[dir] = { face, a0: sg > 0 ? -HALF : split, a1: sg > 0 ? split : HALF, splitHi: sg > 0 };
+  }
+  return out;
 }
 
 /**
@@ -4929,7 +5055,7 @@ const LANE_PROPS = [
  * its mouths), where the town wall runs, on the temple's mound, or in the
  * Shire, the desert, the bog or the neighbourhood, which have their own.
  */
-function buildLanes({ batcher, instances, layout, world, rooms, frontage, lifts, reserved, mountain, cellKey, chunkOf, worldOf, decor, lights, addCollider, streetClutter, pathWalls }) {
+function buildLanes({ batcher, instances, layout, world, rooms, frontage, lifts, reserved, mountain, cellKey, chunkOf, worldOf, decor, lights, addCollider, streetClutter, pathWalls, rowJobs = [] }) {
   // Every way out of every routed cell, over all the passages that share it.
   const cells = new Map();
   for (const link of layout.links) {
@@ -4956,7 +5082,9 @@ function buildLanes({ batcher, instances, layout, world, rooms, frontage, lifts,
   };
 
   // What happened to every routed cell, for tools/judge/cozy.js.
-  const tally = { cells: cells.size, built: 0, rows: 0, corners: 0, reserved: 0, notTown: 0, square: 0, nothingShut: 0, bent: 0, washing: 0, stalls: 0, why: new Map(), lines: [] };
+  const tally = { cells: cells.size, built: 0, rows: 0, corners: 0, reserved: 0, notTown: 0, square: 0, nothingShut: 0, bent: 0, turned: 0, roomsBent: 0, washing: 0, stalls: 0, why: new Map(), lines: [] };
+  // First what every cell is; the street plan needs all of them before any is built.
+  const survey = [];
   for (const [k, { level, x, z, dirs, through }] of cells) {
     if (reserved.has(k) || mountain.has(k)) { tally.reserved++; tally.why.set(k, 'reserved'); continue; }
     let ok = true; let street = false;
@@ -4987,7 +5115,48 @@ function buildLanes({ batcher, instances, layout, world, rooms, frontage, lifts,
       const spot = frontage.get(cellKey(level, nx, nz));
       return !!spot && !!spot.house;
     };
-    const shut = [0, 1, 2, 3].map(closed);
+    survey.push({ k, level, x, z, dirs, nearSquare, shut: [0, 1, 2, 3].map(closed) });
+  }
+
+  // The streets that bend: every cell a straight street runs through, routed
+  // or a room's, then `planStreets` over the lot.
+  const straight = new Map();
+  for (const s of survey) {
+    if (s.nearSquare || s.dirs.size !== 2) continue;
+    const { shut, dirs } = s;
+    if (shut[0] && shut[2] && !shut[1] && !shut[3] && dirs.has(1) && dirs.has(3)) straight.set(s.k, { level: s.level, x: s.x, z: s.z, axis: 'x' });
+    else if (shut[1] && shut[3] && !shut[0] && !shut[2] && dirs.has(0) && dirs.has(2)) straight.set(s.k, { level: s.level, x: s.x, z: s.z, axis: 'z' });
+  }
+  // A room's cell is on one when both its rows are whole and the street goes
+  // on out of both its other sides.
+  const roomRows = new Map();
+  for (const job of rowJobs) {
+    const key = cellKey(job.level, job.x, job.z);
+    if (!roomRows.has(key)) roomRows.set(key, []);
+    roomRows.get(key).push(job);
+  }
+  for (const [key, jobs] of roomRows) {
+    const { level, x, z, vnum } = jobs[0];
+    if (jobs.length !== 2 || !jobs.every((j) => j.full) || lifts.get(vnum)) continue;
+    const ds = jobs.map((j) => j.dir).sort();
+    const axis = ds[0] === 0 && ds[1] === 2 ? 'x' : ds[0] === 1 && ds[1] === 3 ? 'z' : null;
+    if (!axis) continue;
+    const sides = layout.sides.get(vnum);
+    const ways = axis === 'x' ? [1, 3] : [0, 2];
+    if (!ways.every((d) => sides && sides[d] && sides[d].kind === 'alley')) continue;
+    straight.set(key, { level, x, z, axis, room: true });
+  }
+  const plan = planStreets(straight, cellKey);
+  tally.plan = plan;
+  for (const [key, jobs] of roomRows) {
+    for (const job of jobs) {
+      const face = plannedFace(plan, key, job.dir);
+      if (face) tally.roomsBent++;
+      job.build(face || STRAIGHT);
+    }
+  }
+
+  for (const { k, level, x, z, dirs, nearSquare, shut } of survey) {
     const pos = worldOf({ level, x, z });
     const chunk = chunkOf({ level, x, z });
     const cell = { level, x, z };
@@ -5015,28 +5184,46 @@ function buildLanes({ batcher, instances, layout, world, rooms, frontage, lifts,
     else tally.built++;
     tally.why.set(k, shut.map((v) => (v ? '#' : '.')).join(''));
 
-    const bend = laneBend(cell, shut, dirs);
+    // A lane that turns: the two ways out are adjacent sides and both others are shut.
+    const ways = [...dirs];
+    const turning = ways.length === 2 && (ways[0] + 2) % 4 !== ways[1]
+      && shut[(ways[0] + 2) % 4] && shut[(ways[1] + 2) % 4];
+    const turn = turning ? turnRows(ways) : null;
+    if (turn) tally.turned++;
+    if (plan.has(k)) tally.bent++;
     const built = [];
     // A way out of this cell into a room: its shop sign and lantern hang
     // over this cell's edge there.
     const toRoom = (d) => dirs.has(d) && layout.at(level, x + DIR_STEP[d][0], z + DIR_STEP[d][2]) !== undefined;
-    if (bend) tally.bent++;
     for (let dir = 0; dir < 4; dir++) {
       if (!shut[dir]) continue;
       tally.rows++;
+      const along = dir === 1 || dir === 3;
+      const [loSide, hiSide] = along ? [0, 2] : [3, 1];
+      if (turn) {
+        // Round the outside of the turn, the two rows meeting on the diagonal.
+        const t = turn[dir];
+        built[dir] = buildHouseRow({
+          batcher, instances, chunk, pos, dir, cell, salt: 162 + dir, decor, lights, addCollider,
+          a0: t.a0, a1: t.a1, face: t.face, fixLo: !t.splitHi, fixHi: t.splitHi,
+          bareLo: toRoom(loSide), bareHi: toRoom(hiSide),
+        });
+        continue;
+      }
+      const face = plannedFace(plan, k, dir) || STRAIGHT;
       // Where two rows meet in a corner the one along x keeps it and the one
       // along z stops at its street face; the corner-keeping end may then not
       // step back, or it would open a slot beside the other row's end.
-      if (dir === 1 || dir === 3) {
+      if (along) {
         built[dir] = buildHouseRow({
           batcher, instances, chunk, pos, dir, cell, salt: 162 + dir, decor, lights, addCollider,
-          a0: shut[0] ? -HALF + FRONTAGE_D : -HALF, a1: shut[2] ? HALF - FRONTAGE_D : HALF, face: bend ? offsetFace(dir, bend.at, bend.slope) : STRAIGHT,
+          a0: shut[0] ? -HALF + FRONTAGE_D : -HALF, a1: shut[2] ? HALF - FRONTAGE_D : HALF, face,
           bareLo: toRoom(0), bareHi: toRoom(2),
         });
       } else {
         built[dir] = buildHouseRow({
           batcher, instances, chunk, pos, dir, cell, salt: 162 + dir, decor, lights, addCollider,
-          a0: -HALF, a1: HALF, fixLo: shut[3], fixHi: shut[1], face: bend ? offsetFace(dir, bend.at, bend.slope) : STRAIGHT,
+          a0: -HALF, a1: HALF, fixLo: shut[3], fixHi: shut[1], face,
           bareLo: toRoom(3), bareHi: toRoom(1),
         });
       }
@@ -5055,13 +5242,20 @@ function buildLanes({ batcher, instances, layout, world, rooms, frontage, lifts,
     }
     // The barrels and crates against the new fronts, not out in the lane.
     const item = streetClutter.get(k);
-    // In a bent cell only against the side the lane has bowed towards: the
-    // row facing it comes forward, and a barrel at the old line stood in it.
     if (item && shut.some(Boolean)) {
       item.half = HALF - FRONTAGE_D;
       // A ladder leans its top on the ground storey, which is under a jetty.
       item.props = item.props ? item.props.filter((p) => p !== 'ladder') : LANE_PROPS;
-      item.walls = [0, 1, 2, 3].filter((d) => shut[d] && (!bend || (d === 1 || d === 2 ? 1 : -1) * bend.at(0) > 0));
+      // Only against a front that is at or behind the old line wherever the
+      // clutter can land (2.5 m either side of the middle): a row the bend
+      // brings forward stands where the barrel would. Round a turn both rows
+      // come forward, so a turning cell keeps its lane clear.
+      item.walls = [0, 1, 2, 3].filter((d) => {
+        if (!shut[d] || turn) return false;
+        const face = plannedFace(plan, k, d);
+        return !face || [-2.5, 0, 2.5].every((a) => face.f(a) >= ROW_FACE - 1e-6);
+      });
+      if (!item.walls.length && decor.includes(item)) decor.splice(decor.indexOf(item), 1);
     }
   }
   return tally;
