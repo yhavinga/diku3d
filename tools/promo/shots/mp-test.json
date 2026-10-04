@@ -1,0 +1,15 @@
+{ "name": "mp-test", "room": 3014, "time": "dawn", "seconds": 3, "preroll": 3,
+  "mud": { "port": 4051, "camera": "Beorn", "password": "promo1993", "bots": ["Kestrel", "Thorne", "Wren", "Mordecai"] },
+  "mudLog": true,
+  "keys": [ { "t": 0, "pos": [-2, 1.7, 12], "aim": [0, 1.2, 4] }, { "t": 3, "pos": [1, 1.7, 11.5], "aim": [0, 1.2, 4] } ],
+  "events": [
+    { "t": -2.5, "bot": "Kestrel", "stand": [-1.5, 0, 5], "face": [0, 10] },
+    { "t": -2.5, "bot": "Thorne", "stand": [0, 0, 4.5], "face": [0, 10] },
+    { "t": -2.5, "bot": "Wren", "stand": [1.5, 0, 5.2], "face": [0, 10] },
+    { "t": -2.5, "bot": "Mordecai", "stand": [2.8, 0, 6], "face": [0, 10] },
+    { "t": -2, "bot": "Kestrel", "cmd": "follow beorn" },
+    { "t": -2, "bot": "Thorne", "cmd": "follow beorn" },
+    { "t": -2, "bot": "Wren", "cmd": "follow beorn" },
+    { "t": -2, "bot": "Mordecai", "cmd": "follow beorn" },
+    { "t": -1, "js": "window.diku.game.interpret('group all')" }
+  ] }
