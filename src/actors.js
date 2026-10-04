@@ -562,7 +562,7 @@ function buildModelledFigure(asset, proto, library) {
 // mobile is; this dresses it.
 
 /** Every file the people come from. assets.js loads them with the rest. */
-export const PEOPLE_FILES = ['person_male', 'person_female', 'troll'];
+export const PEOPLE_FILES = ['person_male', 'person_female', 'troll', 'minotaur'];
 
 const RIGHT_ARM = ['upperarmR', 'forearmR', 'handR'];
 const LEFT_ARM = ['upperarmL', 'forearmL', 'handL'];
@@ -966,6 +966,14 @@ function buildPerson(library, who, proto, instance) {
     }
     actions[name] = action;
   }
+  // Clips a file has beyond the people's -- a minotaur's paw, snort and
+  // charge -- for motion.js's pastimes, which weights them in by name.
+  for (const [name, clip] of clipsOf(asset).base) {
+    if (actions[name] || name.startsWith('carry_')) continue;
+    actions[name] = mixer.clipAction(clip);
+    actions[name].setEffectiveWeight(0);
+    clips[name] = clip.duration;
+  }
   // Kept for update(), which times the walk against it.
   actions.walkCycle = clips.walk;
   // Stand them in the idle before anything draws: until a mixer update the
@@ -980,6 +988,8 @@ function buildPerson(library, who, proto, instance) {
     stride: { walk: facts.walk * scale * legK, run: facts.run * scale * legK },
     hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
     indoor: mesh.material.dikuIndoor, buried: mesh.material.dikuBuried,
+    // A minotaur's: what it does when you come near (people.js).
+    temper: who.temper || null,
   };
 }
 

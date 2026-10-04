@@ -120,6 +120,7 @@ export const CREATURES = [
   // No harpy's cry was recorded: a bat's screech, slowed, until one is.
   { id: 'harpy', re: /\bharp(y|ies)\b/, idle: ['cr_bat'], fight: ['cr_bat'], rate: [0.5, 0.6], gain: 0.6, every: [15, 45], reach: 18, death: 'death_small' },
   // A golem has no breath to make a sound with: silent but for its blows.
+  { id: 'minotaur', re: /\bminotaurs?\b/, idle: ['cr_cow'], fight: ['cr_beast'], rate: [0.62, 0.72], gain: 0.6, every: [30, 90], reach: 18, death: 'death_beast' },
   { id: 'golem', re: /\bgolems?\b/, idle: [], gain: 0.7, every: [60, 120], reach: 16, death: 'death_beast' },
   { id: 'lamia', re: /\blamias?\b/, idle: [], fight: ['cr_dog_growl'], rate: [0.72, 0.82], gain: 0.6, every: [20, 60], reach: 14, death: 'death_beast' },
   { id: 'horse', re: /\b(horse|pegasus|pony|mule|donkey|stallion|mare|unicorn)\b/, idle: ['cr_horse'], gain: 0.7, every: [15, 50], reach: 22, death: 'death_beast' },
@@ -142,7 +143,8 @@ const creatureCache = new Map();
 /** The voice rule for a mobile's words, or null. Cached on the words. */
 export function creatureOf(words) {
   const key = (words || '').toLowerCase();
-  if (!creatureCache.has(key)) creatureCache.set(key, (PERSON.test(key) ? null : CREATURES.find((c) => c.re.test(key))) || null);
+  // A minotaur is a person with a bull's throat: its bellow, whatever its trade.
+  if (!creatureCache.has(key)) creatureCache.set(key, (PERSON.test(key) && !/\bminotaurs?\b/.test(key) ? null : CREATURES.find((c) => c.re.test(key))) || null);
   return creatureCache.get(key);
 }
 

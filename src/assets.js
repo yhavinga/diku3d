@@ -933,7 +933,7 @@ export const ASSET_NAMES = [
   'rubble_heap', 'charred_beams', 'barricade', 'barricade_stakes', 'burnt_cart', 'brazier', 'crow',
   'dracolich_idol', 'training_pell', 'khan_memorial', 'bramble', 'tall_weeds', 'collapsed_shed', 'dead_planter',
   'broken_stair', 'crystal_stump', 'boarded_window', 'boarded_door', 'barred_window', 'shoring', 'debris', 'city_wall',
-  'townsperson', 'person_male', 'person_female', 'troll',
+  'townsperson', 'person_male', 'person_female', 'troll', 'minotaur',
   'weapon_sword', 'weapon_dagger', 'weapon_axe', 'weapon_mace', 'weapon_spear',
   'weapon_staff', 'shield_round', 'shield_kite',
   // Animals, rigged and animated. One base mesh per build of body; the

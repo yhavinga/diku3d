@@ -1,4 +1,96 @@
 {
+ "minotaur": {
+  "attack": {
+   "duration": 0.7916666666666666,
+   "frames": 19,
+   "head_gap": 0.1382,
+   "hit": 0.5263157894736842
+  },
+  "attack2": {
+   "duration": 0.875,
+   "frames": 21,
+   "head_gap": 0.1687,
+   "hit": 0.5238095238095238
+  },
+  "block": {
+   "duration": 0.5,
+   "frames": 12,
+   "head_gap": 0.085
+  },
+  "cast": {
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.2239,
+   "hit": 0.5833333333333334
+  },
+  "charge": {
+   "duration": 2.2916666666666665,
+   "frames": 55
+  },
+  "death": {
+   "duration": 1.4583333333333333,
+   "frames": 35
+  },
+  "fight": {
+   "duration": 1.3333333333333333,
+   "frames": 32,
+   "head_gap": 0.1687
+  },
+  "hit": {
+   "duration": 0.4166666666666667,
+   "frames": 10,
+   "head_gap": 0.1687
+  },
+  "idle": {
+   "duration": 2.0,
+   "frames": 48
+  },
+  "idle2": {
+   "duration": 3.75,
+   "frames": 90,
+   "head_gap": 0.0348
+  },
+  "lean": {
+   "duration": 4.0,
+   "frames": 96,
+   "head_gap": 0.2144
+  },
+  "paw": {
+   "duration": 2.375,
+   "frames": 57
+  },
+  "run": {
+   "duration": 0.6666666666666666,
+   "frames": 16,
+   "sink": -4.075467586517334e-06,
+   "slip": 0.0032885537652715957,
+   "slip_baked": 0.0016680703117721851,
+   "stance": 0.36,
+   "stride": 2.5998669394719958
+  },
+  "sit": {
+   "duration": 5.0,
+   "frames": 120
+  },
+  "snort": {
+   "duration": 1.4583333333333333,
+   "frames": 35
+  },
+  "talk": {
+   "duration": 3.0,
+   "frames": 72,
+   "head_gap": 0.3144
+  },
+  "walk": {
+   "duration": 1.0833333333333333,
+   "frames": 26,
+   "sink": -2.731475979089737e-05,
+   "slip": 7.412856655397704e-06,
+   "slip_baked": 7.389573591087828e-06,
+   "stance": 0.62,
+   "stride": 1.1999385874486135
+  }
+ },
  "person_female": {
   "attack": {
    "duration": 0.7916666666666666,

@@ -1257,7 +1257,7 @@ CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "b
          "cast", "sit", "lean", "talk")
 
 
-def make_all(arm, measure=True, P=None):
+def make_all(arm, measure=True, P=None, extra=()):
     """Author every clip on the IK rig, bake them, strip the controls, and
     write the baked clips back as plain actions. Returns what the viewer
     needs to know about them: durations, strides, contact frames, and the
@@ -1268,7 +1268,7 @@ def make_all(arm, measure=True, P=None):
     baked = {}
     info = {}
     fns = [anim_idle, anim_idle2, anim_walk, anim_run, anim_fight, anim_attack, anim_attack2,
-           anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk]
+           anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk] + list(extra)
     for fn in fns:
         r = fn(arm)
         name, frames = r[0], r[1]

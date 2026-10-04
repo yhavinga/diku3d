@@ -28,6 +28,7 @@ export const CLIP_FACTS = {
   person_male: { walk: 1.200, run: 2.600 },
   person_female: { walk: 1.137, run: 2.464 },
   troll: { walk: 1.031, run: 2.234 },
+  minotaur: { walk: 1.200, run: 2.600 },
 };
 export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21, cast: 14 / 24 };
 // sit (5 s), lean (4 s) and talk (3 s) are loops for motion.js's settling:
@@ -247,8 +248,71 @@ const SPECIALS = [
   [W('duergar'), 'duergar'],
 ];
 
+/**
+ * A minotaur (tools/blender/bull.py): a man's rig, a bull's girth and head,
+ * dressed for its trade the way its prose dresses it -- 'clad in heavy furs
+ * ... the gleam of his armor', 'blue plate armour', 'heavy red armor and
+ * wields a huge glaive', 'loose robes', 'green and brown leather', 'clad all
+ * in black'. Its own file, `minotaur.glb`, carries guard, knight, mage,
+ * priest, rogue, beggar and noble, and no hats: the horns are in the way.
+ */
+const MINOTAUR = W('minotaurs?');
+const FUR = [0x5a3e2a, 0x4a3426, 0x6a4a30, 0x3e2e22];
+const PLATE = { blue: 0x3a4c7e, red: 0x7a2420, crimson: 0x6e1a1e, black: 0x26262a, white: 0xc8c6c0 };
+
+function minotaurOf(proto, ITEM, instance, w) {
+  const prose = `${proto.long || ''} ${proto.description || ''}`.toLowerCase();
+  const all = `${w.toLowerCase()} ${prose}`;
+  const seed = strHash(proto.keywords, proto.vnum);
+  const seed2 = strHash(`${proto.short}#${instance}`, 31);
+  let arch = 'guard';
+  if (/\b(mage|archmage|robes)\b/.test(all) && !/\barmou?r\b/.test(all)) arch = /\bcleric|holy|white glowing\b/.test(all) ? 'priest' : 'mage';
+  if (/\b(cleric|druid)\b/.test(w.toLowerCase())) arch = 'priest';
+  else if (/\b(thief|ranger)\b/.test(w.toLowerCase())) arch = 'rogue';
+  else if (/\bbutler\b/.test(all)) arch = 'noble';
+  else if (/\bcitizen\b/.test(w.toLowerCase())) arch = 'beggar';
+  else if (/\b(plate|paladin|anti-paladin|grand master|royal|elite|high guard)\b/.test(all) || /\bheavy armou?r\b/.test(all)) arch = 'knight';
+  const out = {
+    file: 'minotaur', arch, face: 'face_minotaur', kind: 'minotaur', scale: 1.2, headScale: 1,
+    weapon: null, shield: null, pieces: [], sex: 'male',
+    tint: { skin: /\bblack fur\b/.test(prose) ? 0x2c2622 : pick(FUR, seed2), hair: 0x241a14, bone: 0xd8cbb0,
+      leather: 0x3a2a1c, linen: 0x8a7a5a, cloth: 0x5a4330, cloth2: pick(DARK, seed) },
+  };
+  const colour = /\b(blue|red|crimson|black|white)\b/.exec(prose);
+  if (arch === 'knight') {
+    out.tint.plate = colour ? PLATE[colour[1]] : (/\banti-paladin|dark aura\b/.test(all) ? PLATE.black : undefined);
+    if (/\bpaladin\b/.test(all) && !/anti-paladin/.test(all)) out.tint.plate = PLATE.white;
+    out.tint.cloth = /\bfurs?\b/.test(prose) ? 0x5a4330 : pick(RICH, seed);
+  }
+  if (arch === 'mage') out.tint.cloth = pick(ROBES.mage, seed);
+  if (arch === 'priest') out.tint.cloth = /\bdruid|leather\b/.test(all) ? 0x4a3a24 : 0xd8d2c0;
+  if (arch === 'rogue') out.tint.cloth = /\bgreen\b/.test(prose) ? 0x3a4a26 : 0x1e1c1a;
+  if (arch === 'noble') out.tint.cloth = 0x1e1c1a;
+  // What the prose puts in their hands.
+  if (/\bglaive\b/.test(prose)) out.weapon = 'weapon_spear';
+  else if (/\bmorningstar\b/.test(prose)) out.weapon = 'weapon_mace';
+  else if (/\baxe\b/.test(prose)) out.weapon = 'weapon_axe';
+  else if (/\bbrass knuckles\b/.test(prose)) out.weapon = null;
+  else if (arch === 'guard' || arch === 'knight') out.weapon = pick(['weapon_axe', 'weapon_mace', 'weapon_axe', 'weapon_spear'], seed);
+  else if (arch === 'mage' || (arch === 'priest' && seed < 0.6)) out.weapon = 'weapon_staff';
+  else if (arch === 'priest') out.weapon = 'weapon_mace';
+  else if (arch === 'rogue') out.weapon = 'weapon_dagger';
+  // How big: 'HUGE', 'towers above you', 'simply huge'; 'a small minotaur';
+  // 'tall and slender', 'agile and thin'.
+  if (/\b(towers above|simply huge)\b/.test(prose)) out.scale = 1.36;
+  else if (/\bhuge\b/i.test(prose)) out.scale = 1.3;
+  else if (/\bsmall minotaur\b/.test(prose)) out.scale = 1.04;
+  else if (/\b(slender|thin)\b/.test(prose)) out.scale = 1.14;
+  // The ones that stand guard lower their horns at whoever comes near; the
+  // rest only paw and snort (motion.js PASTIMES, the minotaur's own clips).
+  out.temper = arch === 'guard' || arch === 'knight' ? { alarm: ['charge', 4.5] } : { alarm: null };
+  applyEquipment(out, proto, ITEM, seed);
+  return out;
+}
+
 export function personOf(proto, ITEM, instance = 0) {
   const w = words(proto);
+  if (MINOTAUR.test(w)) return minotaurOf(proto, ITEM, instance, w);
   // A dracolich is a dragon, whatever it has of a lich.
   if (/\bdracolich/i.test(w)) return null;
   // No Man's Land's "doll" is a woman in her finery; a doll anywhere else

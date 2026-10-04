@@ -128,6 +128,10 @@ const PASTIMES = {
   // A golem stands still; come close and its head comes round to you and
   // its fists close (ALARM). Never idly.
   wake: { odds: 0, once: true, gap: [3, 8], rate: 4 },
+  // A minotaur tosses its head and blows; one standing guard lowers its
+  // horns at you and paws the floor (its temper, people.js).
+  snort: { odds: 1, once: true, gap: [5, 14], rate: 5 },
+  charge: { odds: 0, once: true, gap: [4, 10], rate: 5 },
 };
 const PASTIME_NAMES = Object.keys(PASTIMES);
 /**
@@ -2545,7 +2549,9 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       tickDeath(fig, dt);
       if (fig.legs) animateLegs(fig, dt);
       else animate(fig, dt);
-      if (!fig.bones && fig.mixer) animalLife(fig, dt);
+      // A person with pastime clips of its own (a minotaur paws and snorts)
+      // takes them up as an animal does, when it is not sat or leaning.
+      if (fig.mixer && (!fig.bones || (fig.pastimes && fig.pastimes.length && !m.settle))) animalLife(fig, dt);
       if (fig.mixer) fig.mixer.update(dt);
       if (!fig.bones && m.graze && !(fig.pastimes && fig.pastimes.length)) lowerHead(fig);
       const clipped = m.settle && m.settle.clip;
