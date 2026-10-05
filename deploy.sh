@@ -9,6 +9,10 @@
 # - Server: Cloudflare Origin CA-certificaat in /etc/ssl/certs/diku3d.com.origin.pem,
 #   sleutel in /etc/ssl/private/diku3d.com.key (alleen root). Geen certbot:
 #   alleen Cloudflare hoeft dit certificaat te vertrouwen.
+# - Authenticated Origin Pulls: in de zone een eigen clientcertificaat
+#   (Cloudflare presenteert het aan de server), op de server
+#   /etc/nginx/snippets/cloudflare-origin-pull.conf met de CA die het
+#   uitgaf. Zonder dat snippet keurt `nginx -t` de config af.
 # - ssh naar DEPLOY_HOST zonder wachtwoord, met sudo zonder wachtwoord.
 set -euo pipefail
 
