@@ -30,6 +30,18 @@ is an opinion.
   street shares its only cell with the Pleiades' street, so walling it cut
   that one (the fix is in layout.js). All places: 509 → 494 with every door
   open, 532 → 488 shut (door/guard 107 → 83).
+- **The black hole, after (wave17-blackhole, 51df8d1).** Its street could
+  not move: its one cell lies between #9324's north wall and #9325's south
+  wall, and #9324's only free wall faces the Pleiades' street. So a pass
+  after the allocation lays any other pair's street out of the cells of a
+  street that build.js walls in (`leadsNowhere`'s test in layout terms),
+  and keeps the new route only if it shares no more cells. The Pleiades'
+  street went round, nine cells as before; the other 32 zones' layouts are
+  byte-identical, and in galaxy nothing else moved. Galaxy's places: 34 →
+  31 with every door open, 35 → 32 shut, the sealed one among them. Seen
+  from the grass above, galaxy's town (level −1, under the level-0 ground
+  at −0.47 m) puts the tops of its three-storey houses up through the
+  turf; that was so before and is not fixed.
 - **The judge** holds a body to the lid again: `stairBetween` is gone,
   `passageBetween` covers the four lidless passages, and in a lid's or a
   drop's shaft below the floor above a body counts in the room below
