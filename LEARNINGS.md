@@ -151,6 +151,21 @@ is an opinion.
 - **Still a rule of its own:** main.js `currentRoom()`, for the HUD, the
   sound and the arrow keys. On open ground and at shared street cells it
   can name another room than the one the game counts.
+- **After the lids the figure rose, and no way was lost.** roomcount over
+  every zone read 15.41% where it had read 12.81%: juargan 0.00% → 87.30%
+  (catacomb went 6.9% → 0.00% with the re-laid corridors). With one tool on
+  329f42a and on f72677b, juargan's geometry differs only on level 3: the
+  edge wave17-hatches builds along an elevated open-air room's way-up side,
+  in #4776 A valley, and the kerb of #4772's pit, 0.62 → 0.9 m. Its city
+  (72 rooms, level 0) and the grass round it (551k samples) had never been
+  walkable to each other; they were one piece because the flood's union
+  counts a fall both ways, and a body could fall off the back of #4776's
+  climb into the city and off the hills onto the grass. The edge closed
+  the fall into the city, so the grass's piece holds no room of its level
+  and the reference keeps the last room where the counter names a city
+  room. The climb still walks: its inner treads reach the portal. The pit
+  kerb at 0.9 m means a body jumps into an open pit or types `down`; it
+  can no longer walk in.
 
 ### Doorways, and corridors that wall each other off (wave17-doorways)
 
