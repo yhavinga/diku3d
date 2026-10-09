@@ -909,6 +909,56 @@ export function layoutWorld(world, options = {}) {
       if (!moved) break;
     }
   }
+  // A street the mud runs one way into a room with no way out of it -- the
+  // spider web (#6131), the black hole (#9325) -- build.js walls along both
+  // sides (`leadsNowhere`, `sealStreet`; the same test here), because the
+  // server counts a body on a street in its nearer room, and one that stepped
+  // off it halfway walked out of a room no way leaves. A cell another pair's
+  // street runs through stays open, or that street is cut in two, and
+  // galaxy's street from the Northern Side of the Temple to the Homes of the
+  // Pleiades (#9329-#9326) ran through the black hole's only cell: a body
+  // walked from the black hole's half of it onto the Pleiades'. So a street
+  // through such a street's cells is laid again out of the same two walls,
+  // round them, and kept where it shares no more cells with other pairs'
+  // streets than it did; else it stays, and so does the opening. No room,
+  // wall or door moves, and no other street. Streets of one pair may still
+  // share: galaxy's four ways from #9319 into #9320 all end in the one room.
+  const builtEnds = (l) => !!l.to && l.from.room.sector !== SECTOR.AIR && l.to.room.sector !== SECTOR.AIR;
+  const nowhere = (l) => l.kind === 'alley' && !l.twoWay && builtEnds(l) && !walled(l.from.room) && walled(l.to.room)
+    && !l.to.room.exits.some((e) => e && e.to >= 0 && includeVnum(e.to) && world.rooms.has(e.to));
+  const sealed = new Map(); // grid key -> the streets into a room with no way out through it
+  for (const l of links) {
+    if (!nowhere(l)) continue;
+    for (const c of l.path) {
+      const k = key(l.from.level, c.x, c.z);
+      if (!sealed.has(k)) sealed.set(k, []);
+      sealed.get(k).push(l);
+    }
+  }
+  if (sealed.size) {
+    const intrudes = (m, k) => (sealed.get(k) || []).some((l) => l.from !== m.from || l.to !== m.to);
+    const streetCells = new Map(); // grid key -> the streets through it
+    const lay = (m, on) => {
+      for (const c of m.path) {
+        const k = key(m.from.level, c.x, c.z);
+        if (!streetCells.has(k)) streetCells.set(k, new Set());
+        if (on) streetCells.get(k).add(m); else streetCells.get(k).delete(m);
+      }
+    };
+    for (const l of links) if (l.kind === 'alley' && builtEnds(l)) lay(l, true);
+    const shares = (m, x, z) => [...(streetCells.get(key(m.from.level, x, z)) || [])].some((l) => l !== m && !harmless(l, m));
+    for (const m of links) {
+      if (m.kind !== 'alley' || !builtEnds(m) || !m.path.some((c) => intrudes(m, key(m.from.level, c.x, c.z)))) continue;
+      const was = m.path.filter((c) => shares(m, c.x, c.z) && !intrudes(m, key(m.from.level, c.x, c.z))).length;
+      const sameWalls = (end, dir) => (dir === (end === 0 ? m.entryDir : m.exitDir) ? 0 : Infinity);
+      const route = routePath(m.from, m.to, occupied, reach.get(pair(m.from.vnum, m.to.vnum)) || reachDefault,
+        sameWalls, (k) => blocked.has(k) || intrudes(m, k), (x, z) => (shares(m, x, z) ? DOORWAY_PRICE : 0));
+      if (!route || route.cells.filter((c) => shares(m, c.x, c.z)).length > was) continue;
+      lay(m, false);
+      m.path = route.cells;
+      lay(m, true);
+    }
+  }
   const pathCells = new Set();
   const pathOwner = new Map(); // which passage runs through this cell
   for (const link of links) {
