@@ -27,7 +27,7 @@ import {
   SECTOR, REVERSE_DIR,
 } from './are.js';
 import { createNav } from './nav.js';
-import { openAirIn, shellAttrs } from './shells.js';
+import { openAirIn, shellAttrs, shaftsOf, shaftAt } from './shells.js';
 import {
   COND, OBJ_VNUM, ITEM_TAKE, LEVEL_IMMORTAL, createMoney, makeObject, hasAff, canSee,
   objWeight, objNumber,
@@ -1071,15 +1071,16 @@ const TREE_LINE = 5.4;   // a hollow tree's wall is a ring
 const DOOR_HALF = 1.9;   // half a doorway (build.js DOOR_W 3.2) and some
 
 /**
- * Which room a body is counted in: inside a walled room's walls or in its
- * doorway, that room; on an open-air room's cell, that room; on a street, its
- * nearer end (where streets share a cell, one with `last` at an end); on open
- * ground, the nearest room the level's open ground reaches (open-air rooms a
- * two-way street leaves, and what two-way streets join to them); else null,
- * "keep the last room". Read from the layout alone, so the page and the server
- * decide alike; tools/judge/headless/roomcount.mjs measures it against a flood
- * of the page's own ground. `rooms` is built.rooms, `links` layout.links;
- * positions are feet, in the frame `rooms` is in.
+ * Which room a body is counted in: in the shaft of a lid or a drop, under the
+ * floor above, the room below (shells.js `shaftAt`); inside a walled room's
+ * walls or in its doorway, that room; on an open-air room's cell, that room;
+ * on a street, its nearer end (where streets share a cell, one with `last` at
+ * an end); on open ground, the nearest room the level's open ground reaches
+ * (open-air rooms a two-way street leaves, and what two-way streets join to
+ * them); else null, "keep the last room". Read from the layout alone, so the
+ * page and the server decide alike; tools/judge/headless/roomcount.mjs
+ * measures it against a flood of the page's own ground. `rooms` is built.rooms,
+ * `links` layout.links; positions are feet, in the frame `rooms` is in.
  */
 export function createRoomCounter({ world, rooms, links, zoneOf = null }) {
   const openAir = openAirIn(world);
@@ -1108,6 +1109,14 @@ export function createRoomCounter({ world, rooms, links, zoneOf = null }) {
     entries.set(vnum, e);
     byCell.set(key(e.level, e.gx, e.gz), e);
   }
+  // Keyed where this counter's rooms are, by way of the upper room's own entry
+  // (which has its zone's frame): the server holds every zone side by side, and
+  // two zones' shafts can share a layout cell.
+  const shafts = shaftsOf(world, links, (upper) => {
+    const e = entries.get(upper.vnum);
+    if (!e) throw new Error(`game.js: the shaft under #${upper.vnum} has no room to be counted in`);
+    return { level: e.level, x: e.gx, z: e.gz };
+  });
   // layout.js's own test: the far end of a one-way exit has no way back.
   const oneWay = (link) => !world.rooms.get(link.to.vnum).exits.some((exit) => exit && exit.to === link.from.vnum);
   const streets = new Map();
@@ -1171,6 +1180,9 @@ export function createRoomCounter({ world, rooms, links, zoneOf = null }) {
   };
   /** Where a point is: in a room ({ room }), on a street ({ streets }), or on open ground ({ level, gx }). */
   function region(p) {
+    // A shaft lies in the column of the room above it, whose cell would claim the body: ask it first.
+    const shaft = shaftAt(shafts, p.x, p.y, p.z);
+    if (shaft) return { room: shaft.lower };
     const level = Math.round(p.y / LEVEL_H);
     const gx = Math.round(p.x / CELL);
     const gz = Math.round(p.z / CELL);

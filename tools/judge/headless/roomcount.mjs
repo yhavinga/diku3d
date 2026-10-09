@@ -3,6 +3,8 @@
 // The rule (the user's, 2026-10-09): inside a walled room's walls, that room;
 // on a street, its nearer end; on open ground, the nearest room on the level
 // that the body can reach on foot; otherwise the room it was counted in last.
+// (And, since the lids: in the shaft of a lid or a drop, under the floor above,
+// the room below -- the judge's rule, which the game was to hold to.)
 // "Can reach on foot" is exactly a flood of the page's own ground, which
 // neither the server (no geometry) nor the page (seconds per zone) can run as
 // it walks. So the game approximates it from the layout, and this measures
@@ -72,8 +74,8 @@ export async function loadReference(repo) {
   const mod = (p) => import(pathToFileURL(path.join(repo, p)).href);
   const { CELL, LEVEL_H } = await mod('server/world.mjs');
   const { SECTOR, REVERSE_DIR } = await mod('src/are.js');
-  const { openAirIn, shellAttrs } = await mod('src/shells.js');
-  return (inputs, variant = {}) => referenceCounter(inputs, { CELL, LEVEL_H, SECTOR, REVERSE_DIR, openAirIn, shellAttrs }, variant);
+  const { openAirIn, shellAttrs, wayLid, isDrop } = await mod('src/shells.js');
+  return (inputs, variant = {}) => referenceCounter(inputs, { CELL, LEVEL_H, SECTOR, REVERSE_DIR, openAirIn, shellAttrs, wayLid, isDrop }, variant);
 }
 
 // ------------------------------------------------------------- the rule --
@@ -83,7 +85,7 @@ export async function loadReference(repo) {
  * find the zone's frame), layout.links, the world, zoneOf. Positions are feet,
  * in the frame `rooms` is in.
  */
-function referenceCounter({ world, rooms, links, zoneOf = null }, { CELL, LEVEL_H, SECTOR, REVERSE_DIR, openAirIn, shellAttrs }, variant = {}) {
+function referenceCounter({ world, rooms, links, zoneOf = null }, { CELL, LEVEL_H, SECTOR, REVERSE_DIR, openAirIn, shellAttrs, wayLid, isDrop }, variant = {}) {
   const openAir = openAirIn(world);
   const key = (level, x, z) => `${level},${x},${z}`;
   const entries = new Map();
@@ -105,6 +107,19 @@ function referenceCounter({ world, rooms, links, zoneOf = null }, { CELL, LEVEL_
     e.x = e.gx * CELL; e.z = e.gz * CELL;
     entries.set(vnum, e);
     byCell.set(key(e.level, e.gx, e.gz), e);
+  }
+  // The shaft of every lid (wayLid, but a passage) and drop (isDrop) on a stair,
+  // by the cell of the room above in this frame. Written out again here, not
+  // shells.js's shaftsOf, or the game could not be held to it.
+  const shafts = new Map();
+  for (const link of links) {
+    if (link.kind !== 'stairs' || !link.to) continue;
+    const lower = link.dir === 4 ? link.from : link.to, upper = link.dir === 4 ? link.to : link.from;
+    const lid = wayLid(world, link.from.vnum, link.dir);
+    if (lid ? lid.kind === 'none' : !isDrop(world, upper.vnum, lower.vnum)) continue;
+    const above = entries.get(upper.vnum);
+    if (!above) throw new Error(`roomcount: the shaft under #${upper.vnum} has no room counted there`);
+    shafts.set(key(above.level, above.gx, above.gz), { lower: lower.vnum, floor: upper.level * LEVEL_H });
   }
   // layout.js's own test: the far end of a one-way exit has no way back.
   const oneWay = (link) => !world.rooms.get(link.to.vnum).exits.some((x) => x && x.to === link.from.vnum);
@@ -162,6 +177,9 @@ function referenceCounter({ world, rooms, links, zoneOf = null }, { CELL, LEVEL_
   /** Where a point is: in a room ({ room }), on a street ({ streets }), or on open ground ({}). */
   function region(p) {
     const level = Math.round(p.y / LEVEL_H), gx = Math.round(p.x / CELL), gz = Math.round(p.z / CELL);
+    // Under the floor above, in the column of a shaft: the room below.
+    const shaft = shafts.get(key(level, gx, gz));
+    if (shaft && p.y < shaft.floor - 0.3) return { room: shaft.lower };
     const r = byCell.get(key(level, gx, gz));
     if (r) {
       if (!r.walled) return { room: r.vnum };
