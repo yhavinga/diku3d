@@ -4334,9 +4334,10 @@ function* peopleOf(world, layout, built, options = {}) {
     // A leaf takes no shadow: underground it must not take the sun either.
     return buried ? buriedTwin(base, { sunless: true }) : base;
   };
-  // A forcefield is light, not a thing: it shows in the dark and fades as it opens.
+  // A forcefield is light, not a thing: unlit, a translucent sheet that fades
+  // as it opens. Added to what is behind it, it vanished against a noon sky.
   const fieldMaterial = new THREE.MeshBasicMaterial({
-    color: 0x7fd8ff, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+    color: 0x86dcff, transparent: true, opacity: 0.38, depthWrite: false, side: THREE.DoubleSide,
   });
   const makeField = (w, l, flat) => {
     const geo = new THREE.PlaneGeometry(w, l);
@@ -4347,7 +4348,7 @@ function* peopleOf(world, layout, built, options = {}) {
     return mesh;
   };
   const fadeField = (mesh, t) => {
-    mesh.material.opacity = 0.32 * (1 - t);
+    mesh.material.opacity = 0.38 * (1 - t);
     mesh.visible = t < 0.98;
   };
   const makeLidLeaf = (h, buried) => {
