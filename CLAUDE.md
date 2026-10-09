@@ -482,12 +482,31 @@ choose.
   a jump to a room no exit leads to, through a walled room's wall or shut
   door, or too fast. Which rooms are walled is `isOpenAir`, in shells.js so
   build.js and the server share it; where their walls stand is a model of
-  build.js's (`WALL_LINE`, `TREE_LINE`, `DOOR_HALF`). build.js builds no
-  trapdoor, so the judge lets a body take a stair whatever its door says
-  (`stairBetween`); build one and that rule has to go. After changing how a
-  room is walled, or a doorway's width, run
+  build.js's (`WALL_LINE`, `TREE_LINE`, `DOOR_HALF`). Every way up or down
+  with a door has a lid now, read from its words (shells.js `wayLid`: a
+  slab, trapdoor, grate, stone, boards, forcefield or coffin lid), and the
+  judge holds a body to it; only the four ways the words make plain passages
+  (`passageBetween`) are taken whatever their door says, and in a lid's or a
+  drop's shaft a body counts in the room below (`shaftRoom`). After changing
+  how a room is walled, a doorway's width or a lid, run
   `tools/judge/headless/walkable.mjs`: it puts every step the page allows,
-  in every zone, through the real `judge`, and none may be refused.
+  in every zone, through the real `judge`, and none may be refused. It is
+  only a test of what it reaches: with the lids left out of the page it must
+  refuse at the lids, and at 0.5 m it cannot follow a flight steeper than
+  about 51° or narrower than 1.34 m between its sides.
+- **A flat material from assets.js's tag table is not a world surface.**
+  `oak` there is a plain brown for shoes and belts, without the baked
+  materials' hooks, and a kit model wearing it in a room without sun read
+  RGB (13,12,15) beside boards at (78,59,38): the light it took was the
+  sky's blue. A model placed as part of the world wears a baked recipe.
+  Tell light from colour by setting the material white and reading the
+  pixel.
+- **Below the ground is a level, not a cave.** build.js's `buried` means a
+  cave; actors.js's `isBuriedRoom` means level < 0 or in the rock. A cellar
+  a level down (wyvern #1634) got a pitched roof that stood up through the
+  floor above it. Code that means "under the ground" tests the level. A lid
+  between a buried room and one that is not is lit per side: its underside,
+  its shaft and its linings belong to the room below.
 - **A light hidden inside a model only shows at night.** The "blue
   thresholds" were a cyan point light in every portal arch since the first
   commit; noon drowned it. Find a colour cast by switching lights off one

@@ -8,6 +8,77 @@ is an opinion.
 
 ## 2026-10-09 — wave 17
 
+### Trapdoors, one-way drops and sealed rooms (wave17-hatches, wave17-hatchkit)
+
+- **Each lid is what its words say.** shells.js `wayLid` reads a way up or
+  down with a door from the room texts: of the 71 doors, 26 tomb slabs (13
+  tombs), 22 trapdoors, 6 grates, 6 stones, 4 of floorboards, 4 forcefields
+  and 2 coffin lids; 4 are only passages (#3416/#3418 a tunnel and a
+  staircase, #6154/#6153 steps) and keep their open flight. Stacked ways get
+  a steep narrow flight (60°, 1.3 m wide; STEP_UP 0.62 takes 0.475 m
+  risers) under a hole the size of a hatch (1.46 × 1.7 m, a tomb's 2.3 m
+  long) instead of the 5.3 × 4.0 m stair hole; ladders, pits and climbs get
+  a leaf, and their portals exist only while it is open. Shut, a lid is
+  floor from above and a stop from below; one state per lid over all its
+  faces. Models from Blender (`tools/blender/hatches.py`: trapdoor leaf and
+  frame, tomb slab and kerb, floor grate); the coffin is procedural, because
+  the sarcophagus's lid is part of its one mesh.
+- **One-way drops are shafts.** The 12 one-way ways down have nothing to
+  climb back up, and the judge's both-ways allowance is gone for exactly
+  those. The werklijst's sealed and one-way places went from 15 to 1 in
+  each mode: what is left is galaxy's black hole (#9325), whose one-way
+  street shares its only cell with the Pleiades' street, so walling it cut
+  that one (the fix is in layout.js). All places: 509 → 494 with every door
+  open, 532 → 488 shut (door/guard 107 → 83).
+- **The judge** holds a body to the lid again: `stairBetween` is gone,
+  `passageBetween` covers the four lidless passages, and in a lid's or a
+  drop's shaft below the floor above a body counts in the room below
+  (`shaftRoom`).
+- **Walkable did not test the lids until a control said so.** Run with the
+  lids left out of the page and every door shut, it must refuse at the lids;
+  the first time it refused nowhere, because at 0.5 m samples it cannot
+  follow a flight steeper than about 51° without settling on the highest
+  tread it can step to, and a flight narrower than 2 × (0.25 + 0.42) m has no
+  sample between its side colliders. Now the control refuses 37 times, all
+  at lids, with every one of the 26 lid flights refused at least one way.
+  15 ways up are still out of its reach (the 13 tombs, chapel #3421 and
+  wyvern #1647); player.js's own body climbs out of all five lids tried.
+- **Measured.** walkable over every zone: none refused, 84.1M steps with the
+  doors open, 83.4M shut. ways: 504 and 504, flights 283 → 270, drops 0 → 12,
+  climbs 69 → 70, exactly 13 changed. crossings: dead 3 → 1 (#3405 and #9301
+  cross now; their triggers stood over the old stair holes). mp-hatch.mjs on
+  hitower's trapdoor (#1317) and a tomb (#3606), two pages on a server and
+  standalone: 28 ok each. Draw calls and triangles: the graveyard 345 → 356
+  and 2.20M → 2.24M, hitower 146 → 116 and 612k → 373k. `?cull=off` against
+  on: no pixel inside any lid.
+- **Traps.** assets.js's flat tag materials have none of the baked ones'
+  hooks: the trapdoor frame in `oak` read RGB (13,12,15) in hitower beside
+  boards at (78,59,38), and set white it read (101,128,169), so the light
+  was blue and not the colour; frames and braces wear the baked `wood` now.
+  Stair plans are built after the room loop, with the batch's indoor flag
+  off: anything built per stair inside a walled room passes `indoor` itself.
+  build.js's `buried` means a cave, actors.js's `isBuriedRoom` level < 0: a
+  pitched roof was built for wyvern's cellar (#1634) a level down and stood
+  up through the floor above; roofs stop at level 0 now (513 walled rooms
+  lie below it, none of them an outdoor sector without INDOORS). A lid
+  between an underground room and the open is lit per side: lit as the
+  graveyard, the shut slab seen from inside the tomb went from (48,45,37) at
+  noon to (7,7,10) at night, and with its underside, shaft and linings in the
+  room below it moves by at most 4 levels. player.js stands a body on the
+  highest platform within its radius, so a 1.5 m hole with a tread at floor
+  height is walked across, and the world's ground plane 0.47 m under a street
+  floor is an invisible step out of any shaft through it (`plan.groundCut`).
+  Two streets in one cell: walling one cuts the other. Additive blending is
+  invisible in daylight (the forcefield is a translucent sheet). A noon and
+  night diff needs a noon-to-noon control after the same frames, the torch
+  flicker pinned and the grass held still (`built.grass.still`).
+- **Left.** The room the game counts under a shut lid is the one above
+  while the judge's is the one below, so `up` there answers "Alas, you
+  cannot go that way."; galaxy's black hole; four ways whose sides boot in
+  different states (#910/#918 and others) are shut while either side says
+  shut, so E from the open side first closes them; with `?assets=off` a pit
+  shows an upright leaf in an arch.
+
 ### The room the game counts you in (wave17-room)
 
 - **The rule is the user's:** inside a walled room's walls, or in one of
