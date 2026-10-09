@@ -2731,7 +2731,10 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
           }
         }
         batcher.indoor = true;
-      } else if (kit === null && !buried && !ruin && !tree) {
+      } else if (kit === null && !buried && cell.level >= 0 && !ruin && !tree) {
+        // `buried` is only a cave's: wyvern's cellar (#1634) is a level down
+        // and not one, and its roof stood up through the common room's floor
+        // over the fire pit's grate.
         buildRoof({ batcher, chunk, mats, room, x: pos.x, y: pos.y + CEIL + SLAB, z: pos.z, decor });
       }
       // A room under the ground has no outside to put a window in. The Shire's
@@ -9909,6 +9912,10 @@ function buildLidStair({
   // the graveyard's it was the turf's, and from inside the tomb its lining
   // read (65,60,48) at noon beside a slab lit as the crypt.
   const shaftChunk = buriedBelow ? chunk : upperChunk;
+  // Stair plans are built after the rooms, with the batch's own flag left out
+  // of doors: the surround takes the room's, or an iron band round the fire
+  // pit's grate in wyvern's common room read (15,20,28) beside its boards.
+  const liningIndoor = !buriedBelow && upperIndoor;
   const [dx, , dz] = DIR_STEP[plan.dir];
   const { kind, ladder } = plan.lid;
   // Its top step is a riser under the floor above (shells.js LID_FLIGHT).
@@ -10004,7 +10011,7 @@ function buildLidStair({
     for (const [b0, b1, c0, c1] of [
       [outA0, outA1, o.half - L, outC], [outA0, outA1, -outC, -o.half + L],
       [outA0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, outA1, -o.half + L, o.half - L],
-    ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - SLAB - 0.02, rimY, 'wood', { tint: dress.tint });
+    ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - SLAB - 0.02, rimY, 'wood', { tint: dress.tint, indoor: upperIndoor });
     for (const [b0, b1, c0, c1] of [
       [outA0, outA1, o.half - L, outC], [outA0, outA1, -outC, -o.half + L],
       [outA0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, outA1, -o.half + L, o.half - L],
@@ -10035,19 +10042,19 @@ function buildLidStair({
       for (const [b0, b1, c0, c1] of [
         [o.a0, o.a1, o.half - L, o.half], [o.a0, o.a1, -o.half, -o.half + L],
         [o.a0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, o.a1, -o.half + L, o.half - L],
-      ]) lay(upper, shaftChunk, b0, b1, c0, c1, floorY - SLAB - 0.06, floorY - 0.1, frameMat, { tint: dress.tint });
+      ]) lay(upper, shaftChunk, b0, b1, c0, c1, floorY - SLAB - 0.06, floorY - 0.1, frameMat, { tint: dress.tint, indoor: liningIndoor });
     } else {
       const b = dress.band; const pr = dress.proud;
       for (const [b0, b1, c0, c1] of [
         [o.a0 - b, o.a1 + b, o.half, o.half + b], [o.a0 - b, o.a1 + b, -o.half - b, -o.half],
         [o.a0 - b, o.a0, -o.half, o.half], [o.a1, o.a1 + b, -o.half, o.half],
-      ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - 0.04, floorY + pr, frameMat, { tint: dress.tint, ao: wallAo(floorY) });
+      ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - 0.04, floorY + pr, frameMat, { tint: dress.tint, ao: wallAo(floorY), indoor: upperIndoor });
       // ...and down the floor's cut faces, 20 mm into the opening: laid on
       // them, the two would take turns to be drawn.
       for (const [b0, b1, c0, c1] of [
         [o.a0, o.a1, o.half - L, o.half], [o.a0, o.a1, -o.half, -o.half + L],
         [o.a0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, o.a1, -o.half + L, o.half - L],
-      ]) lay(upper, shaftChunk, b0, b1, c0, c1, floorY - SLAB - 0.06, floorY + pr, frameMat, { tint: dress.tint });
+      ]) lay(upper, shaftChunk, b0, b1, c0, c1, floorY - SLAB - 0.06, floorY + pr, frameMat, { tint: dress.tint, indoor: liningIndoor });
     }
     // A procedural frame lines the opening 20 mm in, so its leaf is that much smaller.
     const inset = model ? 0 : 0.03;

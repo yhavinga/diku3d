@@ -398,7 +398,7 @@ function tagOf(material) {
  * with the original but the flag.
  */
 const indoorVariants = new WeakMap();
-function indoorGeometry(source) {
+export function indoorGeometry(source) {
   if (source.getAttribute('aIndoor')) return source;
   let geometry = indoorVariants.get(source);
   if (!geometry) {

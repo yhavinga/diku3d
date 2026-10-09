@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ITEM, SECTOR, ACT_AGGRESSIVE, ACT_SENTINEL } from './are.js';
 import { hash3, ROOM, CEIL, PIECES, CELL as GRID, LEVEL_H, inSlices } from './build.js';
-import { InstanceBatch, StaticBatches, FURNITURE_NAMES, BURIED_MARK } from './assets.js';
+import { InstanceBatch, StaticBatches, FURNITURE_NAMES, BURIED_MARK, indoorGeometry } from './assets.js';
 import { buriedTwin, honourEnv } from './textures.js';
 import { OVERLAY_LAYER } from './render.js';
 import { interiorGlass, markPanes } from './windows.js';
@@ -2963,6 +2963,8 @@ function* peopleOf(world, layout, built, options = {}) {
     return built.rooms.get(vnum);
   };
   const buriedAt = (x, y, z) => isBuriedRoom(roomInfoAt(x, y, z));
+  // As the props' batch says it (`indoorAt` above): by the walls, not the mud's flag.
+  const walledAt = (x, y, z) => { const info = roomInfoAt(x, y, z); return info?.openAir === false && !isBuriedRoom(info); };
   const chunkAt = (chunk, x, y, z) => (buriedAt(x, y, z) ? `${chunk}${BURIED_MARK}` : chunk);
 
   const trees = [];
@@ -4160,10 +4162,12 @@ function* peopleOf(world, layout, built, options = {}) {
   // sky's light it was black boards with only their torch-lit arrises
   // showing, which a judge read as embers.
   // `swap`, tag -> tag, as InstanceBatch's: see LID_WEAR.
-  const primitivesOf = (asset, buried = false, swap = null) => {
+  // `indoor`: the leaf lies in a walled room's floor and is lit as that room (assets.js `indoorGeometry`).
+  const primitivesOf = (asset, buried = false, swap = null, indoor = false) => {
     const leaf = new THREE.Group();
     for (const kit of asset.primitives) {
-      const base = swap && swap[kit.materialName] ? { ...kit, material: assets.materialFor(swap[kit.materialName]) } : kit;
+      const worn = swap && swap[kit.materialName] ? { ...kit, material: assets.materialFor(swap[kit.materialName]) } : kit;
+      const base = indoor ? { ...worn, geometry: indoorGeometry(worn.geometry) } : worn;
       const primitive = buried ? { ...base, material: buriedTwin(base.material) } : base;
       const mesh = new THREE.Mesh(primitive.geometry, primitive.material);
       mesh.castShadow = true;
@@ -4409,12 +4413,12 @@ function* peopleOf(world, layout, built, options = {}) {
     }
     return unders;
   };
-  const makeLidLeaf = (h, buried) => {
+  const makeLidLeaf = (h, buried, indoor = false) => {
     const leaf = new THREE.Group();
     const kit = LID_MODELS[h.kind];
     const found = kit && assets ? assets.get(kit[0]) : null;
     if (found) {
-      const node = primitivesOf(found, buried, LID_WEAR);
+      const node = primitivesOf(found, buried, LID_WEAR, indoor);
       node.scale.set(h.width / kit[1], 1, h.length / kit[2]);
       leaf.add(node);
       return leaf;
@@ -4461,14 +4465,16 @@ function* peopleOf(world, layout, built, options = {}) {
     }
     for (const [material, parts] of byMaterial) {
       const m = lidMaterial(material, buried);
-      const mesh = new THREE.Mesh(projectUv(mergeGeometries(parts, false), m), m);
+      const geometry = projectUv(mergeGeometries(parts, false), m);
+      if (indoor) geometry.setAttribute('aIndoor', new THREE.BufferAttribute(new Float32Array(geometry.getAttribute('position').count).fill(1), 1));
+      const mesh = new THREE.Mesh(geometry, m);
       mesh.castShadow = true;
       leaf.add(mesh);
     }
     return leaf;
   };
   /** A lid lying in a floor, hung on its hinge: rotation.z about the hinge raises the free edge. */
-  const hangLidLeaf = (h, buried) => {
+  const hangLidLeaf = (h, buried, indoor = false) => {
     const pivot = new THREE.Group();
     pivot.position.set(h.x, h.y, h.z);
     // Local +x out of the hinge across the leaf: (cos, -sin) of the turn about y.
@@ -4481,7 +4487,7 @@ function* peopleOf(world, layout, built, options = {}) {
       hinge.add(field);
       return [{ node: pivot, swing: (t) => fadeField(field, t) }];
     }
-    const leaf = makeLidLeaf(h, buried);
+    const leaf = makeLidLeaf(h, buried, indoor);
     hinge.add(leaf);
     const unders = h.buriedBelow && !buried ? splitUnderside(leaf) : [];
     return [{
@@ -4543,7 +4549,7 @@ function* peopleOf(world, layout, built, options = {}) {
     const lid = spec.way ? lidOf(spec.way) : null;
     // A lid's face seen from the room it has no leaf in; a lid lying in a
     // floor; a forcefield in a doorway. Everything else hangs on its jambs.
-    const pivots = spec.leafless ? [] : spec.hatch ? hangLidLeaf(spec.hatch, buriedAt(spec.x, spec.y, spec.z)) : spec.forcefield ? hangField(spec) : [];
+    const pivots = spec.leafless ? [] : spec.hatch ? hangLidLeaf(spec.hatch, buriedAt(spec.x, spec.y, spec.z), walledAt(spec.x, spec.y, spec.z)) : spec.forcefield ? hangField(spec) : [];
     // A circle cannot be split down the middle and still be a circle, so a
     // round door is a single leaf hung on one jamb -- and so is `single`.
     for (const side of (spec.leafless || spec.hatch || spec.forcefield ? [] : spec.round || spec.single ? [-1] : [-1, 1])) {
