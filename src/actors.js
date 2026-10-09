@@ -4357,6 +4357,58 @@ function* peopleOf(world, layout, built, options = {}) {
     mesh.material.opacity = 0.38 * (1 - t);
     mesh.visible = t < 0.98;
   };
+  /**
+   * A leaf over a room underground, lying in a floor that is not (build.js
+   * `buriedBelow`): shut, its underside is seen only from below, and there it
+   * has to be lit as that room is. Lit as the graveyard, the tombs' slabs read
+   * (48,45,37) at noon and (7,8,10) at night from inside the tomb. So the
+   * faces that look down are a mesh of their own -- the room below's twin
+   * while the lid is shut, the leaf's own surface once it stands in the air --
+   * and the rest keeps the leaf's shared geometry, instanced as it was.
+   */
+  const splitCache = new WeakMap(); // geometry -> { rest, under }
+  const splitUnder = (geometry) => {
+    let split = splitCache.get(geometry);
+    if (split) return split;
+    const pos = geometry.getAttribute('position');
+    const index = geometry.index ? geometry.index.array : Array.from({ length: pos.count }, (_, i) => i);
+    const rest = []; const under = [];
+    const a = new THREE.Vector3(); const b = new THREE.Vector3(); const c = new THREE.Vector3();
+    for (let i = 0; i < index.length; i += 3) {
+      a.fromBufferAttribute(pos, index[i]); b.fromBufferAttribute(pos, index[i + 1]); c.fromBufferAttribute(pos, index[i + 2]);
+      const n = b.sub(a).cross(c.sub(a)).normalize();
+      (n.y < -0.5 ? under : rest).push(index[i], index[i + 1], index[i + 2]);
+    }
+    const part = (list) => {
+      const g = new THREE.BufferGeometry();
+      for (const [name, attribute] of Object.entries(geometry.attributes)) g.setAttribute(name, attribute);
+      g.setIndex(list);
+      return g;
+    };
+    split = under.length ? { rest: part(rest), under: part(under) } : { rest: geometry, under: null };
+    splitCache.set(geometry, split);
+    return split;
+  };
+  const splitUnderside = (leaf) => {
+    const meshes = [];
+    leaf.traverse((m) => { if (m.isMesh) meshes.push(m); });
+    const unders = [];
+    for (const mesh of meshes) {
+      const { rest, under } = splitUnder(mesh.geometry);
+      if (!under) continue;
+      mesh.geometry = rest;
+      if (mesh.userData.doorPrimitive) mesh.userData.doorPrimitive = { ...mesh.userData.doorPrimitive, geometry: rest };
+      const open = mesh.material;
+      const shut = buriedTwin(open, { sunless: true });
+      const u = new THREE.Mesh(under, shut);
+      u.position.copy(mesh.position); u.quaternion.copy(mesh.quaternion); u.scale.copy(mesh.scale);
+      u.castShadow = mesh.castShadow;
+      u.userData.underside = { open, shut };
+      mesh.parent.add(u);
+      unders.push(u);
+    }
+    return unders;
+  };
   const makeLidLeaf = (h, buried) => {
     const leaf = new THREE.Group();
     const kit = LID_MODELS[h.kind];
@@ -4429,8 +4481,16 @@ function* peopleOf(world, layout, built, options = {}) {
       hinge.add(field);
       return [{ node: pivot, swing: (t) => fadeField(field, t) }];
     }
-    hinge.add(makeLidLeaf(h, buried));
-    return [{ node: pivot, swing: (t) => { hinge.rotation.z = t * h.angle; } }];
+    const leaf = makeLidLeaf(h, buried);
+    hinge.add(leaf);
+    const unders = h.buriedBelow && !buried ? splitUnderside(leaf) : [];
+    return [{
+      node: pivot,
+      swing: (t) => {
+        hinge.rotation.z = t * h.angle;
+        for (const u of unders) u.material = t > 0 ? u.userData.underside.open : u.userData.underside.shut;
+      },
+    }];
   };
   /** A forcefield standing in a doorway (build.js `climb`). */
   const hangField = (spec) => {

@@ -2957,9 +2957,12 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     if (plan.lid) {
       // The frame is lit as the floor it lies in: walled and not in the rock
       // is indoors, as actors.js's `indoorAt` says of a prop in a room.
-      const upperIndoor = !isOpenAir(plan.upper.room) && plan.upper.level >= 0
-        && !pickMaterials(plan.upper.room, plan.upper.room.area).inRock;
-      buildLidStair({ ...args, instances, doors, lowerOpen: isOpenAir(plan.lower.room), upperIndoor });
+      const upperMats = pickMaterials(plan.upper.room, plan.upper.room.area);
+      const upperIndoor = !isOpenAir(plan.upper.room) && plan.upper.level >= 0 && !upperMats.inRock;
+      // Underground below and not above, as actors.js's `isBuriedRoom` says:
+      // the leaf's underside is then seen only from a room with no sky.
+      const buriedBelow = (plan.lower.level < 0 || !!lowerMats.inRock) && !(plan.upper.level < 0 || !!upperMats.inRock);
+      buildLidStair({ ...args, instances, doors, lowerOpen: isOpenAir(plan.lower.room), upperIndoor, buriedBelow });
     } else if (plan.drop) {
       buildDrop({
         ...args, upperOpen: isOpenAir(plan.upper.room), lowerOpen: isOpenAir(plan.lower.room),
@@ -9822,6 +9825,40 @@ const LID_DRESS = {
   slab: { frame: 'rock', band: 0.24, proud: 0.05, top: 0.05, model: 'tomb_kerb', clear: [1.0, 2.1], tint: [0.5, 0.5, 0.52] },
   coffin: { frame: 'wood', band: 0.1, proud: 0.598, top: 0.68, tint: [0.16, 0.14, 0.14] },
 };
+/**
+ * A lid's surround in two, registered beside it in the library: the faces
+ * wholly under `y` in the model's own frame -- its lip down the cut, seen
+ * only up the shaft or down an open hole -- and the rest, which a body walks
+ * round. Over a room underground the lip is lit as that room: lit as the
+ * graveyard, the tomb kerb's lip read (46,42,33) at noon and dark blue at
+ * night from inside the tomb.
+ */
+function modelHalves(library, name, y) {
+  const above = `${name}~above${y}`; const below = `${name}~below${y}`;
+  if (library.get(below)) return [above, below];
+  const asset = library.get(name);
+  const halves = { [above]: [], [below]: [] };
+  for (const p of asset.primitives) {
+    const pos = p.geometry.getAttribute('position');
+    const index = p.geometry.index ? p.geometry.index.array : Array.from({ length: pos.count }, (_, i) => i);
+    const lists = { [above]: [], [below]: [] };
+    for (let i = 0; i < index.length; i += 3) {
+      const top = Math.max(pos.getY(index[i]), pos.getY(index[i + 1]), pos.getY(index[i + 2]));
+      lists[top < y ? below : above].push(index[i], index[i + 1], index[i + 2]);
+    }
+    for (const half of [above, below]) {
+      if (!lists[half].length) continue;
+      const geometry = new THREE.BufferGeometry();
+      for (const [attr, data] of Object.entries(p.geometry.attributes)) geometry.setAttribute(attr, data);
+      geometry.setIndex(lists[half]);
+      geometry.computeBoundingBox();
+      halves[half].push({ ...p, geometry });
+    }
+  }
+  for (const half of [above, below]) library.assets.set(half, { ...asset, name: half, primitives: halves[half] });
+  return [above, below];
+}
+
 /** player.js's body: what a lid has to stop. */
 const BODY_R = 0.42;
 const BODY_H = 1.8;
@@ -9860,12 +9897,18 @@ function buildLadderFlight({ batcher, chunk, lower, dx, dz, S, E, W, steps, rise
  * All three carry `door`, which actors.js points at the lid's state.
  */
 function buildLidStair({
-  batcher, instances, plan, worldOf, chunkOf, addCollider, addPlatform, materials, lowerCeil, kerb, buried, lowerOpen, upperIndoor, doors,
+  batcher, instances, plan, worldOf, chunkOf, addCollider, addPlatform, materials, lowerCeil, kerb, buried, lowerOpen, upperIndoor, buriedBelow, doors,
 }) {
   const lower = worldOf(plan.lower);
   const upper = worldOf(plan.upper);
   const chunk = chunkOf(plan.lower);
   const upperChunk = chunkOf(plan.upper);
+  // The shaft through the floor above -- its walls, the ceiling round its
+  // hole, the lining down the cut -- is seen from below, and from above only
+  // down an open hole: over a room underground it is lit as that room is. In
+  // the graveyard's it was the turf's, and from inside the tomb its lining
+  // read (65,60,48) at noon beside a slab lit as the crypt.
+  const shaftChunk = buriedBelow ? chunk : upperChunk;
   const [dx, , dz] = DIR_STEP[plan.dir];
   const { kind, ladder } = plan.lid;
   // Its top step is a riser under the floor above (shells.js LID_FLIGHT).
@@ -9930,7 +9973,7 @@ function buildLidStair({
     if (y1 - y0 > 0.05) {
       for (const [b0, b1, c0, c1] of [
         [a0, a1, -h - 0.25, -h], [a0, a1, h, h + 0.25], [a0 - 0.25, a0, -h - 0.25, h + 0.25], [a1, a1 + 0.25, -h - 0.25, h + 0.25],
-      ]) lay(lower, upperChunk, b0, b1, c0, c1, y0, y1, materials.wallIn, { ao: wallAo(y0) });
+      ]) lay(lower, shaftChunk, b0, b1, c0, c1, y0, y1, materials.wallIn, { ao: wallAo(y0) });
     }
     // The shaft's own ceiling round the lid's hole, which is what the flight
     // looks up at: it was the underside of the floor above, and in the
@@ -9938,7 +9981,7 @@ function buildLidStair({
     const hole = rect(upper, o.a0, o.a1, -o.half, o.half);
     for (const q of rectsAround(rect(lower, a0, a1, -h, h), [hole])) {
       batcher.add(box(q.x1 - q.x0, 0.05, q.z1 - q.z0), materials.wallIn,
-        place((q.x0 + q.x1) / 2, upper.y - SLAB - 0.035, (q.z0 + q.z1) / 2), { chunk: upperChunk });
+        place((q.x0 + q.x1) / 2, upper.y - SLAB - 0.035, (q.z0 + q.z1) / 2), { chunk: shaftChunk });
     }
   }
 
@@ -9975,16 +10018,24 @@ function buildLidStair({
       // with the frame's, and fits the opening edge to edge.
       const [cw, cl] = dress.clear;
       const c = centreOf(upper, dx, dz, ca);
-      instances.add(model, {
+      const placed = {
         x: c.x, y: floorY + dress.proud, z: c.z, rotY: dx !== 0 ? Math.PI / 2 : 0,
         scaleX: (2 * o.half) / cw, scaleY: 1, scaleZ: (o.a1 - o.a0) / cl, indoor: upperIndoor,
-      }, upperChunk, dress.wear || null);
+      };
+      if (buriedBelow) {
+        // Under the floor by a centimetre, in the model's frame.
+        const [top, lip] = modelHalves(instances.library, model, -dress.proud - 0.01);
+        instances.add(top, placed, upperChunk, dress.wear || null);
+        instances.add(lip, { ...placed, indoor: false }, shaftChunk, dress.wear || null);
+      } else {
+        instances.add(model, placed, upperChunk, dress.wear || null);
+      }
       // Its lining is 0.4 m deep and the floor's slab a little more: the
       // rest of the cut is lined here, 20 mm in, hidden behind it above.
       for (const [b0, b1, c0, c1] of [
         [o.a0, o.a1, o.half - L, o.half], [o.a0, o.a1, -o.half, -o.half + L],
         [o.a0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, o.a1, -o.half + L, o.half - L],
-      ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - SLAB - 0.06, floorY - 0.1, frameMat, { tint: dress.tint });
+      ]) lay(upper, shaftChunk, b0, b1, c0, c1, floorY - SLAB - 0.06, floorY - 0.1, frameMat, { tint: dress.tint });
     } else {
       const b = dress.band; const pr = dress.proud;
       for (const [b0, b1, c0, c1] of [
@@ -9996,7 +10047,7 @@ function buildLidStair({
       for (const [b0, b1, c0, c1] of [
         [o.a0, o.a1, o.half - L, o.half], [o.a0, o.a1, -o.half, -o.half + L],
         [o.a0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, o.a1, -o.half + L, o.half - L],
-      ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - SLAB - 0.06, floorY + pr, frameMat, { tint: dress.tint });
+      ]) lay(upper, shaftChunk, b0, b1, c0, c1, floorY - SLAB - 0.06, floorY + pr, frameMat, { tint: dress.tint });
     }
     // A procedural frame lines the opening 20 mm in, so its leaf is that much smaller.
     const inset = model ? 0 : 0.03;
@@ -10025,7 +10076,7 @@ function buildLidStair({
     hatch: {
       kind, x: hinge.x, y: leaf.top, z: hinge.z,
       ux: far ? -dx : (dz !== 0 ? bs : 0), uz: far ? -dz : (dx !== 0 ? bs : 0),
-      width: leafW, length: leafL, angle: 1.06 * Math.PI / 2,
+      width: leafW, length: leafL, angle: 1.06 * Math.PI / 2, buriedBelow,
     },
     colliders: [], platforms: [],
   };
