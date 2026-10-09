@@ -4159,9 +4159,11 @@ function* peopleOf(world, layout, built, options = {}) {
   // A door under the street is lit as the sewer's walls are: wearing the
   // sky's light it was black boards with only their torch-lit arrises
   // showing, which a judge read as embers.
-  const primitivesOf = (asset, buried = false) => {
+  // `swap`, tag -> tag, as InstanceBatch's: see LID_WEAR.
+  const primitivesOf = (asset, buried = false, swap = null) => {
     const leaf = new THREE.Group();
-    for (const base of asset.primitives) {
+    for (const kit of asset.primitives) {
+      const base = swap && swap[kit.materialName] ? { ...kit, material: assets.materialFor(swap[kit.materialName]) } : kit;
       const primitive = buried ? { ...base, material: buriedTwin(base.material) } : base;
       const mesh = new THREE.Mesh(primitive.geometry, primitive.material);
       mesh.castShadow = true;
@@ -4328,6 +4330,10 @@ function* peopleOf(world, layout, built, options = {}) {
     trapdoor: ['trapdoor_leaf', 1.2, 1.2], boards: ['trapdoor_leaf', 1.2, 1.2],
     slab: ['tomb_slab', 1.0, 2.1], stone: ['tomb_slab', 1.0, 2.1], grate: ['floor_grate', 1.0, 1.0],
   };
+  // The trapdoor's brace is tagged `oak`, assets.js's flat brown for shoes,
+  // which has no hook to take the sky's blue out of shade: under an open
+  // leaf in a room it read near black, as its frame did (build.js LID_DRESS).
+  const LID_WEAR = { oak: 'wood' };
   const lidMaterial = (name, buried) => {
     const base = options.materials && options.materials[name];
     if (!base) throw new Error(`actors: lid material ${name} is missing`);
@@ -4356,7 +4362,7 @@ function* peopleOf(world, layout, built, options = {}) {
     const kit = LID_MODELS[h.kind];
     const found = kit && assets ? assets.get(kit[0]) : null;
     if (found) {
-      const node = primitivesOf(found, buried);
+      const node = primitivesOf(found, buried, LID_WEAR);
       node.scale.set(h.width / kit[1], 1, h.length / kit[2]);
       leaf.add(node);
       return leaf;

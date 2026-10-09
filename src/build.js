@@ -2955,7 +2955,11 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         : (isOpenAir(plan.upper.room) ? 'stonewall' : pickMaterials(plan.upper.room, plan.upper.room.area).wallIn),
     };
     if (plan.lid) {
-      buildLidStair({ ...args, instances, doors, lowerOpen: isOpenAir(plan.lower.room) });
+      // The frame is lit as the floor it lies in: walled and not in the rock
+      // is indoors, as actors.js's `indoorAt` says of a prop in a room.
+      const upperIndoor = !isOpenAir(plan.upper.room) && plan.upper.level >= 0
+        && !pickMaterials(plan.upper.room, plan.upper.room.area).inRock;
+      buildLidStair({ ...args, instances, doors, lowerOpen: isOpenAir(plan.lower.room), upperIndoor });
     } else if (plan.drop) {
       buildDrop({
         ...args, upperOpen: isOpenAir(plan.upper.room), lowerOpen: isOpenAir(plan.lower.room),
@@ -9804,11 +9808,15 @@ const acrossSign = (dx, dz, dir) => (dx !== 0 ? DIR_STEP[dir][2] : DIR_STEP[dir]
  * `model`, the surround tools/blender/hatches.py makes for it. A trapdoor
  * lies flush in a timber frame; the tomb's slab is "placed face up in the
  * ground" in a stone kerb a few centimetres proud of the turf; a coffin's lid
- * lies on the coffin, 0.6 m over the floor.
+ * lies on the coffin, 0.6 m over the floor. `wear` swaps the model's tags:
+ * the kit's frame is `oak`, the flat brown assets.js keeps for shoes and
+ * belts, which has none of the baked surfaces' hooks -- in a room with no
+ * sun it took the open sky's blue and read RGB (13,12,15) beside boards at
+ * (78,59,38); in the baked wood it reads (57,39,25).
  */
 const LID_DRESS = {
-  trapdoor: { frame: 'wood', band: 0.12, proud: 0.006, top: 0.006, model: 'trapdoor_frame', clear: [1.2, 1.2] },
-  boards: { frame: 'wood', band: 0.12, proud: 0.006, top: 0.006, model: 'trapdoor_frame', clear: [1.2, 1.2] },
+  trapdoor: { frame: 'wood', band: 0.12, proud: 0.006, top: 0.006, model: 'trapdoor_frame', clear: [1.2, 1.2], wear: { oak: 'wood' } },
+  boards: { frame: 'wood', band: 0.12, proud: 0.006, top: 0.006, model: 'trapdoor_frame', clear: [1.2, 1.2], wear: { oak: 'wood' } },
   grate: { frame: 'iron', band: 0.08, proud: 0.006, top: 0.006 },
   stone: { frame: null, band: 0.2, proud: 0.012, top: 0.012, model: 'tomb_kerb', clear: [1.0, 2.1] },
   slab: { frame: 'rock', band: 0.24, proud: 0.05, top: 0.05, model: 'tomb_kerb', clear: [1.0, 2.1], tint: [0.5, 0.5, 0.52] },
@@ -9852,7 +9860,7 @@ function buildLadderFlight({ batcher, chunk, lower, dx, dz, S, E, W, steps, rise
  * All three carry `door`, which actors.js points at the lid's state.
  */
 function buildLidStair({
-  batcher, instances, plan, worldOf, chunkOf, addCollider, addPlatform, materials, lowerCeil, kerb, buried, lowerOpen, doors,
+  batcher, instances, plan, worldOf, chunkOf, addCollider, addPlatform, materials, lowerCeil, kerb, buried, lowerOpen, upperIndoor, doors,
 }) {
   const lower = worldOf(plan.lower);
   const upper = worldOf(plan.upper);
@@ -9969,8 +9977,8 @@ function buildLidStair({
       const c = centreOf(upper, dx, dz, ca);
       instances.add(model, {
         x: c.x, y: floorY + dress.proud, z: c.z, rotY: dx !== 0 ? Math.PI / 2 : 0,
-        scaleX: (2 * o.half) / cw, scaleY: 1, scaleZ: (o.a1 - o.a0) / cl,
-      }, upperChunk);
+        scaleX: (2 * o.half) / cw, scaleY: 1, scaleZ: (o.a1 - o.a0) / cl, indoor: upperIndoor,
+      }, upperChunk, dress.wear || null);
       // Its lining is 0.4 m deep and the floor's slab a little more: the
       // rest of the cut is lined here, 20 mm in, hidden behind it above.
       for (const [b0, b1, c0, c1] of [

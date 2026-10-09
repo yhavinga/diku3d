@@ -424,7 +424,10 @@ export class InstanceBatch {
 
   /**
    * @param {string} name asset in the library
-   * @param {object} transform {x,y,z, rotY, scale | scaleX/scaleY/scaleZ}
+   * @param {object} transform {x,y,z, rotY, scale | scaleX/scaleY/scaleZ,
+   *   indoor}: `indoor`, where the caller knows the room and the batch has
+   *   no `indoorAt` (build.js's lid frames, which lie in the floor beside the
+   *   room's own flagged boards)
    * @param {string} chunk grouping key, usually the cell chunk
    * @param {object} swap tag -> tag, to wear another surface: the desert's
    *   sandstone crags stand over the troll den in grey rock
@@ -432,7 +435,7 @@ export class InstanceBatch {
   add(name, transform, chunk = '0', swap = null) {
     const asset = this.library.get(name);
     if (!asset) return false;
-    const indoor = !!this.indoorAt?.(transform.x, transform.y, transform.z);
+    const indoor = transform.indoor ?? !!this.indoorAt?.(transform.x, transform.y, transform.z);
     const key = `${chunk}|${name}${swap ? `|${JSON.stringify(swap)}` : ''}${indoor ? '|in' : ''}`;
     let bucket = this.buckets.get(key);
     if (!bucket) { bucket = { asset, chunk, swap, indoor, transforms: [] }; this.buckets.set(key, bucket); }
