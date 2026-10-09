@@ -4315,6 +4315,157 @@ function* peopleOf(world, layout, built, options = {}) {
     return mesh;
   };
 
+  // --- lids: what shuts a way up or down (build.js `buildLidStair`, `hangLid`) --
+
+  /**
+   * A lid's leaf, lying shut in its own frame: the hinge along z at x = 0, the
+   * leaf out along +x, its top face at y = 0 and its thickness below -- the
+   * conventions of tools/blender/hatches.py, so the model and the fallback
+   * hang the same way. Scaled to the opening it lies in: [model, x, z] are
+   * the size the model was made at.
+   */
+  const LID_MODELS = {
+    trapdoor: ['trapdoor_leaf', 1.2, 1.2], boards: ['trapdoor_leaf', 1.2, 1.2],
+    slab: ['tomb_slab', 1.0, 2.1], stone: ['tomb_slab', 1.0, 2.1], grate: ['floor_grate', 1.0, 1.0],
+  };
+  const lidMaterial = (name, buried) => {
+    const base = options.materials && options.materials[name];
+    if (!base) throw new Error(`actors: lid material ${name} is missing`);
+    // A leaf takes no shadow: underground it must not take the sun either.
+    return buried ? buriedTwin(base, { sunless: true }) : base;
+  };
+  // A forcefield is light, not a thing: it shows in the dark and fades as it opens.
+  const fieldMaterial = new THREE.MeshBasicMaterial({
+    color: 0x7fd8ff, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+  });
+  const makeField = (w, l, flat) => {
+    const geo = new THREE.PlaneGeometry(w, l);
+    if (flat) geo.rotateX(-Math.PI / 2);
+    geo.translate(w / 2, flat ? 0 : l / 2, 0);
+    const mesh = new THREE.Mesh(geo, fieldMaterial.clone());
+    mesh.renderOrder = 2;
+    return mesh;
+  };
+  const fadeField = (mesh, t) => {
+    mesh.material.opacity = 0.32 * (1 - t);
+    mesh.visible = t < 0.98;
+  };
+  const makeLidLeaf = (h, buried) => {
+    const leaf = new THREE.Group();
+    const kit = LID_MODELS[h.kind];
+    const found = kit && assets ? assets.get(kit[0]) : null;
+    if (found) {
+      const node = primitivesOf(found, buried);
+      node.scale.set(h.width / kit[1], 1, h.length / kit[2]);
+      leaf.add(node);
+      return leaf;
+    }
+    // The fallback (`?assets=off`), from the baked surfaces. White where the
+    // surface is its own colour: they are vertex-coloured, and black without.
+    const byMaterial = new Map();
+    const part = (material, geo, colour, matrix) => {
+      if (!byMaterial.has(material)) byMaterial.set(material, []);
+      pushPart(byMaterial.get(material), geo, colour, matrix);
+    };
+    const W = h.width; const L = h.length;
+    if (h.kind === 'grate') {
+      for (const z of [-L / 2 + 0.025, L / 2 - 0.025]) part('iron', G.box(W, 0.05, 0.05), 0xffffff, at(W / 2, -0.025, z));
+      for (const x of [0.025, W - 0.025]) part('iron', G.box(0.05, 0.05, L - 0.1), 0xffffff, at(x, -0.025, 0));
+      for (let z = -L / 2 + 0.14; z < L / 2 - 0.08; z += 0.12) part('iron', G.box(W - 0.06, 0.035, 0.022), 0xffffff, at(W / 2, -0.022, z));
+      for (let x = 0.26; x < W - 0.15; x += 0.24) part('iron', G.box(0.03, 0.05, L - 0.08), 0xffffff, at(x, -0.035, 0));
+    } else if (h.kind === 'slab' || h.kind === 'stone') {
+      // "A large rectangular slab of dark grey stone": a field sunk a little
+      // inside a margin, where the name was cut.
+      const tone = h.kind === 'slab' ? 0x8c8c90 : 0xb0aca4;
+      part('rock', G.box(W - 0.01, 0.15, L - 0.01), tone, at(W / 2, -0.087, 0));
+      if (h.kind === 'slab') {
+        const m = 0.09;
+        for (const z of [-L / 2 + m / 2, L / 2 - m / 2]) part('rock', G.box(W - 0.01, 0.012, m), tone, at(W / 2, -0.006, z));
+        for (const x of [m / 2, W - m / 2]) part('rock', G.box(m, 0.012, L - 2 * m), tone, at(x, -0.006, 0));
+      }
+    } else if (h.kind === 'coffin') {
+      // "A jet black coffin": the lid of one, with a raised panel. Never RGB 0.
+      part('wood', G.box(W, 0.055, L), 0x2e2828, at(W / 2, -0.0525, 0));
+      part('wood', G.box(W - 0.24, 0.025, L - 0.34), 0x2e2828, at(W / 2, -0.0125, 0));
+    } else {
+      // Boards across from the hinge, two battens under them, two straps and a ring.
+      const n = Math.max(3, Math.round(L / 0.24));
+      for (let k = 0; k < n; k++) {
+        const z = -L / 2 + (k + 0.5) * (L / n);
+        part('doorboard', G.box(W - 0.01, 0.04, L / n - 0.01), 0xffffff, at(W / 2, -0.032, z));
+      }
+      for (const z of [-L / 3, L / 3]) part('wood', G.box(W - 0.16, 0.035, 0.12), 0xffffff, at(W / 2, -0.07, z));
+      for (const z of [-L / 4, L / 4]) part('iron', G.box(W * 0.8, 0.008, 0.06), 0xffffff, at(W * 0.4 + 0.02, -0.006, z));
+      const ring = new THREE.TorusGeometry(0.055, 0.011, 6, 14);
+      part('iron', ring, 0xffffff, at(W - 0.14, -0.004, 0, Math.PI / 2, 0, 0));
+      ring.dispose();
+    }
+    for (const [material, parts] of byMaterial) {
+      const m = lidMaterial(material, buried);
+      const mesh = new THREE.Mesh(projectUv(mergeGeometries(parts, false), m), m);
+      mesh.castShadow = true;
+      leaf.add(mesh);
+    }
+    return leaf;
+  };
+  /** A lid lying in a floor, hung on its hinge: rotation.z about the hinge raises the free edge. */
+  const hangLidLeaf = (h, buried) => {
+    const pivot = new THREE.Group();
+    pivot.position.set(h.x, h.y, h.z);
+    // Local +x out of the hinge across the leaf: (cos, -sin) of the turn about y.
+    pivot.rotation.y = Math.atan2(-h.uz, h.ux);
+    const hinge = new THREE.Group();
+    pivot.add(hinge);
+    group.add(pivot);
+    if (h.kind === 'forcefield') {
+      const field = makeField(h.width, h.length, true);
+      hinge.add(field);
+      return [{ node: pivot, swing: (t) => fadeField(field, t) }];
+    }
+    hinge.add(makeLidLeaf(h, buried));
+    return [{ node: pivot, swing: (t) => { hinge.rotation.z = t * h.angle; } }];
+  };
+  /** A forcefield standing in a doorway (build.js `climb`). */
+  const hangField = (spec) => {
+    const pivot = new THREE.Group();
+    const [ux, uz] = [Math.cos(spec.rotY), -Math.sin(spec.rotY)];
+    pivot.position.set(spec.x - ux * spec.width / 2, spec.y, spec.z - uz * spec.width / 2);
+    pivot.rotation.y = spec.rotY;
+    const field = makeField(spec.width, spec.height, false);
+    pivot.add(field);
+    group.add(pivot);
+    return [{ node: pivot, swing: (t) => fadeField(field, t) }];
+  };
+  /**
+   * Every face of one lid -- the room above's and the room below's, the
+   * ladder's end and the pit's -- is a door of its own in `doors`, so that the
+   * rules' `hingesOf`, main.js's step and nav.js's `doorOpen` find it by
+   * (room, dir) from either side. They share one state: the lid is open only
+   * while every face says it is, which is how both sides of a way the resets
+   * leave half shut (#910 down shut, #918 up open) agree on what stands
+   * there. `stored` is each face's own word, set by the rules' `syncDoor`.
+   */
+  const lids = new Map();
+  const lidOf = (way) => {
+    let lid = lids.get(way);
+    if (!lid) {
+      lid = { way, faces: [], portals: [], shown: true, get open() { return this.faces.every((f) => f.stored); } };
+      lids.set(way, lid);
+    }
+    return lid;
+  };
+  const swingPivot = (p, t) => {
+    if (p.swing) p.swing(t);
+    else p.node.rotation.y = p.base + p.sign * t * (Math.PI / 2) * 0.95;
+  };
+  /** A lid's portals are in `portals` only while it is open: walking into a shut one goes nowhere. */
+  const showLidPortals = (lid) => {
+    if (lid.open === lid.shown || !lid.portals.length) return;
+    lid.shown = lid.open;
+    if (lid.shown) built.portals.push(...lid.portals);
+    else for (const p of lid.portals) { const i = built.portals.indexOf(p); if (i >= 0) built.portals.splice(i, 1); }
+  };
+
   yield 0.78;
   for (const spec of built.doors) {
     const [ux, uz] = [Math.cos(spec.rotY), -Math.sin(spec.rotY)];
@@ -4322,10 +4473,13 @@ function* peopleOf(world, layout, built, options = {}) {
     // clear width and a one-room cabin does not have double doors, so the leaf
     // spans the whole of it instead of being half of a pair.
     const leafWidth = spec.single ? spec.width - 0.03 : spec.width / 2 - 0.015;
-    const pivots = [];
+    const lid = spec.way ? lidOf(spec.way) : null;
+    // A lid's face seen from the room it has no leaf in; a lid lying in a
+    // floor; a forcefield in a doorway. Everything else hangs on its jambs.
+    const pivots = spec.leafless ? [] : spec.hatch ? hangLidLeaf(spec.hatch, buriedAt(spec.x, spec.y, spec.z)) : spec.forcefield ? hangField(spec) : [];
     // A circle cannot be split down the middle and still be a circle, so a
     // round door is a single leaf hung on one jamb -- and so is `single`.
-    for (const side of (spec.round || spec.single ? [-1] : [-1, 1])) {
+    for (const side of (spec.leafless || spec.hatch || spec.forcefield ? [] : spec.round || spec.single ? [-1] : [-1, 1])) {
       const pivot = new THREE.Group();
       pivot.position.set(spec.x + side * ux * spec.width / 2, spec.y, spec.z + side * uz * spec.width / 2);
       pivot.rotation.y = spec.rotY;
@@ -4342,14 +4496,39 @@ function* peopleOf(world, layout, built, options = {}) {
       // Leaves swing opposite ways to meet in the middle.
       pivots.push({ node: pivot, sign: -side, base: spec.rotY });
     }
-    const door = {
+    const door = lid ? {
+      spec, pivots, lid, stored: !spec.closed, t: 0, buried: buriedAt(spec.x, spec.y, spec.z),
+      // The lid's state, not this face's: see `lidOf`.
+      get open() { return lid.open; },
+      set open(v) { this.stored = !!v; },
+    } : {
       spec, pivots, open: !spec.closed, target: spec.closed ? 0 : 1, t: spec.closed ? 0 : 1,
       buried: buriedAt(spec.x, spec.y, spec.z),
     };
     // Stand the leaves where `t` says they are. The updater only writes on a
-    // change of t, so without this a door that starts open drew shut.
-    for (const p of pivots) p.node.rotation.y = p.base + p.sign * door.t * (Math.PI / 2) * 0.95;
+    // change of t, so without this a door that starts open drew shut. A lid's
+    // are stood once all its faces are in (below).
+    if (!lid) for (const p of pivots) swingPivot(p, door.t);
     doors.push(door);
+    if (lid) {
+      lid.faces.push(door);
+      if (spec.portals) lid.portals.push(...spec.portals);
+      // What it stops a body with, shut (or, raised, open): build.js left
+      // the spec there to be pointed at the lid.
+      for (const item of [...(spec.colliders || []), ...(spec.platforms || [])]) item.door = lid;
+      if (spec.collider) built.colliders.push({ ...spec.collider, door: lid });
+      if (spec.leafless) continue;
+      interactables.push({
+        position: new THREE.Vector3(spec.x, spec.y + (spec.hatch ? 0 : spec.height / 2), spec.z),
+        radius: 2.6,
+        title: spec.keyword.split(/\s+/)[0] || 'door',
+        get subtitle() { return spec.locked ? 'locked' : (lid.open ? 'open' : 'closed'); },
+        body: 'Press E to open or close it; a locked one opens only to its key, or to a thief who can pick it.',
+        kind: 'door',
+        door,
+      });
+      continue;
+    }
     // The far end of a one-way exit: shut against the room, never a thing to
     // open by hand, and swung by `update` for whoever comes down the street.
     if (spec.oneWay) {
@@ -4381,6 +4560,12 @@ function* peopleOf(world, layout, built, options = {}) {
     });
   }
 
+  // Every lid where all its faces say it is, and its portals with it.
+  for (const lid of lids.values()) {
+    const t = lid.open ? 1 : 0;
+    for (const face of lid.faces) { face.t = t; for (const p of face.pivots) swingPivot(p, t); }
+    showLidPortals(lid);
+  }
   const doorLeaves = instanceDoorLeaves(doors, group);
 
   /**
@@ -4704,10 +4889,11 @@ function* peopleOf(world, layout, built, options = {}) {
       const want = door.open ? 1 : 0;
       if (Math.abs(door.t - want) > 0.001) {
         door.t += Math.sign(want - door.t) * Math.min(Math.abs(want - door.t), dt * 2.2);
-        for (const p of door.pivots) p.node.rotation.y = p.base + p.sign * door.t * (Math.PI / 2) * 0.95;
+        for (const p of door.pivots) swingPivot(p, door.t);
         doorLeaves.update(door);
       }
     }
+    for (const lid of lids.values()) showLidPortals(lid);
 
     updateContactShadows();
   }
@@ -4800,7 +4986,7 @@ function* peopleOf(world, layout, built, options = {}) {
   }
 
   return {
-    group, interactables, update, doors, figures, nav, motion, perform, respawn, furniture,
+    group, interactables, update, doors, lids, figures, nav, motion, perform, respawn, furniture,
     setSun, setDaylight, setSky, lights: windowLights,
   };
 }

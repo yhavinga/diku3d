@@ -34,7 +34,7 @@
  *    rooms of a hole in a hill, and say so only by the door they share with it.
  */
 
-import { SECTOR, ROOM_INDOORS } from './are.js';
+import { SECTOR, ROOM_INDOORS, EX_ISDOOR, REVERSE_DIR } from './are.js';
 
 // A cave named as one, or one the prose says is natural. `cave` alone in the
 // description is not enough: "the cave entrance is to the north" is a room
@@ -581,3 +581,116 @@ export function openAirIn(world) {
   classifyCanopy(world);
   return isOpenAir;
 }
+
+// ------------------------------------------- what lies over a way up or down --
+
+/**
+ * What shuts a way up or down that has a door in it, by its own words.
+ *
+ * 71 exits up or down are doors, and their resets shut 57 of them. Over every
+ * one build.js stood an open flight, so a body walked through a door a typed
+ * `down` was refused at. Their texts say what each one is, and it is seldom a
+ * staircase standing in the open: the graveyard's tomb stones are "a large
+ * rectangular slab of dark grey stone that has been placed face up in the
+ * ground", the vampire's den has "one coffin ... in the center of the room",
+ * the forge's smoke "pours into a vent in the ceiling", a store room's dust
+ * hides "the outline of a trapdoor".
+ *
+ * Read from both ends of the way: the two exits' keywords first, because a
+ * door's keyword is its name ("tomb stone", "lid coffin", "floorboards
+ * boards"); where both are empty, the exits' own descriptions and then the two
+ * rooms'. `null` when neither exit is a door. `{ kind: 'none' }` for a door
+ * the words make a passage with nothing in it to shut -- "a clawed passage
+ * that slopes upward", "a stone staircase leading down", "the steps appear
+ * like they will hold your weight" -- which stays the open flight it was, and
+ * which the server lets a body take whatever its door says. Otherwise
+ * `{ kind, ladder }`:
+ *   slab        a stone laid face up in the ground over a tomb
+ *   coffin      a coffin's lid, with the coffin standing over the way down
+ *   grate       iron bars: a grate, a grating, a vent
+ *   boards      floorboards laid over the opening
+ *   forcefield  a forcefield
+ *   stone       a stone door, rocks, an altar, a secret door
+ *   trapdoor    a wooden trapdoor or hatch: what a door in a floor is when
+ *               nothing says otherwise
+ * `ladder` when the words climb it by one ("a ladder climbs up to a hatchway
+ * in the ceiling"), or it is a grate or a vent: the flight under it is drawn
+ * as a ladder.
+ *
+ * Over all 45 areas this reads the 37 ways the 71 doors are on; the words that
+ * decide each are in /tmp/dk/wave15/trapdoors.json's quotes.
+ */
+const LID_WORDS = [
+  ['coffin', /\b(coffins?|sarcophag\w*)\b/i],
+  ['slab', /\b(tomb ?stones?|grave ?stones?|slabs?)\b/i],
+  ['grate', /\b(grates?|gratings?|grilles?|vents?)\b/i],
+  ['forcefield', /\bforce ?fields?\b/i],
+  ['boards', /\b(floor ?boards?|boards)\b/i],
+  ['stone', /\b(stones?|rocks?|altars?|boulders?)\b/i],
+  ['trapdoor', /\b(trap ?doors?|hatch\w*)\b/i],
+  ['stone', /\bsecret\b/i],
+];
+/** What a way is when it is not a lid. */
+const PASSAGE = /\b(tunnels?|stair ?case|stairs?|stairway|steps|passages?|slopes?)\b/i;
+/** A ladder and the lid it climbs to, in one sentence. */
+const LADDER = /\bladder\b[^.]*\b(hatch\w*|trap ?doors?|grates?|vents?)\b|\b(hatch\w*|trap ?doors?|grates?|vents?)\b[^.]*\bladder\b/i;
+
+export function wayLid(world, vnum, dir) {
+  const room = world.rooms.get(vnum);
+  const exit = room && room.exits[dir];
+  if (!exit || dir < 4) return null;
+  const other = world.rooms.get(exit.to);
+  const back = other && other.exits[REVERSE_DIR[dir]];
+  const ends = [exit, back && back.to === vnum ? back : null].filter(Boolean);
+  if (!ends.some((e) => e.locks & EX_ISDOOR)) return null;
+  const keys = ends.map((e) => e.keyword || '').join(' ');
+  const said = ends.map((e) => e.description || '').join(' ');
+  const rooms = [room, other].filter(Boolean).map((r) => r.description).join(' ');
+  const find = (text) => LID_WORDS.find(([, re]) => re.test(text))?.[0] || null;
+  let kind = find(keys) || (PASSAGE.test(keys) ? 'none' : null);
+  if (!kind && !keys.trim()) kind = find(said) || (PASSAGE.test(said) ? 'none' : null) || find(rooms);
+  if (!kind) kind = 'trapdoor';
+  if (kind === 'none') return { kind };
+  return { kind, ladder: kind === 'grate' || LADDER.test(`${said} ${rooms}`) };
+}
+
+/**
+ * A way down with no way back up: the mud's one-way traps. "A well leads down
+ * into darkness ... impossible to climb back up", "an air shaft leads upwards,
+ * but it looks far too slippery to climb", "You have fallen into the bottomless
+ * pit." build.js makes it a shaft with nothing in it to climb, and the server
+ * lets nobody climb it.
+ */
+export function isDrop(world, upper, lower) {
+  const down = world.rooms.get(upper)?.exits[5];
+  const up = world.rooms.get(lower)?.exits[4];
+  return !!down && down.to === lower && !(up && up.to === upper);
+}
+
+/**
+ * The flight under a lid, in the frame build.js lays a staircase out in:
+ * `along` from the lower room's middle towards the wall the flight starts at,
+ * `across` square to that, metres. The open flight is 3.2 m wide and climbs a
+ * level in 7.4 m, which wants a 5.3 by 4.0 m hole in the floor above: no
+ * trapdoor covers that. This one climbs at 60 degrees, sixteen risers of
+ * 0.475 m (a step a body takes, player.js STEP_UP 0.62) over 4.4 m, 1.3 m
+ * wide, so a head comes up through 1.5 m of opening at its head (a camera at
+ * the far edge of it is 0.34 m under the slab of the floor above) and through
+ * 2.7 m of the ceiling below.
+ */
+export const LID_FLIGHT = { start: 4.5, end: 0.1, steps: 16, width: 1.3 };
+/**
+ * The hole a lid lies in, along and across in that frame: a tomb's slab and a
+ * coffin are long. 1.46 m across, so that the lining of the frame or kerb it
+ * lies in (tools/blender/hatches.py: 0.9 of a kerb's clear opening, 0.95 of a
+ * frame's) stands clear of the 1.3 m flight under it.
+ */
+export const lidOpening = (kind) => ({ a0: 0.05, a1: kind === 'slab' || kind === 'coffin' ? 2.35 : 1.55, half: 0.73 });
+/**
+ * The hole a lid's flight comes up through in the ceiling below, along: past
+ * its far end a head clears that ceiling, and a body the lid stops (a radius
+ * short of the far edge of its opening) stands inside it, not under its slab.
+ */
+export const lidCeiling = (kind) => ({ a0: 0.05, a1: Math.max(2.75, lidOpening(kind).a1 + 0.8) });
+/** The open shaft of a drop: a well in the middle of the floor. */
+export const DROP_OPENING = { a0: -1.5, a1: 0.9, half: 1.2 };

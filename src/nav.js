@@ -15,6 +15,7 @@
  */
 
 import { DIR_STEP, REVERSE_DIR } from './are.js';
+import { wayLid, isDrop, LID_FLIGHT, DROP_OPENING } from './shells.js';
 
 // build.js's own numbers, repeated for the reason above.
 const CELL = 13;
@@ -25,8 +26,6 @@ const DOOR_W = 3.2;
 const STAIR_START = ROOM / 2 - 0.5;
 const STAIR_END = STAIR_START - 7.4;
 const STAIR_STEPS = 20;
-const STAIR_RISER = LEVEL_H / STAIR_STEPS;
-const STAIR_TREAD = 7.4 / STAIR_STEPS;
 
 export const NAV_RES = 0.5;
 const PER = CELL / NAV_RES;          // 26 samples across a cell
@@ -108,6 +107,8 @@ export function createNav({ layout, built, world }) {
   const waters = [];
   if (geometric) {
     for (const p of built.platforms) {
+      // A lid is floor only while it is shut, and a plan is made once.
+      if (p.door) continue;
       platforms.add(p);
       if (p.base !== undefined) mounds.add(p);
     }
@@ -589,8 +590,29 @@ export function createNav({ layout, built, world }) {
       const up = b.level > a.level;
       const lower = up ? a : b;
       const upper = up ? b : a;
-      const foot = { x: lower.x * CELL + dx * (STAIR_START - 0.2), z: lower.z * CELL + dz * (STAIR_START - 0.2) };
-      const head = { x: upper.x * CELL + dx * (STAIR_END - 1.4), z: upper.z * CELL + dz * (STAIR_END - 1.4) };
+      // Under a lid the flight is build.js's steep one (shells.js LID_FLIGHT).
+      const lid = wayLid(world, stair.from.vnum, stair.dir);
+      const F = lid && lid.kind !== 'none'
+        ? { start: LID_FLIGHT.start, end: LID_FLIGHT.end, steps: LID_FLIGHT.steps, width: LID_FLIGHT.width }
+        : { start: STAIR_START, end: STAIR_END, steps: STAIR_STEPS, width: DOOR_W };
+      if (F.width === DOOR_W && isDrop(world, upper.vnum, lower.vnum)) {
+        // A drop is a shaft with nothing in it: over its kerb and down, and
+        // never back up. Walked to the kerb and taken as an archway is.
+        if (up) return null;
+        const o = DROP_OPENING;
+        const edge = { x: upper.x * CELL + dx * (o.a0 - 0.9), z: upper.z * CELL + dz * (o.a0 - 0.9) };
+        const points = pathInRoom(from, start, edge, 3);
+        if (!points) return null;
+        const below = { x: lower.x * CELL + dx * ((o.a0 + o.a1) / 2), z: lower.z * CELL + dz * ((o.a0 + o.a1) / 2) };
+        const open = nearestOpen(b.level, below.x, below.z, 3);
+        if (!open) return null;
+        const arrive = { x: centreOf(open[0]), y: b.level * LEVEL_H, z: centreOf(open[1]) };
+        const goal = randomSpot(to, rand);
+        const after = goal ? (pathInRoom(to, arrive, goal) || []) : [];
+        return { points, level: a.level, portal: { arrive, level: b.level, after }, to };
+      }
+      const foot = { x: lower.x * CELL + dx * (F.start - 0.2), z: lower.z * CELL + dz * (F.start - 0.2) };
+      const head = { x: upper.x * CELL + dx * (F.end - 1.4), z: upper.z * CELL + dz * (F.end - 1.4) };
       const leave = up ? foot : head;
       const land = up ? head : foot;
       const points = pathInRoom(from, start, leave, 3);
@@ -602,11 +624,11 @@ export function createNav({ layout, built, world }) {
       const after = goal ? (pathInRoom(to, arrive, goal) || []) : [];
       // The flight itself, tread by tread: a body walks it rather than
       // dissolving at the foot and reappearing 8.7 m away and a storey up.
-      const flight = { x: lower.x * CELL, y: lower.level * LEVEL_H, z: lower.z * CELL, dx, dz };
+      const flight = { x: lower.x * CELL, y: lower.level * LEVEL_H, z: lower.z * CELL, dx, dz, ...F };
       const on = (along, y) => ({ x: flight.x + dx * along, y, z: flight.z + dz * along });
-      const bottom = on(STAIR_START - 0.3, flight.y + STAIR_RISER);
-      const top = on(STAIR_END + 0.18, flight.y + LEVEL_H);
-      const lip = on(STAIR_END - 0.7, flight.y + LEVEL_H);
+      const bottom = on(F.start - 0.3, flight.y + LEVEL_H / F.steps);
+      const top = on(F.end + 0.18, flight.y + LEVEL_H);
+      const lip = on(F.end - 0.7, flight.y + LEVEL_H);
       const climb = up ? [bottom, top, lip, arrive] : [lip, top, bottom, arrive];
       return { points, level: a.level, portal: { arrive, level: b.level, after, stair: true, flight, climb }, to };
     }
@@ -619,13 +641,15 @@ export function createNav({ layout, built, world }) {
    * floor off its sides and foot. build.js's buildStair, in numbers.
    */
   function stairY(flight, x, z) {
+    const S = flight.start ?? STAIR_START; const E = flight.end ?? STAIR_END;
+    const n = flight.steps ?? STAIR_STEPS; const half = (flight.width ?? DOOR_W) / 2;
     const ox = x - flight.x; const oz = z - flight.z;
     const along = ox * flight.dx + oz * flight.dz;
     const across = Math.abs(ox * flight.dz - oz * flight.dx);
-    if (along <= STAIR_END) return flight.y + LEVEL_H;
-    if (along >= STAIR_START || across > DOOR_W / 2 + 0.15) return flight.y;
-    const i = Math.min(STAIR_STEPS - 1, Math.max(0, Math.floor((STAIR_START - along) / STAIR_TREAD)));
-    return flight.y + STAIR_RISER * (i + 1);
+    if (along <= E) return flight.y + LEVEL_H;
+    if (along >= S || across > half + 0.15) return flight.y;
+    const i = Math.min(n - 1, Math.max(0, Math.floor((S - along) / ((S - E) / n))));
+    return flight.y + (LEVEL_H / n) * (i + 1);
   }
 
   /**

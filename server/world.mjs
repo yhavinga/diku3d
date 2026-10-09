@@ -31,7 +31,7 @@ import { join } from 'path';
 import { parseArea, buildWorld, SECTOR, ROOM_INDOORS, EX_CLOSED } from '../src/are.js';
 import { planZones, layoutZone, HOME_AREAS } from '../src/zones.js';
 import { createNav } from '../src/nav.js';
-import { readShell, shellAttrs, openAirIn } from '../src/shells.js';
+import { readShell, shellAttrs, openAirIn, wayLid, isDrop } from '../src/shells.js';
 import { AFF } from '../src/rules/handler.js';
 
 /** build.js's grid, as nav.js and game-check.mjs repeat it. */
@@ -111,6 +111,26 @@ export function bootWorld(root, { log = () => {} } = {}) {
   }
   const byId = new Map(zones.map((z) => [z.zone.id, z]));
   const lifts = mounds(world, zones);
+  /**
+   * The stacked ways up and down build.js shuts or leaves empty, by the cell
+   * of the room above: a lid's (shells.js `wayLid`) and a drop's (`isDrop`).
+   * In their shafts the floor above is where one room ends and the other
+   * begins, not half a level: a body on the flight under a shut lid is still
+   * in the room below, and one falling down a drop is in it once it is
+   * through the floor.
+   */
+  const shafts = new Map();
+  for (const z of zones) {
+    for (const link of z.layout.links) {
+      if (link.kind !== 'stairs' || !link.to) continue;
+      const up = link.dir === 4;
+      const lower = up ? link.from : link.to; const upper = up ? link.to : link.from;
+      const lid = wayLid(world, link.from.vnum, link.dir);
+      const drop = !lid && isDrop(world, upper.vnum, lower.vnum);
+      if (!(lid && lid.kind !== 'none') && !drop) continue;
+      shafts.set(`${z.index}:${upper.level},${upper.x},${upper.z}`, { lower: lower.vnum, upper: upper.vnum, floor: upper.level * LEVEL_H });
+    }
+  }
   /** How far build.js raises the floor at a server point: the lift of the room it belongs to. */
   const liftAt = (x, y, z) => {
     const zone = zoneAtX(x);
@@ -241,12 +261,21 @@ export function bootWorld(root, { log = () => {} } = {}) {
     return null;
   };
   /**
-   * A way up or down between two rooms, either way, shut or not. build.js
-   * stands a flight, a ladder or a shaft in it and never a door, so a shut
-   * trapdoor stops a typed `down` but not a body on the stair (57 of the 71
-   * doors on ways up or down are shut by their resets).
+   * A way up or down with a door in it that build.js builds nothing to shut
+   * (shells.js `wayLid` says `none`: "a clawed passage that slopes upward",
+   * "the steps appear like they will hold your weight"): the page lets a body
+   * take its flight whatever its door says, and so does this. Every other
+   * door on a way up or down is a lid now, and holds a body as a door does.
    */
-  const stairBetween = (a, b) => [[a, b], [b, a]].some(([p, q]) => (world.rooms.get(p)?.exits || []).some((e, d) => e && d > 3 && e.to === q));
+  const passageBetween = (a, b) => [[a, b], [b, a]].some(([p, q]) => (world.rooms.get(p)?.exits || [])
+    .some((e, d) => e && d > 3 && e.to === q && wayLid(world, p, d)?.kind === 'none'));
+  /** The room below a lid or a drop, for a point in its shaft under the floor above; else null. */
+  const shaftRoom = (x, feet, z) => {
+    const zone = zoneAtX(x);
+    if (!zone) return null;
+    const shaft = shafts.get(`${zone.index}:${levelOf(feet)},${Math.round((x - zone.offset) / CELL)},${Math.round(z / CELL)}`);
+    return shaft && feet < shaft.floor - 0.3 ? shaft : null;
+  };
   /** move_char's question: an exit from `from` to `to`, not shut -- unless you pass doors. */
   function adjacent(ch, from, to) {
     const room = world.rooms.get(from);
@@ -278,6 +307,8 @@ export function bootWorld(root, { log = () => {} } = {}) {
   function judge(s, pc, x, y, z, now) {
     const feet = y - 1.72;
     let vnum = nav.roomAt(x, feet, z);
+    const shaft = shaftRoom(x, feet, z);
+    if (shaft && vnum === shaft.upper) vnum = shaft.lower;
     // The room of the last report believed, by the same rule as this one's;
     // after a jump, the room the server put the player in.
     const from = s.navRoom ?? pc.ch.roomVnum;
@@ -309,8 +340,11 @@ export function bootWorld(root, { log = () => {} } = {}) {
     if (vnum !== from && adjacent(pc.ch, from, vnum)) return { room: vnum };
     if (vnum !== from) {
       if (!walk(was, here)) return { why: `no open way from #${from} to #${vnum}` };
-      // A stair is climbed both ways, whichever way the mud's exit runs.
-      if (levelOf(was.y) !== levelOf(feet) && !adjacent(pc.ch, vnum, from) && !stairBetween(from, vnum)
+      // A stair is climbed both ways, whichever way the mud's exit runs --
+      // but not a drop, which has nothing in it to climb, and not through a
+      // shut lid, unless there is nothing there to shut.
+      const back = adjacent(pc.ch, vnum, from) && !isDrop(world, vnum, from);
+      if (levelOf(was.y) !== levelOf(feet) && !back && !passageBetween(from, vnum)
         && (walledAround(here) !== null || walledAround(was) !== null)) {
         return { why: `no way up or down from #${from} to #${vnum}` };
       }

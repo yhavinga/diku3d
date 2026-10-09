@@ -55,10 +55,13 @@ export function installWorld(k) {
     const exit = world.rooms.get(vnum)?.exits[dir];
     if (!exit) return;
     for (const door of hingesOf(vnum, dir)) {
+      // A lid's face (actors.js `lidOf`) takes this word as its own; the lid
+      // is open while every face says so.
       door.open = !(exit.locks & EX_CLOSED);
-      door.spec.closed = !door.open;
+      door.spec.closed = !(exit.locks & EX_CLOSED);
       door.spec.locked = !!(exit.locks & EX_LOCKED);
-      if (sound) {
+      // A lid seen from the room it has no leaf in is the same lid: one sound.
+      if (sound && !door.spec.leafless) {
         emit({
           kind: 'door-sound', sound, x: door.spec.x, y: door.spec.y + 1.4, z: door.spec.z,
           text: '',
@@ -144,7 +147,7 @@ export function installWorld(k) {
       const exit = world.rooms.get(door.spec.room)?.exits[door.spec.dir];
       if (!exit) continue;
       door.open = !(exit.locks & EX_CLOSED);
-      door.spec.closed = !door.open;
+      door.spec.closed = !(exit.locks & EX_CLOSED);
       door.spec.locked = !!(exit.locks & EX_LOCKED);
     }
   });

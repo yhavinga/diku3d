@@ -62,6 +62,13 @@ function outOfCircle(c, x, z) {
   return [cx + (dx / d) * R, cz + (dz / d) * R];
 }
 
+/**
+ * A door's collider is out of the way while its door stands open -- and a
+ * lid's leaf, which stands up on its hinge only when it is open, the other
+ * way round (build.js `buildLidStair`, `whenOpen`).
+ */
+const passable = (c) => (c.whenOpen ? !c.door.open : c.door.open);
+
 // The camera looks down -Z at yaw 0, so facing along a segment is the atan2
 // of the NEGATED offset -- the sign that has shipped wrong twice before.
 const yawAlong = (a, b) => Math.atan2(-(b.x - a.x), -(b.z - a.z));
@@ -163,7 +170,7 @@ export class Player {
     const items = this.colliders.near(x, z, this._scratch);
     const headY = feetY + HEIGHT;
     for (const c of items) {
-      if (c.door && c.door.open) continue;
+      if (c.door && passable(c)) continue;
       if (c.y1 <= feetY + STEP_UP || c.y0 >= headY) continue;
       if (x < c.x0 - RADIUS || x > c.x1 + RADIUS || z < c.z0 - RADIUS || z > c.z1 + RADIUS) continue;
       if (c.r) {
@@ -325,6 +332,8 @@ export class Player {
     const items = this.platforms.near(x, z, this._scratch);
     let best = -Infinity;
     for (const p of items) {
+      // A shut lid is floor; an open one is a hole.
+      if (p.door && p.door.open) continue;
       if (x < p.x0 - RADIUS || x > p.x1 + RADIUS || z < p.z0 - RADIUS || z > p.z1 + RADIUS) continue;
       if (p.top > feetY + STEP_UP) continue;
       if (p.top > best) best = p.top;
@@ -517,7 +526,7 @@ export class Player {
     const items = this.colliders.near(this.position.x, this.position.z, this._scratch);
     const headY = feetY + HEIGHT;
     for (const c of items) {
-      if (c.door && c.door.open) continue;
+      if (c.door && passable(c)) continue;
       if (c.y1 <= feetY + STEP_UP || c.y0 >= headY) continue;
       const x = this.position.x; const z = this.position.z;
       if (x < c.x0 - RADIUS || x > c.x1 + RADIUS || z < c.z0 - RADIUS || z > c.z1 + RADIUS) continue;

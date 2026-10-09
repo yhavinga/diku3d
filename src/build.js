@@ -22,6 +22,7 @@ import { buildGrass } from './grass.js';
 import {
   classifyShells, shellFor, shellAttrs, isOutdoor, sectorOf, isTreeLined, classifyCanopy, isCanopy, isOpenAir,
   isSewer, isEastern, eastStyle, isDeep, isHood, hoodStyle, isPark,
+  wayLid, isDrop, LID_FLIGHT, lidOpening, lidCeiling, DROP_OPENING,
 } from './shells.js';
 import { placeClutter, ALTAR_MIDDLE, STATUE_OF_ODIN, STATUE_DEPTH } from './clutter.js';
 import { MURAL_REGIONS, faceRegion, bloodRegion } from './textures.js';
@@ -55,6 +56,25 @@ const STAIR_END = STAIR_START - STAIR_RUN;
 const HOLE_CENTRE = (STAIR_END + 2.4) / 2;
 const HOLE_RUN = 2.4 - STAIR_END;
 const HOLE_SPAN = DOOR_W + 0.8;
+
+/**
+ * The hole a way up or down makes in the floor above, `along` the flight's
+ * wall from a0 to a1 and `half` either side: the open flight's, a lid's
+ * (shells.js `lidOpening`) or a drop's.
+ */
+const openingOf = (plan) => (plan.lid ? lidOpening(plan.lid.kind)
+  : plan.drop ? DROP_OPENING : { a0: STAIR_END, a1: 2.4, half: HOLE_SPAN / 2 });
+/** That hole as a rect round the room's middle, for a flight against wall `dir`. */
+function holeRect(dir, { a0, a1, half }) {
+  const [dx, , dz] = DIR_STEP[dir];
+  const c = (a0 + a1) / 2; const run = a1 - a0;
+  return {
+    x0: dx * c - (dx !== 0 ? run : 2 * half) / 2,
+    x1: dx * c + (dx !== 0 ? run : 2 * half) / 2,
+    z0: dz * c - (dz !== 0 ? run : 2 * half) / 2,
+    z1: dz * c + (dz !== 0 ? run : 2 * half) / 2,
+  };
+}
 
 /**
  * An exit to room -1 is the stock files' way of writing "nothing": four of
@@ -1795,8 +1815,11 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   const decals = [];      // paint and blood, laid on surfaces: see buildDecals
   const reserved = new Set(options.clear || []); // cells something other than a house stands on
 
-  const addCollider = (x0, x1, z0, z1, y0, y1) => colliders.push({ x0, x1, z0, z1, y0, y1 });
-  const addPlatform = (x0, x1, z0, z1, top) => platforms.push({ x0, x1, z0, z1, top });
+  // Each returns what it added: a lid's (`buildLidStair`) is told which door it belongs to.
+  const addCollider = (x0, x1, z0, z1, y0, y1) => { const c = { x0, x1, z0, z1, y0, y1 }; colliders.push(c); return c; };
+  const addPlatform = (x0, x1, z0, z1, top) => { const p = { x0, x1, z0, z1, top }; platforms.push(p); return p; };
+  // The portals a lid shuts: actors.js keeps each in `portals` only while its lid is open.
+  const hatchPortals = [];
 
   classifySewer(world);
   classifyCanopy(world);
@@ -1841,18 +1864,23 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     const upper = goingUp ? link.to : link.from;
     const dir = layout.stairSide.get(link);
     if (dir === undefined || !lower || !upper) continue;
-    stairPlans.push({ lower, upper, dir });
-    const [dx, , dz] = DIR_STEP[dir];
-    const rect = {
-      x0: dx * HOLE_CENTRE - (dx !== 0 ? HOLE_RUN : HOLE_SPAN) / 2,
-      x1: dx * HOLE_CENTRE + (dx !== 0 ? HOLE_RUN : HOLE_SPAN) / 2,
-      z0: dz * HOLE_CENTRE - (dz !== 0 ? HOLE_RUN : HOLE_SPAN) / 2,
-      z1: dz * HOLE_CENTRE + (dz !== 0 ? HOLE_RUN : HOLE_SPAN) / 2,
-    };
+    // What shuts it, if anything (shells.js `wayLid`); a passage with a door
+    // and nothing to shut stays the open flight. A way down with no way back
+    // up is a shaft (`isDrop`).
+    const way = wayLid(world, link.from.vnum, link.dir);
+    const lid = way && way.kind !== 'none' ? way : null;
+    const drop = !lid && isDrop(world, upper.vnum, lower.vnum);
+    const plan = { lower, upper, dir, lid, drop };
+    plan.opening = openingOf(plan);
+    stairPlans.push(plan);
     if (!holes.has(upper.vnum)) holes.set(upper.vnum, []);
-    holes.get(upper.vnum).push({ ...rect, ceiling: false });
+    holes.get(upper.vnum).push({ ...holeRect(dir, plan.opening), ceiling: false });
     if (!holes.has(lower.vnum)) holes.set(lower.vnum, []);
-    holes.get(lower.vnum).push({ ...rect, ceiling: true });
+    // A lid's flight comes up through more of the ceiling below than of the
+    // floor above: a head has further to rise to clear the floor than the
+    // ceiling, and the shaft between them is lined (`buildLidStair`).
+    const below = lid ? { ...lidCeiling(lid.kind), half: plan.opening.half + 0.05 } : plan.opening;
+    holes.get(lower.vnum).push({ ...holeRect(dir, below), ceiling: true });
   }
 
   // --- the ground everything stands on -------------------------------------
@@ -1967,7 +1995,14 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       const [ax, , az] = DIR_STEP[down.dir];
       const beside = [(down.dir + 1) % 4, (down.dir + 3) % 4].sort((a, b) => (sides[a] ? 1 : 0) - (sides[b] ? 1 : 0))[0];
       const [bx, , bz] = DIR_STEP[beside];
-      arrive = { x: pos.x + ax * HOLE_CENTRE + bx * 3.45, z: pos.z + az * HOLE_CENTRE + bz * 3.45 };
+      // A lid's or a drop's hole is smaller, and so is the step to one side of it.
+      const o = down.opening;
+      const along = down.lid || down.drop ? (o.a0 + o.a1) / 2 : HOLE_CENTRE;
+      const off = down.lid || down.drop ? o.half + 1.45 : 3.45;
+      arrive = { x: pos.x + ax * along + bx * off, z: pos.z + az * along + bz * off };
+      // The lid is hinged on the side away from where you arrive, so that
+      // open it stands between nobody and the way down.
+      down.beside = beside;
     }
     rooms.set(room.vnum, {
       // `openAir` is the geometry's answer (no walls round it), for what is
@@ -2106,6 +2141,38 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       used.add(`${pick.d}${pick.sign}`);
       return pick;
     };
+    // A lid on a way up or down that is not a stacked flight (shells.js
+    // `wayLid`): a ladder's mouth, a pit's, the doorway at the head of a
+    // climb. `hangLid` puts its door in `doors`, `leaf` saying how it hangs;
+    // the portal it shuts is kept by actors.js only while it is open.
+    const lidOn = (exitDir) => {
+      const lid = wayLid(world, room.vnum, exitDir);
+      return lid && lid.kind !== 'none' ? lid : null;
+    };
+    const hangLid = (lid, exitDir, portal, leaf) => {
+      const exit = room.exits[exitDir];
+      const face = exit && faceOf(room, exitDir, exit.to);
+      if (!face) return null;
+      const spec = {
+        ...face, keyword: face.keyword || LID_NAMES[lid.kind], way: `${Math.min(room.vnum, exit.to)}-${Math.max(room.vnum, exit.to)}`,
+        grate: lid.kind === 'grate', forcefield: lid.kind === 'forcefield',
+        leaf: lid.kind === 'stone' || lid.kind === 'slab' ? { material: isBuried(mats, cell) ? 'polisheddeep' : 'polished', tint: shellTint('grey') } : null,
+        ...leaf,
+      };
+      if (portal) { portal.hatch = true; hatchPortals.push(portal); spec.portals = [portal]; }
+      doors.push(spec);
+      return spec;
+    };
+    /** A door hung upright in an opening: only its own thickness is in the way, not the 2.4 m box a doorway's leaves get. */
+    const uprightLid = (x, y, z, dir, width, height, depth = 0.3) => {
+      const [fx, , fz] = DIR_STEP[dir];
+      const a = width / 2 + 0.1;
+      const ex = fx !== 0 ? depth : a; const ez = fz !== 0 ? depth : a;
+      return {
+        x, y, z, rotY: (dir === 1 || dir === 3) ? Math.PI / 2 : 0, width, height, single: true,
+        collider: { x0: x - ex, x1: x + ex, z0: z - ez, z1: z + ez, y0: y, y1: y + height + 0.1 },
+      };
+    };
     /**
      * Stone steps along a wall up to a landing, and a doorway on the landing
      * with the dark threshold in it: the way up the prose describes as steps,
@@ -2163,18 +2230,25 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         { x: sill.x, y: pos.y + top, z: sill.z },
       ];
       ways.push({ room: room.vnum, dir: exitDir, how: 'climb', x: door.x, y: pos.y, z: door.z, face: dir, top, route });
+      // "A forcefield prevents you from going further upwards", "piles of
+      // stones": shut, in the doorway at the head of the steps.
+      const lid = lidOn(exitDir);
+      const hung = lid ? uprightLid(door.x, pos.y + top, door.z, dir, 1.5, 2.42) : null;
       if (crossing) {
         // What main.js `walkIntoCrossing` and the ways-out panel look for: the
         // doorway, at the landing's height, facing out.
         decor.push({ kind: 'gateSign', x: sill.x, y: pos.y + top + 2.7, z: sill.z, rotY, dx: fx, dz: fz, text: DIR_NAME[exitDir] });
+        if (lid) hangLid(lid, exitDir, null, hung);
         return;
       }
       if (!target) return;
       // `foot` is where a mobile walks to (nav.js): it cannot path onto the landing.
-      portals.push({
+      const p = {
         x: sill.x, y: pos.y + top, z: sill.z, radius: 0.8, target: target.vnum, from: room.vnum, label: target.room.name, dir: exitDir,
         foot: { x: foot.x, z: foot.z },
-      });
+      };
+      portals.push(p);
+      if (lid) hangLid(lid, exitDir, p, hung);
     };
     /** Which way a way up or down is shown, by its words (see WAY_MAGIC). */
     const wayShape = (exitDir) => {
@@ -2197,9 +2271,12 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       const tx = -fz; const tz = fx;
       const at = (depth, a) => ({ x: pos.x + fx * depth + tx * a, z: pos.z + fz * depth + tz * a });
       const wall = openAir ? HALF : ROOM / 2;
-      const portal = (p, radius) => portals.push({
-        x: p.x, y: pos.y, z: p.z, radius, target: target.vnum, from: room.vnum, label: target.room.name, dir: exitDir,
-      });
+      const portal = (p, radius) => {
+        const made = { x: p.x, y: pos.y, z: p.z, radius, target: target.vnum, from: room.vnum, label: target.room.name, dir: exitDir };
+        portals.push(made);
+        return made;
+      };
+      const lid = way === 'level' ? null : lidOn(exitDir);
       // Into another zone there is no portal: the marker `walkIntoCrossing`
       // (main.js) takes the crossing at, as at a gate in a wall.
       const crossSign = (p) => decor.push({
@@ -2211,8 +2288,18 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         const p = at(wall, along);
         instances.add('sewer_ladder', { x: p.x, y: pos.y, z: p.z, rotY: FACE_ROT[dir] }, chunk);
         claims.push([dir, along - 0.8, along + 0.8]);
-        if (!crossing) portal(at(wall - 0.7, along), 1.2);
-        else crossSign(at(wall - 0.7, along));
+        const made = !crossing ? portal(at(wall - 0.7, along), 1.2) : null;
+        if (crossing) crossSign(at(wall - 0.7, along));
+        if (lid) {
+          // "A small, closed hatch above you": over the mouth the rungs climb
+          // into (sewer_ladder: 1.0 m square, 3.65-4.65 m up, its ring 0.12 m
+          // proud), and in front of the rungs, which stand 0.21 m out.
+          const m = at(wall - 0.3, along - 0.6);
+          hangLid(lid, exitDir, made, { ...uprightLid(m.x, pos.y + 3.55, m.z, dir, 1.2, 1.2), collider: null, noCollider: true });
+          // `uprightLid` centres the leaf on (x, z); a single leaf hangs from its left jamb.
+          doors[doors.length - 1].x = at(wall - 0.3, along).x;
+          doors[doors.length - 1].z = at(wall - 0.3, along).z;
+        }
         ways.push({ room: room.vnum, dir: exitDir, how: 'ladder', x: p.x, y: pos.y, z: p.z, face: dir });
         return;
       }
@@ -2220,9 +2307,21 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         // A shaft in the floor with rungs down its inside.
         const p = at(wall - 1.55, along);
         instances.add('sewer_pit', { x: p.x, y: pos.y, z: p.z, rotY: FACE_ROT[dir] }, chunk);
-        addCollider(p.x - 1.0, p.x + 1.0, p.z - 1.0, p.z + 1.0, pos.y, pos.y + 0.62);
-        if (!crossing) portal(at(wall - 1.55 - PIT_REACH, along), 1.0);
-        else crossSign(at(wall - 1.55 - PIT_REACH, along));
+        // With a lid on it the kerb is a kerb: a body is not stood inside a
+        // shut pit by walking at it from the side the trigger is not on.
+        addCollider(p.x - 1.0, p.x + 1.0, p.z - 1.0, p.z + 1.0, pos.y, pos.y + (lid ? 0.9 : 0.62));
+        const made = !crossing ? portal(at(wall - 1.55 - PIT_REACH, along), 1.0) : null;
+        if (crossing) crossSign(at(wall - 1.55 - PIT_REACH, along));
+        if (lid) {
+          // On the kerb over the mouth (sewer_pit: 1.44 m square, the kerb's
+          // top 0.79 m up), hinged on the side against the wall.
+          const top = pos.y + 0.793 + (LID_THICK[lid.kind] ?? 0.07);
+          const hinge = at(wall - 1.55 + 0.8, along);
+          hangLid(lid, exitDir, made, {
+            x: p.x, y: top, z: p.z, rotY: 0, width: 1.6, height: 0, colliders: [], platforms: [],
+            hatch: { kind: lid.kind, x: hinge.x, y: top, z: hinge.z, ux: -fx, uz: -fz, width: 1.6, length: 1.6, angle: 1.06 * Math.PI / 2 },
+          });
+        }
         ways.push({ room: room.vnum, dir: exitDir, how: 'pit', x: p.x, y: pos.y, z: p.z, face: dir });
         return;
       }
@@ -2239,9 +2338,13 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       if (exitDir > 3) ways.push({ room: room.vnum, dir: exitDir, how: sealed ? 'gate' : 'arch', x: p.x, y: pos.y, z: p.z, face: dir });
       claims.push([dir, along - (small ? 1.4 : 2.5), along + (small ? 1.4 : 2.5)]);
       if (crossing && !sealed) crossSign(at(depth - 0.8, along));
-      if (sealed || crossing) return;
+      // Without the ladder or the pit (`?assets=off`), the lid is a door in the arch.
+      const hung = lid && !sealed ? uprightLid(p.x, pos.y, p.z, dir, small ? 1.5 : 3.0, small ? 2.42 : 3.0) : null;
+      if (hung && !small) hung.single = false;
+      if (sealed || crossing) { if (hung) hangLid(lid, exitDir, null, hung); return; }
       const q = at(depth - 0.8, along);
-      portal(q, small ? 1.1 : 1.6);
+      const made = portal(q, small ? 1.1 : 1.6);
+      if (hung) hangLid(lid, exitDir, made, hung);
     };
     const CORNER = openAir ? 4.2 : 3.8;
 
@@ -2790,10 +2893,13 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   }
 
   for (const plan of stairPlans) {
-    if (plan.lower.room.exits[4]?.to === plan.upper.vnum) ways.push({ room: plan.lower.vnum, dir: 4, how: 'flight' });
-    if (plan.upper.room.exits[5]?.to === plan.lower.vnum) ways.push({ room: plan.upper.vnum, dir: 5, how: 'flight' });
+    // A drop is a shaft, and only the way down it is an exit.
+    const how = plan.drop ? 'drop' : 'flight';
+    const lid = plan.lid ? plan.lid.kind : undefined;
+    if (plan.lower.room.exits[4]?.to === plan.upper.vnum) ways.push({ room: plan.lower.vnum, dir: 4, how, lid });
+    if (plan.upper.room.exits[5]?.to === plan.lower.vnum) ways.push({ room: plan.upper.vnum, dir: 5, how, lid });
     const lowerMats = pickMaterials(plan.lower.room, plan.lower.room.area);
-    buildStair({
+    const args = {
       batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
       materials: lowerMats,
       lowerCeil: ceilingOf(plan.lower.room, plan.lower, layout),
@@ -2808,7 +2914,17 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       // sanctum, not the street's rubble with the temple's blue light on it.
       kerb: isDeep(plan.upper.room) ? (deepStyle(plan.upper.room) === 'cave' ? 'caverock' : 'ashlar')
         : (isOpenAir(plan.upper.room) ? 'stonewall' : pickMaterials(plan.upper.room, plan.upper.room.area).wallIn),
-    });
+    };
+    if (plan.lid) {
+      buildLidStair({ ...args, instances, doors, lowerOpen: isOpenAir(plan.lower.room) });
+    } else if (plan.drop) {
+      buildDrop({
+        ...args, upperOpen: isOpenAir(plan.upper.room), lowerOpen: isOpenAir(plan.lower.room),
+        well: /\bwell\b/i.test(plan.upper.room.description),
+      });
+    } else {
+      buildStair(args);
+    }
   }
 
   // --- the eastern mountains ----------------------------------------------
@@ -3056,8 +3172,22 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       // where you can walk out, railings where you cannot.
       if (layout.at(level, nx, nz) !== undefined || layout.isPath(level, nx, nz)) {
         const [aw, ad] = dx ? [HALF, GRAVEL_W] : [GRAVEL_W, HALF];
-        batcher.add(plane(aw, ad, 2), 'gravel',
-          place(cx * CELL + dx * HALF / 2, y + GRAVEL_LIFT, cz * CELL + dz * HALF / 2), { chunk });
+        const gx = cx * CELL + dx * HALF / 2; const gz = cz * CELL + dz * HALF / 2;
+        // Not across the hole a way down goes through: a tomb's slab lies in
+        // the middle of the path, and the road was laid over it -- and over
+        // the open stair before it, a sheet of gravel with nothing under it.
+        const vn = layout.at(level, cx, cz);
+        const cut = (vn !== undefined ? holes.get(vn) || [] : []).filter((h) => !h.ceiling)
+          .map((h) => ({ x0: cx * CELL + h.x0, x1: cx * CELL + h.x1, z0: cz * CELL + h.z0, z1: cz * CELL + h.z1 }));
+        const arm = { x0: gx - aw / 2, x1: gx + aw / 2, z0: gz - ad / 2, z1: gz + ad / 2 };
+        const pieces = rectsAround(arm, cut);
+        if (pieces.length === 1 && pieces[0] === arm) {
+          batcher.add(plane(aw, ad, 2), 'gravel', place(gx, y + GRAVEL_LIFT, gz), { chunk });
+        } else {
+          for (const r of pieces) {
+            batcher.add(plane(r.x1 - r.x0, r.z1 - r.z0, 2), 'gravel', place((r.x0 + r.x1) / 2, y + GRAVEL_LIFT, (r.z0 + r.z1) / 2), { chunk });
+          }
+        }
         continue;
       }
       // ...and the empty cell between two graveyard rooms is inside, not out.
@@ -3196,7 +3326,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     }
   }
   const thresholds = buildThresholds(veils, zones);
-  return { group, colliders, platforms, lights, portals, doors, rooms, decor, mist, horizon, stats, zones, grass, thresholds, crossings };
+  return { group, colliders, platforms, lights, portals, hatchPortals, doors, rooms, decor, mist, horizon, stats, zones, grass, thresholds, crossings };
 }
 
 /** A sub-step's own 0..1 progress, as a stretch [a, b] of its caller's. */
@@ -9335,7 +9465,11 @@ const CLIMB_LANDING = 1.1; // half its length along the wall
  * Only the look changes: the platforms and the rail colliders are
  * `buildStair`'s and stand exactly where they did.
  */
-function buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, materials, buried, open = false }) {
+function buildFlight({
+  batcher, chunk, lower, dx, dz, rise, riser, run, materials, buried, open = false,
+  // The open flight's numbers; a lid's flight (`buildLidStair`) is steeper and narrower, and has no handrail.
+  S = STAIR_START, E = STAIR_END, W = DOOR_W / 2, steps = STAIR_STEPS, rail: railed = true,
+}) {
   const wooden = !open && WOODEN_FLOOR.has(materials.floor);
   // Under the sky there is no wall to carry a flight: it was the indoor stone
   // flight, a slab with a soffit, hanging over the grass of the room below.
@@ -9344,9 +9478,7 @@ function buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, material
   // all the way: it crosses the middle of the room, where you arrive, and
   // there it has to stay four metres over your head.
   const step = GROUND_FLOOR.has(materials.floor) ? 'stonewall' : materials.floor;
-  const W = DOOR_W / 2;
-  const S = STAIR_START; const E = STAIR_END;
-  const slope = rise / STAIR_RUN;
+  const slope = rise / (S - E);
   // Height of the line through the steps' inner corners: 0 at the foot, `rise` at the head.
   const pitch = (a) => (S - a) * slope;
   const SOLID = 2.3; // pitch up to which an open-air flight is built down to the ground
@@ -9354,9 +9486,9 @@ function buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, material
   const toWorld = (a, y, c) => [lower.x + (dx ? dx * a : c), lower.y + y, lower.z + (dz ? dz * a : c)];
   const solid = (poly, c0, c1, material, ao = null, grain = null) => convexPrism(batcher, toWorld, poly, c0, c1, material, { chunk, ao }, grain);
   const along = [-1 / Math.hypot(1, slope), slope / Math.hypot(1, slope)];
-  const shade = (i) => () => 0.72 + 0.28 * (i / STAIR_STEPS);
+  const shade = (i) => () => 0.72 + 0.28 * (i / steps);
 
-  for (let i = 0; i < STAIR_STEPS; i++) {
+  for (let i = 0; i < steps; i++) {
     const front = S - run * i; const back = front - run;
     const y = riser * (i + 1);
     if (wooden) {
@@ -9394,6 +9526,7 @@ function buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, material
     solid([[E, 0], [E - 0.3, 0], [E - 0.3, rise - SLAB - 0.06], [E, rise - SLAB - 0.06]], -W - T, W + T, step);
   }
 
+  if (!railed) return;
   // The handrail: a newel at the foot and one at the head, the rail between
   // them 0.9 m above the nosings, and balusters on every other tread.
   const rail = wooden ? 'wood' : (buried ? 'rustiron' : 'iron');
@@ -9407,7 +9540,7 @@ function buildFlight({ batcher, chunk, lower, dx, dz, rise, riser, run, material
     box2(foot + post / 2, foot - post / 2, 0, R(foot) + 0.12, post, rail);
     box2(head + post / 2, head - post / 2, rise - 1.0, R(head) + 0.12, post, rail);
     solid([[foot, R(foot) - 0.07], [head, R(head) - 0.07], [head, R(head)], [foot, R(foot)]], c - 0.04, c + 0.04, rail, null, wooden ? along : null);
-    for (let i = 1; i < STAIR_STEPS - 1; i += 2) {
+    for (let i = 1; i < steps - 1; i += 2) {
       const a = S - run * (i + 0.5);
       box2(a + bar / 2, a - bar / 2, riser * (i + 1), R(a) - 0.06, bar, rail);
     }
@@ -9533,6 +9666,320 @@ function buildStair({ batcher, plan, worldOf, chunkOf, addCollider, addPlatform,
     [at(a0, c0 - 0.25), at(a1, c0)], [at(a0, c1), at(a1, c1 + 0.25)],
     [at(a0 - 0.25, c0 - 0.25), at(a0, c1 + 0.25)], [at(a1, c0 - 0.25), at(a1 + 0.25, c1 + 0.25)],
   ]) slab(p, q, y0, y1, materials.wallIn);
+}
+
+// ------------------------------------------------------- lids and shafts ----
+
+/** A box in a flight's frame: `along` a0..a1 from `base` towards wall (dx, dz), `across` c0..c1. */
+function frameBox(base, dx, dz, a0, a1, c0, c1) {
+  const p = { x: base.x + dx * a0 + (dz !== 0 ? c0 : 0), z: base.z + dz * a0 + (dx !== 0 ? c0 : 0) };
+  const q = { x: base.x + dx * a1 + (dz !== 0 ? c1 : 0), z: base.z + dz * a1 + (dx !== 0 ? c1 : 0) };
+  return { x0: Math.min(p.x, q.x), x1: Math.max(p.x, q.x), z0: Math.min(p.z, q.z), z1: Math.max(p.z, q.z) };
+}
+
+/** Which way `dir` lies across a flight against wall (dx, dz): +1 or -1. */
+const acrossSign = (dx, dz, dir) => (dx !== 0 ? DIR_STEP[dir][2] : DIR_STEP[dir][0]) || 1;
+
+/**
+ * What a lid's opening is framed in, by its kind (shells.js `wayLid`): the
+ * band round the opening and the lining down its cut, `band` wide and `proud`
+ * over the floor; `top`, where the lid's own top face lies over the floor;
+ * `model`, the surround tools/blender/hatches.py makes for it. A trapdoor
+ * lies flush in a timber frame; the tomb's slab is "placed face up in the
+ * ground" in a stone kerb a few centimetres proud of the turf; a coffin's lid
+ * lies on the coffin, 0.6 m over the floor.
+ */
+const LID_DRESS = {
+  trapdoor: { frame: 'wood', band: 0.12, proud: 0.006, top: 0.006, model: 'trapdoor_frame', clear: [1.2, 1.2] },
+  boards: { frame: 'wood', band: 0.12, proud: 0.006, top: 0.006, model: 'trapdoor_frame', clear: [1.2, 1.2] },
+  grate: { frame: 'iron', band: 0.08, proud: 0.006, top: 0.006 },
+  stone: { frame: null, band: 0.2, proud: 0.012, top: 0.012, model: 'tomb_kerb', clear: [1.0, 2.1] },
+  slab: { frame: 'rock', band: 0.24, proud: 0.05, top: 0.05, model: 'tomb_kerb', clear: [1.0, 2.1], tint: [0.5, 0.5, 0.52] },
+  coffin: { frame: 'wood', band: 0.1, proud: 0.598, top: 0.68, tint: [0.16, 0.14, 0.14] },
+};
+/** player.js's body: what a lid has to stop. */
+const BODY_R = 0.42;
+const BODY_H = 1.8;
+
+/**
+ * A ladder in place of steps (shells.js `wayLid`: "a ladder climbs up to a
+ * hatchway in the ceiling", a vent): two stringers up the pitch and a rung
+ * over every tread. Only the look: it is walked as the flight's treads are.
+ */
+function buildLadderFlight({ batcher, chunk, lower, dx, dz, S, E, W, steps, riser, run, rise, material }) {
+  const toWorld = (a, y, c) => [lower.x + (dx ? dx * a : c), lower.y + y, lower.z + (dz ? dz * a : c)];
+  for (const s of [-1, 1]) {
+    const c = s * (W - 0.05);
+    // A stringer 0.16 deep, its foot on the floor and its head at the floor above.
+    convexPrism(batcher, toWorld, [[S + 0.06, 0], [S - 0.1, 0], [E - 0.04, rise], [E + 0.12, rise]], c - 0.04, c + 0.04, material, { chunk });
+  }
+  for (let i = 0; i < steps; i++) {
+    const [x, y, z] = toWorld(S - run * (i + 0.5), riser * (i + 1) - 0.04, 0);
+    batcher.add(box(dz ? 2 * W - 0.1 : 0.06, 0.05, dx ? 2 * W - 0.1 : 0.06), material, place(x, y, z), { chunk });
+  }
+}
+
+/**
+ * A way up or down with a lid over it (shells.js `wayLid`): the flight of
+ * LID_FLIGHT from the room below up through a hole in the floor above the
+ * size of the lid, the shaft it climbs through between the two, the frame,
+ * kerb or coffin the lid lies in, and the lid itself, as a door actors.js
+ * hangs and swings (`doors`: `hatch`, and `way` for both faces of it).
+ *
+ * Shut, the lid is floor: a platform over the opening. And it is a ceiling a
+ * climb ends under -- a collider the size of the opening, reaching down to
+ * where a head is when the body stands one radius short of the opening's far
+ * edge, so walking up the flight stops at that edge rather than being pushed
+ * out of the middle of the opening once the head is in it. Open, both are
+ * gone, and the lid stands on its hinge as a wall of its own (`whenOpen`).
+ * All three carry `door`, which actors.js points at the lid's state.
+ */
+function buildLidStair({
+  batcher, instances, plan, worldOf, chunkOf, addCollider, addPlatform, materials, lowerCeil, kerb, buried, lowerOpen, doors,
+}) {
+  const lower = worldOf(plan.lower);
+  const upper = worldOf(plan.upper);
+  const chunk = chunkOf(plan.lower);
+  const upperChunk = chunkOf(plan.upper);
+  const [dx, , dz] = DIR_STEP[plan.dir];
+  const { kind, ladder } = plan.lid;
+  const { start: S, end: E, steps, width } = LID_FLIGHT;
+  const W = width / 2;
+  const rise = LEVEL_H;
+  const riser = rise / steps;
+  const run = (S - E) / steps;
+  const slope = rise / (S - E);
+  const o = plan.opening;
+  const rect = (base, a0, a1, c0, c1) => frameBox(base, dx, dz, a0, a1, c0, c1);
+  const lay = (base, ch, a0, a1, c0, c1, y0, y1, material, opts = {}) => {
+    const r = rect(base, a0, a1, c0, c1);
+    batcher.add(box(r.x1 - r.x0, y1 - y0, r.z1 - r.z0), material,
+      place((r.x0 + r.x1) / 2, (y0 + y1) / 2, (r.z0 + r.z1) / 2), { chunk: ch, ...opts });
+    return r;
+  };
+
+  // The treads, laid as `buildStair` lays its own.
+  for (let i = 0; i < steps; i++) {
+    const a = S - run * (i + 0.5);
+    const r = rect(lower, a - run / 2, a + run / 2, -W, W);
+    addPlatform(r.x0, r.x1, r.z0, r.z1, lower.y + riser * (i + 1));
+  }
+  // Steps of the room's stone, or of wood under a wooden trapdoor; a ladder
+  // where the words climb one.
+  const wooden = kind === 'trapdoor' || kind === 'boards';
+  if (ladder) {
+    buildLadderFlight({
+      batcher, chunk, lower, dx, dz, S, E, W, steps, riser, run, rise,
+      material: kind === 'grate' ? (buried ? 'rustiron' : 'iron') : 'wood',
+    });
+  } else {
+    const stone = GROUND_FLOOR.has(materials.floor) || WOODEN_FLOOR.has(materials.floor) ? 'stonewall' : materials.floor;
+    buildFlight({
+      batcher, chunk, lower, dx, dz, rise, riser, run, buried, S, E, W, steps, rail: false,
+      materials: { ...materials, floor: wooden ? 'planks' : stone },
+    });
+  }
+  // Its sides, from where it comes up through the ceiling below to its head:
+  // the shaft's walls are there, and nothing to step off into. Below the
+  // ceiling the flight stands free, as the open flight's lowest stretch does.
+  // Never higher than the floor above, where they would fence the lid.
+  const ceil = lidCeiling(kind);
+  const into = ceil.a1;
+  const SEG = 5;
+  for (const s of [-1, 1]) {
+    for (let k = 0; k < SEG; k++) {
+      const a0 = into - (into - E) * (k / SEG); const a1 = into - (into - E) * ((k + 1) / SEG);
+      const r = rect(lower, a1, a0, s > 0 ? W : -W - 0.3, s > 0 ? W + 0.3 : -W);
+      const y0 = Math.max(lower.y, lower.y + (S - a0) * slope - 0.4);
+      const y1 = Math.min(upper.y - 0.05, lower.y + (S - a1) * slope + 1.1);
+      if (y1 > y0) addCollider(r.x0, r.x1, r.z0, r.z1, y0, y1);
+    }
+  }
+  // The shaft between the ceiling below and the floor above, round the hole
+  // in the ceiling: the floor above closes its top but for the lid's hole.
+  if (!lowerOpen) {
+    const y0 = lower.y + lowerCeil + SLAB; const y1 = upper.y - SLAB;
+    const { a0, a1 } = ceil; const h = o.half + 0.05;
+    if (y1 - y0 > 0.05) {
+      for (const [b0, b1, c0, c1] of [
+        [a0, a1, -h - 0.25, -h], [a0, a1, h, h + 0.25], [a0 - 0.25, a0, -h - 0.25, h + 0.25], [a1, a1 + 0.25, -h - 0.25, h + 0.25],
+      ]) lay(lower, upperChunk, b0, b1, c0, c1, y0, y1, materials.wallIn, { ao: wallAo(y0) });
+    }
+    // The shaft's own ceiling round the lid's hole, which is what the flight
+    // looks up at: it was the underside of the floor above, and in the
+    // graveyard that is turf, green from below.
+    const hole = rect(upper, o.a0, o.a1, -o.half, o.half);
+    for (const q of rectsAround(rect(lower, a0, a1, -h, h), [hole])) {
+      batcher.add(box(q.x1 - q.x0, 0.05, q.z1 - q.z0), materials.wallIn,
+        place((q.x0 + q.x1) / 2, upper.y - SLAB - 0.035, (q.z0 + q.z1) / 2), { chunk: upperChunk });
+    }
+  }
+
+  // What the lid lies in.
+  const dress = LID_DRESS[kind] || LID_DRESS.trapdoor;
+  const floorY = upper.y;
+  const frameMat = dress.frame || kerb;
+  const L = 0.02;
+  const ca = (o.a0 + o.a1) / 2;
+  const model = dress.model && instances && instances.library.get(dress.model) ? dress.model : null;
+  // The leaf's extent and where its top lies: inside the frame, or for a
+  // coffin, over the whole of it.
+  let leaf;
+  if (kind === 'coffin') {
+    // "One coffin lies in the center of the room": its walls stand round the
+    // opening, 20 mm inside it so that none lies in the plane of the floor's
+    // cut, from under the floor's slab to the rim; the rim is stood on.
+    const t = dress.band; const rimY = floorY + dress.proud;
+    const outA0 = o.a0 + L - t; const outA1 = o.a1 - L + t; const outC = o.half - L + t;
+    for (const [b0, b1, c0, c1] of [
+      [outA0, outA1, o.half - L, outC], [outA0, outA1, -outC, -o.half + L],
+      [outA0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, outA1, -o.half + L, o.half - L],
+    ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - SLAB - 0.02, rimY, 'wood', { tint: dress.tint });
+    for (const [b0, b1, c0, c1] of [
+      [outA0, outA1, o.half - L, outC], [outA0, outA1, -outC, -o.half + L],
+      [outA0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, outA1, -o.half + L, o.half - L],
+    ]) { const r = rect(upper, b0, b1, c0, c1); addPlatform(r.x0, r.x1, r.z0, r.z1, rimY); }
+    leaf = { a0: outA0, a1: outA1, half: outC, top: floorY + dress.top };
+  } else {
+    if (model) {
+      // Its clear opening scaled to this one, x across and z along, its top
+      // at `proud`: the frame 6 mm over the boards it lies in, the tomb's
+      // kerb 50 mm over the turf. The leaf lies in its rebate, its top level
+      // with the frame's, and fits the opening edge to edge.
+      const [cw, cl] = dress.clear;
+      const c = centreOf(upper, dx, dz, ca);
+      instances.add(model, {
+        x: c.x, y: floorY + dress.proud, z: c.z, rotY: dx !== 0 ? Math.PI / 2 : 0,
+        scaleX: (2 * o.half) / cw, scaleY: 1, scaleZ: (o.a1 - o.a0) / cl,
+      }, upperChunk);
+      // Its lining is 0.4 m deep and the floor's slab a little more: the
+      // rest of the cut is lined here, 20 mm in, hidden behind it above.
+      for (const [b0, b1, c0, c1] of [
+        [o.a0, o.a1, o.half - L, o.half], [o.a0, o.a1, -o.half, -o.half + L],
+        [o.a0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, o.a1, -o.half + L, o.half - L],
+      ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - SLAB - 0.06, floorY - 0.1, frameMat, { tint: dress.tint });
+    } else {
+      const b = dress.band; const pr = dress.proud;
+      for (const [b0, b1, c0, c1] of [
+        [o.a0 - b, o.a1 + b, o.half, o.half + b], [o.a0 - b, o.a1 + b, -o.half - b, -o.half],
+        [o.a0 - b, o.a0, -o.half, o.half], [o.a1, o.a1 + b, -o.half, o.half],
+      ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - 0.04, floorY + pr, frameMat, { tint: dress.tint, ao: wallAo(floorY) });
+      // ...and down the floor's cut faces, 20 mm into the opening: laid on
+      // them, the two would take turns to be drawn.
+      for (const [b0, b1, c0, c1] of [
+        [o.a0, o.a1, o.half - L, o.half], [o.a0, o.a1, -o.half, -o.half + L],
+        [o.a0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, o.a1, -o.half + L, o.half - L],
+      ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - SLAB - 0.06, floorY + pr, frameMat, { tint: dress.tint });
+    }
+    // A procedural frame lines the opening 20 mm in, so its leaf is that much smaller.
+    const inset = model ? 0 : 0.03;
+    leaf = { a0: o.a0 + inset, a1: o.a1 - inset, half: o.half - inset, top: floorY + dress.top };
+  }
+
+  // The lid: hinged on its long side away from where a body arrives in the
+  // room above (`arrive`), so that open it stands clear of the way in.
+  const bs = plan.beside !== undefined ? acrossSign(dx, dz, plan.beside) : 1;
+  const hinge = centreOf(upper, dx, dz, ca, -bs * leaf.half);
+  const centre = centreOf(upper, dx, dz, ca);
+  const leafW = 2 * leaf.half; const leafL = leaf.a1 - leaf.a0;
+  const way = `${Math.min(plan.upper.vnum, plan.lower.vnum)}-${Math.max(plan.upper.vnum, plan.lower.vnum)}`;
+  const faces = [faceOf(plan.upper.room, 5, plan.lower.vnum), faceOf(plan.lower.room, 4, plan.upper.vnum)].filter(Boolean);
+  const named = faces.find((f) => f.keyword) || faces[0];
+  const keyword = named.keyword || LID_NAMES[kind];
+  const spec = {
+    ...faces[0], keyword, way, x: centre.x, y: leaf.top, z: centre.z, rotY: 0, width: leafW, height: 0,
+    hatch: {
+      kind, x: hinge.x, y: leaf.top, z: hinge.z, ux: dz !== 0 ? bs : 0, uz: dx !== 0 ? bs : 0,
+      width: leafW, length: leafL, angle: 1.06 * Math.PI / 2,
+    },
+    colliders: [], platforms: [],
+  };
+  // Shut: floor over the opening, and a ceiling under it the climb ends at.
+  const r = rect(upper, leaf.a0, leaf.a1, -leaf.half, leaf.half);
+  const stop = lower.y + (S - (leaf.a1 + BODY_R)) * slope + BODY_H - 0.1;
+  const lid = addCollider(r.x0, r.x1, r.z0, r.z1, Math.min(stop, leaf.top - 0.3), leaf.top);
+  const floor = addPlatform(r.x0, r.x1, r.z0, r.z1, leaf.top);
+  // Open: the leaf on its hinge, leaning a little past upright.
+  const s0 = -bs * leaf.half; const s1 = -bs * (leaf.half + 0.18);
+  const q = rect(upper, leaf.a0, leaf.a1, Math.min(s0, s1), Math.max(s0, s1));
+  const raised = addCollider(q.x0, q.x1, q.z0, q.z1, leaf.top, leaf.top + leafW);
+  raised.whenOpen = true;
+  for (const c of [lid, raised]) { c.door = spec; spec.colliders.push(c); }
+  floor.door = spec; spec.platforms.push(floor);
+  doors.push(spec);
+  // The same lid seen from the other room: a door of its own, with no leaf,
+  // so that what is typed or walked from there finds it shut.
+  for (const f of faces.slice(1)) doors.push({ ...f, keyword: f.keyword || keyword, way, x: centre.x, y: leaf.top, z: centre.z, rotY: 0, width: 0, height: 0, leafless: true });
+}
+
+/** How thick a lid is, so that one laid on a kerb rests on it. */
+const LID_THICK = { trapdoor: 0.07, boards: 0.07, grate: 0.06, stone: 0.16, slab: 0.16, coffin: 0.08, forcefield: 0.02 };
+/** What a lid is called where its exits leave the keyword empty. */
+const LID_NAMES = { trapdoor: 'trapdoor', boards: 'floorboards', grate: 'grate', stone: 'stone', slab: 'slab', coffin: 'coffin', forcefield: 'forcefield' };
+
+/** The middle of a flight's opening, or a point `across` from it, in world x/z. */
+function centreOf(base, dx, dz, along, across = 0) {
+  return { x: base.x + dx * along + (dz !== 0 ? across : 0), z: base.z + dz * along + (dx !== 0 ? across : 0) };
+}
+
+/** One room's side of a door: the exit `dir` of `room`, if it leads to `other`, with its state. */
+function faceOf(room, dir, other) {
+  const e = room.exits[dir];
+  if (!e || e.to !== other) return null;
+  return { room: room.vnum, dir, keyword: e.keyword || '', closed: !!(e.locks & EX_CLOSED), locked: !!(e.locks & EX_LOCKED) };
+}
+
+/**
+ * A drop (shells.js `isDrop`): "A well leads down into darkness ... impossible
+ * to climb back up". A shaft through the floor and the ceiling below, and
+ * nothing in it: a body steps over the kerb, falls and cannot climb back.
+ * Under a roof the opening has a kerb a step high, its top a platform, as a
+ * well in a floor wants; out of doors it is a hole in the ground with a stone
+ * lip round it, unless the room calls it a well.
+ */
+function buildDrop({ batcher, plan, worldOf, chunkOf, addPlatform, materials, lowerCeil, kerb, upperOpen, well, lowerOpen, shaftWalls }) {
+  const lower = worldOf(plan.lower);
+  const upper = worldOf(plan.upper);
+  const upperChunk = chunkOf(plan.upper);
+  const [dx, , dz] = DIR_STEP[plan.dir];
+  const o = plan.opening;
+  const lay = (base, a0, a1, c0, c1, y0, y1, material, opts = {}) => {
+    const r = frameBox(base, dx, dz, a0, a1, c0, c1);
+    batcher.add(box(r.x1 - r.x0, y1 - y0, r.z1 - r.z0), material,
+      place((r.x0 + r.x1) / 2, (y0 + y1) / 2, (r.z0 + r.z1) / 2), { chunk: upperChunk, ...opts });
+    return r;
+  };
+  const floorY = upper.y;
+  const K = 0.3;
+  const ring = [
+    [o.a0 - K, o.a1 + K, o.half, o.half + K], [o.a0 - K, o.a1 + K, -o.half - K, -o.half],
+    [o.a0 - K, o.a0, -o.half, o.half], [o.a1, o.a1 + K, -o.half, o.half],
+  ];
+  if (!upperOpen || well) {
+    // 0.55 m: under STEP_UP, so a body steps onto it, and off it into the dark.
+    const KH = 0.55;
+    for (const [a0, a1, c0, c1] of ring) {
+      const r = lay(upper, a0, a1, c0, c1, floorY, floorY + KH, kerb, { ao: wallAo(floorY) });
+      addPlatform(r.x0, r.x1, r.z0, r.z1, floorY + KH);
+    }
+  } else {
+    for (const [a0, a1, c0, c1] of ring) lay(upper, a0, a1, c0, c1, floorY - 0.04, floorY + 0.03, kerb);
+  }
+  // The opening's own cut, lined 20 mm into it.
+  const L = 0.02;
+  for (const [a0, a1, c0, c1] of [
+    [o.a0, o.a1, o.half - L, o.half], [o.a0, o.a1, -o.half, -o.half + L],
+    [o.a0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, o.a1, -o.half + L, o.half - L],
+  ]) lay(upper, a0, a1, c0, c1, floorY - SLAB - 0.02, floorY - 0.005, kerb);
+  // And down to the ceiling below, where there is one: a sewer shaft's own
+  // walls already run the whole way up.
+  if (lowerOpen || shaftWalls) return;
+  const y0 = lower.y + lowerCeil + SLAB; const y1 = upper.y - SLAB;
+  if (y1 - y0 < 0.05) return;
+  for (const [a0, a1, c0, c1] of [
+    [o.a0, o.a1, -o.half - 0.25, -o.half], [o.a0, o.a1, o.half, o.half + 0.25],
+    [o.a0 - 0.25, o.a0, -o.half - 0.25, o.half + 0.25], [o.a1, o.a1 + 0.25, -o.half - 0.25, o.half + 0.25],
+  ]) lay(lower, a0, a1, c0, c1, y0, y1, materials.wallIn, { ao: wallAo(y0) });
 }
 
 /** Pitched roof over an indoor room, with a chimney now and then. */

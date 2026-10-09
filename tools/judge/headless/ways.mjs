@@ -9,8 +9,10 @@
 //   cp <repo>/tools/judge/headless/ways.mjs /tmp/pw/
 //   node /tmp/pw/ways.mjs --port 8173 [--out /tmp/ways.json] [--zone 3001]
 //
-// Kinds: flight (a staircase between rooms the grid stacked), ladder, pit,
-// well, climb (steps up to a door), arch (an archway: not up or down), gate
+// Kinds: flight (a staircase between rooms the grid stacked, with or without
+// a lid over it), drop (a shaft with nothing in it to climb: the mud's
+// one-way traps), ladder, pit, well, climb (steps up to a door), arch (an
+// archway: not up or down), gate
 // (a barred archway: not up or down, and closed), none (nothing built).
 // Exits that are not shown on purpose are counted apart: to a room in the
 // air (scenery, never built), from a room in the air, and the stock files'
@@ -71,7 +73,7 @@ const res = await page.evaluate(async (only) => {
 }, opt.zone);
 const count = {};
 for (const r of res) count[r.how] = (count[r.how] || 0) + 1;
-const vertical = ['flight', 'ladder', 'pit', 'well', 'climb'].reduce((s, k) => s + (count[k] || 0), 0);
+const vertical = ['flight', 'drop', 'ladder', 'pit', 'well', 'climb'].reduce((s, k) => s + (count[k] || 0), 0);
 const unmarked = ['arch', 'gate', 'none'].reduce((s, k) => s + (count[k] || 0), 0);
 console.log(`${res.length} ways up or down:`, JSON.stringify(count));
 console.log(`vertical ${vertical}, unmarked ${unmarked} (arch ${count.arch || 0}, gate ${count.gate || 0}, none ${count.none || 0})`);

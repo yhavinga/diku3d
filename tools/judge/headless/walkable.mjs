@@ -24,7 +24,12 @@
 // in the page is a wall and every door exit in the server's world is shut,
 // which finds the page letting a body round a shut door. The gate at the far
 // end of a one-way exit is a wall either way: the page opens it only for an
-// eye coming down the street, and never from inside the room. --jumps lets a
+// eye coming down the street, and never from inside the room. A lid on a way
+// up or down (build.js `buildLidStair`, `hangLid`) is walked as the page
+// walks it in each case: open, its hole is a hole, its leaf stands up on its
+// hinge as a wall, and the portal it shuts is a portal; shut, it is floor
+// over the hole and a ceiling over the flight under it, and its portal goes
+// nowhere. --jumps lets a
 // step clear what a standing jump does (player.js: 1.1 m up, landing on
 // ground a step above that), over-generously, for the whole step.
 //
@@ -191,10 +196,19 @@ for (const zoneId of zoneIds) {
     if (d.zone !== zone) return { skipped: `goto(${zone.start}) drew ${d.zone.id}` };
     d.state.paused = true;
     const col = [];
-    for (const c of d.built.colliders) if (!c.door || shut || c.door.spec.oneWay) col.push(c.x0, c.x1, c.z0, c.z1, c.y0, c.y1, c.r || 0);
+    for (const c of d.built.colliders) {
+      // A door's leaves, a lid's (`c.door` is then the lid, with its faces),
+      // and a lid's leaf standing on its hinge, which is there only open.
+      const lid = !!c.door && !c.door.spec;
+      const keep = !c.door || (lid ? (c.whenOpen ? !shut : shut) : (shut || c.door.spec.oneWay));
+      if (keep) col.push(c.x0, c.x1, c.z0, c.z1, c.y0, c.y1, c.r || 0);
+    }
     const plat = [];
-    for (const p of d.built.platforms) plat.push(p.x0, p.x1, p.z0, p.z1, p.top);
-    const portals = d.built.portals.map((p) => [p.x, p.y, p.z, p.radius]);
+    for (const p of d.built.platforms) if (!p.door || shut) plat.push(p.x0, p.x1, p.z0, p.z1, p.top);
+    // The page keeps a lid's portal only while the lid is open; here every
+    // lid is open or every lid is shut.
+    const portals = [...d.built.portals.filter((p) => !p.hatch), ...(shut ? [] : d.built.hatchPortals || [])]
+      .map((p) => [p.x, p.y, p.z, p.radius]);
     const rooms = [];
     for (const [vnum, info] of d.built.rooms) {
       if (info.unbuilt || d.plan.zoneOf(vnum) !== zone) continue;
