@@ -1891,6 +1891,11 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     // ceiling, and the shaft between them is lined (`buildLidStair`).
     const below = lid ? { ...lidCeiling(lid.kind), half: plan.opening.half + 0.05 } : plan.opening;
     holes.get(lower.vnum).push({ ...holeRect(dir, below), ceiling: true });
+    // What the world's ground plane under a street-level floor is cut by: a
+    // lid's whole shaft. Cut to the lid's own hole, its edge lay 0.47 m under
+    // the floor beyond it, one step up from the flight, and a body walking
+    // down stepped up onto it and out again.
+    plan.groundCut = holeRect(dir, lid ? below : plan.opening);
   }
 
   // --- the ground everything stands on -------------------------------------
@@ -1914,7 +1919,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   const groundHoles = [];
   for (const plan of stairPlans) {
     if (plan.upper.level !== 0 || plan.lower.level >= 0) continue;
-    const rect = unionRect(holes.get(plan.upper.vnum).filter((h) => !h.ceiling));
+    const rect = plan.lid ? plan.groundCut : unionRect(holes.get(plan.upper.vnum).filter((h) => !h.ceiling));
     const ux = plan.upper.x * CELL; const uz = plan.upper.z * CELL;
     groundHoles.push({ x0: ux + rect.x0, x1: ux + rect.x1, z0: uz + rect.z0, z1: uz + rect.z1 });
   }
@@ -9855,11 +9860,9 @@ function buildLidStair({
   const upperChunk = chunkOf(plan.upper);
   const [dx, , dz] = DIR_STEP[plan.dir];
   const { kind, ladder } = plan.lid;
-  const { start: S, end: E, steps, width } = LID_FLIGHT;
+  // Its top step is a riser under the floor above (shells.js LID_FLIGHT).
+  const { start: S, end: E, steps, width, riser, tread: run, rise } = LID_FLIGHT;
   const W = width / 2;
-  const rise = LEVEL_H;
-  const riser = rise / steps;
-  const run = (S - E) / steps;
   const slope = rise / (S - E);
   const o = plan.opening;
   const rect = (base, a0, a1, c0, c1) => frameBox(base, dx, dz, a0, a1, c0, c1);
@@ -9992,12 +9995,19 @@ function buildLidStair({
     leaf = { a0: o.a0 + inset, a1: o.a1 - inset, half: o.half - inset, top: floorY + dress.top };
   }
 
-  // The lid: hinged on its long side away from where a body arrives in the
-  // room above (`arrive`), so that open it stands clear of the way in.
+  // The lid's hinge. A long one (a tomb's slab, a coffin's lid) on its long
+  // side away from where a body arrives in the room above (`arrive`), so
+  // that open it stands clear of the way in. A short one on its far edge,
+  // over the flight's lower end: a trapdoor 1.5 m long is less than a body
+  // and a step, and walking in from the flight's head a body stepped from the
+  // top tread to the floor beyond and on across it, open. Stood up there it
+  // is a wall the body meets, and the way on is down.
   const bs = plan.beside !== undefined ? acrossSign(dx, dz, plan.beside) : 1;
-  const hinge = centreOf(upper, dx, dz, ca, -bs * leaf.half);
+  const far = leaf.a1 - leaf.a0 < 2.0;
+  const hinge = far ? centreOf(upper, dx, dz, leaf.a1) : centreOf(upper, dx, dz, ca, -bs * leaf.half);
   const centre = centreOf(upper, dx, dz, ca);
-  const leafW = 2 * leaf.half; const leafL = leaf.a1 - leaf.a0;
+  // `leafW` from the hinge to the free edge, `leafL` along the hinge.
+  const leafW = far ? leaf.a1 - leaf.a0 : 2 * leaf.half; const leafL = far ? 2 * leaf.half : leaf.a1 - leaf.a0;
   const way = `${Math.min(plan.upper.vnum, plan.lower.vnum)}-${Math.max(plan.upper.vnum, plan.lower.vnum)}`;
   const faces = [faceOf(plan.upper.room, 5, plan.lower.vnum), faceOf(plan.lower.room, 4, plan.upper.vnum)].filter(Boolean);
   const named = faces.find((f) => f.keyword) || faces[0];
@@ -10005,7 +10015,8 @@ function buildLidStair({
   const spec = {
     ...faces[0], keyword, way, x: centre.x, y: leaf.top, z: centre.z, rotY: 0, width: leafW, height: 0,
     hatch: {
-      kind, x: hinge.x, y: leaf.top, z: hinge.z, ux: dz !== 0 ? bs : 0, uz: dx !== 0 ? bs : 0,
+      kind, x: hinge.x, y: leaf.top, z: hinge.z,
+      ux: far ? -dx : (dz !== 0 ? bs : 0), uz: far ? -dz : (dx !== 0 ? bs : 0),
       width: leafW, length: leafL, angle: 1.06 * Math.PI / 2,
     },
     colliders: [], platforms: [],
@@ -10017,8 +10028,12 @@ function buildLidStair({
   const floor = addPlatform(r.x0, r.x1, r.z0, r.z1, leaf.top);
   // Open: the leaf on its hinge, leaning a little past upright.
   const s0 = -bs * leaf.half; const s1 = -bs * (leaf.half + 0.18);
-  const q = rect(upper, leaf.a0, leaf.a1, Math.min(s0, s1), Math.max(s0, s1));
-  const raised = addCollider(q.x0, q.x1, q.z0, q.z1, leaf.top, leaf.top + leafW);
+  const q = far ? rect(upper, leaf.a1, leaf.a1 + 0.18, -leaf.half, leaf.half)
+    : rect(upper, leaf.a0, leaf.a1, Math.min(s0, s1), Math.max(s0, s1));
+  // From 0.9 m up: a body on the flight stands on the highest tread its
+  // radius reaches, and coming down past the far edge its head is 0.85 m over
+  // the floor; one on the floor is stopped by its head and shoulders.
+  const raised = addCollider(q.x0, q.x1, q.z0, q.z1, leaf.top + 0.9, leaf.top + Math.max(leafW, 1.9));
   raised.whenOpen = true;
   for (const c of [lid, raised]) { c.door = spec; spec.colliders.push(c); }
   floor.door = spec; spec.platforms.push(floor);

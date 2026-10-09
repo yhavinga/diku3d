@@ -672,20 +672,26 @@ export function isDrop(world, upper, lower) {
  * `along` from the lower room's middle towards the wall the flight starts at,
  * `across` square to that, metres. The open flight is 3.2 m wide and climbs a
  * level in 7.4 m, which wants a 5.3 by 4.0 m hole in the floor above: no
- * trapdoor covers that. This one climbs at 60 degrees, sixteen risers of
- * 0.475 m (a step a body takes, player.js STEP_UP 0.62) over 4.4 m, 1.3 m
- * wide, so a head comes up through 1.5 m of opening at its head (a camera at
- * the far edge of it is 0.34 m under the slab of the floor above) and through
- * 2.7 m of the ceiling below.
+ * trapdoor covers that. This one climbs at 60 degrees, risers of 0.475 m (a
+ * step a body takes, player.js STEP_UP 0.62) over treads of 0.275, 1.3 m
+ * wide, so a head comes up through 1.7 m of opening at its head and through
+ * 2.7 m of the ceiling below. Its top step is one riser under the floor
+ * above, the first step down from it: with a tread at the floor's own height
+ * in the opening, a body walking in from the flight's head stood on that
+ * tread and stepped across to the floor beyond, and never went down.
  */
-export const LID_FLIGHT = { start: 4.5, end: 0.1, steps: 16, width: 1.3 };
+export const LID_FLIGHT = { start: 4.5, steps: 15, riser: 7.6 / 16, tread: 0.275, width: 1.3 };
+LID_FLIGHT.end = LID_FLIGHT.start - LID_FLIGHT.steps * LID_FLIGHT.tread;
+LID_FLIGHT.rise = LID_FLIGHT.steps * LID_FLIGHT.riser;
 /**
  * The hole a lid lies in, along and across in that frame: a tomb's slab and a
  * coffin are long. 1.46 m across, so that the lining of the frame or kerb it
  * lies in (tools/blender/hatches.py: 0.9 of a kerb's clear opening, 0.95 of a
- * frame's) stands clear of the 1.3 m flight under it.
+ * frame's) stands clear of the 1.3 m flight under it. 1.7 m along at least:
+ * from the flight's top step the floor at the far edge is out of a body's
+ * radius and a step, so walking in it goes down.
  */
-export const lidOpening = (kind) => ({ a0: 0.05, a1: kind === 'slab' || kind === 'coffin' ? 2.35 : 1.55, half: 0.73 });
+export const lidOpening = (kind) => ({ a0: 0.05, a1: kind === 'slab' || kind === 'coffin' ? 2.35 : 1.75, half: 0.73 });
 /**
  * The hole a lid's flight comes up through in the ceiling below, along: past
  * its far end a head clears that ceiling, and a body the lid stops (a radius

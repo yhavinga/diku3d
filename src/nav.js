@@ -593,8 +593,8 @@ export function createNav({ layout, built, world }) {
       // Under a lid the flight is build.js's steep one (shells.js LID_FLIGHT).
       const lid = wayLid(world, stair.from.vnum, stair.dir);
       const F = lid && lid.kind !== 'none'
-        ? { start: LID_FLIGHT.start, end: LID_FLIGHT.end, steps: LID_FLIGHT.steps, width: LID_FLIGHT.width }
-        : { start: STAIR_START, end: STAIR_END, steps: STAIR_STEPS, width: DOOR_W };
+        ? { start: LID_FLIGHT.start, end: LID_FLIGHT.end, steps: LID_FLIGHT.steps, width: LID_FLIGHT.width, riser: LID_FLIGHT.riser, rise: LID_FLIGHT.rise }
+        : { start: STAIR_START, end: STAIR_END, steps: STAIR_STEPS, width: DOOR_W, riser: LEVEL_H / STAIR_STEPS, rise: LEVEL_H };
       if (F.width === DOOR_W && isDrop(world, upper.vnum, lower.vnum)) {
         // A drop is a shaft with nothing in it: over its kerb and down, and
         // never back up. Walked to the kerb and taken as an archway is.
@@ -626,8 +626,8 @@ export function createNav({ layout, built, world }) {
       // dissolving at the foot and reappearing 8.7 m away and a storey up.
       const flight = { x: lower.x * CELL, y: lower.level * LEVEL_H, z: lower.z * CELL, dx, dz, ...F };
       const on = (along, y) => ({ x: flight.x + dx * along, y, z: flight.z + dz * along });
-      const bottom = on(F.start - 0.3, flight.y + LEVEL_H / F.steps);
-      const top = on(F.end + 0.18, flight.y + LEVEL_H);
+      const bottom = on(F.start - 0.3, flight.y + F.riser);
+      const top = on(F.end + 0.18, flight.y + F.rise);
       const lip = on(F.end - 0.7, flight.y + LEVEL_H);
       const climb = up ? [bottom, top, lip, arrive] : [lip, top, bottom, arrive];
       return { points, level: a.level, portal: { arrive, level: b.level, after, stair: true, flight, climb }, to };
@@ -643,13 +643,14 @@ export function createNav({ layout, built, world }) {
   function stairY(flight, x, z) {
     const S = flight.start ?? STAIR_START; const E = flight.end ?? STAIR_END;
     const n = flight.steps ?? STAIR_STEPS; const half = (flight.width ?? DOOR_W) / 2;
+    const riser = flight.riser ?? LEVEL_H / n;
     const ox = x - flight.x; const oz = z - flight.z;
     const along = ox * flight.dx + oz * flight.dz;
     const across = Math.abs(ox * flight.dz - oz * flight.dx);
     if (along <= E) return flight.y + LEVEL_H;
     if (along >= S || across > half + 0.15) return flight.y;
     const i = Math.min(n - 1, Math.max(0, Math.floor((S - along) / ((S - E) / n))));
-    return flight.y + (LEVEL_H / n) * (i + 1);
+    return flight.y + riser * (i + 1);
   }
 
   /**

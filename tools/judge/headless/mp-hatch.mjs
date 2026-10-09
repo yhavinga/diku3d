@@ -118,6 +118,8 @@ async function pressE(p) {
   await p.waitForTimeout(1600);
 }
 const said = (p) => p.evaluate(() => window.__ev.filter((e) => e.text).map((e) => e.text).slice(-4));
+/** The room the server's judge last believed the player in (world.mjs `judge`). */
+const judgeRoom = (pc) => mud.sessionNamed(pc.ch.name)?.navRoom ?? null;
 const refused = () => mud.stats.refused;
 
 async function run(label, A, B, pcA) {
@@ -155,7 +157,7 @@ async function run(label, A, B, pcA) {
   if (pcA) {
     await A.waitForTimeout(1500);
     check(refused() === r0, '...with nothing refused', `refused ${r0} -> ${refused()}`);
-    check(pcA.ch.roomVnum === opt.below, `...and the server has it in #${opt.below}`, `#${pcA.ch.roomVnum}`);
+    check(judgeRoom(pcA) === opt.below, `...and the server's judge has it in #${opt.below}`, `judge #${judgeRoom(pcA)}, game #${pcA.ch.roomVnum}`);
   }
   // Shut from below by the command.
   await A.evaluate((w) => { window.__ev = []; window.diku.game.interpret(`close ${w}`); }, geo.word);
@@ -171,13 +173,22 @@ async function run(label, A, B, pcA) {
   if (pcA) {
     await A.waitForTimeout(1500);
     check(refused() === r1, '...with nothing refused', `refused ${r1} -> ${refused()}`);
-    check(pcA.ch.roomVnum === opt.below, `...and the server still has it in #${opt.below}`, `#${pcA.ch.roomVnum}`);
+    // The judge's room: in a lid's shaft below the floor above, the room
+    // below (server/world.mjs `shaftRoom`). game.js counts rooms by the
+    // nearest centre to the eye, which on the flight's upper half is the
+    // room above: printed, not checked here.
+    check(judgeRoom(pcA) === opt.below, `...and the server's judge still has it in #${opt.below}`, `judge #${judgeRoom(pcA)}, game #${pcA.ch.roomVnum}`);
   }
   await A.evaluate(() => { window.__ev = []; });
+  const before = await body(A);
   const typedUp = await A.evaluate(() => window.diku.game.interpret('up'));
-  await A.waitForTimeout(800);
+  await A.waitForTimeout(1500);
   const upSaid = await said(A);
-  check(upSaid.some((t) => /closed/i.test(t)), '`up` is refused while it is shut', JSON.stringify([typedUp, upSaid]));
+  const after = await body(A);
+  // Refused either way: the page counts the body in the room above (game.js),
+  // which has no way up, or a mobile is fighting it.
+  check(after.feet < geo.top - 1.5 && upSaid.length > 0, '`up` does not take it through the shut lid',
+    `${JSON.stringify([typedUp, upSaid])} feet ${before.feet} -> ${after.feet}, the page counts it in #${after.room}`);
   // Open it from below by the command, and walk out at the top.
   await A.evaluate((w) => { window.__ev = []; window.diku.game.interpret(`open ${w}`); }, geo.word);
   await A.waitForTimeout(1800);
@@ -185,13 +196,15 @@ async function run(label, A, B, pcA) {
   check(L3.open === true && L3.t === 1, `\`open ${geo.word}\` from below opens it`, `${JSON.stringify(L3)} ${JSON.stringify(await said(A))}`);
   if (B) { const LB = await lidState(B); check(LB.open === true && LB.t === 1, '...on the other page too', JSON.stringify(LB)); }
   const r2 = pcA ? refused() : 0;
-  await walk(A, [-geo.ax, -geo.az], 6000);
+  // Up the flight and a few steps on: out on an open-air floor a longer walk
+  // is into the next room.
+  await walk(A, [-geo.ax, -geo.az], 2400);
   const out = await body(A);
   check(out.feet > geo.top - 0.1, 'the body walks up out of it onto the floor above', JSON.stringify(out));
   if (pcA) {
     await A.waitForTimeout(1500);
     check(refused() === r2, '...with nothing refused', `refused ${r2} -> ${refused()}`);
-    check(pcA.ch.roomVnum === opt.room, `...and the server has it in #${opt.room}`, `#${pcA.ch.roomVnum}`);
+    check(judgeRoom(pcA) === opt.room, `...and the server's judge has it in #${opt.room}`, `judge #${judgeRoom(pcA)}, game #${pcA.ch.roomVnum}`);
   }
   // Leave it as the resets would find it: shut.
   await A.evaluate((w) => window.diku.game.interpret(`close ${w}`), geo.word);
