@@ -24,8 +24,10 @@
 import {
   ACT_SENTINEL, ACT_AGGRESSIVE, ACT_PRACTICE, ACT_SCAVENGER, ITEM,
   ROOM_NO_MOB, ROOM_PRIVATE, ROOM_SOLITARY, DIR_NAME, EX_CLOSED, EX_LOCKED,
+  SECTOR, REVERSE_DIR,
 } from './are.js';
 import { createNav } from './nav.js';
+import { openAirIn, shellAttrs } from './shells.js';
 import {
   COND, OBJ_VNUM, ITEM_TAKE, LEVEL_IMMORTAL, createMoney, makeObject, hasAff, canSee,
   objWeight, objNumber,
@@ -1060,6 +1062,200 @@ const dist2 = (a, b) => {
  */
 export const FAR = 1e7;
 
+// build.js's grid and walls, as server/world.mjs models them: the count reads
+// the layout, never the geometry, so the page and the server decide alike.
+const CELL = 13;
+const LEVEL_H = 7.6;
+const WALL_LINE = 5.35;  // clear of where a body stops: about 4.5 m inside a box wall, 6.1 m outside
+const TREE_LINE = 5.4;   // a hollow tree's wall is a ring
+const DOOR_HALF = 1.9;   // half a doorway (build.js DOOR_W 3.2) and some
+
+/**
+ * Which room a body is counted in: inside a walled room's walls or in its
+ * doorway, that room; on an open-air room's cell, that room; on a street, its
+ * nearer end (where streets share a cell, one with `last` at an end); on open
+ * ground, the nearest room the level's open ground reaches (open-air rooms a
+ * two-way street leaves, and what two-way streets join to them); else null,
+ * "keep the last room". Read from the layout alone, so the page and the server
+ * decide alike; tools/judge/headless/roomcount.mjs measures it against a flood
+ * of the page's own ground. `rooms` is built.rooms, `links` layout.links;
+ * positions are feet, in the frame `rooms` is in.
+ */
+export function createRoomCounter({ world, rooms, links, zoneOf = null }) {
+  const openAir = openAirIn(world);
+  const key = (level, x, z) => `${level},${x},${z}`;
+  const entries = new Map();
+  const byCell = new Map();
+  const zoneId = (v) => (zoneOf && zoneOf(v) ? zoneOf(v).id : '');
+  for (const [vnum, info] of rooms) {
+    const room = world.rooms.get(vnum);
+    if (!room) throw new Error(`game.js: built room #${vnum} is not in the world`);
+    // build.js builds nothing for an "In the air..." room: nobody stands there.
+    if (room.sector === SECTOR.AIR) continue;
+    if (!info.cell) throw new Error(`game.js: built room #${vnum} has no layout cell to be counted in`);
+    // The cell is the grid's, and only the frame comes from the centre: on the
+    // server a zone is a whole number of cells along x, and the page's centres
+    // stand at most 3.5 m off the grid (a stair's hole), which rounds to none.
+    const ox = Math.round((info.center.x - info.cell.x * CELL) / CELL);
+    const oz = Math.round((info.center.z - info.cell.z * CELL) / CELL);
+    const walled = !openAir(room);
+    const e = {
+      vnum, level: info.cell.level, gx: info.cell.x + ox, gz: info.cell.z + oz, ox, oz,
+      walled, round: walled && shellAttrs(room)?.named === 'tree', zone: zoneId(vnum),
+      doorways: [false, false, false, false],
+    };
+    e.x = e.gx * CELL; e.z = e.gz * CELL;
+    entries.set(vnum, e);
+    byCell.set(key(e.level, e.gx, e.gz), e);
+  }
+  // layout.js's own test: the far end of a one-way exit has no way back.
+  const oneWay = (link) => !world.rooms.get(link.to.vnum).exits.some((exit) => exit && exit.to === link.from.vnum);
+  const streets = new Map();
+  const parent = new Map();
+  const find = (a) => { while (parent.get(a) !== a) { parent.set(a, parent.get(parent.get(a))); a = parent.get(a); } return a; };
+  const join = (a, b) => { a = find(a); b = find(b); if (a !== b) parent.set(b, a); };
+  for (const e of entries.values()) parent.set(e.vnum, e.vnum);
+  const streeted = new Set();
+  for (const link of links) {
+    if (link.kind !== 'alley' || !link.to || !link.path) continue;
+    const a = entries.get(link.from.vnum);
+    const b = entries.get(link.to.vnum);
+    if (!a || !b) continue;
+    // A street's cells are on its `from` room's level. layout.js would put the
+    // cells between a raised street's ramps a level up (`crossings: 'raise'`,
+    // layout.bridges); it is 'allow' and none is raised, so none is keyed there.
+    for (const c of link.path) {
+      const k = key(link.from.level, c.x + a.ox, c.z + a.oz);
+      if (!streets.has(k)) streets.set(k, []);
+      streets.get(k).push([a, b]);
+    }
+    a.doorways[link.entryDir] = true;
+    b.doorways[REVERSE_DIR[link.exitDir]] = true;
+    if (oneWay(link)) continue;
+    join(a.vnum, b.vnum);
+    streeted.add(a.vnum); streeted.add(b.vnum);
+  }
+  // A level's open ground reaches the open-air rooms a two-way street leaves,
+  // not every open-air room: olympus' #901 and canyon's #9201 have only a gate
+  // and a portal, plains' #345 no exit, and counting them from the whole
+  // level's ground was wrong over all of olympus and canyon (roomcount.mjs
+  // spec-all against spec).
+  for (const e of entries.values()) {
+    if (e.walled || !streeted.has(e.vnum)) continue;
+    const out = `out|${e.zone}|${e.level}`;
+    if (!parent.has(out)) parent.set(out, out);
+    join(out, e.vnum);
+  }
+  const reached = new Map(); // `${zone}|${level}` -> rooms, nearest first by a 26 m grid
+  const outsideOf = (zone, level) => {
+    const k = `${zone}|${level}`;
+    if (reached.has(k)) return reached.get(k);
+    const out = `out|${zone}|${level}`;
+    let index = null;
+    if (parent.has(out)) {
+      const root = find(out);
+      const list = [...entries.values()].filter((e) => e.zone === zone && e.level === level && find(e.vnum) === root);
+      index = gridOf(list);
+    }
+    reached.set(k, index);
+    return index;
+  };
+  // Which zone a point is in: the one whose frame is nearest along x (one zone in a page).
+  const frames = new Map();
+  for (const e of entries.values()) if (!frames.has(e.zone)) frames.set(e.zone, e.ox);
+  const zoneAt = (gx) => {
+    let best = null;
+    let bd = Infinity;
+    for (const [zone, ox] of frames) { const d = Math.abs(gx - ox); if (d < bd) { bd = d; best = zone; } }
+    return best;
+  };
+  /** Where a point is: in a room ({ room }), on a street ({ streets }), or on open ground ({ level, gx }). */
+  function region(p) {
+    const level = Math.round(p.y / LEVEL_H);
+    const gx = Math.round(p.x / CELL);
+    const gz = Math.round(p.z / CELL);
+    const r = byCell.get(key(level, gx, gz));
+    if (r) {
+      if (!r.walled) return { room: r.vnum };
+      const dx = p.x - r.x;
+      const dz = p.z - r.z;
+      if (r.round ? dx * dx + dz * dz < TREE_LINE * TREE_LINE : Math.abs(dx) < WALL_LINE && Math.abs(dz) < WALL_LINE) return { room: r.vnum };
+      // In a doorway: out past the wall line, but within a doorway's half-width of a side a street leaves by.
+      const dir = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz > 0 ? 2 : 0);
+      if (r.doorways[dir] && Math.abs(dir === 1 || dir === 3 ? dz : dx) < DOOR_HALF) return { room: r.vnum };
+      return { level, gx };
+    }
+    const list = streets.get(key(level, gx, gz));
+    return list ? { streets: list } : { level, gx };
+  }
+  /** The room counted at feet `p` for a body last counted in `last`, or null: keep `last`. */
+  function at(p, last) {
+    const where = region(p);
+    if (where.room !== undefined) return where.room;
+    if (where.streets) {
+      // Where streets share the cell, the one the body is walking: one with its last room at an end.
+      const mine = where.streets.filter(([a, b]) => a.vnum === last || b.vnum === last);
+      let best = null;
+      let bd = Infinity;
+      for (const pair of mine.length ? mine : where.streets) {
+        for (const end of pair) {
+          const d = (end.x - p.x) ** 2 + (end.z - p.z) ** 2;
+          if (d < bd || (d === bd && end.vnum < best)) { bd = d; best = end.vnum; }
+        }
+      }
+      return best;
+    }
+    const index = outsideOf(zoneAt(where.gx), where.level);
+    return index ? index.nearest(p.x, p.z) : null;
+  }
+  return { at, region, entries };
+}
+
+/**
+ * The nearest of `list` ({ vnum, x, z }) to a point, flat, ties to the lower
+ * vnum -- built.rooms is walked in one order on the page and in another on the
+ * server, and the two must pick alike. A 26 m grid, searched in rings.
+ */
+function gridOf(list) {
+  const S = 26;
+  const grid = new Map();
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let z0 = Infinity;
+  let z1 = -Infinity;
+  for (const e of list) {
+    const k = `${Math.floor(e.x / S)},${Math.floor(e.z / S)}`;
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(e);
+    x0 = Math.min(x0, e.x); x1 = Math.max(x1, e.x); z0 = Math.min(z0, e.z); z1 = Math.max(z1, e.z);
+  }
+  if (!list.length) return null;
+  return {
+    nearest(x, z) {
+      const bx = Math.floor(x / S);
+      const bz = Math.floor(z / S);
+      // Far enough out to hold every room, from wherever the point is.
+      const reach = Math.ceil(Math.max(Math.abs(x - x0), Math.abs(x - x1), Math.abs(z - z0), Math.abs(z - z1)) / S) + 1;
+      let best = null;
+      let bd = Infinity;
+      const look = (cx, cz) => {
+        for (const e of grid.get(`${cx},${cz}`) || []) {
+          const d = (e.x - x) ** 2 + (e.z - z) ** 2;
+          if (d < bd || (d === bd && e.vnum < best.vnum)) { bd = d; best = e; }
+        }
+      };
+      for (let ring = 0; ring <= reach; ring++) {
+        // Nothing in ring r is nearer than (r - 1) buckets: stop once the best found is nearer.
+        if (best && ((ring - 1) * S) ** 2 > bd) break;
+        if (ring === 0) { look(bx, bz); continue; }
+        for (let d = -ring; d <= ring; d++) { look(bx + d, bz - ring); look(bx + d, bz + ring); }
+        for (let d = -ring + 1; d <= ring - 1; d++) { look(bx - ring, bz + d); look(bx + ring, bz + d); }
+      }
+      return best.vnum;
+    },
+  };
+}
+
 /**
  * @param {object} deps  world/layout/built from the boot chain. `actors` is
  *   optional: without it the game runs headless, which is how the harness and
@@ -1119,46 +1315,9 @@ export function createGame({
   }
 
   // -- rooms ----------------------------------------------------------------
-  // The zone's rooms by where they stand; redone on entering a zone.
-  let roomCentres = [];
-  const roomBucket = new Map();
+  // The zone's rooms as the count reads them (createRoomCounter); made in enterZone.
+  let counter = null;
   const bucketKey = (x, z) => `${Math.floor(x / 26)},${Math.floor(z / 26)}`;
-  function indexRooms() {
-    roomCentres = [];
-    roomBucket.clear();
-    for (const [vnum, info] of built.rooms) {
-      roomCentres.push({ vnum, x: info.center.x, y: info.center.y, z: info.center.z, outdoor: !!info.outdoor });
-    }
-    for (const room of roomCentres) {
-      const key = bucketKey(room.x, room.z);
-      if (!roomBucket.has(key)) roomBucket.set(key, []);
-      roomBucket.get(key).push(room);
-    }
-  }
-  indexRooms();
-
-  function nearestRoom(p) {
-    let best = null;
-    let bestD = Infinity;
-    const cx = Math.floor(p.x / 26);
-    const cz = Math.floor(p.z / 26);
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        const bucket = roomBucket.get(`${cx + dx},${cz + dz}`);
-        if (!bucket) continue;
-        for (const room of bucket) {
-          const d = dist2(room, p);
-          if (d < bestD) { bestD = d; best = room; }
-        }
-      }
-    }
-    if (best) return best;
-    for (const room of roomCentres) {
-      const d = dist2(room, p);
-      if (d < bestD) { bestD = d; best = room; }
-    }
-    return best;
-  }
 
   // -- mobiles --------------------------------------------------------------
   // One slot per M line in the whole world, whether or not its room is drawn.
@@ -2846,9 +3005,10 @@ export function createGame({
 
   /** The bound player's half of a frame: where you are, and what that ends. */
   function playerFrame() {
-    const room = nearestRoom(position);
+    // null: the level's open ground reaches no room, and the last one stands.
+    const at = counter.at(feet(), state.roomVnum);
     const before = state.roomVnum;
-    if (room) state.roomVnum = room.vnum;
+    if (at !== null) state.roomVnum = at;
     // move_char's half that is not the walking: "$n leaves north." and the followers.
     if (multi && rules.playerMoved && before !== undefined && before !== state.roomVnum) rules.playerMoved(before, state.roomVnum);
     if (!puppet) {
@@ -2890,7 +3050,9 @@ export function createGame({
     // until you could actually see it, so an unvisited quarter of the city
     // costs nothing.
     for (const slot of mobsNear(position, 48)) if (!slot.instance) wake(slot);
-    return room;
+    // The counted room's own entry (weatherUpdate reads `.outdoor` off it); none
+    // when the room kept is in a zone that is not drawn.
+    return built.rooms.get(state.roomVnum) || null;
   }
 
   /** The world's half: bodies, spells in flight, the pulses, the sky. */
@@ -2989,7 +3151,7 @@ export function createGame({
     built = next.built;
     actors = next.actors || null;
     ways = next.nav || (actors && actors.nav) || createNav({ layout, built, world });
-    indexRooms();
+    counter = createRoomCounter({ world, rooms: built.rooms, links: layout.links || [], zoneOf });
 
     const placed = [];
     for (const [vnum] of built.rooms) {
@@ -3070,6 +3232,12 @@ export function createGame({
     enterZone,
     /** Which zone a room is in, or null when the world is one zone. */
     zoneOf: (vnum) => (zoneOf ? zoneOf(vnum) : null),
+    /**
+     * The room counted at `feet` for a body last counted in `last` (null:
+     * keep it). For tools -- roomcount.mjs --page-check, mp-room.mjs; the
+     * frame asks the counter itself.
+     */
+    roomAt: (feet, last) => counter.at(feet, last),
 
     // -- magic --------------------------------------------------------------
     magic,
@@ -3381,7 +3549,7 @@ export function createGame({
     get ways() { return ways; },
     zoneHooks, sameZone, embody, disembody, ringSpot, FAR,
     mobs, ground, gates, protoInfo, emit, ctx, game, SPEC_FUNS, rules,
-    wake, order, moveMobile, mobsNear, nearestRoom, objToRoom, objFromRoom, dropSpot, removeBody,
+    wake, order, moveMobile, mobsNear, objToRoom, objFromRoom, dropSpot, removeBody,
     toRoom, recall, breakOff, facingAway, weather: () => weather, dist2, updatePos,
     damage: (ch, victim, dam, dt) => damage(ch, victim, dam, dt, ctx),
     multiHit: (ch, victim, dt) => multiHit(ch, victim, dt, ctx),
