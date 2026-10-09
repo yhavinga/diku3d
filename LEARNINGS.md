@@ -6,6 +6,63 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-09 — wave 17
+
+### Doorways, and corridors that wall each other off (wave17-doorways)
+
+- **The census** (`tools/judge/headless/doorways.mjs`, from the layout
+  alone): of 2,717 doorways of walled rooms in 33 zones, 2,380 come out on
+  their own exit's street. 317 do not: 203 on another pair's doorstep, 13
+  breaking out, 101 where two corridors (streets between walled rooms)
+  cross. 14 zones have none.
+- **The werklijst's street kind is not doorways, and no routing lowers it
+  for free.** Re-allocating every street with a price on shared cells
+  lowered it 276 → 270, wrong walls 52 → 48, and took 12 of the 178 reviewed
+  touches (ofcol's three among them). But door/guard rose 91 → 94 (the Dump's
+  27-cell lane re-routed past the graveyard paths), Luxan's shop in ofcol
+  reached the grass, and 35 more pairs of streets ran side by side. Not
+  taken. Most of the street kind is open streets crossing, which is
+  PLAN_BRIDGES. Ofcol's bedroom (#636) lies west of the village's column of
+  rooms and its house (#635) north-east of it; every gap in the column is a
+  one-cell street between linked rooms, so it needs a room moved or a bridge.
+- **What the werklijst cannot see: a corridor through another's cell is
+  shut.** Each corridor stands a wall across the other's way. Walking every
+  street inside its own cells in the page (`doorways.mjs --page`), 155 of
+  2,604 cannot be walked from one room to the other on 1e6994c, 131 of them
+  corridors that share a cell with a corridor. The werklijst lists joins, and
+  a way cut off joins nothing. Hitower's library entrance (#1437) opened
+  north onto plaster a metre past its door frame, a sewer line (#7129) onto
+  brick.
+- **86725c4:** after the allocation, a corridor that shares a cell with
+  another pair's street is laid again between the same two doorsteps (a
+  shared cell priced at three), and kept only if it shares fewer cells, the
+  zone gets no more, no open street gains a meeting with a corridor or a
+  walled doorstep, and no clear street is spoilt. No room, door or open
+  street moves: 10 corridors in 5 zones. Offenders 317 → 301, cells two
+  corridors share 35 → 24, two streets 430 → 409, streets that cannot be
+  walked 155 → 147, none newly. layout-check and exit-check are
+  byte-identical, walkable refuses nothing (doors open and shut), ways and
+  crossings read the same. zones.js hands the layout build.js's walled test,
+  read once per world: `classifyCanopy` only ever adds, and build.js fills it
+  per zone.
+- **Traps.** Picking the best trial by one score in priority order lets it
+  win on an earlier measure while it worsens a later one: require no worse
+  on every measure. A street routed round a crossing runs beside the other
+  instead: count touches, not only shared cells. A town's corridors are part
+  of its fence; moving one opened ofcol onto its grass. A flood along a
+  street must step over one-sample gaps, or every upper-floor doorway reads
+  as impassable (526 → 155). A room's exit back into itself (the Void) keeps
+  its one-cell stub; priced, it loops round the room. A running walkable
+  ignores SIGTERM: `kill -9` it and its Chrome.
+
+### One file per `node --check`
+
+- `node --check a.js b.js` checks a.js and hands b.js to it as an argument:
+  with b.js broken it exits 0. CLAUDE.md's first check, the agent brief and
+  deploy.sh's smoke test all ran it over a glob, so since 2026-08-02 they
+  checked `src/actors.js` alone. Found by the wave17-room builder; all 66
+  files pass one at a time. Now a loop, one file per call.
+
 ## 2026-10-09 — the werklijst: where the world joins what the mud keeps apart
 
 - **`walkable.mjs --work` lists every place a body walks from one room into

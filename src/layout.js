@@ -151,21 +151,29 @@ function routeShortest(from, to, nominalDir, occupied, MAX = 6, forbidFirst = ne
  * is how that exit ended up with no door at all. A street two cells longer
  * that leaves north out of the north wall is the better street.
  * `cost(end, dir)` is that price for setting off (end 0) or arriving (end 1).
+ * `penalty(x, z, first, last)`, if given, is what a cell costs on top of its
+ * 1 (a corridor's shared cells, in layoutWorld); without it the search is
+ * the plain one.
  */
-function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = () => false) {
+function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = () => false, penalty = null) {
   // Breadth-first by length, but a state is the cell *and* the wall it left
   // by: the same cell reached out of two walls is two different routes.
   // Cells are kept as a chain back to the first, not copied at every step.
+  // A state is reached first by its shortest way, which is kept whatever it
+  // costs, so a cell's price never puts a route out of reach; a longer way
+  // to it is taken up again only if it costs less in all.
   let frontier = [];
-  const seen = new Set();
+  const seen = new Map(); // state -> the least length plus cost it was reached at
+  const state = (x, z, dir) => ((x + 32768) * 65536 + (z + 32768)) * 4 + dir;
   for (const dir of [0, 1, 2, 3]) {
     const c0 = cost(0, dir);
     if (c0 === Infinity) continue;
     const [dx, , dz] = DIR_STEP[dir];
     const x = from.x + dx; const z = from.z + dz;
     if ((x === to.x && z === to.z) || occupied.has(key(from.level, x, z)) || blocked(key(from.level, x, z))) continue;
-    seen.add(`${x},${z},${dir}`);
-    frontier.push({ x, z, back: null, entryDir: dir, c0 });
+    const c = c0 + (penalty ? penalty(x, z, true, false) : 0);
+    seen.set(state(x, z, dir), 1 + c);
+    frontier.push({ x, z, back: null, entryDir: dir, c0: c });
   }
   let best = null;
   for (let len = 1; len <= MAX && frontier.length; len++) {
@@ -179,15 +187,24 @@ function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = () => 
         if (x === to.x && z === to.z) {
           const c1 = cost(1, dir);
           if (c1 === Infinity) continue;
-          const score = len + node.c0 + c1;
+          // The last cell was priced as one on the way; as the doorstep of
+          // the room it arrives in it may cost more.
+          const last = penalty ? penalty(node.x, node.z, !node.back, true) - penalty(node.x, node.z, !node.back, false) : 0;
+          const score = len + node.c0 + c1 + last;
           if (!best || score < best.score) best = { score, node, entryDir: node.entryDir, exitDir: dir };
           continue;
         }
         if (len >= MAX) continue;
-        const seenKey = `${x},${z},${node.entryDir}`;
-        if (seen.has(seenKey) || occupied.has(key(from.level, x, z)) || blocked(key(from.level, x, z))) continue;
-        seen.add(seenKey);
-        next.push({ x, z, back: node, entryDir: node.entryDir, c0: node.c0 });
+        if (occupied.has(key(from.level, x, z)) || blocked(key(from.level, x, z))) continue;
+        const c = node.c0 + (penalty ? penalty(x, z, false, false) : 0);
+        // A priced search drops what cannot beat the route in hand: every
+        // cell still to go costs at least 1.
+        if (penalty && best && len + Math.abs(to.x - x) + Math.abs(to.z - z) + c >= best.score) continue;
+        const seenKey = state(x, z, node.entryDir);
+        const had = seen.get(seenKey);
+        if (had !== undefined && had <= len + 1 + c) continue;
+        seen.set(seenKey, len + 1 + c);
+        next.push({ x, z, back: node, entryDir: node.entryDir, c0: c });
       }
     }
     frontier = next;
@@ -223,6 +240,13 @@ function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = () => 
  * links; whole, nothing moves and the Dump's link south is the long one.
  */
 const LAID_WHOLE = new Set(['hood.are', 'midennir.are']);
+
+/**
+ * What a corridor pays, in cells, for each cell it shares with another
+ * pair's street, when it is laid again round them (the end of layoutWorld):
+ * enough to go two cells round one.
+ */
+const DOORWAY_PRICE = 3;
 
 export function layoutWorld(world, options = {}) {
   const {
@@ -260,6 +284,12 @@ export function layoutWorld(world, options = {}) {
     // and the server know nothing of raised streets yet). Measured in
     // tools/planar-check.mjs --try crossings=forbid|raise.
     crossings = 'allow',
+    // Which rooms build.js walls in (shells.js isOpenAir, which zones.js
+    // hands over); this file's own sky test where nobody says.
+    walled = (room) => !openToSky(room),
+    // What a corridor pays for a cell it shares (`DOORWAY_PRICE`); 0 lays
+    // every corridor where the allocation left it, as before.
+    doorways = DOORWAY_PRICE,
   } = options;
 
   const cells = new Map();      // vnum -> {x, level, z, room}
@@ -782,6 +812,103 @@ export function layoutWorld(world, options = {}) {
   });
   for (const l of links) delete l.lifted;
   const { sides, stairSide, bridges } = best;
+
+  // A street between two walled rooms is a corridor: build.js walls and
+  // roofs every side of its cells it does not run through. One that shares a
+  // cell with another pair's street spoils a doorway. Two corridors through
+  // one cell each stand a wall across the other's way, so neither can be
+  // walked: in the page, every one of the 131 corridors over all zones that
+  // shared a cell with another corridor was shut, and Ofcol's Big House
+  // opened west onto the wall of the bedroom's corridor a metre outside its
+  // door. A corridor through an open street's cell is left open there ("the
+  // street builds the cell"), so it comes out on that street: Ofcol's
+  // kitchen comes out on the Local Inn's. So each such corridor is laid again
+  // between its own two doorsteps -- out of the same walls, so no door moves
+  // -- round the cells it shares, where a route within reach shares fewer
+  // and costs less, a shared cell costing `doorways` cells. Nothing else
+  // moves: no room, no wall, and no open street, since an open street led
+  // round another runs beside it instead, which out of doors joins the two
+  // just as well (measured: pricing open streets too ran 35 more pairs of
+  // streets side by side). Counted by tools/judge/headless/doorways.mjs.
+  if (doorways && crossings === 'allow') {
+    const builtLink = (l) => l.kind === 'alley' && !!l.to && l.from.room.sector !== SECTOR.AIR && l.to.room.sector !== SECTOR.AIR;
+    const isWalled = (cell) => walled(cell.room);
+    const corridor = (l) => isWalled(l.from) && isWalled(l.to);
+    const streetCells = new Map(); // grid key -> the streets through it
+    const lay = (l, on) => {
+      for (const c of l.path) {
+        const k = key(l.from.level, c.x, c.z);
+        if (!streetCells.has(k)) streetCells.set(k, new Set());
+        if (on) streetCells.get(k).add(l); else streetCells.get(k).delete(l);
+      }
+    };
+    for (const l of links) if (builtLink(l)) lay(l, true);
+    const sharesAt = (l, x, z) => {
+      for (const m of streetCells.get(key(l.from.level, x, z)) || []) if (m !== l && !harmless(l, m)) return true;
+      return false;
+    };
+    const sharedBy = (l, path) => path.filter((c) => sharesAt(l, c.x, c.z)).length;
+    // What the zone as a whole must not get more of: cells two streets
+    // share; streets that spoil a doorway (a corridor sharing any cell, or a
+    // street sharing the doorstep of a walled room at an end of it), not one
+    // that was clear before, since a corridor led over another's doorstep
+    // shuts that one (four did, in the first version of this).
+    const doorstep = (l, i) => (i === 0 && isWalled(l.from)) || (i === l.path.length - 1 && isWalled(l.to));
+    // And cells where an open street meets a corridor or a walled room's
+    // doorstep: those join rooms in the open, where two corridors only shut
+    // each other, so trading the one for the other is no gain.
+    const tally = () => {
+      let cellsShared = 0; const spoilt = new Set(); let exposed = 0;
+      for (const [k, there] of streetCells) {
+        const ls = [...there];
+        if (!ls.some((l, i) => ls.some((m, j) => j > i && !harmless(l, m)))) continue;
+        cellsShared++;
+        const [, xz] = k.split(':'); const [x, z] = xz.split(',').map(Number);
+        const atDoor = (l) => l.path.some((c, i) => c.x === x && c.z === z && doorstep(l, i));
+        if (ls.some((l) => !corridor(l) && ls.some((m) => m !== l && !harmless(l, m) && (corridor(m) || atDoor(m) || atDoor(l))))) exposed++;
+      }
+      for (const l of links) {
+        if (builtLink(l) && l.path.some((c, i) => (corridor(l) || doorstep(l, i)) && sharesAt(l, c.x, c.z))) spoilt.add(l);
+      }
+      return [cellsShared, spoilt, exposed];
+    };
+    // A corridor among open streets and open-air rooms is part of a town's
+    // fabric: the cell it leaves is open ground, and the werklijst found that
+    // gap (Ofcol's kitchen corridor, moved off the cell north of Luxan's
+    // shop, let the shop out onto the grass round the village). It stays.
+    const inTown = (l, c) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => {
+      const v = occupied.get(key(l.from.level, c.x + dx, c.z + dz));
+      if (v !== undefined) return !isWalled(cells.get(v));
+      return [...(streetCells.get(key(l.from.level, c.x + dx, c.z + dz)) || [])].some((m) => !corridor(m));
+    });
+    let [cellsShared, spoilt, exposed] = tally();
+    for (let pass = 0; pass < 4; pass++) {
+      let moved = 0;
+      for (const l of links) {
+        if (!builtLink(l) || !corridor(l) || l.from === l.to) continue;
+        const was = sharedBy(l, l.path);
+        if (!was) continue;
+        lay(l, false);
+        const sameWalls = (end, dir) => (dir === (end === 0 ? l.entryDir : l.exitDir) ? 0 : Infinity);
+        const price = (x, z) => (sharesAt(l, x, z) ? doorways : 0);
+        const route = routePath(l.from, l.to, occupied, reach.get(pair(l.from.vnum, l.to.vnum)) || reachDefault,
+          sameWalls, (k) => blocked.has(k), price);
+        const old = l.path;
+        const keeps = new Set(route ? route.cells.map((c) => `${c.x},${c.z}`) : []);
+        if (route && sharedBy(l, route.cells) < was && route.score < old.length + was * doorways
+          && !old.some((c) => !keeps.has(`${c.x},${c.z}`) && inTown(l, c))) {
+          l.path = route.cells;
+          lay(l, true);
+          const [c2, s2, e2] = tally();
+          if (c2 <= cellsShared && [...s2].every((m) => spoilt.has(m)) && e2 <= exposed) { cellsShared = c2; spoilt = s2; exposed = e2; moved++; continue; }
+          lay(l, false);
+          l.path = old;
+        }
+        lay(l, true);
+      }
+      if (!moved) break;
+    }
+  }
   const pathCells = new Set();
   const pathOwner = new Map(); // which passage runs through this cell
   for (const link of links) {
