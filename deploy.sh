@@ -37,7 +37,9 @@ echo "▸ Deploy $SHA → $SERVER:$DOCMAP"
 # --- 1. Rooktest. Er is geen build; dit zijn de goedkope checks uit CLAUDE.md
 # die een kapotte pagina tegenhouden (syntaxis, imports, alle 45 .are-bestanden).
 echo "▸ Rooktest"
-(cd "$ROOT" && node --check src/*.js src/rules/*.js server/*.mjs \
+# Elk bestand apart: `node --check a.js b.js` controleert alleen a.js en geeft
+# b.js als argument mee.
+(cd "$ROOT" && for f in src/*.js src/rules/*.js server/*.mjs; do node --check "$f" || exit 1; done \
   && node tools/import-check.mjs >/dev/null \
   && node tools/parse-check.mjs >/dev/null)
 [ -f "$ROOT/merc21/area/midgaard.are" ] || { echo "✗  merc21/ is niet uitgecheckt (git submodule update --init)" >&2; exit 1; }
