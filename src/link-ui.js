@@ -86,6 +86,7 @@ export function createConnectUi({ game, onEnter, onAlone, storage = globalThis.l
 
   opener.addEventListener('click', () => (form.hidden ? open() : close()));
   $('connect-alone').addEventListener('click', () => { close(); onAlone(); });
+  $('connect-back').addEventListener('click', close);
   name.addEventListener('input', () => { if (stage === 'new') setStage('login'); });
   // The keys the world binds (WASD, E, I ...) must not fire while typing here.
   form.addEventListener('keydown', (event) => event.stopPropagation());

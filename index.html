@@ -226,8 +226,11 @@
   #connect-status { margin: 0; min-height: 1.2em; text-transform: none; letter-spacing: 0.03em; font-size: 12px; line-height: 1.45; color: #f4e7cb; }
   #connect-status.bad { color: #ffb3a1; }
   /* Connecting, the page's own class row and saved game are not what is being chosen. */
-  /* The form has its own "play alone", which is the temple door. */
-  #title.connecting #keys, #title.connecting #class-pick, #title.connecting #continue, #title.connecting #enter { display: none; }
+  /* The form has its own "play alone", which is the temple door, and its own
+     way back: the link that opened it read as the form's heading, not as the
+     button that closes it. */
+  #title.connecting #keys, #title.connecting #class-pick, #title.connecting #continue, #title.connecting #enter,
+  #title.connecting #connect-open { display: none; }
   /* The form is tall with a new character's fields open: the title gives it
      the room, from the top down, and the credits follow it rather than lie
      over it -- on a short screen the title scrolls, and they are still there. */
@@ -428,7 +431,7 @@
       <div class="connect-pick"><span>class</span><span id="connect-class"></span></div>
       <div class="connect-pick"><span>sex</span><span id="connect-sex"></span></div>
     </div>
-    <div class="connect-actions"><button type="submit" id="connect-go">connect</button><button type="button" id="connect-alone">play alone</button></div>
+    <div class="connect-actions"><button type="submit" id="connect-go">connect</button><button type="button" id="connect-alone">play alone</button><button type="button" id="connect-back">back</button></div>
     <p id="connect-status" role="status" aria-live="polite"></p>
   </form>
   <div id="keys">
