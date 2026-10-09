@@ -3234,8 +3234,8 @@ export function createGame({
     zoneOf: (vnum) => (zoneOf ? zoneOf(vnum) : null),
     /**
      * The room counted at `feet` for a body last counted in `last` (null:
-     * keep it). For tools -- roomcount.mjs --page-check, mp-room.mjs; the
-     * frame asks the counter itself.
+     * keep it). For tools -- roomcount.mjs --page-check holds the page's
+     * count to node's with it; the frame asks the counter itself.
      */
     roomAt: (feet, last) => counter.at(feet, last),
 
