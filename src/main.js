@@ -15,6 +15,7 @@ import { collectResources, disposeZoneGraph } from './teardown.js';
 import { createMaterials, bakeJobs, runBake } from './textures.js';
 import { bakeTextures } from './bakery.js';
 import { buildScene, CELL, LEVEL_H } from './build.js';
+import { shaftsOf, shaftAt } from './shells.js';
 import { populate } from './actors.js';
 import { Player } from './player.js';
 import { Hud } from './hud.js';
@@ -1864,13 +1865,21 @@ async function boot() {
       + `${layout.stats.portals} archways · ${(built.stats.triangles / 1e6).toFixed(2)}M tris built`;
   }
 
+  // The drawn zone's lids' and drops' shafts, made when the layout changes.
+  let lidShafts = null;
+  let lidShaftsOf = null;
   /**
    * Which room you are in. Standing in a room's own cell is unambiguous;
    * standing in a street belongs to whichever end of that street is nearer,
    * which is the closest thing the mud's own geography has to an answer.
+   * In a shaft, under the floor above, it is the room below, as game.js's
+   * count and the server's judge have it.
    */
   function currentRoom() {
     const feet = player.position.y - 1.72;
+    if (lidShaftsOf !== layout) { lidShafts = shaftsOf(world, layout.links); lidShaftsOf = layout; }
+    const shaft = shaftAt(lidShafts, player.position.x, feet, player.position.z);
+    if (shaft) return shaft.lower;
     const level = Math.round(feet / LEVEL_H);
     const cx = Math.round(player.position.x / CELL);
     const cz = Math.round(player.position.z / CELL);
