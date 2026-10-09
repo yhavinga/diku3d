@@ -209,6 +209,13 @@
   }
   /* The lineage, under the areas: the name is Diku3D, where it comes from second. */
   #title h2 span { display: block; margin-top: 9px; font-size: 10px; color: var(--dim); }
+  /* A device with no mouse or trackpad (main.js boot): the notice instead of every way in. */
+  #desktop-only { margin: 10px 0 0; max-width: 30em; font-size: 17px; line-height: 1.5; color: var(--ink); }
+  #title.desktop-only { padding-right: 24px; }
+  /* The vignette darkens a wide screen's left half; upright, the type sits over lit houses too. */
+  #title.desktop-only::before { background: rgba(4,4,7,0.62); }
+  #title.desktop-only #enter, #title.desktop-only #class-pick, #title.desktop-only #continue,
+  #title.desktop-only #connect-open, #title.desktop-only #connect, #title.desktop-only #keys { display: none; }
   #enter {
     margin-top: 20px; pointer-events: auto; cursor: pointer;
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
@@ -448,6 +455,7 @@
   <img id="title-still" src="assets/title-still.webp" alt="">
   <h1>DIKU3D</h1>
   <h2>Midgaard · Haon Dor · Moria · the Shire · and nearly forty more<span>DikuMUD · Merc 2.1 · in three dimensions</span></h2>
+  <p id="desktop-only" hidden>For now Diku3D needs a keyboard and mouse, and more memory than a phone browser gives a page. Open diku3d.com on a computer to play.</p>
   <button id="enter">enter the temple</button>
   <div id="class-pick"><span>alone, as a</span><button data-class="3" class="on">warrior</button><button data-class="0">mage</button><button data-class="1">cleric</button><button data-class="2">thief</button></div>
   <button id="continue" hidden></button>

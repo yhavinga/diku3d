@@ -480,6 +480,15 @@ const fetchText = async (url) => {
 };
 
 async function boot() {
+  // A phone has no keys to walk with and runs out of memory building the
+  // world (the home zone holds 1.5 GB of heap in desktop Chrome), so a device
+  // with no mouse or trackpad gets the title and a notice, and nothing is built.
+  if (!matchMedia('(any-pointer: fine)').matches) {
+    dom.title.classList.add('desktop-only');
+    document.getElementById('desktop-only').hidden = false;
+    dom.loading.classList.add('hidden');
+    return;
+  }
   // The title is up from the first paint (index.html) and the world is built
   // behind it; a way in taken before it is finished waits for it (title.js).
   const titleHold = holdTitle({ loading: dom.loading });
