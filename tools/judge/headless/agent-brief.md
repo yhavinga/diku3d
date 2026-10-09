@@ -36,10 +36,10 @@ what, and the agent's own task.
 
 ## Checks before calling anything done
 
-    node --check src/*.js src/rules/*.js
+    for f in src/*.js src/rules/*.js; do node --check "$f" || echo "$f"; done   # one file per call
     node tools/import-check.mjs
     node tools/parse-check.mjs
-    node tools/layout-check.mjs      # Midgaard 93%, mean 94% — must not drop
+    node tools/layout-check.mjs      # Midgaard 97%, mean 95.4% — must not drop
     node tools/world-check.mjs
     node tools/game-check.mjs; node tools/magic-check.mjs; node tools/rules-check.mjs
     node tools/people-check.mjs; node tools/shell-check.mjs; node tools/clutter-check.mjs
