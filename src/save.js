@@ -81,6 +81,21 @@ export function restore(state, data, world, POS) {
 }
 
 /**
+ * The saved character, or null, read without a game: the title offers
+ * "continue" before the world it would continue in has been built.
+ */
+export function peekSave(storage) {
+  const raw = storage.getItem(SAVE_KEY);
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw);
+    return data && data.version === 1 ? data : null;
+  } catch (error) {
+    throw new Error(`save.js: the saved character does not parse: ${error.message}`);
+  }
+}
+
+/**
  * Puts `save`, `quit` and `loadSave` on the game. `onRestore(room)` moves the
  * body; `now` is for the autosave clock.
  */
@@ -93,16 +108,7 @@ export function installSave(game, { world, storage, onRestore = null }) {
     return { ok: true, text: 'Ok.' };
   }
 
-  function peek() {
-    const raw = storage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    try {
-      const data = JSON.parse(raw);
-      return data && data.version === 1 ? data : null;
-    } catch (error) {
-      throw new Error(`save.js: the saved character does not parse: ${error.message}`);
-    }
-  }
+  const peek = () => peekSave(storage);
 
   function loadSave() {
     const data = peek();

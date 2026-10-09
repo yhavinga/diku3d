@@ -29,13 +29,13 @@ import { createFx } from './fx.js';
 import { createSpellFx } from './spellfx.js';
 import { createRain } from './rain.js';
 import { createItems } from './items.js';
-import { installSave } from './save.js';
+import { installSave, peekSave } from './save.js';
 import { createKick } from './kick.js';
 import { setPaneDaylight } from './windows.js';
 import { createVisibility } from './cull.js';
 import { createImpostors } from './impostor.js';
 import { createOcclusion } from './occlusion.js';
-import { createTitleReel } from './title.js';
+import { createTitleReel, holdTitle } from './title.js';
 import { createVistas } from './vista.js';
 import { attachSocketLink, SocketLink } from './link.js';
 import { createDashboard } from './dashboard.js';
@@ -480,6 +480,32 @@ const fetchText = async (url) => {
 };
 
 async function boot() {
+  // The title is up from the first paint (index.html) and the world is built
+  // behind it; a way in taken before it is finished waits for it (title.js).
+  const titleHold = holdTitle({ loading: dom.loading });
+  // The saved character back, from the title screen (the class question
+  // itself is game-ui.js's #class-pick). Continuing replaces whatever was picked.
+  const continueButton = document.getElementById('continue');
+  let saved = null;
+  try { saved = peekSave(window.localStorage); } catch (error) { console.error(error); }
+  if (saved) {
+    continueButton.hidden = false;
+    continueButton.textContent = `continue — ${saved.className}, level ${saved.level}`;
+  }
+  // The server form too opens before there is a world. Sending it is held
+  // until there is one, so these callbacks only ever run once everything
+  // they name further down exists.
+  createConnectUi({
+    getGame: () => game,
+    onAlone: () => begin(false),
+    onEnter(link, enter) {
+      begin(false);
+      connected = attachSocketLink(link, game, linkHost, enter);
+      window.diku.link = connected;
+      dashboard.attach(connected);
+    },
+  });
+
   // The texture bake needs nothing from the world, so it starts first and runs
   // in its workers while the area files are read and laid out. What it reports
   // before its own step comes up is held until then.
@@ -1218,8 +1244,9 @@ async function boot() {
 
   document.addEventListener('keydown', (event) => {
     // The title's camera is not the player's: an arrow here would start a
-    // walk from wherever the reel happens to be.
-    if (titleReel && titleReel.active) return;
+    // walk from wherever the reel happens to be. Before the reel, the title
+    // is up over a world still being built.
+    if (!titleReel || titleReel.active) return;
     // The same key closes it. Escape works too, but Escape is the browser's own
     // pointer-lock release, so relying on it costs you the mouse as well.
     if (event.code === 'KeyE' && hud.examineOpen) {
@@ -1880,15 +1907,6 @@ async function boot() {
     dom.hint.classList.add('visible');
   });
 
-  // The saved character back, from the title screen (the class question
-  // itself is game-ui.js's #class-pick). Continuing replaces whatever was picked.
-  const continueButton = document.getElementById('continue');
-  let saved = null;
-  try { saved = game.savedCharacter(); } catch (error) { console.error(error); }
-  if (saved) {
-    continueButton.hidden = false;
-    continueButton.textContent = `continue — ${saved.className}, level ${saved.level}`;
-  }
   let begun = false;
   /**
    * Out of the title and into the game, whether or not the mouse can be had.
@@ -1979,16 +1997,6 @@ async function boot() {
       text.textContent = `${error.message}  Reload to log in again.`;
       document.getElementById('link-lost-reconnect').hidden = true;
     }
-  });
-  createConnectUi({
-    game,
-    onAlone: () => begin(false),
-    onEnter(link, enter) {
-      begin(false);
-      connected = attachSocketLink(link, game, linkHost, enter);
-      window.diku.link = connected;
-      dashboard.attach(connected);
-    },
   });
   dom.hint.addEventListener('click', () => player.requestLock());
   renderer.domElement.addEventListener('mousedown', (event) => {
@@ -2652,22 +2660,28 @@ async function boot() {
   await precompile((fraction) => progress(along(bar.compile, fraction), null, compiling));
 
   await progress(1, 'ready');
-  dom.loading.classList.add('hidden');
   // What the build came to belongs with the frame rate on the stats overlay
   // (F), not on the title, where it read as a spec sheet. The triangle count is
   // rounded because an indexed geometry's triangles are index.count/3 and the
   // sum is taken over position.count/3, so it comes out fractional.
   state.worldStats = describeWorld();
-  // The title card goes up over the world with a camera moving through it.
+  // The camera starts moving through the world behind the title card, and
+  // the still that stood in for it fades through the veil's black.
   titleReel = createTitleReel({
     camera, built, veil: document.getElementById('title-veil'), viewer: window.diku,
   });
   window.diku.title = titleReel;
   audio.startTitle();
-  if (titleReel.active) document.body.classList.add('titling');
-  dom.title.classList.remove('hidden');
+  document.body.classList.toggle('titling', titleReel.active);
+  const still = document.getElementById('title-still');
+  still.addEventListener('transitionend', () => still.remove(), { once: true });
+  still.classList.add('gone');
   frame();
   mountVistas();
+  // Before the loading screen goes: a way in that was held takes the title
+  // down first, and the world is what is under it.
+  titleHold.release();
+  dom.loading.classList.add('hidden');
 }
 
 function makeStars() {
@@ -2692,7 +2706,8 @@ function makeStars() {
 }
 
 boot().catch((error) => {
-  dom.loading.classList.remove('hidden');
+  dom.title.classList.add('hidden');
+  dom.loading.classList.remove('hidden', 'on-title');
   dom.loadingText.innerHTML = `<strong>failed to start</strong><br>${String(error.message || error)}`;
   dom.loadingBar.style.background = '#a33';
   console.error(error);

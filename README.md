@@ -18,8 +18,11 @@ installs.
 Every texture is still generated in the browser, in up to eight workers
 (`src/bakery.js`, `src/bakeworker.js`); IndexedDB keeps what this browser baked
 before, about 65 MB, under a SHA-256 of `src/textures.js`, so any change to that
-file bakes everything again. A first visit is ready in about 6 s, a repeat visit
-in about 5; `diku.bake` says what came from where.
+file bakes everything again; `diku.bake` says what came from where. The title
+is up in the first paint and the world is built behind it, over a still of the
+title reel's first shot. The world is ready about 9 s into a first visit and
+6.6 s into a repeat one (diku3d.com, headless Chromium on an M-series Mac), and
+31.7 s in for a GPU that has never compiled these shaders, 17.7 s of it compiling.
 
 There is no build step. Three.js is vendored under `vendor/`; the app is plain
 ES modules.

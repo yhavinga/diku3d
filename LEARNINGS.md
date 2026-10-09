@@ -6,6 +6,38 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-09 — the title before the world
+
+- **The title waited for everything.** It came up on the last line of
+  `boot()`, after the bake, 283 models, the build, the mobiles and every
+  shader. Measured on diku3d.com in headless Chromium on an M-series Mac:
+  31.7 s to the title on a first visit, 17.7 s of it `precompile` (579
+  programs: five light-pool levels times the materials), 9.0 s once the
+  driver's shader cache is warm, 6.6 s on a repeat visit (3.5 s of it
+  raising the town). A quit reloads the page, so it cost the 2.5 s verse
+  plus the repeat visit. The title is now in the first paint (75 ms locally)
+  and the world builds behind it; after a quit it is back as the page
+  reloads.
+- **A shader cache can outlive the browser profile.** A fresh Chromium
+  profile compiled the same 579 programs in 0.9 s right after a cold run
+  took 17.7 s: Metal keeps its own cache outside the profile. A first visit
+  cannot be reproduced on a machine that has already compiled them once, so
+  keep the cold number when you have it.
+- **Hold the click, don't rebuild the wiring.** Everything that starts the
+  game is wired late in `boot()`, against a game that does not exist while
+  the title is up. `holdTitle` (title.js) puts capture listeners on those
+  same elements first: before the world is ready they stop the event, bring
+  the loading screen forward and replay the click on `release()`. Only the
+  server form had to open early, so `createConnectUi` moved up and reads the
+  game through `getGame()` when the form is sent.
+- **Render a stand-in wide.** The still behind the early title is
+  2560x1080 at the camera's own vertical fov, and `object-fit: cover` crops
+  only its sides on any screen up to 2.37:1, which is exactly what the reel
+  shows there, so the still and the first live frame match.
+- **Input stays responsive behind the build.** Event Timing on clicks every
+  200 ms while it ran: a median delay of 22 ms, worst 0.3 s, and 0.3–0.5 s
+  in the switch from the still to the reel.
+
 ## 2026-10-04 — wave 14: hybrids, and streets that bend
 
 - **Hybrids (wave14-hybrids):** a shared taur rig (centaurs ×14, lamias ×48),

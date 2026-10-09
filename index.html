@@ -157,6 +157,13 @@
       radial-gradient(ellipse 90% 85% at 60% 50%, rgba(3,3,5,0) 55%, rgba(3,3,5,0.55) 100%);
   }
   #title-veil { position: absolute; inset: 0; z-index: -2; background: #05060a; pointer-events: none; }
+  /* The title is up before the world is built, and until then the reel has
+     nothing to film: a still of its first shot stands in. It is rendered wide
+     (2560x1080) at the camera's own vertical field of view, so cropped to any
+     narrower screen it frames what the camera will see there. */
+  #title-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -2;
+    pointer-events: none; transition: opacity 900ms ease; }
+  #title-still.gone { opacity: 0; }
   body.titling #hud, body.titling #game-ui { visibility: hidden; }
   #loading-text { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; color: var(--gold); opacity: 0.8; text-align: center; }
   #loading-track { width: min(360px, 60vw); height: 2px; background: rgba(224,189,119,0.16); }
@@ -170,6 +177,14 @@
     animation: loading-glint 1.6s ease-in-out infinite; will-change: transform; }
   @keyframes loading-glint { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
   #loading-detail { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; color: var(--gold); opacity: 0.45; text-align: center; min-height: 1.3em; }
+  /* While the title is up the build goes on in a corner of it -- the top one,
+     which the music button takes over once it is done; at the bottom it ran
+     into the credits on a small screen. A way into the game taken before then
+     brings the whole screen forward (title.js holdTitle). */
+  #loading.on-title { inset: 26px 30px auto auto; background: none; align-items: flex-end; gap: 8px; pointer-events: none;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.55); }
+  #loading.on-title #loading-track { width: min(220px, 40vw); }
+  #loading.on-title #loading-text, #loading.on-title #loading-detail { text-align: right; }
 
   #title h1 {
     font-size: clamp(44px, 7vw, 96px); margin: 0 0 0 -0.04em; letter-spacing: 0.18em;
@@ -375,7 +390,7 @@
   body.titling #help-hint { display: none; }
 </style>
 </head>
-<body>
+<body class="titling">
 <div id="view"></div>
 
 <div id="hud">
@@ -413,8 +428,9 @@
 <div id="hint">click to look around</div>
 <div id="link-lost" hidden><p id="link-lost-text"></p><button id="link-lost-reconnect" type="button" hidden>reconnect</button><button id="link-lost-reload" type="button">reload</button></div>
 
-<div id="title" class="hidden">
+<div id="title">
   <div id="title-veil"></div>
+  <img id="title-still" src="assets/title-still.webp" alt="">
   <h1>MIDGAARD</h1>
   <h2>DikuMUD · Merc 2.1 · in three dimensions</h2>
   <button id="enter">enter the temple</button>
@@ -452,7 +468,7 @@
   </div>
 </div>
 
-<div id="loading">
+<div id="loading" class="on-title">
   <div id="loading-text">reading area files</div>
   <div id="loading-track"><div id="loading-bar"></div></div>
   <div id="loading-detail"></div>

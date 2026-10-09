@@ -19,8 +19,11 @@ const SEXES = [['male', 'm'], ['female', 'f'], ['neither', 'n']];
 /**
  * `onEnter(link, enter)` once the server has put the character in the
  * world; `onAlone()` for the play-alone button. `storage` remembers the address.
+ * `getGame()` is asked only when the form is sent: the form opens on the
+ * title, before the world and its game are built (title.js holdTitle keeps
+ * a sending until they are).
  */
-export function createConnectUi({ game, onEnter, onAlone, storage = globalThis.localStorage }) {
+export function createConnectUi({ getGame, onEnter, onAlone, storage = globalThis.localStorage }) {
   const $ = (id) => {
     const node = document.getElementById(id);
     if (!node) throw new Error(`link-ui: index.html has no #${id}`);
@@ -107,7 +110,7 @@ export function createConnectUi({ game, onEnter, onAlone, storage = globalThis.l
     say(`Connecting to ${where.url} ...`);
     const next = new SocketLink(where.url);
     const hello = await next.open();
-    const mine = worldFingerprint(game);
+    const mine = worldFingerprint(getGame());
     if (hello.world && (hello.world.mobs !== mine.mobs || hello.world.hash !== mine.hash)) {
       next.close();
       throw new Error(`That server runs a different world (${hello.world.rooms} rooms, ${hello.world.mobs} mobiles)`

@@ -1,8 +1,12 @@
 /**
  * The title screen's reel: the built world behind the title card, a slow
- * camera move through a handful of places, cross-faded through black. The
- * world is finished before the title comes up, so a black card in front of
- * it was hiding the one thing worth showing.
+ * camera move through a handful of places, cross-faded through black. A
+ * black card in front of the world was hiding the one thing worth showing.
+ * The title comes up before the world is built, though: waiting for it cost
+ * 6.6 s on a repeat visit and 31.7 s on a first one, and a quit, which
+ * reloads the page, came back the same way. Until the reel can start, a
+ * still of its first shot stands in (index.html #title-still), and
+ * `holdTitle` keeps what is clicked in the meantime.
  *
  * Each shot is a straight dolly between two points while the camera stays
  * on one aim point, which turns a short move into parallax -- the near
@@ -18,7 +22,9 @@ import * as THREE from 'three';
 
 const EYE = 1.72;
 
-// Framed by eye in the headless browser at dusk, 1280x720.
+// Framed by eye in the headless browser at dusk, 1280x720. The first is also
+// the still the title shows until the world is built (assets/title-still.webp):
+// change it and re-render that with tools/judge/headless/title-still.js.
 const SHOTS = [
   // Market Square: across the paving, the frontage sliding past the statue.
   { vnum: 3014, from: [-7, 0.5, 10], to: [-3, 0.8, 8.5], aim: [5, 3, -10] },
@@ -39,6 +45,58 @@ const FADE_IN = 1.6;
 const FADE_OUT = 1.1;
 
 const ease = (u) => u * u * (3 - 2 * u);
+
+/**
+ * The title before the world is built (main.js boot). A way into the game
+ * clicked then -- enter, continue, play alone, the server form sent -- has
+ * nothing to start yet: it is held, the loading screen comes forward from its
+ * corner of the title, and `release()` plays the click again once the world
+ * is there. A class picked meanwhile is shown at once and chosen for real on
+ * release. The server form opening and closing needs no world and is left be.
+ *
+ * Capture listeners on the element itself run ahead of the handlers main.js,
+ * game-ui.js and link-ui.js add to it, and stopImmediatePropagation keeps
+ * those from running until the world they act on exists.
+ */
+export function holdTitle({ loading }) {
+  const $ = (id) => {
+    const node = document.getElementById(id);
+    if (!node) throw new Error(`title: index.html has no #${id}`);
+    return node;
+  };
+  let ready = false;
+  let start = null;
+  let picked = null;
+  const hold = (node, type, replay) => node.addEventListener(type, (event) => {
+    if (ready) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (start) return;
+    start = replay;
+    loading.classList.remove('on-title');
+  }, true);
+  for (const id of ['enter', 'continue', 'connect-alone']) {
+    const button = $(id);
+    hold(button, 'click', () => button.click());
+  }
+  const form = $('connect');
+  hold(form, 'submit', () => form.requestSubmit());
+  const pick = $('class-pick');
+  pick.addEventListener('click', (event) => {
+    const button = !ready && event.target.closest('button[data-class]');
+    if (!button) return;
+    event.stopImmediatePropagation();
+    picked = button;
+    for (const b of pick.querySelectorAll('button')) b.classList.toggle('on', b === button);
+  }, true);
+  return {
+    release() {
+      ready = true;
+      if (picked) picked.click();
+      if (start) start();
+    },
+  };
+}
 
 /**
  * @param {object} deps

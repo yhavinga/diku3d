@@ -471,6 +471,12 @@ choose.
   Whole words only, and run the vocabulary over all 45 areas.
 - **Room house rows are built late** (`rowJobs`, built by `buildLanes`):
   anything reading a room cell's colliders before that will not see them.
+- **The title is up before the world is built** (index.html, over
+  `assets/title-still.webp`), and `boot()` wires most of the title late.
+  A new control on it that starts or needs the game must go through
+  `holdTitle` (title.js), or a click on it during the build reaches a game
+  that does not exist yet. Re-render the still with
+  `tools/judge/headless/title-still.js` if the reel's first shot changes.
 - **Wrap every headless and Blender run in `timeout`** (GNU timeout in
   /opt/homebrew/bin); a hung headless Chrome never returns.
 - Figures are skinned meshes: one draw each, no instancing, and a second pass if
