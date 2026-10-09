@@ -305,26 +305,38 @@ async function main() {
   }
   async function geometryOf(zoneId) {
     const file = opt.geo && path.join(opt.geo, `geo-${zoneId}.json`);
-    if (file && fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (file && fs.existsSync(file)) {
+      const geo = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (geo.format !== 2) throw new Error(`roomcount: ${file} was written before the lids (format ${geo.format}); point --geo at an empty directory`);
+      return geo;
+    }
     const drawn = await drawZone(zoneId);
     if (drawn.error) throw new Error(`roomcount: ${drawn.error}`);
     if (drawn.skipped) return { skipped: drawn.skipped };
     const geo = await page.evaluate(() => {
       const d = window.diku;
+      // Each door collider's last number says when it stands: 0 a door's leaf (shut),
+      // 1 a one-way gate (always), 2 a lid's leaf standing on its hinge (open),
+      // 3 a lid's cover (shut). A lid's collider has the lid for `door`, which has no `spec`.
       const col = []; const doors = [];
       for (const c of d.built.colliders) {
         const row = [c.x0, c.x1, c.z0, c.z1, c.y0, c.y1, c.r || 0];
-        if (!c.door) col.push(...row); else doors.push([...row, c.door.spec.oneWay ? 1 : 0]);
+        if (!c.door) col.push(...row);
+        else if (!c.door.spec) doors.push([...row, c.whenOpen ? 2 : 3]);
+        else doors.push([...row, c.door.spec.oneWay ? 1 : 0]);
       }
-      const plat = []; for (const p of d.built.platforms) plat.push(p.x0, p.x1, p.z0, p.z1, p.top);
-      const portals = d.built.portals.map((p) => [p.x, p.y, p.z, p.radius]);
+      // A shut lid's floor is ground only while it is shut; its portal exists only while it is open.
+      const plat = []; const platShut = [];
+      for (const p of d.built.platforms) (p.door ? platShut : plat).push(p.x0, p.x1, p.z0, p.z1, p.top);
+      const portals = d.built.portals.filter((p) => !p.hatch).map((p) => [p.x, p.y, p.z, p.radius]);
+      const hatchPortals = (d.built.hatchPortals || []).map((p) => [p.x, p.y, p.z, p.radius]);
       const rooms = [];
       for (const [vnum, info] of d.built.rooms) {
         const own = d.plan.zoneOf(vnum) === d.zone;
         const arrive = own && !info.unbuilt ? d.player.resolvePoint(info.center.x, info.center.z, info.center.y) : [info.center.x, info.center.z];
         rooms.push({ vnum, own, unbuilt: !!info.unbuilt, center: [info.center.x, info.center.y, info.center.z], arrive });
       }
-      return { col, doors, plat, portals, rooms, bounds: d.layout.bounds };
+      return { format: 2, col, doors, plat, platShut, portals, hatchPortals, rooms, bounds: d.layout.bounds };
     });
     if (file) { fs.mkdirSync(opt.geo, { recursive: true }); fs.writeFileSync(file, JSON.stringify(geo)); }
     return geo;
@@ -333,8 +345,9 @@ async function main() {
   /** player.js's ground and walls over the zone's boxes (walkable.mjs's), and the step graph from every arrival point. */
   function stepGraph(geo, Z) {
     const C = geo.col.slice();
-    for (const d of geo.doors) if (opt.shut || d[7]) C.push(...d.slice(0, 7));
-    const P = geo.plat;
+    for (const d of geo.doors) if (d[7] === 2 ? !opt.shut : opt.shut || d[7] === 1) C.push(...d.slice(0, 7));
+    const P = opt.shut ? geo.plat.concat(geo.platShut) : geo.plat;
+    const portals = opt.shut ? geo.portals : geo.portals.concat(geo.hatchPortals);
     const B = 4, bk = (bx, bz) => bx * 100003 + bz;
     const bucketsOf = (arr, stride) => {
       const m = new Map();
@@ -368,7 +381,7 @@ async function main() {
       }
       return false;
     };
-    const inPortal = (x, z, feet) => geo.portals.some(([px, py, pz, pr]) => Math.abs(py - feet) <= 3 && (px - x) ** 2 + (pz - z) ** 2 < pr * pr);
+    const inPortal = (x, z, feet) => portals.some(([px, py, pz, pr]) => Math.abs(py - feet) <= 3 && (px - x) ** 2 + (pz - z) ** 2 < pr * pr);
     const bb = geo.bounds, M = 6;
     const I0 = Math.floor(((bb.minX - M) * CELL - CELL / 2) / RES), I1 = Math.ceil(((bb.maxX + M) * CELL + CELL / 2) / RES);
     const J0 = Math.floor(((bb.minZ - M) * CELL - CELL / 2) / RES), J1 = Math.ceil(((bb.maxZ + M) * CELL + CELL / 2) / RES);
