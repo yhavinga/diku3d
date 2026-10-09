@@ -22,6 +22,7 @@ import { serialize, restore } from '../src/save.js';
 import { titleFor, trustOf, PLR_MORE } from '../src/rules/actcomm.js';
 import { PLR, nested } from '../src/rules/handler.js';
 import { bootWorld } from './world.mjs';
+import { EX_ISDOOR, EX_CLOSED, EX_LOCKED } from '../src/are.js';
 import { createNotes, createSite } from './store.mjs';
 import { createDash } from './dash.mjs';
 import {
@@ -31,7 +32,8 @@ import {
 /**
  * 2: positions are checked and answered with `at`, which a page must obey
  * or every later report is dropped as stale; and `shop`, `gates`, the
- * reconnect token in `enter`.
+ * reconnect token in `enter`. `doors` came later and needs no new number:
+ * a page that does not know it ignores it.
  */
 export const PROTOCOL = 2;
 const ROOM_VNUM_TEMPLE = 3001;
@@ -131,7 +133,7 @@ export async function startMud({
     const fast = stats.ticks % Math.max(1, Math.round(100 / tickMs)) === 0;
     for (const s of sessions) {
       if (!s.pc || !s.open) continue;
-      if (fast) { sendSelf(s); sendMobs(s); sendGround(s); sendPlayers(s); sendShop(s); sendGates(s); }
+      if (fast) { sendSelf(s); sendMobs(s); sendGround(s); sendPlayers(s); sendShop(s); sendGates(s); sendDoors(s); }
       flush(s);
       if ((s.saveIn -= dt) <= 0) { s.saveIn = AUTOSAVE_SECONDS; saveSession(s); }
     }
@@ -742,6 +744,36 @@ export async function startMud({
     if (s.sent.gates === text) return;
     s.sent.gates = text;
     send(s, { t: 'gates', z: zone, g: list });
+  }
+
+  /**
+   * The doors of the reader's zone: [room, direction, the exit's shut and
+   * locked bits] for every exit with a door. The rules that open, close and
+   * reset them run here, where no page's hinges are (rules/world.js
+   * `syncDoor`), so a page learns what its doors say from this.
+   */
+  const doorViews = { tick: -1, byZone: new Map() };
+  function sendDoors(s) {
+    const zone = s.zone || w.zoneOfVnum(s.pc.ch.roomVnum)?.zone.id;
+    if (!zone || !w.byId.has(zone)) return;
+    if (doorViews.tick !== stats.ticks) {
+      doorViews.tick = stats.ticks;
+      doorViews.byZone = new Map();
+    }
+    let list = doorViews.byZone.get(zone);
+    if (!list) {
+      list = [];
+      for (const vnum of w.byId.get(zone).layout.cells.keys()) {
+        w.world.rooms.get(vnum).exits.forEach((e, dir) => {
+          if (e && (e.locks & EX_ISDOOR)) list.push([vnum, dir, e.locks & (EX_CLOSED | EX_LOCKED)]);
+        });
+      }
+      doorViews.byZone.set(zone, list);
+    }
+    const text = JSON.stringify(list);
+    if (s.sent.doors === text) return;
+    s.sent.doors = text;
+    send(s, { t: 'doors', z: zone, d: list });
   }
 
   function sendWeather(only = null) {

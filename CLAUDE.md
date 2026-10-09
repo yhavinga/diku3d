@@ -456,6 +456,12 @@ choose.
   Standalone must stay byte-identical — check with a seeded trace, and run
   `node tools/server-check.mjs` (needs `cd server && npm ci`) after any
   change to `game.js` or `src/rules/`.
+- **What the rules do to the page's own objects does nothing on a server.**
+  `k.actors` (the drawn zone's hinges, figures) is absent there, so a rule
+  that changes something the page draws has to reach the page over the
+  link: doors come in `doors`, gates in `gates`, mobiles in `mob`. A door
+  opened on the server stood shut on every page, collider and all, until
+  `doors` existed.
 - **The server walks where the page walks** (`server/world.mjs` `judge`).
   The page's ground runs on where the mud joins nothing -- grass between
   and round the rooms, streets that cross or touch, ledges -- and the old

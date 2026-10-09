@@ -23,7 +23,7 @@
 
 import {
   ACT_SENTINEL, ACT_AGGRESSIVE, ACT_PRACTICE, ACT_SCAVENGER, ITEM,
-  ROOM_NO_MOB, ROOM_PRIVATE, ROOM_SOLITARY, DIR_NAME, EX_CLOSED,
+  ROOM_NO_MOB, ROOM_PRIVATE, ROOM_SOLITARY, DIR_NAME, EX_CLOSED, EX_LOCKED,
 } from './are.js';
 import { createNav } from './nav.js';
 import {
@@ -3541,6 +3541,22 @@ export function createGame({
     mob: mirrorMob, ground: mirrorGround, self: mirrorSelf, resolve: resolveRef, remotes,
     /** The weather the server's barometer is at. */
     weather(w) { Object.assign(weather, w); },
+    /**
+     * Whether each door is shut and locked, [room, direction, those two
+     * bits]: the exit takes the server's word and its hinge swings, as the
+     * rules swing it here alone. `quiet` for the first word on a zone, which
+     * only catches the page up and is no door being opened.
+     */
+    doors(list, quiet = false) {
+      const BITS = EX_CLOSED | EX_LOCKED;
+      for (const [vnum, dir, bits] of list) {
+        const was = world.rooms.get(vnum)?.exits[dir]?.locks;
+        if (was === undefined || (was & BITS) === bits) continue;
+        const sound = quiet ? null : (was & EX_CLOSED) !== (bits & EX_CLOSED) ? (bits & EX_CLOSED ? 'close' : 'open')
+          : (bits & EX_LOCKED ? 'lock' : 'unlock');
+        kernel.setExitFlags(vnum, dir, bits, BITS & ~bits, sound);
+      }
+    },
     /** Stop running the rules here: the server runs them. */
     become() { puppet = true; },
     get puppet() { return puppet; },

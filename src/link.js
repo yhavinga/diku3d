@@ -516,6 +516,15 @@ export function attachSocketLink(link, game, host, enter) {
       }
     }
   }));
+  // Whether each door of the zone is shut: the server's word, since the
+  // rules that open one run there, and without it the door you opened stood
+  // shut on your own page, collider and all. The first list on a zone only
+  // catches the page up, so it makes no sound.
+  let doorZone = null;
+  offs.push(link.on('doors', (msg) => {
+    mirror.doors(msg.d, msg.z !== doorZone);
+    doorZone = msg.z;
+  }));
   let token = enter.token;
   offs.push(link.on('enter', (msg) => { seq = msg.seq; id = msg.id; token = msg.token; host.teleport(msg.room); }));
   // A report the server would not believe: back to where it has you.

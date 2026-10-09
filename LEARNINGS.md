@@ -6,6 +6,24 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-09 — doors on a server
+
+- **A door opened on the server stayed shut on the page.** Reported at
+  #3700: "You open the door.", and no leaf moved. The rules swing a door's
+  hinge themselves (rules/world.js `syncDoor`, through `k.actors.doors`),
+  and on a server there are no hinges, so nothing reached the page but the
+  line of text. The page kept the exit flags it booted with: its leaf, its
+  collider and its subtitle said shut, and a second E closed a door it had
+  never shown open. Gates had their own message (`gates`); doors had none.
+  Now the server sends each page its zone's doors, [room, direction, shut
+  and locked bits], whenever they change, and the page sets its exits from
+  them and swings the hinge through the same `setExitFlags`
+  (game.js `mirror.doors`), quietly for the first list on a zone. On a local
+  server with two pages in #3700: one opens, both leaves swing open with the
+  sound, the opener walks through into #3744 with nothing refused, the
+  other shuts it and both swing shut. `k.actors` is used twice more in the
+  rules, for a mobile's clip and its respawn, and both come over in `mob`.
+
 ## 2026-10-09 — north and west walls
 
 - **A wall facing north or west had an inside-out collider.**
