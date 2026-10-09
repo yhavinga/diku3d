@@ -1857,6 +1857,9 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
 
   const holes = new Map();
   const stairPlans = [];
+  // One-way ways up the grid stacked: steps up to a doorway that carries you
+  // in, by the lower room's cell (see below).
+  const climbsUp = new Map();
   for (const link of layout.links) {
     if (link.kind !== 'stairs') continue;
     const goingUp = link.dir === 4;
@@ -1864,6 +1867,13 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     const upper = goingUp ? link.to : link.from;
     const dir = layout.stairSide.get(link);
     if (dir === undefined || !lower || !upper) continue;
+    // "An old set of wooden steps leads up to a creaking second floor ...
+    // The old rotted floorboards suddenly give way": a way up with none back
+    // down. A flight through the floor above is walked back down it, so it is
+    // steps up to a doorway, as a way the grid could not stack is, and the
+    // floor above is whole.
+    const back = upper.room.exits[5];
+    if (goingUp && !(back && back.to === lower.vnum)) { climbsUp.set(lower.vnum, { dir, target: upper }); continue; }
     // What shuts it, if anything (shells.js `wayLid`); a passage with a door
     // and nothing to shut stays the open flight. A way down with no way back
     // up is a shaft (`isDrop`).
@@ -2363,7 +2373,17 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       // a level one is; indoors it is a ladder or a shaft against a wall
       // that stays whole (`fixture`).
       const shaft = !!side && side.kind === 'shaft' && !wellDown;
-      const open = side && (side.kind === 'alley' || side.kind === 'portal' || (shaft && openAir)) && !wellDown;
+      // Out of doors above the ground a way up or down is steps or an arch
+      // in the room's edge, and the rest of that side is the edge: left open,
+      // it was a gap to step off and fall through. "No way are you going to
+      // descend now ... Look down and you'll see why" (#7916), and the body
+      // walked off its way-up side and down to the room below. `gap` is what
+      // the steps or the arch (`fixture`) stand in, along the side.
+      const ledge = shaft && openAir && cell.level > 0 && !airborne;
+      const shape = ledge ? wayShape(side.link.dir) : null;
+      const span = shape === 'climb' ? [-1.4, 3.0] : shape === 'arch' ? [-2.5, 2.5] : null;
+      const gap = span && (dir === 0 || dir === 1 ? span : [-span[1], -span[0]]);
+      const open = side && (side.kind === 'alley' || side.kind === 'portal' || (shaft && openAir && !ledge)) && !wellDown;
       const distance = openAir ? HALF : ROOM / 2;
       const wx = pos.x + dx * distance;
       const wz = pos.z + dz * distance;
@@ -2386,7 +2406,17 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         // Nothing walls a room under the canopy: `buildForest` stands a picket
         // of trees along every side there is no way out of, and a rock kerb
         // behind that is the level editor showing through.
-        if (!canopy && dir !== fort) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog, instances });
+        if (!canopy && dir !== fort) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog, instances, gap });
+        // ...and the steps' own backs are on the edge, with nothing behind
+        // them: on the chain a body stood on the third step and stepped back
+        // off it. Behind the gap, outside the cell, so no step lies in it.
+        if (gap && !canopy && dir !== fort) {
+          const along = dir === 1 || dir === 3;
+          const n = along ? dx : dz;
+          const lo = Math.min(n * HALF, n * (HALF + 0.3)); const hi = Math.max(n * HALF, n * (HALF + 0.3));
+          addCollider(along ? pos.x + lo : pos.x + gap[0], along ? pos.x + hi : pos.x + gap[1],
+            along ? pos.z + gap[0] : pos.z + lo, along ? pos.z + gap[1] : pos.z + hi, pos.y, pos.y + 4.5);
+        }
         // Once, for the whole cell -- the corners need to know about all four
         // sides, not one at a time.
         // Outside a gate is outside the wall: no houses. See `townEdges`.
@@ -2518,6 +2548,9 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     // Nobody has lit a lamp in the neighborhood for years: its light is the
     // gangs' fires.
     if (openAir && !hood) buildStreetLamp({ room, cell, pos, decor, lights, addCollider, instances, chunk });
+
+    const climbUp = climbsUp.get(room.vnum);
+    if (climbUp && !airborne) fixture({ way: 'up', dir: climbUp.dir, along: 0, target: climbUp.target, exitDir: 4 });
 
     // A way up or down that no passage carries. layout.js pairs an exit with
     // the one coming back, once; the Void's rooms go up *and* down to the
@@ -2856,6 +2889,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt,
       cellKey, streetCells: openStreet, lift: Math.min(liftFrom, liftTo), streetClutter,
     });
+    if (leadsNowhere(link, world)) sealStreet({ batcher, instances, link, worldOf, chunkOf, addCollider, layout });
     if (liftFrom && liftTo) {
       for (const c of link.path) {
         const at = worldOf({ ...c, level: link.from.level });
@@ -6964,8 +6998,17 @@ function buildMist(group, cells) {
 }
 
 /** The boundary of an open-air room: an opening, or something to stop you. */
-function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog = false, instances = null }) {
+function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog = false, instances = null, gap = null, part = null }) {
   if (open) return;
+  // With a gap -- the steps of a way up standing in this edge -- it is two
+  // edges, either side of it: [g0, g1] along the side's own axis (x for north
+  // and south, z for east and west), from the room's middle.
+  if (gap) {
+    for (const [s0, s1] of [[-HALF, gap[0]], [gap[1], HALF]]) {
+      if (s1 - s0 > 0.3) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog, instances, part: [s0, s1] });
+    }
+    return;
+  }
   // No Man's Land's edges are what is left of the houses that stood there:
   // a broken wall along the side, a heap of it at its foot.
   const hood = hoodStyle(room);
@@ -7059,8 +7102,12 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
     // three metres, to a ragged lip -- and falls away more steeply behind.
     const depth = 4.4;
     const out = dir === 1 || dir === 2 ? 1 : -1;       // local z towards the edge
-    const geo = peatBank(CELL + 2.4, wild ? 1.2 : h, depth, out, room.vnum * 4 + dir);
-    const c = { x: pos.x + dx * (HALF - depth / 2 + 0.9), z: pos.z + dz * (HALF - depth / 2 + 0.9) };
+    // A part runs past the cell's corner as the whole bank does, 1.2 m.
+    const p0 = part ? (part[0] <= -HALF ? -HALF - 1.2 : part[0]) : 0;
+    const p1 = part ? (part[1] >= HALF ? HALF + 1.2 : part[1]) : 0;
+    const m = part ? (p0 + p1) / 2 : 0;
+    const geo = peatBank(part ? p1 - p0 : CELL + 2.4, wild ? 1.2 : h, depth, out, room.vnum * 4 + dir);
+    const c = { x: pos.x + dx * (HALF - depth / 2 + 0.9) + (along ? 0 : m), z: pos.z + dz * (HALF - depth / 2 + 0.9) + (along ? m : 0) };
     batcher.add(geo, bog ? 'peat' : (sectorOf(room) === SECTOR.FOREST ? 'duff' : 'grass'),
       place(c.x, pos.y - 0.04, c.z, along ? Math.PI / 2 : 0), { chunk, ao: bog ? shade : null, normals: true });
     geo.dispose();
@@ -7068,15 +7115,26 @@ function buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, b
     for (let i = 0; fern && i < 4; i++) {
       // At the foot of the bank on the room's side, clear of the middle.
       const a = (hash3(room.vnum, dir, i, 1061) - 0.5) * (CELL - 3);
+      if (part && (a < part[0] || a > part[1])) continue;
       const inward = HALF - 3.4 - hash3(room.vnum, dir, i, 1062) * 0.8;
       instances.add(fern, {
         x: pos.x + dx * inward + (along ? 0 : a), y: pos.y, z: pos.z + dz * inward + (along ? a : 0),
         rotY: hash3(room.vnum, dir, i, 1063) * Math.PI * 2, scale: 0.8 + hash3(room.vnum, dir, i, 1064) * 0.4,
       }, chunk);
     }
+  } else if (part) {
+    const L = part[1] - part[0]; const m = (part[0] + part[1]) / 2;
+    batcher.add(box(along ? t : L, h, along ? L : t, 2, 2, 2), material,
+      place(bx + (along ? 0 : m), pos.y + h / 2, bz + (along ? m : 0)), { chunk, ao: shade });
   } else {
     batcher.add(box(along ? t : CELL, h, along ? CELL : t, 2, 2, 2), material,
       place(bx, pos.y + h / 2, bz), { chunk, ao: shade });
+  }
+  if (part) {
+    const [a0, a1] = part;
+    addCollider(along ? bx - t / 2 : pos.x + a0, along ? bx + t / 2 : pos.x + a1,
+      along ? pos.z + a0 : bz - t / 2, along ? pos.z + a1 : bz + t / 2, pos.y, pos.y + h + 2);
+    return;
   }
   addCollider(bx - (along ? t : CELL) / 2, bx + (along ? t : CELL) / 2,
     bz - (along ? CELL : t) / 2, bz + (along ? CELL : t) / 2, pos.y, pos.y + h + 2);
@@ -7107,6 +7165,60 @@ function buildRailFence({ batcher, chunk, pos, dir, addCollider }) {
   }
   const [cw, cd] = along ? [0.6, CELL] : [CELL, 0.6];
   addCollider(c.x - cw / 2, c.x + cw / 2, c.z - cd / 2, c.z + cd / 2, pos.y, pos.y + H + 1.2);
+}
+
+/**
+ * A street the mud runs one way into a room with no way out of it: the spider
+ * web (#6131), the black hole (#9325). Out of doors a street is open at its
+ * sides, so a body walked down it and stepped off onto the ground beside it
+ * halfway -- out of a room it can never leave, by the server's count, which
+ * puts a body on a street in its nearer room. Walled along its sides
+ * (`sealStreet`), it is a way in and nothing else.
+ */
+const leadsNowhere = (link, world) => !link.twoWay && !!link.to && link.path.length > 0
+  && isOpenAir(link.from.room) && !isOpenAir(link.to.room)
+  && !link.to.room.exits.some((e) => e && e.to >= 0 && world.rooms.has(e.to));
+/** What a street into a web is covered in: clutter.js's words for one. */
+const WEBBED = /\b(?:cobwebs?|spider ?webs?|giant web|sticky (?:ropes|wires|threads|strands)|huge threads)\b/i;
+
+/**
+ * Both sides of every cell of `link`'s street that it neither comes in by nor
+ * leaves by, walled to well over a head: "the path seems to be completely
+ * covered in a giant web made from huge threads covered with glue" is silk
+ * (clutter.py's web), and anything else -- "Nothing can escape from this
+ * monster, not even light" -- dark stone.
+ */
+function sealStreet({ batcher, instances, link, worldOf, chunkOf, addCollider, layout }) {
+  const chain = [link.from, ...link.path, link.to];
+  // A cell another street crosses is that street's too, and is left open: the
+  // Pleiades' street crosses the black hole's in its only cell, and walled,
+  // it was cut in two (see the report: the layout is where that is mended).
+  const crossed = (c) => layout.links.some((l) => l !== link && l.kind === 'alley' && l.from.level === link.from.level
+    && l.path.some((q) => q.x === c.x && q.z === c.z));
+  const webbed = WEBBED.test(`${link.from.room.description} ${link.to.room.description}`)
+    && !!instances && !!instances.library.get('clutter_web');
+  const H = 3.4;
+  for (let i = 1; i < chain.length - 1; i++) {
+    if (crossed(chain[i])) continue;
+    const c = { ...chain[i], level: link.from.level };
+    const at = worldOf(c);
+    const chunk = chunkOf(c);
+    const used = [dirBetween(chain[i], chain[i - 1]), dirBetween(chain[i], chain[i + 1])];
+    for (let dir = 0; dir < 4; dir++) {
+      if (used.includes(dir)) continue;
+      const [dx, , dz] = DIR_STEP[dir];
+      const along = dir === 1 || dir === 3;
+      const x = at.x + dx * (HALF - 0.3); const z = at.z + dz * (HALF - 0.3);
+      if (webbed) {
+        // The web model is 7.9 m across and 7 m high from 0.7 m up: one a
+        // side, stretched to the cell and held down to the path's height.
+        instances.add('clutter_web', { x, y: at.y - 0.6, z, rotY: FACE_ROT[dir], scaleX: CELL / 7.9, scaleY: 0.55, scaleZ: 1 }, chunk);
+      } else {
+        batcher.add(box(along ? 0.6 : CELL, H, along ? CELL : 0.6), 'blackstone', place(x, at.y + H / 2, z), { chunk, ao: wallAo(at.y) });
+      }
+      addCollider(x - (along ? 0.3 : HALF), x + (along ? 0.3 : HALF), z - (along ? HALF : 0.3), z + (along ? HALF : 0.3), at.y, at.y + H + 2);
+    }
+  }
 }
 
 /**
