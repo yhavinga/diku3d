@@ -344,7 +344,10 @@ export function bootWorld(root, { log = () => {} } = {}) {
       // but not a drop, which has nothing in it to climb, and not through a
       // shut lid, unless there is nothing there to shut.
       const back = adjacent(pc.ch, vnum, from) && !isDrop(world, vnum, from);
-      if (levelOf(was.y) !== levelOf(feet) && !back && !passageBetween(from, vnum)
+      // Up out of a shaft onto the floor above is up, though the feet were
+      // already nearer that level than their own on the flight's upper half.
+      const vertical = levelOf(was.y) !== levelOf(feet) || !!shaftRoom(was.x, was.y, was.z) !== !!shaft;
+      if (vertical && !back && !passageBetween(from, vnum)
         && (walledAround(here) !== null || walledAround(was) !== null)) {
         return { why: `no way up or down from #${from} to #${vnum}` };
       }

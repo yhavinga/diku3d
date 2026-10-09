@@ -9782,14 +9782,18 @@ function buildLidStair({
   // Its sides, from where it comes up through the ceiling below to its head:
   // the shaft's walls are there, and nothing to step off into. Below the
   // ceiling the flight stands free, as the open flight's lowest stretch does.
-  // Never higher than the floor above, where they would fence the lid.
+  // Never higher than the floor above, where they would fence the lid. Their
+  // faces are at the shaft's lining, 0.1 m out from the treads: that leaves a
+  // body 0.33 m either side of the middle, where a half-metre grid's samples
+  // (walkable.mjs) are; at the treads' edge it was 0.23, and none were.
   const ceil = lidCeiling(kind);
   const into = ceil.a1;
   const SEG = 5;
+  const C = o.half + 0.02;
   for (const s of [-1, 1]) {
     for (let k = 0; k < SEG; k++) {
       const a0 = into - (into - E) * (k / SEG); const a1 = into - (into - E) * ((k + 1) / SEG);
-      const r = rect(lower, a1, a0, s > 0 ? W : -W - 0.3, s > 0 ? W + 0.3 : -W);
+      const r = rect(lower, a1, a0, s > 0 ? C : -C - 0.3, s > 0 ? C + 0.3 : -C);
       const y0 = Math.max(lower.y, lower.y + (S - a0) * slope - 0.4);
       const y1 = Math.min(upper.y - 0.05, lower.y + (S - a1) * slope + 1.1);
       if (y1 > y0) addCollider(r.x0, r.x1, r.z0, r.z1, y0, y1);

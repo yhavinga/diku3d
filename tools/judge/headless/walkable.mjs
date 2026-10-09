@@ -402,8 +402,15 @@ for (const zoneId of zoneIds) {
       const nx = (a + 0.5) * RES, nz = (c + 0.5) * RES;
       // A jump takes the step from the top of its rise.
       for (const rise of opt.jumps ? [0, JUMP_UP] : [0]) {
-        const nfeet = groundAt(nx, nz, feet + rise);
+        let nfeet = groundAt(nx, nz, feet + rise);
         if (nfeet === -Infinity || blocked(nx, nz, feet + rise)) continue;
+        // player.js steps up onto whatever is within a step of the feet, frame
+        // after frame while the body stands there, so on a flight it stands on
+        // the highest tread its radius reaches -- not the first one it could
+        // step to from half a metre back. On a flight steeper than a step per
+        // sample (a lid's, 60 degrees: 0.86 m in 0.5 m) the flood fell off the
+        // flight four samples up without this, and never came near the lid.
+        for (let g = groundAt(nx, nz, nfeet); g > nfeet + 1e-6 && !blocked(nx, nz, g); g = groundAt(nx, nz, nfeet)) nfeet = g;
         if (inPortal(nx, nz, nfeet)) continue;
         steps++;
         const v = judged(room, x, feet, z, nx, nfeet, nz);
