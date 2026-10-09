@@ -43,7 +43,9 @@ export function createConnectUi({ getGame, onEnter, onAlone, storage = globalThi
 
   let remembered = null;
   try { remembered = storage && storage.getItem(ADDRESS_KEY); } catch { remembered = null; }
-  address.value = remembered || '';
+  // Filled in with this site rather than left empty: an empty field reads as
+  // one you have to fill, though empty already meant "this site".
+  address.value = remembered || globalThis.location?.host || '';
   address.placeholder = `${globalThis.location?.host || 'this site'}/ws · or host:port`;
 
   let link = null;
