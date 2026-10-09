@@ -16,8 +16,9 @@
  * never depends on where the player happens to enter.
  */
 
-import { DIR_STEP } from './are.js';
+import { DIR_STEP, SECTOR } from './are.js';
 import { layoutWorld } from './layout.js';
+import { openAirIn } from './shells.js';
 
 /**
  * The default world. Measured choices, each one documented where main.js
@@ -114,6 +115,27 @@ export function zoneWorld(world, zone) {
 }
 
 /**
+ * Which rooms build.js walls in, for layout.js to keep their doorways and
+ * corridors clear of other streets: shells.js `isOpenAir`, as the server
+ * holds a step to it (server/world.mjs `walled`). Read once per world, the
+ * first time a zone is laid out, and kept: build.js and vista.js classify a
+ * zone's own rooms again as they build it (`classifyCanopy` on the zone
+ * alone), and a layout must not depend on which zones were built before it,
+ * or a page and the server would put the same streets in different cells.
+ */
+const walledIn = new WeakMap();
+function wallsOf(world) {
+  if (!walledIn.has(world)) {
+    const openAir = openAirIn(world);
+    const walled = new Set();
+    for (const room of world.rooms.values()) if (room.sector !== SECTOR.AIR && !openAir(room)) walled.add(room);
+    walledIn.set(world, walled);
+  }
+  const walled = walledIn.get(world);
+  return (room) => walled.has(room);
+}
+
+/**
  * Lay a zone out: layout.js's own placement from the zone's fixed start,
  * with every arrival room it could not walk to laid down whole beside it.
  */
@@ -123,6 +145,7 @@ export function layoutZone(world, plan, zone) {
     maxRooms: zone.maxRooms,
     includeVnum: (v) => plan.zoneOf(v) === zone,
     roots: zone.arrivals,
+    walled: wallsOf(world),
   });
 }
 
