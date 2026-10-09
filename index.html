@@ -230,11 +230,12 @@
     border: 1px solid rgba(224,189,119,0.45); padding: 10px 22px; border-radius: 2px; }
   #continue:hover { background: rgba(224,189,119,0.08); }
   #continue[hidden] { display: none; }
-  /* The other door: a server (src/link-ui.js). Playing alone stays the big one. */
-  #connect-open { margin-top: 2px; pointer-events: auto; cursor: pointer; font-family: var(--mono); font-size: 10px;
-    letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); background: transparent; border: none;
-    padding: 6px 0; opacity: 0.72; text-decoration: underline; text-decoration-color: rgba(224,189,119,0.35); text-underline-offset: 4px; }
-  #connect-open:hover { opacity: 1; }
+  /* The other door: a server (src/link-ui.js). Playing alone stays the big one, but as an
+     underlined line nobody saw that meeting other players means connecting first. */
+  #connect-open { margin-top: 4px; pointer-events: auto; cursor: pointer; font-family: var(--mono); font-size: 10.5px;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); background: rgba(8,7,6,0.4);
+    border: 1px solid rgba(224,189,119,0.6); padding: 10px 22px; border-radius: 2px; }
+  #connect-open:hover { background: rgba(224,189,119,0.1); border-color: rgba(224,189,119,0.9); }
   #connect { pointer-events: auto; display: grid; gap: 8px; margin-top: 4px; width: min(420px, 80vw);
     font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; color: var(--gold);
     background: rgba(8,7,6,0.62); border: 1px solid rgba(224,189,119,0.3); border-radius: 2px; padding: 14px 16px; }
@@ -448,9 +449,9 @@
   <h1>DIKU3D</h1>
   <h2>Midgaard · Haon Dor · Moria · the Shire · and nearly forty more<span>DikuMUD · Merc 2.1 · in three dimensions</span></h2>
   <button id="enter">enter the temple</button>
-  <div id="class-pick"><span>as a</span><button data-class="3" class="on">warrior</button><button data-class="0">mage</button><button data-class="1">cleric</button><button data-class="2">thief</button></div>
+  <div id="class-pick"><span>alone, as a</span><button data-class="3" class="on">warrior</button><button data-class="0">mage</button><button data-class="1">cleric</button><button data-class="2">thief</button></div>
   <button id="continue" hidden></button>
-  <button id="connect-open" type="button">connect to a server</button>
+  <button id="connect-open" type="button">play with others · connect to a server</button>
   <form id="connect" hidden autocomplete="on">
     <label>server <input id="connect-address" spellcheck="false" autocapitalize="off" autocomplete="url"></label>
     <label>name <input id="connect-name" maxlength="12" spellcheck="false" autocapitalize="off" autocomplete="username"></label>
