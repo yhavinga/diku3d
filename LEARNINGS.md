@@ -6,6 +6,52 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-09 — north and west walls
+
+- **A wall facing north or west had an inside-out collider.**
+  `buildIndoorWall` wrote its box as `x - t*0.2 .. x + dx*t + t*0.2`, which
+  for dx or dz = -1 gives x0 > x1, and player.js does not sort a box. So the
+  wall was a strip 0.42 m wide that a body met 0.14 m past the plaster:
+  5.14 m from the middle, against 4.44 m at a south or east wall, with the
+  camera looking out through the wall at the street. A census of every
+  collider in all 32 zones (addCollider instrumented in the page): 3,980 of
+  50,999 inverted, every one from `addWall` -- 1,436 whole walls, 2,544
+  halves beside a doorway -- and nothing from anywhere else. Fixed by
+  sorting the two ends; in moria, hitower and chapel exactly the inverted
+  boxes changed and every other collider is byte-identical.
+- **At 20 fps a sprint went straight through.** main.js clamps dt at 0.05 s,
+  so a sprint is a 0.475 m step, wider than the strip. player.js's own
+  update, 40 frames at dt 0.05 into each wall of #3003, #3006, #3009 and
+  #3010: through every north and west wall (6.6 to 20.8 m out), stopped at
+  4.4 m by every south and east one. After the fix all of them stop at 4.4.
+- **A thicker wall cut off no way.** A flood from every room's arrival
+  point, 45 m and two levels round it, listing the rooms it walks to: after
+  the fix 8 pairs fewer, none of them along an exit -- #1124 to #1121,
+  #6134 to #6131 (the spider web, which has no exits), and hitower's #1382
+  on level 2 to six rooms on level 0 -- and none gained. crossings.mjs and
+  ways.mjs read the same before and after.
+- **Ofcol's grass was reached by squeezing past a wall.** walkable's steps
+  there fell from 3.75M to 0.44M. The grass round the zone (743k samples)
+  met the rest at two places only, a 0.8 m gap between the outside of a west
+  wall and the street beside it (cells 8,8 and 12,-2), which a 0.84 m body
+  passed only by standing 0.4 m into the wall. With the fix ofcol is shut in,
+  as every south and east wall already shut it. Elsewhere walkable lost
+  2-10% of its steps, the strips along the walls; with every door open and
+  every door shut it refuses nothing (84.1M and 83.4M steps).
+- **Clutter had been placed against the broken walls.** clutter.js finds a
+  wall by probing the colliders and never found an inverted one, so against
+  a north or west wall it stood things at the plaster, and against a south
+  or east one it refused any floor thing whose footprint reached the
+  collider's 0.14 m strip in front of the plaster. A cage or a chest in a
+  kit room (stone face 5.13 m out) stood only against north and west walls:
+  cages N 6, W 3, S 0, E 0. With only the walls fixed, 4 things lost their
+  place (the Watermill's millstones, the torture room's hanging skeletons)
+  and 16 left their wall. Now the strip is no obstacle to what stands against
+  the wall (`offWall`), a probe that hits it reads the plaster, and on the
+  floor the room to walk round a thing is not wanted against a wall but the
+  thing stops at the plaster. Of 528 placements 494 are where they were and
+  none is missed that was placed before.
+
 ## 2026-10-09 — the server walks where the page walks
 
 - **The page's ground is not the mud's graph, and the server believed only
@@ -36,8 +82,8 @@ is an opinion.
   the hollow tree #6153: a walker in the wood reached the corner of the box,
   outside the bark. Its wall is round (hollow to 4.2–4.9 m, bark from
   6.0 m), so the judge holds it to `TREE_LINE` 5.4.
-- **North and west walls are thinner than south and east.** Found, not
-  fixed. In `buildIndoorWall` the collider of a wall facing -x or -z is an
+- **North and west walls are thinner than south and east.** Found here,
+  fixed in the next round (above). In `buildIndoorWall` the collider of a wall facing -x or -z is an
   inverted box (x0 > x1), so its collision band is 0.42 m wide instead of
   1.82 m. Measured with `resolvePoint` in #3002, #3003, #3006, #3009 and
   #3010: a body stops 5.16 m from the centre at a north or west wall, inside

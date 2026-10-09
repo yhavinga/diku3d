@@ -3583,9 +3583,17 @@ function buildIndoorWall({ batcher, chunk, mats, x, y, z, rotY, open, kit, insta
 
   const t = WALL_IN + WALL_OUT;
   const centre = along ? z : x;
+  // A fifth of the wall's thickness inside its inner face to a fifth past its
+  // outer one, whichever way it faces. Written from the inner face's minus
+  // side, a north or west wall's box came out with x0 > x1: a strip 0.42 m
+  // wide that a body stood 0.14 m inside, looking out through the wall, and
+  // that a sprint at 20 fps (a 0.475 m step) went straight through.
+  const face = along ? x : z;
+  const out = along ? dx : dz;
+  const [lo, hi] = [face - out * t * 0.2, face + out * t + out * t * 0.2].sort((a, b) => a - b);
   const addWall = (c0, c1) => {
-    if (along) addCollider(x - t * 0.2, x + dx * t + t * 0.2, c0, c1, y, y + eave);
-    else addCollider(c0, c1, z - t * 0.2, z + dz * t + t * 0.2, y, y + eave);
+    if (along) addCollider(lo, hi, c0, c1, y, y + eave);
+    else addCollider(c0, c1, lo, hi, y, y + eave);
   };
   if (!gap) addWall(centre - width / 2, centre + width / 2);
   else {

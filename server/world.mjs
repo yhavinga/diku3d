@@ -60,8 +60,7 @@ const SPEED_SLACK = 3;
  * Where a walled room's wall is, for a step through it: build.js's box (the
  * middle of a wall whose inner face is ROOM/2 out, KIT_LINE), or the ring of
  * a hollow tree (`buildGreatTree`: hollow to 4.2-4.9 m, bark from 6.0 m).
- * A body is stopped 0.8 m short of the line at a south or east wall, and
- * 0.2 m short at a north or west one, whose collider is thinner.
+ * A body is stopped 0.9 m short of the line, at 4.44 m from the middle.
  */
 const WALL_LINE = 5.35;
 const TREE_LINE = 5.4;

@@ -494,6 +494,8 @@ export function placeClutter(ctx) {
   if (!instances) return { placed: 0 };
   const library = instances.library;
   for (const name of INDOOR_ONLY) markIndoor(library.get(name), BufferAttribute);
+  // From the middle of a walled room, where its walls' colliders begin (4.86 m), and a little.
+  const IN_WALL = ROOM / 2 - 0.2;
 
   // Small placements already made, by cell, so a sarcophagus is not stood in
   // a bone pile: everything instanced whose footprint is under 4 m a side.
@@ -600,13 +602,29 @@ export function placeClutter(ctx) {
       if (!outside && info.materials && info.materials.rockCave) return ROOM / 2 - 0.86;
       if (plan && !outside) return ROOM / 2 + ((plan.face || 0) > 0 ? 0.13 : (shellKind === 'log' ? plan.face : 0));
       // A walled room's wall is never further out than ROOM / 2: a wall with
-      // a doorway in it has had no collider past the opening's jambs.
+      // a doorway in it has had no collider past the opening's jambs. The
+      // wall's own collider starts 0.14 m short of its plaster (build.js
+      // `buildIndoorWall`), and what stands against it stands at the plaster.
       const most = outside ? 7.2 : ROOM / 2 + 0.01;
       for (let s = 1.5; s < most; s += 0.05) {
         const x = px + dx * s; const z = pz + dz * s;
-        if (solid.some((c) => x > c.x0 && x < c.x1 && z > c.z0 && z < c.z1)) return s;
+        if (solid.some((c) => x > c.x0 && x < c.x1 && z > c.z0 && z < c.z1)) return !outside && s > IN_WALL ? ROOM / 2 : s;
       }
       return outside ? HALF : ROOM / 2;
+    };
+    /**
+     * A footprint against wall `dir` less the part of it inside that wall's
+     * collider, which is no obstacle to what stands against the wall. With
+     * it counted, nothing on the floor could stand against any wall but a
+     * north or a west one, whose box came out inside out and was never seen.
+     */
+    const offWall = (r, dir) => {
+      if (outside) return r;
+      const [dx, , dz] = DIR_STEP[dir];
+      return {
+        x0: dx < 0 ? Math.max(r.x0, pos.x - IN_WALL) : r.x0, x1: dx > 0 ? Math.min(r.x1, pos.x + IN_WALL) : r.x1,
+        z0: dz < 0 ? Math.max(r.z0, pos.z - IN_WALL) : r.z0, z1: dz > 0 ? Math.min(r.z1, pos.z + IN_WALL) : r.z1,
+      };
     };
 
     const put = (name, x, z, rotY, { scale = 1, collide = false, y = pos.y, far = false, examine = null } = {}) => {
@@ -687,7 +705,7 @@ export function placeClutter(ctx) {
             const bottom = pos.y + b.min.y * scale;
             const wide = (c) => Math.max(c.x1 - c.x0, c.z1 - c.z0) > 3;
             if (colliders.some((c) => !wide(c) && c.y1 > bottom && c.y0 < pos.y + b.max.y * scale && overlaps(r, c, 0.1))) continue;
-          } else if (hang ? (!above && !clear(r, false)) : !clear(r)) continue;
+          } else if (hang ? (!above && !clear(r, false)) : !clear(offWall(r, dir))) continue;
           // A barrel under a painting is where barrels go; a cupboard in
           // front of one is not.
           if (hang && !high && blocked.some((q) => overlaps(r, q, -0.05) && !solid.includes(q) && (q.h ?? 9) > 1.2)) continue;
@@ -726,8 +744,12 @@ export function placeClutter(ctx) {
         const facing = Math.abs(gx) > Math.abs(gz) ? Math.PI / 2 : 0;
         for (const rotY of spinAny ? [roll(room.vnum, k, gx * 4 + gz) * Math.PI * 2] : [facing, facing + Math.PI / 2]) {
           const r = footprint(b, x, z, rotY, scale, pad);
-          if (!clear(r, true, flat)) continue;
-          return { x, z, rotY, r: footprint(b, x, z, rotY, scale) };
+          // The room to walk round it is not wanted between it and a wall,
+          // but it stops at the plaster itself.
+          const own = footprint(b, x, z, rotY, scale);
+          if (!outside && Math.max(pos.x - own.x0, own.x1 - pos.x, pos.z - own.z0, own.z1 - pos.z) > ROOM / 2) continue;
+          if (!clear(outside ? r : [0, 1, 2, 3].reduce(offWall, r), true, flat)) continue;
+          return { x, z, rotY, r: own };
         }
       }
       return null;
