@@ -46,6 +46,20 @@ is an opinion.
   `passageBetween` covers the four lidless passages, and in a lid's or a
   drop's shaft below the floor above a body counts in the room below
   (`shaftRoom`).
+- **The room under a shut lid, after (wave17-shaft).** The game's counter
+  and the page's own room (main.js `currentRoom()`, which a typed move goes
+  by) still said the room above, so `up` under hitower's shut trapdoor
+  answered "Alas, you cannot go that way.". The shaft map is shells.js's now
+  (`shaftsOf`, `shaftAt`), shared by the judge, the counter and the page:
+  the move changed nothing in the judge (0 differences in 773M points over
+  the 12 zones with a shaft; a threshold moved by 1 cm is caught), and
+  mp-hatch.mjs reads 37 ok on hitower's trapdoor and on a tomb, against 29
+  ok and 8 failed on the code before. On the server one map keyed by the
+  cell alone would have lost a shaft: chapel's #3405 and galaxy's #9301
+  both lie at cell 0,0 on level 0 of their own zones, hence the frame each
+  zone's shafts are keyed in. A test that took any answer to `up` had been
+  passing in the tomb on "No way! You are still fighting!": a graveyard
+  mobile was on the body the whole time.
 - **Walkable did not test the lids until a control said so.** Run with the
   lids left out of the page and every door shut, it must refuse at the lids;
   the first time it refused nowhere, because at 0.5 m samples it cannot
@@ -84,12 +98,10 @@ is an opinion.
   invisible in daylight (the forcefield is a translucent sheet). A noon and
   night diff needs a noon-to-noon control after the same frames, the torch
   flicker pinned and the grass held still (`built.grass.still`).
-- **Left.** The room the game counts under a shut lid is the one above
-  while the judge's is the one below, so `up` there answers "Alas, you
-  cannot go that way."; galaxy's black hole; four ways whose sides boot in
-  different states (#910/#918 and others) are shut while either side says
-  shut, so E from the open side first closes them; with `?assets=off` a pit
-  shows an upright leaf in an arch.
+- **Left.** Four ways whose sides boot in different states (#910/#918 and
+  others) are shut while either side says shut, so E from the open side
+  first closes them; with `?assets=off` a pit shows an upright leaf in an
+  arch. (The room under a shut lid and the black hole are fixed: above.)
 
 ### The room the game counts you in (wave17-room)
 

@@ -487,7 +487,8 @@ choose.
   slab, trapdoor, grate, stone, boards, forcefield or coffin lid), and the
   judge holds a body to it; only the four ways the words make plain passages
   (`passageBetween`) are taken whatever their door says, and in a lid's or a
-  drop's shaft a body counts in the room below (`shaftRoom`). After changing
+  drop's shaft a body counts in the room below (shells.js `shaftAt`, which
+  the judge, game.js's counter and main.js `currentRoom()` share). After changing
   how a room is walled, a doorway's width or a lid, run
   `tools/judge/headless/walkable.mjs`: it puts every step the page allows,
   in every zone, through the real `judge`, and none may be refused. It is
