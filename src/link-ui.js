@@ -47,6 +47,7 @@ export function createConnectUi({ getGame, onEnter, onAlone, storage = globalThi
   // one you have to fill, though empty already meant "this site".
   address.value = remembered || globalThis.location?.host || '';
   address.placeholder = `${globalThis.location?.host || 'this site'}/ws · or host:port`;
+  countPlayers(address.value, $('online'));
 
   let link = null;
   let stage = 'login';
@@ -165,4 +166,28 @@ export function createConnectUi({ getGame, onEnter, onAlone, storage = globalThi
   }
 
   return { open, close };
+}
+
+/**
+ * How many players the server has in the world, under the connect button:
+ * a socket opened only for its hello and closed again, which logs nobody in.
+ * A page with no server behind it (serve.py) just shows no count.
+ */
+async function countPlayers(input, line) {
+  const where = resolveAddress(input);
+  if (where.error) return;
+  const probe = new SocketLink(where.url);
+  let hello;
+  try {
+    hello = await probe.open();
+  } catch (error) {
+    console.info(`link-ui: no player count: ${error.message}`);
+    return;
+  } finally {
+    probe.close();
+  }
+  const n = hello.online;
+  if (!(n > 0)) return;
+  line.textContent = `● ${n} ${n === 1 ? 'player' : 'players'} online now`;
+  line.hidden = false;
 }

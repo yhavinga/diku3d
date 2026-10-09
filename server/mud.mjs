@@ -144,6 +144,14 @@ export async function startMud({
     dash.tick(fast, ms, Math.round(1000 / tickMs));
   }, tickMs);
 
+  /**
+   * do_who's count as someone with no character would see it: no wizinvis
+   * immortal, and no lost link -- Merc's who walks the descriptors, and a
+   * linkdead character has none.
+   */
+  const online = () => [...byPc.values()]
+    .filter((o) => o.pc && o.linkdead === null && !(o.pc.ch.act & PLR_MORE.WIZINVIS)).length;
+
   // ------------------------------------------------------------- sockets --
   const wss = server ? new WebSocketServer({ server }) : new WebSocketServer({ port, host });
   await new Promise((resolve) => (server ? resolve() : wss.once('listening', resolve)));
@@ -177,7 +185,8 @@ export async function startMud({
     }
     sessions.add(s);
     // `features`: what this server offers past the protocol; a page asks only for what is listed.
-    send(s, { t: 'hello', v: PROTOCOL, features: ['dash'], world: fingerprint, motd: 'Welcome to Merc Diku Mud.  May your visit here be ... Mercenary.' });
+    // `online` is for the title screen, which asks before anyone logs in.
+    send(s, { t: 'hello', v: PROTOCOL, features: ['dash'], world: fingerprint, online: online(), motd: 'Welcome to Merc Diku Mud.  May your visit here be ... Mercenary.' });
     ws.on('message', (data) => {
       stats.msgsIn += 1;
       stats.bytesIn += data.length;

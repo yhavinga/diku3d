@@ -243,6 +243,9 @@
     letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); background: rgba(8,7,6,0.4);
     border: 1px solid rgba(224,189,119,0.6); padding: 10px 22px; border-radius: 2px; }
   #connect-open:hover { background: rgba(224,189,119,0.1); border-color: rgba(224,189,119,0.9); }
+  /* Who is there to meet, asked of the server before anyone logs in; nobody is said by saying nothing. */
+  #online { display: block; margin-top: 6px; font-size: 9.5px; letter-spacing: 0.16em; color: var(--ink); }
+  #online[hidden] { display: none; }
   #connect { pointer-events: auto; display: grid; gap: 8px; margin-top: 4px; width: min(420px, 80vw);
     font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; color: var(--gold);
     background: rgba(8,7,6,0.62); border: 1px solid rgba(224,189,119,0.3); border-radius: 2px; padding: 14px 16px; }
@@ -459,7 +462,7 @@
   <button id="enter">enter the temple</button>
   <div id="class-pick"><span>alone, as a</span><button data-class="3" class="on">warrior</button><button data-class="0">mage</button><button data-class="1">cleric</button><button data-class="2">thief</button></div>
   <button id="continue" hidden></button>
-  <button id="connect-open" type="button">play with others · connect to a server</button>
+  <button id="connect-open" type="button">play with others · connect to a server<span id="online" hidden></span></button>
   <form id="connect" hidden autocomplete="on">
     <label>server <input id="connect-address" spellcheck="false" autocapitalize="off" autocomplete="url"></label>
     <label>name <input id="connect-name" maxlength="12" spellcheck="false" autocapitalize="off" autocomplete="username"></label>

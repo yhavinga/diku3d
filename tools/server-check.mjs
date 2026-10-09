@@ -117,6 +117,7 @@ await a.opened;
 await a.waitFor((x) => x.messages.find((m) => m.t === 'hello'), 3000, 'hello');
 const hello = a.messages.find((m) => m.t === 'hello');
 check(hello.v === 2 && hello.world.mobs === game.mobs.length, 'hello names the protocol and the world', `${hello.world.rooms} rooms, ${hello.world.mobs} mobiles, ${hello.world.hash}`);
+check(hello.online === 0, '...and how many players are online: nobody yet', hello.online);
 a.send({ t: 'login', name: 'Arwen', password: 'elbereth' });
 const asked = await a.waitFor((x) => x.messages.find((m) => m.t === 'login'), 3000, 'login reply');
 check(asked.new === true && /Did I get that right, Arwen/.test(asked.why), 'an unknown name is a new character, asked to confirm', asked.why);
@@ -146,6 +147,14 @@ c3.send({ t: 'login', name: 'Arwen', password: 'wrongpass' });
 await c3.waitFor((x) => x.messages.find((m) => m.t === 'login'));
 check(c3.messages.find((m) => m.t === 'login').why === 'Wrong password.', 'a wrong password is refused');
 c3.ws.close();
+
+// The title screen's count: a socket that only reads hello (src/link-ui.js countPlayers).
+const probe = client('title screen');
+await probe.opened;
+await probe.waitFor((x) => x.messages.find((m) => m.t === 'hello'), 3000, 'hello');
+const counted = probe.messages.find((m) => m.t === 'hello').online;
+check(counted === 2, "a page that has not logged in is told who's online: Arwen and Boromir", counted);
+probe.ws.close();
 
 // ------------------------------------------------------- seeing each other --
 console.log('\nSEEING EACH OTHER');
