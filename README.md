@@ -281,9 +281,12 @@ transfer, restore, stat, advance, snoop, mset/oset/rset, ban/allow, wizlock,
 shutdown and the rest). `wizlock` toggles whether mortals may log in; a
 fresh `site.json` written by `deploy.sh` starts with it on.
 
-The server does not take a page's word for where its player is: a report
-off the streets, through a shut door, or faster than a glide is refused and
-the page put back. Notes, the ban list and the wizlock live in
+The server does not take a page's word for where its player is, but it
+walks where the page walks: across the grass between rooms, from one street
+onto another the mud never joined, off a ledge. A report inside the rock,
+a jump to a room no open exit leads to, a step through the wall or the shut
+door of a walled room, or anything faster than a glide is refused and the
+page put back. Notes, the ban list and the wizlock live in
 `server/data/`. A dropped link can be taken up again without a reload, and
 a player who dies leaves a corpse with their gear that only they, their
 group or an immortal may loot.

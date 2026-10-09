@@ -456,6 +456,20 @@ choose.
   Standalone must stay byte-identical — check with a seeded trace, and run
   `node tools/server-check.mjs` (needs `cd server && npm ci`) after any
   change to `game.js` or `src/rules/`.
+- **The server walks where the page walks** (`server/world.mjs` `judge`).
+  The page's ground runs on where the mud joins nothing -- grass between
+  and round the rooms, streets that cross or touch, ledges -- and the old
+  rule, a room change only along an exit, put players back at 2,849 places
+  in the home zone alone. A report is now refused only inside the rock, as
+  a jump to a room no exit leads to, through a walled room's wall or shut
+  door, or too fast. Which rooms are walled is `isOpenAir`, in shells.js so
+  build.js and the server share it; where their walls stand is a model of
+  build.js's (`WALL_LINE`, `TREE_LINE`, `DOOR_HALF`). build.js builds no
+  trapdoor, so the judge lets a body take a stair whatever its door says
+  (`stairBetween`); build one and that rule has to go. After changing how a
+  room is walled, or a doorway's width, run
+  `tools/judge/headless/walkable.mjs`: it puts every step the page allows,
+  in every zone, through the real `judge`, and none may be refused.
 - **A light hidden inside a model only shows at night.** The "blue
   thresholds" were a cyan point light in every portal arch since the first
   commit; noon drowned it. Find a colour cast by switching lights off one

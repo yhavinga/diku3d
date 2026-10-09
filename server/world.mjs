@@ -18,15 +18,21 @@
  * on the way in and goes back up on the way out (`liftAt`), so a player on
  * the temple steps and a mobile beside them are on one floor for reach. The
  * arrival point moved off a stair opening is still the client's alone.
+ *
+ * Nor can it have build.js's walls, bar one kind: which rooms are walled at
+ * all is shells.js `isOpenAir`, build.js's own answer, and a walled room's
+ * walls stand where build.js stands them, with a doorway on every side the
+ * layout gave an exit. That is all `judge` holds a client's walking to.
  */
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-import { parseArea, buildWorld, SECTOR, ROOM_INDOORS } from '../src/are.js';
+import { parseArea, buildWorld, SECTOR, ROOM_INDOORS, EX_CLOSED } from '../src/are.js';
 import { planZones, layoutZone, HOME_AREAS } from '../src/zones.js';
 import { createNav } from '../src/nav.js';
-import { readShell } from '../src/shells.js';
+import { readShell, shellAttrs, openAirIn } from '../src/shells.js';
+import { AFF } from '../src/rules/handler.js';
 
 /** build.js's grid, as nav.js and game-check.mjs repeat it. */
 export const CELL = 13;
@@ -38,6 +44,29 @@ export const LEVEL_H = 7.6;
  * zone spans about 1.6 km).
  */
 export const SPAN = 26000;
+/** Metres a second a page may move its player: a glide's top speed and some. */
+const MAX_SPEED = 45;
+/** ...and up: a jump, a glide up a stair. */
+const MAX_CLIMB = 30;
+/**
+ * ...and down, which is a fall: off the canyon's highest ledge it is 84 m to
+ * the ground (tools/judge/headless/walkable.mjs), and at player.js's 24 m/s2
+ * the last tenth of a second of it is 6.4 m.
+ */
+const MAX_FALL = 70;
+/** Metres of jitter on top: two reports in one packet, a frame's rounding. */
+const SPEED_SLACK = 3;
+/**
+ * Where a walled room's wall is, for a step through it: build.js's box (the
+ * middle of a wall whose inner face is ROOM/2 out, KIT_LINE), or the ring of
+ * a hollow tree (`buildGreatTree`: hollow to 4.2-4.9 m, bark from 6.0 m).
+ * A body is stopped 0.8 m short of the line at a south or east wall, and
+ * 0.2 m short at a north or west one, whose collider is thinner.
+ */
+const WALL_LINE = 5.35;
+const TREE_LINE = 5.4;
+/** Half a doorway (build.js DOOR_W 3.2) and some: through a wall there is through its door. */
+const DOOR_HALF = 1.9;
 
 const OUTDOOR = new Set([
   SECTOR.CITY, SECTOR.FIELD, SECTOR.FOREST, SECTOR.HILLS, SECTOR.MOUNTAIN,
@@ -55,6 +84,7 @@ export function bootWorld(root, { log = () => {} } = {}) {
 
   const zones = [];
   const built = { rooms: new Map(), colliders: [], portals: [] };
+  const openAir = openAirIn(world);
   const links = [];
   for (const [index, zone] of plan.zones.entries()) {
     const layout = layoutZone(world, plan, zone);
@@ -69,6 +99,9 @@ export function bootWorld(root, { log = () => {} } = {}) {
         outdoor: OUTDOOR.has(room.sector) && !(room.flags & ROOM_INDOORS),
         // build.js builds nothing for an "In the air..." room: nobody stands there.
         unbuilt: room.sector === SECTOR.AIR || undefined,
+        // Built with walls round it, and a hollow tree's are round.
+        walled: room.sector !== SECTOR.AIR && !openAir(room),
+        round: !openAir(room) && shellAttrs(room)?.named === 'tree',
         materials: {},
       };
       local.rooms.set(vnum, info);
@@ -131,27 +164,167 @@ export function bootWorld(root, { log = () => {} } = {}) {
     }
     return { exact, near, candidates };
   };
-  /**
-   * Whether a step from one server point to the next crosses where a street
-   * of room `a` and a street of room `b` share a cell. The layout lets two
-   * streets share a cell even when the mud joins none of their rooms, and
-   * the page lets you walk from one onto the other there; until such
-   * crossings become bridges (PLAN_BRIDGES) the server accepts that step --
-   * only from or onto the shared cell, into a cell beside it, same level.
-   */
-  const crossingStep = (p, q, a, b) => {
+  // ----------------------------------------------------- what a client says --
+  const nav = compositeNav({ zones, zoneOfVnum, zoneAtX, navOf });
+  const levelOf = (feet) => Math.round(feet / LEVEL_H);
+  /** The layout cell a server point (at its feet) is in, and its zone. */
+  const cellAt = (p) => {
     const zone = zoneAtX(p.x);
-    if (!zone || zoneAtX(q.x) !== zone) return false;
-    const cell = (pt) => ({ level: Math.round(pt.y / LEVEL_H), x: Math.round((pt.x - zone.offset) / CELL), z: Math.round(pt.z / CELL) });
-    const cp = cell(p); const cq = cell(q);
-    if (cp.level !== cq.level || Math.max(Math.abs(cp.x - cq.x), Math.abs(cp.z - cq.z)) > 1) return false;
-    const touches = (link, v) => link.from.vnum === v || (link.to && link.to.vnum === v);
-    const joins = (c) => {
-      const streets = streetsAt(zone).get(`${c.level},${c.x},${c.z}`) || [];
-      return streets.some((l) => touches(l, a)) && streets.some((l) => touches(l, b));
-    };
-    return joins(cp) || joins(cq);
+    return zone && { zone, level: levelOf(p.y), x: Math.round((p.x - zone.offset) / CELL), z: Math.round(p.z / CELL) };
   };
+  /** A step a body takes: in one zone, into a cell beside it, no more than a level up or down. */
+  const walk = (p, q) => {
+    const a = cellAt(p); const b = cellAt(q);
+    return !!a && !!b && a.zone === b.zone && Math.abs(a.level - b.level) <= 1
+      && Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z)) <= 1;
+  };
+  // game.js's `nearestRoom` over the same rooms, for a body out in the open:
+  // the room the game counts it as standing in.
+  const centres = new Map();
+  for (const [vnum, info] of built.rooms) {
+    const key = `${Math.floor(info.center.x / 26)},${Math.floor(info.center.z / 26)}`;
+    if (!centres.has(key)) centres.set(key, []);
+    centres.get(key).push({ vnum, ...info.center });
+  }
+  const nearestRoom = (x, y, z) => {
+    let best; let bestD = Infinity;
+    const take = (r) => { const d = (r.x - x) ** 2 + (r.y - y) ** 2 + (r.z - z) ** 2; if (d < bestD) { bestD = d; best = r.vnum; } };
+    const bx = Math.floor(x / 26); const bz = Math.floor(z / 26);
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) for (const r of centres.get(`${bx + dx},${bz + dz}`) || []) take(r);
+    if (best === undefined) for (const vnum of zoneAtX(x).layout.cells.keys()) take({ vnum, ...built.rooms.get(vnum).center });
+    return best;
+  };
+  /** Within a walled room's walls, seen from above: its box, or a hollow tree's ring. */
+  const withinWalls = (info, p) => {
+    const dx = p.x - info.center.x; const dz = p.z - info.center.z;
+    return info.round ? dx * dx + dz * dz < TREE_LINE * TREE_LINE : Math.abs(dx) < WALL_LINE && Math.abs(dz) < WALL_LINE;
+  };
+  /** The walled room a server point is inside the walls of, on its own level, or null. */
+  const walledAround = (p) => {
+    const c = cellAt(p);
+    const vnum = c ? c.zone.layout.at(c.level, c.x, c.z) : undefined;
+    const info = vnum !== undefined && built.rooms.get(vnum);
+    return info && info.walled && withinWalls(info, p) ? vnum : null;
+  };
+  /**
+   * The wall a step on one level goes through, if it goes through a walled
+   * room's: { room } for the wall itself, { room, door } for a doorway whose
+   * door is shut -- or null, for a step through an open doorway or no wall at
+   * all. A doorway is the middle of a side the layout gave an exit, which is
+   * where build.js cuts it.
+   */
+  const wallCrossed = (p, q, passDoor) => {
+    const a = cellAt(p);
+    if (!a || !walk(p, q) || levelOf(q.y) !== a.level) return null;
+    const L = a.zone.layout;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const vnum = L.at(a.level, a.x + dx, a.z + dz);
+        const info = vnum !== undefined && built.rooms.get(vnum);
+        if (!info || !info.walled) continue;
+        const inside = withinWalls(info, p);
+        if (inside === withinWalls(info, q)) continue;
+        // Where the step meets the wall, to a few millimetres.
+        let lo = 0; let hi = 1;
+        for (let k = 0; k < 12; k++) {
+          const m = (lo + hi) / 2;
+          if (withinWalls(info, { x: p.x + (q.x - p.x) * m, z: p.z + (q.z - p.z) * m }) === inside) lo = m; else hi = m;
+        }
+        const ox = p.x + (q.x - p.x) * hi - info.center.x; const oz = p.z + (q.z - p.z) * hi - info.center.z;
+        const dir = Math.abs(ox) > Math.abs(oz) ? (ox > 0 ? 1 : 3) : (oz > 0 ? 2 : 0);
+        const side = (L.sides.get(vnum) || [])[dir];
+        if (!side || Math.abs(dir === 1 || dir === 3 ? oz : ox) >= DOOR_HALF) return { room: vnum };
+        // The far end of a one-way exit has no exit of its own: the door is the one leading in.
+        const exit = side.exit || side.link?.exit;
+        if (exit && (exit.locks & EX_CLOSED) && !passDoor) return { room: vnum, door: exit };
+      }
+    }
+    return null;
+  };
+  /**
+   * A way up or down between two rooms, either way, shut or not. build.js
+   * stands a flight, a ladder or a shaft in it and never a door, so a shut
+   * trapdoor stops a typed `down` but not a body on the stair (57 of the 71
+   * doors on ways up or down are shut by their resets).
+   */
+  const stairBetween = (a, b) => [[a, b], [b, a]].some(([p, q]) => (world.rooms.get(p)?.exits || []).some((e, d) => e && d > 3 && e.to === q));
+  /** move_char's question: an exit from `from` to `to`, not shut -- unless you pass doors. */
+  function adjacent(ch, from, to) {
+    const room = world.rooms.get(from);
+    if (!room) return false;
+    const passDoor = (ch.affectedBy || 0) & AFF.PASS_DOOR;
+    return room.exits.some((e) => e && !e.offMap && e.to === to && (!(e.locks & EX_CLOSED) || passDoor));
+  }
+  /**
+   * Whether a reported point can be where this player is: { room } when it
+   * can -- the room it counts as standing in -- or { why } when it cannot.
+   * `s` is the session ({ navRoom, posAt }), (x, y, z) the report in the
+   * server's frame, eye height, the mound's lift already off it.
+   *
+   * The body is the page's to walk, and the page's ground runs on where the
+   * mud joins nothing: streets cross and touch, the grass outside the walls
+   * reaches every room on it, and a ledge can be walked off. So a move along
+   * an open exit is believed as it always was, any other step wherever it
+   * goes, and a report is refused only for what a page cannot do:
+   *  - stand inside the rock (below ground, on no room's floor nor a street's);
+   *  - turn up in another room, more than a step away, that no open exit
+   *    leads to (a jump: a page's glide follows an exit);
+   *  - go through the wall of a walled room, or its doorway with the door
+   *    shut; nor up or down into or out of one but by an exit's own way;
+   *  - off an exit, move faster than anything a page does (a run is 9.5 m/s,
+   *    a glide tops out near 40), or climb or fall faster.
+   * tools/judge/headless/walkable.mjs walks every step the page allows, in
+   * every zone, through this, and none may be refused.
+   */
+  function judge(s, pc, x, y, z, now) {
+    const feet = y - 1.72;
+    let vnum = nav.roomAt(x, feet, z);
+    // The room of the last report believed, by the same rule as this one's;
+    // after a jump, the room the server put the player in.
+    const from = s.navRoom ?? pc.ch.roomVnum;
+    if (vnum === undefined || !built.rooms.has(vnum)) {
+      // On no room's floor nor a street's: out in the open, on the grass
+      // between them or falling past them -- unless this is below the ground.
+      if (!zoneAtX(x) || levelOf(feet) < 0) return { why: 'off the map' };
+      vnum = nearestRoom(x, y, z);
+    } else if (vnum !== from) {
+      const place = placeAt(x, feet, z);
+      if (place && place.exact) {
+        // Where two streets cross, the cell is on both: this room's, or a neighbour's, first.
+        if (place.candidates.has(from)) vnum = from;
+        else vnum = [...place.candidates].find((v) => adjacent(pc.ch, from, v)) ?? vnum;
+      } else if (place && [...place.near].some((v) => v === from || adjacent(pc.ch, from, v))) {
+        // Off the street, on a corner a glide cut: still where it was, if the
+        // street it is beside is one of this room's or a neighbour's.
+        vnum = from;
+      }
+    }
+    const was = { x: pc.position.x, y: pc.position.y - 1.72, z: pc.position.z };
+    const here = { x, y: feet, z };
+    // Just placed (enter, teleport, recall): the next report is the first,
+    // and is where it was put or a step from it.
+    if (s.posAt === null) {
+      return vnum === from || adjacent(pc.ch, from, vnum) || walk(was, here) ? { room: vnum } : { why: `#${vnum} is not #${from}` };
+    }
+    // Along an open exit: a step, a glide down the street, a fade through an arch.
+    if (vnum !== from && adjacent(pc.ch, from, vnum)) return { room: vnum };
+    if (vnum !== from) {
+      if (!walk(was, here)) return { why: `no open way from #${from} to #${vnum}` };
+      // A stair is climbed both ways, whichever way the mud's exit runs.
+      if (levelOf(was.y) !== levelOf(feet) && !adjacent(pc.ch, vnum, from) && !stairBetween(from, vnum)
+        && (walledAround(here) !== null || walledAround(was) !== null)) {
+        return { why: `no way up or down from #${from} to #${vnum}` };
+      }
+    }
+    const wall = wallCrossed(was, here, (pc.ch.affectedBy || 0) & AFF.PASS_DOOR);
+    if (wall) return { why: wall.door ? `the ${wall.door.keyword || 'door'} of #${wall.room} is shut` : `through the wall of #${wall.room}` };
+    const dt = Math.max(0.05, (now - s.posAt) / 1000);
+    const d = Math.hypot(x - pc.position.x, z - pc.position.z);
+    if (d > MAX_SPEED * dt + SPEED_SLACK) return { why: `${d.toFixed(1)} m in ${dt.toFixed(2)} s` };
+    const dy = y - pc.position.y;
+    if (dy > MAX_CLIMB * dt + SPEED_SLACK || -dy > MAX_FALL * dt + SPEED_SLACK) return { why: `${Math.abs(dy).toFixed(1)} m up or down in ${dt.toFixed(2)} s` };
+    return { room: vnum };
+  }
   /** Per zone, every street through each cell: "level,x,z" -> [link]. */
   const streetsAt = (zone) => {
     if (!zone.streets) {
@@ -168,9 +341,9 @@ export function bootWorld(root, { log = () => {} } = {}) {
   };
 
   return {
-    world, plan, zones, byId, built, zoneOfVnum, zoneAtX, lifts, liftAt, placeAt, crossingStep,
+    world, plan, zones, byId, built, zoneOfVnum, zoneAtX, lifts, liftAt, placeAt, judge, adjacent,
     layout: { links, cells: new Map() },
-    nav: compositeNav({ zones, zoneOfVnum, zoneAtX, navOf }),
+    nav,
     /** A client's zone-local point into the server's frame. */
     toServer: (zoneId, p) => ({ x: p.x + (byId.get(zoneId)?.offset ?? NaN), y: p.y, z: p.z }),
     /** A server point into the frame of the zone it is in. */

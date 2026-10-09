@@ -20,8 +20,7 @@ import { WebSocketServer } from 'ws';
 import { createGame, createCharacter, POS, CLASS_TABLE } from '../src/game.js';
 import { serialize, restore } from '../src/save.js';
 import { titleFor, trustOf, PLR_MORE } from '../src/rules/actcomm.js';
-import { PLR, AFF, nested } from '../src/rules/handler.js';
-import { EX_CLOSED } from '../src/are.js';
+import { PLR, nested } from '../src/rules/handler.js';
 import { bootWorld } from './world.mjs';
 import { createNotes, createSite } from './store.mjs';
 import { createDash } from './dash.mjs';
@@ -42,12 +41,6 @@ const SIGHT = 160;
 const LINKDEAD_SECONDS = 180;
 /** Autosave, as char_update's oldest-save-first does every few minutes. */
 const AUTOSAVE_SECONDS = 300;
-/** Metres a second a page may move its player inside one room: a glide's top speed and some. */
-const MAX_SPEED = 45;
-/** ...and up or down: a fall, a jump, a stair. */
-const MAX_CLIMB = 30;
-/** Metres of jitter on top: two reports in one packet, a frame's rounding. */
-const SPEED_SLACK = 3;
 
 export async function startMud({
   root, dataDir, port = 4011, host = '127.0.0.1', seed, tickMs = 50, log = console.log,
@@ -359,15 +352,11 @@ export async function startMud({
 
   // ---------------------------------------------------- what a client says --
   /**
-   * Where a client says its player is, checked before it is believed: the
-   * body is the page's to walk, but not to put anywhere it likes. A report is
-   * refused, and the client put back where the server has it (`at`), when
-   *  - it lies in no room's ground, nor a street's, nor next to one;
-   *  - it is in another room than the server's, and no open exit leads
-   *    there (a jump without the server's sequence number is that);
-   *  - inside one room it moved faster than anything a page does: a run is
-   *    9.5 m/s, and a glide along an exit (player.js) tops out near 40.
-   * Never a kick: a page that lagged or fell is put back, not thrown out.
+   * Where a client says its player is, checked before it is believed
+   * (world.mjs `judge`): the body is the page's to walk, but not to put
+   * anywhere it likes. A report refused puts the client back where the
+   * server has it (`at`). Never a kick: a page that lagged or fell is put
+   * back, not thrown out.
    */
   function position(s, msg) {
     const { zone, x, y, z, yaw = 0, seq = 0 } = msg;
@@ -380,7 +369,7 @@ export async function startMud({
     const sx = x + local.offset;
     // The client stands on build.js's floor; the server's game on the grid.
     const sy = y - w.liftAt(sx, y - 1.72, z);
-    const judged = judge(s, pc, sx, sy, z, now);
+    const judged = w.judge(s, pc, sx, sy, z, now);
     const why = judged.why;
     if (why) {
       stats.refused += 1;
@@ -398,54 +387,6 @@ export async function startMud({
     s.yaw = yaw;
     s.posAt = now;
     s.navRoom = judged.room;
-  }
-
-  /**
-   * Whether a reported point can be where this player is: { room } when it
-   * can -- the room it counts as standing in -- or { why } when it cannot.
-   */
-  function judge(s, pc, x, y, z, now) {
-    const feet = y - 1.72;
-    let vnum = w.nav.roomAt(x, feet, z);
-    if (vnum === undefined || !w.built.rooms.has(vnum)) return { why: 'off the map' };
-    // The room of the last report believed, by the same rule as this one's;
-    // after a jump, the room the server put the player in.
-    const from = s.navRoom ?? pc.ch.roomVnum;
-    if (vnum !== from) {
-      const place = w.placeAt(x, feet, z);
-      if (place && place.exact) {
-        // Where two streets cross, the cell is on both: this room's, or a neighbour's, first.
-        if (place.candidates.has(from)) vnum = from;
-        else vnum = [...place.candidates].find((v) => adjacent(pc.ch, from, v)) ?? vnum;
-      } else if (place && [...place.near].some((v) => v === from || adjacent(pc.ch, from, v))) {
-        // Off the street, on a corner a glide cut: still where it was, if the
-        // street it is beside is one of this room's or a neighbour's.
-        vnum = from;
-      }
-    }
-    // Just placed (enter, teleport, recall): the next report is the first.
-    if (s.posAt === null) return vnum === from || adjacent(pc.ch, from, vnum) ? { room: vnum } : { why: `#${vnum} is not #${from}` };
-    if (vnum !== from && adjacent(pc.ch, from, vnum)) return { room: vnum };
-    if (vnum !== from) {
-      // A street crossing joins rooms the mud keeps apart; the page lets you
-      // step across there, so the server does too -- only from or onto the
-      // shared cell itself, and still under the speed check below.
-      const was = { x: pc.position.x, y: pc.position.y - 1.72, z: pc.position.z };
-      if (!w.crossingStep(was, { x, y: feet, z }, from, vnum)) return { why: `no open way from #${from} to #${vnum}` };
-    }
-    const dt = Math.max(0.05, (now - s.posAt) / 1000);
-    const d = Math.hypot(x - pc.position.x, z - pc.position.z);
-    if (d > MAX_SPEED * dt + SPEED_SLACK) return { why: `${d.toFixed(1)} m in ${dt.toFixed(2)} s` };
-    if (Math.abs(y - pc.position.y) > MAX_CLIMB * dt + SPEED_SLACK) return { why: `${Math.abs(y - pc.position.y).toFixed(1)} m up or down in ${dt.toFixed(2)} s` };
-    return { room: vnum };
-  }
-
-  /** move_char's question: an exit from `from` to `to`, not shut -- unless you pass doors. */
-  function adjacent(ch, from, to) {
-    const room = w.world.rooms.get(from);
-    if (!room) return false;
-    const passDoor = (ch.affectedBy || 0) & AFF.PASS_DOOR;
-    return room.exits.some((e) => e && !e.offMap && e.to === to && (!(e.locks & EX_CLOSED) || passDoor));
   }
 
   /** Put the client back where the server has its player, under a new sequence number. */
@@ -1009,7 +950,7 @@ export async function startMud({
       if (!s || !s.pc) throw new Error(`place: no player ${id}`);
       const from = s.navRoom ?? s.pc.ch.roomVnum;
       // A room it could walk into is walked into: the report alone is believed.
-      if (from === vnum || adjacent(s.pc.ch, from, vnum)) return false;
+      if (from === vnum || w.adjacent(s.pc.ch, from, vnum)) return false;
       if (!game.placePlayer(s.pc, vnum)) throw new Error(`place: #${vnum} has nowhere to stand`);
       return true;
     },

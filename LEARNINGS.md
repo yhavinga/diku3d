@@ -6,6 +6,77 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-09 — the server walks where the page walks
+
+- **The page's ground is not the mud's graph, and the server believed only
+  the graph.** Reported outside the West Gate: walking south from #3052 onto
+  the grass, the server put the player back 50 times in a minute. The live
+  log had `no open way from #3052 to #3043` (inside the gate, the gate's
+  street touches Wall Road's) and `off the map` (on the grass). Measured by
+  flooding every step player.js allows and putting each one through the
+  server's own check: at street level in the home zone 3.7M half-metre
+  samples are walkable, and 76% of them lie on no room's cell or street
+  cell, nor next to one. The old rule (a room change only along an exit,
+  nothing far from a room) refused at 5,093 places in 27 of the 32 zones
+  with anything built: 2,268 off the map, 2,825 without an exit. The
+  street-crossing exception of 96a19d9 covered a handful of them.
+- **The rule now** (`server/world.mjs` `judge`): every step is believed,
+  except a report inside the rock, a jump to a room no open exit leads to,
+  a step through a walled room's wall or shut door, and anything too fast.
+  With it, `tools/judge/headless/walkable.mjs` finds no refused step in any
+  of the 32 zones with anything built: 87.7M steps, with every door open and
+  again with every door shut. Split over five processes by `--zones`, that
+  takes seven minutes, six of them the home zone.
+- **Walls the server can know.** Which rooms are walled is `isOpenAir`,
+  moved into shells.js with the style classifiers it reads. The move was
+  checked by classifying all 2,568 rooms before and after: identical. A box
+  wall's inner face is at 5.0 m and its outer face at 5.7 m; a body stops at
+  4.46 m inside and 6.12 m outside, so the line the judge holds a step to,
+  `WALL_LINE` 5.35, sits clear of both. The one exception walking found is
+  the hollow tree #6153: a walker in the wood reached the corner of the box,
+  outside the bark. Its wall is round (hollow to 4.2–4.9 m, bark from
+  6.0 m), so the judge holds it to `TREE_LINE` 5.4.
+- **North and west walls are thinner than south and east.** Found, not
+  fixed. In `buildIndoorWall` the collider of a wall facing -x or -z is an
+  inverted box (x0 > x1), so its collision band is 0.42 m wide instead of
+  1.82 m. Measured with `resolvePoint` in #3002, #3003, #3006, #3009 and
+  #3010: a body stops 5.16 m from the centre at a north or west wall, inside
+  the wall's inner skin, against 4.46 m at a south or east one. A Haiku
+  survey of build.js turned it up; it was then measured.
+- **A lock number of 2 is a door no thief can pick.** are.js kept the D
+  line's number raw, so a 2 read as `EX_CLOSED`. That made 96 exits wrong,
+  and 18 of them, with no D reset, were shut for good without being doors:
+  nothing could open them and build.js built no door there, so the page
+  walked through where the rules refused. They are now read as db.c reads
+  them: 472 doors, where 454 were.
+- **A one-way stair is climbed both ways in the page.** #3002 down to
+  #7026, #3029 down to #7043, and the pits #7022 and #7036 are one-way in
+  the mud, but their flights are stairs. A step onto another level now
+  takes an exit either way.
+- **build.js builds no trapdoor.** There are 71 doors on ways up or down,
+  and their resets shut 57 of them: the graveyard's tombs, hitower's
+  trapdoors and vent. Over every one of them build.js stands a flight, a
+  ladder or a shaft and nothing to shut it, so a body walks through while a
+  typed `down` is refused. The old rule put a player on those stairs back.
+  The judge now takes a stair whatever its door says (`stairBetween`), and
+  the run with every door shut is how this showed up.
+- **Falls are long, and fast at the end.** The deepest fall per zone:
+  canyon 84.1 m (from the highest ledge down to the ground plane), olympus
+  61.3 m, hitower and draconia 53.7 m. At player.js's 24 m/s² the last tenth
+  of a second of 84 m is 6.4 m, past the 6 m that `MAX_CLIMB` allows in one
+  report. A fall now has its own limit, `MAX_FALL` 70 m/s.
+- **A flood with the judge in it needs the judge's room in its state, and
+  that room must follow from the point.** Out in the open the judge first
+  kept whichever room the walker came from. Every room that walked onto the
+  grass then brought its own copy of the grass, and the flood ran out of
+  memory. Now a point in the open counts as the nearest room, as game.js
+  counts it: 4.3M states in the home zone.
+- **Check the checker against the report.** With the old rule the flood
+  refused in exactly the cell of the live log. On a local server, a page
+  walking on the keys from #3052 south, east, north and west across the
+  grass was put back 0 times, and the server's position stayed equal to the
+  page's.
+
 ## 2026-10-09 — the title before the world
 
 - **The title waited for everything.** It came up on the last line of
