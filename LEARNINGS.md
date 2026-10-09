@@ -6,6 +6,59 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-09 — the werklijst: where the world joins what the mud keeps apart
+
+- **`walkable.mjs --work` lists every place a body walks from one room into
+  another that no open exit joins.** A body is in a room on an open-air
+  room's cell or inside a walled room's walls (`walledAround`, exported from
+  world.mjs for this), on a street on a street's cell, and anywhere else on
+  open ground, which a union over the samples joins into patches. Over the
+  32 zones with every door open: 509 places, 337 where two rooms or streets
+  touch and 172 patches of open ground; with every door shut, 37 more where
+  a body walks round a door the resets shut. By kind: street 276, open 127,
+  door/guard 91, sealed 9, one-way 6.
+- **Three things the first version counted wrong.** Turning back halfway down
+  a one-way street crosses the middle, where the judge's label changes ends:
+  not a way between the rooms. The gate at the far end of a one-way exit is a
+  wall in the open-doors walk too, since the page opens it only coming down
+  the street. And a reviewer found that a wimpy aggressive is no guard (game.js
+  `aggrOn` lets it jump only a sleeper) and that, with every door shut, a door
+  no reset shuts is no shut door; those two moved 25 places out of door/guard.
+- **The review.** Haiku looked at 419 of the places, two screenshots each, and
+  a script found all of its 1,300-odd quotes literally in the texts they name;
+  Sonnet decided the 82 it could not: 314 to separate, 105 fine. One Haiku
+  agent ran into an image limit after about 60 screenshots and wrote what it
+  "saw" from the texts for 68 places; those were looked at again in batches of
+  17. A reviewer's notes are worth less than its verdict: Haiku called dozens
+  of places a missing wall.
+- **No walled room is missing a wall.** A probe every 0.5 m along each side's
+  wall line, 1 m up, found all four walls of every walled room standing in all
+  32 zones; only the sewer's pipes, which are not boxes, failed the probe. What
+  reads as a missing wall is a doorway that opens onto another room's street
+  -- the ofcol bedroom's north door comes out on the village square's -- and
+  with the street crossings of PLAN_BRIDGES that is most of the street kind.
+  The rest: roads that run into a river whose bank the mud calls steep, the
+  graveyard and the park running into each other, tombs open with no stone,
+  a city gate with no wall beside it, a 0.7 m gap in the floor at hitower's
+  upper doorway (#1350), sealed rooms entered on foot (#6131 the spider web,
+  the black hole, Mid-Air), and one-way drops climbed back up (#3002, #3029,
+  #7036).
+- **The room the game counts you in.** game.js `nearestRoom` is the nearest
+  room centre in 3D, from the eye. Over 16.4M samples of open ground in the
+  32 zones it is a room on another level 35.1% of the time, a walled room the
+  body is outside of 50.6%, a room it cannot walk to 27.0%; on Midgaard's
+  streets 27% of samples count as a room that is neither end of the street.
+  The room of the cell (inside the walls of a walled one), a street's nearer
+  end, and on open ground the nearest room on the level that can be walked to
+  take the first, third and fourth to 0%; on 16.7% of open ground no room on
+  the level can be walked to at all.
+- **Trapdoors.** 71 doors are on ways up or down: 51 shut and 6 locked at
+  boot, 8 with a key that exists. Their texts (288 quotes, all literal) say
+  what they are, and it is often not a staircase: the graveyard's 26 tomb
+  stones are "placed face up in the ground", there is a vent in a ceiling, a
+  coffin in the middle of a room, a hatchway "securely fastened" that a
+  ladder climbs to.
+
 ## 2026-10-09 — doors on a server
 
 - **A door opened on the server stayed shut on the page.** Reported at

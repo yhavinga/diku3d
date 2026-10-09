@@ -340,7 +340,7 @@ export function bootWorld(root, { log = () => {} } = {}) {
   };
 
   return {
-    world, plan, zones, byId, built, zoneOfVnum, zoneAtX, lifts, liftAt, placeAt, judge, adjacent,
+    world, plan, zones, byId, built, zoneOfVnum, zoneAtX, lifts, liftAt, placeAt, judge, adjacent, walledAround,
     layout: { links, cells: new Map() },
     nav,
     /** A client's zone-local point into the server's frame. */

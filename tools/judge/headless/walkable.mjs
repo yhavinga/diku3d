@@ -22,13 +22,37 @@
 //
 // Doors stand open, and so do their exits, unless --shut: then every door
 // in the page is a wall and every door exit in the server's world is shut,
-// which finds the page letting a body round a shut door. --jumps lets a
+// which finds the page letting a body round a shut door. The gate at the far
+// end of a one-way exit is a wall either way: the page opens it only for an
+// eye coming down the street, and never from inside the room. --jumps lets a
 // step clear what a standing jump does (player.js: 1.1 m up, landing on
 // ground a step above that), over-generously, for the whole step.
+//
+// --work <file> writes the werklijst: every place where the page walks a
+// body from one room into another that no open exit joins, which is where
+// the world joins what the mud keeps apart. A body is in a room on an
+// open-air room's cell or inside a walled room's walls, and on a street on a
+// street's cell; anywhere else is open ground. A step from one room or
+// street straight into another is listed as a `street` pair. A stretch of
+// open ground (the grass, a gap between buildings, the strip outside a wall)
+// is listed once, as a patch, with a pair for every room a body steps off
+// onto it and every room it steps from it into. Turning back halfway down an
+// exit's own street is not listed. Each pair has its distance in the mud's
+// graph (`dist`) and within its zone (`zoneDist`), and its kind, the first
+// that fits:
+//   sealed      out of a room with no way out, into one no exit leads into,
+//               or into one only ever entered by exits with no way back;
+//   door/guard  within the zone only through a door the resets shut, or past
+//               a mobile that stays put and attacks on sight (with --shut:
+//               round such a door);
+//   one-way     back along a one-way exit;
+//   street, open  none of those.
+// and a tag where the mud joins the two only through another zone.
 //
 //   cp <repo>/tools/judge/headless/walkable.mjs /tmp/pw/
 //   node --max-old-space-size=8192 /tmp/pw/walkable.mjs --repo <repo> [--port 8173]
 //        [--zones home,ofcol | all] [--shut] [--jumps] [--res 0.5] [--out /tmp/walkable.json]
+//        [--work /tmp/werklijst.json]
 //
 // Prints each zone's count and its refusals; exits 1 if any step was refused.
 // Deterministic: the set of steps reached does not depend on the order they
@@ -39,7 +63,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const args = process.argv.slice(2);
-const opt = { repo: null, port: 8173, zones: 'all', shut: false, jumps: false, res: 0.5, out: null };
+const opt = { repo: null, port: 8173, zones: 'all', shut: false, jumps: false, res: 0.5, out: null, work: null };
 for (let i = 0; i < args.length; i++) {
   const a = args[i], v = args[i + 1];
   if (a === '--repo') { opt.repo = v; i++; }
@@ -49,10 +73,11 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--jumps') opt.jumps = true;
   else if (a === '--res') { opt.res = +v; i++; }
   else if (a === '--out') { opt.out = v; i++; }
+  else if (a === '--work') { opt.work = v; i++; }
 }
 if (!opt.repo) throw new Error('walkable: --repo <the diku3d checkout> is needed, for the server code');
 const { bootWorld, CELL, LEVEL_H } = await import(pathToFileURL(path.join(opt.repo, 'server/world.mjs')).href);
-const { EX_ISDOOR, EX_CLOSED, EX_LOCKED } = await import(pathToFileURL(path.join(opt.repo, 'src/are.js')).href);
+const { EX_ISDOOR, EX_CLOSED, EX_LOCKED, ACT_SENTINEL, ACT_AGGRESSIVE } = await import(pathToFileURL(path.join(opt.repo, 'src/are.js')).href);
 
 // player.js's body.
 const RADIUS = 0.42, STEP_UP = 0.62, HEIGHT = 1.8, EYE = 1.72, GRAVITY = 24, JUMP = 7.4;
@@ -61,6 +86,79 @@ const RES = opt.res;
 const HZ = 10; // link.js SEND_HZ
 
 const w = bootWorld(opt.repo);
+
+// --work: the mud's graph, and which of its doors the resets leave shut,
+// read before the doors below are opened or shut for the walk.
+const rooms = w.world.rooms;
+const bootShut = new Set();
+for (const room of rooms.values()) {
+  room.exits.forEach((e, dir) => { if (e && (e.locks & EX_ISDOOR) && (e.locks & EX_CLOSED)) bootShut.add(`${room.vnum},${dir}`); });
+}
+const ways = (v) => (rooms.get(v)?.exits || []).flatMap((e, dir) => (e && !e.offMap && rooms.has(e.to)
+  ? [{ to: e.to, dir, shut: bootShut.has(`${v},${dir}`) }] : []));
+const exitTo = (a, b) => ways(a).some((e) => e.to === b);
+/** A door the resets shut, on an exit either way between the two. */
+const doorBetween = (a, b) => [[a, b], [b, a]].some(([p, q]) => ways(p).some((e) => e.to === q && e.shut));
+const into = new Map();
+for (const v of rooms.keys()) for (const e of ways(v)) { if (!into.has(e.to)) into.set(e.to, new Set()); into.get(e.to).add(v); }
+// A guard is one that stays where it is and attacks on sight: a way past it
+// is a fight. A wimpy aggressive only jumps you in your sleep (game.js aggrOn).
+const ACT_WIMPY = 128;
+const guards = new Map();
+for (const room of rooms.values()) {
+  const mob = (room.mobs || []).find((m) => (m.proto.act & ACT_SENTINEL) && (m.proto.act & ACT_AGGRESSIVE) && !(m.proto.act & ACT_WIMPY));
+  if (mob) guards.set(room.vnum, mob.proto.short);
+}
+const zoneRooms = new Map(w.zones.map((z) => [z.zone.id, new Set(z.layout.cells.keys())]));
+const trees = new Map();
+/**
+ * The mud's shortest ways out of `a`, by breadth: room -> the room before it.
+ * Within one zone's rooms if `zone` is given; not through guarded rooms or
+ * doors the resets shut, as `avoid` says.
+ */
+const treeFrom = (a, avoid = 'none', zone = null) => {
+  const key = `${a}|${avoid}|${zone}`;
+  if (trees.has(key)) return trees.get(key);
+  const inside = zone && zoneRooms.get(zone);
+  const prev = new Map([[a, null]]); const q = [a];
+  for (let h = 0; h < q.length; h++) {
+    const v = q[h];
+    if (avoid === 'guards' && v !== a && guards.has(v)) continue;
+    for (const e of ways(v)) {
+      if (prev.has(e.to) || (avoid === 'doors' && e.shut) || (inside && !inside.has(e.to))) continue;
+      prev.set(e.to, v); q.push(e.to);
+    }
+  }
+  trees.set(key, prev);
+  return prev;
+};
+const pathIn = (prev, b) => { if (!prev.has(b)) return null; const path = []; for (let v = b; v !== null; v = prev.get(v)) path.push(v); return path.reverse(); };
+const PRECEDENCE = ['sealed', 'door/guard', 'one-way'];
+/**
+ * A pair the page walks with no open exit: how far apart the mud has them,
+ * in the whole world and within the zone, and what the walk skips.
+ */
+function judgePair(a, b, via, zone) {
+  const whole = pathIn(treeFrom(a), b);
+  const local = pathIn(treeFrom(a, 'none', zone), b);
+  const tags = [];
+  if (!ways(a).length) tags.push('sealed: no way out of the first');
+  if (!into.has(b)) tags.push('sealed: no exit leads into the second');
+  else if ([...into.get(b)].every((x) => !exitTo(b, x))) tags.push('sealed: the second is only entered one way');
+  if (opt.shut && doorBetween(a, b)) tags.push('door/guard: round the door between them');
+  if (local && !treeFrom(a, 'doors', zone).has(b)) tags.push('door/guard: only through a door the resets shut');
+  if (local && !treeFrom(a, 'guards', zone).has(b)) {
+    const g = local.slice(1, -1).find((v) => guards.has(v));
+    tags.push(`door/guard: only past ${g ? `${guards.get(g)} in #${g}` : 'a guard'}`);
+  }
+  if (exitTo(b, a) && !exitTo(a, b)) tags.push('one-way: back along a one-way exit');
+  if (whole && !local) tags.push('only through another zone');
+  if (!whole) tags.push('no way at all in the mud');
+  const kind = PRECEDENCE.find((k) => tags.some((t) => t.startsWith(`${k}:`))) || via;
+  return { from: a, to: b, kind, dist: whole ? whole.length - 1 : null, zoneDist: local ? local.length - 1 : null, tags };
+}
+const work = { shut: opt.shut, zones: {} };
+
 // The doors as the page's are taken: all open, or with --shut all shut. The
 // resets shut some at boot, and a page walked with its doors open would be
 // refused at every one of those.
@@ -93,7 +191,7 @@ for (const zoneId of zoneIds) {
     if (d.zone !== zone) return { skipped: `goto(${zone.start}) drew ${d.zone.id}` };
     d.state.paused = true;
     const col = [];
-    for (const c of d.built.colliders) if (!c.door || shut) col.push(c.x0, c.x1, c.z0, c.z1, c.y0, c.y1, c.r || 0);
+    for (const c of d.built.colliders) if (!c.door || shut || c.door.spec.oneWay) col.push(c.x0, c.x1, c.z0, c.z1, c.y0, c.y1, c.r || 0);
     const plat = [];
     for (const p of d.built.platforms) plat.push(p.x0, p.x1, p.z0, p.z1, p.top);
     const portals = d.built.portals.map((p) => [p.x, p.y, p.z, p.radius]);
@@ -202,6 +300,76 @@ for (const zoneId of zoneIds) {
     return { room };
   };
 
+  // --work. Open ground is joined into patches as it is walked (a union over
+  // its samples); a step between it and a room's cell or a street's is where
+  // that patch meets the room; a step straight from one room's or street's
+  // cell onto another's, with no open exit between them, is a street pair.
+  const parent = new Map();
+  const find = (k) => {
+    let r = k;
+    while (parent.get(r) !== r) r = parent.get(r);
+    for (let c = k; c !== r;) { const n = parent.get(c); parent.set(c, r); c = n; }
+    return r;
+  };
+  const join = (p, q) => {
+    if (!parent.has(p)) parent.set(p, p);
+    if (!parent.has(q)) parent.set(q, q);
+    const a = find(p), b = find(q);
+    if (a !== b) parent.set(a, b);
+  };
+  const borders = new Map();
+  const streets = new Map();
+  const sample = (i, j, feet) => ((j - J0) * NI + (i - I0)) * 40000 + Math.round(feet * 100) + 20000;
+  /**
+   * In a room or on a street: on an open-air room's cell or a street's (as
+   * placeAt's `exact` has it), or inside a walled room's walls. The rest of
+   * a walled room's cell is outside it, and is open ground.
+   */
+  const onCell = (x, feet, z) => {
+    const level = Math.round(feet / LEVEL_H), cx = Math.round(x / CELL), cz = Math.round(z / CELL);
+    const vnum = Z.layout.at(level, cx, cz);
+    if (vnum === undefined) return !!Z.layout.passageAt(level, cx, cz);
+    return !w.built.rooms.get(vnum)?.walled || w.walledAround({ x: x + off, y: feet, z }) === vnum;
+  };
+  // The street of an exit is that exit's: turning back halfway down a one-way
+  // street crosses the middle where the judge's label changes ends, and is no
+  // way the world opens between the two rooms.
+  const along = new Map();
+  for (const link of Z.layout.links) {
+    for (const c of link.path || []) {
+      const key = `${link.from.level},${c.x},${c.z}`;
+      if (!along.has(key)) along.set(key, []);
+      along.get(key).push(link);
+    }
+  }
+  const sameStreet = (x, feet, z, a, b) => (along.get(`${Math.round(feet / LEVEL_H)},${Math.round(x / CELL)},${Math.round(z / CELL)}`) || [])
+    .some((link) => link.to && ((link.from.vnum === a && link.to.vnum === b) || (link.from.vnum === b && link.to.vnum === a)));
+  /** Where to stand to see a step, facing along it (zone-local). */
+  const where = (x, feet, z, nx, nz) => [+x.toFixed(2), +feet.toFixed(2), +z.toFixed(2), +Math.atan2(-(nx - x), -(nz - z)).toFixed(2)];
+  const note = (i, j, x, feet, z, room, a, c, nx, nfeet, nz, to) => {
+    const p = onCell(x, feet, z), q = onCell(nx, nfeet, nz);
+    if (!p && !q) { join(sample(i, j, feet), sample(a, c, nfeet)); return; }
+    if (!p || !q) {
+      const k = p ? sample(a, c, nfeet) : sample(i, j, feet);
+      if (!parent.has(k)) parent.set(k, k);
+      if (!borders.has(k)) borders.set(k, new Map());
+      const m = borders.get(k);
+      const r = p ? room : to;
+      if (!m.has(r)) m.set(r, {});
+      const b = m.get(r);
+      if (p && !b.off) b.off = where(x, feet, z, nx, nz);
+      if (q && !b.on) b.on = where(x, feet, z, nx, nz);
+      return;
+    }
+    if (room === to || w.adjacent(ch, room, to)) return;
+    if (sameStreet(x, feet, z, room, to) && sameStreet(nx, nfeet, nz, room, to)) return;
+    const key = `${room}|${to}`;
+    if (!streets.has(key)) streets.set(key, { n: 0, at: where(x, feet, z, nx, nz), cells: new Set() });
+    const e = streets.get(key);
+    e.n++;
+    if (e.cells.size < 8) e.cells.add(`${Math.round(nfeet / LEVEL_H)},${Math.round(nx / CELL)},${Math.round(nz / CELL)}`);
+  };
+
   for (const [vnum, x, y, z] of data.rooms) {
     const i = Math.floor(x / RES), j = Math.floor(z / RES);
     const cx = (i + 0.5) * RES, cz = (j + 0.5) * RES;
@@ -239,6 +407,7 @@ for (const zoneId of zoneIds) {
           e.n++;
           continue;
         }
+        if (opt.work) note(i, j, x, feet, z, room, a, c, nx, nfeet, nz, v.room);
         visit(a, c, nfeet, v.room);
       }
     }
@@ -250,8 +419,47 @@ for (const zoneId of zoneIds) {
   for (const e of list.slice(0, 20)) {
     console.log(`    from #${e.from}: ${e.why} -- at ${e.at.join(', ')} from ${e.was.join(', ')} (cell ${e.cell}, ${e.n} steps)`);
   }
+  if (!opt.work) continue;
+  const named = (pair) => ({ ...pair, names: [rooms.get(pair.from)?.name, rooms.get(pair.to)?.name] });
+  const street = [...streets].map(([key, e]) => {
+    const [a, b] = key.split('|').map(Number);
+    return { ...named(judgePair(a, b, 'street', zoneId)), n: e.n, at: e.at, cells: [...e.cells] };
+  });
+  const patches = new Map();
+  for (const k of parent.keys()) {
+    const r = find(k);
+    if (!patches.has(r)) patches.set(r, { samples: 0, rooms: new Map() });
+    patches.get(r).samples++;
+  }
+  for (const [k, m] of borders) {
+    const patch = patches.get(find(k));
+    for (const [r, b] of m) {
+      if (!patch.rooms.has(r)) patch.rooms.set(r, {});
+      const e = patch.rooms.get(r);
+      if (b.off && !e.off) e.off = b.off;
+      if (b.on && !e.on) e.on = b.on;
+    }
+  }
+  const open = [];
+  for (const patch of patches.values()) {
+    const pairs = [];
+    for (const [a, ea] of patch.rooms) {
+      if (!ea.off) continue;
+      for (const [b, eb] of patch.rooms) {
+        if (!eb.on || a === b || w.adjacent(ch, a, b)) continue;
+        pairs.push({ ...named(judgePair(a, b, 'open', zoneId)), off: ea.off, on: eb.on });
+      }
+    }
+    if (pairs.length) open.push({ m2: Math.round(patch.samples * RES * RES), rooms: [...patch.rooms.keys()], pairs });
+  }
+  open.sort((p, q) => q.pairs.length - p.pairs.length);
+  const counts = {};
+  for (const pair of [...street, ...open.flatMap((p) => p.pairs)]) counts[pair.kind] = (counts[pair.kind] || 0) + 1;
+  work.zones[zoneId] = { counts, street, open };
+  console.log(`    werklijst: ${street.length} street pairs, ${open.length} patches of open ground with ${open.reduce((s, p) => s + p.pairs.length, 0)} pairs; by kind ${JSON.stringify(counts)}`);
 }
 await browser.close();
 if (opt.out) fs.writeFileSync(opt.out, JSON.stringify(report, null, 1));
+if (opt.work) fs.writeFileSync(opt.work, JSON.stringify(work));
 console.log(refusedAll ? `${refusedAll} places where a step the page allows is refused` : 'every step the page allows is believed');
 process.exit(refusedAll ? 1 : 0);
