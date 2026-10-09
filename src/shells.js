@@ -667,6 +667,51 @@ export function isDrop(world, upper, lower) {
   return !!down && down.to === lower && !(up && up.to === upper);
 }
 
+// build.js's grid, repeated as nav.js and game.js repeat it: this file has no three.js to import it from.
+const CELL = 13;
+const LEVEL_H = 7.6;
+
+/**
+ * The shafts of the ways up and down that build.js shuts or leaves empty -- a
+ * lid's (`wayLid`, any kind but `none`) and a drop's (`isDrop`) -- from layout
+ * links of kind `stairs`, as `{ lower, upper, floor }` (the two rooms' vnums,
+ * the height of the floor above) under the key `level,x,z` of the upper room's
+ * cell. Whoever counts the room a body is in asks `shaftAt` for it: in a
+ * shaft the floor above is where one room ends and the other begins, not half
+ * a level, so a body on the flight under a shut lid is still in the room below
+ * and one falling down a drop is in it once through the floor.
+ *
+ * `frame` moves the key out of the layout's own cell, `(upper) => { level, x, z }`
+ * for the upper room's cell `{ vnum, level, x, z }`: game.js's counter holds
+ * every zone side by side, and two zones' shafts can share one layout cell
+ * (the chapel's #3405 and galaxy's #9301 both lie at 0,0 on level 0).
+ */
+export function shaftsOf(world, links, frame = (upper) => upper) {
+  const shafts = new Map();
+  for (const link of links) {
+    if (link.kind !== 'stairs' || !link.to) continue;
+    const up = link.dir === 4;
+    const lower = up ? link.from : link.to; const upper = up ? link.to : link.from;
+    const lid = wayLid(world, link.from.vnum, link.dir);
+    const drop = !lid && isDrop(world, upper.vnum, lower.vnum);
+    if (!(lid && lid.kind !== 'none') && !drop) continue;
+    const cell = frame(upper);
+    shafts.set(`${cell.level},${cell.x},${cell.z}`, { lower: lower.vnum, upper: upper.vnum, floor: upper.level * LEVEL_H });
+  }
+  return shafts;
+}
+
+/**
+ * The shaft a point at `feet` is in (`shaftsOf`'s value), or null: in the
+ * column of a shaft's cell and more than 0.3 m under the floor above, so that
+ * standing on that floor is still the room above. In the frame the shafts were
+ * keyed in.
+ */
+export function shaftAt(shafts, x, feet, z) {
+  const shaft = shafts.get(`${Math.round(feet / LEVEL_H)},${Math.round(x / CELL)},${Math.round(z / CELL)}`);
+  return shaft && feet < shaft.floor - 0.3 ? shaft : null;
+}
+
 /**
  * The flight under a lid, in the frame build.js lays a staircase out in:
  * `along` from the lower room's middle towards the wall the flight starts at,
