@@ -458,6 +458,16 @@ choose.
   Standalone must stay byte-identical — check with a seeded trace, and run
   `node tools/server-check.mjs` (needs `cd server && npm ci`) after any
   change to `game.js` or `src/rules/`.
+- **The room a body is counted in is game.js `createRoomCounter`**, read
+  from the layout alone (cells, links, the world's exits, shells.js) so that
+  a page and the server count alike: inside a walled room's walls or its
+  doorway that room, on a street its nearer end, on open ground the nearest
+  room the level's open ground reaches, else the last room. Never count from
+  `built.rooms` centres: the page moves 182 of them off the grid. Against
+  where a body can really walk it decides otherwise on 12.8% of samples, all
+  open ground that build.js's geometry cuts off (`roomcount.mjs` measures
+  it; `mp-room.mjs` holds page and server to each other). main.js
+  `currentRoom()` (HUD, sound, arrow keys) is still a rule of its own.
 - **What the rules do to the page's own objects does nothing on a server.**
   `k.actors` (the drawn zone's hinges, figures) is absent there, so a rule
   that changes something the page draws has to reach the page over the

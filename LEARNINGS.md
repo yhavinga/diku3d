@@ -8,6 +8,55 @@ is an opinion.
 
 ## 2026-10-09 — wave 17
 
+### The room the game counts you in (wave17-room)
+
+- **The rule is the user's:** inside a walled room's walls, or in one of
+  its doorways, that room; anywhere on an open-air room's cell, that room;
+  on a street, its nearer end (where streets share a cell, of one with the
+  last room at an end); on open ground, the nearest room the level's open
+  ground reaches -- every open-air room a two-way street leaves, and what
+  two-way streets join to those; else the last room. game.js
+  `createRoomCounter` reads it from the layout alone (cells, links, the
+  world's exits, shells.js), so a page and the server count alike: 0 of
+  64,000 decisions differ between a page and node in 32 zones, and 0 of
+  61.7M between game.js and the reference in roomcount.mjs.
+- **Against where a body can really walk** (`roomcount.mjs`: a flood of
+  every step player.js allows, 18.9M samples, each rule carrying its own
+  last room): decided otherwise 41.80% → 12.81%, home 18.2% → 1.9%, rooms
+  and streets 0.00%. All of the rest is open ground the layout joins and
+  build.js's geometry keeps apart, which no rule over the layout can see:
+  arachnos 88% and dwarven 94% (a ground plane walled off by gorges and
+  massifs, reached only by falling), redferne 96.6% (#7914, which no street
+  leaves), dylan 70.5%, mahntor 18.6%, grove 13.1%, catacomb 6.9%, and in
+  home Bag End's Pantry (#1137) and Bedroom (#1136): a 1.6 m collider across
+  the whole width of each corridor, so no body walks into either.
+- **Cost:** 1-4 ms to build for the home zone, 3-11 ms for the server's
+  counter over every zone; 3 µs a decision, 10 µs on open ground.
+- **Seeded is not repeatable without the clock.** game.js reads the mud's
+  calendar off `Date.now()` at boot, and game-check's wandering line moves
+  with the hour (171 room changes at one, 155 at another). With the clock
+  stood still (`node --import freeze-clock.mjs`: `Date.now = () => const`)
+  game, magic and rules-check came out byte-identical before and after.
+  server-check needs the real clock: frozen, two of its rates read Infinity.
+- **Traps.** The page moves `built.rooms` centres (182 off the grid for a
+  stair hole, 4 lifted): count from grid centres. Feet, not the eye. Ties to
+  the lower vnum: the page and the server iterate `built.rooms` in different
+  orders. A flood that stores feet as float32 loses the steps that land
+  exactly `STEP_UP` higher, and juargan's ground plane came apart from its
+  city. A street's nearer end can be a room the body never entered, so the
+  last room is no evidence of where it has been: one rejected rule counted
+  #6131, behind its one-way gate, over the whole home zone.
+- **A test of a rule change has to fail on the old rule.** mp-room.mjs's
+  first three legs passed on the old count too. The final one fails 7 checks
+  on 1e6994c and passes 33 now: round the inn the page counted #3008, the
+  room above it; on the grass west of the gate, a sewer room 8.85 m below
+  the eye; half up the inn's flight, the room upstairs, because the old count
+  turned at the eye's 3.8 m (feet 2.08 on the server, 3.04 on the page,
+  whose centres are moved).
+- **Still a rule of its own:** main.js `currentRoom()`, for the HUD, the
+  sound and the arrow keys. On open ground and at shared street cells it
+  can name another room than the one the game counts.
+
 ### Doorways, and corridors that wall each other off (wave17-doorways)
 
 - **The census** (`tools/judge/headless/doorways.mjs`, from the layout
