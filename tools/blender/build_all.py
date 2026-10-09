@@ -46,6 +46,7 @@ MODULES = [
     "clutter",
     "setpiece",
     "statues",
+    "hatches",
 ]
 
 # What each one is allowed to cost. The town instances all of these, so a
@@ -192,6 +193,11 @@ BUDGET = {
     # One each: the sewer's imp and its dragons on the lair's table, carved
     # small and seen close; the Shire watermill's stones and gearing.
     "statue_imp": 9500, "figurine_dragons": 6800, "millstones": 2400,
+    # hatches.py. Held to what they cost and not to PROP_BUDGET's 800: a leaf is
+    # seen from above at walking distance, or from below as a ceiling hatch, and
+    # the tomb's slab and kerb are laid thirteen times over in the graveyard.
+    "trapdoor_leaf": 700, "trapdoor_frame": 200, "tomb_slab": 350, "tomb_kerb": 250,
+    "floor_grate": 320,
 }
 PROP_BUDGET = 800
 # people.py: an archetype is a whole dressed person, one skinned draw per
