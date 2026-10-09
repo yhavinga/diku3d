@@ -177,8 +177,10 @@ export function bootWorld(root, { log = () => {} } = {}) {
     return !!a && !!b && a.zone === b.zone && Math.abs(a.level - b.level) <= 1
       && Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z)) <= 1;
   };
-  // game.js's `nearestRoom` over the same rooms, for a body out in the open:
-  // the room the game counts it as standing in.
+  // The judge's room for a body out in the open: the room whose middle is
+  // nearest in 3D, as game.js counted before wave 17. The game counts by its
+  // own rule now (createRoomCounter); this one only says whether a report is
+  // a jump, and a report a cell from the last is believed whatever it says.
   const centres = new Map();
   for (const [vnum, info] of built.rooms) {
     const key = `${Math.floor(info.center.x / 26)},${Math.floor(info.center.z / 26)}`;
