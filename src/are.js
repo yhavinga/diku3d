@@ -191,6 +191,14 @@ function loadObjects(r, area) {
   }
 }
 
+/**
+ * A D line's lock number as the exit's flags, db.c's load_rooms: 1 is a
+ * door, 2 a door no thief can pick. Kept raw, a 2 read as EX_CLOSED -- a way
+ * shut for good that is not a door, which nothing could open and build.js
+ * built no door in, so the page walked through where the rules would not.
+ */
+const doorFlags = (locks) => (locks === 1 ? EX_ISDOOR : locks === 2 ? EX_ISDOOR | EX_PICKPROOF : 0);
+
 function loadRooms(r, area) {
   for (;;) {
     const tag = r.vnumHeader();
@@ -216,7 +224,7 @@ function loadRooms(r, area) {
           dir,
           description: r.string(),
           keyword: r.string(),
-          locks: r.number(),
+          locks: doorFlags(r.number()),
           key: r.number(),
           to: r.number(),
         };
