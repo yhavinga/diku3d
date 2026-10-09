@@ -1,5 +1,6 @@
 /**
- * What a walled room is built as, read from its own words.
+ * What a room is built as, read from its own words: open to the sky or
+ * walled (`isOpenAir`, at the end), and what a walled one is walled in.
  *
  * Every room with walls used to come out as the same box -- the stone kit, or
  * plaster and boards -- whatever it said it was. The prose is a construction
@@ -32,6 +33,8 @@
  *  - `smial`: only ever inherited -- Bag End's "Bedroom" and "Pantry" are the
  *    rooms of a hole in a hill, and say so only by the door they share with it.
  */
+
+import { SECTOR, ROOM_INDOORS } from './are.js';
 
 // A cave named as one, or one the prose says is natural. `cave` alone in the
 // description is not enough: "the cave entrance is to the north" is a room
@@ -346,4 +349,235 @@ const attrsOf = new WeakMap();
 export function shellAttrs(room) {
   if (!attrsOf.has(room)) attrsOf.set(room, readShell(room));
   return attrsOf.get(room);
+}
+
+// ------------------------------------------------------- open or walled ----
+//
+// Whether a room has walls round it at all, and in which of its area's own
+// styles it is built. These are build.js's questions; they live here, with
+// no three.js in them, because the game server asks the first one too
+// (server/world.mjs holds a step to the walls of a walled room) and cannot
+// load build.js.
+
+const OUTDOOR = new Set([
+  SECTOR.CITY, SECTOR.FIELD, SECTOR.FOREST, SECTOR.HILLS,
+  SECTOR.MOUNTAIN, SECTOR.WATER_SWIM, SECTOR.WATER_NOSWIM, SECTOR.DESERT, SECTOR.AIR,
+]);
+
+export const isOutdoor = (room) => OUTDOOR.has(room.sector) && !(room.flags & ROOM_INDOORS);
+
+/**
+ * Country the mud sectored as town. Miden'nir's "The Plains" -- "a vast
+ * desolate place where the wind can howl undisturbed" -- and "The Lane",
+ * "lined on both sides by tall, stately trees", are CITY like the streets of
+ * Midgaard next door, and were built as streets: a stone frontage and a gate
+ * lodge on the plains, two rows of town houses along a tree-lined lane. The
+ * words win over the sector, as they do for the bog and the canopy.
+ *
+ * Measured over all 45 stock areas, CITY and not INDOORS: these take exactly
+ * #3500/#5365 (the plains) and #3501/#5363 (the lane), Old Thalos carrying a
+ * copy of each. What they must not take is as load-bearing. `avenue` alone
+ * takes Emerald Avenue and the neighborhood's avenues, which are streets;
+ * `field`/`plains`/`desolate` anywhere in the prose take the East Gate ("the
+ * plains stretch out in the distance"), a Thalos watchtower, the end of Impy
+ * Way, the Shire's pig pen and the Cross Roads ("to the north is a very
+ * desolate ...") -- every one of them pointing at country, none standing in
+ * it. So the name, or the prose saying *you are* on it.
+ *
+ * Only what is built reads this (`sectorOf`); the rules keep the mud's sector.
+ */
+const COUNTRY_NAME = /\b(plains|meadows?|moors?|moorland|heath|grassland|prairie|steppe)\b/i;
+const COUNTRY_SELF = /\byou are (?:standing |walking |strolling )?(?:on|in|across|upon) (?:the |a |an )?(?:vast |open |wide |grassy )*(?:plains?|fields?|meadows?|moors?|heath|grassland|prairie|steppe)\b/i;
+const AVENUE = /\blined (?:on both sides )?(?:by|with) [^.]{0,30}\btrees\b|\btree-lined\b|\bshady lane\b/i;
+export const isTreeLined = (room) => room.sector === SECTOR.CITY && !(room.flags & ROOM_INDOORS) && AVENUE.test(room.description);
+const isCountryside = (room) => room.sector === SECTOR.CITY && !(room.flags & ROOM_INDOORS)
+  && (COUNTRY_NAME.test(room.name) || COUNTRY_SELF.test(room.description) || AVENUE.test(room.description));
+/** The sector a room is *built* as. */
+export const sectorOf = (room) => (isCountryside(room) ? SECTOR.FIELD : room.sector);
+
+/** The sewer under the town, which build.js dresses by its own words. */
+export const isSewer = (room) => room.areaFile === 'sewer.are';
+
+/**
+ * East of the town the river goes into the mountains through a hole in the
+ * wall, and comes out -- past an underground lake, caves, a fungus temple --
+ * on the edge of a desert with a nomads' oasis in it. Keyed by area, and then
+ * by the rooms' own words, five ways:
+ *
+ *  - `cave`: everything the mud calls INDOORS that is not a tent. The river's
+ *    tunnels, the lake, the caverns: the sewer's cave treatment -- rock lining,
+ *    no sky in the lighting -- and, because these are at street level and not
+ *    under it, a mountain over them (`buildMassif`).
+ *  - `desert`: "A vast desert stretches for miles": sand, and dunes out past
+ *    the rooms (`buildSandSea`).
+ *  - `camp`: the oasis -- "this small group of desert nomads has stopped ...
+ *    beside this beautiful oasis" -- palms, water, the tents seen from outside.
+ *  - `tent`: "Inside a small tent", "The main tent": a room whose walls and
+ *    roof are cloth.
+ *  - `ledge`: "the wind-swept ledge ... this canyon is about a half a kilometer
+ *    deep": rock underfoot at the edge of a drop.
+ */
+export const isEastern = (room) => room.areaFile === 'eastern.are';
+const EAST_TENT = /\btents?\b/i;
+const EAST_CAMP = /\b(camp|camels?|oasis)\b/i;
+const EAST_LEDGE = /\bledge\b/i;
+export const eastStyle = (room) => {
+  if (!isEastern(room)) return null;
+  if (EAST_TENT.test(room.name)) return 'tent';
+  if (EAST_CAMP.test(room.name)) return 'camp';
+  if (EAST_LEDGE.test(room.name)) return 'ledge';
+  if (sectorOf(room) === SECTOR.DESERT || /\bsand\b/i.test(room.name)) return 'desert';
+  if (room.flags & ROOM_INDOORS) return 'cave';
+  return 'desert';
+};
+
+/** Anywhere that lights itself and dresses itself from its prose, with no sky in it. */
+export const isDeep = (room) => isSewer(room) || eastStyle(room) === 'cave';
+
+/**
+ * Raff's neighborhood, keyed by area like the Shire and the sewer, because it
+ * is a different kind of place rather than a different kind of room: the same
+ * town, gone bad. Inside the area the prose decides, room by room -- "All the
+ * shops and homes have been boarded up and abandoned", "Everywhere you look
+ * you see signs of recent violence. Patches of blood lie everywhere", "The
+ * remains of the magic shop", "This is the section of town between the two
+ * gang's territories. This is usually where the violence starts."
+ *
+ *  - `nml`: No Man's Land. Its ten rooms are sectored HILLS, which built them
+ *    grass ridges and rock kerbs; they are a burnt-out strip of town, open
+ *    and wider than a street, rubble and barricades at both ends.
+ *  - `ruin`: "The remains of", "What is left of", "what USED to be the
+ *    armory". Walled, but the roof and the floors above are gone: the ruin_
+ *    kit from tools/blender/hood.py, ash underfoot, the sky over it.
+ *  - `court`: the courtyards, flagged INDOORS and described as open ground
+ *    with the plants dead in them. The words win, as they do for the desert.
+ *  - `lot`, `plaza`, `park`: the over-grown lot, Dracolich Plaza, Khan Park.
+ *  - `lair`: the warehouse the gang leader runs things from, and the chapel.
+ *  - `wall`: Wall Road, "along the inside of the wall surrounding the city".
+ *  - `street` and `room` for the rest.
+ */
+export const isHood = (room) => room.areaFile === 'hood.are';
+const HOOD_NML = /\bno man'?s land\b/i;
+const HOOD_RUIN = /\b(remains of|what is left of|used to be the)\b/i;
+const HOOD_COURT = /\bcourtyard\b/i;
+const HOOD_PLAZA = /\bplaza\b/i;
+const HOOD_LOT = /\bover-?grown\b/i;
+const HOOD_LAIR = /\b(warehouse|chapel)\b/i;
+export const hoodStyle = (room) => {
+  if (!isHood(room)) return null;
+  const { name } = room;
+  if (HOOD_NML.test(name)) return 'nml';
+  if ((room.flags & ROOM_INDOORS) && HOOD_RUIN.test(`${name} ${room.description}`)) return 'ruin';
+  if (HOOD_COURT.test(name)) return 'court';
+  if (HOOD_PLAZA.test(name)) return 'plaza';
+  if (isPark(room)) return 'park';
+  if (HOOD_LOT.test(name)) return 'lot';
+  if (HOOD_LAIR.test(name)) return 'lair';
+  if (/^wall road$/i.test(name)) return 'wall';
+  return (room.flags & ROOM_INDOORS) ? 'room' : 'street';
+};
+
+/**
+ * A park by the name the mud gives it -- "Small path through the park",
+ * "Park Entrance" -- and not a road that runs past one (build.js plants it).
+ */
+const PARK = /\bpark\b/i;
+const PARK_IS_A_ROAD = /\b(road|street|avenue|lane)\b/i;
+export const isPark = (room) => isOutdoor(room) && PARK.test(room.name) && !PARK_IS_A_ROAD.test(room.name);
+
+/**
+ * FOREST plus ROOM_INDOORS is the mud saying "no sky", not "inside a building".
+ * Haon Dor's deep, dark forest is under the canopy -- "the crowns of the trees
+ * must be very dense, as they leave the forest floor in utter darkness" -- and
+ * 44 of the default world's 68 forest rooms carry the flag. Built as interiors
+ * they came out as stone boxes with a ceiling and a roof standing in a wood.
+ *
+ * `isOutdoor` still answers no for them, and that is the right answer: it is
+ * what keeps the rain and the open-air ambience off under a canopy. What
+ * changes is only the geometry, so the two questions are now separate.
+ */
+// The sector says forest, but six of Haon Dor's INDOORS rooms are named
+// caves, an underground hallway, a temple, the inside of a tree -- real
+// interiors that happen to sit in a forest area. The name wins over the
+// sector code, the same move readFittings and the park already make.
+// The plurals and the rest of the burrow's words: "The many tunnels", "The
+// maze", "The hole", "The secret chamber" are Moria's -- FOREST and INDOORS
+// like Haon Dor's trails, and planted as a wood under rock, a fir standing in
+// a tunnel -- and "A Ladder", "A Hole" the gnomes', "Darker Caves" the
+// canyon's. Over all 45 areas this takes no room that reads as forest.
+const CANOPY_NOT = /\b(caves?|underground|temple|hall|inside|web|tunnels?|hole|maze|passage|chamber|ladder)\b/i;
+/**
+ * A room that says it is *outside* one is not inside one. "Outside a cave in
+ * the deep, dark forest" is the mouth of the Green Dragon's cave -- a path end
+ * under the same crowns as the forty-four rooms around it, with the cave
+ * itself the room to the north -- and `cave` in its own name was building it a
+ * brick box with a plank ceiling 5.2 m over the middle of a wood.
+ *
+ * Checked over all 45 stock areas, which is the only way to ship a word here:
+ * of the 45 FOREST+INDOORS rooms `CANOPY_NOT` currently calls interiors --
+ * Moria's thirty-odd tunnels, the spider web, the Green Dragon's cave itself,
+ * the great tree, the cultist temple -- exactly one says `outside`, and it is
+ * #6142. `entrance to` and `before` were tried alongside it and dropped:
+ * across the world they take "Entrance to the Crypt", "Entrance to the High
+ * Tower" and "Standing before the throne", all of them genuinely indoors.
+ */
+const CANOPY_OUTSIDE = /\boutside\b/i;
+// Not the sewer. Twenty-six of its drains are sectored FOREST -- "The sewer
+// drain.", "The strange sewer" -- and every one carries ROOM_INDOORS, so the
+// canopy test took them for Haon Dor and planted firs seven metres under the
+// Dump.
+const canopyNamed = (room) => room.sector === SECTOR.FOREST && !isOutdoor(room) && !isDeep(room)
+  && (CANOPY_OUTSIDE.test(room.name) || !CANOPY_NOT.test(room.name));
+export const isCanopy = (room) => canopyNamed(room) && !enclosedForest.has(room);
+/**
+ * A wood is somewhere you can walk out of. A room the words let through is
+ * still an interior if no way out of it reaches open ground or another room
+ * that reads as forest: Moria's "At the sand bar" is wordless, and its only
+ * exit is the underground river -- it grew a fir under the mountain. One hop,
+ * by the words alone, so the answer does not depend on the order rooms come
+ * in. Over the stock areas this takes that sand bar, a dark room in the
+ * wyvern's tower, and one "Lost in the Mist" whose neighbours are all built
+ * as interiors already.
+ */
+const enclosedForest = new WeakSet();
+export function classifyCanopy(world) {
+  for (const room of world.rooms.values()) {
+    if (!canopyNamed(room)) continue;
+    const open = room.exits.some((exit) => {
+      const next = exit && world.rooms.get(exit.to);
+      return next && (isOutdoor(next) || canopyNamed(next));
+    });
+    if (!open) enclosedForest.add(room);
+  }
+}
+
+/** No walls, no ceiling, no roof -- whatever the mud says about the sky. */
+// "Strange Glowing Sand" is INDOORS by its flags and "a vast desert" by its
+// words; the words win, as they do for the canopy.
+// The neighborhood's courtyards likewise: INDOORS, and "once it was the
+// courtyard of a beautiful building complex ... the plants all died".
+/**
+ * A building the mud left open to the sky. Thalos' "A small guard house"
+ * ("this small shack still stands guarding the entrance"), its "Tavern of the
+ * Sun" and "An impressive house" are CITY with no INDOORS flag, so they were
+ * built as streets lined with houses -- a guard house you stand in the
+ * middle of a lane to be inside. The name is the building itself: a head
+ * noun, at most two words after the article. Over all 45 areas that is those
+ * five rooms (two in each Thalos). What it must not take: "Lawn west of
+ * house" (Dylan's, outside one), "A collapsed home" (rubble and a crater),
+ * and the Smurfs' homes, whose roofs "you rip" off -- a giant standing over
+ * a toy village, open air on purpose -- which the apostrophe keeps out.
+ */
+const NAMED_BUILDING = /^(?:the |an? )?(?:\w+ ){0,2}(?:guard ?house|shack|barracks|hut|hovel|cottage|cabin|house|tavern|inn)\b/i;
+const roofedByName = (room) => room.sector === SECTOR.CITY && NAMED_BUILDING.test(room.name);
+export const isOpenAir = (room) => (isOutdoor(room) && !roofedByName(room)) || isCanopy(room)
+  || (!!eastStyle(room) && eastStyle(room) !== 'cave') || hoodStyle(room) === 'court';
+/**
+ * `isOpenAir` for a zone's rooms before that zone is built: what a vista
+ * (vista.js) is planned by, and the walls the server holds a step to
+ * (server/world.mjs).
+ */
+export function openAirIn(world) {
+  classifyCanopy(world);
+  return isOpenAir;
 }

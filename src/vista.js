@@ -21,7 +21,8 @@
 
 import * as THREE from 'three';
 import { DIR_STEP, SECTOR } from './are.js';
-import { raise, openAirIn, hash3, sectorOf, CELL, LEVEL_H } from './build.js';
+import { raise, hash3, CELL, LEVEL_H } from './build.js';
+import { openAirIn, sectorOf } from './shells.js';
 import { InstanceBatch, StaticBatches } from './assets.js';
 import { plantTrees } from './actors.js';
 import { vistaSites, planVista, cutLayout, vistaCells } from './vistaplan.js';
