@@ -82,14 +82,17 @@ EOF
 # --- 4b. De spelserver (server/, systemd diku3d-server op 127.0.0.1:4000).
 # Spelersbestanden, notes, bans en de wizlock staan in $DATA, buiten de
 # gedeployde boom; bij de allereerste start staat de wizlock aan (alleen
-# immortals), tot een implementor hem met `wizlock` uitzet.
+# immortals), tot een implementor hem met `wizlock` uitzet. Of site.json
+# bestaat vraagt sudo: de ssh-gebruiker kan niet in $DATA kijken (750,
+# diku3d), dus een gewone test faalde altijd en elke deploy zette de wizlock
+# weer aan en gooide de bans weg.
 DATA="${DEPLOY_DATA:-/srv/diku3d-data}"
 echo "▸ spelserver"
 ssh "$SERVER" "sudo tee /etc/systemd/system/diku3d-server.service.new >/dev/null" < "$ROOT/tools/deploy/diku3d-server.service"
 ssh "$SERVER" "set -e
   id diku3d >/dev/null 2>&1 || sudo useradd --system --no-create-home --shell /usr/sbin/nologin diku3d
   sudo install -d -o diku3d -g diku3d -m 750 $DATA
-  [ -f $DATA/site.json ] || echo '{ \"version\": 1, \"wizlock\": true, \"bans\": [] }' | sudo -u diku3d tee $DATA/site.json >/dev/null
+  sudo test -f $DATA/site.json || echo '{ \"version\": 1, \"wizlock\": true, \"bans\": [] }' | sudo -u diku3d tee $DATA/site.json >/dev/null
   cd $DOCMAP/server && sudo npm ci --omit=dev --no-audit --no-fund --silent
   cd /etc/systemd/system
   if ! sudo cmp -s diku3d-server.service.new diku3d-server.service; then
