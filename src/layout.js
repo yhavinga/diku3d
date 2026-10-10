@@ -242,6 +242,21 @@ function routePath(from, to, occupied, MAX = 6, cost = () => 0, blocked = () => 
 const LAID_WHOLE = new Set(['hood.are', 'midennir.are']);
 
 /**
+ * Where the prose sets a room beside another that no exit joins it to.
+ * "Under the Bridge" (#3200) is the reach of the river under On the Bridge
+ * (#3051) -- "the river flows west through an opening in the wall ten feet
+ * below the bridge" -- and its only way west runs off the map, "the river
+ * flowing west into the Forest of Haon-Dor". Placed by its exits alone it lay
+ * on the Concourse's row, 58 m from the bridge, and the river ran under no
+ * bridge at all. Each entry moves `room` to the cell past `to` the other way
+ * from `dir` once everything is placed, and whatever stood there into the
+ * room's old cell: placing it there from the start moved 105 rooms of the
+ * home zone and cost four walls. No street is routed for it; build.js carries
+ * the water on from the room under `to` (`BESIDE` there).
+ */
+export const BESIDE = [{ room: 3200, dir: 3, to: 3051 }];
+
+/**
  * What a corridor pays, in cells, for each cell it shares with another
  * pair's street, when it is laid again round them (the end of layoutWorld):
  * enough to go two cells round one.
@@ -463,6 +478,22 @@ export function layoutWorld(world, options = {}) {
   }
 
   relax(world, cells, occupied, order, 12, { terrace, reserved });
+  for (const { room, dir, to } of BESIDE) {
+    const a = cells.get(room); const b = cells.get(to);
+    if (!a || !b || a.level !== b.level) continue;
+    const [dx, , dz] = DIR_STEP[dir];
+    const x = b.x - dx; const z = b.z - dz;
+    if (a.x === x && a.z === z) continue;
+    const there = occupied.get(key(a.level, x, z));
+    occupied.delete(key(a.level, a.x, a.z));
+    if (there !== undefined) {
+      const c = cells.get(there);
+      c.x = a.x; c.z = a.z;
+      occupied.set(key(c.level, c.x, c.z), there);
+    }
+    a.x = x; a.z = z;
+    occupied.set(key(a.level, x, z), room);
+  }
   if (options.compact) return { order };
 
   // Spread the grid: rooms keep the even coordinates and every cell between
