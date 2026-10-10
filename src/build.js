@@ -2053,6 +2053,15 @@ function buildRiver({ plan, layout, rooms, batcher, instances, chunkOf, addColli
       }
       const g = rect(d, -half, half, barAt - 0.1, barAt + 0.1);
       addCollider(g.x0, g.x1, g.z0, g.z1, bed - 0.2, spring + half);
+      // The footing itself, either side of the arch and over it: a body
+      // in the channel walked through it beside the bars and out under the
+      // ground beyond (walkable.mjs: "off the map" at the cell past it).
+      for (const [a0, a1, ya] of [[-(HALF - QUAY_T), -half, bed - SLAB], [half, HALF - QUAY_T, bed - SLAB], [-half, half, spring + half]]) {
+        const r = rect(d, a0, a1, HALF - T, HALF);
+        addCollider(r.x0, r.x1, r.z0, r.z1, ya, y0);
+      }
+      const back = rect(d, -half, half, HALF - 0.12, HALF);
+      addCollider(back.x0, back.x1, back.z0, back.z1, bed - SLAB, spring + half);
     }
 
     // Steps down the quay from a street that comes to the water: a landing
