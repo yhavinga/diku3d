@@ -15,7 +15,6 @@ import { collectResources, disposeZoneGraph } from './teardown.js';
 import { createMaterials, bakeJobs, runBake } from './textures.js';
 import { bakeTextures } from './bakery.js';
 import { buildScene, CELL, LEVEL_H } from './build.js';
-import { shaftsOf, shaftAt } from './shells.js';
 import { populate } from './actors.js';
 import { Player } from './player.js';
 import { Hud } from './hud.js';
@@ -1865,47 +1864,17 @@ async function boot() {
       + `${layout.stats.portals} archways · ${(built.stats.triangles / 1e6).toFixed(2)}M tris built`;
   }
 
-  // The drawn zone's lids' and drops' shafts, made when the layout changes.
-  let lidShafts = null;
-  let lidShaftsOf = null;
   /**
-   * Which room you are in. Standing in a room's own cell is unambiguous;
-   * standing in a street belongs to whichever end of that street is nearer,
-   * which is the closest thing the mud's own geography has to an answer.
-   * In a shaft, under the floor above, it is the room below, as game.js's
-   * count and the server's judge have it.
+   * Which room you are in, for the HUD, the sound and the arrow keys: the
+   * game's own count (game.js `createRoomCounter`), asked for where the feet
+   * are now, so that a jump (`look`, `goto`) shows at once and a paused frame
+   * agrees with the next one. It used to be a rule of its own -- a room's
+   * cell, a street's nearer end by the page's moved centres, the nearest
+   * room round open ground -- and the HUD and the game could name two rooms.
    */
   function currentRoom() {
-    const feet = player.position.y - 1.72;
-    if (lidShaftsOf !== layout) { lidShafts = shaftsOf(world, layout.links); lidShaftsOf = layout; }
-    const shaft = shaftAt(lidShafts, player.position.x, feet, player.position.z);
-    if (shaft) return shaft.lower;
-    const level = Math.round(feet / LEVEL_H);
-    const cx = Math.round(player.position.x / CELL);
-    const cz = Math.round(player.position.z / CELL);
-
-    const here = layout.at(level, cx, cz);
-    if (here !== undefined) return here;
-
-    const passage = layout.passageAt(level, cx, cz);
-    if (passage) {
-      const a = built.rooms.get(passage.from.vnum);
-      const b = built.rooms.get(passage.to.vnum);
-      return a.center.distanceToSquared(player.position) <= b.center.distanceToSquared(player.position)
-        ? passage.from.vnum : passage.to.vnum;
-    }
-
-    let vnum;
-    let best = Infinity;
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dz = -1; dz <= 1; dz++) {
-        const candidate = layout.at(level, cx + dx, cz + dz);
-        if (candidate === undefined) continue;
-        const distance = built.rooms.get(candidate).center.distanceToSquared(player.position);
-        if (distance < best) { best = distance; vnum = candidate; }
-      }
-    }
-    return vnum;
+    const at = game.roomAt({ x: player.position.x, y: player.position.y - 1.72, z: player.position.z }, game.state.roomVnum);
+    return at ?? game.state.roomVnum ?? undefined;
   }
 
   // --------------------------------------------------------------- events --

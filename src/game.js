@@ -24,10 +24,11 @@
 import {
   ACT_SENTINEL, ACT_AGGRESSIVE, ACT_PRACTICE, ACT_SCAVENGER, ITEM,
   ROOM_NO_MOB, ROOM_PRIVATE, ROOM_SOLITARY, DIR_NAME, EX_CLOSED, EX_LOCKED,
-  SECTOR, REVERSE_DIR,
+  SECTOR, REVERSE_DIR, DIR_STEP,
 } from './are.js';
 import { createNav } from './nav.js';
-import { openAirIn, shellAttrs, shaftsOf, shaftAt } from './shells.js';
+import { openAirIn, shellAttrs, shaftsOf, shaftAt, sunkRivers, RIVER_DROP } from './shells.js';
+import { BESIDE } from './layout.js';
 import {
   COND, OBJ_VNUM, ITEM_TAKE, LEVEL_IMMORTAL, createMoney, makeObject, hasAff, canSee,
   objWeight, objNumber,
@@ -1117,6 +1118,22 @@ export function createRoomCounter({ world, rooms, links, zoneOf = null }) {
     if (!e) throw new Error(`game.js: the shaft under #${upper.vnum} has no room to be counted in`);
     return { level: e.level, x: e.gx, z: e.gz };
   });
+  // Down in the river's channel (shells.js `sunkRivers`) under the street a
+  // bridge carries over it, or between that bridge and the room the prose
+  // puts beside it (layout.js `BESIDE`), a body is in that room -- "Under the
+  // Bridge" -- and not on the bridge over its head.
+  const sunk = sunkRivers(world, { cells: new Map([...rooms].map(([v, info]) => [v, info.cell])) });
+  const underDeck = new Map();
+  for (const { room, dir, to } of BESIDE) {
+    const a = entries.get(room); const b = entries.get(to);
+    if (!a || !b || !sunk.has(room) || a.level !== b.level) continue;
+    const [dx, , dz] = DIR_STEP[dir];
+    for (let n = 1; n <= 8; n++) {
+      const x = a.gx + dx * n; const z = a.gz + dz * n;
+      underDeck.set(key(a.level, x, z), a.vnum);
+      if (x === b.gx && z === b.gz) break;
+    }
+  }
   // layout.js's own test: the far end of a one-way exit has no way back.
   const oneWay = (link) => !world.rooms.get(link.to.vnum).exits.some((exit) => exit && exit.to === link.from.vnum);
   const streets = new Map();
@@ -1186,6 +1203,8 @@ export function createRoomCounter({ world, rooms, links, zoneOf = null }) {
     const level = Math.round(p.y / LEVEL_H);
     const gx = Math.round(p.x / CELL);
     const gz = Math.round(p.z / CELL);
+    const below = underDeck.get(key(level, gx, gz));
+    if (below !== undefined && p.y < level * LEVEL_H - RIVER_DROP / 2) return { room: below };
     const r = byCell.get(key(level, gx, gz));
     if (r) {
       if (!r.walled) return { room: r.vnum };
