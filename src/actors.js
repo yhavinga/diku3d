@@ -4034,10 +4034,10 @@ function* peopleOf(world, layout, built, options = {}) {
       continue;
     }
     // A reach of river fills its cell and is square; a basin is round. Round
-    // ones say so with a radius.
+    // ones say so with a radius, and a step of rapids with its two sides.
     const geo = w.radius
       ? new THREE.CircleGeometry(w.radius, 28)
-      : new THREE.PlaneGeometry(w.size, w.size, 1, 1);
+      : new THREE.PlaneGeometry(w.w ?? w.size, w.d ?? w.size, 1, 1);
     geo.rotateX(-Math.PI / 2);
     const material = new THREE.ShaderMaterial({
       vertexShader: WATER_VERT,

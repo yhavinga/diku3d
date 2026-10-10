@@ -116,13 +116,14 @@ export function createNav({ layout, built, world }) {
     for (const c of built.colliders) if (!c.door) solids.add(c);
     for (const d of built.decor || []) {
       if (d.kind !== 'water') continue;
-      const h = d.size / 2;
-      waters.push({ x0: d.x - h, x1: d.x + h, z0: d.z - h, z1: d.z + h, y: d.y });
+      const hx = (d.w ?? d.size) / 2; const hz = (d.d ?? d.size) / 2;
+      waters.push({ x0: d.x - hx, x1: d.x + hx, z0: d.z - hz, z1: d.z + hz, y: d.y });
     }
   }
   const grids = new Map();
   const _near = [];
   const _mound = [];
+  const _deck = [];
 
   /**
    * The strip under an indoor room's doorway. Such a room's floor stops at the
@@ -158,8 +159,11 @@ export function createNav({ layout, built, world }) {
     const ox = cx * CELL - HALF;
     const oz = cz * CELL - HALF;
     const floors = platforms.around(cx * CELL, cz * CELL, []);
-    const up = mounds.around(cx * CELL, cz * CELL, []).reduce((m, p) => Math.max(m, p.top - p.base), 0);
-    const boxes = solids.around(cx * CELL, cz * CELL, _near).filter((c) => c.y1 > y + BAND_LO && c.y0 < y + BAND_HI + up);
+    const based = mounds.around(cx * CELL, cz * CELL, []);
+    const up = based.reduce((m, p) => Math.max(m, p.top - p.base), 0);
+    // A river's channel is ground cut below its level (build.js `buildRiver`).
+    const down = based.reduce((m, p) => Math.min(m, p.top - p.base), 0);
+    const boxes = solids.around(cx * CELL, cz * CELL, _near).filter((c) => c.y1 > y + BAND_LO + down && c.y0 < y + BAND_HI + up);
     const doors = doorways(level, cx, cz) || [];
     const wet = waters.filter((w) => Math.abs(w.y - y) < 1);
     for (let j = 0; j < PER; j++) {
@@ -169,13 +173,20 @@ export function createNav({ layout, built, world }) {
         let ground = false;
         let raised = false;
         let g = y;
+        let low = null; let floored = false;
         for (const p of floors) {
           if (x < p.x0 || x > p.x1 || z < p.z0 || z > p.z1) continue;
           if (p.base !== undefined) {
-            if (Math.abs(p.base - y) <= FLOOR_TOL) { ground = true; g = Math.max(g, p.top); }
-          } else if (Math.abs(p.top - y) <= FLOOR_TOL) ground = true;
+            if (Math.abs(p.base - y) <= FLOOR_TOL) {
+              ground = true;
+              if (p.top < y - FLOOR_TOL) low = low === null ? p.top : Math.max(low, p.top);
+              else g = Math.max(g, p.top);
+            }
+          } else if (Math.abs(p.top - y) <= FLOOR_TOL) { ground = true; floored = true; }
           else if (p.top > y + FLOOR_TOL && p.top < y + BAND_HI) raised = true;
         }
+        // In the channel the ground is its bed; where a deck crosses it, the deck.
+        if (low !== null && !floored && g === y) g = low;
         // On a mound the ground is the mound, and what is in the way is
         // what stands on it -- not the mound's own sides.
         if (g > y + FLOOR_TOL) raised = false;
@@ -242,13 +253,20 @@ export function createNav({ layout, built, world }) {
       if (x < p.x0 || x > p.x1 || z < p.z0 || z > p.z1 || Math.abs(p.base - base) > FLOOR_TOL) continue;
       if (top === null || p.top > top) top = p.top;
     }
+    // Under a deck over the river's channel, the deck is the ground.
+    if (top !== null && top < base) {
+      for (const p of platforms.around(x, z, _deck)) {
+        if (p.base === undefined && x >= p.x0 && x <= p.x1 && z >= p.z0 && z <= p.z1 && Math.abs(p.top - base) <= FLOOR_TOL) return null;
+      }
+    }
     return top;
   }
 
   /**
-   * Which room a point belongs to -- main.js's `currentRoom`, for feet rather
-   * than for eyes. A room's own cell is unambiguous; a street belongs to the
-   * nearer end of it.
+   * Which room a point belongs to, by the grid alone: a room's own cell is
+   * unambiguous; a street belongs to the nearer end of it. The server's
+   * judge and its lifts ask this; who a body is counted in is game.js
+   * `createRoomCounter`'s.
    */
   function roomAt(x, y, z) {
     const level = levelOf(y);

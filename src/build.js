@@ -22,8 +22,9 @@ import { buildGrass } from './grass.js';
 import {
   classifyShells, shellFor, shellAttrs, isOutdoor, sectorOf, isTreeLined, classifyCanopy, isCanopy, isOpenAir,
   isSewer, isEastern, eastStyle, isDeep, isHood, hoodStyle, isPark,
-  wayLid, isDrop, LID_FLIGHT, lidOpening, lidCeiling, DROP_OPENING,
+  wayLid, isDrop, LID_FLIGHT, lidOpening, lidCeiling, DROP_OPENING, sunkRivers, RIVER_DROP,
 } from './shells.js';
+import { BESIDE } from './layout.js';
 import { placeClutter, ALTAR_MIDDLE, STATUE_OF_ODIN, STATUE_DEPTH } from './clutter.js';
 import { MURAL_REGIONS, faceRegion, bloodRegion } from './textures.js';
 
@@ -1716,6 +1717,394 @@ function buildHoodWallRoad({ batcher, instances, link, layout, chunkOf, addColli
   }
 }
 
+// --------------------------------------------------------------- the river ----
+
+/** A quay's thickness, standing in the channel along a dry side of its cell. */
+const QUAY_T = 0.6;
+/** The parapet along a quay or a deck, and how high it holds a body back. */
+const PARAPET_T = 0.45;
+const PARAPET_H = 1.0;
+const PARAPET_HOLD = 1.5;
+/**
+ * A deck over the water: a street's width between its fronts (the cell less
+ * the 3.2 m frontage either side, `FRONTAGE_D`), a corridor's a doorway's and
+ * a little; and how deep its slab is at the crown of the bridge's arch.
+ */
+const DECK_W = 6.6;
+const CORRIDOR_DECK_W = 3.6;
+const DECK_T = 0.6;
+/** Where a stair comes down a quay: the landing at the street's end of it. */
+const LANDING_W = 2.4;
+const LANDING_D = 2.0;
+const STAIR_TREAD = 0.8;
+/** How many steps the water climbs out of the channel in, a riser each. */
+const RAPIDS_STEPS = 6;
+/** "The arch under the bridge is covered by seaweed for one foot above the surface of the river." */
+const RIVER_ARCH_SPRING = 0.35;
+
+/**
+ * The river in its channel (shells.js `sunkRivers`): every cell the water
+ * runs through, and the sides it goes on through (`wet`). The rooms; the
+ * routed cells between two of them; where the prose puts a room beside
+ * another (layout.js `BESIDE`), the cells from it on under that room, whose
+ * street the bridge carries over the water (`under`), and out through the
+ * wall on its far side (`out`). Where a water link climbs out of the channel
+ * to water that is not in it, the cells it climbs in (`rapids`: the side
+ * downstream); where a land link comes down to the water, the side of the
+ * room its steps come down (`stair`); where a land link crosses, the sides
+ * its deck lands on (`deck`).
+ */
+function riverPlan(layout, sunk, cellKey) {
+  const cells = new Map();
+  if (!sunk.size) return cells;
+  const at = (level, x, z) => {
+    const k = cellKey(level, x, z);
+    if (!cells.has(k)) {
+      cells.set(k, { level, x, z, wet: new Set(), room: null, under: null, out: -1, stair: -1, rapids: -1, deck: new Set(), deckW: DECK_W });
+    }
+    return cells.get(k);
+  };
+  for (const vnum of sunk) {
+    const c = layout.cells.get(vnum);
+    if (c) at(c.level, c.x, c.z).room = vnum;
+  }
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || !link.to) continue;
+    const level = link.from.level;
+    const chain = [link.from, ...link.path, link.to];
+    const a = sunk.has(link.from.vnum); const b = sunk.has(link.to.vnum);
+    if (a && b) {
+      for (let i = 0; i < chain.length - 1; i++) {
+        at(level, chain[i].x, chain[i].z).wet.add(dirBetween(chain[i], chain[i + 1]));
+        at(level, chain[i + 1].x, chain[i + 1].z).wet.add(dirBetween(chain[i + 1], chain[i]));
+      }
+    } else if ((a || b) && isWater(link.from.room) && isWater(link.to.room)) {
+      const low = a ? link.from : link.to;
+      const ordered = a ? chain : [...chain].reverse();
+      at(level, low.x, low.z).wet.add(dirBetween(low, ordered[1]));
+      for (let i = 1; i < ordered.length - 1; i++) at(level, ordered[i].x, ordered[i].z).rapids = dirBetween(ordered[i], ordered[i - 1]);
+    } else if (a || b) {
+      const low = a ? link.from : link.to;
+      at(level, low.x, low.z).stair = dirBetween(low, a ? chain[1] : chain[chain.length - 2]);
+    }
+  }
+  for (const { room, dir, to } of BESIDE) {
+    if (!sunk.has(room)) continue;
+    const a = layout.cells.get(room); const b = layout.cells.get(to);
+    if (!a || !b || a.level !== b.level) continue;
+    const [dx, , dz] = DIR_STEP[dir];
+    let x = a.x; let z = a.z;
+    for (let n = 0; n < 8 && !(x === b.x && z === b.z); n++) {
+      at(a.level, x, z).wet.add(dir);
+      x += dx; z += dz;
+      at(a.level, x, z).wet.add(REVERSE_DIR[dir]);
+    }
+    const under = at(b.level, b.x, b.z);
+    under.under = to;
+    under.out = dir;
+  }
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || !link.to) continue;
+    if (sunk.has(link.from.vnum) && sunk.has(link.to.vnum)) continue;
+    const water = isWater(link.from.room) && isWater(link.to.room);
+    const level = link.from.level;
+    const chain = [link.from, ...link.path, link.to];
+    for (let i = 1; i < chain.length - 1; i++) {
+      const c = cells.get(cellKey(level, chain[i].x, chain[i].z));
+      if (!c || (water && c.rapids >= 0)) continue;
+      c.deck.add(dirBetween(chain[i], chain[i - 1]));
+      c.deck.add(dirBetween(chain[i], chain[i + 1]));
+      if (alleyEnclosed(link)) c.deckW = Math.min(c.deckW, CORRIDOR_DECK_W);
+    }
+  }
+  return cells;
+}
+
+/**
+ * A wall pierced by one arch, as world-space triangles for `Batcher.add`.
+ * `u` runs across the wall's face along `axis` ('x' or 'z') from `u0` to `u1`
+ * about (`cx`, `cz`); the wall is `t` thick across it and stands from `foot`
+ * to `top`. The opening is `half` either side of the centre, straight jambs
+ * from `foot` to `spring`, then a segment of a circle rising `rise` to its
+ * crown. Both faces, the jambs and the soffit; the top and ends are left to
+ * whatever the wall stands against.
+ */
+function archedWall({ cx, cz, axis, u0, u1, t, foot, top, half, spring, rise, seg = 18 }) {
+  const R = (half * half + rise * rise) / (2 * rise);
+  const yc = spring + rise - R;
+  const archY = (u) => yc + Math.sqrt(Math.max(0, R * R - u * u));
+  const pos = [];
+  const P = (u, w, y) => (axis === 'x' ? [cx + u, y, cz + w] : [cx + w, y, cz + u]);
+  // Seen from +w the face winds one way, from -w the other.
+  const quad = (a, b, c, d) => { pos.push(...a, ...b, ...c, ...a, ...c, ...d); };
+  const face = (w, ua, ub, ya0, yb0, ya1, yb1) => {
+    const front = w > 0;
+    const a = P(ua, w, ya0); const b = P(ub, w, yb0); const c = P(ub, w, yb1); const d = P(ua, w, ya1);
+    // three's front faces wind anticlockwise; axis 'x' puts +w along +z,
+    // which a viewer at +z sees with u to the right.
+    const flip = (axis === 'x') === front;
+    if (flip) quad(a, b, c, d); else quad(b, a, d, c);
+  };
+  const us = [];
+  for (let i = 0; i <= seg; i++) us.push(-half + (2 * half * i) / seg);
+  for (const w of [-t / 2, t / 2]) {
+    if (u0 < -half) face(w, u0, -half, foot, foot, top, top);
+    if (u1 > half) face(w, half, u1, foot, foot, top, top);
+    for (let i = 0; i < seg; i++) face(w, us[i], us[i + 1], archY(us[i]), archY(us[i + 1]), top, top);
+  }
+  // The soffit, looking down into the opening, and the jambs.
+  const under = (ua, ub, ya, yb) => {
+    const a = P(ua, -t / 2, ya); const b = P(ub, -t / 2, yb); const c = P(ub, t / 2, yb); const d = P(ua, t / 2, ya);
+    if (axis === 'x') quad(a, b, c, d); else quad(a, d, c, b);
+  };
+  for (let i = 0; i < seg; i++) under(us[i], us[i + 1], archY(us[i]), archY(us[i + 1]));
+  if (spring > foot) {
+    for (const [s, u] of [[1, -half], [-1, half]]) {
+      const a = P(u, -t / 2, foot); const b = P(u, t / 2, foot); const c = P(u, t / 2, spring); const d = P(u, -t / 2, spring);
+      if ((s > 0) === (axis === 'x')) quad(b, a, d, c); else quad(a, b, c, d);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  return { geo, archY };
+}
+
+/**
+ * The river's works, cell by cell (`riverPlan`): its bed and water, a quay
+ * up every dry side with a parapet on it, a deck wherever a street crosses,
+ * the bridge whose street the prose puts over it, the culvert where it goes
+ * out under the town wall, the steps down from a street that comes to the
+ * water, and the rapids where it climbs out to water that is not sunk.
+ * "The riverbanks are too steep to climb": a quay is 3 m of stone, and a
+ * body down in the channel walks out only by the steps or the rapids.
+ */
+function buildRiver({ plan, layout, rooms, batcher, instances, chunkOf, addCollider, addPlatform, decor, sunkRects }) {
+  if (!plan.size) return;
+  const was = batcher.indoor;
+  batcher.indoor = false;
+  for (const c of plan.values()) {
+    const chunk = chunkOf(c);
+    const px = c.x * CELL; const pz = c.z * CELL;
+    const y0 = c.level * LEVEL_H;
+    const bed = y0 - RIVER_DROP;
+    sunkRects.push({ x0: px - HALF, x1: px + HALF, z0: pz - HALF, z1: pz + HALF, y: y0 });
+    // A rect in this cell's frame against side `d`: `a0..a1` along the side,
+    // `b0..b1` in from the centre towards it.
+    const rect = (d, a0, a1, b0, b1) => {
+      const [dx, , dz] = DIR_STEP[d];
+      if (dz !== 0) {
+        const z0 = dz < 0 ? pz - b1 : pz + b0; const z1 = dz < 0 ? pz - b0 : pz + b1;
+        return { x0: px + a0, x1: px + a1, z0, z1 };
+      }
+      const x0 = dx < 0 ? px - b1 : px + b0; const x1 = dx < 0 ? px - b0 : px + b1;
+      return { x0, x1, z0: pz + a0, z1: pz + a1 };
+    };
+    const solid = (r, ya, yb, material, { collide = true, opts = {} } = {}) => {
+      const w = r.x1 - r.x0; const d = r.z1 - r.z0; const h = yb - ya;
+      if (w < 0.01 || d < 0.01 || h < 0.01) return;
+      batcher.add(box(w, h, d, 1, 1, 1), material, place((r.x0 + r.x1) / 2, (ya + yb) / 2, (r.z0 + r.z1) / 2), { chunk, ...opts });
+      if (collide) addCollider(r.x0, r.x1, r.z0, r.z1, ya, yb);
+    };
+    const flow = c.rapids >= 0 ? new Set([c.rapids, (c.rapids + 2) % 4]) : null;
+    const quayed = (d) => !c.wet.has(d) && d !== c.out && !(flow && flow.has(d));
+    // The two ends of side `d` along it: a north or south quay owns the
+    // corners, an east or west one stops short of them.
+    const span = (d, t) => {
+      if (d === 0 || d === 2) return [-HALF, HALF];
+      return [quayed(0) ? -HALF + t : -HALF, quayed(2) ? HALF - t : HALF];
+    };
+    const neighbour = (d) => {
+      const [dx, , dz] = DIR_STEP[d];
+      const v = layout.at(c.level, c.x + dx, c.z + dz);
+      return v === undefined ? null : rooms.get(v) || null;
+    };
+
+    // The bed, and the water over it, as a room of the river lays its own.
+    if (c.rapids < 0 && !c.room) {
+      batcher.add(plane(CELL, CELL, 6), 'water', place(px, bed, pz), { chunk });
+      addPlatform(px - HALF, px + HALF, pz - HALF, pz + HALF, bed);
+      decor.push({ kind: 'water', x: px, y: bed + WATER_LIFT, z: pz, size: CELL + WATER_LAP });
+    }
+
+    // Gaps a parapet leaves along a side: where a deck lands, where the steps come down.
+    const gaps = (d) => {
+      const out = [];
+      if (c.deck.has(d)) out.push([-c.deckW / 2, c.deckW / 2]);
+      if (c.under && (d + 2) % 4 !== c.out && d !== c.out && !c.wet.has(d)) out.push([-DECK_W / 2, DECK_W / 2]);
+      if (c.stair === d) out.push([-LANDING_W / 2, LANDING_W / 2]);
+      return out;
+    };
+    for (let d = 0; d < 4; d++) {
+      if (!quayed(d)) continue;
+      const [a0, a1] = span(d, QUAY_T);
+      solid(rect(d, a0, a1, HALF - QUAY_T, HALF), bed - SLAB, y0 - 0.012, 'stonewall', { opts: { ao: wallAo(bed) } });
+      // Nothing to hold back where a room's own wall stands.
+      const info = neighbour(d);
+      if (info && !info.openAir) continue;
+      const [p0, p1] = span(d, PARAPET_T);
+      let from = p0;
+      for (const [g0, g1] of [...gaps(d), [p1, p1]].sort((m, n) => m[0] - n[0])) {
+        if (g0 > from) {
+          const r = rect(d, from, g0, HALF - PARAPET_T, HALF);
+          solid(r, y0 - 0.012, y0 + PARAPET_H, 'stonewall', { collide: false, opts: { ao: wallAo(y0) } });
+          addCollider(r.x0, r.x1, r.z0, r.z1, y0, y0 + PARAPET_HOLD);
+        }
+        from = Math.max(from, g1);
+      }
+    }
+    // A corner of dry land between two sides the water goes on through.
+    for (let d = 0; d < 4; d++) {
+      const e = (d + 1) % 4;
+      if (quayed(d) || quayed(e) || flow) continue;
+      const [dx, , dz] = DIR_STEP[d]; const [ex, , ez] = DIR_STEP[e];
+      if (plan.has(`${c.level}:${c.x + dx + ex},${c.z + dz + ez}`)) continue;
+      const sx = dx + ex; const sz = dz + ez;
+      const cxp = px + sx * (HALF - QUAY_T / 2); const czp = pz + sz * (HALF - QUAY_T / 2);
+      solid({ x0: cxp - QUAY_T / 2, x1: cxp + QUAY_T / 2, z0: czp - QUAY_T / 2, z1: czp + QUAY_T / 2 }, bed - SLAB, y0 - 0.012, 'stonewall');
+      const qx = px + sx * (HALF - PARAPET_T / 2); const qz = pz + sz * (HALF - PARAPET_T / 2);
+      solid({ x0: qx - PARAPET_T / 2, x1: qx + PARAPET_T / 2, z0: qz - PARAPET_T / 2, z1: qz + PARAPET_T / 2 }, y0 - 0.012, y0 + PARAPET_H, 'stonewall', { collide: false });
+      addCollider(qx - PARAPET_T / 2, qx + PARAPET_T / 2, qz - PARAPET_T / 2, qz + PARAPET_T / 2, y0, y0 + PARAPET_HOLD);
+    }
+
+    // A street carried over the water: a strip from each side it comes in by
+    // to the middle, parapets down its open edges.
+    if (c.deck.size && !c.under) {
+      const W = c.deckW;
+      const dirs = [...c.deck];
+      const strips = [];
+      const rails = [];
+      if (dirs.length === 2 && (dirs[0] + 2) % 4 === dirs[1]) {
+        const d = dirs[0];
+        strips.push(rect(d, -W / 2, W / 2, -HALF, HALF));
+        rails.push(rect(d, -W / 2, -W / 2 + PARAPET_T, -HALF, HALF), rect(d, W / 2 - PARAPET_T, W / 2, -HALF, HALF));
+      } else {
+        // Two sides at a corner (a crossing turns): `a` runs to the middle
+        // and past it, `b` stops at `a`. Along `a`'s side the other one's
+        // axis is the one `rect` measures as `a0..a1`.
+        const [a, b] = dirs.length === 2 ? dirs : [dirs[0], (dirs[0] + 1) % 4];
+        const sb = DIR_STEP[b][0] + DIR_STEP[b][2]; // +1 if b lies along +x or +z
+        const sa = DIR_STEP[a][0] + DIR_STEP[a][2];
+        strips.push(rect(a, -W / 2, W / 2, -W / 2, HALF), rect(b, -W / 2, W / 2, W / 2, HALF));
+        // The outer edges: away from b along a's strip, away from a along b's.
+        const outerA = sb > 0 ? [-W / 2, -W / 2 + PARAPET_T] : [W / 2 - PARAPET_T, W / 2];
+        const innerA = sb > 0 ? [W / 2 - PARAPET_T, W / 2] : [-W / 2, -W / 2 + PARAPET_T];
+        const outerB = sa > 0 ? [-W / 2, -W / 2 + PARAPET_T] : [W / 2 - PARAPET_T, W / 2];
+        const innerB = sa > 0 ? [W / 2 - PARAPET_T, W / 2] : [-W / 2, -W / 2 + PARAPET_T];
+        rails.push(rect(a, outerA[0], outerA[1], -W / 2, HALF), rect(a, innerA[0], innerA[1], W / 2, HALF));
+        rails.push(rect(b, outerB[0], outerB[1], -W / 2 + PARAPET_T, HALF), rect(b, innerB[0], innerB[1], W / 2 - PARAPET_T, HALF));
+      }
+      for (const r of strips) {
+        const w = r.x1 - r.x0; const d = r.z1 - r.z0;
+        batcher.add(plane(w, d, 3), 'cobble', place((r.x0 + r.x1) / 2, y0, (r.z0 + r.z1) / 2), { chunk });
+        solid(r, y0 - DECK_T, y0 - 0.01, 'stonewall', { collide: false });
+        addPlatform(r.x0, r.x1, r.z0, r.z1, y0);
+      }
+      for (const r of rails) {
+        solid(r, y0, y0 + PARAPET_H, 'stonewall', { collide: false, opts: { ao: wallAo(y0) } });
+        addCollider(r.x0, r.x1, r.z0, r.z1, y0, y0 + PARAPET_HOLD);
+      }
+    }
+
+    // The bridge: its street on an arch over the water, from one quay to the
+    // other, parapets down both sides; the room it is still stands on it.
+    if (c.under) {
+      const along = (c.out + 1) % 4;               // the deck runs across the flow
+      const axis = along === 0 || along === 2 ? 'z' : 'x';
+      const crown = y0 - DECK_T;
+      const { geo } = archedWall({
+        cx: px, cz: pz, axis, u0: -(HALF - QUAY_T), u1: HALF - QUAY_T, t: DECK_W,
+        foot: bed + RIVER_ARCH_SPRING, top: y0 - 0.01, half: HALF - QUAY_T, spring: bed + RIVER_ARCH_SPRING, rise: crown - (bed + RIVER_ARCH_SPRING),
+      });
+      batcher.add(geo, 'stonewall', new THREE.Matrix4(), { chunk, ao: wallAo(bed) });
+      geo.dispose();
+      const deck = rect(along, -DECK_W / 2, DECK_W / 2, -HALF, HALF);
+      const info = rooms.get(c.under);
+      const floor = info?.materials?.floor || 'cobble';
+      batcher.add(plane(deck.x1 - deck.x0, deck.z1 - deck.z0, 3), floor, place((deck.x0 + deck.x1) / 2, y0, (deck.z0 + deck.z1) / 2), { chunk });
+      addPlatform(deck.x0, deck.x1, deck.z0, deck.z1, y0);
+      for (const [r0, r1] of [[-DECK_W / 2, -DECK_W / 2 + PARAPET_T], [DECK_W / 2 - PARAPET_T, DECK_W / 2]]) {
+        const r = rect(along, r0, r1, -HALF, HALF);
+        solid(r, y0, y0 + PARAPET_H, 'stonewall', { collide: false, opts: { ao: wallAo(y0) } });
+        addCollider(r.x0, r.x1, r.z0, r.z1, y0, y0 + PARAPET_HOLD);
+      }
+    }
+
+    // "The water gently flows through an opening in the lower part of the
+    // city wall": the wall's footing across the channel, an arch in it at
+    // the water, barred, and dark behind the bars.
+    if (c.out >= 0) {
+      const d = c.out;
+      const [dx, , dz] = DIR_STEP[d];
+      const T = 2.5;
+      const mid = HALF - T / 2;
+      const axis = dz !== 0 ? 'x' : 'z';
+      const half = 1.8; const spring = bed + 0.9;
+      const { geo, archY } = archedWall({
+        cx: px + dx * mid, cz: pz + dz * mid, axis, u0: -(HALF - QUAY_T), u1: HALF - QUAY_T, t: T,
+        foot: bed - SLAB, top: y0 - 0.012, half, spring, rise: half,
+      });
+      batcher.add(geo, 'stonewall', new THREE.Matrix4(), { chunk, ao: wallAo(bed) });
+      geo.dispose();
+      // The back of the culvert, where the light gives out.
+      solid(rect(d, -half, half, HALF - 0.12, HALF), bed - SLAB, spring + half, 'stonewall', { collide: false, opts: { tint: [0.16, 0.16, 0.17] } });
+      const barAt = HALF - T + 0.3;
+      for (let u = -half + 0.16; u < half - 0.1; u += 0.2) {
+        solid(rect(d, u - 0.025, u + 0.025, barAt - 0.025, barAt + 0.025), bed - 0.1, archY(u) + 0.05, 'iron', { collide: false });
+      }
+      const g = rect(d, -half, half, barAt - 0.1, barAt + 0.1);
+      addCollider(g.x0, g.x1, g.z0, g.z1, bed - 0.2, spring + half);
+    }
+
+    // Steps down the quay from a street that comes to the water: a landing
+    // at the street's end of them, then the flight along the quay.
+    if (c.stair >= 0) {
+      const d = c.stair;
+      const b1 = HALF - QUAY_T; const b0 = b1 - LANDING_D;
+      const landing = rect(d, -LANDING_W / 2, LANDING_W / 2, b0, b1);
+      batcher.add(plane(landing.x1 - landing.x0, landing.z1 - landing.z0, 2), 'cobble', place((landing.x0 + landing.x1) / 2, y0, (landing.z0 + landing.z1) / 2), { chunk });
+      solid(landing, bed, y0 - 0.01, 'stonewall', { collide: false });
+      addPlatform(landing.x0, landing.x1, landing.z0, landing.z1, y0);
+      // Which way along the quay the flight goes down: towards `d + 1`.
+      const s = DIR_STEP[(d + 1) % 4][0] + DIR_STEP[(d + 1) % 4][2];
+      const risers = Math.round(RIVER_DROP / 0.5);
+      const rise = RIVER_DROP / risers;
+      for (let k = 1; k < risers; k++) {
+        const u0 = LANDING_W / 2 + (k - 1) * STAIR_TREAD; const u1 = u0 + STAIR_TREAD;
+        const r = s > 0 ? rect(d, u0, u1, b0, b1) : rect(d, -u1, -u0, b0, b1);
+        solid(r, bed, y0 - rise * k, 'stonewall', { collide: false });
+        addPlatform(r.x0, r.x1, r.z0, r.z1, y0 - rise * k);
+      }
+      // Its edges over the water: the landing's front, and its far end.
+      const front = rect(d, -LANDING_W / 2, LANDING_W / 2, b0, b0 + PARAPET_T);
+      const end = s > 0 ? rect(d, -LANDING_W / 2, -LANDING_W / 2 + PARAPET_T, b0 + PARAPET_T, b1)
+        : rect(d, LANDING_W / 2 - PARAPET_T, LANDING_W / 2, b0 + PARAPET_T, b1);
+      for (const r of [front, end]) {
+        solid(r, y0, y0 + PARAPET_H, 'stonewall', { collide: false, opts: { ao: wallAo(y0) } });
+        addCollider(r.x0, r.x1, r.z0, r.z1, y0, y0 + PARAPET_HOLD);
+      }
+    }
+
+    // Rapids: the bed climbs out of the channel in steps, each with its own
+    // water, to the water beyond that is at the street's own level.
+    if (c.rapids >= 0) {
+      const d = (c.rapids + 2) % 4;     // upstream, where the bed is highest
+      const n = RAPIDS_STEPS; const len = CELL / n; const rise = RIVER_DROP / n;
+      for (let k = 0; k < n; k++) {
+        // From the downstream edge: step k runs b from -HALF + k*len.
+        const r = rect(d, -(HALF - QUAY_T), HALF - QUAY_T, -HALF + k * len, -HALF + (k + 1) * len);
+        const topY = bed + rise * k;
+        batcher.add(plane(r.x1 - r.x0, r.z1 - r.z0, 3), 'water', place((r.x0 + r.x1) / 2, topY, (r.z0 + r.z1) / 2), { chunk });
+        solid(r, bed - SLAB, topY - 0.01, 'stonewall', { collide: false });
+        addPlatform(r.x0, r.x1, r.z0, r.z1, topY);
+        // Its water, run on upstream under the next step's lip.
+        const wr = rect(d, -HALF + QUAY_T - 0.3, HALF - QUAY_T + 0.3, -HALF + k * len, -HALF + (k + 1) * len + 0.3);
+        decor.push({ kind: 'water', x: (wr.x0 + wr.x1) / 2, y: topY + WATER_LIFT, z: (wr.z0 + wr.z1) / 2, w: wr.x1 - wr.x0, d: wr.z1 - wr.z0, chop: 1.6 });
+      }
+    }
+  }
+  batcher.indoor = was;
+}
+
 /**
  * The paint and the blood: every decal quad in the world, merged by
  * material, laid a centimetre off whatever it is on.
@@ -1848,6 +2237,10 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   // boundaries between two biomes without guessing at them a second time.
   const groundAt = new Map();
   const cellKey = (level, x, z) => `${level}:${x},${z}`;
+  // Midgaard's river in its channel: what `buildRiver` builds, and what
+  // everything else built on a cell keeps off.
+  const river = riverPlan(layout, sunkRivers(world, layout), cellKey);
+  const sunkRects = [];
   // What this build may put down on a cell that is neither a room nor a
   // street: not where a vista stands (`options.clear`), nor, in a vista,
   // where the drawn zone already builds.
@@ -1923,6 +2316,10 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     const ux = plan.upper.x * CELL; const uz = plan.upper.z * CELL;
     groundHoles.push({ x0: ux + rect.x0, x1: ux + rect.x1, z0: uz + rect.z0, z1: uz + rect.z1 });
   }
+  // ...and over the river's channel, which would otherwise be lawn.
+  for (const c of river.values()) {
+    if (c.level === 0) groundHoles.push({ x0: c.x * CELL - HALF, x1: c.x * CELL + HALF, z0: c.z * CELL - HALF, z1: c.z * CELL + HALF });
+  }
   for (const r of vista ? [] : rectsAround({ x0: gx0, x1: gx1, z0: gz0, z1: gz1 }, groundHoles)) {
     const w = r.x1 - r.x0; const d = r.z1 - r.z0;
     const seg = Math.max(1, Math.min(32, Math.round(Math.max(w, d) / 60)));
@@ -1946,8 +2343,10 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     const lift = lifts.get(room.vnum) || 0;
     if (lift) {
       pos.y += lift;
-      buildPodium({ batcher, chunk: chunkOf(cell), x: pos.x, y: pos.y - lift, z: pos.z, lift, addCollider, addPlatform, raised, steps: true, sides: layout.sides.get(cell.vnum) });
+      if (lift > 0) buildPodium({ batcher, chunk: chunkOf(cell), x: pos.x, y: pos.y - lift, z: pos.z, lift, addCollider, addPlatform, raised, steps: true, sides: layout.sides.get(cell.vnum) });
     }
+    // A room the river runs under (the bridge): `buildRiver` lays its street.
+    const bridged = !!river.get(cellKey(cell.level, cell.x, cell.z))?.under;
     const chunk = chunkOf(cell);
     const outdoor = isOutdoor(room);
     // What the room record carries is the mud's answer, because rain and
@@ -2052,12 +2451,14 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     // the wall line and the ruin kit's inner face the world's grass showed as
     // a green seam along the foot of every wall. Its ash runs under them.
     const half = airborne ? ROOM / 2 : (openAir || buried || ruin ? HALF : ROOM / 2);
-    if (openAir) groundAt.set(cellKey(cell.level, cell.x, cell.z), mats.floor);
-    buildFloor({
-      batcher, chunk, material: mats.floor, x: pos.x, y: pos.y, z: pos.z,
-      half, holes: roomHoles.filter((h) => !h.ceiling), addPlatform, slab: !airborne,
-      shade: !openAir, tint: mats.floorTint,
-    });
+    if (openAir && !bridged) groundAt.set(cellKey(cell.level, cell.x, cell.z), mats.floor);
+    if (!bridged) {
+      buildFloor({
+        batcher, chunk, material: mats.floor, x: pos.x, y: pos.y, z: pos.z,
+        half, holes: roomHoles.filter((h) => !h.ceiling), addPlatform, slab: !airborne,
+        shade: !openAir, tint: mats.floorTint,
+      });
+    }
 
     // Six of the marsh's rooms are sectored as open water and only two of them
     // are: "Gloomy Path Through the Marsh" is WATER_SWIM, and a path is not
@@ -2075,7 +2476,8 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       // an abutting edge still shows as a line where the two planes' waves
       // disagree by a pixel.
       decor.push({ kind: 'water', x: pos.x, y: pos.y + WATER_LIFT, z: pos.z, size: half * 2 + WATER_LAP });
-      buildShore({
+      // Down in the channel the banks are quays (`buildRiver`).
+      if (lift >= 0) buildShore({
         batcher,
         instances,
         model,
@@ -2428,9 +2830,12 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         if (dir === 3 && gateOf(room) >= 0) {
           buildGateFlanks({ batcher, instances, chunk, pos, dir: gateOf(room), addCollider });
         } else if (dir === 3) {
+          // Over the river nothing stands on a bridge's sides but its parapets.
+          const overWater = river.get(cellKey(cell.level, cell.x, cell.z));
           buildCityFrontage({
             batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors,
             lights, decals, turf: hood ? turfAt(cell.z) : null, gateSide, rowJobs,
+            skip: overWater ? new Set([...overWater.wet, overWater.out]) : null,
           });
         }
       }
@@ -2893,17 +3298,19 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       continue;
     }
     const liftFrom = lifts.get(link.from.vnum) || 0; const liftTo = lifts.get(link.to.vnum) || 0;
+    // On one mound, on it; from a mound or out of the river's channel, at
+    // the street's own level, and the steps are the mound's or the river's.
     buildAlley({
       batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt,
-      cellKey, streetCells: openStreet, lift: Math.min(liftFrom, liftTo), streetClutter,
+      cellKey, streetCells: openStreet, lift: liftFrom === liftTo ? liftFrom : 0, streetClutter, river,
     });
     if (leadsNowhere(link, world)) sealStreet({ batcher, instances, link, worldOf, chunkOf, addCollider, layout });
-    if (liftFrom && liftTo) {
+    if (liftFrom > 0 && liftTo > 0) {
       for (const c of link.path) {
         const at = worldOf({ ...c, level: link.from.level });
         buildPodium({ batcher, chunk: chunkOf({ ...c, level: link.from.level }), x: at.x, y: at.y, z: at.z, lift: liftFrom, addCollider, addPlatform, raised, steps: false });
       }
-    } else if ((liftFrom || liftTo) && link.path.length && link.kind === 'alley') {
+    } else if ((liftFrom > 0 || liftTo > 0) && link.path.length && link.kind === 'alley') {
       // "Huge marble steps lead up to the temple gate."
       const top = liftFrom ? link.from : link.to;
       const first = liftFrom ? link.path[0] : link.path[link.path.length - 1];
@@ -2933,6 +3340,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       });
     }
   }
+  buildRiver({ plan: river, layout, rooms, batcher, instances, chunkOf, addCollider, addPlatform, decor, sunkRects });
 
   for (const plan of stairPlans) {
     // A drop is a shaft, and only the way down it is an exit.
@@ -3062,6 +3470,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   for (const spot of frontage.values()) {
     yield 0.223 + 0.005 * (spotsDone++ / frontage.size);
     if (mountain.has(cellKey(spot.level, spot.x, spot.z))) continue;
+    if (river.has(cellKey(spot.level, spot.x, spot.z))) continue;
     if (reserved.has(cellKey(spot.level, spot.x, spot.z))) continue;
     // Face the house at the street. Models are built fronting -Z, so the
     // rotation that turns that front towards direction d is FACE_ROT[d]. It
@@ -3138,6 +3547,13 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   // The town wall's lengths, and a tower wherever a length ends without
   // another one beside it facing the same way: a curtain wall that simply
   // stops shows its cut end.
+  // "The bridge is built out from the western city wall": the wall goes
+  // over the river where the river goes out under it.
+  if (instances && instances.library.get('city_wall')) {
+    for (const c of river.values()) {
+      if (c.out >= 0) townWalls.push({ spot: { level: c.level, x: c.x, z: c.z }, pos: { x: c.x * CELL, y: c.level * LEVEL_H, z: c.z * CELL }, dir: c.out });
+    }
+  }
   const walled = new Set(townWalls.map(({ spot, dir }) => `${cellKey(spot.level, spot.x, spot.z)}|${dir}`));
   for (const { spot, pos, dir } of townWalls) {
     const [dx, , dz] = DIR_STEP[dir];
@@ -3369,6 +3785,16 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   for (const p of platforms) {
     for (const r of raised) {
       if (p.x0 >= r.x0 - 0.01 && p.x1 <= r.x1 + 0.01 && p.z0 >= r.z0 - 0.01 && p.z1 <= r.z1 + 0.01 && p.top > r.y + 0.05 && p.top <= r.y + r.lift + 0.05) {
+        p.base = r.y;
+        break;
+      }
+    }
+  }
+  // ...and everything down in the river's channel to the level it is cut in.
+  for (const p of platforms) {
+    if (p.base !== undefined) continue;
+    for (const r of sunkRects) {
+      if (p.x0 >= r.x0 - 0.01 && p.x1 <= r.x1 + 0.01 && p.z0 >= r.z0 - 0.01 && p.z1 <= r.z1 + 0.01 && p.top < r.y - 0.05 && p.top >= r.y - RIVER_DROP - 0.1) {
         p.base = r.y;
         break;
       }
@@ -3833,7 +4259,7 @@ const frontsCrossing = (room, dir) => wantsFrontage(room) && !isShire(room) && d
  * inside the 5-9 m a real town street runs to, and the buildings now touch
  * their neighbours in the cells behind instead of standing free on paving.
  */
-function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors, lights = [], decals = null, turf = null, gateSide = -1, rowJobs = null }) {
+function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, sides, addCollider, decor, doors, lights = [], decals = null, turf = null, gateSide = -1, rowJobs = null, skip = null }) {
   if (!wantsFrontage(room)) return;
   // A crossing's side is a frontage like any closed one, with the gate's
   // lodge in a gap in the middle of it (`buildCrossing`): left open, it was
@@ -4095,7 +4521,7 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
   };
 
   for (let dir = 0; dir < 4; dir++) {
-    if (isOpen(dir)) continue;
+    if (isOpen(dir) || (skip && skip.has(dir))) continue;
     const [dx, , dz] = DIR_STEP[dir];
     const along = dir === 1 || dir === 3;
     const bx = pos.x + dx * inset;
@@ -7241,7 +7667,7 @@ function sealStreet({ batcher, instances, link, worldOf, chunkOf, addCollider, l
  * buildings that fill the cells beside it become the street frontage; between
  * two indoor rooms it gets walls and a ceiling and becomes a corridor.
  */
-function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null, streetCells = null, lift = 0, streetClutter = null }) {
+function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null, streetCells = null, lift = 0, streetClutter = null, river = null }) {
   const enclosed = alleyEnclosed(link);
   batcher.indoor = enclosed;
   const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
@@ -7311,6 +7737,8 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
     // floorboards would lie over the river "On the River" runs down. The
     // street builds the cell.
     if (enclosed && streetCells && cellKey && streetCells.has(cellKey(level, c.x, c.z))) continue;
+    // The river's channel, and whatever crosses it, are `buildRiver`'s.
+    if (river && cellKey && river.has(cellKey(level, c.x, c.z))) continue;
 
     // A Shire covered way takes a strip of the cell; the rest of it is the
     // field the way crosses, not a thirteen-metre deck of floorboards.
@@ -7464,6 +7892,8 @@ function mounds(world, layout) {
       }
     }
   }
+  // The river in its channel lies under its level instead (`buildRiver`).
+  for (const vnum of sunkRivers(world, layout)) lifts.set(vnum, -RIVER_DROP);
   return lifts;
 }
 

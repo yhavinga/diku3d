@@ -14,9 +14,10 @@
  * What the server cannot have is the geometry: build.js is three.js. Its rooms
  * are the layout grid, as tools/game-check.mjs stubs them, and the server's
  * game stands everyone on that grid. Where build.js raises a room -- the
- * temple's mound, `mounds` below -- a client's report comes down by the lift
- * on the way in and goes back up on the way out (`liftAt`), so a player on
- * the temple steps and a mobile beside them are on one floor for reach. The
+ * temple's mound, `mounds` below -- or sinks one, the river in its channel, a
+ * client's report comes down by the lift on the way in and goes back up on
+ * the way out (`liftAt`), so a player on the temple steps and a mobile beside
+ * them are on one floor for reach. The
  * arrival point moved off a stair opening is still the client's alone.
  *
  * Nor can it have build.js's walls, bar one kind: which rooms are walled at
@@ -31,7 +32,7 @@ import { join } from 'path';
 import { parseArea, buildWorld, SECTOR, ROOM_INDOORS, EX_CLOSED } from '../src/are.js';
 import { planZones, layoutZone, HOME_AREAS } from '../src/zones.js';
 import { createNav } from '../src/nav.js';
-import { readShell, shellAttrs, openAirIn, wayLid, isDrop, shaftsOf, shaftAt } from '../src/shells.js';
+import { readShell, shellAttrs, openAirIn, wayLid, isDrop, shaftsOf, shaftAt, sunkRivers, RIVER_DROP } from '../src/shells.js';
 import { AFF } from '../src/rules/handler.js';
 
 /** build.js's grid, as nav.js and game-check.mjs repeat it. */
@@ -401,6 +402,9 @@ function mounds(world, zones) {
         }
       }
     }
+    // The river in its channel lies under its level instead (shells.js
+    // `sunkRivers`), as build.js lays it.
+    for (const vnum of sunkRivers(world, layout)) lifts.set(vnum, -RIVER_DROP);
   }
   return lifts;
 }

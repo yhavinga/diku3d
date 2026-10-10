@@ -745,3 +745,38 @@ export const lidOpening = (kind) => ({ a0: 0.05, a1: kind === 'slab' || kind ===
 export const lidCeiling = (kind) => ({ a0: 0.05, a1: Math.max(2.75, lidOpening(kind).a1 + 0.8) });
 /** The open shaft of a drop: a well in the middle of the floor. */
 export const DROP_OPENING = { a0: -1.5, a1: 0.9, half: 1.2 };
+
+/**
+ * Midgaard's river runs in a channel under the street. Its own words: "The
+ * riverbanks are too steep to climb" (#3201, #3202), and "the river flows
+ * west through an opening in the wall ten feet below the bridge" (#3051) --
+ * the only banks in the 45 areas the prose calls too steep. Laid on the
+ * ground like a pond it read as reeds and a pool in the middle of town, with
+ * the bridge a cobbled street 58 m from the water. The river is the water
+ * rooms of one area on one level that exits join to a room saying so; their
+ * floor lies `RIVER_DROP` under their level's. build.js builds the channel,
+ * its quays and the decks over it, and the server's `liftAt` takes the same
+ * answer as it takes a temple's mound.
+ */
+export const RIVER_DROP = 3;
+const STEEP_BANKS = /\btoo steep to climb\b/i;
+const isWaterRoom = (room) => room.sector === SECTOR.WATER_SWIM || room.sector === SECTOR.WATER_NOSWIM;
+export function sunkRivers(world, layout) {
+  const sunk = new Set();
+  for (const [vnum, cell] of layout.cells) {
+    const room = world.rooms.get(vnum);
+    if (!room || sunk.has(vnum) || !isWaterRoom(room) || !STEEP_BANKS.test(room.description)) continue;
+    const queue = [room];
+    while (queue.length) {
+      const r = queue.shift();
+      const c = layout.cells.get(r.vnum);
+      if (!c || sunk.has(r.vnum) || c.level !== cell.level) continue;
+      sunk.add(r.vnum);
+      for (const e of r.exits.slice(0, 4)) {
+        const next = e && world.rooms.get(e.to);
+        if (next && isWaterRoom(next) && next.areaFile === room.areaFile && !sunk.has(next.vnum)) queue.push(next);
+      }
+    }
+  }
+  return sunk;
+}
