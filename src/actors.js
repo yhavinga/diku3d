@@ -4333,7 +4333,11 @@ function* peopleOf(world, layout, built, options = {}) {
   const LID_MODELS = {
     trapdoor: ['trapdoor_leaf', 1.2, 1.2], boards: ['trapdoor_leaf', 1.2, 1.2],
     slab: ['tomb_slab', 1.0, 2.1], stone: ['tomb_slab', 1.0, 2.1], grate: ['floor_grate', 1.0, 1.0],
+    coffin: ['coffin_lid', 1.62, 2.46],
   };
+  // "A jet black coffin": its wood as dark as build.js tints the coffin's
+  // (LID_DRESS), which still holds a value in a room without sun.
+  const COFFIN_TINT = [0.16, 0.14, 0.14];
   // The trapdoor's brace is tagged `oak`, assets.js's flat brown for shoes,
   // which has no hook to take the sky's blue out of shade: under an open
   // leaf in a room it read near black, as its frame did (build.js LID_DRESS).
@@ -4419,6 +4423,17 @@ function* peopleOf(world, layout, built, options = {}) {
     const found = kit && assets ? assets.get(kit[0]) : null;
     if (found) {
       const node = primitivesOf(found, buried, LID_WEAR, indoor);
+      // The leaves are drawn instanced from their primitives
+      // (`instanceDoorLeaves`), so the coffin's own colour goes there.
+      for (const mesh of node.children) {
+        const primitive = mesh.userData.doorPrimitive;
+        if (h.kind !== 'coffin' || primitive.materialName !== 'wood') continue;
+        const geometry = primitive.geometry.clone();
+        const col = geometry.attributes.color;
+        for (let i = 0; i < col.count; i++) col.setXYZ(i, ...COFFIN_TINT);
+        mesh.geometry = geometry;
+        mesh.userData.doorPrimitive = { ...primitive, geometry };
+      }
       node.scale.set(h.width / kit[1], 1, h.length / kit[2]);
       leaf.add(node);
       return leaf;

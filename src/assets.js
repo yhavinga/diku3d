@@ -923,7 +923,7 @@ export const ASSET_NAMES = [
   'headstone', 'grave_slab', 'iron_fence',
   // What shuts a way up or down: tools/blender/hatches.py. The leaves are
   // hung and swung by actors.js; the frame and the kerb are placed by build.js.
-  'trapdoor_leaf', 'trapdoor_frame', 'tomb_slab', 'tomb_kerb', 'floor_grate',
+  'trapdoor_leaf', 'trapdoor_frame', 'tomb_slab', 'tomb_kerb', 'floor_grate', 'coffin', 'coffin_lid',
   // the sewer: tools/blender/sewer.py
   'sewer_tunnel', 'sewer_arm', 'sewer_hub', 'sewer_hub_end', 'sewer_chamber', 'sewer_chamber_air', 'sewer_shaft',
   'sewer_wall_open', 'sewer_wall_solid', 'sewer_shaft_open', 'sewer_shaft_solid',

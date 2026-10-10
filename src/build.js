@@ -10256,7 +10256,7 @@ const LID_DRESS = {
   grate: { frame: 'iron', band: 0.08, proud: 0.006, top: 0.006 },
   stone: { frame: null, band: 0.2, proud: 0.012, top: 0.012, model: 'tomb_kerb', clear: [1.0, 2.1] },
   slab: { frame: 'rock', band: 0.24, proud: 0.05, top: 0.05, model: 'tomb_kerb', clear: [1.0, 2.1], tint: [0.5, 0.5, 0.52] },
-  coffin: { frame: 'wood', band: 0.1, proud: 0.598, top: 0.68, tint: [0.16, 0.14, 0.14] },
+  coffin: { frame: 'wood', band: 0.1, proud: 0.598, top: 0.68, tint: [0.16, 0.14, 0.14], model: 'coffin', clear: [1.46, 2.30] },
 };
 /**
  * A lid's surround in two, registered beside it in the library: the faces
@@ -10438,10 +10438,27 @@ function buildLidStair({
     // cut, from under the floor's slab to the rim; the rim is stood on.
     const t = dress.band; const rimY = floorY + dress.proud;
     const outA0 = o.a0 + L - t; const outA1 = o.a1 - L + t; const outC = o.half - L + t;
-    for (const [b0, b1, c0, c1] of [
-      [outA0, outA1, o.half - L, outC], [outA0, outA1, -outC, -o.half + L],
-      [outA0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, outA1, -o.half + L, o.half - L],
-    ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - SLAB - 0.02, rimY, 'wood', { tint: dress.tint, indoor: upperIndoor });
+    if (model) {
+      // tools/blender/hatches.py's: its clear opening scaled to this one,
+      // through the batch rather than instanced, so that it can be "jet
+      // black" -- the wood tinted as the procedural walls were -- and keep
+      // its own grain and normals.
+      const [cw, cl] = dress.clear;
+      const c = centreOf(upper, dx, dz, ca);
+      const m = new THREE.Matrix4().compose(
+        new THREE.Vector3(c.x, floorY, c.z), new THREE.Quaternion().setFromAxisAngle(UP_AXIS, dx !== 0 ? Math.PI / 2 : 0),
+        new THREE.Vector3((2 * o.half) / cw, 1, (o.a1 - o.a0) / cl));
+      for (const p of instances.library.get(model).primitives) {
+        batcher.add(p.geometry, p.materialName, m, {
+          chunk: upperChunk, tint: p.materialName === 'wood' ? dress.tint : null, normals: true, keepUv: true, indoor: upperIndoor,
+        });
+      }
+    } else {
+      for (const [b0, b1, c0, c1] of [
+        [outA0, outA1, o.half - L, outC], [outA0, outA1, -outC, -o.half + L],
+        [outA0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, outA1, -o.half + L, o.half - L],
+      ]) lay(upper, upperChunk, b0, b1, c0, c1, floorY - SLAB - 0.02, rimY, 'wood', { tint: dress.tint, indoor: upperIndoor });
+    }
     for (const [b0, b1, c0, c1] of [
       [outA0, outA1, o.half - L, outC], [outA0, outA1, -outC, -o.half + L],
       [outA0, o.a0 + L, -o.half + L, o.half - L], [o.a1 - L, outA1, -o.half + L, o.half - L],
