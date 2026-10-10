@@ -4,7 +4,7 @@ The mud's trapdoors are told in the room prose: "the faint outline of a
 trapdoor can be seen in the dust", "a large rectangular slab of dark grey stone
 that has been placed face up in the ground", "heavy blue smoke pours into a
 vent in the ceiling", "a see-through opening in the floor, down into a
-dungeon". Three leaves and two surrounds cover them:
+dungeon". Four leaves and three surrounds cover them:
 
 * `trapdoor_leaf` + `trapdoor_frame` -- planks, two iron strap hinges and a
   flush ring pull, in a timber frame let into the floor.
@@ -14,9 +14,12 @@ dungeon". Three leaves and two surrounds cover them:
 * `floor_grate` -- iron bars in a frame, for a vent or a grating in a floor or a
   ceiling. `sewer_grate` is not this: it is a 1.1 m drain lying on a chamber
   floor, centred on its origin and with no hinge, over a quad of black water.
-
-No coffin is made here. `clutter_sarcophagus` already answers the word (src/
-clutter.js maps "coffin" to it), though its lid is part of the one mesh.
+* `coffin_lid` + `coffin` -- the vampire's "jet black coffin ... who knows what
+  lurks beneath", which is the way down: a stair climbs up through it. The
+  coffin is a box with no top and no bottom that stands up out of the floor, and
+  its lid lies on the rim. `clutter_sarcophagus` is the prop clutter.js maps the
+  word "coffin" to, with its lid part of the one mesh; this is the one that
+  opens.
 
 Axes are Blender's, Z up; the exporter turns Blender -Y into three's +Z, so
 nothing here is asymmetric in Y except where a comment says so.
@@ -36,11 +39,22 @@ z = 0 (the floor, or the turf line). The ring round the opening is rebated by
 the leaf's own thickness, so the leaf drops in flush, and a lining runs down
 0.4 m from there so an open hatch shows sides and not the void.
 
+The coffin is the one surround that is not let into the floor. Its origin is
+still on the floor at the middle of the opening, but its walls stand to 0.598
+over it and its lid lies on top, with its own top at z = 0 in the leaf's frame
+like any other: the viewer sets the lid 0.68 up. Under the floor the walls run
+on to -0.40, as a lining does.
+
 Tags: `doorboard` is the recipe made for plank leaves (grain along v, which on
 a top face is Y -- along the boards -- see the cube projection), `oak` is
 assets.js's flat joinery, `iron` the bars, and `rock` is the graveyard's stone:
 `stonewall` is coursed masonry and would rule a mortar joint across a slab
-that was cut from one block (props.py says it for the headstones).
+that was cut from one block (props.py says it for the headstones). The coffin
+is `wood`, the baked joiner's oak, and not `oak`: that is a flat brown with
+none of the baked surfaces' hooks, and in a room with no sun it took the open
+sky's blue (build.js LID_DRESS). The viewer tints the baked wood near-black
+itself, so nothing here is dark on purpose. Its grain runs along u, which the
+cube projection would put across the lid -- `lay_grain` lays it by hand.
 """
 
 import math
@@ -48,6 +62,7 @@ import importlib
 
 import bpy
 import bmesh
+import mathutils
 
 import lib
 import kit
@@ -57,14 +72,18 @@ importlib.reload(kit)
 # Viewport and preview colours only: the viewer bakes its own surfaces.
 lib.PALETTE.setdefault("doorboard", (0.34, 0.26, 0.18, 1.0))
 lib.PALETTE.setdefault("rock", (0.30, 0.29, 0.27, 1.0))
+lib.PALETTE.setdefault("wood", (0.33, 0.21, 0.12, 1.0))
 
 
 # --- raw geometry ---------------------------------------------------------
 
-def solid(name, verts, faces, mat):
+def solid(name, verts, faces, mat, grain=None):
     """A closed shell from raw lists. Winding is handed to bmesh rather than
     reasoned about -- kit.timber is on record as having come out inside-out
-    for one axis -- and a UV layer is added so join() has one to keep."""
+    for one axis -- and a UV layer is added so join() has one to keep.
+
+    `grain`, for a wooden part, is a function of a face's centre that returns
+    the direction the grain runs there (see lay_grain)."""
     me = bpy.data.meshes.new(name)
     me.from_pydata(verts, [], faces)
     me.validate()
@@ -75,9 +94,69 @@ def solid(name, verts, faces, mat):
     bm.free()
     me.update()
     me.uv_layers.new(name="UVMap")
+    if grain is not None:
+        lay_grain(me, grain)
     obj = bpy.data.objects.new(name, me)
     bpy.context.collection.objects.link(obj)
     return lib.assign(obj, mat)
+
+
+def lay_grain(me, along):
+    """UVs for a wooden part, in metres, with u running along the grain.
+
+    The baked `wood` draws its latewood lines along u (textures.js), and the
+    delivery's cube projection gives every face that looks up u = x. A lid
+    that lies along y would be grained across its width, and the rim of a long
+    wall across the rim. So each face is laid flat in its own plane, u the way
+    `along(centre)` says the grain runs there, projected into the face, and v
+    across it. The faces are flagged own_uv, which kit.deliver leaves alone
+    (trees.py's mark_own_uv), and what is left -- the iron -- is projected."""
+    layer = me.uv_layers[0]
+    for poly in me.polygons:
+        n = poly.normal
+        t = mathutils.Vector(along(poly.center))
+        t = t - n * t.dot(n)
+        if t.length < 0.35:
+            # The grain points out of this face: end grain, any way round will do.
+            t = mathutils.Vector((0.0, 0.0, 1.0))
+            t = t - n * t.dot(n)
+            if t.length < 0.35:
+                t = mathutils.Vector((1.0, 0.0, 0.0)) - n * n.x
+        t.normalize()
+        s = n.cross(t)
+        for li in poly.loop_indices:
+            p = me.vertices[me.loops[li].vertex_index].co
+            layer.data[li].uv = (p.dot(t), p.dot(s))
+    flag = me.attributes.new("own_uv", "INT", "FACE")
+    for item in flag.data:
+        item.value = 1
+
+
+def sweep(path, hx, hy, name, mat, cx=0.0, cy=0.0, closed=True, grain=None):
+    """A profile swept round a rectangle, mitred at the corners.
+
+    `path` is [(out, z), ...]: how far each point stands out from the
+    rectangle's edge (negative is in) and how high. Every point becomes a ring
+    of four corners, all offset by the same `out`, and the corners of
+    concentric rectangles are the mitres -- nothing is cut, and the four sides
+    meet in the line the profile does. A closed path is a ring (a wall round an
+    opening); an open one is a slab, capped by the rectangle at each end."""
+    n = len(path)
+    verts = []
+    for (out, z) in path:
+        ex, ey = hx + out, hy + out
+        verts += [(cx + ex, cy + ey, z), (cx - ex, cy + ey, z),
+                  (cx - ex, cy - ey, z), (cx + ex, cy - ey, z)]
+    faces = []
+    for k in range(n if closed else n - 1):
+        a, b = 4 * k, 4 * ((k + 1) % n)
+        for i in range(4):
+            j = (i + 1) % 4
+            faces.append((a + i, a + j, b + j, b + i))
+    if not closed:
+        faces.append((0, 1, 2, 3))
+        faces.append(tuple(range(4 * (n - 1), 4 * n)))
+    return solid(name, verts, faces, mat, grain)
 
 
 def prism(outline, z0, z1, name, mat):
@@ -362,8 +441,182 @@ def build_floor_grate():
     return kit.deliver(p, "floor_grate")
 
 
+# --- the coffin -----------------------------------------------------------
+
+COFFIN_HX, COFFIN_HY = 0.73, 1.15   # half the clear opening: 1.46 across, 2.30 along
+COFFIN_WALL = 0.10                  # so the walls are 1.66 x 2.50 where they are thickest
+COFFIN_RIM = 0.598                  # the top of the walls over the floor, and the lid's seat
+COFFIN_FOOT = -0.40                 # and where they end under it
+BODY = 0.056                        # the panelled body stands this far out of the opening's edge
+RISE, BEVEL = 0.012, 0.020          # a panel stands this far off the body, its bevel this wide
+SUNK = 0.004                        # and its foot is let this far into it, which is hidden
+STILE = 0.115                       # the body left bare at a corner
+PANEL_Z = (0.164, 0.405)            # a panel's foot and head, 50 mm in from the body's ends
+PLATE, PLATE_W, PLATE_H = 0.006, 0.052, 0.070   # the plate a handle's leg stands on
+HANDLE_HALF, HANDLE_LEG, HANDLE_OFF, HANDLE_BAR = 0.10, 0.014, 0.026, 0.010
+HANDLE_PITCH = 0.66                 # three to a long side, this far apart
+
+# The wall in section from the foot of its outside, up to the rim and down the
+# inside again: (out, z), `out` from the opening's edge. Nothing is further out
+# than the wall is thick, so the coffin stays in the footprint it was asked for;
+# the plinth and the cornice are the full 0.10, the body between them is stepped
+# back to hold the panels and the handles inside it. A vertex lies on z = 0, so
+# no face crosses the floor line and the part under it can be told from the
+# part over it exactly (build.js `modelHalves`).
+COFFIN_SECTION = [
+    (COFFIN_WALL, COFFIN_FOOT), (COFFIN_WALL, 0.0),     # the lining, under the floor
+    (COFFIN_WALL, 0.055), (0.094, 0.068),               # the plinth: a band, its arris eased,
+    (0.094, 0.082), (BODY, 0.114),                      # a neck, and the splay up into the body
+    (BODY, 0.455),                                      # the body
+    (0.082, 0.484), (0.082, 0.492),                     # the moulding under the rim: out in two
+    (COFFIN_WALL, 0.507), (COFFIN_WALL, 0.578),         # steps to a frieze,
+    (0.088, COFFIN_RIM), (0.0, COFFIN_RIM),             # the rim, flat so a lid can lie on it,
+    (0.0, 0.0), (0.0, COFFIN_FOOT),                     # and the inside, plain, to the foot
+]
+
+SIDES = ((1, 0), (0, 1), (-1, 0), (0, -1))   # which way each side faces: +X, +Y, -X, -Y
+
+
+def on_side(side, s, out, z):
+    """A point `s` along a side of the coffin, anticlockwise from above, `out`
+    from the edge of the opening, at height z."""
+    nx, ny = SIDES[side]
+    d = (COFFIN_HX if nx else COFFIN_HY) + out
+    return (nx * d - ny * s, ny * d + nx * s, z)
+
+
+def coffin_grain(c):
+    """The grain runs along the wall: y on the long sides, x on the ends. A face
+    is on a long side if it stands further out of the opening in x than in y."""
+    return (0.0, 1.0, 0.0) if abs(c.x) - COFFIN_HX >= abs(c.y) - COFFIN_HY else (1.0, 0.0, 0.0)
+
+
+def frustum(side, s0, s1, z0, z1, out0, out1, bevel):
+    """A field standing on a side of the coffin, as a closed shell: its foot
+    s0..s1 by z0..z1 at `out0`, a flat top at `out1` drawn in by `bevel` all
+    round, and four bevels between. Returns (verts, faces)."""
+    foot = [(s0, z0), (s1, z0), (s1, z1), (s0, z1)]
+    head = [(s0 + bevel, z0 + bevel), (s1 - bevel, z0 + bevel),
+            (s1 - bevel, z1 - bevel), (s0 + bevel, z1 - bevel)]
+    verts = [on_side(side, s, out0, z) for (s, z) in foot]
+    verts += [on_side(side, s, out1, z) for (s, z) in head]
+    faces = [(0, 1, 2, 3), (4, 5, 6, 7)]
+    faces += [(a, (a + 1) % 4, 4 + (a + 1) % 4, 4 + a) for a in range(4)]
+    return verts, faces
+
+
+def merged(shells):
+    """Several (verts, faces) shells as one list, for one object."""
+    verts, faces = [], []
+    for (v, f) in shells:
+        i = len(verts)
+        verts += v
+        faces += [tuple(i + k for k in face) for face in f]
+    return verts, faces
+
+
+def coffin_panels():
+    """The raised field of the panelling on each of the four sides. One long one
+    to a side, not a row of them: framed one to a handle they read as the
+    fronts of drawers, and a chest is what that makes of it. The foot of a field
+    is let into the body, so no face of one lies in the body's own."""
+    z0, z1 = PANEL_Z
+    shells = []
+    for side in range(4):
+        half = (COFFIN_HY if SIDES[side][0] else COFFIN_HX) + BODY - STILE
+        shells.append(frustum(side, -half, half, z0, z1, BODY - SUNK, BODY + RISE, BEVEL))
+    return merged(shells)
+
+
+def coffin_handles():
+    """Three iron handles to a long side, each a flat bar on two legs -- a
+    staple, seen from above and extruded 30 mm up -- and each leg on a small
+    plate, which is what makes a bar on a wall a coffin's. The bar's outer face
+    is 2 mm inside the cornice's, so nothing stands out of the footprint; the
+    legs are let 2 mm into their plates and the plates 2 mm into the panel.
+    Returns the plates as one shell list and the staples as parts."""
+    a, w, h, t = HANDLE_HALF, HANDLE_LEG, HANDLE_OFF, HANDLE_BAR
+    face = BODY + RISE                              # the panel's face
+    zc = sum(PANEL_Z) / 2
+    lug = a - w / 2                                 # a leg's middle, from the handle's
+    staple = [(-a, 0.0), (-a, h), (a, h), (a, 0.0), (a - w, 0.0), (a - w, h - t),
+              (-a + w, h - t), (-a + w, 0.0)]
+    plates, staples = [], []
+    for side in (0, 2):
+        for k in (-1, 0, 1):
+            s = k * HANDLE_PITCH
+            for sign in (-1, 1):
+                u = s + sign * lug
+                plates.append(frustum(side, u - PLATE_W / 2, u + PLATE_W / 2,
+                                      zc - PLATE_H / 2, zc + PLATE_H / 2,
+                                      face - 0.002, face + PLATE, 0.006))
+            outline = [on_side(side, s + u, face + PLATE - 0.002 + out, 0.0)[:2] for (u, out) in staple]
+            staples.append(prism(outline, zc - 0.015, zc + 0.015, "handle", "iron"))
+    return merged(plates), staples
+
+
+def build_coffin():
+    """"One coffin lies in the center of the room", and "a jet black coffin ...
+    who knows what lurks beneath": the way down from the Den of the Vampire
+    goes through it, so this is a box with no top and no bottom. Four walls 0.10
+    thick round a clear 1.46 x 2.30 opening, standing 0.598 over the floor where
+    the lid lies, and running down to -0.40 so that looking into an open coffin
+    shows wood and not the void.
+
+    It has a coffin's character inside the 1.66 x 2.50 the walls make: a moulded
+    plinth, a long raised panel to a side, a moulding under the rim and three
+    iron handles to a long side. The inside is plain. Nothing stands outside
+    that footprint, the handles included -- the body is stepped back to leave
+    them room.
+
+    The origin is on the floor, under the middle of the opening."""
+    lib.reset()
+    p = [sweep(COFFIN_SECTION, COFFIN_HX, COFFIN_HY, "wall", "wood", grain=coffin_grain)]
+    verts, faces = coffin_panels()
+    p.append(solid("panels", verts, faces, "wood", coffin_grain))
+    (verts, faces), staples = coffin_handles()
+    p.append(solid("plates", verts, faces, "iron"))
+    return kit.deliver(p + staples, "coffin")
+
+
+# --- the coffin's lid -----------------------------------------------------
+
+LID_X, LID_Y, LID_T = 1.62, 2.46, 0.08
+
+# The lid in section, from the underside out to the edge and in to the middle:
+# (out, z), `out` from its outline, negative being in. The panel is raised, in
+# two steps, but the leaf may not stand over the floor line, so it is the field
+# round it that is sunk: the top of the panel is z = 0, a step lies 15 mm under
+# it and the field 30 mm.
+LID_SECTION = [
+    (-0.008, -LID_T), (0.0, -0.072),    # the underside, its arris eased
+    (0.0, -0.050),                      # the edge
+    (-0.022, -0.030),                   # bevelled up to the field
+    (-0.072, -0.030),                   # the field
+    (-0.108, -0.015),                   # a bevel up to the first step,
+    (-0.138, -0.015),                   # the step,
+    (-0.174, 0.0),                      # and the panel's bevel, up to the floor line
+]
+
+
+def along_y(c):
+    return (0.0, 1.0, 0.0)
+
+
+def build_coffin_lid():
+    """The leaf that lies on the coffin: 1.62 x 2.46 x 0.08, so it covers the
+    opening and 0.08 of the rim all round and leaves 20 mm of the rim showing.
+    Hinged on a long side, as the viewer hangs a coffin's. A raised panel in two
+    steps and a bevelled edge, cut from the one board: the grain runs the length
+    of the lid, which is the way the boards of a coffin lie."""
+    lib.reset()
+    lid = sweep(LID_SECTION, LID_X / 2, LID_Y / 2, "lid", "wood", cx=LID_X / 2,
+                closed=False, grain=along_y)
+    return kit.deliver([lid], "coffin_lid")
+
+
 ASSETS = [build_trapdoor_leaf, build_trapdoor_frame, build_tomb_slab, build_tomb_kerb,
-          build_floor_grate]
+          build_floor_grate, build_coffin_lid, build_coffin]
 
 
 def build():

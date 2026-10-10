@@ -196,8 +196,9 @@ BUDGET = {
     # hatches.py. Held to what they cost and not to PROP_BUDGET's 800: a leaf is
     # seen from above at walking distance, or from below as a ceiling hatch, and
     # the tomb's slab and kerb are laid thirteen times over in the graveyard.
+    # The coffin is one, in the vampire's den, seen from arm's length.
     "trapdoor_leaf": 700, "trapdoor_frame": 200, "tomb_slab": 350, "tomb_kerb": 250,
-    "floor_grate": 320,
+    "floor_grate": 320, "coffin": 520, "coffin_lid": 70,
 }
 PROP_BUDGET = 800
 # people.py: an archetype is a whole dressed person, one skinned draw per
