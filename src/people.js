@@ -37,7 +37,7 @@ export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21, cast: 14 / 24 };
 // against a wall behind, arms folded; talk gestures with the right hand.
 export const LOOPS = new Set(['idle', 'idle2', 'walk', 'run', 'fight', 'sit', 'lean', 'talk']);
 export const CLIPS = ['idle', 'idle2', 'walk', 'run', 'fight', 'attack', 'attack2', 'hit', 'block', 'death', 'cast',
-  'sit', 'lean', 'talk'];
+  'sit', 'lean', 'talk', 'jump', 'land'];
 
 // --- vocabulary -------------------------------------------------------------
 

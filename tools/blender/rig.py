@@ -1253,8 +1253,118 @@ def anim_carry(arm, name):
     return name, (1, 2)
 
 
+# --- jump and land ----------------------------------------------------------
+
+def _leg_geometry(arm):
+    """Thigh and shin length and the straight-leg hip-to-ankle height of this
+    rig, so the knee angles below are the same on a troll as on a woman."""
+    b = arm.data.bones
+    return (b["thigh.L"].length, b["shin.L"].length,
+            b["thigh.L"].head_local.z - b["foot.L"].head_local.z)
+
+
+def _crouch_drop(arm, knee):
+    """How far the hips sink with the feet planted under them for a knee
+    flexed `knee` degrees: law of cosines on thigh and shin."""
+    l1, l2, D = _leg_geometry(arm)
+    return D - math.sqrt(l1 * l1 + l2 * l2 + 2 * l1 * l2 * math.cos(math.radians(knee)))
+
+
+def _air_leg(arm, tag, thigh, knee, pitch):
+    """One foot, free of the ground: the thigh `thigh` degrees forward of
+    vertical (negative is behind it), the knee flexed `knee`. An ankle offset
+    from rest as (dx, dy, dz, pitch); y negative is forward."""
+    l1, l2, D = _leg_geometry(arm)
+    a, k = math.radians(thigh), math.radians(knee)
+    fwd = l1 * math.sin(a) + l2 * math.sin(a - k)
+    down = l1 * math.cos(a) + l2 * math.cos(a - k)
+    return (STANCES["rest"][tag][0][0], -fwd, D - down, pitch)
+
+
+def _leap_feet(arm, t=1.0):
+    """The leap's legs, `t` of the way from standing: the right leg leads
+    (thigh 50 forward, knee 75, toes down a little), the left trails (thigh
+    15 behind, knee 65, the foot up behind). The knees are over a standing
+    leg's at t=0, so the push carries into the pose rather than snapping."""
+    return {"R": _air_leg(arm, "R", 50.0 * t, 75.0 * t, -25.0 * t),
+            "L": _air_leg(arm, "L", -15.0 * t, 65.0 * t, -35.0 * t)}
+
+
+def _grounded(dz=0.0, pitch=0.0):
+    return {t: (STANCES["rest"][t][0][0], 0.0, dz, pitch) for t in "LR"}
+
+
+def _air_clip(arm, name, keys):
+    """keys: [(frame, bones, hips, feet)] with feet from _leap_feet/_air_leg/_grounded."""
+    new_action(arm, name)
+    for (f, bones, hips, feet) in keys:
+        pose(arm, f, bones, hips, feet=False)
+        for t in "LR":
+            dx, dy, dz, pitch = feet[t]
+            a = rest_ankle(arm, t) + V((dx, dy, dz))
+            place(arm, "foot_ik." + t, f, foot_matrix(arm, t, a, pitch, STANCES["rest"][t][1]))
+    return keys[-1][0]
+
+
+# Arms and trunk, written once so jump and land share their poses exactly.
+# Positive X on an arm swings it back, negative forward; Z out is + on R.
+# The leap: left arm forward and up, right arm back and out (against the
+# legs), chest leaning 10 degrees and turned 8 towards the leading right leg,
+# the head held level. The right arm is back so a weapon in that hand points
+# away from a camera behind the figure.
+_AIR = merge(HANG, {"spine": (4, -3, 0), "chest": (6, -5, 0), "neck": (-6, 0, 0), "head": (-10, 0, 0),
+                    "upperarm.L": (-70, 0, -25), "forearm.L": (-40, 0, 0),
+                    "upperarm.R": (25, 0, 45), "forearm.R": (-30, 0, 0)})
+_AIR_HIPS = ((0.0, 0.0, -0.004), 5.0, 0.0, 0.0)
+# The idle clip's first key: land ends on it, so the crossfade is a no-op.
+_IDLE0 = merge(HANG, {"forearm.L": (-10, 0, 0), "forearm.R": (-12, 0, 0)})
+_IDLE0_HIPS = ((0.0, 0.0, -0.004), 0.0, 0.0, 0.0)
+
+
+def anim_jump(arm):
+    """0.29 s, held on its last frame while airborne. Down into a crouch with
+    the arms swung back, drive up onto the toes with the arms coming through,
+    then the knees draw up and the arms lift forward and out for balance."""
+    d = _crouch_drop(arm, 25.0)
+    crouch = merge(HANG, {"spine": (12, 0, 0), "chest": (10, 0, 0), "neck": (-4, 0, 0), "head": (-10, 0, 0),
+                          "upperarm.R": (42, 0, 10), "upperarm.L": (42, 0, -10),
+                          "forearm.R": (-14, 0, 0), "forearm.L": (-14, 0, 0)})
+    push = merge(HANG, {"spine": (2, 0, 0), "chest": (2, 0, 0), "head": (-6, 0, 0),
+                        "upperarm.R": (-42, 0, 22), "upperarm.L": (-42, 0, -22),
+                        "forearm.R": (-20, 0, 0), "forearm.L": (-20, 0, 0)})
+    k = [
+        (1, crouch, ((0.0, 0.0, -0.004 - d), 8.0, 0.0, 0.0), _grounded()),
+        (3, push, ((0.0, 0.0, 0.0), 0.0, 0.0, 0.0), _grounded(0.03, -25.0)),
+        (5, blend(push, _AIR, 0.5), ((0.0, 0.0, -0.004), 3.0, 0.0, 0.0), _leap_feet(arm, 0.5)),
+        (8, _AIR, _AIR_HIPS, _leap_feet(arm)),
+    ]
+    return "jump", (1, _air_clip(arm, "jump", k))
+
+
+def anim_land(arm):
+    """0.33 s: from the airborne pose the feet meet the ground, the knees
+    take it (30 degrees, hips down), the arms come forward and down, and the
+    body rises to the idle stance, which is where the last key sits."""
+    d = _crouch_drop(arm, 30.0)
+    take = merge(HANG, {"spine": (12, 0, 0), "chest": (10, 0, 0), "neck": (-4, 0, 0), "head": (-10, 0, 0),
+                        "upperarm.R": (-30, 0, 22), "upperarm.L": (-30, 0, -22),
+                        "forearm.R": (-24, 0, 0), "forearm.L": (-24, 0, 0)})
+    deep = ((0.0, 0.0, -0.004 - d), 9.0, 0.0, 0.0)
+    k = [
+        (1, _AIR, _AIR_HIPS, _leap_feet(arm)),
+        # The leading right foot meets the ground first, the left still reaching.
+        (2, blend(_AIR, take, 0.35), ((0.0, 0.0, -0.004 - d * 0.25), 6.0, 0.0, 0.0),
+         {"R": _grounded()["R"], "L": _air_leg(arm, "L", 8.0, 40.0, -10.0)}),
+        (3, blend(_AIR, take, 0.7), ((0.0, 0.0, -0.004 - d * 0.6), 8.0, 0.0, 0.0), _grounded()),
+        (5, take, deep, _grounded()),
+        (7, blend(take, _IDLE0, 0.55), ((0.0, 0.0, -0.004 - d * 0.3), 4.0, 0.0, 0.0), _grounded()),
+        (9, _IDLE0, _IDLE0_HIPS, _grounded()),
+    ]
+    return "land", (1, _air_clip(arm, "land", k))
+
+
 CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "block", "death",
-         "cast", "sit", "lean", "talk")
+         "cast", "sit", "lean", "talk", "jump", "land")
 
 
 def make_all(arm, measure=True, P=None, extra=()):
@@ -1268,7 +1378,8 @@ def make_all(arm, measure=True, P=None, extra=()):
     baked = {}
     info = {}
     fns = [anim_idle, anim_idle2, anim_walk, anim_run, anim_fight, anim_attack, anim_attack2,
-           anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk] + list(extra)
+           anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk,
+           anim_jump, anim_land] + list(extra)
     for fn in fns:
         r = fn(arm)
         name, frames = r[0], r[1]
@@ -1293,7 +1404,7 @@ def make_all(arm, measure=True, P=None, extra=()):
     for name, (samples, frames) in baked.items():
         commit(arm, name, samples)
     if measure and P is not None:
-        for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2", "lean", "talk"):
+        for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2", "lean", "talk", "jump", "land"):
             arm.animation_data.action = bpy.data.actions[name]
             gap, f, limb = head_clearance(arm, P, (0, info[name]["frames"]))
             info[name]["head_gap"] = round(gap, 4)
