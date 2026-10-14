@@ -220,9 +220,9 @@ async function run(label, A, B, pcA) {
   await A.waitForTimeout(1500);
   const upSaid = await said(A);
   const after = await body(A);
-  // main.js `step` takes a typed move from its own `currentRoom()`, the room
-  // the HUD shows, not from the game's count: printed beside the refusal, so
-  // an "Alas" can be traced to the room it was said in.
+  // main.js `step` takes a typed move from `currentRoom()`, the room the HUD
+  // shows, which is the game's own counter (`game.roomAt`): printed beside
+  // the refusal, so an "Alas" can be traced to the room it was said in.
   const hudRoom = await A.evaluate(() => window.diku.state.roomVnum);
   check(after.feet < geo.top - 1.5 && upSaid.some((t) => /^The .+ is closed\.$/.test(t)) && !upSaid.some((t) => /Alas/.test(t)),
     '`up` is refused by the lid itself ("The ... is closed."), not as a way that is not there',
