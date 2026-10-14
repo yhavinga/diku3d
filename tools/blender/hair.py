@@ -618,6 +618,341 @@ def style_fringe(S, P, name="hair_fringe", seed=23):
     return _finish(S, P, [body], name)
 
 
+# --- hair with a silhouette ---------------------------------------------------
+#
+# The players' hair. The older styles above lie close: a mass a few millimetres
+# proud of the skull, which reads as a cap from across a room. These are drawn
+# for a silhouette -- volume on top, a knot, a tail, a crown of plait -- and
+# for movement of the eye: a long lock leaving the head is the thing a viewer
+# reads first.
+
+def _hang(pts, wave, phase, wavelength=0.13, ramp=0.07):
+    """A lock's path swayed from side to side round the head, so loose hair
+    waves instead of hanging as ruled lines: `wave` metres of amplitude,
+    growing over the first `ramp` metres so the root stays where it grew."""
+    out = []
+    run = 0.0
+    for i, p in enumerate(pts):
+        p = np.array(p)
+        if i:
+            run += float(np.linalg.norm(p - np.array(pts[i - 1])))
+        rad = np.array([p[0], p[1] - 0.006])
+        n = max(1e-9, float(np.linalg.norm(rad)))
+        tang = np.array([-rad[1] / n, rad[0] / n, 0.0])
+        out.append(p + tang * wave * min(1.0, run / ramp) * math.sin(run * 2 * math.pi / wavelength + phase))
+    return out
+
+
+def style_swept(S, P, name="hair_swept", seed=31):
+    """A man's medium hair swept back off the forehead: a lift of volume over
+    the brow and the top, combed back over the crown and down to the collar,
+    tapered over the ears."""
+    grow = lambda p, soft=0.004: scalp_mask(p, recede=0.9, soft=soft)
+
+    def thick(p):
+        z, y, x = p[:, 2], p[:, 1], np.abs(p[:, 0])
+        top = np.clip((z - 0.040) / 0.050, 0, 1)
+        front = np.clip((0.035 - y) / 0.06, 0, 1)
+        # Most volume at the front of the top, where the hair is lifted off
+        # the brow, easing back over the crown.
+        return 0.0050 + 0.0030 * np.clip(y / 0.08, 0, 1) + top * (0.005 + 0.009 * front) * (1.0 - 0.35 * np.clip(x / 0.06, 0, 1))
+    fm_obj, fm = mass(S, name + "_mass", thick, grow, target=500)
+    fcoll = body_field(S)
+
+    def flow(p):
+        x, y, z = p
+        side = abs(x)
+        # Back over the top; over the ears down and back, so the sides lie
+        # along the head instead of standing out from it.
+        d = np.array([x * 2.2, 1.0, -0.12 - 9.0 * max(0.0, side - 0.040)])
+        return tangent(fm, p, d)
+    roots, rnd = sample_roots(fm, grow, 120, seed, 0.010)
+    locks = []
+    for r in roots:
+        top = float(np.clip((r[2] - 0.040) / 0.05, 0, 1))
+        front = float(np.clip((0.0 - r[1]) / 0.05, 0, 1))
+        L = (0.095 + 0.12 * top * (0.5 + 0.5 * front)) * rnd.uniform(0.9, 1.1)
+        pts = grow_lock(fm, fcoll, r, flow(r), flow, L, step=0.009, hug=0.0005, fall=0.30, rnd=rnd,
+                        scalp=grow)
+        if r[1] < 0.02:
+            # In front of the ears the hair ends at the hairline, as style_short's
+            # does: a lock that left the head there hung down the face.
+            out = np.nonzero(grow(np.array(pts)) < 0.35)[0]
+            if len(out):
+                pts = pts[:max(3, int(out[0]) + 1)]
+        locks.append(Lock(pts, rnd.uniform(0.026, 0.034), rnd.uniform(0.0062, 0.0078), rnd.uniform(0.84, 1.14),
+                          curl=rnd.uniform(-0.15, 0.15)))
+    bpy.data.objects.remove(fm_obj, do_unlink=True)
+    parts = [sculpt(fm, grow, locks, name + "_mass", target=2000)]
+    loose = free_locks(locks, fm, grow, off=0.009)
+    if loose:
+        parts.append(lock_mesh(loose, fcoll, name + "_locks", root_dark=0.85))
+    return _finish(S, P, parts, name)
+
+
+def style_undercut(S, P, name="hair_undercut", seed=37):
+    """Short sides and a longer textured top that falls to one side: the sides
+    are clipped to a nap below a line at the temples and the nape; above it the
+    hair is parted off-centre and combed across, and its ends fall over the
+    brow's left corner."""
+    grow = lambda p, soft=0.004: scalp_mask(p, recede=0.2, soft=soft)
+
+    def topm(p):
+        # The undercut's line, level over the ears and rising a little behind.
+        line = 0.042 + 0.012 * np.clip(p[:, 1] / 0.09, 0, 1)
+        return np.clip((p[:, 2] - line) / 0.032, 0, 1)
+
+    def thick(p):
+        return 0.0026 + 0.011 * topm(p)
+    fm_obj, fm = mass(S, name + "_mass", thick, grow, target=500)
+    fcoll = body_field(S)
+    whorl = np.array([0.0, 0.070, 0.100])
+    part = np.array([-0.030, -0.030, 0.100])
+
+    def flow_top(p):
+        # From the parting across the top to the left, a little forward, so the
+        # ends come down over the temple instead of the crown.
+        d = np.array([1.0, -0.15 - 2.0 * max(0.0, -0.01 - p[1]), -0.25 - 5.0 * max(0.0, p[0] - 0.035)])
+        return tangent(fm, p, d)
+
+    def flow_side(p):
+        return tangent(fm, p, p - whorl)
+
+    def flow(p):
+        return flow_top(p) if float(topm(np.array([p]))[0]) > 0.5 else flow_side(p)
+    roots, rnd = sample_roots(fm, grow, 120, seed, 0.010)
+    locks = []
+    for r in roots:
+        if float(topm(np.array([r]))[0]) > 0.5:
+            L = rnd.uniform(0.09, 0.15)
+            pts = grow_lock(fm, fcoll, r, flow(r), flow, L, step=0.008, hug=0.0005, fall=0.28, rnd=rnd, scalp=grow)
+            # The hairline ends the lock, except over the left temple, where
+            # the ends fall over the side of the head: that is the cut's
+            # direction.
+            out = np.nonzero(grow(np.array(pts)) < 0.35)[0]
+            if len(out) and pts[int(out[0])][0] < 0.05:
+                pts = pts[:max(3, int(out[0]) + 1)]
+            locks.append(Lock(pts, rnd.uniform(0.022, 0.030), rnd.uniform(0.0058, 0.0072), rnd.uniform(0.82, 1.14),
+                              curl=rnd.uniform(-0.2, 0.2)))
+        else:
+            pts = grow_lock(fm, fcoll, r, flow(r), flow, rnd.uniform(0.020, 0.030), step=0.005, hug=0.0003,
+                            rnd=rnd, scalp=grow)
+            locks.append(Lock(pts, rnd.uniform(0.012, 0.016), 0.0018, rnd.uniform(0.9, 1.06)))
+    bpy.data.objects.remove(fm_obj, do_unlink=True)
+    parts = [sculpt(fm, grow, locks, name + "_mass", target=2100)]
+    loose = free_locks([L for L in locks if L.width > 0.02 and L.pts[-1][0] > 0.05], fm, grow, off=0.008)
+    if loose:
+        parts.append(lock_mesh(loose, fcoll, name + "_locks", root_dark=0.85))
+    return _finish(S, P, parts, name)
+
+
+def _plait(top, length, fcoll, rnd, n=14, w0=0.032, lean=0.02):
+    """A plait down the back from `top`: lobes left and right in turn, kept
+    on the collision field so it lies on the head and the back and not in
+    them."""
+    locks = []
+    top = np.array(top, float)
+    for i in range(n):
+        t = i / n
+        p = top + np.array([0.0, lean * t + 0.012 * math.sin(t * 2.0), -length * t])
+        dc = float(fcoll(p[None, :])[0])
+        if dc < 0.012:
+            p = p + heads.grad(fcoll, p[None, :])[0] * (0.012 - dc)
+        side = 1 if i % 2 else -1
+        w = w0 * (1.0 - 0.5 * t)
+        a = p + np.array([side * w * 0.35, 0.0, 0.010])
+        b = p + np.array([-side * w * 0.25, 0.004, -length / n * 0.9])
+        locks.append(Lock([a, (a + b) / 2 + np.array([0, 0.004, 0]), b], w, w * 0.42, rnd.uniform(0.9, 1.05)))
+    return locks
+
+
+def _topknot(center, name, rnd):
+    """A knot of hair standing on the crown: a ball of hair and coils wound
+    round it in two planes, so it is a knot from the side as well as from the
+    front (a flat coil is a disc, and a disc seen edge-on is a stick)."""
+    c = np.array(center)
+    ball = heads.mesh_field(lambda p: heads.ell(p, c, (0.027, 0.024, 0.028)), name + "_knotball", tuple(c),
+                            level=4, target=160)
+    heads.set_colors(ball, np.full((len(ball.data.vertices), 3), 0.55))
+    locks = []
+    for k in range(6):
+        # Great circles of the ball, tipped round the vertical, each a coil
+        # that stands a little proud.
+        tilt = math.pi * k / 6.0
+        pts = []
+        for i in range(26):
+            a = 2 * math.pi * i / 25.0
+            u, v = math.cos(a), math.sin(a)
+            pts.append(c + np.array([u * math.cos(tilt) * 0.030, u * math.sin(tilt) * 0.027, v * 0.031]))
+        locks.append(Lock(pts, 0.016, 0.006, rnd.uniform(0.86, 1.08)))
+    ballf = lambda p: heads.ell(p, c, (0.027, 0.024, 0.028))
+    return [ball, lock_mesh(locks, ballf, name + "_knot", root_dark=0.8)]
+
+
+def style_warrior(S, P, name="hair_warrior", seed=41):
+    """Sides shaved to a shadow, a band of hair left along the top and drawn
+    up into a knot at the crown, a plait hanging from the knot down the back:
+    a fighter's, with nothing a hand can take hold of at the temples."""
+    grow = lambda p, soft=0.004: scalp_mask(p, recede=0.3, soft=soft)
+
+    def band(p):
+        x = np.abs(p[:, 0])
+        # Narrower at the nape, where the plait gathers it.
+        w = 0.044 - 0.012 * np.clip(p[:, 1] / 0.09, 0, 1)
+        return np.clip((w - x) / 0.012, 0, 1) * np.clip((p[:, 2] - 0.030) / 0.020, 0, 1)
+
+    def thick(p):
+        return 0.0014 + 0.0105 * band(p)
+    fm_obj, fm = mass(S, name + "_mass", thick, grow, target=420, shade=0.6)
+    fcoll = body_field(S)
+    knot = np.array([0.0, 0.058, 0.112])
+
+    def flow(p):
+        d = knot - p
+        if float(band(np.array([p]))[0]) < 0.3:
+            d = np.array([0.0, 0.25, -1.0])
+        return tangent(fm, p, d)
+    roots, rnd = sample_roots(fm, grow, 100, seed, 0.010)
+    locks = []
+    for r in roots:
+        if float(band(np.array([r]))[0]) > 0.3:
+            L = float(np.linalg.norm(knot - r)) * 1.1 + 0.01
+            pts = grow_lock(fm, fcoll, r, flow(r), flow, L, step=0.007, hug=0.0004, rnd=rnd, scalp=grow)
+            locks.append(Lock(pts, rnd.uniform(0.016, 0.022), rnd.uniform(0.0035, 0.0045), rnd.uniform(0.86, 1.1)))
+        else:
+            pts = grow_lock(fm, fcoll, r, flow(r), flow, rnd.uniform(0.012, 0.020), step=0.005, hug=0.0003,
+                            rnd=rnd, scalp=grow)
+            locks.append(Lock(pts, rnd.uniform(0.011, 0.015), 0.0016, rnd.uniform(0.9, 1.05)))
+    bpy.data.objects.remove(fm_obj, do_unlink=True)
+    parts = [sculpt(fm, grow, locks, name + "_mass", target=1300)]
+    parts += _topknot(knot + np.array([0.0, 0.014, 0.012]), name, rnd)
+    parts.append(lock_mesh(_plait(knot + np.array([0.0, 0.026, -0.006]), 0.30, fcoll, rnd, w0=0.026, lean=0.03),
+                           fcoll, name + "_plait", root_dark=0.85))
+    return _finish(S, P, parts, name)
+
+
+def style_ponyhigh(S, P, name="hair_ponyhigh", seed=43):
+    """Drawn up and back into a high tie at the back of the crown, the tail
+    leaving it up and out before it falls and sways to one side: a long lock
+    on a curve, which is what a ponytail looks like from every side."""
+    tie = np.array([0.0, 0.082, 0.064])
+    fm, fcoll, rnd, parts = style_back(S, P, name, tie, seed)
+    length = 0.36
+    n_locks = 22
+    tail_locks = []
+    for k in range(n_locks):
+        a = 2 * math.pi * k / n_locks
+        ring = np.array([math.cos(a), 0.55 * math.sin(a)])
+        L = length * rnd.uniform(0.82, 1.06)
+        phase = rnd.uniform(0, 2 * math.pi)
+        pts = []
+        m = 12
+        for i in range(m + 1):
+            s = i / m
+            # Out and up from the tie, then down under its own weight; the
+            # tail swings to the figure's left, and spreads to its fullest
+            # a third of the way down before gathering to a tip.
+            r = (0.007 + 0.017 * math.sin(math.pi * min(1.0, s * 1.15) ** 0.8)) * (1.0 - 0.45 * s * s)
+            x = ring[0] * r + 0.060 * s * s * (L / length) + 0.007 * math.sin(s * 6.0 + phase)
+            y = ring[1] * r + 0.135 * (s * (2.0 - s)) * (L / length)
+            z = 0.090 * s - 0.40 * s * s * (L / length)
+            pts.append(tie + np.array([x, y, z]))
+        tail_locks.append(Lock(pts, 0.022 * (1.0 - 0.15 * ring[1]), 0.0075, rnd.uniform(0.86, 1.1),
+                               curl=rnd.uniform(-0.25, 0.25), taper=0.7))
+    parts.append(lock_mesh(tail_locks, fcoll, name + "_tail", root_dark=0.8))
+    tie_ring = heads.mesh_field(lambda p: heads.ell(p, tie + np.array([0.0, 0.006, 0.002]), (0.016, 0.014, 0.011)),
+                                name + "_tie", tuple(tie), level=3, target=80)
+    heads.set_colors(tie_ring, np.full((len(tie_ring.data.vertices), 3), 0.5))
+    parts.append(tie_ring)
+    return _finish(S, P, parts, name)
+
+
+def style_crown(S, P, name="hair_crown", seed=47):
+    """A crown braid: the hair drawn back from a centre parting and a thick plait
+    laid round the head above the ears and across the top of the forehead,
+    with a few strands left loose at the temples and the nape."""
+    fm, fcoll, rnd, parts = style_back(S, P, name, (0.0, 0.098, 0.030), seed)
+    # The braid's ring on the head: a height for each bearing, high over the
+    # brow, lower behind the ear, met on the mass by a ray from inside.
+    n = 34
+    ring = []
+    for i in range(n):
+        th = math.pi * (2.0 * i / n) - math.pi
+        zt = float(np.interp(abs(math.degrees(th)), [0, 40, 90, 140, 180], [0.074, 0.066, 0.056, 0.050, 0.044]))
+        d = np.array([math.sin(th) * 0.10, -math.cos(th) * 0.10, zt + 0.010])
+        ring.append(d / np.linalg.norm(d))
+    pts = heads.project(fm, (0.0, 0.006, -0.010), np.array(ring))
+    locks = []
+    for i in range(n):
+        a, b, c = pts[i - 1], pts[i], pts[(i + 1) % n]
+        T = c - a
+        T /= max(1e-9, np.linalg.norm(T))
+        N = heads.grad(fm, b[None, :])[0]
+        S_ = np.cross(T, N)
+        S_ /= max(1e-9, np.linalg.norm(S_))
+        side = 1 if i % 2 else -1
+        step = float(np.linalg.norm(c - b))
+        w = 0.030
+        # A lobe: from one edge of the plait on its upstream half to the other
+        # at its downstream end, lifted off the head by its own thickness.
+        p0 = b - T * step * 0.75 + S_ * side * w * 0.26 + N * 0.006
+        p2 = b + T * step * 0.75 - S_ * side * w * 0.26 + N * 0.006
+        mid = (p0 + p2) / 2 + N * 0.004
+        locks.append(Lock([p0, (p0 + mid) / 2 + N * 0.002, mid, (mid + p2) / 2 + N * 0.002, p2], w * 1.1, w * 0.5,
+                          rnd.uniform(0.9, 1.08), taper=0.3))
+    parts.append(lock_mesh(locks, fm, name + "_plait", root_dark=0.85))
+    # Loose strands: two at each temple in front of the ear, two at the nape.
+    loose = []
+    spots = [(sx * 0.064, -0.040 + 0.012 * k, 0.040 - 0.006 * k) for sx in (-1, 1) for k in (0, 1)] + \
+            [(sx * 0.028, 0.092, -0.020) for sx in (-1, 1)]
+    for (x, y, z) in spots:
+        root = heads.project(fm, (0.0, 0.006, -0.010), np.array([[x, y - 0.006, z + 0.010]]) / np.linalg.norm([x, y - 0.006, z + 0.010]))[0]
+        drift = np.array([0.0, 0.10 if y > 0 else -0.05, 0.0])
+        pts_ = grow_lock(fcoll, fcoll, root, (0.0, 0.1, -1.0), lambda p, d=drift: np.array([0.0, 0.1, -1.0]),
+                         rnd.uniform(0.12, 0.17), step=0.012, hug=0.004, fall=0.5, rnd=rnd)
+        loose.append(Lock(pts_, 0.014, 0.004, rnd.uniform(0.9, 1.1), curl=rnd.uniform(-0.3, 0.3), taper=0.8))
+    parts.append(lock_mesh(loose, fcoll, name + "_wisps", root_dark=0.9))
+    return _finish(S, P, parts, name)
+
+
+def style_waves(S, P, name="hair_waves", seed=53, length=0.30):
+    """Loose waves to the shoulders and past them: parted to one side, full over
+    the ears and on the back, every lock swaying as it falls, so the hair has
+    a line down it that is an S and not a ruler."""
+    part = 0.020
+    grow = lambda p, soft=0.004: scalp_mask(p, soft=soft)
+    fm_obj, fm = mass(S, name + "_mass", _thick(0.007, 0.006, 0.007), grow, target=500)
+    fcoll = body_field(S)
+
+    def flow(p):
+        x, y, z = p
+        side = 1.0 if x - part >= 0 else -1.0
+        d = np.array([side * max(0.0, z - 0.02) * 10.0,
+                      max(0.0, y) * 3.0 + 0.2 + 25.0 * max(0.0, -0.035 - y), -1.0])
+        return tangent(fm, p, d)
+    roots, rnd = sample_roots(fm, grow, 90, seed, 0.011)
+    locks = []
+    for r in roots:
+        back = np.clip((r[1] + 0.03) / 0.10, 0.0, 1.0)
+        L = length * (0.62 + 0.38 * back) * rnd.uniform(0.88, 1.08)
+        if r[1] < -0.050 and r[2] > 0.035:
+            L = rnd.uniform(0.09, 0.13)
+        pts = grow_lock(fm, fcoll, r, flow(r), flow, L, step=0.010, hug=0.0006, fall=0.35, rnd=rnd, scalp=grow)
+        pts = clear_of_face(pts)
+        locks.append(Lock(pts, rnd.uniform(0.038, 0.050), rnd.uniform(0.0050, 0.0068), rnd.uniform(0.84, 1.12),
+                          curl=rnd.uniform(-0.35, 0.35)))
+    bpy.data.objects.remove(fm_obj, do_unlink=True)
+    parts = [sculpt(fm, grow, locks, name + "_mass", target=1800)]
+    loose = free_locks(locks, fm, grow, off=0.004)
+    if loose:
+        for L in loose:
+            # The waves go into the fall only, after it is found: swaying the
+            # path while it was grown sent the lock into the shoulders.
+            L.pts = _hang(resample(L.pts, 0.02), 0.010, rnd.uniform(0, 2 * math.pi))
+        parts.append(lock_mesh(loose, fcoll, name + "_locks", root_dark=0.85))
+    return _finish(S, P, parts, name)
+
+
 # --- beards -------------------------------------------------------------------
 
 def beard_region(S, kind):

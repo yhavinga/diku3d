@@ -222,7 +222,9 @@ FACE_BUDGET = 3800
 # there are no head pieces in the troll file -- and an ettin's is two of it.
 HAIR_BUDGET = {"hair_long": 8000, "turban": 1200, "face_troll": 6500, "face_ettin": 13000, "hair_braid": 3000, "hair_bun": 3000, "hair_tail": 3500,
                "hair_short": 2600, "hair_crop": 1600, "hair_fringe": 1400, "beard_full": 1800,
-               "beard_short": 1200, "moustache": 400}
+               "beard_short": 1200, "moustache": 400,
+               "hair_swept": 3200, "hair_undercut": 3400, "hair_warrior": 3400, "hair_ponyhigh": 4200,
+               "hair_crown": 4200, "hair_waves": 8000}
 TREE_BUDGET = 1500
 
 

@@ -252,7 +252,7 @@ def transfer_weights(obj, body, only=None):
 
 
 def loft_skirt(body, name, top, hem, flare=1.35, mat="cloth", sides=24, rings=8,
-               ease=0.014, hem_wave=0.0, ragged=0.0, lift_front=0.0, under=()):
+               ease=0.014, hem_wave=0.0, ragged=0.0, lift_front=0.0, under=(), smooth=True):
     """A skirt, or the lower half of a tunic or robe: rings from `top` down to
     `hem`. Each ring is fitted to whatever it covers -- found by casting rays
     in at it from outside, since a trunk is not an ellipse and an ellipse
@@ -286,7 +286,7 @@ def loft_skirt(body, name, top, hem, flare=1.35, mat="cloth", sides=24, rings=8,
             verts.append((d.x * rr * fold, cy + d.y * rr * fold, zz))
         # Neighbouring columns are eased together, so a single ray that
         # slipped between the legs does not notch the hem.
-        if ri > 0:
+        if ri > 0 and smooth:
             base = ri * sides
             sm = [(verts[base + (i - 1) % sides], verts[base + i], verts[base + (i + 1) % sides])
                   for i in range(sides)]
@@ -347,8 +347,10 @@ def thicken(obj, t=0.006):
 
 # --- rigid pieces -------------------------------------------------------------------
 
-def rigid_shell(body, arm, name, keep, bone, offset=0.02, mat="steel", planes=(), thick=0.008):
-    obj = shell(body, arm, name, keep, offset=offset, mat=mat, planes=planes, thick=thick)
+def rigid_shell(body, arm, name, keep, bone, offset=0.02, mat="steel", planes=(), thick=0.008,
+                keep_ratio=0.45):
+    obj = shell(body, arm, name, keep, offset=offset, mat=mat, planes=planes, thick=thick,
+                keep_ratio=keep_ratio)
     rig.set_rigid(obj, bone)
     return obj
 
@@ -806,7 +808,8 @@ def apron(body, arm, C, top, hem, width=0.15, mat="linen", under=(), bib=False, 
     return obj
 
 
-def cloak(body, arm, C, hem, mat="cloth", under=(), width=0.26, name="cloak", ragged=0.0):
+def cloak(body, arm, C, hem, mat="cloth", under=(), width=0.26, name="cloak", ragged=0.0,
+          arc=(15, 165)):
     """A cloak hanging from the shoulders down the back, wrapping round the
     sides: rows fitted over the shoulders and falling straight from the
     widest point, flaring a little to the hem."""
@@ -821,7 +824,7 @@ def cloak(body, arm, C, hem, mat="cloth", under=(), width=0.26, name="cloak", ra
         for c in range(cols + 1):
             # Round the back from one shoulder to the other: angle 20..160
             # degrees measured from the figure's left.
-            a = math.radians(15 + 150 * c / cols)
+            a = math.radians(arc[0] + (arc[1] - arc[0]) * c / cols)
             d = V((math.cos(a), math.sin(a), 0.0))
             o = V((0.0, 0.0, max(z, C.z(1.30)) if t < 0.15 else z))
             loc, _, _, _ = tree.ray_cast(o + d * 0.7, -d, 0.7)
@@ -1274,9 +1277,546 @@ def brute(body, arm, C):
     return [top, skirt] + rope
 
 
+# --- the heroes ------------------------------------------------------------------------
+#
+# What a player wears (people.js youngPlayer; no mobile is ever given one).
+# The townsperson archetypes above are what a crowd wears, and a flat block of
+# robe with a cord round it is right for a crowd; a player is the one figure
+# the camera stays on, and has to read at thirty metres as a silhouette --
+# shoulders wider than the waist, something at the collar, something swinging
+# at the hem -- and at three as a colour with a second colour on it. So these
+# four are built the other way round: the cloth is plain and the shape is made
+# of pieces on it.
+#
+# Bones: pieces cut from the body (`shell`) carry its weights; everything
+# that hangs below the belt (`hem_band`, `ribbon`, the skirts) is weighted as a
+# skirt so it swings with the stride and the actors.js spring; what lies on
+# the chest or shoulders (`strap`, `mantle`, `collar`) takes the nearest body
+# vertex's weights; plate (`pauldron`, `vambrace`) is wholly one bone. The
+# upper arm's own net scale at run time is 1 (actors.js BUILDS gives the
+# clavicle and chest what it takes back off the arm), so a plate rigid to it
+# needs no allowance for the athletic build.
+
+def hem_band(body, arm, C, skirt, hem, height, mat, follow, top=None, name="hem_band"):
+    """A band of a second cloth round the foot of a skirt: the same
+    silhouette (it reads its radius off the skirt itself, flare 1) standing a
+    centimetre proud, weighted as the skirt is."""
+    # Cast a hair above the hem, which is the skirt's own bottom edge and a
+    # ray along it can slip through; the last ring is let down afterwards.
+    band = loft_skirt(body, name, hem + height, hem + 0.008, flare=1.0, mat=mat, ease=0.011,
+                      rings=3, under=[skirt], smooth=False)
+    low = min(v.co.z for v in band.data.vertices)
+    for v in band.data.vertices:
+        if v.co.z < low + 1e-4:
+            v.co.z = hem - 0.004
+    hang(band, arm, body, C, top if top is not None else C.z(1.00), hem, follow=follow)
+    rim(band, 0.006)
+    return band
+
+
+def ribbon(body, arm, C, top, hem, x, width, mat="cloth2", under=(), name="ribbon", gap=0.012,
+           taper=0.0, vee=0.0, drift=0.0, rows=12, cols=3, belt_z=None, follow=0.45, sgn=-1,
+           curve=0.012):
+    """A strip down the front (sgn -1) or back (+1) of whatever is worn, from
+    `top` to `hem`, centred `x` off the middle: a stole, a placket, the ends
+    of a sash, a band at the foot of a tabard. As `apron`: it lies on the
+    surface down to the belt and hangs straight below it. `taper` narrows it
+    towards the hem, `vee` cuts the hem to a swallow-tail, `drift` swings the
+    foot out sideways."""
+    tree = bvh([body] + list(under))
+    belt_z = belt_z if belt_z is not None else C.z(1.04)
+    verts, faces = [], []
+    hung = None
+    for r in range(rows + 1):
+        t = r / rows
+        z = top + (hem - top) * t
+        w = width * (1.0 - taper * t)
+        xc = x + drift * t * t
+        hits = [drape(tree, xc + u * w * 0.9, z, sgn, None) for u in (-1, -0.5, 0, 0.5, 1)]
+        hits = [h for h in hits if h is not None]
+        front = (min(hits) if sgn < 0 else max(hits)) if hits else sgn * 0.13
+        if z < belt_z:
+            if hung is None:
+                hung = front
+            front = min(front, hung) if sgn < 0 else max(front, hung)
+            front += sgn * 0.008 * ((belt_z - z) / max(1e-3, belt_z - hem))
+        for c in range(cols + 1):
+            u = -1.0 + 2.0 * c / (cols)
+            zz = z + (vee * (1.0 - abs(u)) if r == rows else 0.0)
+            verts.append((xc + u * w, front + sgn * gap - sgn * curve * u * u, zz))
+    for r in range(rows):
+        for c in range(cols):
+            i = r * (cols + 1) + c
+            faces.append((i, i + 1, i + 2 + cols, i + 1 + cols) if sgn < 0 else
+                         (i, i + 1 + cols, i + 2 + cols, i + 1))
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.validate()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    lib.assign(obj, mat)
+    people.outward(obj)
+    for p in obj.data.polygons:
+        p.use_smooth = True
+    thicken(obj, 0.005)
+    hang(obj, arm, body, C, belt_z - 0.02, hem, follow=follow)
+    return obj
+
+
+def strap(body, arm, C, p0, p1, width, mat="leather", under=(), name="strap", gap=0.010,
+          sgn=-1, steps=9):
+    """A band laid across the chest (sgn -1) or back (+1) from the (x, z) of
+    `p0` to that of `p1`, following the surface a ray finds under every
+    point of its edges: a bandolier, a jerkin's lacing. Weighted as the
+    trunk under it."""
+    tree = bvh([body] + list(under))
+    d = V((p1[0] - p0[0], p1[1] - p0[1], 0.0))
+    n = V((-d.y, d.x, 0.0)).normalized() * (width / 2)
+    verts, faces = [], []
+    for i in range(steps + 1):
+        t = i / steps
+        cx, cz = p0[0] + d.x * t, p0[1] + d.y * t
+        for s in (-1, 1):
+            x, z = cx + n.x * s, cz + n.y * s
+            y = drape(tree, x, z, sgn, sgn * 0.12)
+            verts.append((x, y + sgn * gap, z))
+    for i in range(steps):
+        a = 2 * i
+        faces.append((a, a + 1, a + 3, a + 2))
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.validate()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    lib.assign(obj, mat)
+    people.outward(obj)
+    for p in obj.data.polygons:
+        p.use_smooth = True
+    thicken(obj, 0.006)
+    transfer_weights(obj, body, lambda co, b: limb(b) in ("chest", "spine", "hips", "shoulder"))
+    return obj
+
+
+def stud(body, C, x, z, mat="gold", under=(), r=0.014, sgn=-1, name="buckle"):
+    """A buckle or boss on the chest at (x, z): a flat gilt plate on whatever
+    surface a ray finds there, wholly on the chest bone."""
+    tree = bvh([body] + list(under))
+    y = drape(tree, x, z, sgn, sgn * 0.12)
+    o = lib.box((r * 2, 0.012, r * 1.6), (x, y + sgn * 0.012, z), name=name, mat=mat)
+    rig.set_rigid(o, "chest")
+    return o
+
+
+def collar(body, arm, C, rise=0.060, flare=0.032, mat="cloth", name="collar", lift=0.0):
+    """A stand collar, stiff and open at the top: a tube round the neck from
+    inside the shoulders' slope up to the jaw, flaring out, so the head sits
+    in it."""
+    rn = C.P["neck"]
+    z0 = C.neck - 0.04
+    x0, y0, y1 = section(body, C.neck - 0.005, bones=("neck", "chest"))
+    cy = (y0 + y1) / 2
+    top = rise + 0.04
+    L = lift
+    rings = [(0.0, rn + 0.060, rn + 0.052, rn + 0.044, 0, 0, 2.2),
+             (0.04, rn + 0.030 + L, rn + 0.030 + L, rn + 0.026 + L, 0, 0, 2.2),
+             (0.04 + rise * 0.6, rn + 0.030 + flare * 0.3 + L, rn + 0.032 + L, rn + 0.028 + L, 0, 0, 2.2),
+             (top, rn + 0.030 + flare + L, rn + 0.034 + flare + L, rn + 0.028 + flare * 0.6 + L, 0, 0, 2.2)]
+    o = people.ring_loft((0, cy, z0), (0, 0, 1), rings, sides=24, side=(1, 0, 0), name=name,
+                         mat=mat, caps=False)
+    for p in o.data.polygons:
+        p.use_smooth = True
+    thicken(o, 0.007)
+    transfer_weights(o, body, lambda co, b: limb(b) in ("chest", "neck", "shoulder", "spine"))
+    return o
+
+
+def mantle(body, arm, C, drop=0.17, mat="cloth", name="mantle", stand=0.026, out=0.016, lift=0.0):
+    """A short cape over the shoulders, a hand's breadth below them: what
+    turns a robe's narrow shoulders into a V. Lofted by hand, because rays
+    would shrink-wrap the arms and the neck and leave it a lumpy hood; it
+    stands `out` clear of the deltoid all the way down, and `stand` above
+    the neck's base. Weighted from the body, then the arm's share of it
+    halved and given to the clavicle: a cape moves with the shoulder and
+    not with every swing of the arm."""
+    P = C.P
+    sj = C.b["upperarm.L"].head_local
+    rn = P["neck"]
+    xo = sj.x + P["delt"]
+    z0 = C.neck + stand
+    x0, y0, y1 = section(body, C.neck - 0.03, bones=("neck", "chest", "spine"))
+    cy = 0.0
+    fz, bk = abs(y0) + 0.02, abs(y1) + 0.02
+    fz = max(fz, P["chest"][1] + 0.016)
+    bk = max(bk, P["chest"][2] + 0.016)
+    L = lift
+    rings = [(0.00, rn + 0.030 + L, rn + 0.040 + L, rn + 0.030 + L, 0, 0, 2.2),
+             (0.020, 0.55 * xo + 0.04 + L, fz * 0.80 + L, bk * 0.80 + L, 0, 0, 2.3),
+             (0.040, xo - 0.005 + L, fz * 0.96 + L, bk * 0.96 + L, 0, 0, 2.5),
+             (0.075, xo + out + L, fz + 0.012 + L, bk + 0.012 + L, 0, 0, 2.6),
+             (0.075 + (drop - 0.075 - 0.035) * 0.6, xo + out + 0.010 + L, fz + 0.022 + L, bk + 0.020 + L, 0, 0, 2.6),
+             (drop - 0.035, xo + out + 0.016 + L, fz + 0.028 + L, bk + 0.026 + L, 0, 0, 2.6),
+             (drop, xo + out + 0.022 + L, fz + 0.032 + L, bk + 0.030 + L, 0, 0, 2.6)]
+    o = people.ring_loft((0, cy, z0), (0, 0, -1), rings, sides=28, side=(1, 0, 0), name=name,
+                         mat=mat, caps=False)
+    for p in o.data.polygons:
+        p.use_smooth = True
+    transfer_weights(o, body, lambda co, b: limb(b) in ("chest", "neck", "shoulder", "spine", "upperarm"))
+    shift_arm_weights(o, 0.5)
+    rim(o, 0.006)
+    return o
+
+
+def shift_arm_weights(obj, give):
+    """Move `give` of every upper-arm weight on a mesh to the clavicle of the
+    same side."""
+    for t in "LR":
+        ua = obj.vertex_groups.get("upperarm." + t)
+        if ua is None:
+            continue
+        sh = obj.vertex_groups.get("shoulder." + t) or obj.vertex_groups.new(name="shoulder." + t)
+        for v in obj.data.vertices:
+            w = 0.0
+            for g in v.groups:
+                if g.group == ua.index:
+                    w = g.weight
+            if w > 0:
+                moved = w * give
+                ua.add([v.index], w - moved, "REPLACE")
+                cur = 0.0
+                for g in v.groups:
+                    if g.group == sh.index:
+                        cur = g.weight
+                sh.add([v.index], cur + moved, "REPLACE")
+    return obj
+
+
+def limb_band(body, arm, C, bone, lo, hi, offset, mat, name, rings=2, flare=0.0, sides=12,
+              thick=0.005):
+    """A ring of cloth, leather or plate round a limb from `lo` to `hi` of
+    its bone, fitted to the skin by rays out from the bone's axis and
+    standing `offset` off it. A shell cut from the body has a saw-tooth
+    where it ends -- the decimated limb is a few rows of long triangles --
+    and a band made of its own rings has none, which is why every cuff,
+    bracer, greave and boot top here is one. Wholly on the bone. `flare`
+    opens the `hi` end out like a bell."""
+    bb = C.b[bone]
+    h, tl = bb.head_local, bb.tail_local
+    ax = (tl - h)
+    length = ax.length
+    ax.normalize()
+    u = V((1.0, 0.0, 0.0))
+    if abs(ax.dot(u)) > 0.9:
+        u = V((0.0, 1.0, 0.0))
+    u = (u - ax * ax.dot(u)).normalized()
+    v = ax.cross(u)
+    tree = bvh([body], trunk_only=False)
+    verts, faces = [], []
+    radii = []
+    for k in range(rings + 1):
+        f = lo + (hi - lo) * k / rings
+        c = h + ax * (length * f)
+        row = []
+        for i in range(sides):
+            a = 2 * math.pi * i / sides
+            d = u * math.cos(a) + v * math.sin(a)
+            loc, _, _, _ = tree.ray_cast(c, d, 0.3)
+            row.append((loc - c).length if loc is not None else 0.04)
+        radii.append([(row[i - 1] + 2 * row[i] + row[(i + 1) % sides]) / 4 for i in range(sides)])
+    for k in range(rings + 1):
+        f = lo + (hi - lo) * k / rings
+        c = h + ax * (length * f)
+        for i in range(sides):
+            a = 2 * math.pi * i / sides
+            d = u * math.cos(a) + v * math.sin(a)
+            r = radii[k][i] + offset + flare * (k / rings) ** 2
+            verts.append(tuple(c + d * r))
+    for k in range(rings):
+        for i in range(sides):
+            j = (i + 1) % sides
+            faces.append((k * sides + i, k * sides + j, (k + 1) * sides + j, (k + 1) * sides + i))
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.validate()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    lib.assign(obj, mat)
+    people.outward(obj)
+    for p in obj.data.polygons:
+        p.use_smooth = True
+    rig.set_rigid(obj, bone)
+    rim(obj, thick)
+    return obj
+
+
+def cuffs_of(body, arm, C, lo, hi, mat, offset=0.022, name="cuff", flare=0.0):
+    """A band round each wrist, between `lo` and `hi` of the forearm."""
+    return [limb_band(body, arm, C, "forearm." + t, lo, hi, offset, mat, "%s_%s" % (name, t),
+                      flare=flare) for t in "LR"]
+
+
+def vambraces(body, arm, C, mat="steel", lo=0.12, hi=0.88, offset=0.022, name="vambrace"):
+    return cuffs_of(body, arm, C, lo, hi, mat, offset, name)
+
+
+def pauldron(body, arm, C, mat="steel", trim="gold", lames=3, r0=0.098, name="pauldron"):
+    """A shoulder of layered plates, a dome on the point of the shoulder and
+    `lames` bands running down the arm, each a little smaller and hiding the
+    top of the next -- the part of a figure the eye finds first. Wholly on
+    the upper arm. Each is a closed ring round the arm, mostly inside the
+    chest where it cannot be seen."""
+    out = []
+    for t in "LR":
+        bb = C.b["upperarm." + t]
+        h, tl = bb.head_local, bb.tail_local
+        axis = (tl - h).normalized()
+        o = people.ring_loft(h, axis, [
+            (-0.050, 0.020, 0.020), (-0.040, 0.058, 0.058), (-0.020, 0.086, 0.086),
+            (0.010, r0, r0), (0.045, r0 - 0.002, r0 - 0.002), (0.072, r0 - 0.008, r0 - 0.008)],
+            sides=14, side=(0, 1, 0), name="%s_%s" % (name, t), mat=mat, caps=False)
+        parts = [o]
+        for i in range(lames - 1):
+            s = 0.060 + i * 0.048
+            rr = r0 - 0.012 - i * 0.010
+            parts.append(people.ring_loft(h, axis, [
+                (s, rr - 0.004, rr - 0.004), (s + 0.020, rr + 0.002, rr + 0.002),
+                (s + 0.062, rr - 0.006, rr - 0.006)],
+                sides=14, side=(0, 1, 0), name="%s%d_%s" % (name, i, t), mat=mat, caps=False))
+        if trim:
+            parts.append(people.ring_loft(h, axis, [
+                (0.074, r0 - 0.006, r0 - 0.006), (0.082, r0 - 0.005, r0 - 0.005)],
+                sides=14, side=(0, 1, 0), name="%s_trim_%s" % (name, t), mat=trim, caps=False))
+        for p in parts:
+            for q in p.data.polygons:
+                q.use_smooth = True
+            rig.set_rigid(p, "upperarm." + t)
+            rim(p, 0.006)
+        out += parts
+    return out
+
+
+def boot_cuffs(body, arm, C, top, mat="leather", up=0.10, down=0.13, offset=0.024, name="boot_cuff"):
+    """The turned-down top of a boot: a band round the leg across the
+    boot's edge -- `up` of the shin above it, `down` below -- which hides the
+    saw-tooth the edge of a cut boot has."""
+    return [limb_band(body, arm, C, "shin." + t, top - up, top + down, offset, mat,
+                      "%s_%s" % (name, t), rings=2) for t in "LR"]
+
+
+def greaves(body, arm, C, mat="steel", lo=0.10, hi=0.72, offset=0.022):
+    return [limb_band(body, arm, C, "shin." + t, lo, hi, offset, mat, "greave_" + t, rings=4,
+                      sides=14) for t in "LR"]
+
+
+def hero_boots(body, arm, C, top, mat="leather", cuff=True):
+    """A tall boot with a clean top: the shell of the foot and ankle
+    (`boots`), and the shaft above it a band of its own from `top` of the
+    shin to the ankle, so the edge a cut boot has -- the saw-tooth, with the
+    breeches showing through it -- is nowhere. A cuff is turned over the
+    top."""
+    foot = boots(body, arm, C, top=0.80, mat=mat)
+    out = [foot]
+    out += [limb_band(body, arm, C, "shin." + t, top, 0.99, 0.013, mat, "shaft_" + t, rings=5,
+                      sides=14) for t in "LR"]
+    if cuff:
+        out += boot_cuffs(body, arm, C, top + 0.06, mat=mat, up=0.06, down=0.07, offset=0.022)
+    return out
+
+
+def pouch(body, arm, C, x, y, z, size=(0.075, 0.05, 0.085), mat="leather", name="pouch"):
+    """A belt pouch: a box with a flap, on the hip bone. Not weighted as a
+    skirt -- it hangs from the belt and does not swing out."""
+    o = lib.box(size, (x, y, z), name=name, mat=mat)
+    flap = lib.box((size[0] * 1.05, size[1] * 1.08, size[2] * 0.36), (x, y, z + size[2] * 0.34),
+                   name=name + "_flap", mat=mat)
+    for q in (o, flap):
+        rig.set_rigid(q, "hips")
+    return [o, flap]
+
+
+def hero_belt(body, arm, C, z, under, mat="leather", width=0.05, buckle="gold", ease=0.012):
+    bt = belt(body, z, under=under, width=width, mat=mat, buckle=buckle, ease=ease)
+    for b in bt:
+        hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
+    return bt
+
+
+def hero_mage(body, arm, C):
+    """A mage, cut to be looked at: a fitted robe with a stiff standing
+    collar, a short mantle over the shoulders, a wide band of a second cloth
+    at the hem and the cuffs and a placket down the front, a sash knotted at
+    the hip with two ends swinging."""
+    hem = 0.035
+    top, skirt = robe(body, arm, C, mat="cloth", hem=hem, flare=1.42, sleeve=0.94)
+    feet = boots(body, arm, C, top=0.92)
+    parts = [top, skirt, feet]
+    parts.append(hem_band(body, arm, C, skirt, C.zl(hem), 0.15, "cloth2", 0.42))
+    parts += cuffs_of(body, arm, C, 0.55, 1.0, "cloth2", offset=0.020, flare=0.016)
+    plk = ribbon(body, arm, C, C.z(1.30), C.zl(hem) + 0.148, 0.0, 0.020, "cloth2",
+                 under=[top, skirt], gap=0.007, rows=16)
+    bt = hero_belt(body, arm, C, C.z(1.06), [top, skirt, plk], mat="cloth2", width=0.06, buckle="gold")
+    ends = [ribbon(body, arm, C, C.z(1.06), C.zl(0.34), 0.11, 0.030, "cloth2", under=[top, skirt] + bt,
+                   name="sash_a", vee=0.025, drift=0.020, taper=0.15, follow=0.5),
+            ribbon(body, arm, C, C.z(1.06), C.zl(0.46), 0.145, 0.028, "cloth2", under=[top, skirt] + bt,
+                   name="sash_b", vee=0.025, drift=0.030, taper=0.15, follow=0.5)]
+    cape = mantle(body, arm, C, drop=0.17, mat="cloth")
+    cband = mantle(body, arm, C, drop=0.17, mat="cloth2", name="mantle_band", lift=0.006)
+    # The band is the foot of the same mantle, a little proud of it:
+    # everything above is cut away.
+    cut(cband, below=None, above=C.neck + 0.026 - 0.17 + 0.0355)
+    col = collar(body, arm, C, mat="cloth")
+    clc = collar(body, arm, C, rise=0.060, mat="cloth2", name="collar_trim", lift=0.004)
+    cut(clc, below=C.neck + 0.060 - 0.022)
+    return parts + [plk] + bt + ends + [cape, cband, col, clc]
+
+
+def cut(obj, above=None, below=None):
+    """Delete every face of a mesh with a vertex above `above` or below
+    `below`, and keep the rest: how a band is taken off the foot or the lip
+    of a lofted garment."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    dead = [f for f in bm.faces if any((above is not None and v.co.z > above) or
+                                       (below is not None and v.co.z < below) for v in f.verts)]
+    bmesh.ops.delete(bm, geom=dead, context="FACES")
+    loose = [v for v in bm.verts if not v.link_faces]
+    bmesh.ops.delete(bm, geom=loose, context="VERTS")
+    bm.to_mesh(obj.data)
+    bm.free()
+    return obj
+
+
+def torso_shell(body, arm, C, mat="cloth", hem=None, offset=0.020, neck_drop=0.04, name="jerkin"):
+    """The body's trunk from the neckline to `hem` and no sleeves: a
+    jerkin, a surcoat, a waistcoat. The armhole is wherever the body's own
+    weights change from the chest to the arm, which a pauldron or a sleeve
+    over it covers."""
+    hem = hem if hem is not None else C.z(0.93)
+    neck = C.neckline(neck_drop)
+
+    def keep(co, bone):
+        if co.z < hem - 0.001 or co.z > C.neck - 0.02:
+            return False
+        l = limb(bone)
+        if l in ("chest", "spine", "hips"):
+            return above(neck, co) or abs(co.x) > 0.10
+        # The top of the chest is the clavicles' by weight.
+        if l == "shoulder":
+            return abs(co.x) < 0.115 and above(neck, co)
+        return l == "thigh" and co.z >= hem
+    return shell(body, arm, name, keep, offset=offset, mat=mat,
+                 planes=[neck, (V((0, 0, hem)), V((0, 0, 1)))])
+
+
+def hero_priest(body, arm, C):
+    """A battle cleric: a tunic to below the knee over leather breeches and
+    boots, a tabard in ivory with a gold band at the foot, a long stole of
+    gold from the neck to the shin, steel on the shoulders and forearms, and
+    the holy symbol over it all."""
+    top = tunic_body(body, arm, C, sleeve=0.94, hem=C.z(0.93), mat="cloth", offset=0.012,
+                     neck_drop=0.05, name="tunic")
+    skirt = loft_skirt(body, "tunic_skirt", C.z(1.00), C.zl(0.34), flare=1.30, mat="cloth",
+                       hem_wave=0.06, under=[top], rings=12)
+    hang(skirt, arm, body, C, C.z(1.00), C.zl(0.34), follow=0.5)
+    rim(skirt, 0.006)
+    legs = hose(body, arm, C, mat="leather")
+    parts = [top, skirt, legs] + hero_boots(body, arm, C, 0.40)
+    parts += cuffs_of(body, arm, C, 0.62, 1.0, "cloth2", offset=0.020)
+    tb = tabard(body, arm, C, C.zl(0.42), width=0.120, mat="linen", under=[top, skirt], gap=0.010)
+    parts += tb
+    for sgn, tag in ((-1, "f"), (1, "b")):
+        parts.append(ribbon(body, arm, C, C.zl(0.42) + 0.12, C.zl(0.42) - 0.004, 0.0, 0.121, "cloth2",
+                            under=[top, skirt] + tb, gap=0.010, name="tabard_band_" + tag, sgn=sgn,
+                            rows=2, cols=6, follow=0.45))
+    bt = hero_belt(body, arm, C, C.z(1.05), [top, skirt] + tb, width=0.055, buckle="gold")
+    parts += bt
+    for sx in (-1, 1):
+        parts.append(ribbon(body, arm, C, C.neck - 0.012, C.zl(0.45), sx * 0.072, 0.036, "cloth2",
+                            under=[top, skirt] + tb + bt, gap=0.009, rows=20, taper=-0.30, vee=0.03,
+                            curve=0.004,
+                            name="stole_" + ("l" if sx > 0 else "r"), follow=0.5))
+    parts += holy_symbol(body, arm, C, under=[top] + tb)
+    parts += pauldron(body, arm, C, mat="steel", trim="gold", lames=2, r0=0.092)
+    parts += vambraces(body, arm, C, lo=0.20, hi=0.58, offset=0.017)
+    return parts
+
+
+def hero_rogue(body, arm, C):
+    """A thief: a shirt, a fitted leather jerkin over it laced across the
+    chest with a bandolier and its buckles, a wide belt with pouches, leather
+    bracers, tall boots turned down at the top, and a short half-cloak
+    pinned over the left shoulder."""
+    shirt = tunic_body(body, arm, C, sleeve=0.80, hem=C.z(0.93), mat="cloth", offset=0.010,
+                       neck_drop=0.05, name="shirt")
+    jerkin = torso_shell(body, arm, C, mat="leather", hem=C.z(0.95), offset=0.020, name="jerkin")
+    flaps = loft_skirt(body, "jerkin_skirt", C.z(1.00), C.zl(0.80), flare=1.16, mat="leather",
+                       hem_wave=0.05, under=[shirt, jerkin], rings=4, sides=20)
+    hang(flaps, arm, body, C, C.z(1.00), C.zl(0.80), follow=0.6)
+    rim(flaps, 0.006)
+    skirt = loft_skirt(body, "shirt_skirt", C.z(1.00), C.zl(0.66), flare=1.10, mat="cloth",
+                       under=[shirt, jerkin], rings=6, sides=20)
+    hang(skirt, arm, body, C, C.z(1.00), C.zl(0.66), follow=0.6)
+    rim(skirt, 0.006)
+    legs = hose(body, arm, C, mat="cloth2")
+    parts = [shirt, jerkin, skirt, flaps, legs] + hero_boots(body, arm, C, 0.28)
+    parts += cuffs_of(body, arm, C, 0.35, 0.98, "leather", offset=0.019, name="bracer")
+    parts += pauldron(body, arm, C, mat="leather", trim=None, lames=1, r0=0.084, name="spaulder")
+    lace = strap(body, arm, C, (0.095, C.z(1.38)), (-0.105, C.z(1.08)), 0.040, "leather",
+                 under=[jerkin, shirt], name="bandolier")
+    parts.append(lace)
+    parts.append(strap(body, arm, C, (0.0, C.neck - 0.07), (0.0, C.z(1.06)), 0.016, "cloth2",
+                       under=[jerkin, shirt, lace], name="lacing", gap=0.012))
+    parts.append(stud(body, C, 0.0, C.z(1.20), "gold", under=[jerkin, shirt, lace], r=0.013, name="clasp"))
+    parts.append(stud(body, C, 0.045, C.z(1.30), "gold", under=[jerkin, shirt, lace], r=0.010, name="clasp"))
+    bt = hero_belt(body, arm, C, C.z(1.03), [jerkin, flaps, skirt], width=0.065, buckle="iron", ease=0.014)
+    parts += bt
+    x0, y0, y1 = section(body, C.z(1.03))
+    parts += pouch(body, arm, C, x0 + 0.030, -0.040, C.z(1.00) - 0.05)
+    parts += pouch(body, arm, C, -(x0 + 0.030), -0.070, C.z(1.00) - 0.05, size=(0.060, 0.045, 0.070))
+    parts += pouch(body, arm, C, 0.0, y1 + 0.04, C.z(1.00) - 0.04, size=(0.10, 0.05, 0.07), name="satchel")
+    # Over the left shoulder and down the back: only the arc from the left
+    # arm's side round to the middle of the back.
+    parts.append(cloak(body, arm, C, C.zl(0.60), mat="wool", under=[shirt, jerkin] + bt,
+                       name="half_cloak", arc=(-12, 112), ragged=0.05))
+    return parts
+
+
+def hero_guard(body, arm, C):
+    """A warrior: mail to the elbow and mid-thigh under a short surcoat in a
+    strong colour with a band at its foot, layered pauldrons, steel
+    vambraces and greaves, leather breeches and boots turned down at the
+    top, and a wide belt with a gilt buckle. Nothing of the watch's tabard,
+    blue mail shirt and bare shins."""
+    mail = tunic_body(body, arm, C, sleeve=0.50, hem=C.z(0.93), mat="mail", offset=0.012,
+                      neck_drop=0.02, name="mail")
+    mskirt = loft_skirt(body, "mail_skirt", C.z(1.00), C.zl(0.70), flare=1.10, mat="mail",
+                        under=[mail], rings=5, sides=20)
+    hang(mskirt, arm, body, C, C.z(1.00), C.zl(0.70), follow=0.6)
+    rim(mskirt, 0.006)
+    # One loft from the neck to the hem, with no sleeves: the arms stand out
+    # of it at the sides, and the camail hides where it meets the shoulders.
+    coat = loft_skirt(body, "surcoat", C.z(1.22), C.zl(0.70), flare=1.16, mat="cloth",
+                      ease=0.022, hem_wave=0.05, under=[mail, mskirt], rings=12, sides=24)
+    hang(coat, arm, body, C, C.z(1.00), C.zl(0.70), follow=0.55)
+    rim(coat, 0.006)
+    sk = coat
+    legs = hose(body, arm, C, mat="leather")
+    parts = [mail, mskirt, coat, legs] + hero_boots(body, arm, C, 0.62)
+    parts.append(mantle(body, arm, C, drop=0.09, mat="mail", name="camail", out=0.004))
+    parts.append(hem_band(body, arm, C, sk, C.zl(0.70), 0.07, "cloth2", 0.55, name="surcoat_band"))
+    parts += greaves(body, arm, C, lo=0.08, hi=0.52)
+    parts += vambraces(body, arm, C, lo=0.30, hi=0.96, offset=0.017)
+    parts += pauldron(body, arm, C, mat="steel", trim="cloth2", lames=3, r0=0.104)
+    bt = hero_belt(body, arm, C, C.z(1.04), [coat, mail], width=0.075, buckle="gold", ease=0.016)
+    parts += bt
+    parts.append(stud(body, C, 0.0, C.z(1.04), "gold", under=[coat, mail] + bt, r=0.030, name="buckle_plate"))
+    return parts
+
+
 DRESS = {"brute": brute, "lady": lady, "nomad": nomad, "skeleton": skeleton, "troll": troll, "woman": woman, "maid": maid, "crone": crone, "peasant": peasant, "guard": guard, "merchant": merchant, "smith": smith,
          "priest": priest, "mage": mage, "rogue": rogue, "beggar": beggar, "noble": noble,
-         "knight": knight, "zombie": zombie, "ghost": ghost}
+         "knight": knight, "zombie": zombie, "ghost": ghost,
+         "hero_mage": hero_mage, "hero_priest": hero_priest, "hero_rogue": hero_rogue,
+         "hero_guard": hero_guard}
 
 
 
@@ -1435,6 +1975,36 @@ def hair_tail(P):
     hair, heads = _hair()
     S = heads.spec_for(P)
     return hair.style_tail(S, P, "hair_tail", length=0.26 if S["sex"] == "f" else 0.18)
+
+
+def hair_swept(P):
+    hair, heads = _hair()
+    return hair.style_swept(heads.spec_for(P), P, "hair_swept")
+
+
+def hair_undercut(P):
+    hair, heads = _hair()
+    return hair.style_undercut(heads.spec_for(P), P, "hair_undercut")
+
+
+def hair_warrior(P):
+    hair, heads = _hair()
+    return hair.style_warrior(heads.spec_for(P), P, "hair_warrior")
+
+
+def hair_ponyhigh(P):
+    hair, heads = _hair()
+    return hair.style_ponyhigh(heads.spec_for(P), P, "hair_ponyhigh")
+
+
+def hair_crown(P):
+    hair, heads = _hair()
+    return hair.style_crown(heads.spec_for(P), P, "hair_crown")
+
+
+def hair_waves(P):
+    hair, heads = _hair()
+    return hair.style_waves(heads.spec_for(P), P, "hair_waves")
 
 
 def beard_full(P):
@@ -1648,7 +2218,8 @@ def hat_cap(P):
 
 HEAD_PIECES = {
     "male": [hair_short, hair_crop, hair_long, hair_fringe, hair_tail, beard_full, beard_short, moustache,
-             hood, coif, helm_kettle, helm_nasal, helm_great, hat_wizard, hat_cap, turban],
+             hood, coif, helm_kettle, helm_nasal, helm_great, hat_wizard, hat_cap, turban,
+             hair_swept, hair_undercut, hair_warrior],
     "female": [hair_long, hair_bun, hair_braid, hair_tail, hair_short, scarf, coif, hood,
-               helm_kettle, helm_nasal, hat_wizard],
+               helm_kettle, helm_nasal, hat_wizard, hair_ponyhigh, hair_crown, hair_waves],
 }

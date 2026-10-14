@@ -213,7 +213,7 @@ function weaponOf(item) {
  * behind his counter reads as a joke. So the civil trades keep their own
  * things and only the fighting ones take what the mud hands them.
  */
-const ARMED = new Set(['guard', 'knight', 'rogue', 'smith', 'troll', 'skeleton', 'zombie', 'nomad']);
+const ARMED = new Set(['guard', 'knight', 'rogue', 'smith', 'troll', 'skeleton', 'zombie', 'nomad', 'hero_guard', 'hero_rogue']);
 
 /**
  * Everything the viewer needs to dress one mobile.
@@ -223,7 +223,7 @@ const ARMED = new Set(['guard', 'knight', 'rogue', 'smith', 'troll', 'skeleton',
  * @param ITEM the item-type table from are.js
  * @returns {{file, arch, face, scale, headScale, female, weapon, shield, pieces,
  *   tint, sex, kind}} or null for anything that is not a person. `face` is the
- *   face mesh to wear (face_male, face_male_old, face_female, face_female_old,
+ *   face mesh to wear (face_male, face_male_old, face_male_hero, face_female, face_female_old, face_female_hero,
  *   face_troll) or null for a skeleton.
  */
 /**
@@ -647,18 +647,32 @@ export function personOf(proto, ITEM, instance = 0) {
  * the same person on every page that draws them.
  */
 const PLAYER_ARCH = { mage: 'mage', cleric: 'priest', thief: 'rogue', warrior: 'guard' };
+/**
+ * What a player wears, cut for the purpose (tools/blender/outfits.py, "the
+ * heroes"): a mantle and a collar, a stole and a tabard, a bandolier and a
+ * half-cloak, pauldrons. Only players are ever given one; the townsfolk keep
+ * the archetypes above. Worn armour (`applyEquipment`) changes the colour of
+ * a robe and what is on the head and in the hands, and a hero takes all of
+ * that as its base does; what it does not do is swap the garment itself.
+ */
+const HERO_ARCH = { mage: 'hero_mage', cleric: 'hero_priest', thief: 'hero_rogue', warrior: 'hero_guard' };
+/** Trims for a mage's robe: gold, silver, copper, teal. */
+const MAGE_ROBES = [0x4a2a7a, 0x1f3f8a, 0x7a1f3f, 0x1f6a52, 0x5a2a6a, 0x2a3a7a];
+const MAGE_TRIMS = [0xb08a3a, 0xc9c2b2, 0xa8643a, 0x3a9a9a];
+const THIEF_CLOTHS = [0x2f5a5a, 0x5a2f44, 0x3f5a2f, 0x6b2f2f, 0x2f3a5a];
+const THIEF_CLOAKS = [0x2a3a2a, 0x2a2a3a, 0x3a2a2a, 0x2f3a3a];
 const PLAYER_HAIR = {
   male: {
-    mage: ['hood', 'hair_long', 'hair_tail', 'hair_short'],
-    cleric: ['hair_short', 'hair_crop', 'hair_long', 'hair_tail', 'hair_short', 'hair_crop', 'hood'],
-    thief: ['hood', 'hair_tail', 'hood', 'hair_short', 'hair_crop'],
-    warrior: ['hair_short', 'hair_crop', 'hair_tail', 'hair_long'],
+    mage: ['hood', 'hair_swept', 'hair_long', 'hair_tail', 'hair_swept', 'hair_undercut'],
+    cleric: ['hair_swept', 'hair_short', 'hair_crop', 'hair_undercut', 'hair_long', 'hair_tail', 'hair_swept', 'hood'],
+    thief: ['hood', 'hair_undercut', 'hair_tail', 'hood', 'hair_swept', 'hair_crop'],
+    warrior: ['hair_warrior', 'hair_undercut', 'hair_crop', 'hair_warrior', 'hair_swept', 'hair_tail'],
   },
   female: {
-    mage: ['hair_long', 'hair_braid', 'hair_tail', 'hood'],
-    cleric: ['hair_braid', 'hair_tail', 'hair_long', 'hood'],
-    thief: ['hood', 'hair_tail', 'hair_braid'],
-    warrior: ['hair_braid', 'hair_tail'],
+    mage: ['hair_waves', 'hair_long', 'hair_ponyhigh', 'hair_waves', 'hood'],
+    cleric: ['hair_crown', 'hair_waves', 'hair_braid', 'hair_ponyhigh', 'hair_crown', 'hood'],
+    thief: ['hood', 'hair_ponyhigh', 'hair_crown', 'hair_braid'],
+    warrior: ['hair_ponyhigh', 'hair_crown', 'hair_braid', 'hair_ponyhigh'],
   },
 };
 /**
@@ -675,7 +689,7 @@ function youngPlayer(out, proto, isFemale) {
   if (!PLAYER_ARCH[trade]) throw new Error(`people: a player's keywords end in "<name> <trade> <sex>", got "${proto.keywords}"`);
   const sex = isFemale ? 'female' : 'male';
   // A name like "Crone" or "Lady" must not change the trade the player chose.
-  if (out.arch !== PLAYER_ARCH[trade]) {
+  if (out.arch !== PLAYER_ARCH[trade] && out.arch !== HERO_ARCH[trade]) {
     out.arch = PLAYER_ARCH[trade];
     if (!out.weapon) out.weapon = { mage: 'weapon_staff', cleric: 'weapon_staff', thief: 'weapon_dagger', warrior: 'weapon_sword' }[trade];
   }
@@ -683,7 +697,7 @@ function youngPlayer(out, proto, isFemale) {
   const hc = strHash(`${proto.short}#colour`, 43);
   const bs = strHash(`${proto.short}#beard`, 47);
   const ts = strHash(`${proto.short}#cloth`, 53);
-  out.face = isFemale ? 'face_female' : 'face_male';
+  out.face = isFemale ? 'face_female_hero' : 'face_male_hero';
   out.headScale = 0.95;
   out.scale = 1.03;
   out.build = isFemale ? 'athleticF' : 'athletic';
@@ -693,8 +707,8 @@ function youngPlayer(out, proto, isFemale) {
   out.pieces = pieces;
   switch (trade) {
     case 'mage':
-      out.tint.cloth = pick(ROBES.mage, ts);
-      out.tint.cloth2 = pick(RICH, strHash(`${proto.short}#trim`, 59));
+      out.tint.cloth = pick(MAGE_ROBES, ts);
+      out.tint.cloth2 = pick(MAGE_TRIMS, strHash(`${proto.short}#trim`, 59));
       break;
     case 'cleric': {
       out.tint.cloth = pick(CLERIC_ROBES, ts);
@@ -703,15 +717,22 @@ function youngPlayer(out, proto, isFemale) {
       break;
     }
     case 'thief':
-      out.tint.cloth = pick(DARK, ts);
+      // Shirt in a colour, jerkin in warm leather, breeches and laces dark,
+      // the half-cloak darker still.
+      out.tint.cloth = pick(THIEF_CLOTHS, ts);
       out.tint.cloth2 = pick(DARK, strHash(`${proto.short}#trim`, 59));
-      out.tint.leather = 0x3a2a1c;
+      out.tint.wool = pick(THIEF_CLOAKS, strHash(`${proto.short}#cloak`, 61));
+      out.tint.leather = 0x5a3a22;
       break;
     default:
+      // The surcoat in a strong dye with gold at its foot and on the
+      // shoulders.
       out.tint.cloth = pick(DYED, ts);
-      out.tint.cloth2 = pick(DARK, strHash(`${proto.short}#trim`, 59));
-      out.tint.leather = 0x3a2a1c;
+      out.tint.cloth2 = MAGE_TRIMS[0];
+      out.tint.leather = 0x4a3322;
   }
+  if (trade === 'cleric') out.tint.leather = 0x4a3322;
+  out.arch = HERO_ARCH[trade];
   out.player = true;
 }
 
@@ -746,7 +767,10 @@ function applyEquipment(out, proto, ITEM, seed) {
             : /\b(caps?|hats?)\b/i.test(name) ? 'hat_cap' : null;
       // Under a helm or a hood the hair goes, as the guards' do (helm or hair,
       // never both); a cap sits on it. Beards stay.
-      const covers = piece && (piece.startsWith('helm_') || piece === 'hood');
+      // A cap too, over the new styles: their volume on top is more than a
+      // cap's few millimetres clear of the skull, and would stand through it.
+      const covers = piece && (piece.startsWith('helm_') || piece === 'hood'
+        || (piece === 'hat_cap' && (out.pieces || []).some((x) => VOLUME_HAIR.has(x))));
       if (piece) out.pieces = [...(out.pieces || []).filter((x) => !HEADWEAR.has(x) && !(covers && x.startsWith('hair_'))), piece];
     }
   }
@@ -759,6 +783,8 @@ function applyEquipment(out, proto, ITEM, seed) {
 
 /** game.js WEAR.HEAD. */
 const WEAR_HEAD = 6;
+/** Hairstyles with volume or a knot that a cap cannot sit over. */
+const VOLUME_HAIR = new Set(['hair_swept', 'hair_undercut', 'hair_warrior', 'hair_crown', 'hair_ponyhigh', 'hair_waves']);
 /** The head pieces that are something worn, as against hair or a beard. */
 const HEADWEAR = new Set(['hood', 'hat_wizard', 'helm_kettle', 'helm_nasal', 'helm_great', 'hat_cap', 'coif', 'turban', 'scarf']);
 

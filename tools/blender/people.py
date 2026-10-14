@@ -865,8 +865,10 @@ def render(path, objs=None, azims=(0, 35, 90, 180), dist=3.2, cz=0.95, lens=50,
 # Which archetypes are built on which body, and so into which file.
 FILES = {
     "person_male": (MALE, ["peasant", "guard", "merchant", "smith", "priest", "mage", "rogue",
-                           "beggar", "noble", "knight", "zombie", "ghost", "skeleton", "nomad"]),
-    "person_female": (FEMALE, ["woman", "maid", "crone", "lady", "guard", "priest", "mage", "rogue"]),
+                           "beggar", "noble", "knight", "zombie", "ghost", "skeleton", "nomad",
+                           "hero_mage", "hero_priest", "hero_rogue", "hero_guard"]),
+    "person_female": (FEMALE, ["woman", "maid", "crone", "lady", "guard", "priest", "mage", "rogue",
+                             "hero_mage", "hero_priest", "hero_rogue", "hero_guard"]),
     "troll": (TROLL, ["troll", "brute"]),
     # Every minotaur in the stock areas is dressed for a trade: guards in
     # furs over armour, knights in plate, the masters in robes or leather.

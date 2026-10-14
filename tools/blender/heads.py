@@ -197,6 +197,50 @@ OLD_MALE = dict(MALE, name="male_old", age=1.0, fold=1.0, fissure=(0.0142, 0.003
 OLD_FEMALE = dict(FEMALE, name="female_old", age=1.0, fold=0.9, fissure=(0.0146, 0.0040, 0.0040),
                   nose=0.9, nose_len=0.96, lips=0.8)
 
+# The faces players wear: a hero of a modern game, twenty-five to thirty-five,
+# not the town's everyman. Both are read off MALE and FEMALE and keep every
+# number that the skull, the eyes, the ears and the hair's scalp are built
+# from -- eye, dome, the loft above the cheekbone -- so hair and hats and the
+# eye bones fit them like the others; only the face below the brow moves, and
+# by millimetres, since a beard grown on MALE's jaw has to stay outside it.
+#
+# The man: a squarer, stronger jaw (a higher n down the lower rows), a chin
+# with some mass to it, a deeper brow, cheekbones higher and further out over
+# cheeks that are lean under them, a straight and narrower nose, thinner lips,
+# and the outer corner of the eye a little higher than the inner, which is
+# what reads as alert.
+MALE_HERO = dict(
+    MALE, name="male_hero",
+    loft=_loft_scale(LOFT_MALE,
+                     wk=[(-0.12, 1.0), (-0.105, 1.045), (-0.09, 1.06), (-0.07, 1.04), (-0.045, 0.99),
+                         (-0.02, 0.99), (0.0, 1.0), (0.1, 1.0)],
+                     nk=[(-0.12, 1.1), (-0.09, 1.16), (-0.05, 1.1), (0.0, 1.0), (0.1, 1.0)]),
+    brow=1.5,
+    cheek=((0.050, -0.061, -0.012), (0.015, 0.013, 0.011)),
+    chin=((0.0, -0.079, -0.101), (0.019, 0.012, 0.014)),
+    fissure=(0.0152, 0.0040, 0.0039), tilt=0.0016,
+    nose_w=0.9, nose_len=0.93, nose_top=0.014,
+    lips=0.85,
+    fold=0.3, stubble=0.6,
+)
+
+# The woman: the cheekbones high and forward with the roundness under them
+# taken down, so the face has planes instead of a doll's even curve; the jaw
+# defined at its angle and the chin kept small and shaped; the lips full, the
+# eyes a little larger in the face, a straight nose with a fine tip.
+FEMALE_HERO = dict(
+    FEMALE, name="female_hero",
+    loft=_loft_scale(FEMALE["loft"],
+                     wk=[(-0.12, 0.97), (-0.10, 1.0), (-0.08, 1.03), (-0.05, 1.0), (-0.02, 1.0), (0.0, 1.0), (0.1, 1.0)],
+                     nk=[(-0.12, 1.08), (-0.09, 1.16), (-0.05, 1.08), (0.0, 1.0), (0.1, 1.0)]),
+    cheek=((0.046, -0.059, -0.006), (0.015, 0.011, 0.010)),
+    apple=((0.033, -0.066, -0.027), (0.012, 0.008, 0.010)),
+    chin=((0.0, -0.073, -0.099), (0.012, 0.008, 0.010)),
+    fissure=(0.0172, 0.0062, 0.0050), eye_r=0.0130, tilt=0.0022,
+    nose=0.58, nose_w=0.72, nose_len=0.78, nose_top=0.010,
+    lips=2.5, lip_w=1.04,
+)
+
 # A troll: a low skull that slopes back from a brow like a shelf, small deep
 # eyes under it, a long hooked nose that hangs to the lip, a wide mouth over a
 # jaw that juts past it, two tusks up out of the lower jaw, big ears, warts,
@@ -298,15 +342,15 @@ OGRE = dict(
     tusks=False,
 )
 
-SPECS = {s["name"]: s for s in (MALE, FEMALE, OLD_MALE, OLD_FEMALE, TROLL, RAT, ILLITHID, ETTIN, OGRE)}
+SPECS = {s["name"]: s for s in (MALE, FEMALE, MALE_HERO, FEMALE_HERO, OLD_MALE, OLD_FEMALE, TROLL, RAT, ILLITHID, ETTIN, OGRE)}
 
 # Which faces each body carries, by file: the young and the old of each sex.
 # Every face of one body shares its eyes, its skull and its ears, so hair and
 # hats and the eye bones fit all of them.
 FACES = {
     "male": [("face_male", MALE), ("face_male_old", OLD_MALE), ("face_wererat", RAT),
-             ("face_illithid", ILLITHID)],
-    "female": [("face_female", FEMALE), ("face_female_old", OLD_FEMALE)],
+             ("face_illithid", ILLITHID), ("face_male_hero", MALE_HERO)],
+    "female": [("face_female", FEMALE), ("face_female_old", OLD_FEMALE), ("face_female_hero", FEMALE_HERO)],
     "troll": [("face_troll", TROLL), ("face_ettin", ETTIN), ("face_ogre", OGRE)],
 }
 
