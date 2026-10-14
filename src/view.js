@@ -317,6 +317,8 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     },
     chest: (out) => out.set(player.position.x, player.position.y - EYE + (figure ? figure.height : 1.75) * 0.62, player.position.z),
     feet: (out) => out.set(player.position.x, player.position.y - EYE, player.position.z),
+    /** The staff's knot, when the figure carries one (spellfx glows it with your mana). */
+    staff: (out) => (figure && figure.staff && figure.castPoint && figure.group.visible ? figure.castPoint.getWorldPosition(out) : null),
   };
 
   function set(on) {

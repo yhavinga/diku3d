@@ -2850,6 +2850,33 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     light.spawn({ x: eye.x + Math.cos(a2) * r + _v.x * 0.8, y: eye.y + rand(-1.1, 0.2), z: eye.z + Math.sin(a2) * r + _v.z * 0.8, vx: 0, vy: rand(0.3, 0.6), vz: 0, life: rand(1.5, 2.4), size: rand(0.025, 0.04), color: PAL.sanctuary.mote, shape: 1, drag: 0.5, fadeIn: 0.4, occ: 0.25 });
   }
 
+  /**
+   * Over your own shoulder, a mage's staff carries its power: a small light
+   * in the knot that brightens and swells with the mana you have, and now
+   * and then a mote lifting off it. Empty, it is a dull ember; full, it is
+   * plainly the thing the spells will come out of.
+   */
+  const _tip = new THREE.Vector3();
+  let tipMotes = 0;
+  function updateOwnStaff(dt) {
+    if (!self || !self.staff || game.state.class !== 0) return;
+    const tip = self.staff(_tip);
+    if (!tip) return;
+    const full = clamp(game.state.mana / Math.max(1, game.state.maxMana), 0, 1);
+    const beat = 0.85 + 0.15 * Math.sin(clock * 2.6);
+    // No lamp of its own: one more light is one more in every shader's key.
+    // A wide faint halo stands in for the light it would throw.
+    light.spawn({ x: tip.x, y: tip.y, z: tip.z, life: 0.05, size: 0.7 * full * beat, color: PAL.missile.glow, alpha: 0.3 * full, shape: 0, drag: 0, fadeIn: 0 });
+    light.spawn({ x: tip.x, y: tip.y, z: tip.z, life: 0.05, size: (0.12 + 0.2 * full) * beat, color: PAL.missile.glow, alpha: 0.45 + 0.55 * full, shape: 0, drag: 0, fadeIn: 0 });
+    // The heart in the spell's own HDR colour, so the bloom takes it up.
+    light.spawn({ x: tip.x, y: tip.y, z: tip.z, life: 0.05, size: 0.04 + 0.06 * full, color: PAL.missile.core, alpha: 0.25 + 0.75 * full, shape: 0, drag: 0, fadeIn: 0 });
+    tipMotes += dt * (0.5 + 3.5 * full) * budget.density;
+    while (tipMotes >= 1) {
+      tipMotes -= 1;
+      light.spawn({ x: tip.x + rand(-0.03, 0.03), y: tip.y, z: tip.z + rand(-0.03, 0.03), vx: rand(-0.05, 0.05), vy: rand(0.15, 0.35), vz: rand(-0.05, 0.05), life: rand(0.6, 1.1), size: rand(0.012, 0.022), color: PAL.missile.glow, shape: 1, drag: 0.6, swirl: rand(1, 2), fadeIn: 0.2 });
+    }
+  }
+
   /** A blow that sanctuary took half of: the mantle flares where it landed. */
   function absorbed(slot) {
     const fig = figureOf(slot);
@@ -2985,6 +3012,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     updateAuras(dt);
     updateSanctuary(dt);
     updateOwnMantle(dt);
+    updateOwnStaff(dt);
     updateEdge();
 
     light.update(dt, anchors);

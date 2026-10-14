@@ -987,6 +987,7 @@ function buildPerson(library, who, proto, instance) {
     // A leg scaled by legK carries the foot legK as far each stride.
     stride: { walk: facts.walk * scale * legK, run: facts.run * scale * legK },
     hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
+    weaponName: weapon ? who.weapon : null,
     indoor: mesh.material.dikuIndoor, buried: mesh.material.dikuBuried,
     // A minotaur's: what it does when you come near (people.js).
     temper: who.temper || null,
@@ -1285,6 +1286,10 @@ export function createPlayerFigure({
     group, height: made.height, update, perform, say, pose, air,
     /** The meshes a click can land on: the body, not its shadow or its words. */
     body: made.group,
+    /** Where a spell leaves it: the knot of its staff, or its right fist. */
+    castPoint: made.castPoint || null,
+    /** Whether that knot is a staff's. */
+    staff: made.weaponName === 'weapon_staff',
     dispose() {
       dropSpeech();
       group.removeFromParent();
