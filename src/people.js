@@ -25,19 +25,21 @@
  * fraction of the clip at which the blow lands.
  */
 export const CLIP_FACTS = {
-  person_male: { walk: 1.200, run: 2.600 },
-  person_female: { walk: 1.137, run: 2.464 },
-  troll: { walk: 1.031, run: 2.234 },
-  minotaur: { walk: 1.200, run: 2.600 },
+  person_male: { walk: 1.200, run: 2.600, jog: 3.200, sprint: 4.100, strafe_l: 2.650, strafe_r: 2.650, back: 1.870 },
+  person_female: { walk: 1.137, run: 2.464, jog: 3.033, sprint: 3.886, strafe_l: 2.512, strafe_r: 2.512, back: 1.772 },
+  troll: { walk: 1.031, run: 2.234, jog: 2.749, sprint: 3.523, strafe_l: 2.277, strafe_r: 2.277, back: 1.607 },
+  minotaur: { walk: 1.200, run: 2.600, jog: 3.200, sprint: 4.100, strafe_l: 2.650, strafe_r: 2.650, back: 1.870 },
 };
 export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21, cast: 14 / 24, kick: 7 / 14, backstab: 9 / 18, disarm: 7 / 14 };
 // sit (5 s), lean (4 s) and talk (3 s) are loops for motion.js's settling:
 // sit is written for a seat 0.46 m high at scale 1 for a man's legs (scaled by
 // leg length on the others), feet planted a pace forward; lean has the back
 // against a wall behind, arms folded; talk gestures with the right hand.
-export const LOOPS = new Set(['idle', 'idle2', 'walk', 'run', 'fight', 'sit', 'lean', 'talk']);
+export const LOOPS = new Set(['idle', 'idle2', 'walk', 'run', 'fight', 'sit', 'lean', 'talk', 'jog', 'sprint', 'strafe_l',
+  'strafe_r', 'back']);
 export const CLIPS = ['idle', 'idle2', 'walk', 'run', 'fight', 'attack', 'attack2', 'hit', 'block', 'death', 'cast',
-  'sit', 'lean', 'talk', 'jump', 'land', 'kick', 'backstab', 'disarm'];
+  'sit', 'lean', 'talk', 'jump', 'land', 'kick', 'backstab', 'disarm', 'jog', 'sprint', 'strafe_l', 'strafe_r',
+  'back', 'turn_l', 'turn_r'];
 
 // --- vocabulary -------------------------------------------------------------
 

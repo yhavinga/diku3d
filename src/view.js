@@ -70,6 +70,7 @@ const SHIELD = 11;
 const BLOWS = new Set(['hit', 'miss', 'parry', 'dodge']);
 /** How long the body keeps facing your aim after the words of a spell. */
 const CAST_FACE = 0.8;
+const REVERSE = (135 * Math.PI) / 180;
 /** Flying (the spell), the body rides this high over its feet, bobbing. */
 const HOVER = 0.32;
 
@@ -301,13 +302,22 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     return null;
   }
 
+  // Held facing one way (fighting, casting) the body slides and backpedals;
+  // from a sprint on it is let go and turns to run, since a sideways 9.5 m/s
+  // is not a thing a body does. Back under the pace it takes the hold again.
+  const LET_GO = 7.5;
+  const TAKE_BACK = 6.5;
+  let released = false;
+
   /** Which way the body faces: where it is going, or where you look when it fights or casts. */
   function turn(dt, moved, aiming) {
     let target = heading;
     if (aiming) target = camera.rotation.y;
     else if (moved.lengthSq() > (0.3 * dt) ** 2) target = Math.atan2(-moved.x, -moved.z);
     const d = Math.atan2(Math.sin(target - heading), Math.cos(target - heading));
-    heading += d * Math.min(1, dt * 12);
+    // Going back on yourself, the body pivots at twice the rate it swings round.
+    const rate = !aiming && moved.lengthSq() > (0.3 * dt) ** 2 && Math.abs(d) > REVERSE ? 24 : 12;
+    heading += d * Math.min(1, dt * rate);
   }
 
   function update(dt, { active = true, aiming = false } = {}) {
@@ -340,10 +350,19 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     last.copy(player.position);
     lastValid = true;
     // A pinned camera is somewhere else's view: the body keeps its own facing.
-    turn(dt, moved, !pinned && (aiming || clock < facingUntil));
     const pace = dt > 0 ? moved.length() / dt : 0;
+    if (pace > LET_GO) released = true; else if (pace < TAKE_BACK) released = false;
+    const locked = !pinned && (aiming || clock < facingUntil) && !released;
+    turn(dt, moved, locked);
     feet.set(player.position.x, player.position.y - EYE, player.position.z);
-    figure.update(dt, feet, heading, pace);
+    // The movement in the body's own frame, for the legs: forward and to the
+    // left, against the yaw it is held to (the camera's, not the lagging heading).
+    const held = camera.rotation.y;
+    figure.update(dt, feet, heading, pace, {
+      locked, face: held,
+      fwd: dt > 0 ? (-moved.x * Math.sin(held) - moved.z * Math.cos(held)) / dt : 0,
+      side: dt > 0 ? (-moved.x * Math.cos(held) + moved.z * Math.sin(held)) / dt : 0,
+    });
     own.at.copy(feet);
     // Under fly the body rides the air and its shadow stays on the ground,
     // which is what says it is off it. The game's own feet do not move.

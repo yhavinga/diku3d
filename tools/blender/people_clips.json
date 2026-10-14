@@ -12,6 +12,20 @@
    "head_gap": 0.1687,
    "hit": 0.5238095238095238
   },
+  "back": {
+   "direction": [
+    0.0,
+    -1.0
+   ],
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.3124,
+   "sink": -2.4942681193351746e-05,
+   "slip": 9.49843642049941e-06,
+   "slip_baked": 1.0368855850576684e-05,
+   "stance": 0.55,
+   "stride": 1.8699042987740895
+  },
   "backstab": {
    "duration": 0.75,
    "frames": 18,
@@ -62,6 +76,16 @@
    "frames": 90,
    "head_gap": 0.0348
   },
+  "jog": {
+   "duration": 0.6666666666666666,
+   "frames": 16,
+   "head_gap": 0.2516,
+   "sink": -1.6875099390745163e-05,
+   "slip": 0.0012226117813560755,
+   "slip_baked": 0.0012227309906456263,
+   "stance": 0.32,
+   "stride": 3.1998362331963026
+  },
   "jump": {
    "duration": 0.2916666666666667,
    "frames": 7,
@@ -104,10 +128,58 @@
    "duration": 1.4583333333333333,
    "frames": 35
   },
+  "sprint": {
+   "duration": 0.4583333333333333,
+   "frames": 11,
+   "head_gap": 0.1322,
+   "sink": -1.3966113328933716e-05,
+   "slip": 0.0,
+   "slip_baked": 0.0,
+   "stance": 0.26,
+   "stride": 4.099790173782762
+  },
+  "strafe_l": {
+   "direction": [
+    -1.0,
+    0.0
+   ],
+   "duration": 0.625,
+   "frames": 15,
+   "head_gap": 0.2784,
+   "sink": -1.505902037024498e-05,
+   "slip": 6.1718112505801e-07,
+   "slip_baked": 1.9123375882653176e-07,
+   "stance": 0.32,
+   "stride": 2.649864380615688
+  },
+  "strafe_r": {
+   "direction": [
+    1.0,
+    0.0
+   ],
+   "duration": 0.625,
+   "frames": 15,
+   "head_gap": 0.2784,
+   "sink": -1.1504394933581352e-05,
+   "slip": 3.1403690872095244e-06,
+   "slip_baked": 3.365491497718669e-06,
+   "stance": 0.32,
+   "stride": 2.649864380615688
+  },
   "talk": {
    "duration": 3.0,
    "frames": 72,
    "head_gap": 0.3144
+  },
+  "turn_l": {
+   "duration": 0.5416666666666666,
+   "frames": 13,
+   "head_gap": 0.2957
+  },
+  "turn_r": {
+   "duration": 0.5416666666666666,
+   "frames": 13,
+   "head_gap": 0.2957
   },
   "walk": {
    "duration": 1.0833333333333333,
@@ -131,6 +203,20 @@
    "frames": 21,
    "head_gap": 0.1577,
    "hit": 0.5238095238095238
+  },
+  "back": {
+   "direction": [
+    0.0,
+    -1.0
+   ],
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.2616,
+   "sink": -2.1068379282951355e-05,
+   "slip": 8.523570454686709e-06,
+   "slip_baked": 8.979020406751223e-06,
+   "stance": 0.55,
+   "stride": 1.7723085629747317
   },
   "backstab": {
    "duration": 0.75,
@@ -178,6 +264,16 @@
    "frames": 90,
    "head_gap": 0.0288
   },
+  "jog": {
+   "duration": 0.6666666666666666,
+   "frames": 16,
+   "head_gap": 0.2151,
+   "sink": -9.6932053565979e-06,
+   "slip": 0.0014148881749247444,
+   "slip_baked": 0.0014150446371172798,
+   "stance": 0.32,
+   "stride": 3.032827487443391
+  },
   "jump": {
    "duration": 0.2916666666666667,
    "frames": 7,
@@ -212,10 +308,58 @@
    "duration": 5.0,
    "frames": 120
   },
+  "sprint": {
+   "duration": 0.4583333333333333,
+   "frames": 11,
+   "head_gap": 0.1057,
+   "sink": -8.29668715596199e-06,
+   "slip": 0.0,
+   "slip_baked": 0.0,
+   "stance": 0.26,
+   "stride": 3.8858102182868444
+  },
+  "strafe_l": {
+   "direction": [
+    -1.0,
+    0.0
+   ],
+   "duration": 0.625,
+   "frames": 15,
+   "head_gap": 0.2341,
+   "sink": -1.4560297131538391e-05,
+   "slip": 5.479019290515589e-07,
+   "slip_baked": 9.909091344616858e-08,
+   "stance": 0.32,
+   "stride": 2.511560263039058
+  },
+  "strafe_r": {
+   "direction": [
+    1.0,
+    0.0
+   ],
+   "duration": 0.625,
+   "frames": 15,
+   "head_gap": 0.2341,
+   "sink": -1.1006370186805725e-05,
+   "slip": 3.0415297713171466e-06,
+   "slip_baked": 3.274197548828267e-06,
+   "stance": 0.32,
+   "stride": 2.511560263039058
+  },
   "talk": {
    "duration": 3.0,
    "frames": 72,
    "head_gap": 0.2634
+  },
+  "turn_l": {
+   "duration": 0.5416666666666666,
+   "frames": 13,
+   "head_gap": 0.2488
+  },
+  "turn_r": {
+   "duration": 0.5416666666666666,
+   "frames": 13,
+   "head_gap": 0.2488
   },
   "walk": {
    "duration": 1.0833333333333333,
@@ -239,6 +383,20 @@
    "frames": 21,
    "head_gap": 0.1692,
    "hit": 0.5238095238095238
+  },
+  "back": {
+   "direction": [
+    0.0,
+    -1.0
+   ],
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.2868,
+   "sink": -2.4942681193351746e-05,
+   "slip": 9.49843642049941e-06,
+   "slip_baked": 1.0368855850576684e-05,
+   "stance": 0.55,
+   "stride": 1.8699042987740895
   },
   "backstab": {
    "duration": 0.75,
@@ -286,6 +444,16 @@
    "frames": 90,
    "head_gap": 0.033
   },
+  "jog": {
+   "duration": 0.6666666666666666,
+   "frames": 16,
+   "head_gap": 0.2413,
+   "sink": -1.6875099390745163e-05,
+   "slip": 0.0012226117813560755,
+   "slip_baked": 0.0012227309906456263,
+   "stance": 0.32,
+   "stride": 3.1998362331963026
+  },
   "jump": {
    "duration": 0.2916666666666667,
    "frames": 7,
@@ -320,10 +488,58 @@
    "duration": 5.0,
    "frames": 120
   },
+  "sprint": {
+   "duration": 0.4583333333333333,
+   "frames": 11,
+   "head_gap": 0.1237,
+   "sink": -1.3966113328933716e-05,
+   "slip": 0.0,
+   "slip_baked": 0.0,
+   "stance": 0.26,
+   "stride": 4.099790173782762
+  },
+  "strafe_l": {
+   "direction": [
+    -1.0,
+    0.0
+   ],
+   "duration": 0.625,
+   "frames": 15,
+   "head_gap": 0.2586,
+   "sink": -1.505902037024498e-05,
+   "slip": 6.1718112505801e-07,
+   "slip_baked": 1.9123375882653176e-07,
+   "stance": 0.32,
+   "stride": 2.649864380615688
+  },
+  "strafe_r": {
+   "direction": [
+    1.0,
+    0.0
+   ],
+   "duration": 0.625,
+   "frames": 15,
+   "head_gap": 0.2586,
+   "sink": -1.1504394933581352e-05,
+   "slip": 3.1403690872095244e-06,
+   "slip_baked": 3.365491497718669e-06,
+   "stance": 0.32,
+   "stride": 2.649864380615688
+  },
   "talk": {
    "duration": 3.0,
    "frames": 72,
    "head_gap": 0.2882
+  },
+  "turn_l": {
+   "duration": 0.5416666666666666,
+   "frames": 13,
+   "head_gap": 0.2719
+  },
+  "turn_r": {
+   "duration": 0.5416666666666666,
+   "frames": 13,
+   "head_gap": 0.2719
   },
   "walk": {
    "duration": 1.0833333333333333,
@@ -347,6 +563,20 @@
    "frames": 21,
    "head_gap": 0.2861,
    "hit": 0.5238095238095238
+  },
+  "back": {
+   "direction": [
+    0.0,
+    -1.0
+   ],
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.4895,
+   "sink": -1.3480620282280142e-06,
+   "slip": 7.670339756983925e-07,
+   "slip_baked": 9.272399453286426e-07,
+   "stance": 0.55,
+   "stride": 1.6066821669733828
   },
   "backstab": {
    "duration": 0.75,
@@ -394,6 +624,16 @@
    "frames": 90,
    "head_gap": 0.0339
   },
+  "jog": {
+   "duration": 0.6666666666666666,
+   "frames": 16,
+   "head_gap": 0.3255,
+   "sink": -1.1632278074102942e-06,
+   "slip": 0.00178118400258509,
+   "slip_baked": 0.0017819183321525767,
+   "stance": 0.32,
+   "stride": 2.7494026386710293
+  },
   "jump": {
    "duration": 0.2916666666666667,
    "frames": 7,
@@ -428,10 +668,58 @@
    "duration": 5.0,
    "frames": 120
   },
+  "sprint": {
+   "duration": 0.4583333333333333,
+   "frames": 11,
+   "head_gap": 0.1302,
+   "sink": -6.447205578297144e-06,
+   "slip": 0.0,
+   "slip_baked": 0.0,
+   "stance": 0.26,
+   "stride": 3.5226721307972557
+  },
+  "strafe_l": {
+   "direction": [
+    -1.0,
+    0.0
+   ],
+   "duration": 0.625,
+   "frames": 15,
+   "head_gap": 0.3669,
+   "sink": -4.954226255904359e-07,
+   "slip": 3.8977241064144305e-07,
+   "slip_baked": 6.78385738592989e-07,
+   "stance": 0.32,
+   "stride": 2.2768490601494458
+  },
+  "strafe_r": {
+   "direction": [
+    1.0,
+    0.0
+   ],
+   "duration": 0.625,
+   "frames": 15,
+   "head_gap": 0.3669,
+   "sink": -5.624777941193315e-07,
+   "slip": 3.2786739099377515e-07,
+   "slip_baked": 4.246979342563295e-07,
+   "stance": 0.32,
+   "stride": 2.2768490601494458
+  },
   "talk": {
    "duration": 3.0,
    "frames": 72,
    "head_gap": 0.4922
+  },
+  "turn_l": {
+   "duration": 0.5416666666666666,
+   "frames": 13,
+   "head_gap": 0.4658
+  },
+  "turn_r": {
+   "duration": 0.5416666666666666,
+   "frames": 13,
+   "head_gap": 0.4658
   },
   "walk": {
    "duration": 1.0833333333333333,

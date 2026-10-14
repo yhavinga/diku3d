@@ -600,7 +600,9 @@ function carriedClip(asset, name, carry) {
   const clip = set.base.get(name);
   if (!clip || (!carry.right && !carry.left)) return clip;
   if (name === 'fight') return guardClip(set, clip, carry);
-  if (!['idle', 'idle2', 'walk', 'run'].includes(name)) return clip;
+  // The player's gaits too: a sprint keyed with both arms pumping swung the
+  // sword over the head every stride. The free arm still pumps.
+  if (!['idle', 'idle2', 'walk', 'run', 'jog', 'sprint', 'strafe_l', 'strafe_r', 'back', 'turn_l', 'turn_r'].includes(name)) return clip;
   const key = `${name}|${carry.right}|${carry.left}`;
   if (set.carried.has(key)) return set.carried.get(key);
   const swap = new Map();
@@ -1002,7 +1004,7 @@ function buildPerson(library, who, proto, instance) {
   return {
     group, headGroup: null, height: heightOf(asset, who.file, who.arch) * scale - (body.userData.drop || 0), scale, mixer, actions, clips,
     // A leg scaled by legK carries the foot legK as far each stride.
-    stride: { walk: facts.walk * scale * legK, run: facts.run * scale * legK },
+    stride: Object.fromEntries(Object.entries(facts).map(([clip, metres]) => [clip, metres * scale * legK])),
     hitFrame: { ...HIT_FRAME }, weapon, shield, castPoint, archetype: who.arch,
     weaponName: weapon ? who.weapon : null,
     indoor: mesh.material.dikuIndoor, buried: mesh.material.dikuBuried,
@@ -1132,6 +1134,29 @@ function speechSprite(text, height = 0.36) {
   return sprite;
 }
 
+// A body that pivots more than this, going somewhere, swings round faster; one standing still and
+// held facing one way turns on the spot by the clip once it is further off than TURN_FROM (rig.py TURN_DEG).
+const REVERSE = THREE.MathUtils.degToRad(135);
+const TURN_FROM = THREE.MathUtils.degToRad(55);
+const TURN_DEG = THREE.MathUtils.degToRad(90);
+// Bank into a turn and lean with the acceleration, in radians: gain on the physical value, then the ceiling.
+const BANK = { gain: 0.2, max: THREE.MathUtils.degToRad(11) };
+const LEAN = { gain: THREE.MathUtils.degToRad(0.5), fwd: THREE.MathUtils.degToRad(6), back: THREE.MathUtils.degToRad(5) };
+const ramp = (v, a, b) => { const t = THREE.MathUtils.clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const smooth01 = (t) => ramp(t, 0, 1);
+/**
+ * Which forward clip a speed (m/s) belongs to. Each plays near its natural
+ * speed -- walk about 1.3, run 3.9, jog 4.8, sprint 9 -- and the ramps sit
+ * where one hands over to the next, so the legs never run at twice the pace
+ * they were made for. The four always sum to one.
+ */
+function gaitBands(v) {
+  const toRun = ramp(v, 1.7, 2.6);
+  const toJog = ramp(v, 3.7, 4.3);
+  const toSprint = ramp(v, 7.0, 8.2);
+  return { walk: 1 - toRun, run: toRun * (1 - toJog), jog: toJog * (1 - toSprint), sprint: toSprint };
+}
+
 export function createPlayerFigure({
   library, name, title = '', cls = 3, sex = 1, level = 1, weapon = 0, shield = 0, worn = [], objProtos = null, roomAt = null,
   lying = false,
@@ -1170,11 +1195,32 @@ export function createPlayerFigure({
   let speechLeft = 0;
 
   const actions = made.actions || null;
-  const natural = (clip, fallback) => (made.stride && made.clips && made.clips[clip] ? made.stride[clip] / made.clips[clip] : fallback);
-  const walkSpeed = natural('walk', 1.3);
-  const runSpeed = natural('run', 3.6);
-  const weights = { idle: 1, walk: 0, run: 0 };
+  const natural = (clip, fallback) => (made.stride && made.clips && made.clips[clip] && made.stride[clip] ? made.stride[clip] / made.clips[clip] : fallback);
+  // The speed each locomotion clip covers the ground at when played as
+  // authored (rig.py: stride over the length of the cycle). A clip is only
+  // ever played near it -- see the bands in update() -- or the legs spin.
+  const gaits = {
+    walk: natural('walk', 1.3), run: natural('run', 3.6), jog: natural('jog', 4.8), sprint: natural('sprint', 9),
+    strafe_l: natural('strafe_l', 4.2), strafe_r: natural('strafe_r', 4.2), back: natural('back', 3.2),
+  };
+  const GAITS = Object.keys(gaits);
+  const stridesOf = (clip) => (made.stride && made.stride[clip]) || gaits[clip] * (made.clips[clip] || 1);
+  const BASE = ['idle', 'turn_l', 'turn_r', ...GAITS];
+  const weights = { idle: 1, turn_l: 0, turn_r: 0 };
+  for (const g of GAITS) weights[g] = 0;
   let speed = 0;
+  // Body-relative velocity, smoothed: forward and to the left, m/s.
+  let velFwd = 0;
+  let velLeft = 0;
+  let rawFwd = 0;
+  // One shared phase for every locomotion clip (they all strike the left heel
+  // at 0), so crossfading walk, jog and sprint never has the feet pass through
+  // each other, and a diagonal's two clips step together.
+  let gaitPhase = 0;
+  let turning = null;
+  const moveAt = new THREE.Vector3();
+  let moveKnown = false;
+  const tilt = { bank: 0, lean: 0, yawRate: 0, accel: 0 };
   let yawNow = null;
   let lit = null;
   // Your own figure's states (src/view.js): a held pose, in the air, and the
@@ -1290,23 +1336,82 @@ export function createPlayerFigure({
   /**
    * One frame: stand at `feet`, face `yaw` (the camera's convention: forward
    * is (-sin, -cos)), and move the legs for `pace` metres a second.
+   *
+   * `local` is the body's own account of its motion, for your figure only
+   * (src/view.js): { fwd, side } the velocity along the body's front and to
+   * its left, `locked` whether the body is held facing one way (fighting,
+   * casting) rather than turning to where it goes, `face` the yaw it is held
+   * to. Without it -- other players -- the direction is read off the figure's
+   * own travel against the yaw it is given, which for them is where they look.
    */
-  function update(dt, feet, yaw, pace) {
+  function update(dt, feet, yaw, pace, local) {
     // Read before the position moves: this frame's travel, for the robe.
     const hop = skirtOn && !lying && skirtAt.lengthSq() > 0 ? Math.hypot(feet.x - skirtAt.x, feet.y - skirtAt.y, feet.z - skirtAt.z) : -1;
     const vx = hop >= 0 ? (feet.x - skirtAt.x) / dt : 0;
     const vy = hop >= 0 ? (feet.y - skirtAt.y) / dt : 0;
     const vz = hop >= 0 ? (feet.z - skirtAt.z) / dt : 0;
     skirtAt.set(feet.x, feet.y, feet.z);
+    // The same for the legs, which need it with or without a robe.
+    let stepX = 0;
+    let stepZ = 0;
+    if (moveKnown && dt > 0) { stepX = (feet.x - moveAt.x) / dt; stepZ = (feet.z - moveAt.z) / dt; }
+    moveAt.set(feet.x, feet.y, feet.z);
+    moveKnown = true;
     group.position.set(feet.x, feet.y, feet.z);
+    const locked = !!(local && local.locked);
     // A figure faces +Z at yaw 0; the camera looks down -Z.
-    const want = yaw + Math.PI;
+    const want = (locked && local.face !== undefined ? local.face : yaw) + Math.PI;
     if (yawNow === null) yawNow = want;
-    const turn = Math.atan2(Math.sin(want - yawNow), Math.cos(want - yawNow));
-    skirtYaw = turn * Math.min(1, dt * 10);
-    yawNow += skirtYaw;
+    const free = !posed && !airborne && !lying;
+    let turn = Math.atan2(Math.sin(want - yawNow), Math.cos(want - yawNow));
+    if (turning) {
+      // A turn on the spot is the clip's: the root is carried through the
+      // angle the clip was authored for (rig.py TURN_DEG) on the clip's own
+      // easing, which is what keeps the planted feet planted.
+      turning.t += dt;
+      const u = Math.min(1, turning.t / turning.length);
+      const before = yawNow;
+      yawNow = turning.from + turning.dir * TURN_DEG * smooth01(u);
+      skirtYaw = yawNow - before;
+      if (u >= 1 || !free || pace > 0.5) turning = null;
+    } else {
+      const rate = pace > 1 && Math.abs(turn) > REVERSE ? 22 : 10;
+      skirtYaw = turn * Math.min(1, dt * rate);
+      yawNow += skirtYaw;
+      if (locked && free && pace < 0.25 && speed < 0.3 && Math.abs(turn) > TURN_FROM) {
+        const clip = turn > 0 ? 'turn_l' : 'turn_r';
+        const action = actions && actions[clip];
+        if (action && made.clips[clip]) {
+          action.reset();
+          action.timeScale = 1;
+          action.setEffectiveWeight(1);
+          action.play();
+          turning = { clip, dir: turn > 0 ? 1 : -1, from: yawNow - skirtYaw, t: 0, length: made.clips[clip] };
+        }
+      }
+    }
     if (lying) group.rotation.y = yawNow; else made.group.rotation.y = yawNow;
     speed += (pace - speed) * Math.min(1, dt * 6);
+    // Which way the body is going in its own frame.
+    let wantFwd = pace;
+    let wantLeft = 0;
+    if (local && local.fwd !== undefined) {
+      wantFwd = locked ? local.fwd : pace;
+      wantLeft = locked ? local.side : 0;
+    } else if (pace > 0.3 && Math.hypot(stepX, stepZ) > 0.3 && Math.hypot(stepX, stepZ) < 18) {
+      const sn = Math.sin(yawNow - Math.PI);
+      const cs = Math.cos(yawNow - Math.PI);
+      const across = Math.hypot(stepX, stepZ);
+      const f = (-stepX * sn - stepZ * cs) / across;
+      const l = (-stepX * cs + stepZ * sn) / across;
+      wantFwd = pace * f;
+      wantLeft = pace * l;
+    }
+    const kv = Math.min(1, dt * 6);
+    velFwd += (wantFwd - velFwd) * kv;
+    velLeft += (wantLeft - velLeft) * kv;
+    tilt.accel += ((dt > 0 ? (wantFwd - rawFwd) / dt : 0) - tilt.accel) * Math.min(1, dt * 8);
+    rawFwd = wantFwd;
     placeShadows();
     if (speech) {
       speechLeft -= dt;
@@ -1328,25 +1433,96 @@ export function createPlayerFigure({
       ending[i].action.fadeOut(0.22);
       ending.splice(i, 1);
     }
-    const runFrom = (walkSpeed * 1.25 + runSpeed) / 2;
     // Sitting, lying dead or off the ground, the legs are not walking.
-    const target = posed || airborne ? null : (speed < 0.25 ? 'idle' : (speed < runFrom ? 'walk' : 'run'));
-    for (const clip of ['idle', 'walk', 'run']) {
-      weights[clip] += ((clip === target ? 1 : 0) - weights[clip]) * Math.min(1, dt * 8);
-      actions[clip].setEffectiveWeight(weights[clip]);
+    const aim = {};
+    for (const k of BASE) aim[k] = 0;
+    const along = {};
+    if (turning) {
+      aim[turning.clip] = 1;
+    } else if (free) {
+      const idle = 1 - ramp(speed, 0.2, 0.7);
+      aim.idle = idle;
+      const moving = 1 - idle;
+      const mag = Math.hypot(velFwd, velLeft);
+      const ca = mag > 0.05 ? velFwd / mag : 1;
+      const sa = mag > 0.05 ? velLeft / mag : 0;
+      const df = Math.max(0, ca);
+      const dl = Math.max(0, sa);
+      const dr = Math.max(0, -sa);
+      const db = Math.max(0, -ca);
+      const sum = df + dl + dr + db || 1;
+      const band = gaitBands(speed * df);
+      for (const g of ['walk', 'run', 'jog', 'sprint']) { aim[g] = moving * (df / sum) * band[g]; along[g] = speed * df; }
+      aim.strafe_l = moving * dl / sum;
+      aim.strafe_r = moving * dr / sum;
+      aim.back = moving * db / sum;
+      along.strafe_l = speed * dl; along.strafe_r = speed * dr; along.back = speed * db;
+    }
+    for (const clip of BASE) {
+      weights[clip] += (aim[clip] - weights[clip]) * Math.min(1, dt * 10);
+      if (actions[clip]) actions[clip].setEffectiveWeight(weights[clip]);
     }
     if (actions.sit) {
       weights.sit = (weights.sit || 0) + ((posed === 'sit' ? 1 : 0) - (weights.sit || 0)) * Math.min(1, dt * 5);
       actions.sit.setEffectiveWeight(weights.sit);
     }
-    actions.walk.timeScale = Math.max(0.4, speed / walkSpeed);
-    actions.run.timeScale = Math.max(0.6, speed / runSpeed);
+    // The shared phase runs at the weighted rate each clip would need on its
+    // own to cover its share of the ground at its own stride. A floor on the
+    // speed keeps the first step out of slow motion.
+    let rate = 0;
+    let share = 0;
+    for (const g of GAITS) {
+      const w = weights[g];
+      if (w < 1e-3) continue;
+      rate += w * Math.max(along[g] || 0, gaits[g] * 0.45) / stridesOf(g);
+      share += w;
+    }
+    if (share > 1e-3) gaitPhase = (gaitPhase + dt * rate / share) % 1;
+    for (const g of GAITS) {
+      const action = actions[g];
+      action.timeScale = 0;
+      action.time = gaitPhase * made.clips[g];
+    }
     made.mixer.update(dt);
     if (bearingOn && !lying) holdBearing(dt);
+    leanIntoMotion(dt);
     // A teleport (a recall, a new zone) or a long frame is not a move to swing at.
     if (!skirtOn || lying || dt <= 0) return;
     if (hop < 0 || hop > 18 * dt) { skirtV.x = skirtV.y = skirtV.z = 0; return; }
     swingSkirt(dt, vx, vy, vz);
+  }
+
+  const leanBones = ['spine', 'chest'].map((n) => made.group.getObjectByName(n)).filter(Boolean);
+  const leanQ = new THREE.Quaternion();
+  const leanE = new THREE.Euler();
+  made.group.rotation.order = 'YXZ';
+
+  /**
+   * The body's weight in what it is doing, laid over the clips after the
+   * mixer: banked into a turn (the whole body about the feet, from the yaw
+   * rate and the speed, as a rider leans), and the chest pitched forward as
+   * it speeds up and back as it brakes. Its own function and its own state:
+   * the clips know nothing of either, and it adds to whatever else is laid
+   * on the bones, never replaces it.
+   */
+  function leanIntoMotion(dt) {
+    if (lying || dt <= 0) return;
+    const h = Math.min(dt, 1 / 30);
+    const k = Math.min(1, h * 6);
+    const rate = THREE.MathUtils.clamp(skirtYaw / h, -SKIRT.maxTurn, SKIRT.maxTurn);
+    tilt.yawRate += (rate - tilt.yawRate) * Math.min(1, h * 10);
+    const gate = turning || posed || airborne ? 0 : 1;
+    // Centripetal lean tamed to a few degrees: v * omega / g, a fraction of it.
+    const bank = gate * THREE.MathUtils.clamp(BANK.gain * Math.atan((speed * tilt.yawRate) / 9.8), -BANK.max, BANK.max);
+    tilt.bank += (bank - tilt.bank) * k;
+    const lean = gate * THREE.MathUtils.clamp(LEAN.gain * tilt.accel, -LEAN.back, LEAN.fwd) * Math.min(1, speed / 1.5 + Math.abs(tilt.accel) / 12);
+    tilt.lean += (lean - tilt.lean) * k;
+    // Positive roll about +Z lifts the figure's left side: a left turn banks negative.
+    made.group.rotation.z = -tilt.bank;
+    for (const bone of leanBones) {
+      leanQ.setFromEuler(leanE.set(tilt.lean / leanBones.length, 0, 0));
+      bone.quaternion.multiply(leanQ);
+    }
   }
 
   /**

@@ -557,8 +557,16 @@ class Gait:
     and lets the foot drift."""
 
     def __init__(self, arm, frames, stride, stance, lift, pitch_strike, pitch_off,
-                 lean=3.0, sway=0.015, yaw=5.0, roll=3.0, bob=0.0, aft=0.01, reach=0.998, kick=0.85):
+                 lean=3.0, sway=0.015, yaw=5.0, roll=3.0, bob=0.0, aft=0.01, reach=0.998, kick=0.85,
+                 direction=None, cross=0.0):
         self.arm = arm
+        # Which way a planted foot travels under the body, (x, y) in the
+        # armature's frame; None is the old +y (a body walking forward) and
+        # takes the exact arithmetic it always had. `cross` carries a swinging
+        # foot that far forward past the planted one, for a sideways gait
+        # whose feet would otherwise pass through each other.
+        self.dir = direction
+        self.cross = cross
         self.frames = frames
         self.stride = stride
         self.beta = stance
@@ -591,8 +599,12 @@ class Gait:
             p = self.pitch(ph)
             # Mid-stance puts the heel where it rests, a touch forward of the
             # hip, so the stride is shared evenly fore and aft.
-            y = rest_heel.y + self.stride * (ph - be / 2) + self.aft
-            h = V((A.x, y, 0.0))
+            if self.dir is None:
+                y = rest_heel.y + self.stride * (ph - be / 2) + self.aft
+                h = V((A.x, y, 0.0))
+            else:
+                s = self.stride * (ph - be / 2) + self.aft
+                h = V((A.x + self.dir[0] * s, rest_heel.y + self.dir[1] * s, 0.0))
             if p >= 0:
                 pivot, off = h, A - heel
             else:
@@ -604,10 +616,13 @@ class Gait:
         a0, p0 = self.contact(tag, be)
         a1, p1 = self.contact(tag, 0.0)
         v = self.stride / 1.0            # metres per cycle, in cycle time
-        m0 = V((0.0, v * (1.0 - be) * 0.6, 0.0))
-        m1 = V((0.0, v * (1.0 - be) * 0.4, 0.0))
+        u = self.dir or (0.0, 1.0)
+        m0 = V((u[0] * v * (1.0 - be) * 0.6, u[1] * v * (1.0 - be) * 0.6, 0.0))
+        m1 = V((u[0] * v * (1.0 - be) * 0.4, u[1] * v * (1.0 - be) * 0.4, 0.0))
         pos = _hermite(a0, a1, m0, m1, s)
         pos.z += self.lift * math.sin(math.pi * min(1.0, s ** self.kick))
+        if self.cross:
+            pos.y -= self.cross * math.sin(math.pi * s)
         return pos, self.pitch(ph)
 
     def key(self):
@@ -720,7 +735,7 @@ def anim_run(arm):
 
 # --- measuring ----------------------------------------------------------------
 
-def foot_slip(arm, frames, stride, stance):
+def foot_slip(arm, frames, stride, stance, direction=None):
     """Worst drift of a planted foot, in metres, over a locomotion clip, read
     off the deforming bones -- so it can be run on the baked clip with the IK
     gone, which is the one that ships.
@@ -729,7 +744,9 @@ def foot_slip(arm, frames, stride, stance):
     end. Within it the contact point is whichever of the heel and the ball
     is lower; that point plus the ground the figure has covered since the
     cycle began should not move. Also returns the lowest either point goes,
-    which is how far a sole sinks into the paving."""
+    which is how far a sole sinks into the paving. `direction` is the way the
+    planted foot travels under the body (Gait's), None for +y; the drift is
+    then the spread of the contact point along and across it."""
     scene = bpy.context.scene
     n = frames[1] - frames[0]
     speed = stride / n
@@ -751,13 +768,21 @@ def foot_slip(arm, frames, stride, stance):
                 continue
             p = heel if heel.z <= ball.z else ball
             plant = math.floor((f - frames[0]) / n - start)
-            seen.append((p.y - speed * (f - frames[0]), ("heel" if p is heel else "ball", plant), f))
+            if direction is None:
+                at = p.y - speed * (f - frames[0])
+            else:
+                dist = speed * (f - frames[0])
+                at = (p.x - direction[0] * dist, p.y - direction[1] * dist)
+            seen.append((at, ("heel" if p is heel else "ball", plant), f))
         # Drift within each run of the same contact point.
         runs = {}
         for (y, k, f) in seen:
             runs.setdefault(k, []).append(y)
         for ys in runs.values():
-            worst = max(worst, max(ys) - min(ys))
+            if direction is None:
+                worst = max(worst, max(ys) - min(ys))
+            else:
+                worst = max(worst, max(math.hypot(a[0] - b[0], a[1] - b[1]) for a in ys for b in ys))
     return worst, sink
 
 
@@ -1471,8 +1496,143 @@ def anim_disarm(arm):
     return "disarm", (1, _air_clip(arm, "disarm", k)), (8 - 1) / 14.0
 
 
+# --- jog, sprint, sidestep, backpedal, turn ---------------------------------
+#
+# Natural speeds are what the viewer matches playback to (stride over clip
+# length, scaled by leg length like walk and run): jog 4.8 m/s, the player's
+# default pace; sprint 9 m/s. The sidesteps and the backpedal are for a body
+# whose facing is held, so their torso stays square to the front.
+
+def _gait_clip(arm, name, n, g, upper):
+    g.key()
+    upper_locomotion(arm, n, gait=g, **upper)
+    ret = dict(stride=g.stride, stance=g.beta)
+    if g.dir is not None:
+        ret["direction"] = list(g.dir)
+    return name, (1, n + 1), ret
+
+
+def anim_jog(arm):
+    """16 frames, 3.2 m a cycle: 4.8 m/s at 3 steps a second, a short
+    flight between steps, the heel kicked up early, 8 degrees of lean from
+    the hips and the arms pumping at about 80 to 100 degrees."""
+    new_action(arm, "jog")
+    n = 16
+    g = Gait(arm, n, stride=3.20 * _leg_scale(arm), stance=0.32, lift=0.22, pitch_strike=12.0,
+             pitch_off=-42.0, lean=8.0, sway=0.012, yaw=6.0, roll=3.0, bob=0.022, aft=0.10, reach=0.985, kick=0.55)
+    return _gait_clip(arm, "jog", n, g, dict(swing=36.0, elbow=56.0, lean_chest=2.0, counter=7.0,
+                                             arm_out=7.0, hand=-8.0))
+
+
+def anim_sprint(arm):
+    """11 frames, 4.1 m a cycle: 9 m/s at 4.4 steps a second. Long flight,
+    high knees, 13 degrees of lean taken at the ankle (the feet land further
+    behind the hips, the chest does not fold), arms driving hard with the
+    hands loose."""
+    new_action(arm, "sprint")
+    n = 11
+    g = Gait(arm, n, stride=4.10 * _leg_scale(arm), stance=0.26, lift=0.40, pitch_strike=6.0,
+             pitch_off=-50.0, lean=13.0, sway=0.008, yaw=8.0, roll=3.0, bob=0.03, aft=0.10, reach=0.985, kick=0.50)
+    return _gait_clip(arm, "sprint", n, g, dict(swing=48.0, elbow=68.0, lean_chest=0.0, counter=10.0,
+                                                arm_out=8.0, hand=-4.0))
+
+
+def _strafe(arm, name, sx):
+    """`sx` is the side the body goes to: +1 left. The planted feet run the
+    other way under it, flat; the foot in the air carries forward past the
+    planted one and well off the ground, so they cross one in front of the
+    other without meeting. Torso square to the front, arms held ready."""
+    new_action(arm, name)
+    n = 15
+    g = Gait(arm, n, stride=2.65 * _leg_scale(arm), stance=0.32, lift=0.13, pitch_strike=0.0,
+             pitch_off=0.0, lean=3.0, sway=0.0, yaw=1.5, roll=4.0 * sx, bob=0.012, aft=0.0, kick=0.85,
+             direction=(-float(sx), 0.0), cross=0.24 * _leg_scale(arm))
+    return _gait_clip(arm, name, n, g, dict(swing=9.0, elbow=62.0, lean_chest=1.0, counter=2.0,
+                                            arm_out=6.0, hand=0.0))
+
+
+def anim_strafe_l(arm):
+    return _strafe(arm, "strafe_l", 1)
+
+
+def anim_strafe_r(arm):
+    return _strafe(arm, "strafe_r", -1)
+
+
+def anim_back(arm):
+    """14 frames, 1.87 m a cycle: 3.2 m/s backwards, short steps landing on
+    the toe and the heel only coming down after, the weight kept forward."""
+    new_action(arm, "back")
+    n = 14
+    g = Gait(arm, n, stride=1.87 * _leg_scale(arm), stance=0.55, lift=0.10, pitch_strike=-16.0,
+             pitch_off=-26.0, lean=4.0, sway=0.014, yaw=4.0, roll=3.0, bob=0.0, aft=0.0, kick=0.85,
+             direction=(0.0, -1.0))
+    return _gait_clip(arm, "back", n, g, dict(swing=16.0, elbow=48.0, lean_chest=1.0, counter=3.0,
+                                              arm_out=5.0, hand=0.0))
+
+
+# A turn in place. The clip animates the body in the figure's own frame: the
+# FIGURE'S ROOT is what turns, by TURN_DEG * _smoothstep(t / duration) -- the
+# viewer applies that to the group while the clip plays, positive to the left.
+# What the clip adds is everything a root turn on its own lacks: the hips
+# lead it, the head looks into it ahead of the body, and the feet stay where
+# they were on the ground (so they appear to counter-rotate in the figure's
+# frame) until each is lifted and set down again facing the new way. It ends
+# on idle's first key, so after the turn the figure is at rest, rotated.
+TURN_DEG = 90.0
+TURN_FRAMES = 13
+
+
+def _turn(arm, name, sg):
+    new_action(arm, name)
+    n = TURN_FRAMES
+    hb = arm.data.bones
+    lead, second = ("L", "R") if sg > 0 else ("R", "L")
+    # (lift, land) as a share of the clip, per foot.
+    steps = {lead: (0.08, 0.55), second: (0.42, 0.90)}
+    base = {}
+    for t in "LR":
+        (dx, dy), yaw0, _ = STANCES["rest"][t]
+        A = rest_ankle(arm, t)
+        base[t] = (A, V((A.x + dx, A.y + dy)), yaw0)
+    psi_end = sg * TURN_DEG
+    for f in range(n + 1):
+        u = f / n
+        frame = f + 1
+        psi = psi_end * _smoothstep(u)
+        left = sg * (TURN_DEG * (1.0 - _smoothstep(u)))         # degrees still to turn, signed
+        bump = math.sin(math.pi * u)
+        bones = merge(_IDLE0, {"chest": (0, -sg * 5.0 * bump, 0), "spine": (0, -sg * 2.0 * bump, 0),
+                               "neck": (0, left * 0.30, 0), "head": (0, left * 0.30, 0)})
+        pose(arm, frame, bones, ((0.0, 0.0, -0.004 - 0.015 * bump), 2.0 * bump, sg * 16.0 * bump, 0.0),
+             feet=False)
+        for t in "LR":
+            A, P0, yaw0 = base[t]
+            lift, land = steps[t]
+            s = _smoothstep((u - lift) / (land - lift))
+            P1 = V((P0.x * math.cos(math.radians(psi_end)) - P0.y * math.sin(math.radians(psi_end)),
+                    P0.x * math.sin(math.radians(psi_end)) + P0.y * math.cos(math.radians(psi_end))))
+            world = P0 + (P1 - P0) * s
+            wyaw = yaw0 + psi_end * s
+            c, sn = math.cos(math.radians(-psi)), math.sin(math.radians(-psi))
+            body = V((world.x * c - world.y * sn, world.x * sn + world.y * c, A.z + 0.07 * math.sin(math.pi * s)))
+            place(arm, "foot_ik." + t, frame, foot_matrix(arm, t, body, 0.0, wyaw - psi))
+    return name, (1, n + 1)
+
+
+def anim_turn_l(arm):
+    return _turn(arm, "turn_l", 1)
+
+
+def anim_turn_r(arm):
+    return _turn(arm, "turn_r", -1)
+
+
+NEW_LOCOMOTION = ("jog", "sprint", "strafe_l", "strafe_r", "back")
+
 CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "block", "death",
-         "cast", "sit", "lean", "talk", "jump", "land", "kick", "backstab", "disarm")
+         "cast", "sit", "lean", "talk", "jump", "land", "kick", "backstab", "disarm",
+         "jog", "sprint", "strafe_l", "strafe_r", "back", "turn_l", "turn_r")
 
 
 def make_all(arm, measure=True, P=None, extra=()):
@@ -1487,7 +1647,8 @@ def make_all(arm, measure=True, P=None, extra=()):
     info = {}
     fns = [anim_idle, anim_idle2, anim_walk, anim_run, anim_fight, anim_attack, anim_attack2,
            anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk,
-           anim_jump, anim_land, anim_kick, anim_backstab, anim_disarm] + list(extra)
+           anim_jump, anim_land, anim_kick, anim_backstab, anim_disarm, anim_jog, anim_sprint,
+           anim_strafe_l, anim_strafe_r, anim_back, anim_turn_l, anim_turn_r] + list(extra)
     for fn in fns:
         r = fn(arm)
         name, frames = r[0], r[1]
@@ -1498,7 +1659,8 @@ def make_all(arm, measure=True, P=None, extra=()):
         if isinstance(extra, dict):
             entry.update(extra)
             if measure:
-                entry["slip"], entry["sink"] = foot_slip(arm, frames, extra["stride"], extra["stance"])
+                entry["slip"], entry["sink"] = foot_slip(arm, frames, extra["stride"], extra["stance"],
+                                                         extra.get("direction"))
         elif extra is not None:
             entry["hit"] = extra
         info[name] = entry
@@ -1513,16 +1675,18 @@ def make_all(arm, measure=True, P=None, extra=()):
         commit(arm, name, samples)
     if measure and P is not None:
         for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2", "lean", "talk", "jump", "land",
-                     "kick", "backstab", "disarm"):
+                     "kick", "backstab", "disarm", "jog", "sprint", "strafe_l", "strafe_r", "back", "turn_l",
+                     "turn_r"):
             arm.animation_data.action = bpy.data.actions[name]
             gap, f, limb = head_clearance(arm, P, (0, info[name]["frames"]))
             info[name]["head_gap"] = round(gap, 4)
             if gap < 0:
                 raise RuntimeError("%s: %s goes %.0f mm into the head at frame %d of %s"
                                    % (P["name"], limb, -gap * 1000, f, name))
-        for name in ("walk", "run"):
+        for name in ("walk", "run") + NEW_LOCOMOTION:
             arm.animation_data.action = bpy.data.actions[name]
             fr = (0, info[name]["frames"])
-            info[name]["slip_baked"], _ = foot_slip(arm, fr, info[name]["stride"], info[name]["stance"])
+            info[name]["slip_baked"], _ = foot_slip(arm, fr, info[name]["stride"], info[name]["stance"],
+                                                    info[name].get("direction"))
     arm.animation_data.action = bpy.data.actions["idle"]
     return info
