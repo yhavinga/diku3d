@@ -467,7 +467,10 @@ choose.
   where a body can really walk it decides otherwise on 12.8% of samples, all
   open ground that build.js's geometry cuts off (`roomcount.mjs` measures
   it; `mp-room.mjs` holds page and server to each other). main.js
-  `currentRoom()` (HUD, sound, arrow keys) is still a rule of its own.
+  `currentRoom()` (HUD, sound, arrow keys) is that counter too. One
+  exception the user chose: down in Midgaard's river channel under the
+  bridge's deck a body is in #3200 Under the Bridge, not #3051 whose cell it
+  is (game.js `underDeck`, and roomcount.mjs's reference rule with it).
 - **What the rules do to the page's own objects does nothing on a server.**
   `k.actors` (the drawn zone's hinges, figures) is absent there, so a rule
   that changes something the page draws has to reach the page over the
@@ -495,6 +498,36 @@ choose.
   only a test of what it reaches: with the lids left out of the page it must
   refuse at the lids, and at 0.5 m it cannot follow a flight steeper than
   about 51° or narrower than 1.34 m between its sides.
+- **Midgaard's river is sunk** (shells.js `sunkRivers`, `RIVER_DROP`): the
+  water rooms whose text says the banks are too steep to climb lie 3 m down
+  in a channel, as a negative lift the judge and nav.js share; layout.js
+  `BESIDE` puts #3200 beside the bridge after `relax`.
+- **Streets the mud does not join are kept apart, not just drawn**
+  (build.js `crossingPlan`): where two such streets share a cell in
+  Midgaard, one is carried 3.5 m over the other on stairs and a deck, or
+  their lane is split by an iron railing, from a search over heights per
+  edge (`solveCrossings`). An edge may be up only between two cells that can
+  hold the street there or bring it down, or a street ends in a drop; a lane
+  two streets share is split, never roofed. Anything a body must not climb
+  is held above 1.76 m -- a jump lifts the feet 1.14 m and a step goes 0.62
+  m more -- so parapets hold to 1.9 m (`CROSS_HOLD`), fences to 2.0. Three
+  tangles have no answer with two heights and are left (the user,
+  2026-10-14); the river's deck stays at grade.
+- **A fence that does not close is clutter** (build.js `fencePlan`): the
+  zone's rooms are split into regions joined without boot-shut doors and
+  guards, and a region other than the largest is fenced round only where
+  the fence closes it -- no own street into a cell another region's street
+  shares, every doorless gap onto a closed region's ground or the guard's
+  own. The graveyard and the eastern desert do not close: their paths cross
+  others where no crossing parts them. Midgaard's zone only, for now; a gate
+  between two rooms out of doors has its street walled.
+- **Below the ground a building fits under the ground** (`fitUnder`): a
+  level below 0 has the ground's slab over it, and cull.js keeps hidden
+  things in the shadow pass, so anything taller lays its shadow on the turf
+  above and leaves its colliders standing there (galaxy's town did both).
+- **A 'D' reset sets both sides of a door** (are.js `mirrorDoor`, and on
+  every repop): db.c sets only the one it names, and 24 stock resets name
+  one side, which left a lid shut seen from one room and open from the other.
 - **A flat material from assets.js's tag table is not a world surface.**
   `oak` there is a plain brown for shoes and belts, without the baked
   materials' hooks, and a kit model wearing it in a room without sun read
