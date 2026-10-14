@@ -30,14 +30,14 @@ export const CLIP_FACTS = {
   troll: { walk: 1.031, run: 2.234 },
   minotaur: { walk: 1.200, run: 2.600 },
 };
-export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21, cast: 14 / 24 };
+export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21, cast: 14 / 24, kick: 7 / 14, backstab: 9 / 18, disarm: 7 / 14 };
 // sit (5 s), lean (4 s) and talk (3 s) are loops for motion.js's settling:
 // sit is written for a seat 0.46 m high at scale 1 for a man's legs (scaled by
 // leg length on the others), feet planted a pace forward; lean has the back
 // against a wall behind, arms folded; talk gestures with the right hand.
 export const LOOPS = new Set(['idle', 'idle2', 'walk', 'run', 'fight', 'sit', 'lean', 'talk']);
 export const CLIPS = ['idle', 'idle2', 'walk', 'run', 'fight', 'attack', 'attack2', 'hit', 'block', 'death', 'cast',
-  'sit', 'lean', 'talk', 'jump', 'land'];
+  'sit', 'lean', 'talk', 'jump', 'land', 'kick', 'backstab', 'disarm'];
 
 // --- vocabulary -------------------------------------------------------------
 

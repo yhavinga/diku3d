@@ -12,6 +12,12 @@
    "head_gap": 0.1687,
    "hit": 0.5238095238095238
   },
+  "backstab": {
+   "duration": 0.75,
+   "frames": 18,
+   "head_gap": 0.1134,
+   "hit": 0.5
+  },
   "block": {
    "duration": 0.5,
    "frames": 12,
@@ -30,6 +36,12 @@
   "death": {
    "duration": 1.4583333333333333,
    "frames": 35
+  },
+  "disarm": {
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.2573,
+   "hit": 0.5
   },
   "fight": {
    "duration": 1.3333333333333333,
@@ -54,6 +66,12 @@
    "duration": 0.2916666666666667,
    "frames": 7,
    "head_gap": 0.2675
+  },
+  "kick": {
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.2604,
+   "hit": 0.5
   },
   "land": {
    "duration": 0.3333333333333333,
@@ -114,6 +132,12 @@
    "head_gap": 0.1577,
    "hit": 0.5238095238095238
   },
+  "backstab": {
+   "duration": 0.75,
+   "frames": 18,
+   "head_gap": 0.0852,
+   "hit": 0.5
+  },
   "block": {
    "duration": 0.5,
    "frames": 12,
@@ -128,6 +152,12 @@
   "death": {
    "duration": 1.4583333333333333,
    "frames": 35
+  },
+  "disarm": {
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.2182,
+   "hit": 0.5
   },
   "fight": {
    "duration": 1.3333333333333333,
@@ -152,6 +182,12 @@
    "duration": 0.2916666666666667,
    "frames": 7,
    "head_gap": 0.2227
+  },
+  "kick": {
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.2225,
+   "hit": 0.5
   },
   "land": {
    "duration": 0.3333333333333333,
@@ -204,6 +240,12 @@
    "head_gap": 0.1692,
    "hit": 0.5238095238095238
   },
+  "backstab": {
+   "duration": 0.75,
+   "frames": 18,
+   "head_gap": 0.1029,
+   "hit": 0.5
+  },
   "block": {
    "duration": 0.5,
    "frames": 12,
@@ -218,6 +260,12 @@
   "death": {
    "duration": 1.4583333333333333,
    "frames": 35
+  },
+  "disarm": {
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.2394,
+   "hit": 0.5
   },
   "fight": {
    "duration": 1.3333333333333333,
@@ -242,6 +290,12 @@
    "duration": 0.2916666666666667,
    "frames": 7,
    "head_gap": 0.2476
+  },
+  "kick": {
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.2495,
+   "hit": 0.5
   },
   "land": {
    "duration": 0.3333333333333333,
@@ -294,6 +348,12 @@
    "head_gap": 0.2861,
    "hit": 0.5238095238095238
   },
+  "backstab": {
+   "duration": 0.75,
+   "frames": 18,
+   "head_gap": 0.1817,
+   "hit": 0.5
+  },
   "block": {
    "duration": 0.5,
    "frames": 12,
@@ -308,6 +368,12 @@
   "death": {
    "duration": 1.4583333333333333,
    "frames": 35
+  },
+  "disarm": {
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.4252,
+   "hit": 0.5
   },
   "fight": {
    "duration": 1.3333333333333333,
@@ -332,6 +398,12 @@
    "duration": 0.2916666666666667,
    "frames": 7,
    "head_gap": 0.4225
+  },
+  "kick": {
+   "duration": 0.5833333333333334,
+   "frames": 14,
+   "head_gap": 0.3296,
+   "hit": 0.5
   },
   "land": {
    "duration": 0.3333333333333333,

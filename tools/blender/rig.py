@@ -1363,8 +1363,116 @@ def anim_land(arm):
     return "land", (1, _air_clip(arm, "land", k))
 
 
+# --- kick, backstab, disarm -------------------------------------------------
+# Skills of the warrior and the thief. All three start and end on the idle
+# clip's first key (as land does) so they cut in and out of any stance.
+
+def _kfeet(arm, thigh, knee, pitch, hz, step=0.0):
+    """Right leg raised (see _air_leg), left planted. `hz` is the hips' drop,
+    which _air_leg does not know: it measures from a hip at standing height."""
+    dx, dy, dz, pt = _air_leg(arm, "R", thigh, knee, pitch)
+    return {"R": (dx, dy, dz + hz, pt), "L": _grounded()["L"]}
+
+
+def anim_kick(arm):
+    """A front snap kick with the right leg, 0.58 s. The weight goes onto the
+    bent left leg, the right knee chambers to 82 degrees with the shin hanging,
+    then the shin snaps straight in two frames and the foot stops at the
+    target; the torso leans back 15 degrees against it, fists up in guard. The
+    leg folds back through the chamber before it comes down, so the foot never
+    simply drops. The sword hand stays above the thigh's line, in front of the
+    chest."""
+    fists = merge(HANG, {"upperarm.R": (-40, 0, 18), "forearm.R": (-96, 0, 0), "hand.R": (46, 0, 0),
+                         "upperarm.L": (-36, 0, -14), "forearm.L": (-100, 0, 0), "hand.L": (0, 0, 0)})
+
+    def torso(back):
+        return {"spine": (-back * 0.4, 0, 0), "chest": (-back * 0.35, 0, 0), "neck": (back * 0.2, 0, 0),
+                "head": (back * 0.15, 0, 0)}
+
+    # (frame, arm blend towards the fists, back lean, thigh, knee, toes, hips)
+    rows = [
+        (3, 0.5, -3, 12, 35, -15, ((0.035, 0.0, -0.034), 3.0, 0.0, -2.0)),
+        (5, 0.9, 0, 58, 108, -20, ((0.052, 0.0, -0.030), -1.0, 0.0, -3.0)),
+        (6, 1.0, 5, 88, 122, -20, ((0.056, 0.015, -0.026), -3.0, 0.0, -3.5)),
+        (7, 1.0, 9, 92, 52, 12, ((0.056, 0.03, -0.024), -4.0, 0.0, -3.5)),
+        (8, 1.0, 15, 96, 3, 55, ((0.056, 0.045, -0.024), -5.0, 0.0, -3.5)),
+        (9, 1.0, 15, 96, 6, 55, ((0.056, 0.045, -0.024), -5.0, 0.0, -3.5)),
+        (11, 1.0, 5, 86, 106, -12, ((0.052, 0.02, -0.028), -2.0, 0.0, -3.0)),
+        (13, 0.5, 0, 22, 45, -10, ((0.02, 0.0, -0.016), 1.0, 0.0, -1.0)),
+    ]
+    k = [(1, _IDLE0, _IDLE0_HIPS, _grounded())]
+    for (f, a, back, th, kn, pt, hips) in rows:
+        k.append((f, merge(blend(_IDLE0, fists, a), torso(back)), hips, _kfeet(arm, th, kn, pt, hips[0][2])))
+    k.append((15, _IDLE0, _IDLE0_HIPS, _grounded()))
+    return "kick", (1, _air_clip(arm, "kick", k)), (8 - 1) / 14.0
+
+
+def anim_backstab(arm):
+    """A low lunge, 0.75 s. Down into a crouch (knees 35 degrees) and a
+    creeping step in with the dagger drawn back at the hip, then the right
+    foot goes a long way forward, the hips drop over it and the dagger arm
+    drives forward and up under the ribs while the left hand reaches ahead for
+    the shoulder. A beat's hold, then back to standing."""
+    drop = _crouch_drop(arm, 35.0)
+    crouch = merge(HANG, {"spine": (10, -4, 0), "chest": (8, -4, 0), "neck": (-4, 0, 0), "head": (-10, 0, 0),
+                          "upperarm.R": (22, 0, 16), "forearm.R": (-78, 0, 0), "hand.R": (40, 0, 0),
+                          "upperarm.L": (-42, 0, -10), "forearm.L": (-34, 0, 0), "hand.L": (0, 0, 0)})
+    lunge = merge(HANG, {"spine": (14, -6, 0), "chest": (10, -8, 0), "neck": (-8, 4, 0), "head": (-22, 4, 0),
+                         "upperarm.R": (-128, 0, 8), "forearm.R": (-14, 0, 0), "hand.R": (70, 0, 0),
+                         "upperarm.L": (-92, 0, -14), "forearm.L": (-12, 0, 0), "hand.L": (0, 0, 0)})
+    drive = merge(lunge, {"upperarm.R": (-134, 0, 6), "forearm.R": (-8, 0, 0), "chest": (10, -10, 0)})
+    deep = -0.20
+
+    def feet(r_dy, l_dy, r_dz=0.0, l_dz=0.0, l_pitch=0.0):
+        return {"R": (STANCES["rest"]["R"][0][0], r_dy, r_dz, 0.0),
+                "L": (STANCES["rest"]["L"][0][0], l_dy, l_dz, l_pitch)}
+
+    k = [
+        (1, _IDLE0, _IDLE0_HIPS, _grounded()),
+        (4, crouch, ((0.0, 0.0, -0.004 - drop), 12.0, 6.0, 0.0), feet(0.04, -0.04)),
+        # Creeping step: the right foot comes through, low, the weight on the left.
+        (7, blend(crouch, lunge, 0.35), ((0.0, -0.05, -0.004 - drop * 1.1), 12.0, 10.0, 0.0),
+         feet(-0.30, 0.06, 0.07)),
+        (9, blend(crouch, lunge, 0.8), ((0.0, -0.10, -0.004 - drop - 0.07), 14.0, 12.0, 0.0),
+         feet(-0.58, 0.28)),
+        (10, lunge, ((0.0, -0.14, -0.004 - drop - 0.10), 14.0, 14.0, 0.0), feet(-0.66, 0.40)),
+        (12, drive, ((0.0, -0.15, -0.004 - drop - 0.10), 15.0, 15.0, 0.0), feet(-0.66, 0.40)),
+        (15, blend(drive, _IDLE0, 0.55), ((0.0, -0.06, -0.004 - drop * 0.8), 8.0, 6.0, 0.0),
+         feet(-0.25, 0.14)),
+        (19, _IDLE0, _IDLE0_HIPS, _grounded()),
+    ]
+    return "backstab", (1, _air_clip(arm, "backstab", k)), (10 - 1) / 18.0
+
+
+def anim_disarm(arm):
+    """A bind and flick, 0.58 s. The blade comes in to the guard, the hand
+    circles inward and down with the forearm turning under it (the bind, on
+    the opponent's blade), then the wrist and elbow flick it up and out to the
+    right as the hips turn 20 degrees with it. Back to standing."""
+    guard = merge(HANG, {"spine": (3, 4, 0), "chest": (3, 6, 0), "neck": (-3, 2, 0), "head": (-5, 2, 0),
+                         "upperarm.R": (-38, 0, 14), "forearm.R": (-88, 0, 0), "hand.R": (48, 0, 0),
+                         "upperarm.L": (-30, 0, -12), "forearm.L": (-90, 0, 0), "hand.L": (0, 0, 20)})
+    bind = merge(guard, {"spine": (6, 8, 0), "chest": (6, 12, 0), "head": (-6, 4, 0),
+                         "upperarm.R": (-48, 0, -10), "forearm.R": (-62, -45, 0), "hand.R": (78, 0, 0)})
+    flick = merge(guard, {"spine": (2, -14, 0), "chest": (0, -22, 0), "head": (-6, -10, 0),
+                          "upperarm.R": (-46, 0, 46), "forearm.R": (-72, 32, 0), "hand.R": (8, 0, 0),
+                          "upperarm.L": (-26, 0, -8)})
+    k = [
+        (1, _IDLE0, _IDLE0_HIPS, _grounded()),
+        (3, blend(_IDLE0, guard, 0.9), ((0.0, 0.0, -0.02), 3.0, 8.0, 0.0), _grounded()),
+        (5, blend(guard, bind, 0.6), ((0.0, 0.01, -0.03), 5.0, 14.0, 0.0), _grounded()),
+        (6, bind, ((0.0, 0.01, -0.035), 6.0, 20.0, 0.0), _grounded()),
+        (7, blend(bind, flick, 0.6), ((0.0, -0.01, -0.03), 4.0, -4.0, 0.0), _grounded()),
+        (8, flick, ((0.0, -0.02, -0.025), 2.0, -20.0, 0.0), _grounded()),
+        (10, flick, ((0.0, -0.02, -0.025), 2.0, -22.0, 0.0), _grounded()),
+        (12, blend(flick, _IDLE0, 0.6), ((0.0, 0.0, -0.012), 1.0, -8.0, 0.0), _grounded()),
+        (15, _IDLE0, _IDLE0_HIPS, _grounded()),
+    ]
+    return "disarm", (1, _air_clip(arm, "disarm", k)), (8 - 1) / 14.0
+
+
 CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "block", "death",
-         "cast", "sit", "lean", "talk", "jump", "land")
+         "cast", "sit", "lean", "talk", "jump", "land", "kick", "backstab", "disarm")
 
 
 def make_all(arm, measure=True, P=None, extra=()):
@@ -1379,7 +1487,7 @@ def make_all(arm, measure=True, P=None, extra=()):
     info = {}
     fns = [anim_idle, anim_idle2, anim_walk, anim_run, anim_fight, anim_attack, anim_attack2,
            anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk,
-           anim_jump, anim_land] + list(extra)
+           anim_jump, anim_land, anim_kick, anim_backstab, anim_disarm] + list(extra)
     for fn in fns:
         r = fn(arm)
         name, frames = r[0], r[1]
@@ -1404,7 +1512,8 @@ def make_all(arm, measure=True, P=None, extra=()):
     for name, (samples, frames) in baked.items():
         commit(arm, name, samples)
     if measure and P is not None:
-        for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2", "lean", "talk", "jump", "land"):
+        for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2", "lean", "talk", "jump", "land",
+                     "kick", "backstab", "disarm"):
             arm.animation_data.action = bpy.data.actions[name]
             gap, f, limb = head_clearance(arm, P, (0, info[name]["frames"]))
             info[name]["head_gap"] = round(gap, 4)
