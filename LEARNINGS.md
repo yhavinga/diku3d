@@ -6,6 +6,152 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-14 — wave 18
+
+### Midgaard's river in its channel (wave18-river)
+
+- **"The riverbanks are too steep to climb" is a channel.** shells.js
+  `sunkRivers` takes every water room whose text says so, and the water
+  rooms of its area joined to it on its level (#3200–#3205), 3 m down
+  (`RIVER_DROP`); server/world.mjs `mounds` and build.js `mounds` carry it as
+  a negative lift, so the judge and nav.js stand a body on the water's floor.
+  Only midgaard.are says it. build.js `riverPlan`/`buildRiver` build the bed,
+  quays with parapets (the north and south ones own the corners), decks where
+  a street crosses the water (6), the Levee's stair, the rapids down to #5001,
+  the bridge #3051 on an arched wall, and the culvert where the river leaves
+  under the city wall (its footing needed colliders of its own: walkable
+  refused one step there, "off the map", until it had them).
+- **"Under the Bridge" was 58 m from the bridge.** layout.js `BESIDE` moves
+  #3200 into the cell west of #3051 after `relax` (two rooms swap; the first
+  try, as a placement rule, moved 105 rooms and cost walls and shortcuts).
+- **Counting under the deck.** game.js counts a body in the channel under the
+  bridge in #3200, not in #3051 whose cell it is (user, 2026-10-14);
+  roomcount.mjs's reference rule took the same exception, and its "game
+  against spec" went from 732 decisions to 0 in all zones.
+- **planar-check's ceiling went 408 → 410** (user's OK): the swap adds two
+  shortcut cells.
+
+### The crossings (wave18-bridges)
+
+- **Two heights and a railing.** Where two streets share a cell and the mud
+  joins neither pair of their rooms, each street gets 0 or 3.5 m at every
+  edge and middle it crosses (build.js `crossingPlan`, `solveCrossings`,
+  backtracking capped at 400k tries per cluster). A stair is an arm whose two
+  ends differ (47°, 7 risers of 0.5 m in 3.2 m), or the whole of a plain
+  straight cell beside the cluster (15°), or the arm of a plain bend. 32 of
+  Midgaard's cells, and one of the graveyard's over the Concourse; two
+  tangles (Poor Alley, 9 cells; the Concourse by the park, 10, one cell with
+  four streets) and one of the graveyard's paths with the park's (9) have no
+  answer and are left (user, 2026-10-14).
+- **v2 ended streets in a 3.5 m drop.** A cluster's edge could be up where
+  the cell beyond was a bend with no stair: 11 of 25 cells. An edge is up
+  only between two cells that can hold the street there or bring it down.
+- **v2 roofed lanes for three cells at a time.** Stacking two streets in an
+  arm they share cost nothing; with the drop gone it cost stairs, and the
+  shared arm is now always split, each street on a half: at one height an
+  iron railing between (kerb 0.3, bars to 2.0 m, held to 2.1), at two the
+  upper street's own stair and deck, which cross over the lower in the
+  middle. The halves are parity unknowns per street per edge (union-find
+  with parity), tied across an edge for free.
+- **A parapet is held to 1.9 m** (`CROSS_HOLD`): a jump lifts the feet
+  1.14 m and a step goes 0.62 m more, so at 1.5 m a body left a deck for the
+  street under it.
+- walkable home, open and shut: none refused; ways, doorways and crossings
+  as on main; roomcount home street samples +337, "walled outside" −0.31.
+
+### Small faults (wave18-fixes)
+
+- **Bag End's passages had a 1.6 m collider across them.** buildSmialHill's
+  toe strip ran the whole of every side without a face; it is cut open
+  across a side with an exit (4.6 m, `SMIAL_TUNNEL` either side).
+- **Galaxy's town a level down stood through the grass.** Rows of up to
+  9.6 m plus roofs and chimneys, filler houses to 12 m, corner houses, the
+  town wall (8.4) and its towers (11.7): 471 colliders above y = 0 over the
+  zone, and the roofs' shadows on the turf, because cull.js keeps hidden
+  things in the shadow pass. On a level below the ground they now fit under
+  the slab above (`fitUnder`, `UNDER_CLEAR` 7.05 m): 0.
+- **A 'D' reset sets one side of a door.** db.c's reset_area does, where
+  do_open and do_close set both; 24 stock resets name one side only, and
+  #910's trapdoor stood shut above and open from #918, where `up` said
+  "The trapdoor is closed." and `open trapdoor` "It's already open.". The
+  way back takes the reset's state too (are.js `mirrorDoor`, and on every
+  repop; user, 2026-10-14).
+- **The pit kerb at 0.9 m was not a fault on the page.** With #4772's
+  stone open, walking at the pit from its front takes a body down to #4700
+  through the portal before the kerb; the "jumps or types down" in wave 17's
+  notes is the flood of the measuring tools, which has no portals.
+- Measured on the branch: walkable none refused in all 32 zones, open and
+  shut; roomcount over all zones 15.41% → 14.98%, home 1.78% → 0.00% (its
+  "not walkable" open ground, 2.14%, was what the smial toe strips cut
+  off); doorways' "streets
+  that cannot be walked inside their own cells" 146 → 137 (home 60 → 58,
+  galaxy 7 → 0); mp-room, mp-hatch and the throne's trapdoor (#910/#918)
+  pass.
+- main.js `currentRoom()` is the game's counter now; the coffin (#3460) is a
+  model with its lid (Blender `hatches.py`), tinted on the lid's instanced
+  primitive, because instanceDoorLeaves draws from `doorPrimitive`.
+
+### Fences round what the mud keeps apart (wave18-fences)
+
+- **The review's door/guard places were still walked.** Of the 112 places
+  the wave-15 review saw with the doors open, 111 were still walked in wave
+  18; in Midgaard's zone 37 of 38.
+- **The rule** (build.js `fencePlan`, `buildFences`; the user, 2026-10-14,
+  Midgaard's zone first): split the zone's rooms into regions joined by
+  exits that are neither a boot-shut door nor into a guard's room (sentinel,
+  aggressive, not wimpy); leave the largest open; fence every other one
+  round -- its rooms' cells, its streets, the open cells it closes in -- with
+  a gap where a street crosses the line, the gate's width where a door hangs
+  on that edge. A street between two regions is the side's the door does
+  not hang on, or the guard's. The fence is the ground's: iron at the
+  graveyard, a sand ridge in the desert, reeds on peat in the marsh, a
+  hedge in the fields and the Shire, a wall in a town -- all held to 2.0 m.
+- **A fence that does not close is clutter, and most did not.** The first
+  version fenced 237 edges and closed three places (the marsh's). The
+  werklijst's own step positions showed why: the graveyard's paths and the
+  park's share cells where the crossings found no answer, and the desert --
+  in the mud a 3 x 3 maze whose exits wrap round -- is laid out as long
+  streets that cross each other all over its nine rooms. Where a region's
+  own street runs into a cell another region's street shares, no fence parts
+  them. The rule now fences a region only if it closes: no such cell, and
+  every doorless gap onto a closed region's ground, or the region is the
+  guard's (a fixpoint). 16 regions close (the Shire's field and pig pen,
+  the nomad camp, ten of the marsh's, the Green Dragon's cave, the Goblin
+  Headquarters); 12 do not (the graveyard, eight of the desert's, the
+  Marshy Forest, the Oozing Bog).
+- **What it did to the werklijst**: door/guard pairs over home's open
+  ground 7122 → 3242; the patch that joins the most rooms 146 → 128 rooms;
+  the review's places still walked 37 → 35 (doors open). The graveyard keeps
+  its old railing, now 1.9 m tall (the model's 1.1 m stood in front of a
+  2.2 m collider).
+- **The desert's sand ridge is its own mesh** (`duneRidge`): the dune
+  model pressed thin came out as separate humps with sharp tips and an
+  unseen wall between them; ends that stop short of the ground show a slit
+  of shadow under them, so both ends come down to the sand.
+- **A gate between two rooms out of doors has its passage walled**: the
+  East Gate (#3041/#3053), shut, was walked round over the next cells'
+  ground; the five such gates in the zone (East, West, the graveyard's
+  grate, one in the forest, one in the bog) have their streets walled along
+  both sides where no other street runs through.
+- The crossings took the graveyard's paths in a second pass, only in
+  clusters no Midgaard street takes part in: all at once, they joined two of
+  Midgaard's clusters and none of the three had an answer (29 cells where
+  Midgaard alone had 32). One more cell is carried: the graveyard's path
+  over the Concourse at (-3,20).
+- **Final, measured**: walkable all 32 zones, open and shut, none refused;
+  home's door/guard pairs 7122 → 2962 (open); the review's places walked
+  with the doors open 37 → 35 in home (the marsh's three), with them shut
+  4 → 2 (the East Gate and the grate closed by the gate walls; the forest
+  edge by Emerald Avenue, #3121/#6016, and the cabin, #6010, are left --
+  the cabin's is the street outside its own shut door, which the werklijst
+  names after the cabin); ways and crossings as on main. server-check
+  failed once on "of the roster only the rows that changed" and passed on a
+  rerun with no server code changed: a timing check.
+- **What is left of tracks 2 and 3**: the graveyard, the desert and the
+  rest of the werklijst's door/guard places in other zones wait on the
+  crossings (cells two regions' streets share), and those wait on the
+  layout: with two heights the solver has no answer for them.
+
 ## 2026-10-09 — wave 17
 
 ### Trapdoors, one-way drops and sealed rooms (wave17-hatches, wave17-hatchkit)
