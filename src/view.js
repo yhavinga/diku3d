@@ -86,6 +86,34 @@ const BLOWS = new Set(['hit', 'miss', 'parry', 'dodge']);
 /** How long the body keeps facing your aim after the words of a spell. */
 const CAST_FACE = 0.8;
 const REVERSE = (135 * Math.PI) / 180;
+/**
+ * Sprinting (player.js SPRINT 9.5 m/s against WALK 4.8) opens the lens a few
+ * degrees, which is most of what makes a run read as fast. Only over the
+ * shoulder: first person never touches the FOV.
+ */
+const SPRINT_PACE = 8;
+const FOV_KICK = 6;
+/** Time constant in seconds: the ease is 95% done in three of these, about 0.4 s. */
+const FOV_TAU = 0.13;
+/**
+ * The pivot trails a change of pace by up to PIVOT_LAG m: the camera is hung
+ * on the body, not welded to it. It is the pivot that moves, never the arm's
+ * direction, so every check below still sees the point the arm starts from.
+ */
+const PACE_TAU = 0.2;
+const PIVOT_GAIN = 0.008;
+const PIVOT_LAG = 0.06;
+const PIVOT_TAU = 0.07;
+/** Landing: the pivot dips by up to LAND_DIP and is back in about 0.3 s. */
+const LAND_DIP = 0.1;
+const DIP_FROM = 4;
+const PUFF_FROM = 6;
+const RING_FROM = 9;
+/**
+ * Paving and earth throw dust; water, snow, peat, boards, marble and turf do
+ * not. Out of doors only, read off the floor recipe build.js gave the room.
+ */
+const DUSTY = new Set(['cobble', 'flagstone', 'dirt', 'sand', 'rock', 'ash']);
 /** Flying (the spell), the body rides this high over its feet, bobbing. */
 const HOVER = 0.32;
 
@@ -129,6 +157,48 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
   let facingUntil = 0;
   let air = { up: false, since: 0 };
   const pending = [];
+  // The lens, the pivot's weight and the dust asked of fx.js (which owns the particles).
+  let fovBase = camera.fov;
+  let fovSet = camera.fov;
+  let fovKick = 0;
+  const pacedVelocity = new THREE.Vector3();
+  const velocity = new THREE.Vector3();
+  const sway = new THREE.Vector3();
+  const swayNow = new THREE.Vector3();
+  let dipTarget = 0;
+  let dip = 0;
+  let prevVy = 0;
+  let wasGround = true;
+  let stepPhase = 0;
+  let stepSide = 1;
+  const dustQueue = [];
+
+  /**
+   * The lens, eased towards the sprint's. The base is whatever the FOV was
+   * when this last left it alone, so a change made by someone else in
+   * between (a resize, an options slider) is the new base and not undone.
+   */
+  function lens(dt, want) {
+    if (camera.fov !== fovSet) fovBase = camera.fov;
+    fovKick += (want - fovKick) * (1 - Math.exp(-dt / FOV_TAU));
+    if (Math.abs(fovKick - want) < 0.01) fovKick = want;
+    const fov = fovKick === 0 ? fovBase : fovBase + fovKick;
+    if (fov !== camera.fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
+    fovSet = fov;
+  }
+  function lensOff() {
+    if (camera.fov !== fovSet) fovBase = camera.fov;
+    fovKick = 0;
+    if (camera.fov !== fovBase) { camera.fov = fovBase; camera.updateProjectionMatrix(); }
+    fovSet = fovBase;
+  }
+
+  /** Is the ground under the feet dust, out of doors? */
+  function dusty() {
+    if (game.state.affectedBy & AFF.FLYING) return false;
+    const room = roomAt(player.position.x, player.position.y - EYE, player.position.z);
+    return !!room && !!room.outdoor && !!room.materials && DUSTY.has(room.materials.floor);
+  }
 
   const firstPerson = player.body;
   // What you aim at is where you look, through the crosshair (game.update's
@@ -377,6 +447,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     if (!third || !active) {
       if (figure) figure.group.visible = false;
       lastValid = false;
+      lensOff();
       return;
     }
     ensureFigure();
@@ -417,6 +488,40 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
       side: dt > 0 ? (-moved.x * Math.cos(held) + moved.z * Math.sin(held)) / dt : 0,
     });
     own.at.copy(feet);
+
+    // The sprint opens the lens. A pinned camera is a judge's, and is left alone.
+    lens(dt, !pinned && pace > SPRINT_PACE && player.onGround ? FOV_KICK : 0);
+
+    // The pivot's weight: pace is followed lazily and the gap between the
+    // two is what the camera lags (speeding up) or leads (stopping) by.
+    // A teleport is not a pace.
+    if (dt > 0 && pace < 20) velocity.copy(moved).divideScalar(dt); else velocity.set(0, 0, 0);
+    pacedVelocity.lerp(velocity, 1 - Math.exp(-dt / PACE_TAU));
+    sway.subVectors(pacedVelocity, velocity).multiplyScalar(PIVOT_GAIN);
+    if (sway.length() > PIVOT_LAG) sway.setLength(PIVOT_LAG);
+    swayNow.lerp(sway, 1 - Math.exp(-dt / PIVOT_TAU));
+    // Landing: the impact is read from last frame's fall (player.step has
+    // already zeroed it on the frame it lands). The dip rises and recovers.
+    if (player.onGround && !wasGround && prevVy < -DIP_FROM) {
+      dipTarget = Math.min(LAND_DIP * 1.3, (-prevVy - DIP_FROM) * 0.018);
+      if (dusty() && -prevVy > PUFF_FROM) {
+        dustQueue.push({ kind: -prevVy > RING_FROM ? 'ring' : 'puff', x: feet.x, y: feet.y, z: feet.z, power: Math.min(1, (-prevVy - PUFF_FROM) / 8) });
+      }
+    }
+    wasGround = player.onGround;
+    prevVy = player.velocity.y;
+    dipTarget *= Math.exp(-dt / 0.09);
+    dip += (dipTarget - dip) * (1 - Math.exp(-dt / 0.04));
+    // A foot comes down on each half-turn of the stride (player.js bobPhase):
+    // the one that lands under a sprint on paving or earth kicks up a puff.
+    const phase = Math.floor(player.bobPhase / Math.PI);
+    if (phase !== stepPhase) {
+      stepPhase = phase;
+      stepSide = -stepSide;
+      if (pace > SPRINT_PACE && player.onGround && dusty()) {
+        dustQueue.push({ kind: 'step', x: feet.x + Math.cos(heading) * 0.12 * stepSide, y: feet.y, z: feet.z - Math.sin(heading) * 0.12 * stepSide });
+      }
+    }
     // Under fly the body rides the air and its shadow stays on the ground,
     // which is what says it is off it. The game's own feet do not move.
     const flying = (game.state.affectedBy & AFF.FLYING) && game.state.position > POS.SLEEPING;
@@ -431,6 +536,13 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     forward.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
     right.set(Math.cos(yaw), 0, -Math.sin(yaw));
     pivot.copy(player.position);
+    // The weight moves the pivot only where a camera could stand: a lag
+    // into a wall is dropped, since the arm's checks begin at the pivot.
+    offset.copy(swayNow).setY(-dip);
+    if (offset.lengthSq() > 1e-8) {
+      pivot.add(offset);
+      if (blocked(pivot)) pivot.copy(player.position);
+    }
     want.copy(pivot).addScaledVector(forward, -ARM).addScaledVector(right, SHOULDER).addScaledVector(up, RISE);
     // Never under the feet: looking up swings the camera down towards the floor.
     want.y = Math.max(want.y, feet.y + 0.4);
@@ -506,10 +618,14 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
       lastValid = false;
       castValid = false;
       ceiling = { key: '', y: Infinity, indoor: false };
+      pacedVelocity.set(0, 0, 0); swayNow.set(0, 0, 0); dip = 0; dipTarget = 0;
+      prevVy = 0; wasGround = true; dustQueue.length = 0;
       player.body = body;
       if (spellfx) spellfx.setSelf(self);
     } else {
       player.body = firstPerson;
+      lensOff();
+      dustQueue.length = 0;
       if (spellfx) spellfx.setSelf(null);
       if (figure) figure.group.visible = false;
       camera.position.copy(player.position);
@@ -525,6 +641,8 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     get state() { return { arm, ceiling: ceiling.y, indoor: ceiling.indoor, blockedAt: lastBlock }; },
     set,
     update,
+    /** The dust the feet have kicked up since last asked, for fx.js to throw. */
+    takeDust() { return dustQueue.splice(0); },
     dispose() {
       unlisten();
       set(false);

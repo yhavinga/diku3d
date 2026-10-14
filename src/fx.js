@@ -1124,15 +1124,15 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
   }
 
   /** The ground ring a heavy blow throws: dust racing out flat from the feet. */
-  function ring(p, floor) {
+  function ring(p, floor, power = 1) {
     const k = ambient;
     for (let i = 0; i < 20; i++) {
       const a = (i / 20) * Math.PI * 2 + Math.random() * 0.2;
       matter.spawn({
         x: p.x + Math.cos(a) * 0.25, y: floor + 0.05, z: p.z + Math.sin(a) * 0.25,
-        vx: Math.cos(a) * 2.8, vy: 0.04, vz: Math.sin(a) * 2.8,
+        vx: Math.cos(a) * 2.8 * power, vy: 0.04, vz: Math.sin(a) * 2.8 * power,
         life: 0.55 + Math.random() * 0.2, size: 0.3, grow: 1.5, gravity: 0, drag: 2.6,
-        r: 0.85 * k, g: 0.77 * k, b: 0.62 * k, alpha: 0.42, fade: 1.2, floor,
+        r: 0.85 * k, g: 0.77 * k, b: 0.62 * k, alpha: 0.42 * power, fade: 1.2, floor,
       });
     }
   }
@@ -1503,6 +1503,14 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     if (kick.rollAt !== null && camera.rotation.z === kick.rollAt) camera.rotation.z -= kick.rollNow;
     if (kick.at && camera.position.equals(kick.at)) camera.position.sub(kick.lean);
     kick.pitch = 0; kick.rollNow = 0; kick.rollAt = null; kick.at = null;
+    // Dust from the feet of the body the camera stands behind (view.js).
+    const body = camera.userData.view;
+    if (body && body.third) {
+      for (const d of body.takeDust()) {
+        if (d.kind === 'ring') ring(d, d.y + 0.02, 0.5 + d.power * 0.5);
+        else dust(d, d.kind === 'puff' ? 0.4 + d.power * 0.4 : 0.3); // 0.15 was not to be seen on cobble
+      }
+    }
 
     for (let i = holds.length - 1; i >= 0; i--) {
       const h = holds[i];
