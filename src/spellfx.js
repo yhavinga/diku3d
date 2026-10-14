@@ -1695,6 +1695,13 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
 
   /** A participant: the player, or a mobile's slot. */
   const who = (slot, isPlayer) => ({ slot: isPlayer ? null : slot, player: !!isPlayer });
+  /**
+   * You, seen from your own eye: the first-person effects are scaled down and
+   * led forward because they start half a metre from the lens. Over your own
+   * shoulder (setSelf) you are seen from outside like anyone else, at a
+   * mobile's size.
+   */
+  const close = (w) => !!w && w.player && !self;
 
   /** A figure plays its casting clip, timed so the release lands on `contactIn`. */
   function performCast(w, contactIn, clip = 'cast') {
@@ -1780,6 +1787,19 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         u.uTime.value = clock;
       });
     }
+    // Seen from outside -- a mobile, or you over your own shoulder -- the
+    // words gather round the whole body and not only at the hand, which from
+    // behind is hidden by the caster's own back: motes rising round it.
+    const spoken = ['cast', 'spec', 'recite', 'brandish'].includes(e.source);
+    if (spoken && !fx.lost && !close(from)) motes(from, palette.glow, 22, e.windup + 0.5);
+    // Your own words light where you stand: the hand's light grows over the
+    // windup onto the robe, the floor and the walls round you.
+    if (spoken && !fx.lost && from.player && palette.light) {
+      const at = new THREE.Vector3();
+      takeLight(palette.light, (t) => (t < e.windup + 0.12
+        ? { p: handPoint(from, at), intensity: 1.5 + 9 * smooth(Math.min(1, t / Math.max(0.1, e.windup))), distance: 7 }
+        : null));
+    }
     S.gather(fx.hand, fx.family, e.windup);
   }
 
@@ -1809,7 +1829,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   function gather(fx, dt) {
     const palette = pal(fx.family);
     const u = clamp(fx.t / Math.max(0.05, fx.windup), 0, 1);
-    const rate = (fx.from.player ? 28 : 40) * budget.density;
+    const rate = (close(fx.from) ? 28 : 40) * budget.density;
     fx.data.acc = (fx.data.acc || 0) + dt * rate * (0.4 + u);
     while (fx.data.acc >= 1) {
       fx.data.acc -= 1;
@@ -1823,7 +1843,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       });
     }
     // The growing heart of it: one sprite a frame, short-lived, so it follows the hand.
-    const coreSize = (fx.from.player ? 0.06 : 0.09) + u * (fx.from.player ? 0.1 : 0.16);
+    const coreSize = (close(fx.from) ? 0.06 : 0.09) + u * (close(fx.from) ? 0.1 : 0.16);
     light.spawn({ x: 0, y: 0, z: 0, anchor: fx.anchor, life: 0.05, size: coreSize * 2.6, color: palette.glow, alpha: 0.5 + u * 0.5, shape: 0, drag: 0, fadeIn: 0 });
     light.spawn({ x: 0, y: 0, z: 0, anchor: fx.anchor, life: 0.05, size: coreSize * 0.8, color: (palette.core || palette.mote || palette.glow), alpha: 0.35 + u * 0.4, shape: 1, drag: 0, fadeIn: 0 });
   }
@@ -1872,7 +1892,13 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     if (fx.to) chestPoint(fx.to, fx.aim, true);
     const palette = pal(f);
     // A flash as it leaves the hand.
-    glowAt(light, src, palette.glow, fx.from.player ? 0.5 : 0.8, 0.18, 0.9);
+    glowAt(light, src, palette.glow, close(fx.from) ? 0.5 : 0.8, 0.18, 0.9);
+    // Over your own shoulder the release goes through the ground and the
+    // view: a ring out from your feet, and for the heavy ones a jolt.
+    if (from.player && !close(from)) {
+      decal(feetPoint(from, new THREE.Vector3()), 1.6, 1, palette.glow, 0.5, (d, u, t) => { u.uRadius.value = smooth(t / 0.4); u.uAlpha.value = 0.85 * (1 - t / 0.5); });
+      if (['fireball', 'lightning', 'prism', 'acid'].includes(f) && player) player.shake(0.12);
+    }
 
     if (f === 'missile' && fx.to) {
       const count = clamp(1 + Math.floor(fx.level / 6), 1, 5);
@@ -1970,7 +1996,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
           // what the bolt heads for as it leaves, and a pure sideways bow of
           // 1.6 m half a metre from the lens took it out of the frame at the
           // top right and back in -- a beam out of the sky, not out of the hand.
-          const p1 = fx.from.player
+          const p1 = close(fx.from)
             ? tmpA.lerpVectors(src, aim, 0.3).addScaledVector(b.bend, Math.min(1, dist * 0.12))
             : tmpA.copy(src).addScaledVector(b.bend, Math.min(3, dist * 0.35));
           const p2 = tmpB.copy(aim).addScaledVector(b.bend2, Math.min(2, dist * 0.25));
@@ -2026,8 +2052,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         const ball = fx.data.ball;
         // Out of your own hand it starts small and swells as it leaves, or
         // the first frames are a ball of fire filling the view.
-        const near = fx.from.player ? clamp(distToCamera(pos) / 3, 0.3, 1) : 1;
-        const r = (fx.from.player ? 0.2 : 0.26) * (0.6 + 0.4 * Math.min(1, tf / 0.12)) * near;
+        const near = close(fx.from) ? clamp(distToCamera(pos) / 3, 0.3, 1) : 1;
+        const r = (close(fx.from) ? 0.2 : 0.26) * (0.6 + 0.4 * Math.min(1, tf / 0.12)) * near;
         if (ball) {
           ball.mesh.position.copy(pos);
           ball.mesh.scale.setScalar(r);
@@ -2119,8 +2145,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
           spectral(ray.hue + along * 0.08 + clock * 1.3, 2.6);
           light.spawn({ x: src.x + ray.dir.x * along, y: src.y + ray.dir.y * along, z: src.z + ray.dir.z * along, vx: ray.dir.x * 1.5, vy: rand(-0.2, 0.4), vz: ray.dir.z * 1.5, life: rand(0.2, 0.45), size: rand(0.06, 0.13), color: _spec, shape: 7, drag: 3, occ: 0.2 });
         }
-        glowAt(light, src, WHITE_HOT, fx.from.player ? 0.14 : 0.26, 0.04, 1, 1);
-        glowAt(light, src, C_PRISM_FLARE, fx.from.player ? 0.4 : 0.8, 0.04, 0.7, 0, 0.2);
+        glowAt(light, src, WHITE_HOT, close(fx.from) ? 0.14 : 0.26, 0.04, 1, 1);
+        glowAt(light, src, C_PRISM_FLARE, close(fx.from) ? 0.4 : 0.8, 0.04, 0.7, 0, 0.2);
         break;
       }
       case 'curse': case 'drain': case 'weaken': case 'hex': case 'blind': case 'poison': case 'faerie': case 'dispel': case 'holy': {
@@ -3014,12 +3040,12 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       const u = clamp(fx.t / Math.max(0.05, fx.windup), 0, 1);
       if (u > 0.2 && Math.random() < 0.35 + 0.6 * u) {
         const arcs = fx.data.arcs || (fx.data.arcs = [P3(9), P3(9)]);
-        const r = fx.from.player ? 0.06 : 0.14 + u * 0.08;
+        const r = close(fx.from) ? 0.06 : 0.14 + u * 0.08;
         for (const arc of arcs) {
           _v.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize().multiplyScalar(r).add(fx.hand);
           _w.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize().multiplyScalar(r * 1.2).add(fx.hand);
           jag(arc, _v, _w, 0.4, 3);
-          glow.strip(arc, 0.05 * (fx.from.player ? 0.5 : 1), PAL.lightning.glow, 0.5, 0);
+          glow.strip(arc, 0.05 * (close(fx.from) ? 0.5 : 1), PAL.lightning.glow, 0.5, 0);
           glow.strip(arc, 0.01, PAL.lightning.core, 0.9, 1);
         }
       }
