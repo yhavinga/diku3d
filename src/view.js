@@ -25,6 +25,7 @@
 import * as THREE from 'three';
 import { createPlayerFigure } from './actors.js';
 import { POS } from './game.js';
+import { AFF } from './magic.js';
 
 /**
  * Behind, up and to the right of the eye, in metres. At 2.6 m the figure was
@@ -68,6 +69,8 @@ const SHIELD = 11;
 const BLOWS = new Set(['hit', 'miss', 'parry', 'dodge']);
 /** How long the body keeps facing your aim after the words of a spell. */
 const CAST_FACE = 0.8;
+/** Flying (the spell), the body rides this high over its feet, bobbing. */
+const HOVER = 0.32;
 
 export function createView({ camera, player, scene, getBuilt, library, world, game, roomAt, spellfx }) {
   let third = false;
@@ -78,6 +81,8 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
   const pinTurn = new THREE.Euler();
   let figure = null;
   let bones = null;
+  // What spellfx's auras need of a figure (they key on this object).
+  let own = null;
   let looks = '';
   let heading = camera.rotation.y;
   let arm = ARM;
@@ -101,6 +106,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
   const offset = new THREE.Vector3();
   const current = new THREE.Vector3();
   let clock = 0;
+  let hover = 0;
   let facingUntil = 0;
   let air = { up: false, since: 0 };
   const pending = [];
@@ -131,6 +137,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     figure.group.traverse((o) => { if (o.isSprite) o.visible = false; });
     scene.add(figure.group);
     bones = { grip: figure.body.getObjectByName('gripR') || figure.body.getObjectByName('handR'), head: figure.body.getObjectByName('head') };
+    own = { object: figure.body, at: new THREE.Vector3(), height: figure.height };
     looks = key;
   }
 
@@ -205,7 +212,8 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     const delay = e.delay || 0;
     if (e.kind === 'cast' && e.fromPlayer && !e.lost && !['quaff', 'eat'].includes(e.source)) {
       later(0, () => figure && figure.perform('cast', { contactIn: e.windup || 0.6 }));
-      facingUntil = clock + (e.windup || 0.6) + CAST_FACE;
+      // A spell at something faces it; one on yourself leaves you as you stand.
+      if (!e.self) facingUntil = clock + (e.windup || 0.6) + CAST_FACE;
       return;
     }
     if (e.spell || !BLOWS.has(e.kind)) return;
@@ -268,6 +276,12 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     const pace = dt > 0 ? moved.length() / dt : 0;
     feet.set(player.position.x, player.position.y - EYE, player.position.z);
     figure.update(dt, feet, heading, pace);
+    own.at.copy(feet);
+    // Under fly the body rides the air and its shadow stays on the ground,
+    // which is what says it is off it. The game's own feet do not move.
+    const flying = (game.state.affectedBy & AFF.FLYING) && game.state.position > POS.SLEEPING;
+    hover += ((flying ? HOVER : 0) - hover) * Math.min(1, dt * 2.5);
+    figure.body.position.y = hover > 0.002 ? hover + Math.sin(clock * 1.9) * 0.04 * (hover / HOVER) : 0;
 
     // player.step puts the camera back on the head every frame; a pinned one
     // is put back where it was pinned.
@@ -317,6 +331,8 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     },
     chest: (out) => out.set(player.position.x, player.position.y - EYE + (figure ? figure.height : 1.75) * 0.62, player.position.z),
     feet: (out) => out.set(player.position.x, player.position.y - EYE, player.position.z),
+    /** The figure as spellfx's auras see a mobile's: its body, where it stands, how tall. */
+    figure: () => (figure && figure.group.visible ? own : null),
     /** The staff's knot, when the figure carries one (spellfx glows it with your mana). */
     staff: (out) => (figure && figure.staff && figure.castPoint && figure.group.visible ? figure.castPoint.getWorldPosition(out) : null),
   };

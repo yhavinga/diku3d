@@ -67,6 +67,13 @@ const PAL = {
   heal: { glow: C(1.9, 1.5, 0.8), mote: C(3.0, 2.5, 1.3), light: 0xffd9a0 },
   refresh: { glow: C(0.7, 1.7, 1.3), mote: C(1.4, 3.0, 2.3), light: 0xa0ffd8 },
   ward: { glow: C(0.75, 1.0, 1.9), mote: C(1.4, 1.9, 3.2), light: 0xa8c8ff },
+  // The wards one by one (spellfx wardSpell): bronze plates, a force shell,
+  // stone, a surge of strength, and the air under you.
+  armor: { glow: C(1.7, 1.05, 0.38), mote: C(3.0, 1.9, 0.7), light: 0xffc27a },
+  shieldDome: { glow: C(0.5, 0.95, 2.4), mote: C(1.2, 2.0, 3.6), light: 0x8fc4ff },
+  stone: { glow: C(0.8, 0.72, 0.6), chip: C(0.36, 0.33, 0.29), lit: C(1.1, 0.98, 0.8), dust: C(0.52, 0.48, 0.42), light: 0xd8c8b0 },
+  strength: { glow: C(2.2, 0.55, 0.14), mote: C(3.2, 1.0, 0.25), light: 0xff6a30 },
+  air: { glow: C(1.1, 1.5, 1.9), mote: C(1.8, 2.3, 2.8), light: 0xd0e8ff },
   bless: { glow: C(1.9, 1.5, 0.6), mote: C(3.2, 2.6, 1.1), light: 0xffe0a0 },
   sanctuary: { glow: C(2.0, 1.85, 1.45), mote: C(3.6, 3.3, 2.4), light: 0xfff0d0 },
   dark: { glow: C(0.55, 0.12, 0.9), smoke: C(0.07, 0.03, 0.09), light: 0x7a3cff },
@@ -2412,6 +2419,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       }
       case 'ward': case 'bless': case 'sanctuary': case 'sight': {
         const w = target || fx.from;
+        if (f === 'ward' && wardSpell(fx.spell, w, feet, aim)) break;
         const strong = f === 'sanctuary';
         auraPulse(w, palette.glow, strong ? 0.45 : 1.2, strong ? 2.2 : 1.3, strong ? 1 : 0);
         if (f === 'bless') {
@@ -2611,6 +2619,163 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     } });
   }
 
+  // -- the wards, one by one ------------------------------------------------------------
+  // They all used to land the same way: a pulse, motes, a ring. Each now says
+  // what it does to a body, from outside: armor closes on it in bronze plates,
+  // shield stands round it as a lattice of force, stone skin crusts it over,
+  // giant strength surges up it from the ground, fly lifts it.
+
+  /** Something to happen `wait` seconds from now, inside the effect loop. */
+  function after(wait, fn) {
+    const t0 = clock + wait;
+    effects.push({ kind: 'custom', update() { if (clock < t0) return true; fn(); return false; } });
+  }
+
+  function wardSpell(spell, w, feet, aim) {
+    const h = heightOf(w);
+    const chest = new THREE.Vector3(feet.x, feet.y + h * 0.58, feet.z);
+    switch (spell) {
+      case 'armor': case 'protection': {
+        // Plates from every side close on the body and lock with a flash.
+        for (let k = 0; k < n(30); k++) {
+          const d = new THREE.Vector3(rand(-1, 1), rand(-0.6, 1), rand(-1, 1)).normalize();
+          const from = 1.5; const to = 0.32; const t = 0.34;
+          light.spawn({ x: chest.x + d.x * from, y: chest.y + d.y * from, z: chest.z + d.z * from,
+            vx: -d.x * (from - to) / t, vy: -d.y * (from - to) / t, vz: -d.z * (from - to) / t,
+            life: t + 0.03, size: rand(0.07, 0.12), color: PAL.armor.mote, shape: 2, drag: 0, fadeIn: 0.12, occ: 0.3 });
+        }
+        after(0.34, () => {
+          glowAt(light, chest, PAL.armor.glow, 1.1, 0.25, 0.9);
+          auraPulse(w, PAL.armor.glow, 1.7, 0.9);
+          burst(light, chest, 18, { speed: [0.6, 1.6], life: [0.25, 0.5], size: [0.02, 0.04], color: PAL.armor.mote, drag: 3, shape: 1 });
+        });
+        takeLight(PAL.armor.light, (t) => (t < 0.9 ? { p: chest, intensity: 9 * Math.sin(Math.PI * Math.min(1, t / 0.9)), distance: 6 } : null));
+        S.chord(aim, 392, 1.1);
+        return true;
+      }
+      case 'shield': {
+        dome(chest, h, PAL.shieldDome.glow, 1.4);
+        auraPulse(w, PAL.shieldDome.glow, 1.2, 1.0);
+        takeLight(PAL.shieldDome.light, (t) => (t < 1.2 ? { p: chest, intensity: 10 * Math.sin(Math.PI * Math.min(1, t / 1.2)), distance: 7 } : null));
+        S.chord(aim, 466, 1.3);
+        return true;
+      }
+      case 'stone skin': {
+        // Chips of stone fly in and crust it over; dust falls off it. Lit
+        // chips: grey matter against a night street was nothing at all.
+        for (let k = 0; k < n(60); k++) {
+          const d = new THREE.Vector3(rand(-1, 1), rand(-0.5, 1), rand(-1, 1)).normalize();
+          const from = rand(1.1, 1.6); const to = 0.3; const t = 0.3;
+          light.spawn({ x: chest.x + d.x * from, y: chest.y + d.y * from, z: chest.z + d.z * from,
+            vx: -d.x * (from - to) / t, vy: -d.y * (from - to) / t, vz: -d.z * (from - to) / t,
+            life: t + 0.05, size: rand(0.06, 0.13), color: PAL.stone.lit, shape: 2, drag: 0, fadeIn: 0.05, occ: 0.4 });
+        }
+        after(0.3, () => {
+          auraPulse(w, PAL.stone.glow, 1.8, 1.1);
+          burst(matter, chest, 16, { speed: [0.2, 0.7], life: [0.9, 1.5], size: [0.18, 0.32], grow: 1.6, color: PAL.stone.dust, alpha: 0.45, drag: 1.4, gravity: 1.2, shape: 3, fadeIn: 0.1, floor: feet.y + 0.05 });
+          burst(matter, chest, 14, { speed: [0.4, 1.2], life: [0.5, 0.9], size: [0.03, 0.06], color: PAL.stone.chip, alpha: 0.95, drag: 0.6, gravity: 9, shape: 6, floor: feet.y + 0.02 });
+          if (w.player && player) player.shake(0.08);
+        });
+        S.chord(aim, 220, 1.2);
+        return true;
+      }
+      case 'giant strength': {
+        // A surge from the ground up the body, and the ground takes the weight.
+        for (let k = 0; k < n(44); k++) {
+          const a = rand(0, TAU); const r = rand(0.15, 0.45);
+          light.spawn({ x: feet.x + Math.cos(a) * r, y: feet.y + rand(0, 0.2), z: feet.z + Math.sin(a) * r, vx: 0, vy: rand(3, 5.5), vz: 0,
+            life: rand(0.3, 0.5), size: rand(0.06, 0.12), color: PAL.strength.mote, shape: 4, drag: 1.5, swirl: rand(2, 4), fadeIn: 0.05, occ: 0.3 });
+        }
+        decal(feet, 1.9, 1, PAL.strength.glow, 0.5, (d, u, t) => { u.uRadius.value = smooth(t / 0.4); u.uAlpha.value = 1 - t / 0.5; });
+        auraPulse(w, PAL.strength.glow, 2.0, 0.8);
+        takeLight(PAL.strength.light, (t) => (t < 0.7 ? { p: chest, intensity: 12 * Math.sin(Math.PI * Math.min(1, t / 0.7)), distance: 6 } : null));
+        if (w.player && player) player.shake(0.16);
+        S.boom(feet, 0.6);
+        return true;
+      }
+      case 'fly': {
+        // The air under it: a swirl of pale motes round the feet, and a pool of light.
+        for (let k = 0; k < n(36); k++) {
+          const a = rand(0, TAU); const r = rand(0.35, 0.8);
+          light.spawn({ x: feet.x + Math.cos(a) * r, y: feet.y + rand(0, 0.3), z: feet.z + Math.sin(a) * r, vx: 0, vy: rand(0.4, 1.0), vz: 0,
+            life: rand(0.8, 1.3), size: rand(0.03, 0.06), color: PAL.air.mote, shape: 1, drag: 0.4, swirl: rand(4, 7), fadeIn: 0.2, occ: 0.25 });
+        }
+        decal(feet, 1.2, 2, PAL.air.glow.clone().multiplyScalar(0.7), 1.4, (d, u, t) => { u.uAlpha.value = Math.sin(Math.PI * clamp(t / 1.4, 0, 1)); });
+        auraPulse(w, PAL.air.glow, 1.0, 1.0);
+        S.chord(aim, 523, 1);
+        return true;
+      }
+      default: return false;
+    }
+  }
+
+  /**
+   * A shell of force round a body: a geodesic lattice, lines brightest at a
+   * glancing angle, opening from the ground up and then fading. Pooled.
+   */
+  const DOME_VERT = `
+    attribute vec3 aBary;
+    varying vec3 vBary; varying vec3 vN; varying vec3 vView; varying float vY;
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vBary = aBary; vY = normalize(position).y;
+      vN = normalize(mat3(modelMatrix) * normal);
+      vView = normalize(cameraPosition - wp.xyz);
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`;
+  const DOME_FRAG = `
+    uniform vec3 uColor; uniform float uAlpha; uniform float uOpen; uniform float uTime;
+    varying vec3 vBary; varying vec3 vN; varying vec3 vView; varying float vY;
+    void main() {
+      float edge = min(min(vBary.x, vBary.y), vBary.z);
+      float line = 1.0 - smoothstep(0.0, 0.045, edge);
+      float rim = pow(1.0 - abs(dot(normalize(vN), vView)), 2.0);
+      float front = uOpen * 2.2 - 1.1;
+      if (vY > front) discard;
+      float lead = exp(-pow((front - vY) / 0.08, 2.0));
+      float shimmer = 0.75 + 0.25 * sin(uTime * 6.0 + vY * 9.0);
+      float a = uAlpha * (line * (0.35 + 0.65 * rim) * shimmer + rim * 0.22 + lead * 0.9);
+      gl_FragColor = vec4(uColor * a, a);
+    }`;
+  const domes = [];
+  function domeMesh() {
+    const geo = new THREE.IcosahedronGeometry(1, 2);
+    const bary = new Float32Array(geo.attributes.position.count * 3);
+    for (let i = 0; i < bary.length; i += 9) { bary[i] = 1; bary[i + 4] = 1; bary[i + 8] = 1; }
+    geo.setAttribute('aBary', new THREE.BufferAttribute(bary, 3));
+    const material = new THREE.ShaderMaterial({
+      vertexShader: DOME_VERT, fragmentShader: DOME_FRAG, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      uniforms: { uColor: { value: new THREE.Color() }, uAlpha: { value: 0 }, uOpen: { value: 0 }, uTime: { value: 0 } },
+    });
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.layers.set(OVERLAY_LAYER);
+    mesh.frustumCulled = false;
+    mesh.visible = false;
+    scene.add(mesh);
+    return { mesh, busy: false };
+  }
+  function dome(centre, h, color, life) {
+    let d = domes.find((x) => !x.busy);
+    if (!d) { if (domes.length >= 3) return; d = domeMesh(); domes.push(d); }
+    d.busy = true;
+    const u = d.mesh.material.uniforms;
+    u.uColor.value.copy(color);
+    d.mesh.position.copy(centre);
+    d.mesh.scale.setScalar(Math.max(0.9, h * 0.6));
+    d.mesh.visible = true;
+    const t0 = clock;
+    effects.push({ kind: 'custom', update() {
+      const t = clock - t0;
+      u.uOpen.value = smooth(t / 0.35);
+      u.uAlpha.value = t < 0.35 ? 1 : Math.max(0, 1 - (t - 0.35) / (life - 0.35));
+      u.uTime.value = clock;
+      if (t < life) return true;
+      d.mesh.visible = false; d.busy = false;
+      return false;
+    } });
+  }
+
   // -- lasting auras -----------------------------------------------------------------
 
   const auras = new Map();   // figure -> { meshes, material, pulse }
@@ -2618,8 +2783,10 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     // flag or affect type, colour, intensity, thickness, flicker
     { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.3, thick: 0.012, flicker: 0.05, soft: 1 },
     { test: (ch) => ch.affectedBy & AFF.FAERIE_FIRE, color: PAL.faerie.glow, intensity: 0.9, thick: 0.025, flicker: 0.6 },
-    { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'shield' || a.type === 'stone skin'), color: PAL.ward.glow, intensity: 0.55, thick: 0.03, flicker: 0 },
-    { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'armor' || a.type === 'protection'), color: PAL.ward.glow, intensity: 0.35, thick: 0.025, flicker: 0 },
+    { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'shield'), color: PAL.shieldDome.glow, intensity: 0.55, thick: 0.03, flicker: 0 },
+    { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'stone skin'), color: PAL.stone.glow, intensity: 0.6, thick: 0.035, flicker: 0 },
+    { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'armor' || a.type === 'protection'), color: PAL.armor.glow, intensity: 0.4, thick: 0.025, flicker: 0 },
+    { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'giant strength'), color: PAL.strength.glow, intensity: 0.3, thick: 0.02, flicker: 0.15 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'bless'), color: PAL.bless.glow, intensity: 0.35, thick: 0.025, flicker: 0 },
   ];
 
@@ -2685,8 +2852,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
 
   /** A shell flaring over a body for a moment: the landing of a ward, a frost rime. */
   function auraPulse(w, color, intensity, life, soft = 0) {
-    if (w.player) return;
-    const fig = figureOf(w.slot);
+    // You: only when your own figure is in view (over the shoulder).
+    const fig = w.player ? (self && self.figure ? self.figure() : null) : figureOf(w.slot);
     if (!fig) return;
     const a = auraFor(fig);
     a.pulse = { color: color.clone(), intensity, life, t: 0, soft };
@@ -2694,16 +2861,22 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
 
   /** Each visible figure's affects, as a shell and a little matter. */
   function updateAuras(dt) {
-    const time = clock;
     for (const slot of game.mobs) {
       const fig = figureOf(slot);
-      const ch = slot.instance;
-      if (!fig) continue;
-      const visible = fig.object.visible && !slot.dead;
+      if (fig) auraStep(fig, slot.instance, fig.object.visible && !slot.dead, slot.proto.vnum % 17, dt);
+    }
+    // Over your own shoulder your figure wears your affects like anyone's.
+    const own = self && self.figure ? self.figure() : null;
+    if (own) auraStep(own, game.state, true, 5, dt);
+  }
+
+  function auraStep(fig, ch, visible, seed, dt) {
+    const time = clock;
+    {
       let kind = null;
       if (ch && visible) kind = AURA_KIND.find((k) => k.test(ch)) || null;
       let a = auras.get(fig);
-      if (!kind && !(a && a.pulse)) { if (a && a.on) { for (const m of a.meshes) m.visible = false; a.on = false; } continue; }
+      if (!kind && !(a && a.pulse)) { if (a && a.on) { for (const m of a.meshes) m.visible = false; a.on = false; } return; }
       a = a || auraFor(fig);
       const u = a.material.uniforms;
       let intensity = kind ? kind.intensity : 0;
@@ -2724,15 +2897,15 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         }
       }
       u.uIntensity.value = intensity;
-      u.uTime.value = time + (slot.proto.vnum % 17);
+      u.uTime.value = time + seed;
       const on = intensity > 0.01 && visible;
       if (on !== a.on) { for (const m of a.meshes) m.visible = on; a.on = on; }
 
       // Matter for the affects that are not a light: dark wisps of a curse,
       // sickly bubbles of poison, a haze over blind eyes.
-      if (!ch || !visible) continue;
+      if (!ch || !visible) return;
       const near = distToCamera(fig.at) < 28;
-      if (!near) continue;
+      if (!near) return;
       const rate = dt * budget.density;
       const px = fig.at.x; const py = fig.at.y; const pz = fig.at.z; const h = fig.height;
       if ((ch.affectedBy & AFF.FAERIE_FIRE) && Math.random() < 8 * rate) {
@@ -3266,6 +3439,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       effects.length = 0;
       byId.clear();
       for (const l of lingering) anchors.release(l.anchor);
+      for (const d of domes) { scene.remove(d.mesh); d.mesh.geometry.dispose(); d.mesh.material.dispose(); }
       lingering.length = 0;
       for (const d of decals) { d.busy = false; d.mesh.visible = false; d.drive = null; d.anchorFn = null; d.owner = null; }
       for (const sp of spheres) freeSphere(sp);
