@@ -1230,6 +1230,11 @@ export function createRoomCounter({ world, rooms, links, zoneOf = null }) {
       let bd = Infinity;
       for (const pair of mine.length ? mine : where.streets) {
         for (const end of pair) {
+          // A walled end only once inside its walls: out past its doorway, a
+          // street to a room out of doors is that room's. Outside the cabin's
+          // shut door (#6010) the HUD said "Inside the cabin" (the user,
+          // 2026-10-14).
+          if (end.walled && pair.some((other) => !other.walled)) continue;
           const d = (end.x - p.x) ** 2 + (end.z - p.z) ** 2;
           if (d < bd || (d === bd && end.vnum < best)) { bd = d; best = end.vnum; }
         }

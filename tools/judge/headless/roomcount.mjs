@@ -1,7 +1,8 @@
 // Which room the game counts a body in, over every step a body can take.
 //
 // The rule (the user's, 2026-10-09): inside a walled room's walls, that room;
-// on a street, its nearer end; on open ground, the nearest room on the level
+// on a street, its nearer end -- but a walled end only once inside its walls
+// (the user, 2026-10-14); on open ground, the nearest room on the level
 // that the body can reach on foot; otherwise the room it was counted in last.
 // (And, since the lids: in the shaft of a lid or a drop, under the floor above,
 // the room below -- the judge's rule, which the game was to hold to.)
@@ -28,9 +29,10 @@
 //         over every room the page built (centres as build.js placed them);
 //   spec  the rule game.js is to run, built here (`referenceCounter`, and
 //         importable: `loadReference(repo)`, for mp-room.mjs and traces);
-//   spec-all, spec-walls  the two variants measured and not taken: every
-//         open-air room on the level's open ground, street or no street; and
-//         on a street, a walled end only once inside its walls;
+//   spec-all  measured and not taken: every open-air room on the level's
+//         open ground, street or no street;
+//   spec-near  the street rule before 2026-10-14: a street's nearer end,
+//         walled or not;
 //   game  the page's own function, once game.js has it: createRoomCounter
 //         imported from <repo>/src/game.js and given what the server gives it
 //         (world.mjs's rooms on the layout grid, the layout's links).
@@ -221,8 +223,8 @@ function referenceCounter({ world, rooms, links, zoneOf = null }, { CELL, LEVEL_
       let best = null, bd = Infinity;
       for (const pair of mine.length ? mine : where.streets) {
         for (const end of pair) {
-          // variant.streetWalls, measured and not taken: a walled end only once inside its walls.
-          if (variant.streetWalls && end.walled && pair.some((other) => !other.walled)) continue;
+          // A walled end only once inside its walls (variant.nearerEnd: the rule before).
+          if (!variant.nearerEnd && end.walled && pair.some((other) => !other.walled)) continue;
           const d = (end.x - p.x) ** 2 + (end.z - p.z) ** 2;
           if (d < bd || (d === bd && end.vnum < best)) { bd = d; best = end.vnum; }
         }
@@ -503,7 +505,7 @@ async function main() {
       if (name === 'old') { const f = oldRule(geo); ruleFns.old = (p) => f(p); }
       else if (name === 'spec') ruleFns.spec = (p, last) => ref.at(p, last);
     else if (name === 'spec-all') { const r = makeReference(inputs, { outsideAll: true }); ruleFns[name] = (p, last) => r.at(p, last); }
-    else if (name === 'spec-walls') { const r = makeReference(inputs, { streetWalls: true }); ruleFns[name] = (p, last) => r.at(p, last); }
+    else if (name === 'spec-near') { const r = makeReference(inputs, { nearerEnd: true }); ruleFns[name] = (p, last) => r.at(p, last); }
       else if (name === 'game') { const g = gameCounter(inputs); ruleFns.game = (p, last) => g.at(p, last); }
       else throw new Error(`roomcount: no rule ${name}`);
     }
