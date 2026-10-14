@@ -582,6 +582,38 @@ choose.
   `tools/judge/headless/title-still.js` if the reel's first shot changes.
 - **Wrap every headless and Blender run in `timeout`** (GNU timeout in
   /opt/homebrew/bin); a hung headless Chrome never returns.
+- **A player's body is a fake proto through `personOf`** (actors.js
+  `createPlayerFigure`, `player: true`), and people.js `youngPlayer` dresses
+  it: hero faces, the new hair, the `hero_*` outfits, the athletic build.
+  Mobiles must not change with it. `tools/mobile-looks.mjs` writes
+  `personOf` over every mobile as JSON; run it before and after, and `cmp`
+  the two files.
+- **A body is shaped at load by bone scale only.** The exporter bakes a
+  translation on every bone, so a moved bone is put back by the first
+  frame; `.scale` tracks are stripped (`clipsOf`), so scale holds. A layer
+  added after the mixer (posture, lean, the robe spring) multiplies onto
+  bones the clips key. On a bone no clip keys, such as an arm in a carry
+  pose, it accumulates frame after frame unless it puts back its own last
+  output first (`turnBy`).
+- **Every clip on all four rigs, and a .glb never merges.** `buildPerson`
+  throws on a CLIPS entry a rig lacks (person_male, person_female, troll,
+  minotaur). Branches that change `tools/blender/*.py` merge as text; then
+  regenerate the models once from the merged sources and hold them with
+  `tools/glb-clips.mjs` (every old clip at 0 difference, each branch's new
+  clips against that branch's own build) and `tools/glb-meshes.mjs`. A new
+  gait goes on `carriedClip`'s list, or the arm that holds a weapon pumps
+  it over the head.
+- **The over-the-shoulder camera is held by `tools/judge/headless/thirdperson.mjs`**
+  (copy it to /tmp/pw; `--places market,temple` for a subset, all ten
+  places take 30 minutes): a camera inside geometry must stay 0, a figure
+  under 2% black, feet within 3 cm. The colliders are wall footprints, not
+  faces (the Boar's bar wall stands 0.38 m in front of its), so view.js
+  casts one ray from the eye near them; and only the arm's length is eased,
+  never the vector, which swung the camera through the altar.
+- **Over the shoulder a lamp at the hand is on the robe.** An effect light
+  placed for the first-person eye washes your own figure white seen from
+  behind (inverse square at 0.15 m). Effects that light their caster take
+  `close(w)` into account.
 - Figures are skinned meshes: one draw each, no instancing, and a second pass if
   they cast shadows. They are kept out of the shadow map and culled past 46 m.
 - Large soft sprites are the most expensive thing per pixel in the scene. The

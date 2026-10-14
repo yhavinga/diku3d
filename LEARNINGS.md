@@ -6,6 +6,120 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-15 — wave 20: third person, and players who look like heroes
+
+### A wash is a lamp before it is a shader
+
+- **Seen from outside, heal turned the cleric white from the shoulders
+  down.** The aura shell was the suspect. It is rim-only (`pow(rim, 3.2)`),
+  and switching the effects off one at a time (a probe flag in `auraPulse`,
+  `takeLight` and `motes`) settled it in one run. The cause was the
+  windup's point light at the hand, which over the shoulder is a hand's
+  breadth off the robe. At 0.15 m, inverse square makes even 4.5 of
+  intensity about 200 on the cloth. Lifted 0.8 m it is about 12. Heal's
+  landing lamp had stood at the chest, lighting the robe from inside, and
+  now stands 1.3 m over it. A light that is right from the eye is wrong
+  from behind.
+
+### Players, not people (people.js `youngPlayer`)
+
+- **The odds that make a crowd make an old player.** `ELDER` gives a mage
+  0.5 and a priest 0.35. A player is a fake proto through the same
+  `personOf`, so half of all mages came out grey-bearded under a pointed
+  hat, and `hair_fringe` (a tonsure) read as bald. Players now take a path
+  of their own after the trade is read: young or hero face, no `HAIR_OLD`,
+  short beards at most.
+- **The guard for "mobiles unchanged" is a byte compare.**
+  `tools/mobile-looks.mjs` runs `personOf` over all 768 mobile protos
+  at three instances, 2304 calls. It held identical across all four
+  changes that touched people.js.
+- **A lineup of eight names is not a distribution.** With ivory taken out
+  of the cleric robes, all eight test names came out crimson or wine. Over
+  30 names the same `strHash` spreads 7/8/7/8. Ivory itself read as a
+  bathrobe, or with a hood as a nun, in every lineup.
+
+### Shaping a body at load
+
+- **Bone scale is the only tool.** The exporter bakes a translation track
+  on every bone (32 channels a clip), so a bone moved at load is put back
+  by the first frame. `clipsOf` strips the `.scale` tracks, so scale
+  survives. The athletic build scales the clavicles 1.15 with the upper
+  arm at the inverse, taking the shoulder span from 0.346 to 0.417 m, and
+  the chest 1.04 with the neck at the inverse.
+- **An additive layer on a bone no clip keys accumulates.** The posture
+  layer multiplies onto bones after the mixer. On the staff arm, which the
+  carry pose holds unkeyed, the turn added up every frame until the staff
+  stood horizontal. `turnBy` puts back its own last output before adding
+  again. Keyed bones (spine, chest) are reset by the mixer, which is why
+  the locomotion lean can simply multiply.
+- **The hero light is one uniform, not a define.** `dikuHero` (0 for
+  mobiles, 1 for players) adds a sky-tinted rim and a daytime camera-side
+  fill. Programs went 601 to 602 on building a player figure, as on the
+  base. Figure luma by day: front 16.9 to 22.9, back 35.6 to 48.8; night
+  +1 to +2, sewer 0.
+
+### Cadence, not slip
+
+- **The default pace is a run, the sprint a sprint.** player.js WALK is
+  4.8 m/s and SPRINT 9.5. The only run clip has a natural speed of 3.6 m/s,
+  so it played at 1.33x and 2.6x. The feet did not skate: the old code
+  scaled the playback to the ground. The cadence was wrong instead, 7.3
+  steps a second at a sprint. `jog` (3.2 m a cycle, 3 steps/s) and
+  `sprint` (4.1 m, 4.4 steps/s) put both near 1x.
+- **Facing held, the legs went the wrong way.** While aiming, the body
+  faced the camera and played the forward run while moving sideways. Page
+  slip was 139% of ground speed for a strafe and 196% backwards. With
+  `strafe_l/r` and `back`, blended by direction, it is 18% and 9%.
+- **A gait keyed with both arms pumping swings the weapon.** A sprint with
+  a sword put the blade over the head every stride. `carriedClip`'s list
+  of clips that take the carry pose on the holding arm has to grow with
+  every new gait.
+- **A player's one-shot is half itself.** The idle under a clip stays at
+  weight 1, and three averages by weight. A cast's lunge read halved until
+  the gestures played at 5, five parts in six.
+
+### Merging Blender branches
+
+- **Three agents changed rig.py at once, and the .glb do not merge.** The
+  sources merge as text; the CLIPS tuple and `make_all` conflict by hand.
+  The models were regenerated once from the merged sources, then held two
+  ways:
+  - every clip of the pre-merge build at 0 difference;
+  - every branch's new clips (and new meshes, compared by name) at 0
+    difference against that branch's own build.
+  The build is deterministic, so both held exactly, every time.
+  `tools/glb-clips.mjs <refDir> <newDir> [clips]` and
+  `tools/glb-meshes.mjs <ref.glb> <new.glb> [regex]` do the comparing (save
+  the old files with `git show HEAD:assets/x.glb` before regenerating).
+- **What it costs.** person_male.glb went from 8.5 to 12.2 MB and
+  person_female from 5.9 to 10.1: four hero outfits, two faces, six
+  hairstyles and 14 clips, with LODs.
+
+### The camera over the shoulder
+
+- **30 of 2208 poses had the camera inside something**, by
+  `tools/judge/headless/thirdperson.mjs` over ten places. 19 were at the
+  market fountain and 4 at the Boar's bar. Three causes:
+  - easing the camera as a vector swung it along the chord between two
+    safe places, through the altar steps and the fountain;
+  - walls stand in front of their colliders (the Boar's bar wall by 0.38 m,
+    the sewer's bars by 0.4);
+  - a camera over a low obstacle looked through its edge.
+  After the fixes it is 0. The price: arms under 1.2 m went from 71 to 139
+  (the camera now comes in where it used to look through the fountain), and
+  turning by the fountain the arm can drop 2 m in one frame.
+- **Easing the vector also made every mouse turn lag.** Only the length is
+  eased now; the direction is the one just checked.
+
+### Testing a figure from outside
+
+- **In a pinned side shot W runs at the camera.** player.js moves along the
+  camera's facing, and pinned that is the side camera's. Moving
+  `player.position` in a rAF loop at a set speed is what makes a side
+  strip.
+- **A pinned camera also keeps the body's facing.** A backstab shot pinned
+  never turned to its victim and showed nothing of the lunge.
+
 ## 2026-10-14 — wave 19
 
 ### Midgaard's two tangles laid again (layout.js `UNTANGLE`)
