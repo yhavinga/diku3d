@@ -1379,6 +1379,8 @@ export function createPlayerFigure({
 
   return {
     group, height: made.height, update, perform, say, pose, air,
+    /** Whether the rig carries a clip: `perform` is silent for one it lacks, and a caller may want a stand-in. */
+    has: (clip) => !!(actions && actions[clip]),
     /** The meshes a click can land on: the body, not its shadow or its words. */
     body: made.group,
     /** Where a spell leaves it: the knot of its staff, or its right fist. */

@@ -26,6 +26,7 @@ import * as THREE from 'three';
 import { createPlayerFigure } from './actors.js';
 import { POS } from './game.js';
 import { AFF } from './magic.js';
+import { SKILL_CONTACT, DISARM_FLICK } from './fx.js';
 
 /**
  * Behind, up and to the right of the eye, in metres. At 2.6 m the figure was
@@ -218,6 +219,20 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
       if (!e.self) facingUntil = clock + (e.windup || 0.6) + CAST_FACE;
       return;
     }
+    // The skills carry their own events (rules/skills.js): the body does the
+    // clip, timed so its contact is the blow's landing. Until the rig has the
+    // clip the plain swing stands in, so the body is never still.
+    if (!figure) return;
+    const skill = (name, contactIn) => {
+      later(0, () => figure && figure.perform(figure.has(name) ? name : 'attack', { contactIn }));
+      facingUntil = clock + contactIn + 0.4;
+    };
+    if ((e.kind === 'kick' || e.kind === 'backstab') && !e.from) { skill(e.kind, SKILL_CONTACT); return; }
+    if (e.kind === 'disarm' && (e.from !== undefined || e.to !== undefined)) {
+      if (!e.from && e.to) skill('disarm', DISARM_FLICK);
+      else if (e.from && !e.to) later(0, () => figure && figure.perform('hit', { whole: true }));
+      return;
+    }
     if (e.spell || !BLOWS.has(e.kind)) return;
     if (!e.from && e.to) {
       later(0, () => figure && figure.perform(e.beat % 2 ? 'attack2' : 'attack', { contactIn: delay }));
@@ -229,6 +244,55 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
   }
   const later = (wait, fn) => pending.push({ at: clock + wait, fn });
   const unlisten = game.listen(onEvent);
+
+  /**
+   * Hidden (AFF.HIDE): the figure goes shadowy so you can see you are. Each
+   * mesh gets a copy of its material -- the originals are shared with every
+   * other body -- and the copy keeps the original's shader hooks, which a
+   * plain clone() drops. fx.js adds the smoke at its edge.
+   */
+  let ghost = { amount: 0, figure: null, parts: [] };
+  const DIM = 0.7;
+  const SEE_THROUGH = 0.45;
+  function ghostOf(material) {
+    const g = material.clone();
+    g.defines = { ...material.defines };
+    g.onBeforeCompile = material.onBeforeCompile;
+    g.customProgramCacheKey = material.customProgramCacheKey;
+    g.defaultAttributeValues = material.defaultAttributeValues;
+    g.userData = material.userData;
+    g.transparent = true;
+    return g;
+  }
+  function unghost() {
+    for (const part of ghost.parts) {
+      part.mesh.material = part.orig;
+      for (const g of part.ghosts) g.dispose();
+    }
+    ghost = { amount: 0, figure: null, parts: [] };
+  }
+  function updateGhost(dt) {
+    const want = (game.state.affectedBy & AFF.HIDE) && game.state.position > POS.SLEEPING ? 1 : 0;
+    if (ghost.figure && ghost.figure !== figure) unghost();
+    if (!want && ghost.amount < 0.01) { if (ghost.parts.length) unghost(); return; }
+    if (!ghost.parts.length) {
+      ghost.figure = figure;
+      figure.body.traverse((n) => {
+        if (!n.isMesh) return;
+        const orig = n.material;
+        const ghosts = (Array.isArray(orig) ? orig : [orig]).map(ghostOf);
+        n.material = Array.isArray(orig) ? ghosts : ghosts[0];
+        ghost.parts.push({ mesh: n, orig, ghosts, base: ghosts.map((g, i) => (Array.isArray(orig) ? orig[i] : orig).color?.clone()) });
+      });
+    }
+    ghost.amount += (want - ghost.amount) * Math.min(1, dt * 5);
+    for (const part of ghost.parts) {
+      part.ghosts.forEach((g, i) => {
+        g.opacity = 1 - SEE_THROUGH * ghost.amount;
+        if (part.base[i] && g.color) g.color.copy(part.base[i]).multiplyScalar(1 - DIM * ghost.amount);
+      });
+    }
+  }
 
   /** Resting, asleep or down: the body's held pose from the character's position. */
   function poseOf(position) {
@@ -262,6 +326,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
       fn();
     }
     figure.pose(poseOf(game.state.position));
+    updateGhost(dt);
     // Off the ground: a jump at once, a step off an edge only once it is a fall.
     if (!player.onGround) {
       if (!air.up && (player.velocity.y > 0.5 || clock - air.since > 0.18)) { air.up = true; figure.air(true); }
@@ -358,7 +423,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     }
   }
 
-  return {
+  const api = {
     get third() { return third; },
     get figure() { return figure; },
     toggle() { set(!third); return third; },
@@ -370,8 +435,14 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     dispose() {
       unlisten();
       set(false);
+      unghost();
+      if (camera.userData.view === api) delete camera.userData.view;
       if (figure) figure.dispose();
       figure = null;
     },
   };
+  // fx.js reads this to tell the view over the shoulder from first person, and
+  // to find your figure: nothing else in the page is shared between the two.
+  camera.userData.view = api;
+  return api;
 }

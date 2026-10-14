@@ -26,6 +26,22 @@ import { OVERLAY_LAYER } from './render.js';
 import { MOB_BEAT, WEAR } from './game.js';
 import { personMaterial, SLOTS } from './dress.js';
 import { honourEnv } from './textures.js';
+import { AFF } from './magic.js';
+
+/**
+ * When a kick's boot or a stab's thrust lands, from the skill's own event:
+ * rules/skills.js `WINDUP`, the delay `strike` gives the blow that follows.
+ * view.js and link.js time the body's clip on it, so the clip's contact and
+ * the effects here fall together.
+ */
+export const SKILL_CONTACT = 0.28;
+/**
+ * A disarm is emitted after the weapon has already left the hand (items.js
+ * hides it that frame), so the clip's contact and the flick are put this far
+ * on. 0.25 is the shortest a clip is stretched to (actors.js `perform`).
+ */
+export const DISARM_FLICK = 0.25;
+const SKILL_BLOWS = new Set(['kick', 'backstab']);
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const ease = (u) => u * u * (3 - 2 * u);
@@ -1072,6 +1088,265 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     }
   }
 
+  // -- the thief's and the warrior's skills, seen from outside --------------------
+
+  const flyers = [];
+  const lastStab = { behind: true };
+  const hidden = { next: 0, last: new THREE.Vector3(), moved: 0 };
+
+  /**
+   * A body the effects can stand on: a mobile's figure, another player's, or
+   * -- over the shoulder only -- your own. In first person your own is null,
+   * and every effect that would be yours stays what it was.
+   */
+  function bodyOf(side) {
+    if (side && side.figure && side.figure.m) return { fig: side.figure, at: side.figure.at, height: side.figure.height, m: side.figure.m };
+    if (side && side.remote) { const f = side.remote.figure; return { fig: f, at: f.group.position, height: f.height, m: null }; }
+    if (side === null) {
+      const v = camera.userData.view;
+      if (v && v.third && v.figure && v.figure.group.visible) return { fig: v.figure, at: v.figure.group.position, height: v.figure.height, m: null, self: true };
+    }
+    return null;
+  }
+
+  /** The event as a skill's step, or null: your own events and link.js's copies of other players' read alike. */
+  function skillOf(event) {
+    if (event.kind === 'skillfx') return event;
+    if (event.kind === 'backstab') return { skill: 'backstab', phase: 'start', from: null, to: event.to, behind: event.behind };
+    if ((event.kind === 'hit' || event.kind === 'miss') && SKILL_BLOWS.has(event.spell)) {
+      return { skill: event.spell, phase: 'land', hit: event.kind === 'hit', from: event.from, to: event.to, behind: lastStab.behind };
+    }
+    // The line a disarmed player hears carries no sides: that one is the room's.
+    if (event.kind === 'disarm' && (event.from !== undefined || event.to !== undefined)) {
+      return { skill: 'disarm', phase: 'disarm', from: event.from, to: event.to, item: event.item };
+    }
+    return null;
+  }
+
+  /** The ground ring a heavy blow throws: dust racing out flat from the feet. */
+  function ring(p, floor) {
+    const k = ambient;
+    for (let i = 0; i < 20; i++) {
+      const a = (i / 20) * Math.PI * 2 + Math.random() * 0.2;
+      matter.spawn({
+        x: p.x + Math.cos(a) * 0.25, y: floor + 0.05, z: p.z + Math.sin(a) * 0.25,
+        vx: Math.cos(a) * 2.8, vy: 0.04, vz: Math.sin(a) * 2.8,
+        life: 0.55 + Math.random() * 0.2, size: 0.3, grow: 1.5, gravity: 0, drag: 2.6,
+        r: 0.85 * k, g: 0.77 * k, b: 0.62 * k, alpha: 0.42, fade: 1.2, floor,
+      });
+    }
+  }
+
+  /** The blade's way in: dark smears laid along the path from the thief's hand to the back. */
+  function trail(sk, u) {
+    const doer = bodyOf(sk.from); const victim = bodyOf(sk.to);
+    if (!doer || !victim) return;
+    const k = ambient;
+    const ax = doer.at.x; const az = doer.at.z; const bx = victim.at.x; const bz = victim.at.z;
+    const y0 = doer.at.y + doer.height * 0.52; const y1 = victim.at.y + victim.height * 0.62;
+    for (let i = 0; i < 4; i++) {
+      const w = clamp(u + (i - 1.5) * 0.04, 0, 1);
+      matter.spawn({
+        x: ax + (bx - ax) * w + (Math.random() - 0.5) * 0.06, y: y0 + (y1 - y0) * w + (Math.random() - 0.5) * 0.06, z: az + (bz - az) * w + (Math.random() - 0.5) * 0.06,
+        vx: 0, vy: 0, vz: 0, life: 0.3, size: 0.2, grow: 0.2, drag: 6,
+        r: 0.03 * k, g: 0.025 * k, b: 0.03 * k, alpha: 0.6, fade: 1.4,
+      });
+    }
+  }
+
+  /** The kick, the stab or the clang at the moment of contact. */
+  function skillLand(sk) {
+    const doer = bodyOf(sk.from); const victim = bodyOf(sk.to);
+    // In first person your own blows are what they were: the leg (kick.js).
+    if (!doer && sk.from === null) return;
+    const mine = !!(doer && doer.self);
+    if (!victim) { if (sk.to === null) player.shake(0.4); return; }
+    const src = doer ? doer.at : camera.position;
+    const away = new THREE.Vector3(victim.at.x - src.x, 0, victim.at.z - src.z);
+    if (away.lengthSq() < 1e-6) away.set(0, 0, 1);
+    away.normalize();
+    const floor = victim.at.y + 0.02;
+    const body = new THREE.Vector3(victim.at.x, victim.at.y + victim.height * 0.62, victim.at.z);
+    const alive = victim.m && !victim.m.dead;
+    if (sk.skill === 'kick') {
+      if (!sk.hit) { if (alive) motion.react(victim.fig, 'evade'); return; }
+      const contact = body.clone().addScaledVector(away, -0.2);
+      contact.y = victim.at.y + victim.height * 0.45;
+      dust(victim.at, 1.7);
+      ring(victim.at, floor);
+      if (alive) {
+        motion.react(victim.fig, 'hit', 0.9);
+        victim.m.recoil = { t: 0, amount: 2.3 };
+        hold(victim.fig, 0.08);
+      }
+      if (mine) { kickView(1); player.shake(0.3); }
+      if (sk.to === null) player.shake(0.45);
+      audio.impact && audio.impact('blunt', { ...where(contact), strength: 1.3 });
+      return;
+    }
+    // Backstab. From in front it is a stab they saw coming; behind and
+    // missed is the dagger finding nothing but air.
+    const back = sk.behind !== false;
+    if (back && sk.hit) {
+      const contact = body.clone().addScaledVector(away, -0.2);
+      // A sharp red-white point, a short fan of hot streaks, and dark
+      // droplets thrown out of the back -- under the bloom's reach, gone fast.
+      glow.spawn({ x: contact.x, y: contact.y, z: contact.z, vx: 0, vy: 0, vz: 0, life: 0.2, size: 0.62, grow: 0.6, r: 1.9, g: 0.5, b: 0.4, alpha: 0.95, fade: 1.6 });
+      sparks.spawn({ x: contact.x, y: contact.y, z: contact.z, vx: 0, vy: 0, vz: 0, life: 0.1, size: 0.15, r: 3, g: 2.2, b: 2, alpha: 1, fade: 1.2 });
+      for (let i = 0; i < 16; i++) {
+        const s = 4 + Math.random() * 3;
+        const d = new THREE.Vector3(away.x + (Math.random() - 0.5) * 1.6, 0.1 + Math.random() * 0.9, away.z + (Math.random() - 0.5) * 1.6).normalize();
+        streaks.spawn({ x: contact.x, y: contact.y, z: contact.z, vx: d.x * s, vy: d.y * s, vz: d.z * s, life: 0.1 + Math.random() * 0.1, drag: 5, floor, r: 4.4, g: 1.5, b: 1.1 });
+      }
+      flesh(contact, away, 1.5);
+      for (let i = 0; i < 16; i++) {
+        const s = 1.2 + Math.random() * 2.2;
+        matter.spawn({
+          x: contact.x, y: contact.y, z: contact.z,
+          vx: (away.x + (Math.random() - 0.5)) * s, vy: 0.4 + Math.random() * 1.3, vz: (away.z + (Math.random() - 0.5)) * s,
+          life: 0.4 + Math.random() * 0.3, size: 0.045 + Math.random() * 0.03, grow: 0.3, gravity: 7, drag: 1.4,
+          r: 0.04 * ambient, g: 0.012 * ambient, b: 0.014 * ambient, alpha: 0.9, fade: 1.2, floor,
+        });
+      }
+      if (alive) {
+        motion.react(victim.fig, 'hit', 1);
+        victim.m.recoil = { t: 0, amount: 1.2 };
+        hold(victim.fig, 0.1);
+      }
+      if (mine) { kickView(0.8); player.shake(0.25); }
+      if (sk.to === null) player.shake(0.5);
+      audio.impact && audio.impact('flesh', { ...where(contact), strength: 1.2 });
+    } else if (!back) {
+      const meet = body.clone().addScaledVector(away, -0.5);
+      meet.y += 0.08;
+      meet.floor = floor;
+      if (alive) { motion.react(victim.fig, 'block'); hold(victim.fig, 0.05); }
+      if (mine) { kickView(0.35); player.shake(0.14); }
+      clash(meet, away);
+      audio.clang && audio.clang({ ...where(meet) });
+    } else if (alive) motion.react(victim.fig, 'evade');
+  }
+
+  /** A weapon of the kind the figure held, as a free-standing model. */
+  function looseWeapon(name) {
+    const kind = name.startsWith('weapon_') ? name.slice(7) : 'sword';
+    return modelledWeapon(library, `weapon_${kind}`) || proceduralWeapon(kind, vm.M);
+  }
+
+  /** The flick: the victim's weapon leaves the hand, turns over in the air, lands, lies, goes. */
+  function disarmFx(sk) {
+    const victim = bodyOf(sk.to);
+    if (!victim) return;
+    const doer = bodyOf(sk.from);
+    const src = doer ? doer.at : camera.position;
+    const away = new THREE.Vector3(victim.at.x - src.x, 0, victim.at.z - src.z);
+    if (away.lengthSq() < 1e-6) away.set(0, 0, 1);
+    away.normalize();
+    const marker = victim.fig.weapon || null;
+    const name = marker && marker.name && marker.name.startsWith('weapon_') ? marker.name : `weapon_${weaponKind({ name: sk.item || '' })}`;
+    const obj = looseWeapon(name);
+    const hand = new THREE.Vector3(victim.at.x, victim.at.y + victim.height * 0.52, victim.at.z);
+    if (marker) marker.getWorldPosition(hand);
+    obj.position.copy(hand);
+    scene.add(obj);
+    const side = Math.random() < 0.5 ? -1 : 1;
+    flyers.push({
+      obj, marker, hand: hand.clone(), floor: victim.at.y + 0.035, t: 0, state: 'held', bounced: false,
+      v: new THREE.Vector3(away.x * 2.6 - away.z * side * 0.7, 3.6, away.z * 2.6 + away.x * side * 0.7),
+      spin: new THREE.Vector3(9 + Math.random() * 5, (Math.random() - 0.5) * 6, 5 + Math.random() * 6),
+      yaw: Math.random() * Math.PI * 2,
+    });
+    if (flyers.length > 6) { const old = flyers.shift(); old.obj.removeFromParent(); }
+    if (victim.m && !victim.m.dead) {
+      motion.react(victim.fig, 'hit', 0.4);
+      victim.m.recoil = { t: 0, amount: 0.6 };
+    }
+    // The flick itself: steel on steel at the hand, as the clip's contact falls.
+    queue.push({ at: clock + DISARM_FLICK, kind: 'flick', hand, away, place: where(hand) });
+  }
+
+  const _q = new THREE.Quaternion();
+  const _e = new THREE.Euler();
+  function updateFlyers(dt) {
+    for (let i = flyers.length - 1; i >= 0; i--) {
+      const f = flyers[i];
+      f.t += dt;
+      const o = f.obj;
+      if (f.state === 'held') {
+        // Still in the grip while the clip winds up: it rides the hand's bone.
+        if (f.marker) {
+          f.marker.getWorldPosition(o.position);
+          f.marker.getWorldQuaternion(o.quaternion);
+        } else o.position.copy(f.hand);
+        if (f.t >= DISARM_FLICK) f.state = 'fly';
+      } else if (f.state === 'fly') {
+        f.v.y -= 12 * dt;
+        o.position.addScaledVector(f.v, dt);
+        o.rotateX(f.spin.x * dt); o.rotateY(f.spin.y * dt); o.rotateZ(f.spin.z * dt);
+        if (o.position.y <= f.floor && f.v.y < 0) {
+          o.position.y = f.floor;
+          if (!f.bounced) {
+            f.bounced = true;
+            f.v.multiplyScalar(0.3).y = 1.6;
+            f.spin.multiplyScalar(0.4);
+            audio.clang && audio.clang({ ...where(o.position) });
+            dust(o.position, 0.4);
+          } else { f.state = 'rest'; f.t = 0; f.from = o.quaternion.clone(); }
+        }
+      } else {
+        // Lying flat, blade along the ground: the model's +Y laid down.
+        _e.set(Math.PI / 2, 0, f.yaw, 'YXZ');
+        _q.setFromEuler(_e);
+        o.quaternion.slerpQuaternions(f.from, _q, ease(clamp(f.t / 0.18, 0, 1)));
+        o.position.y = f.floor + 0.02;
+        if (f.t > 1.4) {
+          const u = clamp((f.t - 1.4) / 0.5, 0, 1);
+          o.scale.setScalar(Math.max(0.001, 1 - ease(u)));
+          if (u >= 1) { o.removeFromParent(); flyers.splice(i, 1); }
+        }
+      }
+    }
+  }
+
+  /** Hidden: a faint smoke off the figure; sneaking: a mist at the feet when it moves. */
+  function hideSneakFx(dt) {
+    const v = camera.userData.view;
+    if (!v || !v.third || !v.figure || !v.figure.group.visible) return;
+    const aff = game.state.affectedBy;
+    const at = v.figure.group.position;
+    const moved = Math.hypot(at.x - hidden.last.x, at.z - hidden.last.z) / Math.max(dt, 1e-3);
+    hidden.last.copy(at);
+    hidden.moved += (moved - hidden.moved) * Math.min(1, dt * 8);
+    hidden.next -= dt;
+    if (hidden.next > 0) return;
+    hidden.next = 0.07;
+    const k = ambient;
+    if (aff & AFF.HIDE) {
+      for (let i = 0; i < 2; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const h = 0.1 + Math.random() * v.figure.height * 0.95;
+        // Out at the body's edge rather than across it: a smoky outline.
+        matter.spawn({
+          x: at.x + Math.cos(a) * 0.3, y: at.y + h, z: at.z + Math.sin(a) * 0.3,
+          vx: Math.cos(a) * 0.12, vy: 0.22 + Math.random() * 0.2, vz: Math.sin(a) * 0.12,
+          life: 0.9 + Math.random() * 0.5, size: 0.16 + Math.random() * 0.12, grow: 0.9, gravity: 0, drag: 1.2,
+          r: 0.06 * k, g: 0.055 * k, b: 0.07 * k, alpha: 0.2, fade: 1.2,
+        });
+      }
+    }
+    if ((aff & AFF.SNEAK) && hidden.moved > 0.4) {
+      for (let i = 0; i < 4; i++) {
+        const a = Math.random() * Math.PI * 2;
+        matter.spawn({
+          x: at.x + Math.cos(a) * 0.22, y: at.y + 0.06, z: at.z + Math.sin(a) * 0.22,
+          vx: Math.cos(a) * 0.2, vy: 0.08 + Math.random() * 0.1, vz: Math.sin(a) * 0.2,
+          life: 0.8 + Math.random() * 0.4, size: 0.2, grow: 1.1, gravity: 0, drag: 1.6,
+          r: 0.3 * k, g: 0.32 * k, b: 0.36 * k, alpha: 0.24, fade: 1.3,
+        });
+      }
+    }
+  }
+
   // -- events ---------------------------------------------------------------
 
   /**
@@ -1082,8 +1357,19 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
   function onEvent(event) {
     // A spell's blow is spellfx.js's to draw: no swing, no spark, no clang.
     if (event.kind === 'cast' && event.fromPlayer && !['quaff', 'eat'].includes(event.source)) vm.cast(event.windup, event.lost);
-    if (event.spell) return;
     const delay = event.delay || 0;
+    const sk = skillOf(event);
+    if (sk) {
+      if (sk.skill === 'backstab' && sk.phase === 'start') {
+        lastStab.behind = sk.behind !== false;
+        // The thrust in: a smear along the path over the windup, and the air it moves.
+        for (let i = 1; i <= 7; i++) queue.push({ at: clock + SKILL_CONTACT * (i / 8), kind: 'trail', sk, u: i / 8 });
+        queue.push({ at: clock + SKILL_CONTACT - 0.12, kind: 'swish', sk });
+      } else if (sk.phase === 'land') queue.push({ at: clock + (sk.delay ?? delay), kind: 'skill', sk });
+      else if (sk.phase === 'disarm') disarmFx(sk);
+      return;
+    }
+    if (event.spell) return;
     if (['hit', 'miss', 'parry', 'dodge'].includes(event.kind)) {
       if (event.from) {
         const fig = figureOf(event.from);
@@ -1263,7 +1549,15 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
       if (item.at > clock) continue;
       queue.splice(i, 1);
       if (item.kind === 'land') land(item.event);
-      else if (item.kind === 'whoosh') {
+      else if (item.kind === 'skill') skillLand(item.sk);
+      else if (item.kind === 'trail') trail(item.sk, item.u);
+      else if (item.kind === 'swish') {
+        const d = bodyOf(item.sk.from);
+        if (d) audio.whoosh && audio.whoosh({ ...where(d.at), weight: 0.6, miss: false });
+      } else if (item.kind === 'flick') {
+        clash(item.hand, item.away);
+        audio.clang && audio.clang({ ...item.place });
+      } else if (item.kind === 'whoosh') {
         const e = item.event;
         const p = e.from ? chest(e.from) : camera.position;
         audio.whoosh && audio.whoosh({ ...where(p), weight: e.armed ? 1 : 0.6, miss: e.kind === 'miss' });
@@ -1273,6 +1567,8 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
       }
     }
 
+    updateFlyers(dt);
+    hideSneakFx(dt);
     sparks.update(dt);
     streaks.update(dt);
     matter.update(dt);

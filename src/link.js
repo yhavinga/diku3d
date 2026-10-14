@@ -20,6 +20,7 @@
 import { createPlayerFigure } from './actors.js';
 import { DIR_NAME, ITEM } from './are.js';
 import { TAR } from './magic.js';
+import { SKILL_CONTACT, DISARM_FLICK } from './fx.js';
 import { PLR } from './rules/handler.js';
 
 /** The protocol this page speaks; the server says its own in `hello`. */
@@ -276,6 +277,8 @@ const MURDER_WINDOW_MS = 4000;
 const DIRS = ['north', 'east', 'south', 'west', 'up', 'down'];
 /** Combat lines: when another player is one side, the room reads them; nothing is "you". */
 const BLOWS = new Set(['hit', 'miss', 'parry', 'dodge', 'disarm', 'kick', 'backstab']);
+/** The clip each skill has on the rig, and when its contact falls (fx.js). */
+const SKILL_CLIPS = { kick: ['kick', SKILL_CONTACT], backstab: ['backstab', SKILL_CONTACT], disarm: ['disarm', DISARM_FLICK] };
 const SPELLS = new Set(['cast', 'spell', 'spell-fizzle', 'suffer']);
 
 /**
@@ -429,6 +432,7 @@ export function attachSocketLink(link, game, host, enter) {
     return look(game.state.inventory) || look(game.state.equipment) || look(game.ground);
   }
 
+  let stabbedFrom = true;
   /** One event off the wire, back into game.js's terms, and into its stream. */
   function receive(event) {
     for (const key of ['from', 'to', 'slot']) if (key in event) event[key] = local(event[key]);
@@ -438,8 +442,17 @@ export function attachSocketLink(link, game, host, enter) {
       // Another player struck or was struck: the room's line, and their body moves.
       const attacker = event.from && event.from.remote;
       const victim = event.to && event.to.remote;
-      if (attacker && BLOWS.has(event.kind)) attacker.figure?.perform(event.attack === 'hit' && !event.armed ? 'attack2' : 'attack');
+      const skill = SKILL_CLIPS[event.kind];
+      // A skill's blow is the clip of the skill, played from its own event; the
+      // hit that follows it is not a second swing. A rig without the clip swings.
+      const ofSkill = skill || ((event.kind === 'hit' || event.kind === 'miss') && SKILL_CLIPS[event.spell]);
+      if (attacker && skill) attacker.figure?.perform(attacker.figure.has(skill[0]) ? skill[0] : 'attack', { contactIn: skill[1] });
+      else if (attacker && !ofSkill && BLOWS.has(event.kind)) attacker.figure?.perform(event.attack === 'hit' && !event.armed ? 'attack2' : 'attack');
       if (victim && event.kind === 'hit') victim.figure?.perform('hit');
+      // fx.js draws the thud, the stab and the flying weapon off these copies.
+      if (event.kind === 'backstab') { stabbedFrom = event.behind; game.inject({ kind: 'skillfx', skill: 'backstab', phase: 'start', from: event.from, to: event.to, behind: event.behind }); }
+      else if (event.kind === 'disarm') game.inject({ kind: 'skillfx', skill: 'disarm', phase: 'disarm', from: event.from, to: event.to, item: event.item });
+      else if (ofSkill) game.inject({ kind: 'skillfx', skill: event.spell, phase: 'land', hit: event.kind === 'hit', from: event.from, to: event.to, behind: stabbedFrom, delay: event.delay || 0 });
       if (!event.text) return;
       game.inject({ kind: 'room', text: event.text, combat: event.kind });
       return;
