@@ -630,8 +630,87 @@ export function personOf(proto, ITEM, instance = 0) {
   // A head is a smaller share of a bigger man.
   if (giant) { out.scale = giantScale(`${proto.long || ''} ${proto.description || ''}`); out.headScale = 0.94; }
   if (out.scale < 0.9) out.pieces = out.pieces.filter((p) => !p.startsWith('beard') && p !== 'moustache' || DWARF.test(w));
+  if (proto.player) youngPlayer(out, proto, isFemale);
   applyEquipment(out, proto, ITEM, seed);
   return out;
+}
+
+/**
+ * The look of a player's own body (`proto.player`; mobiles never come here).
+ * A town is full of people of every age, but the people who play in it are
+ * adventurers: 20 to 40 at most, athletic, well turned out. So never the old
+ * face or the grey hair, no wizard's hat and no full beard, hair that is cut or
+ * tied back, and colours with some presence instead of the drab and the cream
+ * a crowd wears. Everything is chosen from the name, so the same player is
+ * the same person on every page that draws them.
+ */
+const PLAYER_ARCH = { mage: 'mage', cleric: 'priest', thief: 'rogue', warrior: 'guard' };
+const PLAYER_HAIR = {
+  male: {
+    mage: ['hood', 'hair_long', 'hair_tail', 'hair_short'],
+    cleric: ['hair_short', 'hair_crop', 'hair_long', 'hair_tail', 'hair_short', 'hair_crop', 'hood'],
+    thief: ['hood', 'hair_tail', 'hood', 'hair_short', 'hair_crop'],
+    warrior: ['hair_short', 'hair_crop', 'hair_tail', 'hair_long'],
+  },
+  female: {
+    mage: ['hair_long', 'hair_braid', 'hair_tail', 'hood'],
+    cleric: ['hair_braid', 'hair_tail', 'hair_long', 'hood'],
+    thief: ['hood', 'hair_tail', 'hair_braid'],
+    warrior: ['hair_braid', 'hair_tail'],
+  },
+};
+/**
+ * A cleric's vestments: deep crimson, royal blue, forest green, wine, each
+ * trimmed in gold. Ivory was one of them and read as a bathrobe or a nun's
+ * habit in every lineup, hooded or not.
+ */
+const CLERIC_ROBES = [0x7a1a2a, 0x24408a, 0x2a5a32, 0x561e3e];
+const CLERIC_GOLD = 0xb08a3a;
+
+function youngPlayer(out, proto, isFemale) {
+  const tokens = String(proto.keywords).split(/\s+/);
+  const trade = tokens[tokens.length - 2];
+  if (!PLAYER_ARCH[trade]) throw new Error(`people: a player's keywords end in "<name> <trade> <sex>", got "${proto.keywords}"`);
+  const sex = isFemale ? 'female' : 'male';
+  // A name like "Crone" or "Lady" must not change the trade the player chose.
+  if (out.arch !== PLAYER_ARCH[trade]) {
+    out.arch = PLAYER_ARCH[trade];
+    if (!out.weapon) out.weapon = { mage: 'weapon_staff', cleric: 'weapon_staff', thief: 'weapon_dagger', warrior: 'weapon_sword' }[trade];
+  }
+  const hs = strHash(`${proto.short}#style`, 41);
+  const hc = strHash(`${proto.short}#colour`, 43);
+  const bs = strHash(`${proto.short}#beard`, 47);
+  const ts = strHash(`${proto.short}#cloth`, 53);
+  out.face = isFemale ? 'face_female' : 'face_male';
+  out.headScale = 0.95;
+  out.scale = 1.03;
+  out.build = isFemale ? 'athleticF' : 'athletic';
+  out.tint.hair = pick(HAIR, hc);
+  const pieces = [pick(PLAYER_HAIR[sex][trade], hs)];
+  if (!isFemale && bs < (trade === 'warrior' ? 0.4 : 0.3)) pieces.push('beard_short');
+  out.pieces = pieces;
+  switch (trade) {
+    case 'mage':
+      out.tint.cloth = pick(ROBES.mage, ts);
+      out.tint.cloth2 = pick(RICH, strHash(`${proto.short}#trim`, 59));
+      break;
+    case 'cleric': {
+      out.tint.cloth = pick(CLERIC_ROBES, ts);
+      out.tint.cloth2 = CLERIC_GOLD;
+      out.tint.linen = 0xd8cfb8;
+      break;
+    }
+    case 'thief':
+      out.tint.cloth = pick(DARK, ts);
+      out.tint.cloth2 = pick(DARK, strHash(`${proto.short}#trim`, 59));
+      out.tint.leather = 0x3a2a1c;
+      break;
+    default:
+      out.tint.cloth = pick(DYED, ts);
+      out.tint.cloth2 = pick(DARK, strHash(`${proto.short}#trim`, 59));
+      out.tint.leather = 0x3a2a1c;
+  }
+  out.player = true;
 }
 
 function applyEquipment(out, proto, ITEM, seed) {

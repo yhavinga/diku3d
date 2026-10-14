@@ -20,7 +20,7 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { createNav } from './nav.js';
 import { createMotion } from './motion.js';
 import { personOf, carryOf, CLIP_FACTS, HIT_FRAME, LOOPS, CLIPS } from './people.js';
-import { dressedGeometry, personMaterial as dressMaterial } from './dress.js';
+import { dressedGeometry, personMaterial as dressMaterial, HERO_ON } from './dress.js';
 import { litBeast } from './beastlight.js';
 
 const SKIN = [0xe8c39e, 0xd9a877, 0xb5834f, 0x8a5a33, 0x6d4526, 0xc9b7a0];
@@ -666,6 +666,16 @@ function guardClip(set, clip, carry) {
  */
 const BUILDS = {
   halfling: { thigh: 0.8, upperarm: 0.9, spine: 1.08 },
+  // A player's (people.js youngPlayer): broader through the shoulders and
+  // deeper in the chest, the way a figure is drawn to be read as athletic.
+  // The clavicles (`shoulder`) are scaled out from the chest's centre, which
+  // moves each arm out by 0.15 of its 15 cm clavicle; the upper arm takes the
+  // inverse of everything above it so the arm itself keeps its size and its
+  // reach (the hands stay where the clips put them relative to the torso, give
+  // or take the 2 cm the shoulders moved), and the neck the inverse of the
+  // chest so the head is not fatter. The women's are a little less.
+  athletic: { shoulder: 1.15, chest: 1.04 },
+  athleticF: { shoulder: 1.08, chest: 1.02 },
 };
 function shapeBuild(body, build) {
   const b = BUILDS[build];
@@ -673,15 +683,22 @@ function shapeBuild(body, build) {
   const foot = body.getObjectByName('footL');
   const low = () => { body.updateMatrixWorld(true); return foot.getWorldPosition(new THREE.Vector3()).y; };
   const before = low();
+  const thigh = b.thigh || 1;
+  const arm = b.upperarm || 1 / ((b.shoulder || 1) * (b.chest || 1));
   for (const side of ['L', 'R']) {
-    body.getObjectByName(`thigh${side}`).scale.setScalar(b.thigh);
-    body.getObjectByName(`upperarm${side}`).scale.setScalar(b.upperarm);
+    if (b.thigh) body.getObjectByName(`thigh${side}`).scale.setScalar(thigh);
+    if (b.shoulder) body.getObjectByName(`shoulder${side}`).scale.setScalar(b.shoulder);
+    body.getObjectByName(`upperarm${side}`).scale.setScalar(arm);
   }
-  body.getObjectByName('spine').scale.setScalar(b.spine);
+  if (b.spine) body.getObjectByName('spine').scale.setScalar(b.spine);
+  if (b.chest) {
+    body.getObjectByName('chest').scale.setScalar(b.chest);
+    body.getObjectByName('neck').scale.setScalar(1 / b.chest);
+  }
   const drop = low() - before;
   body.position.y -= drop;
   body.userData.drop = drop;
-  return b.thigh;
+  return thigh;
 }
 
 /**
@@ -883,7 +900,7 @@ function buildPerson(library, who, proto, instance) {
   const mesh = body.getObjectByName('person');
   mesh.geometry = dressed.geometry;
   const show = new THREE.Vector2(1, 1);
-  mesh.material = dressMaterial(library, who.tint, ghost, show);
+  mesh.material = dressMaterial(library, who.tint, ghost, show, who.player ? { hero: HERO_ON } : {});
   // Figures stay out of the sun's shadow map: a skinned mesh there is a
   // second skinning pass for a shadow the hand-placed contact patch already
   // draws.
@@ -1061,6 +1078,20 @@ const SKIRT = {
 };
 
 /**
+ * A player's bearing (createPlayerFigure): the clips are a townsperson's, who
+ * stands easy and slightly forward with the arms hanging. A hero's chest is
+ * up, the shoulders back, the head level and the arms clear of the hips. Bone-
+ * local Euler angles in radians, added after the mixer exactly as the robe's
+ * spring is, and scaled to 0 while a one-shot, a sit, a death or a jump is
+ * playing so those clips are untouched. `arm` is the swing out from the
+ * body at idle; it fades with the walk, whose own swing needs the room.
+ */
+const BEARING = {
+  chest: [-0.06, 0, 0], neck: [-0.05, 0, 0], head: [-0.03, 0, 0],
+  shoulder: [0, 0, 0], arm: 0.1,
+};
+
+/**
  * What a player said, over their head for a few seconds: the name label's
  * lettering, warmer, on no plate (see `labelTexture` for why not). Its own
  * canvas, not the label cache -- every line said would stay in that.
@@ -1172,6 +1203,45 @@ export function createPlayerFigure({
   let skirtYaw = 0;
   let skirtGate = 1;
 
+  // The bearing: bones looked up once; a rig without them is left as it is.
+  const bearing = {
+    chest: made.group.getObjectByName('chest'), neck: made.group.getObjectByName('neck'),
+    head: made.group.getObjectByName('head'),
+    arms: ['L', 'R'].map((side) => made.group.getObjectByName(`upperarm${side}`)),
+    shoulders: ['L', 'R'].map((side) => made.group.getObjectByName(`shoulder${side}`)),
+  };
+  const bearingOn = !!(bearing.chest && bearing.neck && bearing.head && bearing.arms.every(Boolean) && bearing.shoulders.every(Boolean));
+  const oneShots = actions ? Object.keys(actions).filter((n) => !LOOPS.has(n) && n !== 'walkCycle' && actions[n].setLoop) : [];
+  let bearingGate = 1;
+  const bearingQ = new THREE.Quaternion();
+  const bearingE = new THREE.Euler();
+  // A bone the playing clips do not key (the arm that carries a staff may be
+  // one) keeps what was left in it from the last frame, so a plain multiply
+  // would turn it further every frame. Remember what was left and, if the
+  // bone still holds exactly that, take the turn back off first.
+  const left = new Map();
+  const turnBy = (bone, x, y, z, k) => {
+    const mine = left.get(bone);
+    if (mine && bone.quaternion.equals(mine.after)) bone.quaternion.copy(mine.before);
+    const before = mine ? mine.before.copy(bone.quaternion) : bone.quaternion.clone();
+    bearingQ.setFromEuler(bearingE.set(x * k, y * k, z * k));
+    bone.quaternion.multiply(bearingQ);
+    if (mine) mine.after.copy(bone.quaternion); else left.set(bone, { before, after: bone.quaternion.clone() });
+  };
+  function holdBearing(dt) {
+    // Eased out for anything that is not standing, walking or running, and for
+    // any clip that is not a loop while it has weight.
+    const free = !posed && !airborne && !oneShots.some((n) => actions[n].getEffectiveWeight() > 0.02);
+    bearingGate += ((free ? 1 : 0) - bearingGate) * Math.min(1, dt * 8);
+    const k = bearingGate;
+    turnBy(bearing.chest, BEARING.chest[0], BEARING.chest[1], BEARING.chest[2], k);
+    turnBy(bearing.neck, BEARING.neck[0], BEARING.neck[1], BEARING.neck[2], k);
+    turnBy(bearing.head, BEARING.head[0], BEARING.head[1], BEARING.head[2], k);
+    const out = BEARING.arm * k * (0.35 + 0.65 * weights.idle);
+    bearing.shoulders.forEach((bone) => turnBy(bone, BEARING.shoulder[0], BEARING.shoulder[1], BEARING.shoulder[2], k));
+    bearing.arms.forEach((bone, i) => turnBy(bone, 0, 0, i === 0 ? out : -out, 1));
+  }
+
   /**
    * The springs, one frame, from the figure's velocity in the world (m/s) and
    * the yaw it turned by this frame (`skirtYaw`).
@@ -1272,6 +1342,7 @@ export function createPlayerFigure({
     actions.walk.timeScale = Math.max(0.4, speed / walkSpeed);
     actions.run.timeScale = Math.max(0.6, speed / runSpeed);
     made.mixer.update(dt);
+    if (bearingOn && !lying) holdBearing(dt);
     // A teleport (a recall, a new zone) or a long frame is not a move to swing at.
     if (!skirtOn || lying || dt <= 0) return;
     if (hop < 0 || hop > 18 * dt) { skirtV.x = skirtV.y = skirtV.z = 0; return; }

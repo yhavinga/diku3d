@@ -263,6 +263,21 @@ export const FIGURE_FILL = { value: 2.4 };
  */
 export const OUTDOOR_FILL = { value: 0 };
 
+/**
+ * A player's figure is lit a little as a hero is (`dikuHero`: 0 for every
+ * mobile, 1 for a player; one uniform in the one program, never a define, so
+ * no program is added). Two things, both shares of the light already there so
+ * night and a dark cellar stay dark: a rim on the silhouette (Fresnel, tinted
+ * by the sky this fragment receives) that lifts the figure off a bright wall,
+ * and by day a camera-side fill like the indoor one, because the sun is as
+ * often behind a player as before them, and a face turned away from it is
+ * nearly black. The rim goes in as emissive so a dark robe's edge still reads;
+ * it is mixed towards the surface's own colour so it is never a white outline.
+ */
+export const HERO_ON = { value: 1 };
+const HERO_OFF = { value: 0 };
+export const HERO = { dayFill: 3.4, rim: 0.5 };
+
 const LIGHTS_END = `
   {
     // Underground the sky's terms give way to the fixed fill (textures.js).
@@ -284,6 +299,13 @@ const LIGHTS_END = `
     float dikuAmbient = dot( iblIrradiance + irradiance + 0.5 * dikuTorch, vec3( 0.2126, 0.7152, 0.0722 ) );
     float dikuWrap = clamp( ( dot( geometryNormal, normalize( vec3( 0.25, 0.45, 1.0 ) ) ) + 0.3 ) / 1.3, 0.0, 1.0 );
     irradiance += vec3( 1.04, 1.0, 0.94 ) * ( dikuFill * max( dikuIndoor, dikuOutdoorFill ) * dikuAmbient * dikuWrap );
+    // The hero's: the daytime fill outdoors, where the indoor one is off, and the rim.
+    float dikuNotLamp = 1.0 - max( dikuIndoor, dikuOutdoorFill );
+    irradiance += vec3( 1.04, 1.0, 0.94 ) * ( dikuHero * dikuHeroDayFill * dikuNotLamp * ( 1.0 - dikuBuried ) * dikuAmbient * dikuWrap );
+    float dikuRim = pow( 1.0 - clamp( dot( geometryNormal, geometryViewDir ), 0.0, 1.0 ), 3.0 );
+    vec3 dikuSkyHue = iblIrradiance / max( dot( iblIrradiance, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-3 );
+    totalEmissiveRadiance += dikuHero * dikuHeroRim * ( 1.0 - dikuBuried ) * dikuRim * dikuAmbient
+      * mix( dikuSkyHue, diffuseColor.rgb * 4.0, 0.5 ) * 0.5;
   }
   #include <lights_fragment_end>`;
 
@@ -307,6 +329,9 @@ function inject(shader, set, tints, show, indoor, buried, light) {
   shader.uniforms.dikuFill = light.fill || FIGURE_FILL;
   shader.uniforms.dikuTorchGain = light.torch || { value: 1 };
   shader.uniforms.dikuOutdoorFill = OUTDOOR_FILL;
+  shader.uniforms.dikuHero = light.hero || HERO_OFF;
+  shader.uniforms.dikuHeroDayFill = { value: HERO.dayFill };
+  shader.uniforms.dikuHeroRim = { value: HERO.rim };
   shader.uniforms.slotAlbedo = { value: set.albedo };
   shader.uniforms.slotNormal = { value: set.normal };
   shader.uniforms.slotOrm = { value: set.orm };
@@ -338,7 +363,10 @@ function inject(shader, set, tints, show, indoor, buried, light) {
       uniform vec3 dikuSkyBleachTint;
       uniform float dikuFill;
       uniform float dikuOutdoorFill;
-      uniform float dikuTorchGain;`)
+      uniform float dikuTorchGain;
+      uniform float dikuHero;
+      uniform float dikuHeroDayFill;
+      uniform float dikuHeroRim;`)
     .replace('#include <lights_fragment_begin>', LIGHTS_BEGIN)
     .replace('#include <lights_fragment_end>', LIGHTS_END)
     .replace('#include <fog_fragment>', FOG)
@@ -401,10 +429,11 @@ export function personMaterial(library, tint, ghost, show = new THREE.Vector2(1,
   // And how far underground, the same way.
   const buried = { value: 0 };
   m.onBeforeCompile = (shader) => inject(shader, set, tints, show, indoor, buried, light);
-  m.customProgramCacheKey = () => 'diku-person-4';
+  m.customProgramCacheKey = () => 'diku-person-5';
   m.onBeforeRender = BURIED_LIGHT.sync;
   m.dikuIndoor = indoor;
   m.dikuBuried = buried;
+  m.dikuHero = light.hero || HERO_OFF;
   if (ghost) {
     m.transparent = true;
     m.opacity = 0.34;
