@@ -2881,7 +2881,12 @@ function streamMaterial(time) {
         {
           float across = vSpill.x; float along = vSpill.y; float down = vSpill.z;
           float edge = pow(max(sin(3.14159265 * across), 0.0), 0.6);
-          float lump = fnoise(vec2(across * 2.5 + vSeed * 17.0, (along - time * (1.6 + 1.4 * down)) * 7.0));
+          // The phase is where the water is in its flight minus the clock:
+          // the stream's points are even steps of its flight, so down is that
+          // time. A speed that varied along the stream, time * (1.6 +
+          // 1.4 * down), drifted further out of step every second and after
+          // about one the lumps crept upward.
+          float lump = fnoise(vec2(across * 2.5 + vSeed * 17.0, (down * 0.6 - time) * 12.0));
           float thread = 0.65 + 0.35 * sin(across * 17.0 + vSeed * 9.0 + along * 3.0);
           float parted = smoothstep(0.2 + down * 0.45, 0.45 + down * 0.4, lump);
           diffuseColor.a *= edge * thread * mix(1.0, parted, down);
