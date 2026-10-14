@@ -1849,10 +1849,54 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         shape: 1, fadeIn: 0.3,
       });
     }
+    if (!close(fx.from)) gatherKind(fx, dt, u);
     // The growing heart of it: one sprite a frame, short-lived, so it follows the hand.
     const coreSize = (close(fx.from) ? 0.06 : 0.09) + u * (close(fx.from) ? 0.1 : 0.16);
     light.spawn({ x: 0, y: 0, z: 0, anchor: fx.anchor, life: 0.05, size: coreSize * 2.6, color: palette.glow, alpha: 0.5 + u * 0.5, shape: 0, drag: 0, fadeIn: 0 });
     light.spawn({ x: 0, y: 0, z: 0, anchor: fx.anchor, life: 0.05, size: coreSize * 0.8, color: (palette.core || palette.mote || palette.glow), alpha: 0.35 + u * 0.4, shape: 1, drag: 0, fadeIn: 0 });
+  }
+
+  /**
+   * What the words are made of, at the hand, seen from outside: every family
+   * gathered as the same drawn-in motes, which at 3.4 m read as one violet
+   * blur whatever was coming. Fire smoulders and throws embers up, frost
+   * grows crystals round the hand and sheds mist, the dark arts draw smoke up
+   * out of the ground, acid drips. Rates grow with the windup (`u`).
+   */
+  function gatherKind(fx, dt, u) {
+    const key = FAMILY[fx.family] || 'ward';
+    const h = fx.hand;
+    const k = dt * budget.density * (0.3 + u);
+    const acc = fx.data.kind || (fx.data.kind = { a: 0, b: 0 });
+    acc.a += k * 34; acc.b += k * 12;
+    if (key === 'fire') {
+      while (acc.a >= 1) { acc.a -= 1; light.spawn({ x: h.x + rand(-0.06, 0.06), y: h.y, z: h.z + rand(-0.06, 0.06), vx: rand(-0.15, 0.15), vy: rand(0.6, 1.3), vz: rand(-0.15, 0.15), life: rand(0.4, 0.8), size: rand(0.015, 0.03), color: PAL.fire.ember, shape: 1, drag: 0.8, swirl: rand(1, 3), fadeIn: 0.05, occ: 0.3 }); }
+      while (acc.b >= 1) { acc.b -= 1; light.spawn({ x: 0, y: 0.02, z: 0, anchor: fx.anchor, vx: 0, vy: rand(0.3, 0.6), vz: 0, life: rand(0.18, 0.3), size: rand(0.07, 0.13) * (0.6 + u), color: PAL.fire.glow, shape: 4, drag: 1, fadeIn: 0.05, occ: 0.45 }); }
+    } else if (key === 'frost') {
+      while (acc.a >= 1) {
+        acc.a -= 1;
+        const a = rand(0, TAU); const r = rand(0.16, 0.3);
+        light.spawn({ x: Math.cos(a) * r, y: rand(-0.12, 0.12), z: Math.sin(a) * r, anchor: fx.anchor, vx: 0, vy: 0, vz: 0, swirl: rand(1.5, 3), pull: rand(0.6, 1.2), life: rand(0.4, 0.7), size: rand(0.03, 0.06), color: PAL.frost.crystal, shape: 2, drag: 0, fadeIn: 0.25 });
+      }
+      while (acc.b >= 1) { acc.b -= 1; light.spawn({ x: h.x + rand(-0.08, 0.08), y: h.y - 0.05, z: h.z + rand(-0.08, 0.08), vx: rand(-0.1, 0.1), vy: -rand(0.1, 0.3), vz: rand(-0.1, 0.1), life: rand(0.8, 1.3), size: rand(0.12, 0.22), grow: 1.8, color: PAL.frost.mist, alpha: 0.22, shape: 3, drag: 1.2, gravity: 0.3, fadeIn: 0.2, occ: 0.5 }); }
+    } else if (key === 'dark' || key === 'harm') {
+      const pal2 = PAL[key];
+      const feet = feetPoint(fx.from, _v);
+      while (acc.b >= 1) {
+        acc.b -= 1;
+        const a = rand(0, TAU); const r = rand(0.5, 0.9);
+        const x = feet.x + Math.cos(a) * r; const z = feet.z + Math.sin(a) * r;
+        const t = 0.7;
+        matter.spawn({ x, y: feet.y + 0.05, z, vx: (h.x - x) / t, vy: (h.y - feet.y) / t, vz: (h.z - z) / t, life: t, size: rand(0.12, 0.22), grow: 0.6, color: pal2.smoke, alpha: 0.6, shape: 3, drag: 0, fadeIn: 0.15 });
+      }
+      while (acc.a >= 2) { acc.a -= 2; light.spawn({ x: rand(-0.2, 0.2), y: rand(-0.2, 0.2), z: rand(-0.2, 0.2), anchor: fx.anchor, vx: 0, vy: 0, vz: 0, pull: 3, swirl: 4, life: 0.4, size: rand(0.02, 0.04), color: pal2.glow, shape: 1, drag: 0, fadeIn: 0.2 }); }
+    } else if (key === 'acid' || key === 'poison') {
+      const pal2 = PAL[key];
+      while (acc.b >= 1) { acc.b -= 1; light.spawn({ x: h.x + rand(-0.05, 0.05), y: h.y - 0.03, z: h.z + rand(-0.05, 0.05), vx: 0, vy: -0.2, vz: 0, life: rand(0.5, 0.8), size: rand(0.025, 0.045), color: pal2.drop || pal2.glow, shape: 6, drag: 0.2, gravity: 6, fadeIn: 0.05, occ: 0.5 }); }
+      while (acc.a >= 3) { acc.a -= 3; light.spawn({ x: rand(-0.12, 0.12), y: rand(-0.05, 0.1), z: rand(-0.12, 0.12), anchor: fx.anchor, vx: 0, vy: 0.15, vz: 0, life: rand(0.4, 0.7), size: rand(0.03, 0.05), color: pal2.glow, shape: 5, drag: 0.5, fadeIn: 0.2 }); }
+    } else {
+      acc.a = 0; acc.b = 0;
+    }
   }
 
   /**
