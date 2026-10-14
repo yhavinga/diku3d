@@ -2694,85 +2694,295 @@ function instanceDoorLeaves(doors, group) {
  * teal disc", at night more than ever, when the only light on it is the lamp
  * beside it and the shader cannot see lamps at all.
  *
- * So a lit, near-mirror surface: dark, the basin floor only just showing, rough 0.04, reflecting the
- * baked sky and catching every lamp and the sun as a highlight, broken by the
- * rings where the four spouts land and a faint chop. The same surface in the
- * upper bowl, over the model's own flat plate. And the four spouts pour: a
- * falling arc each, streaked and running, which is most of what says "water"
- * at any distance.
- *
- * The model (tools/blender/props.py `build_fountain`): lower water 0.775 m,
- * radius 1.18 (see the note where the basin is placed); upper bowl water at
- * 1.98, radius 0.5; spouts at 1.82 on a 0.5 m ring, tips 0.6 out, at 45
- * degrees and every quarter turn from there.
+ * The model (tools/blender/props.py `build_fountain`) is a tazza fountain,
+ * and the water tells one story through it: a jet out of the finial falls
+ * back into the bowl, the bowl spills over its lip all round, and the spill
+ * lands in a ring in the basin, which is where the basin's rings and foam
+ * are. Looking down you see into the water, and at a slant it is a mirror
+ * (Fresnel, in the surface's alpha); the floor under it carries the sun's
+ * caustics, from the direct light alone, so they go with the sun and the
+ * shadows and are gone at night and under cloud. The old model's basin was a
+ * solid drum with the water a film on its cap, and four thin jets that read
+ * as glass rods.
  */
-const SPOUT_Y = 1.82;
-const SPOUT_TIP = 0.6;
-const UPPER_Y = 2.005;
-const UPPER_R = 0.48;
-/** Outward speed at the spout: lands 0.95 m out, clear of the 1.18 m rim. */
-const SPOUT_V = 0.8;
+/** The basin's water above the fountain's floor, and its octagon to the corner inside. */
+const BASIN_WATER = 0.62;
+const BASIN_CORNER = 1.025;
+const BASIN_FLOOR = 0.10;
+/** The tazza's water, brimming at its lip, and how far across it is inside. */
+const TAZZA_WATER = 1.935;
+const TAZZA_R = 0.603;
+/** The spill: off the water at the lip, over the bead, then falling. */
+const SPILL_PATH = [[0.612, 1.951], [0.645, 1.949], [0.667, 1.933]];
+const SPILL_OFF = [0.676, 1.90];
+/** Outward and downward speed as it leaves the bead (m/s). */
+const SPILL_V = [0.25, 0.3];
+const SPILLS = 48;
+const NOZZLE = 2.16;
+const JET_RISE = 0.34;
 
-function rippled(time, drops) {
+const fall = (h, vy) => (-vy + Math.sqrt(vy * vy + 2 * 9.81 * h)) / 9.81;
+/** Where the spill lands in the basin, from its own flight. */
+const SPILL_T = fall(SPILL_OFF[1] - BASIN_WATER, SPILL_V[1]);
+const SPILL_LAND = SPILL_OFF[0] + SPILL_V[0] * SPILL_T;
+
+const FOUNT_GLSL = `
+  float fhash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float fnoise(vec2 p) {
+    vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(fhash(i), fhash(i + vec2(1.0, 0.0)), f.x), mix(fhash(i + vec2(0.0, 1.0)), fhash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }`;
+
+/**
+ * The surface: rings born where the water lands -- each one a single wave
+ * running out and dying, born again at its own rate -- over a faint chop.
+ * The old surface was standing sine rings, which read as circles cut into
+ * glass. `ring` is how far out the water lands, `foam` how much white it
+ * churns up there.
+ */
+function rippled(time, centre, ring, { foam = 0, alpha = 0.5 } = {}) {
   const material = new THREE.MeshStandardMaterial({
-    // Clear and shallow over pale stone: mostly the basin floor, darkened,
-    // with the sky on it at a slant.
-    color: 0x101b19, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.84, envMapIntensity: 1.2,
+    color: 0x0d1d1a, roughness: 0.05, metalness: 0, transparent: true, opacity: 1, envMapIntensity: 1.2,
   });
   material.name = 'fountainwater';
   material.onBeforeCompile = (shader) => {
     shader.uniforms.time = time;
-    shader.uniforms.drops = { value: drops };
+    shader.uniforms.fountC = { value: new THREE.Vector3(centre.x, centre.y, ring) };
+    shader.uniforms.fountFoam = { value: foam };
+    shader.uniforms.fountAlpha = { value: alpha };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vFount;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFount = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform float time;
-        uniform vec3 drops[4];
+        uniform vec3 fountC;
+        uniform float fountFoam;
+        uniform float fountAlpha;
         varying vec3 vFount;
-        // Height of the surface: rings running out from where the spouts
-        // land, dying with distance, over a faint chop.
+        ${FOUNT_GLSL}
         float fountHeight(vec2 p) {
+          vec2 q = p - fountC.xy;
           float h = 0.0;
-          for (int i = 0; i < 4; i++) {
-            float d = distance(p, drops[i].xz);
-            h += sin(d * 34.0 - time * 9.0 + float(i) * 1.7) * exp(-d * 2.6) * 0.016;
+          for (int i = 0; i < 20; i++) {
+            float fi = float(i);
+            float a = fi * 0.31415927 + (fhash(vec2(fi, 1.0)) - 0.5) * 0.25;
+            vec2 o = vec2(cos(a), -sin(a)) * fountC.z * (0.92 + 0.16 * fhash(vec2(fi, 2.0)));
+            float period = 0.5 + 0.6 * fhash(vec2(fi, 3.0));
+            float age = fract(time / period + fhash(vec2(fi, 4.0))) * period;
+            float d = length(q - o) - (0.03 + age * 0.5);
+            h += exp(-d * d * 900.0) * exp(-age * 3.2) * cos(d * 70.0) * 0.005;
           }
-          h += sin(p.x * 9.0 + time * 1.3) * sin(p.y * 11.0 - time * 1.1) * 0.0035;
+          h += (sin(q.x * 13.0 + time * 1.7) * sin(q.y * 15.0 - time * 1.3)
+            + 0.5 * sin((q.x + q.y) * 23.0 - time * 2.3)) * 0.0011;
           return h;
+        }
+        float fountFroth(vec2 p) {
+          vec2 q = p - fountC.xy;
+          float band = smoothstep(0.13, 0.0, abs(length(q) - fountC.z));
+          float churn = fnoise(q * 22.0 + vec2(time * 0.9, -time * 0.7)) * 0.6 + fnoise(q * 47.0 - time * 1.9) * 0.4;
+          return fountFoam * band * smoothstep(0.42, 0.78, churn + 0.25 * band);
         }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float froth = fountFroth(vFount.xz);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.78, 0.83, 0.82), froth);`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.55, froth);`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         {
           vec2 p = vFount.xz;
-          float e = 0.01;
+          float e = 0.004;
           float h = fountHeight(p);
           vec3 up = normalize(vec3(-(fountHeight(p + vec2(e, 0.0)) - h) / e, 1.0, -(fountHeight(p + vec2(0.0, e)) - h) / e));
           normal = normalize((viewMatrix * vec4(up, 0.0)).xyz);
+        }`)
+      .replace('#include <opaque_fragment>', `
+        {
+          // Schlick, water's F0 0.02: you see into it looking down and the
+          // sky on it at a slant.
+          float c = clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
+          float fres = 0.02 + 0.98 * pow(1.0 - c, 5.0);
+          diffuseColor.a = max(mix(fountAlpha, 1.0, fres), froth * 0.92);
+        }
+        #include <opaque_fragment>`);
+  };
+  honourEnv(material);
+  return material;
+}
+
+/**
+ * The sun's caustics on the basin floor: added light, shaped by the surface
+ * above, from the direct lights only -- so the shadow map decides where they
+ * fall, and with no sun (night, overcast) there is next to nothing to add.
+ */
+function caustics(time) {
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff, roughness: 1, metalness: 0, transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, envMapIntensity: 0,
+  });
+  material.name = 'fountaincaustics';
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.time = time;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vFount;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvFount = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform float time;
+        varying vec3 vFount;
+        // Dave Hoskins' tileable caustic; a tile of it is 0.5 m of floor, so
+        // its cells are a hand across. At 2.2 m they were soft blobs.
+        float fountCaustic(vec2 uv, float t) {
+          vec2 p = mod(uv * 6.2831853, 6.2831853) - 250.0;
+          vec2 i = p;
+          float c = 1.0;
+          for (int n = 0; n < 4; n++) {
+            float tn = t * (1.0 - (3.5 / float(n + 1)));
+            i = p + vec2(cos(tn - i.x) + sin(tn + i.y), sin(tn - i.y) + cos(tn + i.x));
+            c += 1.0 / length(vec2(p.x / (sin(i.x + tn) / 0.005), p.y / (cos(i.y + tn) / 0.005)));
+          }
+          c /= 4.0;
+          c = 1.17 - pow(c, 1.4);
+          return pow(abs(c), 8.0);
+        }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        diffuseColor.rgb *= fountCaustic(vFount.xz / 0.5, time * 0.6) * 1.2;`)
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
+        reflectedLight.indirectDiffuse = vec3(0.0);
+        reflectedLight.indirectSpecular = vec3(0.0);`);
+  };
+  return material;
+}
+
+/**
+ * Falling water: thin streams that run in lumps and, as they fall, part into
+ * threads and drops. `aSpill` is (across 0-1, metres along, how far down 0-1)
+ * and `aSeed` keeps neighbouring streams out of step. One material for the
+ * spill and the jet: the jet's `along` runs upward, so its lumps rise.
+ */
+function streamMaterial(time) {
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xdcebee, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.78,
+    depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 1.3,
+  });
+  material.name = 'fountainfall';
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.time = time;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 aSpill;\nattribute float aSeed;\nvarying vec3 vSpill;\nvarying float vSeed;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSpill = aSpill;\nvSeed = aSeed;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform float time;
+        varying vec3 vSpill;
+        varying float vSeed;
+        ${FOUNT_GLSL}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        {
+          float across = vSpill.x; float along = vSpill.y; float down = vSpill.z;
+          float edge = pow(max(sin(3.14159265 * across), 0.0), 0.6);
+          float lump = fnoise(vec2(across * 2.5 + vSeed * 17.0, (along - time * (1.6 + 1.4 * down)) * 7.0));
+          float thread = 0.65 + 0.35 * sin(across * 17.0 + vSeed * 9.0 + along * 3.0);
+          float parted = smoothstep(0.2 + down * 0.45, 0.45 + down * 0.4, lump);
+          diffuseColor.a *= edge * thread * mix(1.0, parted, down);
         }`);
   };
   honourEnv(material);
   return material;
 }
 
-function streakTexture() {
-  const w = 64; const h = 16;
-  const data = new Uint8Array(w * h * 4);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      // Along the stream (x) the water runs in lumps; round it (y) in threads.
-      const along = 0.55 + 0.45 * Math.sin(x / w * Math.PI * 6 + Math.sin(y * 1.9) * 2.0);
-      const thread = 0.6 + 0.4 * Math.sin(y / h * Math.PI * 4 + x * 0.15);
-      const v = Math.round(255 * Math.min(1, 0.25 + 0.75 * along * thread));
-      const i = (y * w + x) * 4;
-      data[i] = data[i + 1] = data[i + 2] = v; data[i + 3] = 255;
+/** One stream as a ribbon along `points` ([x, y, z] world), facing `out`. */
+function ribbon(points, out, width, seed) {
+  const n = points.length;
+  const pos = []; const nor = []; const spill = []; const seeds = []; const index = [];
+  let along = 0;
+  for (let k = 0; k < n; k++) {
+    const p = points[k];
+    if (k > 0) along += Math.hypot(p[0] - points[k - 1][0], p[1] - points[k - 1][1], p[2] - points[k - 1][2]);
+    const w = width(k / (n - 1)) / 2;
+    // Across the stream is along the lip, at right angles to `out`.
+    const sx = -out.y; const sz = out.x;
+    for (const side of [0, 1]) {
+      const sgn = side ? 1 : -1;
+      pos.push(p[0] + sx * w * sgn, p[1], p[2] + sz * w * sgn);
+      nor.push(out.x, 0, out.y);
+      spill.push(side, along, k / (n - 1));
+      seeds.push(seed);
+    }
+    if (k > 0) {
+      const a = (k - 1) * 2;
+      index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
     }
   }
-  const texture = new THREE.DataTexture(data, w, h);
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.magFilter = THREE.LinearFilter;
-  texture.needsUpdate = true;
-  return texture;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute('aSpill', new THREE.Float32BufferAttribute(spill, 3));
+  g.setAttribute('aSeed', new THREE.Float32BufferAttribute(seeds, 1));
+  g.setIndex(index);
+  return g;
+}
+
+/**
+ * Drops thrown off where water meets water: each instance a small bead on
+ * its own parabola, born again every `life` seconds, hidden once it is back
+ * under `floor`. `aDrop` is (heading, outward speed, upward speed, phase).
+ */
+function drops(time, { count, centre, y0, r0, out, up, life, floor, size, seed }) {
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xe8f2f3, roughness: 0.05, metalness: 0, transparent: true, opacity: 0.85, envMapIntensity: 1.4,
+  });
+  material.name = 'fountaindrops';
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.time = time;
+    shader.uniforms.dropLife = { value: life };
+    shader.uniforms.dropFloor = { value: floor - y0 };
+    shader.uniforms.dropR0 = { value: r0 };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec4 aDrop;\nuniform float time;\nuniform float dropLife;\nuniform float dropFloor;\nuniform float dropR0;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        {
+          float age = fract(time / dropLife + aDrop.w) * dropLife;
+          float y = aDrop.z * age - 4.905 * age * age;
+          float r = dropR0 + aDrop.y * age;
+          vec2 dir = vec2(cos(aDrop.x), -sin(aDrop.x));
+          // Drawn out along its fall, and gone once it is back in the water.
+          float vy = abs(aDrop.z - 9.81 * age);
+          transformed *= vec3(1.0, 1.0 + vy * 0.9, 1.0) * step(dropFloor, y);
+          transformed += vec3(dir.x * r, y, dir.y * r);
+        }`);
+  };
+  honourEnv(material);
+  const geometry = new THREE.IcosahedronGeometry(size, 0);
+  const mesh = new THREE.InstancedMesh(geometry, material, count);
+  const rnd = mulberry(seed);
+  const attr = new Float32Array(count * 4);
+  for (let i = 0; i < count; i++) {
+    attr[i * 4] = rnd() * Math.PI * 2;
+    attr[i * 4 + 1] = out[0] + rnd() * (out[1] - out[0]);
+    attr[i * 4 + 2] = up[0] + rnd() * (up[1] - up[0]);
+    attr[i * 4 + 3] = rnd();
+  }
+  geometry.setAttribute('aDrop', new THREE.InstancedBufferAttribute(attr, 4));
+  const identity = new THREE.Matrix4();
+  for (let i = 0; i < count; i++) mesh.setMatrixAt(i, identity);
+  mesh.position.set(centre.x, y0, centre.z);
+  // Every bead sits at the instance's origin until the shader throws it.
+  mesh.frustumCulled = false;
+  mesh.castShadow = false;
+  return mesh;
+}
+
+/** A small seeded generator, so every boot throws the same drops. */
+function mulberry(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function makeFountainWater(w) {
@@ -2780,60 +2990,80 @@ function makeFountainWater(w) {
   group.name = 'fountain water';
   const time = { value: 0 };
   const rotY = w.basin.rotY;
-  // Where the spouts are: model +x at 45 degrees and every quarter turn,
-  // turned with the instance. Blender's +y is three's -z.
-  const spouts = [];
-  for (let i = 0; i < 4; i++) {
-    const a = Math.PI / 4 + i * Math.PI / 2;
-    const lx = Math.cos(a); const lz = -Math.sin(a);
-    const c = Math.cos(rotY); const s = Math.sin(rotY);
-    spouts.push(new THREE.Vector2(lx * c + lz * s, -lx * s + lz * c));
-  }
-  const base = w.y - 0.775; // the fountain's own floor
-  const fall = SPOUT_Y - 0.775;
-  const flight = Math.sqrt((2 * fall) / 9.81);
-  const land = SPOUT_TIP + SPOUT_V * flight;
-  const drops = spouts.map((d) => new THREE.Vector3(w.x + d.x * land, w.y, w.z + d.y * land));
+  const base = w.y - BASIN_WATER; // the fountain's own floor
+  const centre = new THREE.Vector2(w.x, w.z);
 
-  const lower = new THREE.Mesh(new THREE.CircleGeometry(w.radius, 40).rotateX(-Math.PI / 2), rippled(time, drops));
+  // The basin: an octagon like the stone round it, its corners at the
+  // model's (props.py's octagons have a corner at angle 0).
+  const lower = new THREE.Mesh(new THREE.CircleGeometry(BASIN_CORNER, 8).rotateX(-Math.PI / 2),
+    rippled(time, centre, SPILL_LAND, { foam: 1, alpha: 0.42 }));
   lower.position.set(w.x, w.y, w.z);
+  lower.rotation.y = rotY;
   lower.receiveShadow = true;
-  const upperDrops = spouts.map(() => new THREE.Vector3(w.x, base + UPPER_Y, w.z));
-  const upper = new THREE.Mesh(new THREE.CircleGeometry(UPPER_R, 28).rotateX(-Math.PI / 2), rippled(time, upperDrops));
-  upper.position.set(w.x, base + UPPER_Y, w.z);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(BASIN_CORNER, 8).rotateX(-Math.PI / 2), caustics(time));
+  floor.position.set(w.x, base + BASIN_FLOOR + 0.004, w.z);
+  floor.rotation.y = rotY;
+  floor.receiveShadow = true;
+  floor.renderOrder = -1;
+  const upper = new THREE.Mesh(new THREE.CircleGeometry(TAZZA_R, 32).rotateX(-Math.PI / 2),
+    rippled(time, centre, 0.2, { alpha: 0.55 }));
+  upper.position.set(w.x, base + TAZZA_WATER, w.z);
   upper.receiveShadow = true;
-  group.add(lower, upper);
+  group.add(floor, lower, upper);
 
-  // The four falls: a parabola from each spout tip to the basin.
-  const streaks = streakTexture();
-  const fallMaterial = new THREE.MeshStandardMaterial({
-    color: 0xd4e6ea, roughness: 0.12, metalness: 0, transparent: true, opacity: 0.62,
-    alphaMap: streaks, depthWrite: false,
-  });
-  fallMaterial.name = 'fountainfall';
-  const falls = [];
-  for (const d of spouts) {
-    const points = [];
+  // The spill: a stream every 7.5 degrees, wide enough at the lip to be one
+  // sheet and parting into threads as it falls and thins.
+  const rnd = mulberry(Math.round(w.x * 31 + w.z * 17));
+  const streams = [];
+  for (let i = 0; i < SPILLS; i++) {
+    const a = (i + (rnd() - 0.5) * 0.4) * (Math.PI * 2 / SPILLS);
+    const out = new THREE.Vector2(Math.cos(a), -Math.sin(a));
+    const vOut = SPILL_V[0] * (0.85 + rnd() * 0.3);
+    const points = SPILL_PATH.map(([r, y]) => [w.x + out.x * r, base + y, w.z + out.y * r]);
     for (let k = 0; k <= 12; k++) {
-      const t = (k / 12) * flight;
-      const r = SPOUT_TIP + SPOUT_V * t;
-      points.push(new THREE.Vector3(w.x + d.x * r, base + SPOUT_Y - 0.5 * 9.81 * t * t, w.z + d.y * r));
+      const t = (k / 12) * SPILL_T;
+      const r = SPILL_OFF[0] + vOut * t;
+      points.push([w.x + out.x * r, base + SPILL_OFF[1] - SPILL_V[1] * t - 4.905 * t * t, w.z + out.y * r]);
     }
-    const curve = new THREE.CatmullRomCurve3(points);
-    // Thicker where it leaves the spout than where it has thinned in falling.
-    falls.push(new THREE.TubeGeometry(curve, 24, 0.028, 8, false));
+    const wide = (Math.PI * 2 * 0.64 / SPILLS) * (1.1 + rnd() * 0.3);
+    streams.push(ribbon(points, out, (f) => wide * (1 - 0.6 * Math.sqrt(f)), rnd()));
   }
-  // One draw for the four of them.
-  const fallMesh = new THREE.Mesh(mergeGeometries(falls, false), fallMaterial);
-  for (const tube of falls) tube.dispose();
+  // The jet: a cone of water up out of the nozzle, its lumps rising.
+  const jet = new THREE.CylinderGeometry(0.006, 0.013, JET_RISE, 10, 6, true);
+  jet.translate(w.x, base + NOZZLE + JET_RISE / 2, w.z);
+  {
+    const p = jet.attributes.position;
+    const spill = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) {
+      const h = (p.getY(i) - base - NOZZLE) / JET_RISE;
+      // Round a tube there is no edge to fade, so it is all middle.
+      spill[i * 3] = 0.5; spill[i * 3 + 1] = h * JET_RISE; spill[i * 3 + 2] = h;
+    }
+    jet.setAttribute('aSpill', new THREE.BufferAttribute(spill, 3));
+    jet.setAttribute('aSeed', new THREE.BufferAttribute(new Float32Array(p.count).fill(0.37), 1));
+    jet.deleteAttribute('uv');
+  }
+  streams.push(jet);
+  const fallMesh = new THREE.Mesh(mergeGeometries(streams, false), streamMaterial(time));
+  for (const g of streams) g.dispose();
   fallMesh.castShadow = false;
   group.add(fallMesh);
+
+  // The jet breaks at its top into drops that fall back into the bowl, and
+  // the spill throws drops up where it lands.
+  const seed = Math.round(w.x * 13 + w.z * 7);
+  group.add(drops(time, {
+    count: 70, centre: new THREE.Vector3(w.x, 0, w.z), y0: base + NOZZLE + JET_RISE - 0.04, r0: 0.01,
+    out: [0.15, 0.55], up: [0.1, 0.9], life: 0.6, floor: base + TAZZA_WATER, size: 0.009, seed,
+  }));
+  group.add(drops(time, {
+    count: 90, centre: new THREE.Vector3(w.x, 0, w.z), y0: w.y, r0: SPILL_LAND,
+    out: [-0.25, 0.3], up: [0.35, 0.95], life: 0.22, floor: w.y - 0.005, size: 0.007, seed: seed + 1,
+  }));
   return {
     group,
     update(t) {
       time.value = t;
-      // Streaks run down the fall at about the water's own speed.
-      streaks.offset.x = -t * 1.6;
     },
   };
 }
@@ -3130,36 +3360,17 @@ function* peopleOf(world, layout, built, options = {}) {
           z0: mesh.position.z - solid, z1: mesh.position.z + solid,
           y0: mesh.position.y, y1: mesh.position.y + 1.6,
           // A fountain is a drum: round, so you walk round it (player.js).
-          // The modelled one's drum is 1.26 m in radius (props.py).
+          // The modelled one's coping is 1.28 m out at its corners (props.py).
           r: item.proto.itemType === ITEM.FOUNTAIN ? (modelled && instances ? 1.3 : solid) : undefined,
         });
       }
       if (item.proto.itemType === ITEM.FOUNTAIN) {
-        // Fitted to the drum the model actually has, not to a square guess.
-        // This was a 2.4 x 2.4 square at y 0.62, and `build_fountain()` in
-        // tools/blender/props.py caps the basin with a *solid* disc of radius
-        // 1.25 spanning 0.62 to 0.76 -- the "coping" is a cylinder, not a ring.
-        // So the plane sat exactly under that cap and the only part of it
-        // anyone ever saw was the 0.45 m of corner sticking out past the
-        // stonework, cutting through the drum's front face. Which is the whole
-        // of the judge's finding, and it means there is no visible water in the
-        // lower basin at all.
-        //
-        // The asset is not being rebuilt this round, so the water goes on top
-        // of the cap instead of under it: a disc 1.5 cm proud of the stone at
-        // 1.18, inside the 1.25 coping, which leaves a 7 cm lip of stone all
-        // round and reads as a basin filled to the brim. The plinth rises
-        // through it, which is what a pedestal standing in water does.
+        // The basin's water, at the model's own level (props.py
+        // `build_fountain`, makeFountainWater above): the old model capped
+        // its drum with a solid disc and the water had to sit on the cap.
         waters.push({
-          x: mesh.position.x, y: mesh.position.y + 0.775, z: mesh.position.z,
-          radius: 1.18,
-          // A stone basin is still water a foot deep. The river's chop is a
-          // reach of moving water and its `deep` is a colour you cannot see
-          // the bottom through; neither is true here. The glint goes *up*,
-          // because a flat basin is the one water in town that is a mirror,
-          // and a fountain with no specular on it at golden hour reads as
-          // painted concrete -- which is what a judge called it.
-          chop: 0.45, glint: 1.25, deep: 0x2c5f60,
+          x: mesh.position.x, y: mesh.position.y + BASIN_WATER, z: mesh.position.z,
+          radius: BASIN_CORNER,
           basin: { rotY: mesh.rotation.y },
         });
       }

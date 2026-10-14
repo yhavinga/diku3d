@@ -315,29 +315,66 @@ def build_trough():
     return kit.deliver(p, "trough")
 
 
+def lathe(profile, sides, name, mat, smooth=None):
+    """A surface of revolution from (r, z) pairs, bottom first, open at both
+    ends. The profile may turn back on itself -- up the outside, over a rim and
+    down the inside -- and every face still faces out of the stone, because a
+    surface of revolution has one side all along its profile. With `sides` 8
+    it is an octagon whose corners sit at angle 0 and every 45 degrees."""
+    obj = lib.loft([(z, r, r, 0.0, 0.0) for (r, z) in profile], sides=sides,
+                   name=name, mat=mat, caps=False)
+    if smooth:
+        lib.shade_smooth(obj, smooth)
+    return obj
+
+
+# The fountain's numbers, which actors.js (`makeFountainWater`) repeats: the
+# basin's water stands at 0.62, its octagon 1.02 to the corner inside; the
+# tazza holds water to its lip at 1.935, 0.6 across the inside, and spills over
+# a lip 0.67 out; the jet leaves the nozzle at 2.16.
 def build_fountain():
+    """A tazza fountain: an octagonal basin of walling stone with marble
+    pilasters and coping, a pedestal standing in the water, a turned baluster, a shallow
+    bowl the water spills over all round, and a jet out of a finial in it.
+    Hollow, so there is water to look into: the old drum was capped with a
+    solid disc and the water was a film on top of the stone. The marble is the
+    temple's own: `statuary` is polished white and burnt out at noon, and
+    `ashlar` is the sewer's and takes no sky."""
     lib.reset()
     p = []
-    r, wall = 1.2, 0.62
-    p += ring_of(10, r - 0.14, 0.3, wall / 2, wall, mat="stonewall", cham=0.04, name="kerb")
-    p.append(lib.cylinder(r + 0.05, 0.14, (0, 0, wall + 0.07), verts=14, name="coping",
-                          mat="stonewall"))
-    p.append(lib.cylinder(r - 0.3, 0.14, (0, 0, 0.07), verts=12, name="floor", mat="stonewall"))
-    p.append(lib.cylinder(r - 0.29, 0.04, (0, 0, wall - 0.16), verts=12, name="water", mat="water"))
-    # Pedestal and the upper bowl it spills from. Nothing at the exact centre of
-    # a room -- but the fountain IS the centre of its own asset, so this one is
-    # allowed to be, as long as the viewer keeps it off a room's midpoint.
-    p.append(kit.timber((0.62, 0.62, 0.3), (0, 0, wall + 0.15), (0, 0, 0), "stonewall", 0.04, "plinth"))
-    p.append(lib.cone(0.24, 0.17, 0.86, (0, 0, wall + 0.73), verts=12, name="stem", mat="stonewall"))
-    p.append(lib.cone(0.56, 0.2, 0.26, (0, 0, wall + 1.29), verts=14, name="bowl", mat="stonewall"))
-    p.append(lib.cylinder(0.5, 0.04, (0, 0, wall + 1.36), verts=14, name="water", mat="water"))
-    p.append(lib.cone(0.14, 0.09, 0.34, (0, 0, wall + 1.6), verts=8, name="finial", mat="stonewall"))
-    p.append(lib.sphere(0.11, (0, 0, wall + 1.83), segments=8, rings=5, name="ball",
-                        mat="stonewall"))
-    for i in range(4):
-        a = math.pi / 4 + i * math.pi / 2
-        p.append(lib.cylinder(0.045, 0.2, (0.5 * math.cos(a), 0.5 * math.sin(a), wall + 1.2),
-                              (0, math.pi / 2, a), verts=6, name="spout", mat="iron"))
+    # Basin. Corners at 1.2 (the drum's collider is 1.3).
+    p.append(lathe([(1.27, 0.0), (1.27, 0.07), (1.24, 0.10), (1.20, 0.12), (1.20, 0.565)],
+                   8, "basin wall", "stonewall"))
+    # The coping: a roll on the outside, a flat top and down the inside to the
+    # floor, one surface so nothing meets the inner wall face to face.
+    p.append(lathe([(1.20, 0.555), (1.25, 0.575), (1.28, 0.61), (1.28, 0.655), (1.26, 0.69),
+                    (1.21, 0.705), (1.05, 0.705), (1.02, 0.69), (1.02, 0.10)],
+                   8, "coping", "marble"))
+    p.append(lathe([(1.02, 0.10), (0.01, 0.10)], 8, "basin floor", "flagstone"))
+    for i in range(8):
+        a = i * math.pi / 4
+        p.append(kit.timber((0.07, 0.13, 0.46), (1.215 * math.cos(a), 1.215 * math.sin(a), 0.35),
+                            (0, 0, a), "marble", 0.015, "pilaster"))
+    # Pedestal, from inside the floor to a cornice clear of the water.
+    p.append(lathe([(0.36, 0.095), (0.36, 0.66), (0.40, 0.69), (0.40, 0.74), (0.34, 0.78),
+                    (0.27, 0.80), (0.20, 0.80)], 8, "pedestal", "marble"))
+    # Baluster: a foot, a belly and a neck under a collar.
+    p.append(lathe([(0.20, 0.795), (0.25, 0.80), (0.26, 0.83), (0.25, 0.86), (0.20, 0.88),
+                    (0.16, 0.92), (0.15, 0.98), (0.17, 1.06), (0.205, 1.16), (0.215, 1.22),
+                    (0.20, 1.30), (0.16, 1.38), (0.12, 1.44), (0.105, 1.48), (0.115, 1.51),
+                    (0.15, 1.53), (0.15, 1.56), (0.12, 1.58), (0.11, 1.615)],
+                   16, "baluster", "marble", smooth=50))
+    # Tazza: the underside sweeps out from the collar to a beaded lip, the
+    # inside drops to a shallow floor the finial stands in.
+    p.append(lathe([(0.10, 1.60), (0.16, 1.63), (0.26, 1.67), (0.38, 1.72), (0.50, 1.775),
+                    (0.585, 1.82), (0.635, 1.855), (0.66, 1.875), (0.668, 1.90), (0.66, 1.925),
+                    (0.645, 1.94), (0.615, 1.945), (0.595, 1.935), (0.57, 1.91), (0.50, 1.875),
+                    (0.36, 1.845), (0.18, 1.83), (0.06, 1.825)],
+                   24, "tazza", "marble", smooth=55))
+    p.append(lathe([(0.10, 1.82), (0.10, 1.86), (0.07, 1.90), (0.06, 1.98), (0.08, 2.03),
+                    (0.10, 2.06), (0.10, 2.08), (0.06, 2.11), (0.035, 2.125)],
+                   12, "finial", "marble", smooth=50))
+    p.append(lib.cylinder(0.02, 0.05, (0, 0, 2.135), verts=8, name="nozzle", mat="iron"))
     return kit.deliver(p, "fountain")
 
 
