@@ -1125,6 +1125,12 @@ export function createPlayerFigure({
   let speed = 0;
   let yawNow = null;
   let lit = null;
+  // Your own figure's states (src/view.js): a held pose, in the air, and the
+  // one-shots that fade only as they end. Other players' bodies use none.
+  let posed = null;
+  let airborne = false;
+  let clock = 0;
+  const ending = [];
 
   /**
    * One frame: stand at `feet`, face `yaw` (the camera's convention: forward
@@ -1154,11 +1160,22 @@ export function createPlayerFigure({
       }
     }
     if (!actions || !made.mixer) return;
+    clock += dt;
+    for (let i = ending.length - 1; i >= 0; i--) {
+      if (clock < ending[i].at) continue;
+      ending[i].action.fadeOut(0.22);
+      ending.splice(i, 1);
+    }
     const runFrom = (walkSpeed * 1.25 + runSpeed) / 2;
-    const target = speed < 0.25 ? 'idle' : (speed < runFrom ? 'walk' : 'run');
+    // Sitting, lying dead or off the ground, the legs are not walking.
+    const target = posed || airborne ? null : (speed < 0.25 ? 'idle' : (speed < runFrom ? 'walk' : 'run'));
     for (const clip of ['idle', 'walk', 'run']) {
       weights[clip] += ((clip === target ? 1 : 0) - weights[clip]) * Math.min(1, dt * 8);
       actions[clip].setEffectiveWeight(weights[clip]);
+    }
+    if (actions.sit) {
+      weights.sit = (weights.sit || 0) + ((posed === 'sit' ? 1 : 0) - (weights.sit || 0)) * Math.min(1, dt * 5);
+      actions.sit.setEffectiveWeight(weights.sit);
     }
     actions.walk.timeScale = Math.max(0.4, speed / walkSpeed);
     actions.run.timeScale = Math.max(0.6, speed / runSpeed);
@@ -1212,18 +1229,60 @@ export function createPlayerFigure({
     speechLeft = seconds;
   }
 
-  /** A blow, or one taken: the clip once, over whatever the legs are doing. */
-  function perform(clip) {
+  /**
+   * A blow, or one taken: the clip once, over whatever the legs are doing.
+   * `contactIn` times it so the clip's own contact (people.js HIT_FRAME) falls
+   * that many seconds from now -- a spell's release on the end of its words --
+   * and plays it whole, fading only as it ends; without it, as before.
+   */
+  function perform(clip, { contactIn = null, whole = false } = {}) {
     const action = actions && actions[clip];
     if (!action) return;
     action.reset();
+    const length = made.clips && made.clips[clip];
+    action.timeScale = contactIn !== null && HIT_FRAME[clip] && length
+      ? (HIT_FRAME[clip] * length) / Math.max(0.25, contactIn) : 1;
     action.setEffectiveWeight(1);
-    action.fadeOut(0.5);
+    if (contactIn !== null || whole) {
+      const at = clock + (length ? length / action.timeScale : 0.5) - 0.22;
+      for (let i = ending.length - 1; i >= 0; i--) if (ending[i].action === action) ending.splice(i, 1);
+      ending.push({ action, at });
+    } else {
+      action.fadeOut(0.5);
+    }
     action.play();
   }
 
+  /** A held pose: 'sit' (resting, asleep), 'death' (down and staying down), or null. */
+  function pose(name) {
+    if (name === posed || !actions) return;
+    if (posed === 'death' && actions.death) actions.death.fadeOut(0.3);
+    posed = name;
+    if (name === 'death' && actions.death) {
+      actions.death.reset();
+      actions.death.timeScale = 1;
+      actions.death.setEffectiveWeight(1);
+      actions.death.play();
+    }
+  }
+
+  /** Off the ground (true) and back on it (false): the jump held, then the landing. */
+  function air(up) {
+    if (up === airborne || !actions) return;
+    airborne = up;
+    if (up && actions.jump) {
+      actions.jump.reset();
+      actions.jump.timeScale = 1;
+      actions.jump.setEffectiveWeight(1);
+      actions.jump.play();
+    } else if (!up) {
+      if (actions.jump) actions.jump.fadeOut(0.12);
+      if (actions.land) perform('land', { whole: true });
+    }
+  }
+
   return {
-    group, height: made.height, update, perform, say,
+    group, height: made.height, update, perform, say, pose, air,
     /** The meshes a click can land on: the body, not its shadow or its words. */
     body: made.group,
     dispose() {
