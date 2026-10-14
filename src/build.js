@@ -4179,7 +4179,10 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       if (kit === 'temple_') {
         for (const sx of [-1, 1]) {
           for (const sz of [-1, 1]) {
-            instances.add('temple_column', { x: pos.x + sx * 3.0, y: pos.y, z: pos.z + sz * 3.0, rotY: 0 }, chunk);
+            // Instanced models carry no collider of their own; the column's
+            // plinth (model bounds +-0.76) stood in the room with none, so a
+            // body walked into it -- 101 of them in 11 zones.
+            if (instances.add('temple_column', { x: pos.x + sx * 3.0, y: pos.y, z: pos.z + sz * 3.0, rotY: 0 }, chunk)) addCollider(pos.x + sx * 3.0 - 0.76, pos.x + sx * 3.0 + 0.76, pos.z + sz * 3.0 - 0.76, pos.z + sz * 3.0 + 0.76, pos.y, pos.y + CEIL);
           }
         }
       }
