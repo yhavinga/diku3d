@@ -461,7 +461,9 @@ choose.
 - **The room a body is counted in is game.js `createRoomCounter`**, read
   from the layout alone (cells, links, the world's exits, shells.js) so that
   a page and the server count alike: inside a walled room's walls or its
-  doorway that room, on a street its nearer end, on open ground the nearest
+  doorway that room, on a street its nearer end -- but a walled end only
+  once inside its walls: out past its doorway a street to a room out of
+  doors is that room's (the user, 2026-10-14) -- on open ground the nearest
   room the level's open ground reaches, else the last room. Never count from
   `built.rooms` centres: the page moves 182 of them off the grid. Against
   where a body can really walk it decides otherwise on 12.8% of samples, all
@@ -503,24 +505,40 @@ choose.
   in a channel, as a negative lift the judge and nav.js share; layout.js
   `BESIDE` puts #3200 beside the bridge after `relax`.
 - **Streets the mud does not join are kept apart, not just drawn**
-  (build.js `crossingPlan`): where two such streets share a cell in
-  Midgaard, one is carried 3.5 m over the other on stairs and a deck, or
+  (build.js `crossingPlan`): where two such streets share a cell, one is
+  carried 3.5 m over the other on stairs and a deck, or
   their lane is split by an iron railing, from a search over heights per
   edge (`solveCrossings`). An edge may be up only between two cells that can
   hold the street there or bring it down, or a street ends in a drop; a lane
   two streets share is split, never roofed. Anything a body must not climb
   is held above 1.76 m -- a jump lifts the feet 1.14 m and a step goes 0.62
-  m more -- so parapets hold to 1.9 m (`CROSS_HOLD`), fences to 2.0. Three
-  tangles have no answer with two heights and are left (the user,
-  2026-10-14); the river's deck stays at grade.
+  m more -- so parapets hold to 1.9 m (`CROSS_HOLD`), fences to 2.0. Passes
+  run Midgaard, its graveyard, the desert, then anywhere streets of two
+  regions the fences keep apart cross; a later pass keeps the heights an
+  earlier one built (`planned`). Where an arm of a cell carries three
+  streets the mud keeps apart no heights part them: Midgaard's two tangles
+  are laid again (layout.js `UNTANGLE`, paths, same walls). Out in the open
+  nothing else builds a crossing's corners: they are rock or masonry to the
+  deck's height. The river's deck stays at grade.
 - **A fence that does not close is clutter** (build.js `fencePlan`): the
   zone's rooms are split into regions joined without boot-shut doors and
   guards, and a region other than the largest is fenced round only where
   the fence closes it -- no own street into a cell another region's street
   shares, every doorless gap onto a closed region's ground or the guard's
-  own. The graveyard and the eastern desert do not close: their paths cross
-  others where no crossing parts them. Midgaard's zone only, for now; a gate
-  between two rooms out of doors has its street walled.
+  own. A gap is sealed when it leads only on to its own way (a crossing, an
+  arch, a corridor, a walled room), and a cell shared only by streets of
+  rooms the mud joins both ways is no leak. In a walled room's cell the
+  building's walls are the line, with a wing to the cell's edge where the
+  region's ground turns the corner (`e.wings`): a run there stood 0.2 m off
+  the face and hid the windows. Every zone; a gate between two rooms out of
+  doors has its street walled. The graveyard closes because three rooms are
+  moved into the cell their own exit names (layout.js `BY_EXIT`, each with
+  the rooms stacked on it): placed by breadth, it and the park came out
+  interleaved.
+- **Search for a layout fix with every guard in the score.** The first
+  answers for the tangles and the graveyard each moved a door and broke
+  exit-check's ceiling of 52 wrong walls; searched again with the walls
+  held or wrong walls capped, both had answers that cost none.
 - **Below the ground a building fits under the ground** (`fitUnder`): a
   level below 0 has the ground's slab over it, and cull.js keeps hidden
   things in the shadow pass, so anything taller lays its shadow on the turf

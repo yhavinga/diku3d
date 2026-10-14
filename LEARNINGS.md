@@ -6,6 +6,117 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-14 — wave 19
+
+### Midgaard's two tangles laid again (layout.js `UNTANGLE`)
+
+- **Why two heights could not part them.** In both tangles an arm of a cell
+  (-3,5 west at Poor Alley, -1,17 south at the Concourse) carried three
+  streets the mud keeps apart. A split lane has two halves and a crossing
+  two heights, and roofing one street down another's lane was ruled out in
+  wave 18, so no assignment exists; a third height would not help either.
+  "Arms with three such streets" predicted both tangles but is not the whole
+  story: with Poor Alley moved off its arm, 7 cells were still unsolved.
+- **The search.** Each street of an unsolved cluster laid again by
+  `routePath` (same walls or free ones; shared cells priced 3 or 8, or a
+  cell blocked), singly and in pairs, scored by what `crossingPlan` then left
+  unsolved (2.7 s an evaluation; `w19/untangle*.mjs`). The first answer
+  (3132-3139 into Penny Lane from the north) moved a door: exit-check went
+  52 -> 53 wrong walls, over its ceiling. Searched again with the walls
+  held, three streets: Emerald Avenue #3132-#3117 round the east of the
+  Concourse's corner (5 -> 7 cells), Poor Alley round the south of the
+  Armoury, West Gate to Wall Road round the west of Poor Alley. Unsolved
+  19 -> 0, wrong walls unchanged, planar shortcuts 410 -> 413 (ceiling
+  raised with the user's OK: every new one is a built crossing).
+- **The table holds paths, not a rule.** Asked to prefer a cell, the router
+  took the old route at equal cost; an `avoid` list of streets blocked the
+  one cell the right route crosses. So `UNTANGLE` lists the steps, and keeps
+  them only where they are a street out of the same walls.
+
+### The desert's crossings (build.js, third pass)
+
+- The 3 x 3 desert is a torus (its exits wrap round); C3 x C3 is not planar,
+  so some streets must cross. With two heights the solver parts all 20 of
+  its cells.
+- **Out in the open nothing builds a crossing's corners** (`buildLanes`
+  houses only a town's), and a body walked round the corner from one street
+  onto the other. The cell is now solid to the deck's height but where a
+  street runs: in the desert a block of the massif in sandstone, in the
+  country the same crags in grey, masonry where a town street passes.
+- **Looks.** Plain `cliff` boxes read as a wooden blockout: triplanar
+  sandstone's beds on every tread top are boards. Treads are rock under a
+  skin of sand; decks are paved in sand; the split lane's rail is a rib of
+  the rock. A 1 cm gap between a deck slab and its parapets showed from the
+  side as a black line along every deck, the town's too (`SEAM`).
+
+### Fences that close (build.js `fencePlan`, `regionsOf`)
+
+- A gap is sealed where it leads on to nothing but its own way: a crossing,
+  an arch/gate/shaft, a corridor between two walled rooms, a walled room.
+- A cell two regions' streets share is not a leak when every two streets in
+  it are of rooms the mud joins both ways round (the desert's guards).
+- A fourth crossing pass, in every zone, for cells where streets of two
+  regions meet and one is fenced; later passes keep the heights earlier
+  ones built (`planned`), instead of skipping any cluster a carried street
+  takes part in.
+- Fences in every zone now (the user's go).
+- **In a walled room's cell the building is the line.** Out of town a
+  walled room stands free on the grass, and a fence edge in its cell stood
+  0.2 m off its face (walls at 5 m, outer skin to 5.7, the run at 5.9-6.4),
+  2.24 m of pale stonewall over the windows: catacomb's houses, school's,
+  wyvern's tower rooms (205 of the 958 edges outside home stood in such
+  cells). In Midgaard it never showed, because the house rows fill the
+  strip. Now such an edge builds no run, only a wing from inside the
+  building's outer skin to the cell's edge, at an end where the region's
+  ground goes on round the corner, in the building's own masonry. A hollow
+  tree is round and keeps its run. The oblique sheets showed pale bands
+  along the houses; what they were took the same view on main, then a shot
+  from outside at eye level.
+
+### The graveyard (layout.js `BY_EXIT`)
+
+- Park and graveyard both grew south from the Concourse and came out
+  interleaved. Laid whole (`LAID_WHOLE`) the graveyard moved all of
+  Midgaard: 40 unsolved cells. So rooms were moved into the cell their own
+  exit names (beside a neighbour they have an exit to), searched one at a
+  time, the zone laid again and its crossings and fences planned for each
+  (4 to 8 minutes an evaluation; `w19/grave-moves*.mjs`), keeping a move
+  only with nothing unsolved, no passage lost and no wrong wall more. The
+  first answer moved Emerald Avenue #3133 too and cost four wrong walls;
+  with wrong walls capped, three moves: #3112 west of #3113, #3606 west of
+  #3600, #3650 north of #3648. Cells its streets share with the park's
+  12 -> 0, and the graveyard closed (the last move: closed regions
+  27 -> 28).
+- **A room moves with its column.** #3606 moved and its tomb #3607 under
+  it stayed in the old cell: the way down became a portal, the flight led
+  nowhere (ways: flights 270 -> 266), and mp-hatch's tomb test failed. A
+  move now takes every room stacked on it by ways up and down, level by
+  level.
+
+### Small ones
+
+- #3121/#6016: the town wall now also faces the country's own ground beside
+  a town cell (the forest floor north of Emerald Avenue).
+- The cabin (#6010): a walled end of a street only once inside its walls
+  (game.js counter, roomcount.mjs reference; the user's rule).
+- mp-hatch.mjs comment about currentRoom brought up to date.
+
+### Measured, against main (wave 18)
+
+- Home zone: crossing cells 33 -> 100, unsolved 0; fenced regions closed
+  16 -> 28, leaky 0.
+- exit-check strict ok, Midgaard's wrong walls 18 -> 17; planar no hard
+  faults, shortcuts 410 -> 412 (ceiling 413); layout-check Midgaard 97%,
+  mean 95.44%.
+- walkable, all 32 zones open and shut: none refused. werklijst door/guard
+  pairs open 4,484 -> 1,618, shut 4,141 -> 1,347; the wave-15 review's
+  door/guard places still walked open 108 -> 71, shut 12 -> 10.
+- roomcount spec 14.99% -> 19.02%: hitower 0.01% -> 90.44% is grass round
+  the tower that no room reaches since the Shadow Grove is fenced; home
+  0.01% -> 0.39% is real, ground by the bog counted in #8306 behind its
+  reeds. The counter does not know the fences; the user: ship now, the
+  counter next.
+
 ## 2026-10-14 — wave 18
 
 ### Midgaard's river in its channel (wave18-river)
