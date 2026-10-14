@@ -73,9 +73,10 @@ const WALL_LINE = 5.35, TREE_LINE = 5.4, DOOR_HALF = 1.9;
 export async function loadReference(repo) {
   const mod = (p) => import(pathToFileURL(path.join(repo, p)).href);
   const { CELL, LEVEL_H } = await mod('server/world.mjs');
-  const { SECTOR, REVERSE_DIR } = await mod('src/are.js');
-  const { openAirIn, shellAttrs, wayLid, isDrop } = await mod('src/shells.js');
-  return (inputs, variant = {}) => referenceCounter(inputs, { CELL, LEVEL_H, SECTOR, REVERSE_DIR, openAirIn, shellAttrs, wayLid, isDrop }, variant);
+  const { SECTOR, REVERSE_DIR, DIR_STEP } = await mod('src/are.js');
+  const { openAirIn, shellAttrs, wayLid, isDrop, sunkRivers, RIVER_DROP } = await mod('src/shells.js');
+  const { BESIDE } = await mod('src/layout.js');
+  return (inputs, variant = {}) => referenceCounter(inputs, { CELL, LEVEL_H, SECTOR, REVERSE_DIR, DIR_STEP, openAirIn, shellAttrs, wayLid, isDrop, sunkRivers, RIVER_DROP, BESIDE }, variant);
 }
 
 // ------------------------------------------------------------- the rule --
@@ -85,7 +86,7 @@ export async function loadReference(repo) {
  * find the zone's frame), layout.links, the world, zoneOf. Positions are feet,
  * in the frame `rooms` is in.
  */
-function referenceCounter({ world, rooms, links, zoneOf = null }, { CELL, LEVEL_H, SECTOR, REVERSE_DIR, openAirIn, shellAttrs, wayLid, isDrop }, variant = {}) {
+function referenceCounter({ world, rooms, links, zoneOf = null }, { CELL, LEVEL_H, SECTOR, REVERSE_DIR, DIR_STEP, openAirIn, shellAttrs, wayLid, isDrop, sunkRivers, RIVER_DROP, BESIDE }, variant = {}) {
   const openAir = openAirIn(world);
   const key = (level, x, z) => `${level},${x},${z}`;
   const entries = new Map();
@@ -120,6 +121,21 @@ function referenceCounter({ world, rooms, links, zoneOf = null }, { CELL, LEVEL_
     const above = entries.get(upper.vnum);
     if (!above) throw new Error(`roomcount: the shaft under #${upper.vnum} has no room counted there`);
     shafts.set(key(above.level, above.gx, above.gz), { lower: lower.vnum, floor: upper.level * LEVEL_H });
+  }
+  // Down in the river's channel under the bridge, or between it and the room
+  // the prose puts beside it (layout.js BESIDE), the room "Under the Bridge"
+  // and not the bridge over its head (the user, 2026-10-14). Written out again
+  // here, as the shafts are.
+  const sunk = sunkRivers(world, { cells: new Map([...entries].map(([v, e]) => [v, { level: e.level, x: e.gx, z: e.gz }])) });
+  const underDeck = new Map();
+  for (const { room, dir, to } of BESIDE) {
+    const a = entries.get(room), b = entries.get(to);
+    if (!a || !b || !sunk.has(room) || a.level !== b.level) continue;
+    for (let n = 1; n <= 8; n++) {
+      const x = a.gx + DIR_STEP[dir][0] * n, z = a.gz + DIR_STEP[dir][2] * n;
+      underDeck.set(key(a.level, x, z), a.vnum);
+      if (x === b.gx && z === b.gz) break;
+    }
   }
   // layout.js's own test: the far end of a one-way exit has no way back.
   const oneWay = (link) => !world.rooms.get(link.to.vnum).exits.some((x) => x && x.to === link.from.vnum);
@@ -180,6 +196,8 @@ function referenceCounter({ world, rooms, links, zoneOf = null }, { CELL, LEVEL_
     // Under the floor above, in the column of a shaft: the room below.
     const shaft = shafts.get(key(level, gx, gz));
     if (shaft && p.y < shaft.floor - 0.3) return { room: shaft.lower };
+    const below = underDeck.get(key(level, gx, gz));
+    if (below !== undefined && p.y < level * LEVEL_H - RIVER_DROP / 2) return { room: below };
     const r = byCell.get(key(level, gx, gz));
     if (r) {
       if (!r.walled) return { room: r.vnum };
