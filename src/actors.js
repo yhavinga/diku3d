@@ -1079,6 +1079,9 @@ const SKIRT = {
   gain: 3.3, twist: 1.5, lift: 0.6, drag: 2, maxTurn: 20, maxFlare: 40,
 };
 
+/** How much heavier than the idle beneath it a cast gesture plays (see perform). */
+const GESTURE_WEIGHT = 5;
+
 /**
  * A player's bearing (createPlayerFigure): the clips are a townsperson's, who
  * stands easy and slightly forward with the arms hanging. A hero's chest is
@@ -1585,7 +1588,14 @@ export function createPlayerFigure({
     const length = made.clips && made.clips[clip];
     action.timeScale = contactIn !== null && HIT_FRAME[clip] && length
       ? (HIT_FRAME[clip] * length) / Math.max(0.25, contactIn) : 1;
-    action.setEffectiveWeight(1);
+    // The idle under a clip stays at weight 1 and three averages by weight, so
+    // a clip of weight 1 is half itself. A cast gesture is the whole body (the
+    // weight shifts through the hips and feet), so it is weighted to be most of
+    // the pose: 5 against the idle's 1 is five parts in six. The ramp in keeps
+    // the first frame from snapping to it.
+    const gesture = clip.startsWith('cast_');
+    action.setEffectiveWeight(gesture ? GESTURE_WEIGHT : 1);
+    if (gesture) action.fadeIn(0.08);
     if (contactIn !== null || whole) {
       const at = clock + (length ? length / action.timeScale : 0.5) - 0.22;
       for (let i = ending.length - 1; i >= 0; i--) if (ending[i].action === action) ending.splice(i, 1);

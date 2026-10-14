@@ -26,6 +26,7 @@ import * as THREE from 'three';
 import { createPlayerFigure } from './actors.js';
 import { POS } from './game.js';
 import { AFF } from './magic.js';
+import { castClipOf } from './people.js';
 import { SKILL_CONTACT, DISARM_FLICK } from './fx.js';
 
 /**
@@ -215,7 +216,9 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     if (!third) return;
     const delay = e.delay || 0;
     if (e.kind === 'cast' && e.fromPlayer && !e.lost && !['quaff', 'eat'].includes(e.source)) {
-      later(0, () => figure && figure.perform('cast', { contactIn: e.windup || 0.6 }));
+      // The gesture of the spell's family; a rig without it makes the plain cast.
+      const clip = castClipOf(e.family);
+      later(0, () => figure && figure.perform(figure.has(clip) ? clip : 'cast', { contactIn: e.windup || 0.6 }));
       // A spell at something faces it; one on yourself leaves you as you stand.
       if (!e.self) facingUntil = clock + (e.windup || 0.6) + CAST_FACE;
       return;

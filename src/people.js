@@ -30,7 +30,10 @@ export const CLIP_FACTS = {
   troll: { walk: 1.031, run: 2.234, jog: 2.749, sprint: 3.523, strafe_l: 2.277, strafe_r: 2.277, back: 1.607 },
   minotaur: { walk: 1.200, run: 2.600, jog: 3.200, sprint: 4.100, strafe_l: 2.650, strafe_r: 2.650, back: 1.870 },
 };
-export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21, cast: 14 / 24, kick: 7 / 14, backstab: 9 / 18, disarm: 7 / 14 };
+export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21, cast: 14 / 24, kick: 7 / 14, backstab: 9 / 18, disarm: 7 / 14,
+  // The four gestures (rig.py anim_cast_*) release on the same frame as `cast`,
+  // so one stretch of the clip puts the spell on the end of the words.
+  cast_thrust: 14 / 24, cast_overhead: 14 / 24, cast_sweep: 14 / 24, cast_pray: 14 / 24 };
 // sit (5 s), lean (4 s) and talk (3 s) are loops for motion.js's settling:
 // sit is written for a seat 0.46 m high at scale 1 for a man's legs (scaled by
 // leg length on the others), feet planted a pace forward; lean has the back
@@ -39,7 +42,24 @@ export const LOOPS = new Set(['idle', 'idle2', 'walk', 'run', 'fight', 'sit', 'l
   'strafe_r', 'back']);
 export const CLIPS = ['idle', 'idle2', 'walk', 'run', 'fight', 'attack', 'attack2', 'hit', 'block', 'death', 'cast',
   'sit', 'lean', 'talk', 'jump', 'land', 'kick', 'backstab', 'disarm', 'jog', 'sprint', 'strafe_l', 'strafe_r',
-  'back', 'turn_l', 'turn_r'];
+  'back', 'turn_l', 'turn_r', 'cast_thrust', 'cast_overhead', 'cast_sweep', 'cast_pray'];
+
+/**
+ * Which gesture a spell is cast with, by the family magic.js gives it (the
+ * kind of light and sound it makes): a push for what is thrown, a stroke from
+ * the sky for what falls, a sweep for what sprays or breathes, the hands
+ * opened for what is blessed or healed. A family with none of its own, and a
+ * rig without the clip, is cast with the plain `cast`.
+ */
+export const CAST_CLIPS = {
+  cast_thrust: ['missile', 'fireball', 'acid', 'frost', 'shock', 'drain', 'harm', 'curse', 'poison', 'weaken',
+    'blind', 'faerie', 'dark', 'dispel'],
+  cast_overhead: ['lightning', 'storm', 'quake', 'flamestrike'],
+  cast_sweep: ['flame', 'prism', 'breath-fire', 'breath-frost', 'breath-acid', 'breath-gas', 'breath-lightning'],
+  cast_pray: ['heal', 'refresh', 'bless', 'sanctuary', 'ward', 'holy'],
+};
+const CAST_OF = new Map(Object.entries(CAST_CLIPS).flatMap(([clip, families]) => families.map((f) => [f, clip])));
+export const castClipOf = (family) => CAST_OF.get(family) || 'cast';
 
 // --- vocabulary -------------------------------------------------------------
 

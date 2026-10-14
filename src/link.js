@@ -20,6 +20,7 @@
 import { createPlayerFigure } from './actors.js';
 import { DIR_NAME, ITEM } from './are.js';
 import { TAR } from './magic.js';
+import { castClipOf } from './people.js';
 import { SKILL_CONTACT, DISARM_FLICK } from './fx.js';
 import { PLR } from './rules/handler.js';
 
@@ -448,6 +449,10 @@ export function attachSocketLink(link, game, host, enter) {
       const ofSkill = skill || ((event.kind === 'hit' || event.kind === 'miss') && SKILL_CLIPS[event.spell]);
       if (attacker && skill) attacker.figure?.perform(attacker.figure.has(skill[0]) ? skill[0] : 'attack', { contactIn: skill[1] });
       else if (attacker && !ofSkill && BLOWS.has(event.kind)) attacker.figure?.perform(event.attack === 'hit' && !event.armed ? 'attack2' : 'attack');
+      if (attacker && event.kind === 'cast' && !event.lost && !['quaff', 'eat'].includes(event.source)) {
+        const clip = castClipOf(event.family);
+        attacker.figure?.perform(attacker.figure.has(clip) ? clip : 'cast', { contactIn: event.windup || 0.6 });
+      }
       if (victim && event.kind === 'hit') victim.figure?.perform('hit');
       // fx.js draws the thud, the stab and the flying weapon off these copies.
       if (event.kind === 'backstab') { stabbedFrom = event.behind; game.inject({ kind: 'skillfx', skill: 'backstab', phase: 'start', from: event.from, to: event.to, behind: event.behind }); }

@@ -43,6 +43,34 @@
    "head_gap": 0.2239,
    "hit": 0.5833333333333334
   },
+  "cast_overhead": {
+   "body_gap": 0.0522,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.11,
+   "hit": 0.5833333333333334
+  },
+  "cast_pray": {
+   "body_gap": 0.045,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.2162,
+   "hit": 0.5833333333333334
+  },
+  "cast_sweep": {
+   "body_gap": 0.0522,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.1108,
+   "hit": 0.5833333333333334
+  },
+  "cast_thrust": {
+   "body_gap": 0.0522,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.2065,
+   "hit": 0.5833333333333334
+  },
   "charge": {
    "duration": 2.2916666666666665,
    "frames": 55
@@ -235,6 +263,34 @@
    "head_gap": 0.1859,
    "hit": 0.5833333333333334
   },
+  "cast_overhead": {
+   "body_gap": 0.0294,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.0737,
+   "hit": 0.5833333333333334
+  },
+  "cast_pray": {
+   "body_gap": 0.0249,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.1849,
+   "hit": 0.5833333333333334
+  },
+  "cast_sweep": {
+   "body_gap": 0.0294,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.1182,
+   "hit": 0.5833333333333334
+  },
+  "cast_thrust": {
+   "body_gap": 0.0294,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.1677,
+   "hit": 0.5833333333333334
+  },
   "death": {
    "duration": 1.4583333333333333,
    "frames": 35
@@ -415,6 +471,34 @@
    "head_gap": 0.2083,
    "hit": 0.5833333333333334
   },
+  "cast_overhead": {
+   "body_gap": 0.0485,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.0936,
+   "hit": 0.5833333333333334
+  },
+  "cast_pray": {
+   "body_gap": 0.0426,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.2085,
+   "hit": 0.5833333333333334
+  },
+  "cast_sweep": {
+   "body_gap": 0.0485,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.1279,
+   "hit": 0.5833333333333334
+  },
+  "cast_thrust": {
+   "body_gap": 0.0485,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.1915,
+   "hit": 0.5833333333333334
+  },
   "death": {
    "duration": 1.4583333333333333,
    "frames": 35
@@ -593,6 +677,34 @@
    "duration": 1.0,
    "frames": 24,
    "head_gap": 0.3194,
+   "hit": 0.5833333333333334
+  },
+  "cast_overhead": {
+   "body_gap": 0.2685,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.0465,
+   "hit": 0.5833333333333334
+  },
+  "cast_pray": {
+   "body_gap": 0.2314,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.3026,
+   "hit": 0.5833333333333334
+  },
+  "cast_sweep": {
+   "body_gap": 0.2685,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.1393,
+   "hit": 0.5833333333333334
+  },
+  "cast_thrust": {
+   "body_gap": 0.2106,
+   "duration": 1.0,
+   "frames": 24,
+   "head_gap": 0.2497,
    "hit": 0.5833333333333334
   },
   "death": {

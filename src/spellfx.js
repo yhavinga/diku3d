@@ -39,6 +39,7 @@ import * as THREE from 'three';
 import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { OVERLAY_LAYER } from './render.js';
 import { AFF } from './magic.js';
+import { castClipOf } from './people.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -1710,11 +1711,16 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
    */
   const close = (w) => !!w && w.player && !self;
 
-  /** A figure plays its casting clip, timed so the release lands on `contactIn`. */
+  /**
+   * A figure plays its casting clip, timed so the release lands on `contactIn`.
+   * `clip` is the gesture of the spell's family (people.js castClipOf); a rig
+   * without it casts with the plain `cast`, and one without that swings.
+   */
   function performCast(w, contactIn, clip = 'cast') {
     const fig = figureOf(w.slot);
     if (!fig || !actors.perform) return;
-    const name = fig.actions && fig.actions[clip] ? clip : 'attack';
+    const has = (c) => fig.actions && fig.actions[c];
+    const name = has(clip) ? clip : has('cast') ? 'cast' : 'attack';
     actors.perform(w.slot, name, { contactIn });
   }
 
@@ -1777,7 +1783,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     if (!from.player && !fx.lost) {
       if (e.source === 'bite') performCast(from, e.windup, 'attack');
       else if (e.source === 'breath') performCast(from, e.windup, 'attack');
-      else if (!['quaff', 'eat'].includes(e.source)) performCast(from, e.windup);
+      else if (!['quaff', 'eat'].includes(e.source)) performCast(from, e.windup, castClipOf(e.family));
     }
 
     // The circle, for anything spoken; not for a potion, a bite or a breath.

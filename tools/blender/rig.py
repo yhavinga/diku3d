@@ -1630,9 +1630,383 @@ def anim_turn_r(arm):
 
 NEW_LOCOMOTION = ("jog", "sprint", "strafe_l", "strafe_r", "back")
 
+# --- casts: a gesture for each family of spell --------------------------------
+#
+# `cast` stays as it was (the fallback for the families with no gesture of
+# their own, and the pose motion.js lays over a priest at his prayers). These
+# four are the same second long and release at the same frame, so the page
+# stretches any of them to the game's contactIn with the one constant
+# (people.js HIT_FRAME): 1.0 s of 24 frames, the spell leaves on frame 15.
+# Every key is a whole body -- the weight moves through the hips and the
+# feet, which are placed as targets like jump's and planted unless a clip
+# steps -- so no clip is an arm waving over a statue.
+
+CAST_RELEASE = 15
+
+
+def _foot(arm, tag, dx=0.0, dy=0.0, dz=0.0, toes=0.0, yaw=None):
+    """One foot's target as an offset from rest (dy negative is forward).
+    `toes` rolls the foot that many degrees up onto the ball: the ankle rises
+    and comes forward about the ball, which stays where it was, so a foot on
+    its toes is still on the floor and not hanging from the hip."""
+    b = arm.data.bones["foot." + tag]
+    rel = b.head_local - b.tail_local
+    phi = math.radians(toes)
+    y = rel.y * math.cos(phi) - rel.z * math.sin(phi)
+    z = rel.y * math.sin(phi) + rel.z * math.cos(phi)
+    return (STANCES["rest"][tag][0][0] + dx, dy + (y - rel.y), dz + (z - rel.z), -toes,
+            STANCES["rest"][tag][1] if yaw is None else yaw)
+
+
+def _hunch(arm):
+    """How far forward the trunk leans in this rig's rest pose, in degrees
+    (hips joint to the base of the neck): about nothing for a man, a good
+    deal for a troll, whose hunch is built into the rest pose."""
+    b = arm.data.bones
+    v = b["neck"].head_local - b["hips"].head_local
+    return math.degrees(math.atan2(-v.y, v.z))
+
+
+def _fit(arm, bones):
+    """A pose written for a man, for this rig: a hunched trunk starts bent, so
+    the lean the clip adds is halved (a troll at the full 20 degrees is bent
+    double), and an arm raised in front goes up the rest of the way to be
+    level in the world, not level with the chest it hangs from."""
+    h = _hunch(arm)
+    if h < 3.0:
+        return bones
+    out = dict(bones)
+    added = 0.0
+    for n in ("spine", "chest"):
+        x, y, z = out.get(n, (0, 0, 0))
+        added += x
+        out[n] = (x * 0.5, y, z)
+    for n, side in (("upperarm.L", -1), ("upperarm.R", 1)):
+        x, y, z = out.get(n, (0, 0, 0))
+        if x < -30:
+            k = min(1.0, (-x - 30) / 60.0)
+            # The arms hang behind a troll's shoulder line and come forward
+            # converging: out to the sides they go as well, or they cross.
+            out[n] = (x - (h - 0.5 * max(added, 0.0)) * k, y + side * 0.3 * h * k, z)
+    return out
+
+
+def _cast_clip(arm, name, keys):
+    """keys: [(frame, bones, hips, feet)], feet from `_foot` per side."""
+    new_action(arm, name)
+    for (f, bones, hips, feet) in keys:
+        pose(arm, f, _fit(arm, bones), hips, feet=False)
+        for t in "LR":
+            dx, dy, dz, pitch, yaw = feet[t]
+            place(arm, "foot_ik." + t, f, foot_matrix(arm, t, rest_ankle(arm, t) + V((dx, dy, dz)), pitch, yaw))
+    return keys[-1][0]
+
+
+def _hips(arm, x=0.0, y=0.0, knee=None, lead="L", feet=None, pitch=0.0, yaw=0.0, roll=0.0, rise=0.0):
+    """The hips as (offset, pitch, yaw, roll), sunk or lifted to where the
+    `lead` leg bends its knee `knee` degrees given where that foot stands
+    (law of cosines on thigh and shin, as `_crouch_drop`), so a lunge sits
+    down onto its legs and a rise onto the toes does not stretch them. With no
+    `knee` the hips ride `rise` above the standing height. y is back."""
+    if knee is None:
+        return ((x, y, -0.004 + rise), pitch, yaw, roll)
+    l1, l2, D = _leg_geometry(arm)
+    hip = arm.data.bones["thigh." + lead].head_local
+    dx, dy, dz, _, _ = feet[lead]
+    a = rest_ankle(arm, lead) + V((dx, dy, dz))
+    d2 = l1 * l1 + l2 * l2 + 2 * l1 * l2 * math.cos(math.radians(knee))
+    h2 = (hip.x + x - a.x) ** 2 + (hip.y + y - a.y) ** 2
+    z = a.z + math.sqrt(max(d2 - h2, 0.0))
+    return ((x, y, z - hip.z), pitch, yaw, roll)
+
+
+def _rest_feet(arm):
+    return {t: _foot(arm, t) for t in "LR"}
+
+
+def _aim_fist(arm, aims):
+    """Turn the right wrist on each given frame until the line through the
+    fist (grip.R's Y, which is the line of a staff) points along `dir`: what
+    a staff does in a cast is the point of a cast, and a written wrist angle
+    left it at thirty degrees to whatever was meant on every rig. The least
+    wrist that gets there."""
+    p = arm.pose.bones
+    scene = bpy.context.scene
+    for frame, want in aims.items():
+        want = V(want).normalized()
+        best = None
+        for x in range(-90, 91, 6):
+            for y in range(-72, 73, 12):
+                fk(p["hand.R"], frame, x=x, y=y, z=0)
+                scene.frame_set(frame)
+                bpy.context.view_layer.update()
+                got = (arm.pose.bones["grip.R"].matrix.to_3x3() @ V((0, 1, 0))).normalized()
+                cost = math.degrees(got.angle(want)) + 0.05 * (abs(x) + abs(y))
+                if best is None or cost < best[0]:
+                    best = (cost, x, y)
+        fk(p["hand.R"], frame, x=best[1], y=best[2], z=0)
+
+
+# Right hand, in the figure's frame: forward is -Y, up +Z. The staff leans
+# forward 30 degrees from the vertical when it points at something: held
+# level, the metre of it behind the fist would be through the chest.
+UP = (0.0, 0.0, 1.0)
+AT_IT = (0.0, -0.55, 0.85)
+
+# The first and last key of every cast: the stance a caster with a staff
+# idles in (CARRY's pole, the forearm level and the staff standing up) so
+# the crossfade with the idle has no arm to swing, and so the staff does not
+# swing forward through the opening frames, as it did from a hanging hand.
+# With nothing in the fist it reads as a hand held ready.
+HANG_STAFF = merge(HANG, CARRY["carry_pole"])
+
+
+def anim_cast_thrust(arm):
+    """Fire, missile, acid. The weight sinks back onto the left leg with both
+    fists drawn in to the ribs and the chest leaning away (frames 1-9); the
+    right foot comes through, the hips and the shoulders after it, and both
+    hands drive out at chest height with the body behind them on the front
+    knee (15, the release); the arms carry on a hand's breadth past it, hold
+    there while the energy goes, and the foot comes back (25). A staff in the
+    right hand is stood up in the load, brought forward as the arms drive,
+    and stood up again."""
+    rest = _rest_feet(arm)
+    load_b = merge(HANG, {"spine": (-5, -6, 0), "chest": (-6, -8, 0), "neck": (5, 0, 0), "head": (2, 6, 0),
+                          "upperarm.R": (22, 0, 22), "forearm.R": (-118, 0, 0), "hand.R": (0, 0, 0),
+                          "upperarm.L": (22, 0, -22), "forearm.L": (-118, 0, 0), "hand.L": (0, 0, 0)})
+    step_b = merge(load_b, {"spine": (2, 0, 0), "chest": (2, -2, 0), "neck": (-2, 0, 0), "head": (-4, 2, 0),
+                            "upperarm.R": (-24, 0, 14), "forearm.R": (-96, 0, 0),
+                            "upperarm.L": (-24, 0, -14), "forearm.L": (-96, 0, 0)})
+    # The arms are written against a trunk that is leaning 20 degrees forward
+    # by now: 104 off the vertical is level with the shoulders. The hips have
+    # turned 12 degrees to bring the right side through, and the shoulders
+    # turn back against them, so both hands are pointed at the target.
+    push_b = merge(HANG, {"spine": (6, -5, 0), "chest": (7, -7, 0), "neck": (-7, -4, 0), "head": (-10, -4, 0),
+                          "upperarm.R": (-104, 10, -2), "forearm.R": (-6, 0, 0), "hand.R": (0, 0, 0),
+                          "upperarm.L": (-106, -10, 2), "forearm.L": (-6, 0, 0), "hand.L": (-62, 0, 0)})
+    over_b = merge(push_b, {"spine": (9, -5, 0), "chest": (9, -7, 0), "neck": (-8, -4, 0), "head": (-11, -4, 0),
+                            "upperarm.R": (-108, 11, -4), "forearm.R": (-2, 0, 0),
+                            "upperarm.L": (-110, -11, 4), "forearm.L": (-2, 0, 0)})
+    ease_b = merge(over_b, {"spine": (6, 2, 0), "chest": (6, 3, 0), "neck": (-4, 0, 0), "head": (-6, 0, 0),
+                            "upperarm.R": (-52, 0, 6), "forearm.R": (-40, 0, 0),
+                            "upperarm.L": (-54, 0, -6), "forearm.L": (-40, 0, 0)})
+    load_f = {"L": _foot(arm, "L"), "R": _foot(arm, "R")}
+    swing_f = {"L": _foot(arm, "L", toes=6), "R": _foot(arm, "R", dy=-0.20, dz=0.07)}
+    lunge_f = {"L": _foot(arm, "L", dy=0.02, toes=16, yaw=22), "R": _foot(arm, "R", dy=-0.36, yaw=-8)}
+    carry_f = {"L": _foot(arm, "L", dy=0.02, toes=14, yaw=22), "R": _foot(arm, "R", dy=-0.36, yaw=-8)}
+    back_f = {"L": _foot(arm, "L", toes=4), "R": _foot(arm, "R", dy=-0.16, dz=0.04)}
+    k = [
+        (1, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
+        (5, blend(HANG_STAFF, load_b, 0.55), _hips(arm, x=0.015, y=0.03, knee=14, lead="L", feet=load_f, pitch=-1.5, yaw=-3), load_f),
+        (9, load_b, _hips(arm, x=0.045, y=0.075, knee=34, lead="L", feet=load_f, pitch=-4, yaw=-9), load_f),
+        (12, step_b, _hips(arm, x=0.02, y=0.0, knee=38, lead="L", feet=swing_f, pitch=1, yaw=4), swing_f),
+        (15, push_b, _hips(arm, x=-0.01, y=-0.17, knee=44, lead="R", feet=lunge_f, pitch=6, yaw=12), lunge_f),
+        (18, over_b, _hips(arm, x=-0.01, y=-0.20, knee=46, lead="R", feet=carry_f, pitch=8, yaw=13), carry_f),
+        (21, ease_b, _hips(arm, x=-0.005, y=-0.10, knee=30, lead="R", feet=back_f, pitch=5, yaw=6), back_f),
+        (25, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
+    ]
+    end = _cast_clip(arm, "cast_thrust", k)
+    _aim_fist(arm, {1: UP, 5: UP, 9: UP, 12: (0.0, -0.3, 0.95), 15: AT_IT, 18: AT_IT, 21: UP, 25: UP})
+    return "cast_thrust", (1, end), (CAST_RELEASE - 1) / 24.0
+
+
+def anim_cast_overhead(arm):
+    """Lightning, quake. A dip, then the whole body springs up onto its toes
+    as the right arm goes to the sky and the left opens for balance, the back
+    arching and the face going up after the hand (frames 1-11); the arm
+    cracks down and forward as the heels drop and the knees take the weight
+    (15, the release, the hand out in front and low); then it rides on down
+    and the body comes up out of the crouch (25)."""
+    rest = _rest_feet(arm)
+    dip_b = merge(HANG, {"spine": (9, 0, 0), "chest": (8, 0, 0), "neck": (-2, 0, 0), "head": (-4, 0, 0),
+                         "upperarm.R": (30, 0, 14), "forearm.R": (-30, 0, 0),
+                         "upperarm.L": (30, 0, -14), "forearm.L": (-30, 0, 0)})
+    rise_b = merge(HANG, {"spine": (0, -4, 0), "chest": (-2, -4, 0), "neck": (-4, 0, 0), "head": (-8, 0, 0),
+                          "upperarm.R": (-112, 0, -6), "forearm.R": (-30, 0, 0),
+                          "upperarm.L": (-30, 0, -40), "forearm.L": (-22, 0, 0)})
+    top_b = merge(HANG, {"spine": (-6, -5, 0), "chest": (-12, -6, 0), "neck": (-10, 0, 0), "head": (-18, 0, 0),
+                         "upperarm.R": (-170, 0, -12), "forearm.R": (-8, 0, 0),
+                         "upperarm.L": (8, 0, -58), "forearm.L": (-16, 0, 0), "hand.L": (-10, 0, 0)})
+    strike_b = merge(HANG, {"spine": (10, 6, 0), "chest": (9, 8, 0), "neck": (-4, 0, 0), "head": (-10, 0, 0),
+                            "upperarm.R": (-106, 0, 0), "forearm.R": (-8, 0, 0),
+                            "upperarm.L": (22, 0, -24), "forearm.L": (-40, 0, 0)})
+    through_b = merge(strike_b, {"spine": (14, 6, 0), "chest": (12, 8, 0), "neck": (-6, 0, 0), "head": (-12, 0, 0),
+                                 "upperarm.R": (-72, 0, 0), "forearm.R": (-16, 0, 0),
+                                 "upperarm.L": (30, 0, -18)})
+    dip_f = rest
+    toe_f = {"L": _foot(arm, "L", toes=26), "R": _foot(arm, "R", toes=26)}
+    drop_f = {"L": _foot(arm, "L", dy=-0.05, yaw=14), "R": _foot(arm, "R", dy=-0.05, yaw=-14)}
+    k = [
+        (1, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
+        (4, dip_b, _hips(arm, y=0.04, knee=30, lead="L", feet=rest, pitch=4), dip_f),
+        (8, rise_b, _hips(arm, y=0.0, rise=0.05, pitch=-1), blend_feet(arm, rest, toe_f, 0.6)),
+        (11, top_b, _hips(arm, y=-0.01, rise=0.085, pitch=-3), toe_f),
+        (12, top_b, _hips(arm, y=-0.01, rise=0.085, pitch=-3), toe_f),
+        (15, strike_b, _hips(arm, y=-0.06, knee=42, lead="L", feet=drop_f, pitch=6, yaw=6), drop_f),
+        (19, through_b, _hips(arm, y=-0.06, knee=52, lead="L", feet=drop_f, pitch=8, yaw=6), drop_f),
+        (25, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
+    ]
+    end = _cast_clip(arm, "cast_overhead", k)
+    _aim_fist(arm, {1: UP, 4: UP, 8: UP, 11: UP, 12: UP, 15: AT_IT, 19: (0.0, -0.4, 0.9), 22: UP, 25: UP})
+    return "cast_overhead", (1, end), (CAST_RELEASE - 1) / 24.0
+
+
+def blend_feet(arm, a, b, t):
+    return {tag: tuple(x + (y - x) * t for x, y in zip(a[tag], b[tag])) for tag in "LR"}
+
+
+def anim_cast_sweep(arm):
+    """Colour spray, burning hands, breath. The right arm is drawn across the
+    body to the left shoulder and the trunk twists after it, the weight on the
+    left leg (frames 1-9); then the trunk unwinds through the front and the
+    arm goes with it in a flat arc at shoulder height, passing the line to
+    the target on frame 15 -- the release -- and carrying on out to the right
+    as the weight crosses to the right foot. The left arm swings against it."""
+    rest = _rest_feet(arm)
+    wind_b = merge(HANG, {"spine": (4, 16, 0), "chest": (4, 22, 0), "neck": (2, -14, 0), "head": (-2, -20, 0),
+                          "upperarm.R": (-74, -38, 0), "forearm.R": (-84, 0, 0), "hand.R": (0, 0, 0),
+                          "upperarm.L": (-8, 0, -34), "forearm.L": (-30, 0, 0), "hand.L": (-10, 0, 0)})
+    cross_b = merge(wind_b, {"spine": (4, 8, 0), "chest": (5, 10, 0), "neck": (0, -8, 0), "head": (-3, -10, 0),
+                             "upperarm.R": (-84, -12, 0), "forearm.R": (-30, 0, 0),
+                             "upperarm.L": (4, 0, -42), "forearm.L": (-30, 0, 0)})
+    fire_b = merge(HANG, {"spine": (6, -4, 0), "chest": (6, -4, 0), "neck": (-2, 4, 0), "head": (-5, 6, 0),
+                          "upperarm.R": (-88, 14, 0), "forearm.R": (-4, 0, 0), "hand.R": (-20, 0, 0),
+                          "upperarm.L": (14, 0, -52), "forearm.L": (-48, 0, 0)})
+    out_b = merge(HANG, {"spine": (6, -14, 0), "chest": (6, -20, 0), "neck": (-2, 12, 0), "head": (-6, 16, 0),
+                         "upperarm.R": (-88, 58, 0), "forearm.R": (-2, 0, 0), "hand.R": (-20, 0, 0),
+                         "upperarm.L": (22, 0, -26), "forearm.L": (-60, 0, 0)})
+    ease_b = merge(out_b, {"spine": (4, -8, 0), "chest": (4, -10, 0), "neck": (0, 6, 0), "head": (-3, 8, 0),
+                           "upperarm.R": (-56, 46, 0), "forearm.R": (-22, 0, 0),
+                           "upperarm.L": (10, 0, -14), "forearm.L": (-30, 0, 0)})
+    left_f = {"L": _foot(arm, "L", dy=-0.04, yaw=12), "R": _foot(arm, "R", dy=0.05, toes=8, yaw=-20)}
+    right_f = {"L": _foot(arm, "L", dy=0.04, toes=8, yaw=24), "R": _foot(arm, "R", dy=-0.08, yaw=-16)}
+    k = [
+        (1, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
+        (5, blend(HANG_STAFF, wind_b, 0.5), _hips(arm, x=0.02, knee=18, lead="L", feet=blend_feet(arm, rest, left_f, 0.5), yaw=7),
+         blend_feet(arm, rest, left_f, 0.5)),
+        (9, wind_b, _hips(arm, x=0.05, y=0.02, knee=30, lead="L", feet=left_f, pitch=2, yaw=15, roll=3), left_f),
+        (12, cross_b, _hips(arm, x=0.0, knee=34, lead="L", feet=blend_feet(arm, left_f, right_f, 0.5), pitch=3, yaw=0, roll=0),
+         blend_feet(arm, left_f, right_f, 0.5)),
+        (15, fire_b, _hips(arm, x=-0.035, y=-0.03, knee=36, lead="R", feet=right_f, pitch=4, yaw=-10, roll=-3), right_f),
+        (19, out_b, _hips(arm, x=-0.045, y=-0.04, knee=36, lead="R", feet=right_f, pitch=4, yaw=-18, roll=-3), right_f),
+        (22, ease_b, _hips(arm, x=-0.02, knee=20, lead="R", feet=blend_feet(arm, right_f, rest, 0.5), pitch=2, yaw=-8),
+         blend_feet(arm, right_f, rest, 0.5)),
+        (25, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
+    ]
+    end = _cast_clip(arm, "cast_sweep", k)
+    _aim_fist(arm, {1: UP, 9: UP, 12: UP, 15: AT_IT, 19: AT_IT, 22: UP, 25: UP})
+    return "cast_sweep", (1, end), (CAST_RELEASE - 1) / 24.0
+
+
+def anim_cast_pray(arm):
+    """Heal, bless, sanctuary, the wards. The head bows and the hands come
+    together at the breast as the breath goes out and the knees give a little
+    (frames 1-11); at the release (15) the arms open up and out, palms up,
+    the chest lifting, the head rising after the hands and the heels coming
+    off the floor a finger's breadth; then the hands settle (25). A staff in
+    the right hand stays upright throughout: it is held, not wielded."""
+    rest = _rest_feet(arm)
+    bow_b = merge(HANG, {"spine": (7, 0, 0), "chest": (8, 0, 0), "neck": (10, 0, 0), "head": (14, 0, 0),
+                         "upperarm.R": (-30, 0, -20), "forearm.R": (-108, 0, 0), "hand.R": (-8, 0, 0),
+                         "upperarm.L": (-30, 0, 20), "forearm.L": (-108, 0, 0), "hand.L": (-8, 0, 0)})
+    still_b = merge(bow_b, {"spine": (8, 0, 0), "chest": (9, 0, 0), "head": (16, 0, 0)})
+    lift_b = merge(HANG, {"spine": (-2, 0, 0), "chest": (-6, 0, 0), "neck": (-2, 0, 0), "head": (-4, 0, 0),
+                          "upperarm.R": (-48, 0, 16), "forearm.R": (-70, 0, 0), "hand.R": (-20, 0, 0),
+                          "upperarm.L": (-48, 0, -16), "forearm.L": (-70, 0, 0), "hand.L": (-20, 0, 0)})
+    open_b = merge(HANG, {"spine": (-4, 0, 0), "chest": (-8, 0, 0), "neck": (-4, 0, 0), "head": (-8, 0, 0),
+                          "upperarm.R": (-28, 0, 100), "forearm.R": (-34, 0, 0), "hand.R": (-30, 0, 0),
+                          "upperarm.L": (-28, 0, -100), "forearm.L": (-34, 0, 0), "hand.L": (-30, 0, 0)})
+    hold_b = merge(open_b, {"spine": (-3, 0, 0), "chest": (-7, 0, 0), "neck": (-4, 0, 0), "head": (-8, 0, 0),
+                            "upperarm.R": (-24, 0, 90), "upperarm.L": (-24, 0, -90)})
+    soft_b = merge(HANG, {"spine": (2, 0, 0), "chest": (1, 0, 0), "head": (2, 0, 0),
+                          "upperarm.R": (-22, 0, 40), "forearm.R": (-50, 0, 0),
+                          "upperarm.L": (-22, 0, -40), "forearm.L": (-50, 0, 0)})
+    sink_f = rest
+    toe_f = {"L": _foot(arm, "L", toes=9), "R": _foot(arm, "R", toes=9)}
+    k = [
+        (1, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
+        (6, blend(HANG_STAFF, bow_b, 0.8), _hips(arm, knee=16, lead="L", feet=sink_f, pitch=2), sink_f),
+        (10, bow_b, _hips(arm, knee=24, lead="L", feet=sink_f, pitch=3), sink_f),
+        (12, still_b, _hips(arm, knee=26, lead="L", feet=sink_f, pitch=3.5), sink_f),
+        (13, lift_b, _hips(arm, rise=0.012, pitch=0), blend_feet(arm, rest, toe_f, 0.4)),
+        (15, open_b, _hips(arm, rise=0.026, pitch=-2), toe_f),
+        (19, hold_b, _hips(arm, rise=0.026, pitch=-2), toe_f),
+        (22, soft_b, _hips(arm, rise=0.008), blend_feet(arm, toe_f, rest, 0.7)),
+        (25, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
+    ]
+    end = _cast_clip(arm, "cast_pray", k)
+    _aim_fist(arm, {f: UP for f in (1, 6, 10, 12, 13, 15, 19, 22, 25)})
+    return "cast_pray", (1, end), (CAST_RELEASE - 1) / 24.0
+
+
+CAST_ANIMS = [anim_cast_thrust, anim_cast_overhead, anim_cast_sweep, anim_cast_pray]
+
+
+def torso_clearance(arm, P, frames, margin=0.02):
+    """The least gap, in metres, between a hand or the lower forearm and the
+    trunk over a clip, as `head_clearance` does for the head: points down each
+    limb against the cross-section of the torso at their height (girths from
+    the body's own table), in the rest frame of the nearest of hips, spine and
+    chest. Negative is a hand in the belly."""
+    scene = bpy.context.scene
+    hz = P["hip"][2]
+    levels = [(hz - 0.05, P["hips"]), (hz + 0.18, P["waist"]), (P["shoulder"][2] - 0.15, P["chest"]),
+              (P["neck_base"], P["chest"])]
+    worst = (9.0, None, None)
+    for f in range(frames[0], frames[1] + 1):
+        scene.frame_set(f)
+        for t in "LR":
+            for limb, ks in (("forearm", (3, 4, 5)), ("hand", (0, 2, 4, 5))):
+                pb = arm.pose.bones[limb + "." + t]
+                for k in ks:
+                    pt = pb.head + (pb.tail - pb.head) * (k / 5.0)
+                    best = None
+                    for bn in ("hips", "spine", "chest"):
+                        bone = arm.pose.bones[bn]
+                        q = arm.data.bones[bn].matrix_local @ (bone.matrix.inverted() @ pt)
+                        seg = (arm.data.bones[bn].head_local.z, arm.data.bones[bn].tail_local.z)
+                        out = max(seg[0] - q.z, q.z - seg[1], 0.0)
+                        if best is None or out < best[0]:
+                            best = (out, q)
+                    q = best[1]
+                    if q.z < levels[0][0] or q.z > levels[-1][0]:
+                        continue
+                    for (z0, g0), (z1, g1) in zip(levels, levels[1:]):
+                        if z0 <= q.z <= z1:
+                            u = (q.z - z0) / max(z1 - z0, 1e-6)
+                            w = g0[0] + (g1[0] - g0[0]) * u
+                            d = max(g0[1], g0[2]) + (max(g1[1], g1[2]) - max(g0[1], g0[2])) * u
+                            r = math.hypot(q.x / w, q.y / d)
+                            gap = (r - 1.0) * min(w, d) - margin
+                            if gap < worst[0]:
+                                worst = (gap, f, limb + "." + t)
+                            break
+    return worst
+
+
+def measure_casts(arm, P, info):
+    """The casts' hand clearance of the head and the trunk, in the clips'
+    facts; a hand in either is a fault at build time, as for the swings."""
+    for fn in CAST_ANIMS:
+        name = fn.__name__[len("anim_"):]
+        arm.animation_data.action = bpy.data.actions[name]
+        span = (0, info[name]["frames"])
+        gap, f, limb = head_clearance(arm, P, span)
+        info[name]["head_gap"] = round(gap, 4)
+        if gap < 0:
+            raise RuntimeError("%s: %s goes %.0f mm into the head at frame %d of %s"
+                               % (P["name"], limb, -gap * 1000, f, name))
+        gap, f, limb = torso_clearance(arm, P, span)
+        info[name]["body_gap"] = round(gap, 4)
+        if gap < 0:
+            raise RuntimeError("%s: %s goes %.0f mm into the trunk at frame %d of %s"
+                               % (P["name"], limb, -gap * 1000, f, name))
+
+
 CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "block", "death",
          "cast", "sit", "lean", "talk", "jump", "land", "kick", "backstab", "disarm",
-         "jog", "sprint", "strafe_l", "strafe_r", "back", "turn_l", "turn_r")
+         "jog", "sprint", "strafe_l", "strafe_r", "back", "turn_l", "turn_r",
+         "cast_thrust", "cast_overhead", "cast_sweep", "cast_pray")
 
 
 def make_all(arm, measure=True, P=None, extra=()):
@@ -1649,6 +2023,7 @@ def make_all(arm, measure=True, P=None, extra=()):
            anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk,
            anim_jump, anim_land, anim_kick, anim_backstab, anim_disarm, anim_jog, anim_sprint,
            anim_strafe_l, anim_strafe_r, anim_back, anim_turn_l, anim_turn_r] + list(extra)
+    fns += CAST_ANIMS
     for fn in fns:
         r = fn(arm)
         name, frames = r[0], r[1]
@@ -1688,5 +2063,7 @@ def make_all(arm, measure=True, P=None, extra=()):
             fr = (0, info[name]["frames"])
             info[name]["slip_baked"], _ = foot_slip(arm, fr, info[name]["stride"], info[name]["stance"],
                                                     info[name].get("direction"))
+    if measure and P is not None:
+        measure_casts(arm, P, info)
     arm.animation_data.action = bpy.data.actions["idle"]
     return info
