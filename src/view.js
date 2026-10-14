@@ -64,6 +64,20 @@ const INDOOR_TOP = 2.2;
  * 0.72 m and the figure vanished.
  */
 const OVER_MAX = 3.0;
+/** Out of doors the camera goes over an obstacle by steps of OVER_STEP, up to this far over the feet. */
+const OVER_LIFT = 3.5;
+const OVER_STEP = 0.5;
+/**
+ * The colliders are the walls' footprints, not their faces: the Grunting
+ * Boar's bar has a stone wall standing 0.38 m in front of its collider and the
+ * sewer's iron bars 0.4 m, so a camera the colliders let right up to them is
+ * inside. A ray from the eye settles it, and only where a collider is within
+ * this of the camera (or the colliders already stopped the arm): in the open
+ * middle of a room it is 3.5 ms for nothing.
+ */
+const FACE_REACH = 1.0;
+/** A cast is good for a camera that has moved less than this since. */
+const CAST_REUSE = 0.1;
 
 const WIELD = 16;
 const SHIELD = 11;
@@ -106,6 +120,8 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
   const wantOver = new THREE.Vector3();
   const reachA = new THREE.Vector3();
   const reachB = new THREE.Vector3();
+  const reachC = new THREE.Vector3();
+  const reachD = new THREE.Vector3();
   const offset = new THREE.Vector3();
   const current = new THREE.Vector3();
   let clock = 0;
@@ -191,6 +207,40 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
       }
     }
     return true;
+  }
+
+  /** Is a collider within FACE_REACH of `p`, at about its height? */
+  function nearCollider(p) {
+    for (const c of player.colliders.near(p.x, p.z, scratch)) {
+      if (c.door && (c.whenOpen ? !c.door.open : c.door.open)) continue;
+      if (p.y + FACE_REACH <= c.y0 || p.y - FACE_REACH >= c.y1) continue;
+      if (p.x > c.x0 - FACE_REACH && p.x < c.x1 + FACE_REACH && p.z > c.z0 - FACE_REACH && p.z < c.z1 + FACE_REACH) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Cut the arm to `end` short of the first opaque face on the way from the
+   * pivot, in place. The same cast serves while neither end has moved by
+   * CAST_REUSE, so turning against a wall casts a few times a second, not
+   * every frame.
+   */
+  const castPivot = new THREE.Vector3();
+  const castEnd = new THREE.Vector3();
+  let castLen = Infinity;
+  let castValid = false;
+  function clipToFaces(end) {
+    const len = pivot.distanceTo(end);
+    if (len < 0.05) return;
+    if (!castValid || castPivot.distanceTo(pivot) > CAST_REUSE || castEnd.distanceTo(end) > CAST_REUSE) {
+      ray.set(pivot, offset.subVectors(end, pivot).normalize());
+      ray.near = 0.05; ray.far = len;
+      const hit = ray.intersectObject(getBuilt().group, true).find((h) => h.object.visible && !h.object.isSprite
+        && !(h.object.material && h.object.material.transparent));
+      castLen = hit ? Math.max(0, hit.distance - CAMERA_R) : Infinity;
+      castPivot.copy(pivot); castEnd.copy(end); castValid = true;
+    }
+    if (castLen < len) end.lerpVectors(pivot, end, castLen / len);
   }
 
   /** The ceiling over the player, read again in each new half-cell (one ray, 3.5 ms). */
@@ -386,21 +436,41 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     want.y = Math.max(want.y, feet.y + 0.4);
     if (ceiling.indoor) want.y = Math.min(want.y, feet.y + INDOOR_TOP);
     let target = reachA;
-    if (!reach([pivot, want], reachA) && lastTop < feet.y + OVER_MAX) {
-      // Over it: straight up past its top, then back.
-      const top = Math.min(lastTop + 0.35, ceiling.y - CAMERA_R - 0.05, ceiling.indoor ? feet.y + INDOOR_TOP : Infinity);
-      if (top > pivot.y) {
-        over.set(pivot.x, top, pivot.z);
-        wantOver.copy(want).setY(Math.max(want.y, top));
-        reach([pivot, over, wantOver], reachB);
-        if (reachB.distanceTo(pivot) > reachA.distanceTo(pivot) + 0.3) target = reachB;
+    const stopped = !reach([pivot, want], reachA);
+    if (stopped && lastTop < feet.y + OVER_MAX) {
+      // Over it: straight up past its top, then back. The eye still has to see
+      // the camera in a straight line, so a camera that is over a low altar
+      // but whose line from the eye clips the altar's edge goes higher, and
+      // failing that comes in to where the line is clear (the fountain, the
+      // temple's altar steps: 1.7 m of view through marble).
+      const from = lastTop + 0.35;
+      const limit = Math.min(ceiling.y - CAMERA_R - 0.05, ceiling.indoor ? feet.y + INDOOR_TOP : feet.y + OVER_LIFT);
+      let best = reachA.distanceTo(pivot) + 0.3;
+      for (let top = from; ; top += OVER_STEP) {
+        const t = Math.min(top, limit);
+        if (t > pivot.y) {
+          over.set(pivot.x, t, pivot.z);
+          wantOver.copy(want).setY(Math.max(want.y, t));
+          reach([pivot, over, wantOver], reachB);
+          const seen = reach([pivot, reachB], reachC);
+          const got = seen ? reachB : reachC;
+          if (got.distanceTo(pivot) > best) { best = got.distanceTo(pivot); reachD.copy(got); target = reachD; }
+          if (seen) break;
+        }
+        if (t >= limit) break;
       }
     }
+    if (stopped || nearCollider(target)) clipToFaces(target); else castValid = false;
     // In at once, out again gently: a wall never shows through, a gap that
-    // opens does not jerk the view.
+    // opens does not jerk the view. Only the length is eased: the direction
+    // is always the one just checked, because easing the vector itself swings
+    // the camera along the chord between two safe places, and that chord went
+    // through a wall or an altar in 10 of 1440 measured poses.
     offset.subVectors(target, pivot);
-    if (offset.lengthSq() < current.lengthSq()) current.copy(offset);
-    else current.lerp(offset, Math.min(1, dt * RELEASE));
+    const goal = offset.length();
+    let length = current.length();
+    length = goal < length ? goal : length + (goal - length) * Math.min(1, dt * RELEASE);
+    current.copy(offset).setLength(length);
     arm = current.length();
     camera.position.copy(pivot).add(current);
     // The figure walks; the camera does not bob or roll with it.
@@ -434,6 +504,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
       arm = 0;
       current.set(0, 0, 0);
       lastValid = false;
+      castValid = false;
       ceiling = { key: '', y: Infinity, indoor: false };
       player.body = body;
       if (spellfx) spellfx.setSelf(self);
