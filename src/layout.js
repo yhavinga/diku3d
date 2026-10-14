@@ -257,6 +257,47 @@ const LAID_WHOLE = new Set(['hood.are', 'midennir.are']);
 export const BESIDE = [{ room: 3200, dir: 3, to: 3051 }];
 
 /**
+ * Rooms moved, the same way, into the cell their own exit names: `room`'s way
+ * `dir` leads straight to `to`. Placed by breadth, the park and the
+ * graveyard both grew south from the Concourse and came out interleaved, the
+ * park's paths through the graveyard's rows (#3109 between #3601 and #3650),
+ * and the fence round the graveyard could not close: where their streets
+ * shared a cell no crossing had an answer. A search over moving each room of
+ * either beside a neighbour it has an exit to, the zone laid again and its
+ * crossings and fences planned each time, kept the moves that took a shared
+ * cell away with nothing unsolved, no passage of Midgaard lost and no wall
+ * more a wrong one; these three closed it. (A first answer moved Emerald
+ * Avenue #3133 beside #3119 too, and cost four wrong walls.)
+ */
+export const BY_EXIT = [
+  { room: 3112, dir: 1, to: 3113 },
+  { room: 3606, dir: 1, to: 3600 },
+  { room: 3650, dir: 2, to: 3648 },
+];
+
+/**
+ * Streets laid again, once everything else is laid, along the cells given
+ * here: steps from the cell of the room at `from`, the first out of the wall
+ * the street already leaves by and the last into the wall it arrives by.
+ * Kept only where that is a street: every cell free, one step apart, and no
+ * door moved. Two tangles in Midgaard, at Poor Alley and round the Concourse
+ * by the park, had no answer for the crossings (build.js `crossingPlan`):
+ * an arm of a cell that three streets the mud keeps apart all ran down,
+ * which no two heights or split lane can part. A search over the streets of
+ * both, laid again singly and in pairs out of the same walls and scored by
+ * what the crossings then left unsolved, found these three: Emerald Avenue
+ * comes down to the south end of itself (#3132-#3117) round the east of the
+ * Concourse's corner, Poor Alley runs round the south of the Armoury, and
+ * the way from the West Gate down to Wall Road round the west of Poor
+ * Alley. Unsolved cells 19 -> 0; two streets two cells longer.
+ */
+export const UNTANGLE = [
+  { from: 3132, to: 3117, path: [[0, 1], [1, 1], [2, 1], [3, 1], [3, 2], [3, 3], [2, 3]] },
+  { from: 3024, to: 3044, path: [[-1, 0], [-1, 1], [-2, 1], [-3, 1], [-3, 0]] },
+  { from: 3040, to: 3042, path: [[0, 1], [-1, 1], [-1, 2], [-1, 3], [0, 3]] },
+];
+
+/**
  * What a corridor pays, in cells, for each cell it shares with another
  * pair's street, when it is laid again round them (the end of layoutWorld):
  * enough to go two cells round one.
@@ -478,21 +519,34 @@ export function layoutWorld(world, options = {}) {
   }
 
   relax(world, cells, occupied, order, 12, { terrace, reserved });
-  for (const { room, dir, to } of BESIDE) {
+  // A room moves with what is stacked on it by a way up or down -- a tomb
+  // under a graveyard path (#3606 over #3607) stayed behind, and its flight
+  // led nowhere -- and on every level of either column the two cells swap.
+  const column = (cell) => {
+    const out = [cell];
+    for (let i = 0; i < out.length; i++) {
+      for (const d of [4, 5]) {
+        const e = out[i].room.exits[d]; const n = e && cells.get(e.to);
+        if (n && !out.includes(n) && n.x === cell.x && n.z === cell.z) out.push(n);
+      }
+    }
+    return out;
+  };
+  for (const { room, dir, to } of [...BESIDE, ...BY_EXIT]) {
     const a = cells.get(room); const b = cells.get(to);
     if (!a || !b || a.level !== b.level) continue;
     const [dx, , dz] = DIR_STEP[dir];
     const x = b.x - dx; const z = b.z - dz;
     if (a.x === x && a.z === z) continue;
     const there = occupied.get(key(a.level, x, z));
-    occupied.delete(key(a.level, a.x, a.z));
-    if (there !== undefined) {
-      const c = cells.get(there);
-      c.x = a.x; c.z = a.z;
-      occupied.set(key(c.level, c.x, c.z), there);
+    const levels = new Set([...column(a), ...(there !== undefined ? column(cells.get(there)) : [])].map((c) => c.level));
+    const [ax, az] = [a.x, a.z];
+    for (const level of levels) {
+      const p = occupied.get(key(level, ax, az)); const q = occupied.get(key(level, x, z));
+      occupied.delete(key(level, ax, az)); occupied.delete(key(level, x, z));
+      if (p !== undefined) { const c = cells.get(p); c.x = x; c.z = z; occupied.set(key(level, x, z), p); }
+      if (q !== undefined) { const c = cells.get(q); c.x = ax; c.z = az; occupied.set(key(level, ax, az), q); }
     }
-    a.x = x; a.z = z;
-    occupied.set(key(a.level, x, z), room);
   }
   if (options.compact) return { order };
 
@@ -989,6 +1043,17 @@ export function layoutWorld(world, options = {}) {
       m.path = route.cells;
       lay(m, true);
     }
+  }
+  // Streets laid again round a tangle (`UNTANGLE`).
+  for (const { from, to, path } of UNTANGLE) {
+    const m = links.find((l) => l.kind === 'alley' && l.from.vnum === from && l.to?.vnum === to);
+    if (!m || !builtEnds(m)) continue;
+    const cells = path.map(([dx, dz]) => ({ x: m.from.x + dx, z: m.from.z + dz }));
+    const chain = [m.from, ...cells, m.to];
+    const dirs = chain.slice(1).map((q, i) => [0, 1, 2, 3].find((d) => chain[i].x + DIR_STEP[d][0] === q.x && chain[i].z + DIR_STEP[d][2] === q.z));
+    if (dirs.some((d) => d === undefined) || dirs[0] !== m.entryDir || dirs[dirs.length - 1] !== m.exitDir) continue;
+    if (cells.some((c) => occupied.has(key(m.from.level, c.x, c.z)) || blocked.has(key(m.from.level, c.x, c.z)))) continue;
+    m.path = cells;
   }
   const pathCells = new Set();
   const pathOwner = new Map(); // which passage runs through this cell

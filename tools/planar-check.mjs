@@ -75,13 +75,15 @@ const trial = argv.includes('--try') ? argv[argv.indexOf('--try') + 1] : null;
 const vertical = argv.includes('--vertical');
 
 // 48 rooms in 12 zones, none in the home zone, as of wave 13. Shortcuts:
-// 410 cells in all zones, 143 of them in the home zone, at reach 12 with
-// layout.js crossings 'allow' (wave 18: Under the Bridge laid beside the
-// bridge, and Emerald Avenue's street now crosses the river and the
-// Promenade's; 408 and 141 in wave 17, 430 and 150 in wave 15); 0 with
-// 'forbid' or 'raise', which cost walkable passages -- see --try
-// crossings=forbid.
-const CEILING = { roofed: 48, shortcut: 410 };
+// 412 cells in all zones, 145 of them in the home zone, at reach 12 with
+// layout.js crossings 'allow' (wave 19: three streets laid again round
+// Midgaard's two tangles, `UNTANGLE`, so build.js's crossings can part them
+// all -- each of the three new cells is one of its crossings, 413 and 146
+// -- and the graveyard's rooms moved by their exits, `BY_EXIT`, took one
+// away; 410 and 143 in wave 18, when Under the Bridge was laid beside the
+// bridge; 408 and 141 in wave 17, 430 and 150 in wave 15); 0 with 'forbid'
+// or 'raise', which cost walkable passages -- see --try crossings=forbid.
+const CEILING = { roofed: 48, shortcut: 413 };
 const listed = readFileSync(join(areaDir, 'area.lst'), 'latin1').split(/\s+/).filter((f) => f.endsWith('.are'));
 const read = (f) => parseArea(readFileSync(join(areaDir, f), 'latin1'), f);
 
