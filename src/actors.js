@@ -1096,6 +1096,8 @@ export function createPlayerFigure({
   const proto = {
     vnum: 0, keywords: `${name.toLowerCase()} ${trade} ${sex === 2 ? 'woman' : 'man'}`,
     short: `${name}${title}`, long: '', description: '', level, sex, act: 0, equipment: gear,
+    // A player's body: what they wear on their head is worn (people.js applyEquipment).
+    player: true,
   };
   const seed = Math.floor(strHash(name, 7) * 1e6);
   const who = personOf(proto, ITEM, seed);

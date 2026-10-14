@@ -654,6 +654,20 @@ function applyEquipment(out, proto, ITEM, seed) {
       out.shield = out.arch === 'knight' ? 'shield_kite' : (out.shield || 'shield_round');
       out.shieldFromResets = true;
     }
+    // What a player wears on the head is what is on their head. Players only:
+    // for mobiles the archetype already dresses the head, and a reset's helmet
+    // would change faces in 45 areas nobody has looked at.
+    if (ITEM && proto.player && item.wearLoc === WEAR_HEAD && item.proto.itemType === ITEM.ARMOR) {
+      const name = `${item.proto.keywords || ''} ${item.proto.short || ''}`;
+      const piece = /\b(great|full|barrel)\s*helm/i.test(name) ? 'helm_great'
+        : /\bhelm(et)?s?\b/i.test(name) ? (seed < 0.5 ? 'helm_kettle' : 'helm_nasal')
+          : /\bhoods?\b/i.test(name) ? 'hood'
+            : /\b(caps?|hats?)\b/i.test(name) ? 'hat_cap' : null;
+      // Under a helm or a hood the hair goes, as the guards' do (helm or hair,
+      // never both); a cap sits on it. Beards stay.
+      const covers = piece && (piece.startsWith('helm_') || piece === 'hood');
+      if (piece) out.pieces = [...(out.pieces || []).filter((x) => !HEADWEAR.has(x) && !(covers && x.startsWith('hair_'))), piece];
+    }
   }
   // A staff or a spear is held in both hands' worth of arm; nobody carries a
   // shield with a staff.
@@ -661,6 +675,11 @@ function applyEquipment(out, proto, ITEM, seed) {
   // Someone the size of a toddler carries nothing.
   if (out.scale < 0.55) { out.weapon = null; out.shield = null; }
 }
+
+/** game.js WEAR.HEAD. */
+const WEAR_HEAD = 6;
+/** The head pieces that are something worn, as against hair or a beard. */
+const HEADWEAR = new Set(['hood', 'hat_wizard', 'helm_kettle', 'helm_nasal', 'helm_great', 'hat_cap', 'coif', 'turban', 'scarf']);
 
 /** Dyes a garment can be named in, muted the way a worn robe is. */
 const GARMENT = {
