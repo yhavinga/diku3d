@@ -2114,6 +2114,579 @@ function buildRiver({ plan, layout, rooms, batcher, instances, chunkOf, addColli
   batcher.indoor = was;
 }
 
+// ----------------------------------------------------------- the crossings ----
+
+/**
+ * Where two streets meet in a cell and the mud joins neither pair of their
+ * rooms (planar-check's shortcuts), they are kept apart: one carried over the
+ * other, or the lane they share split down the middle by an iron railing
+ * (user, 2026-10-10). Every street through a cluster of such cells gets a
+ * height, 0 or `CROSS_H`, at each cell edge it crosses and in each cell's
+ * middle; an arm (edge to middle) whose two ends differ is a stair. A plain
+ * cell of the street's own just outside the cluster may hold one too -- the
+ * whole flight down a straight one, the arm towards the cluster of a bend --
+ * and an edge is up only between two cells that can hold it there: in v2 a
+ * street left a cluster 3.5 m up over a bend with no stair, a drop at the
+ * cell edge in 11 of 25 cells. An arm two such streets share is always split,
+ * each keeping a half: at one height in the middle the halves follow their
+ * ways, at two they cross over each other in the middle, the upper one's
+ * stair or deck in its own half -- so no street runs roofed down another's
+ * lane, which v2 did for three cells at a time. The river's deck stays at
+ * grade. Fewest stairs and splits win; a search over the cluster's few
+ * unknowns (`solveCrossings`). 3.5 m up, a body on a deck still counts on its
+ * street's level (game.js, the judge), and there is 3 m clear under one.
+ * There is no room for ramps: of 405 such cells only 52 have a plain street
+ * cell either side of a street through them. Midgaard's only (user,
+ * 2026-10-10): 32 cells; two tangles of 9 and 10 cells, at Poor Alley and
+ * round the Concourse by the park, have no answer with two heights and are
+ * left as they were (user, 2026-10-14).
+ */
+const CROSS_H = 3.5;
+const CROSS_T = 0.5;
+const CROSS_W = 6.6;
+const CROSS_RISERS = 7;
+/**
+ * How high a crossing's parapets and stair walls hold a body, over the
+ * metre they stand: above a jump (the feet rise 1.14 m) and the step taken
+ * from it (0.62), so no one leaves a deck for the street under it.
+ */
+const CROSS_HOLD = 1.9;
+/** A lane split in two: an iron railing on a kerb `SPLIT_T` wide, held to `RAIL_HOLD`. */
+const SPLIT_T = 0.4;
+const RAIL_KERB = 0.3;
+const RAIL_H = 2.0;
+const RAIL_HOLD = 2.1;
+const RAIL_BAR = 0.035;
+const RAIL_GAP = 0.14;
+
+/** Left, ahead and right, for a body walking in by arm `s` (facing `(s + 2) % 4`). */
+const turnRank = (s, o) => {
+  const f = (s + 2) % 4;
+  return o === (f + 3) % 4 ? 0 : o === f ? 1 : 2;
+};
+
+function crossingPlan(layout, world, river, cellKey) {
+  const exitTo = new Set();
+  for (const cell of layout.order) for (const e of cell.room.exits) if (e) exitTo.add(`${cell.vnum}>${e.to}`);
+  const joined = (a, b) => a === b || (exitTo.has(`${a}>${b}`) && exitTo.has(`${b}>${a}`));
+  const harmless = (l, m) => [l.from.vnum, l.to.vnum].every((x) => [m.from.vnum, m.to.vnum].every((y) => joined(x, y)));
+  const water = (l) => river.has(cellKey(l.from.level, l.from.x, l.from.z)) && river.has(cellKey(l.to.level, l.to.x, l.to.z))
+    && isWater(l.from.room) && isWater(l.to.room);
+  const links = layout.links.filter((l) => l.kind === 'alley' && l.to && !water(l));
+  const midgaard = (l) => [l.from, l.to].some((c) => c.room.areaFile === 'midgaard.are');
+  const through = new Map();
+  for (const link of links) {
+    const chain = [link.from, ...link.path, link.to];
+    for (let i = 1; i < chain.length - 1; i++) {
+      const k = cellKey(link.from.level, chain[i].x, chain[i].z);
+      if (!through.has(k)) through.set(k, []);
+      through.get(k).push({ link, i, chain, x: chain[i].x, z: chain[i].z, a: dirBetween(chain[i], chain[i - 1]), b: dirBetween(chain[i], chain[i + 1]) });
+    }
+  }
+  const conflict = new Map();
+  for (const [k, list] of through) {
+    if (list.length < 2 || !list.every((e) => midgaard(e.link))) continue;
+    if (list.some((e, p) => list.some((f, q) => q > p && !harmless(e.link, f.link)))) conflict.set(k, list);
+  }
+  // Clusters: conflict cells next to each other along a street through both.
+  const parent = new Map([...conflict.keys()].map((k) => [k, k]));
+  const find = (k) => { while (parent.get(k) !== k) k = parent.get(k); return k; };
+  for (const [k, list] of conflict) {
+    for (const e of list) {
+      for (const j of [e.i - 1, e.i + 1]) {
+        if (j <= 0 || j >= e.chain.length - 1) continue;
+        const n = cellKey(e.link.from.level, e.chain[j].x, e.chain[j].z);
+        if (conflict.has(n)) parent.set(find(n), find(k));
+      }
+    }
+  }
+  const clusters = new Map();
+  for (const k of conflict.keys()) {
+    const r = find(k);
+    if (!clusters.has(r)) clusters.set(r, []);
+    clusters.get(r).push(k);
+  }
+  const plan = new Map();
+  for (const cells of clusters.values()) {
+    const solved = solveCrossings({ cells, conflict, through, harmless, river, cellKey });
+    if (!solved) continue;
+    for (const [k, entry] of solved) plan.set(k, entry);
+  }
+  return plan;
+}
+
+/**
+ * One cluster's heights (`crossingPlan`), or null if two heights and split
+ * lanes cannot keep it apart. Returns, per cell it builds in, the streets
+ * through it with each one's height at its two edges and in the middle, and
+ * where a lane is split, which half each street keeps.
+ */
+function solveCrossings({ cells, conflict, through, harmless, river, cellKey }) {
+  const cellSet = new Set(cells);
+  const streets = new Map();
+  for (const k of cells) for (const e of conflict.get(k)) if (!streets.has(e.link)) streets.set(e.link, e);
+  const vars = [];
+  const edgeVar = new Map();
+  const midVar = new Map();
+  const fixed = new Map();
+  const varOf = (name, map) => { if (!map.has(name)) { map.set(name, vars.length); vars.push(name); } return map.get(name); };
+  const sid = new Map([...streets.keys()].map((l, i) => [l, i]));
+  const keyAt = (e, j) => cellKey(e.link.from.level, e.chain[j].x, e.chain[j].z);
+  // The plain cells of a street's own next to the cluster where its stair
+  // may stand: the whole flight down a straight one, the arm towards the
+  // cluster of a bend, its middle and its other arm at grade. Only where
+  // the cell beyond is plain too, so the street is at grade on that side.
+  const stairCell = new Map();
+  for (const [link, e] of streets) {
+    const id = sid.get(link);
+    for (let j = 1; j < e.chain.length - 1; j++) {
+      if (!cellSet.has(keyAt(e, j))) continue;
+      varOf(`${id}:${j - 1}`, edgeVar); varOf(`${id}:${j}`, edgeVar); varOf(`${id}:${keyAt(e, j)}`, midVar);
+      for (const [jj, beyond, out] of [[j - 1, j - 2, j - 2], [j + 1, j + 2, j + 1]]) {
+        if (jj <= 0 || jj >= e.chain.length - 1 || cellSet.has(keyAt(e, jj))) continue;
+        if ((through.get(keyAt(e, jj)) || []).length > 1) continue;
+        if (beyond > 0 && beyond < e.chain.length - 1 && cellSet.has(keyAt(e, beyond))) continue;
+        const straight = (dirBetween(e.chain[jj], e.chain[jj - 1]) + 2) % 4 === dirBetween(e.chain[jj], e.chain[jj + 1]);
+        stairCell.set(`${id}:${jj}`, straight ? 'flight' : 'bend');
+        varOf(`${id}:${out}`, edgeVar);
+      }
+    }
+  }
+  for (const [name, v] of edgeVar) {
+    const [id, j] = name.split(':').map(Number);
+    const e = streets.get([...streets.keys()][id]);
+    const n = e.chain.length;
+    // An edge can be up only between two cells that can hold the street up
+    // there or bring it down: cluster cells and its stair cells. Onto a room,
+    // or a plain cell with no stair, it is at grade -- or the street would
+    // end in a drop at the cell's edge.
+    const able = (i) => i >= 1 && i <= n - 2 && !river.has(keyAt(e, i)) && (cellSet.has(keyAt(e, i)) || stairCell.has(`${id}:${i}`));
+    if (!able(j) || !able(j + 1)) fixed.set(v, 0);
+  }
+  // The river's own deck is a bridge already, at grade: nothing goes up on it.
+  for (const [name, v] of midVar) if (river.has(name.slice(name.indexOf(':') + 1))) fixed.set(v, 0);
+  // Constraints, per pair of streets the mud keeps apart, per cell.
+  const pairs = [];
+  // Streets the mud joins may meet at one height, but a stair in an arm
+  // another street walks at grade would wall it off: both flat there.
+  const sharing = [];
+  for (const k of cells) {
+    const list = conflict.get(k).filter((e) => streets.has(e.link));
+    for (let p = 0; p < list.length; p++) {
+      for (let q = p + 1; q < list.length; q++) {
+        const A = list[p]; const B = list[q];
+        const ia = sid.get(A.link); const ib = sid.get(B.link);
+        const shared = [];
+        for (const [da, ja] of [[A.a, A.i - 1], [A.b, A.i]]) {
+          for (const [db, jb] of [[B.a, B.i - 1], [B.b, B.i]]) {
+            if (da === db) shared.push({ d: da, ja, jb, ea: edgeVar.get(`${ia}:${ja}`), eb: edgeVar.get(`${ib}:${jb}`) });
+          }
+        }
+        if (harmless(A.link, B.link)) {
+          if (shared.length) sharing.push({ shared, ma: midVar.get(`${ia}:${k}`), mb: midVar.get(`${ib}:${k}`) });
+          continue;
+        }
+        // At one height in the middle the two can only be kept apart by a
+        // wall down the lane they share, each keeping the half of a shared
+        // arm on the side it goes on to: seen walking in by that arm, the one
+        // going further left keeps the left half. Two shared arms: a lane the
+        // two run down together, either way round.
+        const other = (E, d) => (E.a === d ? E.b : E.a);
+        let split = null;
+        if (shared.length === 1) {
+          const d = shared[0].d; const oa = other(A, d); const ob = other(B, d);
+          if (oa !== ob) split = { arms: [d], aLeftOf: { [d]: turnRank(d, oa) < turnRank(d, ob) } };
+        } else if (shared.length === 2) split = { arms: shared.map((s) => s.d), parallel: true };
+        pairs.push({ k, A, B, ia, ib, shared, split, ma: midVar.get(`${ia}:${k}`), mb: midVar.get(`${ib}:${k}`) });
+      }
+    }
+  }
+  const val = new Array(vars.length).fill(-1);
+  for (const [v, x] of fixed) val[v] = x;
+  const flatIn = (c, ma, mb) => c.shared.every(({ ea, eb }) => (val[ea] < 0 || val[ea] === ma) && (val[eb] < 0 || val[eb] === mb));
+  // Two heights in the middle: one passes over the other there, and in an
+  // arm they share each keeps a half, the upper one's stair or deck in its
+  // own -- either half, since they cross in the middle. One height: split.
+  const ok = () => pairs.every((c) => {
+    const ma = val[c.ma]; const mb = val[c.mb];
+    return ma < 0 || mb < 0 || ma !== mb || !!c.split;
+  }) && sharing.every((c) => val[c.ma] < 0 || val[c.mb] < 0 || flatIn(c, val[c.ma], val[c.mb]));
+  // An arm two joined streets share at two heights is roofed by the upper
+  // one's deck, a tunnel down the lower one: the last way out.
+  const STACK_COST = 3;
+  const stacked = () => sharing.reduce((n, c) => n + (val[c.ma] !== val[c.mb] ? c.shared.length : 0), 0);
+  const splitCount = () => pairs.filter((c) => c.shared.length > 0 || val[c.ma] === val[c.mb]).length;
+  const stairs = () => {
+    let n = 0;
+    for (const [link, e] of streets) {
+      const id = sid.get(link);
+      for (let j = 1; j < e.chain.length - 1; j++) {
+        const a = edgeVar.get(`${id}:${j - 1}`); const b = edgeVar.get(`${id}:${j}`);
+        const k = keyAt(e, j);
+        if (cellSet.has(k)) { const m = midVar.get(`${id}:${k}`); n += (val[a] !== val[m]) + (val[b] !== val[m]); } else if (a !== undefined && b !== undefined && val[a] !== val[b]) n++;
+      }
+    }
+    return n;
+  };
+  // The halves of the split lanes. One unknown per street per edge it is
+  // split at -- which side of that edge's middle line it keeps, the same
+  // for the arms either side of the edge -- tied together by parity: two
+  // streets in one arm keep opposite halves; at one height a one-arm split's
+  // halves are fixed by the left-of rule, and down a lane they share both
+  // arms keep one side (straight) or the inner one (round a bend). Unknown 0
+  // is the constant 0. The bit is 0 for the lower-numbered side of the arm.
+  const lowSide = (d) => (d % 2 === 0 ? 1 : 0);
+  const bitOf = (d, side) => (side === lowSide(d) ? 0 : 1);
+  const halvesOf = () => {
+    const node = new Map();
+    const parent = [0]; const parity = [0];
+    const at = (id, j) => {
+      const key = `${id}:${j}`;
+      if (!node.has(key)) { node.set(key, parent.length); parent.push(parent.length); parity.push(0); }
+      return node.get(key);
+    };
+    const find = (u) => {
+      let p = 0; let r = u;
+      while (parent[r] !== r) { p ^= parity[r]; r = parent[r]; }
+      return [r, p];
+    };
+    const tie = (u, v, want) => {
+      const [ru, pu] = find(u); const [rv, pv] = find(v);
+      if (ru === rv) return (pu ^ pv) === want;
+      parent[ru] = rv; parity[ru] = pu ^ pv ^ want;
+      return true;
+    };
+    for (const c of pairs) {
+      if (!c.shared.length) continue;
+      for (const s of c.shared) if (!tie(at(c.ia, s.ja), at(c.ib, s.jb), 1)) return null;
+      if (val[c.ma] !== val[c.mb]) continue;
+      const [s0, s1] = c.shared;
+      if (!c.split.parallel) {
+        const f = (s0.d + 2) % 4;
+        const side = c.split.aLeftOf[s0.d] ? (f + 3) % 4 : (f + 1) % 4;
+        if (!tie(at(c.ia, s0.ja), 0, bitOf(s0.d, side))) return null;
+      } else if ((s0.d + 2) % 4 === s1.d) {
+        if (!tie(at(c.ia, s0.ja), at(c.ia, s1.ja), 0)) return null;
+      } else if (!tie(at(c.ia, s0.ja), at(c.ia, s1.ja), bitOf(s0.d, s1.d) ^ bitOf(s1.d, s0.d))) return null;
+    }
+    const [zr, zp] = find(0);
+    return (id, j, d) => {
+      const [r, p] = find(at(id, j));
+      const bit = p ^ (r === zr ? zp : 0);
+      return bit ? (lowSide(d) + 2) % 4 : lowSide(d);
+    };
+  };
+  const free = vars.map((_, v) => v).filter((v) => !fixed.has(v));
+  let best = null; let bestCost = Infinity; let tries = 0;
+  const go = (i) => {
+    if (tries++ > 400000 || !ok()) return;
+    if (i === free.length) {
+      const cost = stairs() + splitCount() + STACK_COST * stacked();
+      if (cost >= bestCost) return;
+      const half = halvesOf();
+      if (half) { bestCost = cost; best = { val: val.slice(), half }; }
+      return;
+    }
+    for (const x of [0, 1]) { val[free[i]] = x; go(i + 1); }
+    val[free[i]] = -1;
+  };
+  go(0);
+  if (!best) return null;
+  // Per cell: the streets through it and their heights.
+  const out = new Map();
+  const H = (v) => (v === undefined || best.val[v] < 0 ? 0 : best.val[v] * CROSS_H);
+  for (const [link, e] of streets) {
+    const id = sid.get(link);
+    for (let j = 1; j < e.chain.length - 1; j++) {
+      const k = keyAt(e, j);
+      const a = edgeVar.get(`${id}:${j - 1}`); const b = edgeVar.get(`${id}:${j}`);
+      const inside = cellSet.has(k);
+      if (!inside && (a === undefined || b === undefined || H(a) === H(b))) continue;
+      const m = inside ? midVar.get(`${id}:${k}`) : undefined;
+      if (!out.has(k)) out.set(k, { level: link.from.level, x: e.chain[j].x, z: e.chain[j].z, river: river.has(k), plain: !inside, streets: [], splits: [] });
+      // A bend's stair is an arm's, its middle at grade; a straight cell's
+      // flight is the cell's (`hm` null).
+      const hm = inside ? H(m) : stairCell.get(`${id}:${j}`) === 'bend' ? 0 : null;
+      out.get(k).streets.push({
+        link, a: dirBetween(e.chain[j], e.chain[j - 1]), b: dirBetween(e.chain[j], e.chain[j + 1]),
+        ha: H(a), hb: H(b), hm, half: {},
+      });
+    }
+  }
+  for (const c of pairs) {
+    if (!c.shared.length && best.val[c.ma] !== best.val[c.mb]) continue;
+    const entry = out.get(c.k);
+    const sa = entry.streets.find((s) => s.link === c.A.link); const sb = entry.streets.find((s) => s.link === c.B.link);
+    for (const s of c.shared) {
+      sa.half[s.d] = best.half(c.ia, s.ja, s.d);
+      sb.half[s.d] = best.half(c.ib, s.jb, s.d);
+    }
+    // A wall between them only at one height; at two the upper one's stair
+    // and deck, with their parapets, are what part them.
+    if (sa.hm === sb.hm) entry.splits.push({ a: sa, b: sb, arms: c.shared.map((s) => s.d), height: sa.hm });
+  }
+  // Streets through a cluster cell that the solve left out (harmless with
+  // everything there) are at grade; the cell is still built here.
+  for (const k of cells) {
+    const entry = out.get(k);
+    if (!entry) continue;
+    for (const e of conflict.get(k)) {
+      if (entry.streets.some((s) => s.link === e.link)) continue;
+      entry.streets.push({ link: e.link, a: e.a, b: e.b, ha: 0, hb: 0, hm: 0, half: {} });
+    }
+  }
+  return out;
+}
+
+/**
+ * A convex polygon in a vertical plane, `pts` as [along, y], thickened
+ * across from `a0` to `a1`, as world-space triangles for `Batcher.add`:
+ * `at(a, b, y)` maps the frame to the world. Wound outwards by the solid's
+ * own middle, whichever way the frame turns.
+ */
+function extruded(pts, a0, a1, at) {
+  const pos = [];
+  const mid = [0, 0, 0];
+  const corners = [];
+  for (const a of [a0, a1]) for (const [b, y] of pts) corners.push(at(a, b, y));
+  for (const c of corners) for (let i = 0; i < 3; i++) mid[i] += c[i] / corners.length;
+  const tri = (p, q, r) => {
+    const u = [q[0] - p[0], q[1] - p[1], q[2] - p[2]]; const v = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
+    const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const o = [(p[0] + q[0] + r[0]) / 3 - mid[0], (p[1] + q[1] + r[1]) / 3 - mid[1], (p[2] + q[2] + r[2]) / 3 - mid[2]];
+    if (n[0] * o[0] + n[1] * o[1] + n[2] * o[2] < 0) pos.push(...p, ...r, ...q); else pos.push(...p, ...q, ...r);
+  };
+  const n = pts.length;
+  for (const a of [a0, a1]) for (let i = 1; i < n - 1; i++) tri(at(a, ...pts[0]), at(a, ...pts[i]), at(a, ...pts[i + 1]));
+  for (let i = 0; i < n; i++) {
+    const p = pts[i]; const q = pts[(i + 1) % n];
+    const A = at(a0, ...p); const B = at(a0, ...q); const Cq = at(a1, ...q); const D = at(a1, ...p);
+    tri(A, B, Cq); tri(A, Cq, D);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  return geo;
+}
+
+/**
+ * The crossings (`crossingPlan`), cell by cell: the floor; for every street
+ * carried up, its deck over the middle and its arms -- a flat deck where it
+ * stays up, a stair where it comes up or down -- with parapets down the open
+ * sides, and solid masonry under a deck nothing passes beneath; where two
+ * streets keep to the halves of one lane, a wall between. The corners
+ * between the ways are `buildLanes`' houses, as at any crossing; in the
+ * river's channel the street at grade is `buildRiver`'s deck.
+ */
+function buildCrossings({ plan, batcher, chunkOf, addCollider, addPlatform, raised, groundAt, cellKey }) {
+  const was = batcher.indoor;
+  batcher.indoor = false;
+  const half = CROSS_W / 2;
+  const rise = CROSS_H / CROSS_RISERS;
+  for (const c of plan.values()) {
+    const chunk = chunkOf(c);
+    const px = c.x * CELL; const pz = c.z * CELL;
+    const y0 = c.level * LEVEL_H;
+    // A rect against side `d`: `a0..a1` along that side, `b0..b1` in from the centre towards it.
+    const rect = (d, a0, a1, b0, b1) => {
+      const [dx, , dz] = DIR_STEP[d];
+      if (dz !== 0) return { x0: px + a0, x1: px + a1, z0: dz < 0 ? pz - b1 : pz + b0, z1: dz < 0 ? pz - b0 : pz + b1 };
+      return { x0: dx < 0 ? px - b1 : px + b0, x1: dx < 0 ? px - b0 : px + b1, z0: pz + a0, z1: pz + a1 };
+    };
+    const atOf = (d) => {
+      const [dx, , dz] = DIR_STEP[d];
+      return (a, b, y) => (dz !== 0 ? [px + a, y, pz + dz * b] : [px + dx * b, y, pz + a]);
+    };
+    // The point `b` out from the centre towards side `d`, on its middle line.
+    const P = (d, b) => [px + DIR_STEP[d][0] * b, pz + DIR_STEP[d][2] * b];
+    const slab = (r, ya, yb, material, collide = true) => {
+      const w = r.x1 - r.x0; const d = r.z1 - r.z0; const h = yb - ya;
+      if (w < 0.01 || d < 0.01 || h < 0.01) return;
+      batcher.add(box(w, h, d, 1, 1, 1), material, place((r.x0 + r.x1) / 2, (ya + yb) / 2, (r.z0 + r.z1) / 2), { chunk, ao: wallAo(y0) });
+      if (collide) addCollider(r.x0, r.x1, r.z0, r.z1, ya, yb);
+    };
+    const rail = (r, base, drop = 0) => {
+      slab(r, base, base + PARAPET_H - drop, 'stonewall', false);
+      addCollider(r.x0, r.x1, r.z0, r.z1, base, base + CROSS_HOLD);
+    };
+    const deckTop = (r, top) => {
+      batcher.add(plane(r.x1 - r.x0, r.z1 - r.z0, 3), 'cobble', place((r.x0 + r.x1) / 2, top, (r.z0 + r.z1) / 2), { chunk });
+      slab(r, top - CROSS_T, top - 0.01, 'stonewall', false);
+      addPlatform(r.x0, r.x1, r.z0, r.z1, top);
+    };
+    // Two streets at one height down the halves of a lane: an iron railing
+    // on a stone kerb along the middle line, which the eye goes through and
+    // a body cannot climb (a jump lifts the feet 1.14 m, a step 0.62 more).
+    // `low` drops one a centimetre where it meets another, so no two tops
+    // are one plane.
+    const railing = (from, to, base, low = 0) => {
+      const len = Math.hypot(to[0] - from[0], to[1] - from[1]);
+      if (len < 0.05) return;
+      const yaw = Math.atan2(to[0] - from[0], to[1] - from[1]);
+      const mx = (from[0] + to[0]) / 2; const mz = (from[1] + to[1]) / 2;
+      const kerb = RAIL_KERB - low; const top = RAIL_H - low;
+      batcher.add(box(SPLIT_T, kerb, len, 1, 1, 1), 'stonewall', place(mx, base + kerb / 2, mz, yaw), { chunk, ao: wallAo(y0) });
+      batcher.add(box(RAIL_BAR * 2, RAIL_BAR * 2, len, 1, 1, 1), 'iron', place(mx, base + top - RAIL_BAR, mz, yaw), { chunk });
+      const n = Math.max(1, Math.round(len / RAIL_GAP));
+      const barH = top - RAIL_BAR * 2 - kerb;
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n;
+        batcher.add(box(RAIL_BAR, barH, RAIL_BAR, 1, 1, 1), 'iron',
+          place(from[0] + (to[0] - from[0]) * t, base + kerb + barH / 2, from[1] + (to[1] - from[1]) * t, yaw), { chunk });
+      }
+      // A collider is square to the world: one box along an axis, a row of small ones on a slant.
+      const h = SPLIT_T / 2;
+      if (Math.abs(to[0] - from[0]) < 0.01 || Math.abs(to[1] - from[1]) < 0.01) {
+        addCollider(Math.min(from[0], to[0]) - h, Math.max(from[0], to[0]) + h, Math.min(from[1], to[1]) - h, Math.max(from[1], to[1]) + h, base, base + RAIL_HOLD);
+        return;
+      }
+      const steps = Math.ceil(len / 0.35);
+      for (let i = 0; i < steps; i++) {
+        const t = (i + 0.5) / steps;
+        const cx = from[0] + (to[0] - from[0]) * t; const cz = from[1] + (to[1] - from[1]) * t;
+        addCollider(cx - h - 0.05, cx + h + 0.05, cz - h - 0.05, cz + h + 0.05, base, base + RAIL_HOLD);
+      }
+    };
+    if (!c.river) {
+      const source = c.streets.map((s) => (isOpenAir(s.link.from.room) ? s.link.from.room : s.link.to.room))[0];
+      const floor = pickMaterials(source, source.area, true).floor;
+      batcher.add(plane(CELL, CELL, 6), floor, place(px, y0, pz), { chunk });
+      batcher.add(box(CELL, SLAB, CELL), floor, place(px, y0 - SLAB / 2 - 0.01, pz), { chunk });
+      addPlatform(px - HALF, px + HALF, pz - HALF, pz + HALF, y0);
+      if (groundAt) groundAt.set(cellKey(c.level, c.x, c.z), floor);
+    }
+    // Across arm `d`, the street's part of the lane: all of it, or the half a split leaves it.
+    const span = (s, d) => {
+      const side = s.half[d];
+      if (side === undefined) return [-half, half];
+      const [sx, , sz] = DIR_STEP[side];
+      return (d % 2 === 0 ? sx : sz) > 0 ? [SPLIT_T / 2, half] : [-half, -SPLIT_T / 2];
+    };
+    const edgeOf = (s, d) => (s.a === d ? s.ha : s.hb);
+    const lowMid = c.streets.some((s) => s.hm === 0);
+    // Something at grade in arm `d` across `a0..a1`, which a deck there must not fill under.
+    const lowArm = (d, a0, a1) => c.streets.some((s) => s.hm === 0 && (s.a === d || s.b === d) && edgeOf(s, d) === 0
+      && span(s, d)[0] < a1 - 0.01 && span(s, d)[1] > a0 + 0.01);
+    // The middle, once, under every street up there: a deck, filled under if
+    // nothing at grade crosses beneath, and a parapet round it but where a
+    // street goes on out of it by an arm.
+    const up = c.streets.filter((s) => s.hm === CROSS_H);
+    if (up.length) {
+      const mid = rect(0, -half, half, -half, half);
+      deckTop(mid, y0 + CROSS_H);
+      if (!lowMid) slab(mid, y0, y0 + CROSS_H - CROSS_T, 'stonewall');
+      for (let d = 0; d < 4; d++) {
+        const open = up.filter((s) => s.a === d || s.b === d).map((s) => span(s, d)).sort((p, q) => p[0] - q[0]);
+        // The east and west runs stop short of the corners, which the north and south ones own.
+        const inset = d % 2 === 1 ? 0.005 : 0;
+        let from = -half + inset;
+        for (const [o0, o1] of [...open, [half - inset, half]]) {
+          if (o0 - from > 0.05) rail(rect(d, from, o0, half - PARAPET_T - inset, half - inset), y0 + CROSS_H, inset);
+          from = Math.max(from, o1);
+        }
+      }
+    }
+    for (const s of c.streets) {
+      if (s.hm === null) {
+        // A plain cell of the street's own, outside the cluster: the whole
+        // flight in it, as long as the cell, where the street runs straight.
+        const upSide = s.ha > s.hb ? s.a : s.b;
+        const tread = CELL / CROSS_RISERS;
+        const at = atOf(upSide);
+        for (let k = 1; k <= CROSS_RISERS; k++) {
+          const r = rect(upSide, -half, half, HALF - k * tread, HALF - (k - 1) * tread);
+          const top = y0 + CROSS_H - rise * (k - 1);
+          slab(r, y0, top, 'stonewall');
+          addPlatform(r.x0, r.x1, r.z0, r.z1, top);
+        }
+        for (const [a0, a1] of [[-half, -half + PARAPET_T], [half - PARAPET_T, half]]) {
+          const geo = extruded([[HALF, y0], [-HALF, y0], [-HALF, y0 + rise + PARAPET_H], [HALF, y0 + CROSS_H + PARAPET_H]], a0, a1, at);
+          batcher.add(geo, 'stonewall', new THREE.Matrix4(), { chunk, ao: wallAo(y0) });
+          geo.dispose();
+          const w = rect(upSide, a0, a1, -HALF, HALF);
+          addCollider(w.x0, w.x1, w.z0, w.z1, y0, y0 + CROSS_H + CROSS_HOLD);
+        }
+        raised.push({ ...rect(upSide, -half, half, -HALF, HALF), y: y0, lift: CROSS_H });
+        continue;
+      }
+      for (const d of [s.a, s.b]) {
+        const he = edgeOf(s, d); const hm = s.hm;
+        if (he === 0 && hm === 0) continue;
+        const [a0, a1] = span(s, d);
+        const sides = [[a0, a0 + PARAPET_T], [a1 - PARAPET_T, a1]];
+        if (he === hm) {
+          // Up the whole arm: a deck to the cell's edge.
+          const r = rect(d, a0, a1, half, HALF);
+          deckTop(r, y0 + CROSS_H);
+          if (!lowArm(d, a0, a1)) slab(r, y0, y0 + CROSS_H - CROSS_T, 'stonewall');
+          for (const [r0, r1] of sides) rail(rect(d, r0, r1, half, HALF), y0 + CROSS_H);
+          continue;
+        }
+        // A stair in the arm, solid under its treads: up from the edge to
+        // the middle, or down.
+        const fromEdgeUp = he < hm;
+        const tread = (HALF - half) / CROSS_RISERS;
+        for (let k = 1; k <= CROSS_RISERS; k++) {
+          const b0 = HALF - k * tread; const b1 = HALF - (k - 1) * tread;
+          const top = fromEdgeUp ? y0 + rise * k : y0 + CROSS_H - rise * (k - 1);
+          const r = rect(d, a0, a1, b0, b1);
+          slab(r, y0, top, 'stonewall');
+          addPlatform(r.x0, r.x1, r.z0, r.z1, top);
+          for (const [r0, r1] of sides) {
+            const w = rect(d, r0, r1, b0, b1);
+            addCollider(w.x0, w.x1, w.z0, w.z1, y0, top + CROSS_HOLD);
+          }
+        }
+        const at = atOf(d);
+        for (const [r0, r1] of sides) {
+          const pts = fromEdgeUp
+            ? [[HALF, y0], [half, y0], [half, y0 + CROSS_H + PARAPET_H], [HALF, y0 + rise + PARAPET_H]]
+            : [[HALF, y0], [half, y0], [half, y0 + CROSS_H + PARAPET_H], [HALF, y0 + CROSS_H + PARAPET_H]];
+          const geo = extruded(pts, r0, r1, at);
+          batcher.add(geo, 'stonewall', new THREE.Matrix4(), { chunk, ao: wallAo(y0) });
+          geo.dispose();
+        }
+      }
+      // What nav.js stands people on: the stair and the deck are ground of this level.
+      if (s.hm || s.ha || s.hb) raised.push({ x0: px - HALF, x1: px + HALF, z0: pz - HALF, z1: pz + HALF, y: y0, lift: CROSS_H });
+    }
+    // Two streets down the halves of one lane at one height: the railing
+    // along the middle line of each arm they share where both are level in
+    // it (a stair's own side wall parts them where one climbs), and across
+    // the middle to part their ways.
+    for (const sp of c.splits) {
+      const base = y0 + (sp.height || 0);
+      const level = (d) => edgeOf(sp.a, d) === sp.height && edgeOf(sp.b, d) === sp.height;
+      const [d0, d1] = sp.arms;
+      if (sp.arms.length === 2 && (d0 + 2) % 4 === d1) {
+        if (level(d0) && level(d1)) railing(P(d0, HALF), P(d1, HALF), base);
+        else for (const d of sp.arms) if (level(d)) railing(P(d, HALF), P(d, -SPLIT_T / 2), base);
+        continue;
+      }
+      if (sp.arms.length === 2) {
+        // Round a bend together: the middle line of each arm, to the centre.
+        if (level(d0)) railing(P(d0, HALF), P(d0, -SPLIT_T / 2), base);
+        if (level(d1)) railing(P(d1, HALF), P(d1, SPLIT_T / 2), base);
+        continue;
+      }
+      // One arm shared, then each its own way: the arm's middle line, then
+      // on to the corner of the middle square between their two ways.
+      const d = d0;
+      if (level(d)) railing(P(d, HALF), P(d, half), base);
+      const f = (d + 2) % 4;
+      const ra = turnRank(d, sp.a.a === d ? sp.a.b : sp.a.a);
+      const rb = turnRank(d, sp.b.a === d ? sp.b.b : sp.b.a);
+      const [lo, hi] = [Math.min(ra, rb), Math.max(ra, rb)];
+      // In the frame walking in: forward towards f, left towards (f + 3) % 4.
+      const [fx, , fz] = DIR_STEP[f]; const [lx, , lz] = DIR_STEP[(f + 3) % 4];
+      const Q = (fw, lf) => [px + fx * fw + lx * lf, pz + fz * fw + lz * lf];
+      const to = lo === 0 && hi === 2 ? Q(half, 0) : lo === 0 ? Q(half, half) : Q(half, -half);
+      railing(Q(-half, 0), to, base, 0.01);
+    }
+  }
+  batcher.indoor = was;
+}
+
+
 /**
  * The paint and the blood: every decal quad in the world, merged by
  * material, laid a centimetre off whatever it is on.
@@ -2250,6 +2823,9 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   // everything else built on a cell keeps off.
   const river = riverPlan(layout, sunkRivers(world, layout), cellKey);
   const sunkRects = [];
+  // ...and the crossings carried one street over the other (`buildCrossings`).
+  const carried = crossingPlan(layout, world, river, cellKey);
+  const builtApart = { has: (k) => river.has(k) || carried.has(k) };
   // What this build may put down on a cell that is neither a room nor a
   // street: not where a vista stands (`options.clear`), nor, in a vista,
   // where the drawn zone already builds.
@@ -3311,7 +3887,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     // the street's own level, and the steps are the mound's or the river's.
     buildAlley({
       batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt,
-      cellKey, streetCells: openStreet, lift: liftFrom === liftTo ? liftFrom : 0, streetClutter, river,
+      cellKey, streetCells: openStreet, lift: liftFrom === liftTo ? liftFrom : 0, streetClutter, river: builtApart,
     });
     if (leadsNowhere(link, world)) sealStreet({ batcher, instances, link, worldOf, chunkOf, addCollider, layout });
     if (liftFrom > 0 && liftTo > 0) {
@@ -3350,6 +3926,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     }
   }
   buildRiver({ plan: river, layout, rooms, batcher, instances, chunkOf, addCollider, addPlatform, decor, sunkRects });
+  buildCrossings({ plan: carried, batcher, chunkOf, addCollider, addPlatform, raised, groundAt, cellKey });
 
   for (const plan of stairPlans) {
     // A drop is a shaft, and only the way down it is an exit.
@@ -3790,6 +4367,11 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   stats.ways = ways;
   stats.hills = hills;
   stats.lanes = lanes;
+  // The streets carried over another, for the tools: cell, and the streets over and under.
+  stats.carried = [...carried.values()].map((c) => ({
+    x: c.x, z: c.z, splits: c.splits.length, river: c.river, plain: c.plain,
+    streets: c.streets.map((t) => ({ link: [t.link.from.vnum, t.link.to.vnum], a: t.a, b: t.b, ha: t.ha, hm: t.hm, hb: t.hb, half: t.half })),
+  }));
   // Everything standing on a mound belongs to the level it rises from.
   for (const p of platforms) {
     for (const r of raised) {
@@ -7746,7 +8328,8 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
     // floorboards would lie over the river "On the River" runs down. The
     // street builds the cell.
     if (enclosed && streetCells && cellKey && streetCells.has(cellKey(level, c.x, c.z))) continue;
-    // The river's channel, and whatever crosses it, are `buildRiver`'s.
+    // The river's channel and what crosses it are `buildRiver`'s, a street
+    // carried over another `buildCrossings`'.
     if (river && cellKey && river.has(cellKey(level, c.x, c.z))) continue;
 
     // A Shire covered way takes a strip of the cell; the rest of it is the
