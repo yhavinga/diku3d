@@ -272,7 +272,8 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     if (lastValid) moved.subVectors(player.position, last).setY(0); else moved.set(0, 0, 0);
     last.copy(player.position);
     lastValid = true;
-    turn(dt, moved, aiming || clock < facingUntil);
+    // A pinned camera is somewhere else's view: the body keeps its own facing.
+    turn(dt, moved, !pinned && (aiming || clock < facingUntil));
     const pace = dt > 0 ? moved.length() / dt : 0;
     feet.set(player.position.x, player.position.y - EYE, player.position.z);
     figure.update(dt, feet, heading, pace);

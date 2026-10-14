@@ -1887,9 +1887,17 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         const a = rand(0, TAU); const r = rand(0.5, 0.9);
         const x = feet.x + Math.cos(a) * r; const z = feet.z + Math.sin(a) * r;
         const t = 0.7;
-        matter.spawn({ x, y: feet.y + 0.05, z, vx: (h.x - x) / t, vy: (h.y - feet.y) / t, vz: (h.z - z) / t, life: t, size: rand(0.12, 0.22), grow: 0.6, color: pal2.smoke, alpha: 0.6, shape: 3, drag: 0, fadeIn: 0.15 });
+        matter.spawn({ x, y: feet.y + 0.05, z, vx: (h.x - x) / t, vy: (h.y - feet.y) / t, vz: (h.z - z) / t, life: t, size: rand(0.22, 0.38), grow: 0.5, color: pal2.smoke, alpha: 0.75, shape: 3, drag: 0, fadeIn: 0.15 });
       }
-      while (acc.a >= 2) { acc.a -= 2; light.spawn({ x: rand(-0.2, 0.2), y: rand(-0.2, 0.2), z: rand(-0.2, 0.2), anchor: fx.anchor, vx: 0, vy: 0, vz: 0, pull: 3, swirl: 4, life: 0.4, size: rand(0.02, 0.04), color: pal2.glow, shape: 1, drag: 0, fadeIn: 0.2 }); }
+      // What is drawn up glows as it comes: dark smoke against dark ground
+      // was nothing, so the wisps carry the colour of the harm.
+      while (acc.a >= 1) {
+        acc.a -= 1;
+        const a = rand(0, TAU); const r = rand(0.4, 1.0);
+        const x = feet.x + Math.cos(a) * r; const z = feet.z + Math.sin(a) * r;
+        const t = rand(0.45, 0.7);
+        light.spawn({ x, y: feet.y + 0.03, z, vx: (h.x - x) / t, vy: (h.y - feet.y) / t, vz: (h.z - z) / t, life: t, size: rand(0.03, 0.06), color: pal2.glow, shape: 1, drag: 0, swirl: rand(2, 4), fadeIn: 0.1, occ: 0.25 });
+      }
     } else if (key === 'acid' || key === 'poison') {
       const pal2 = PAL[key];
       while (acc.b >= 1) { acc.b -= 1; light.spawn({ x: h.x + rand(-0.05, 0.05), y: h.y - 0.03, z: h.z + rand(-0.05, 0.05), vx: 0, vy: -0.2, vz: 0, life: rand(0.5, 0.8), size: rand(0.025, 0.045), color: pal2.drop || pal2.glow, shape: 6, drag: 0.2, gravity: 6, fadeIn: 0.05, occ: 0.5 }); }
