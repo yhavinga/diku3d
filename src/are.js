@@ -15,6 +15,22 @@ export const DIR_STEP = [
 ];
 export const REVERSE_DIR = [2, 3, 0, 1, 5, 4];
 
+/**
+ * A 'D' reset sets one side of a door (db.c's reset_area), where do_open and
+ * do_close set both; 24 resets in the stock areas name only one side, and
+ * left so the door stands shut from one room and open from the other --
+ * #910's trapdoor shut above, open from #918 below, and the one lid there
+ * shut while E from below closed a side nobody could see. The way back
+ * through takes the reset's state too, wherever it is a door.
+ */
+export function mirrorDoor(rooms, vnum, dir) {
+  const exit = rooms.get(vnum)?.exits[dir];
+  const back = exit && rooms.get(exit.to)?.exits[REVERSE_DIR[dir]];
+  if (!back || back.to !== vnum || !(back.locks & EX_ISDOOR)) return null;
+  back.locks = (back.locks & ~(EX_CLOSED | EX_LOCKED)) | (exit.locks & (EX_CLOSED | EX_LOCKED));
+  return back;
+}
+
 export const SECTOR = {
   INSIDE: 0, CITY: 1, FIELD: 2, FOREST: 3, HILLS: 4, MOUNTAIN: 5,
   WATER_SWIM: 6, WATER_NOSWIM: 7, UNUSED: 8, AIR: 9, DESERT: 10,
@@ -398,6 +414,7 @@ export function buildWorld(areas) {
           exit.locks = reset.arg3 === 0 ? (exit.locks & ~(EX_CLOSED | EX_LOCKED))
             : reset.arg3 === 1 ? ((exit.locks | EX_ISDOOR | EX_CLOSED) & ~EX_LOCKED)
               : (exit.locks | EX_ISDOOR | EX_CLOSED | EX_LOCKED);
+          mirrorDoor(rooms, room.vnum, reset.arg2);
           break;
         }
         case 'R': break; // exit randomiser: nothing to draw

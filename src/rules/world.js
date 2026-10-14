@@ -8,7 +8,7 @@
  * are only told what the exits say.
  */
 
-import { ITEM, EX_ISDOOR, EX_CLOSED, EX_LOCKED, REVERSE_DIR, DIR_NAME } from '../are.js';
+import { ITEM, EX_ISDOOR, EX_CLOSED, EX_LOCKED, REVERSE_DIR, DIR_NAME, mirrorDoor } from '../are.js';
 import { capitalise, doorName, makeObject } from './handler.js';
 
 const ROOM_VNUM_SCHOOL = 3700;
@@ -257,6 +257,10 @@ export function installWorld(k) {
           if (line.arg3 === 0) exit.locks &= ~(EX_CLOSED | EX_LOCKED);
           else if (line.arg3 === 1) exit.locks = (exit.locks | EX_CLOSED) & ~EX_LOCKED;
           else exit.locks |= EX_CLOSED | EX_LOCKED;
+          // Both sides, as on boot (are.js `mirrorDoor`).
+          const back = world.rooms.get(exit.to)?.exits[REVERSE_DIR[line.arg2]];
+          const backWas = back?.locks;
+          if (mirrorDoor(world.rooms, room.vnum, line.arg2) && back.locks !== backWas) syncDoor(exit.to, REVERSE_DIR[line.arg2], null);
           if (exit.locks !== was) syncDoor(room.vnum, line.arg2, (exit.locks & EX_CLOSED) !== (was & EX_CLOSED) ? ((exit.locks & EX_CLOSED) ? 'close' : 'open') : null);
           last = true;
           break;

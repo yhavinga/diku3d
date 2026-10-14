@@ -37,6 +37,22 @@ export const DOOR_H = 3.1;
 export const CEIL = 5.2;        // interior clear height
 export const SLAB = 0.45;       // floor thickness
 export const LEVEL_H = 7.6;     // vertical pitch between levels
+/**
+ * How tall a building may stand, roof and all, on a level below the ground:
+ * under the slab of the ground above, with a little to spare. Galaxy's
+ * open-air rooms a level down put rows of three storeys up to 6 m through
+ * the grass, roofs, chimneys and colliders. The page hides that level from
+ * the surface, but cull.js keeps hidden things in the shadow pass, so the
+ * roofs lay on the turf as shadows and their colliders stood there unseen.
+ */
+const UNDER_CLEAR = LEVEL_H - SLAB - 0.1;
+const underground = (y) => Math.round(y / LEVEL_H) < 0;
+/** A wall height and a roof's rise fitted under `UNDER_CLEAR` together, if the ground is over them. */
+function fitUnder(y, h, rise) {
+  if (!underground(y) || h + rise <= UNDER_CLEAR) return [h, rise];
+  const k = UNDER_CLEAR / (h + rise);
+  return [h * k, rise * k];
+}
 
 /** Where a kit's wall panel is centred, measured from the room centre. */
 const KIT_LINE = 5.35;
@@ -3708,6 +3724,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
           buildSmialHill({
             batcher, instances, chunk, room, pos, faces: hillFaces, addCollider, decor, lights,
             tunnels: [0, 1, 2, 3].filter((d) => sides[d] && smialTunnel(sides[d].link)),
+            ways: [0, 1, 2, 3].filter((d) => sides[d]?.link),
           });
         }
         if (cell.level === 0 && shireOut !== 'lower' && shireOut !== 'barn') {
@@ -4147,14 +4164,16 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     const out = HALF - 1.25;
     const wx = pos.x + dx * out; const wz = pos.z + dz * out;
     // The model's town side is its +z; turn that away from the country.
-    instances.add('city_wall', { x: wx, y: pos.y, z: wz, rotY: FACE_ROT[(dir + 2) % 4] + Math.PI }, chunk);
+    // Below the ground it is squat enough to stay under the slab above (`fitUnder`).
+    const wallH = underground(pos.y) ? UNDER_CLEAR : 8.4;
+    instances.add('city_wall', { x: wx, y: pos.y, z: wz, rotY: FACE_ROT[(dir + 2) % 4] + Math.PI, scaleY: wallH / 8.4 }, chunk);
     const [w, d] = dx ? [2.5, CELL] : [CELL, 2.5];
-    addCollider(wx - w / 2, wx + w / 2, wz - d / 2, wz + d / 2, pos.y, pos.y + 8.4);
+    addCollider(wx - w / 2, wx + w / 2, wz - d / 2, wz + d / 2, pos.y, pos.y + wallH);
     const tx = dz ? 1 : 0; const tz = dx ? 1 : 0;
     for (const s of [-1, 1]) {
       if (walled.has(`${cellKey(spot.level, spot.x + tx * s, spot.z + tz * s)}|${dir}`)) continue;
       const cx = wx + tx * s * (HALF - 1.6); const cz = wz + tz * s * (HALF - 1.6);
-      const T = 4.4; const TH = 10.2;
+      const T = 4.4; const TH = underground(pos.y) ? UNDER_CLEAR - 1.45 : 10.2;
       batcher.add(box(T, TH, T, 2, 4, 2), 'stonewall', place(cx, pos.y + TH / 2, cz), { chunk, ao: wallAo(pos.y) });
       batcher.add(box(T + 0.5, 0.45, T + 0.5), 'stonewall', place(cx, pos.y + TH + 0.22, cz), { chunk });
       for (let i = 0; i < 4; i++) {
@@ -4870,19 +4889,20 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
   const fenced = hoodFenceDir(room);
   // `key` is where the block is hashed from: a block cut back to clear a
   // corner keeps the height and the material it had at full length.
-  const heightAt = (kx, kz, salt) => 6.2 + hash3(cell.x * 7 + Math.round(kx), cell.z * 7 + Math.round(kz), cell.level, salt) * 4.6;
+  // A block's wall and roof, from its seed; under the ground, under the slab above (`fitUnder`).
+  const sizeOf = (seed) => fitUnder(pos.y, 6.2 + seed * 4.6, 1.7 + seed * 1.4);
+  const heightAt = (kx, kz, salt) => sizeOf(hash3(cell.x * 7 + Math.round(kx), cell.z * 7 + Math.round(kz), cell.level, salt))[0];
   // `skip`: a face that gets no windows -- the end of a house that is the
   // side of a gate's pocket.
   const block = (bx, bz, sx, sz, salt, face = -1, kx = bx, kz = bz, skip = -1) => {
     const seed = hash3(cell.x * 7 + Math.round(kx), cell.z * 7 + Math.round(kz), cell.level, salt);
-    const h = 6.2 + seed * 4.6;
+    const [h, roofH] = sizeOf(seed);
     // In the neighborhood every front is masonry: a boarded window nailed
     // over half-timbering's painted braces read as a sticker.
     const stone = hood || hash3(Math.round(kx), Math.round(kz), cell.level, 61) > 0.45;
     const marble = face >= 0 && features.get((face + 2) % 4) === 'marble';
     batcher.add(box(sx, h, sz, 3, 4, 3), marble ? 'marble' : stone ? (hood ? 'sootwall' : 'stonewall') : 'timber',
       place(bx, pos.y + h / 2, bz), { chunk, ao: wallAo(pos.y) });
-    const roofH = 1.7 + seed * 1.4;
     // `triPrism` puts its cross-section on local X and its ridge on local Z,
     // and a quarter turn maps local Z to world X -- so under rotation the two
     // extents have to swap as well. They did not, and the roof came out with
@@ -4925,10 +4945,9 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
    */
   const cottage = (bx, bz, sx, sz, salt) => {
     const seed = hash3(cell.x * 7 + Math.round(bx), cell.z * 7 + Math.round(bz), cell.level, salt);
-    const h = 2.9 + seed * 0.8;
+    const [h, roofH] = fitUnder(pos.y, 2.9 + seed * 0.8, 2.2 + seed * 1.3);
     batcher.add(box(sx, h, sz, 3, 2, 3), seed > 0.5 ? 'plaster' : 'timber',
       place(bx, pos.y + h / 2, bz), { chunk, ao: wallAo(pos.y) });
-    const roofH = 2.2 + seed * 1.3;
     const wide = sx > sz;
     // Thatch, or now and then turf -- not the town's red tile -- and round
     // windows in painted rings: the Shire's own, as on its houses.
@@ -4941,7 +4960,7 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
       kind: 'windows', x: bx, y: pos.y, z: bz, w: sx, d: sz, h, seed, frame: 'timber',
       round: true, paint: SHIRE_PAINT[Math.floor(seed * 7) % SHIRE_PAINT.length],
     });
-    if (hash3(Math.round(bx), Math.round(bz), cell.level, 71) > 0.5) {
+    if (hash3(Math.round(bx), Math.round(bz), cell.level, 71) > 0.5 && !underground(pos.y)) {
       decor.push({ kind: 'smoke', x: bx, y: pos.y + h + roofH, z: bz });
     }
   };
@@ -5480,6 +5499,10 @@ function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cel
     // Two neighbours of one height share a roof plane: one of them steps.
     if (lastH >= 0 && Math.abs(h - lastH) < 0.5) h = h + (h < 8.0 ? 0.8 : -0.8);
     lastH = h;
+    // Below the ground a row of two storeys at most, its roof fitted under
+    // the slab above (`UNDER_CLEAR`) and no chimney through it.
+    const under = underground(y0);
+    if (under) h = Math.min(h, 3.6 + r(1) * 1.4);
 
     const stoneGround = r(2) < 0.45;
     const plaster = r(3) < 0.4;
@@ -5568,12 +5591,13 @@ function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cel
     const gableFront = L < 5.4 ? r(11) > 0.3 : r(11) > 0.75;
     const top = front(storeys[storeys.length - 1][2]);
     const Dt = (len2(sub2(backA, top.A)) + len2(sub2(backB, top.B))) / 2;
-    const rise = gableFront ? (top.len / 2 + 0.25) * (1.2 + r(12) * 0.5) : (Dt / 2 + 0.35) * (1.0 + r(12) * 0.35);
+    const pitched = gableFront ? (top.len / 2 + 0.25) * (1.2 + r(12) * 0.5) : (Dt / 2 + 0.35) * (1.0 + r(12) * 0.35);
+    const rise = under ? Math.min(pitched, UNDER_CLEAR - h) : pitched;
     if (gableFront) quadRoof(batcher, chunk, [top.A, top.B], [backA, backB], y0 + h, rise, 0.25, 0.05, roofMat, upperMat, tint);
     else quadRoof(batcher, chunk, [top.A, backA], [top.B, backB], y0 + h, rise, 0.35, 0, roofMat, upperMat, tint);
     // A chimney stack on some, off the ridge towards the back, standing clear
     // of the ridge whatever the pitch.
-    if (r(13) > 0.62) {
+    if (r(13) > 0.62 && !under) {
       const u = 0.25 + r(14) * 0.5;
       const f0 = add2(top.A, sub2(top.B, top.A), u); const b0 = add2(backA, sub2(backB, backA), u);
       const cc = add2(f0, sub2(b0, f0), 0.8);
@@ -5659,7 +5683,8 @@ function buildCornerHouse({ batcher, chunk, pos, dirA, dirB, cell, decor, addCol
   const R = (k) => hash3(cell.x * 13 + dirA, cell.z * 13 + k, cell.level, 87);
   // As tall as the houses either side of it: a low house on the corner was
   // a gap in the street's skyline at every junction.
-  const h = 5.8 + R(0) * 2.6;
+  // ...or, below the ground, as tall as the slab above lets it (`fitUnder`).
+  const [h, rise] = fitUnder(pos.y, 5.8 + R(0) * 2.6, 1.6 + R(5) * 0.9);
   const plaster = R(1) < 0.4;
   const tint = plaster ? LIMEWASH[Math.floor(R(2) * LIMEWASH.length)] : null;
   const mat = R(3) < 0.5 ? 'stonewall' : plaster ? 'plaster' : 'timber';
@@ -5681,7 +5706,7 @@ function buildCornerHouse({ batcher, chunk, pos, dirA, dirB, cell, decor, addCol
     // The cut runs from (I, C) to (C, I): at sx, its other coordinate is I + C - sx.
     box2(s0, s1, I + C - (s0 + s1) / 2, C);
   }
-  hipRoof(batcher, chunk, pts, pos.y + h, 1.6 + R(5) * 0.9, 0.3, R(6) > 0.88 ? 'thatch' : 'rooftile');
+  hipRoof(batcher, chunk, pts, pos.y + h, rise, 0.3, R(6) > 0.88 ? 'thatch' : 'rooftile');
   // Windows and a door on the cut.
   const P = pts[0]; const Q = pts[4];
   const t = unit2(sub2(Q, P));
@@ -11815,7 +11840,7 @@ function addTurf(batcher, pos3, idx, inside, chunk) {
   make(hid, true);
 }
 
-function buildSmialHill({ batcher, instances, chunk, room, pos, faces, tunnels = [], addCollider, decor, lights }) {
+function buildSmialHill({ batcher, instances, chunk, room, pos, faces, tunnels = [], ways = [], addCollider, decor, lights }) {
   const salt = 1400 + (room.vnum % 997);
   // Over the start of a tunnel out of the room, the hill is inside the
   // tunnel's ridge: see `addTurf`.
@@ -11854,11 +11879,16 @@ function buildSmialHill({ batcher, instances, chunk, room, pos, faces, tunnels =
   }
   addTurf(batcher, pts.flatMap(([vx, vy, vz]) => [pos.x + vx, pos.y + vy, pos.z + vz]), idx, overTunnel, chunk);
   // Where the toe runs past the room's walls into the strip before the cell
-  // edge, it is ground you cannot walk up: a collider to its own height.
+  // edge, it is ground you cannot walk up: a collider to its own height --
+  // but not across the way out of a side with an exit, which ran the strip
+  // over the mouths of both Bag End's passages, to its bedroom and pantry.
   for (let d = 0; d < 4; d++) {
     if (faces.includes(d)) continue;
-    const r = sewerRect(pos, d, SHELL, HALF, -SHELL, SHELL);
-    addCollider(r.x0, r.x1, r.z0, r.z1, pos.y, pos.y + 1.6);
+    const spans = ways.includes(d) ? [[-SHELL, -SMIAL_TUNNEL], [SMIAL_TUNNEL, SHELL]] : [[-SHELL, SHELL]];
+    for (const [c0, c1] of spans) {
+      const r = sewerRect(pos, d, SHELL, HALF, c0, c1);
+      addCollider(r.x0, r.x1, r.z0, r.z1, pos.y, pos.y + 1.6);
+    }
   }
   // A chimney out of the turf where it is thick, smoking.
   const angle = hash3(room.vnum, 7, 0, 5) * Math.PI * 2;
@@ -13050,18 +13080,17 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
           addCollider(x - HALF, x + HALF, z - HALF, z + HALF, y, y + kh);
           break;
         }
-        const ch = 3.0 + hash3(x, z, 0, 29) * 0.9;
+        const [ch, cRoof] = fitUnder(y, 3.0 + hash3(x, z, 0, 29) * 0.9, 2.6 + hash3(x, z, 0, 23) * 1.4);
         batcher.add(box(w, ch, d, 3, 2, 3), hash3(x, z, 0, 22) > 0.5 ? 'plaster' : 'timber',
           place(x, y + ch / 2, z), { chunk, ao: wallAo(y) });
-        const cRoof = 2.6 + hash3(x, z, 0, 23) * 1.4;
         batcher.add(triPrism(w + 1.0, cRoof, d + 1.0), hash3(x, z, 0, 24) > 0.35 ? 'thatch' : 'rooftile',
           place(x, y + ch, z, hash3(x, z, 0, 25) > 0.5 ? Math.PI / 2 : 0), { chunk });
         addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2, y, y + ch);
         decor.push({ kind: 'windows', x, y, z, w, d, h: ch, seed: hash3(x, z, 0, 26), frame: 'timber' });
-        if (hash3(x, z, 0, 27) > 0.45) decor.push({ kind: 'smoke', x, y: y + ch + cRoof, z });
+        if (hash3(x, z, 0, 27) > 0.45 && !underground(y)) decor.push({ kind: 'smoke', x, y: y + ch + cRoof, z });
         break;
       }
-      const h = 5.5 + seed * 6.5;
+      const tallH = 5.5 + seed * 6.5;
       const stone = hash3(x, z, 0, 22) > 0.5;
       const house = model(stone
         ? ['house_stone_a', 'house_stone_b', 'house_a', 'house_b', 'house_c']
@@ -13071,23 +13100,26 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
         // only thing left to decide is which way its front faces the street.
         const modelled = instances.library.get(house);
         const fit = Math.min(1.15, (CELL * 0.92) / Math.max(0.001, Math.max(modelled.size.x, modelled.size.z)));
+        // Chimney and all under the ground's slab, a level down.
+        const tall = fit * (0.85 + seed * 0.4);
+        const scaleY = underground(y) ? Math.min(tall, UNDER_CLEAR / modelled.size.y) : tall;
         instances.add(house, {
           x, y, z, rotY: faceRot ?? Math.floor(hash3(x, z, 0, 25) * 4) * (Math.PI / 2),
-          scaleX: fit, scaleZ: fit, scaleY: fit * (0.85 + seed * 0.4),
+          scaleX: fit, scaleZ: fit, scaleY,
         }, chunk);
-        const height = modelled.size.y * fit * (0.85 + seed * 0.4);
+        const height = modelled.size.y * scaleY;
         addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2, y, y + height);
-        if (hash3(x, z, 0, 27) > 0.55) decor.push({ kind: 'smoke', x, y: y + height, z });
+        if (hash3(x, z, 0, 27) > 0.55 && !underground(y)) decor.push({ kind: 'smoke', x, y: y + height, z });
         break;
       }
       const material = stone ? 'stonewall' : 'timber';
+      const [h, roofH] = fitUnder(y, tallH, 2.0 + hash3(x, z, 0, 23) * 1.5);
       batcher.add(box(w, h, d, 3, 4, 3), material, place(x, y + h / 2, z), { chunk, ao: wallAo(y) });
-      const roofH = 2.0 + hash3(x, z, 0, 23) * 1.5;
       batcher.add(triPrism(w + 0.9, roofH, d + 0.9), hash3(x, z, 0, 24) > 0.82 ? 'thatch' : 'rooftile',
         place(x, y + h, z, hash3(x, z, 0, 25) > 0.5 ? Math.PI / 2 : 0), { chunk });
       addCollider(x - w / 2, x + w / 2, z - d / 2, z + d / 2, y, y + h);
       decor.push({ kind: 'windows', x, y, z, w, d, h, seed: hash3(x, z, 0, 26), frame: stone ? 'stone' : 'timber' });
-      if (hash3(x, z, 0, 27) > 0.55) decor.push({ kind: 'smoke', x, y: y + h + roofH, z });
+      if (hash3(x, z, 0, 27) > 0.55 && !underground(y)) decor.push({ kind: 'smoke', x, y: y + h + roofH, z });
       break;
     }
     case SECTOR.FOREST: {
