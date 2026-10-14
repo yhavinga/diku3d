@@ -1044,6 +1044,23 @@ function playerShadows() {
 }
 
 /**
+ * A robe's spring (createPlayerFigure). Angles in radians, rates per second.
+ * `max` is the swing the hem can make before it meets a thigh: in the page,
+ * with the real mage, the nearest robe vertex to a leg vertex is 63 mm away
+ * at rest, 33 mm at 6 degrees and 12-18 mm at 8-12. The limit is 4 degrees
+ * (soft-clipped by tanh, so never quite reached) on each axis, which leaves
+ * 24 mm at the worst corner (hem forward and sideways together) and 39+ mm
+ * on any single axis. `knee` is the
+ * extra turn the shin-level bone takes, so the hem swings further than the
+ * hip does. w2 is 14 rad/s squared (2.2 Hz, a heavy cloth) and damp 2*0.35*14,
+ * which rings about twice and is still by the second swing.
+ */
+const SKIRT = {
+  max: 0.07, wind: 1.6, knee: 0.5, w2: 196, damp: 9.8,
+  gain: 3.3, twist: 1.5, lift: 0.6, drag: 2, maxTurn: 20, maxFlare: 40,
+};
+
+/**
  * What a player said, over their head for a few seconds: the name label's
  * lettering, warmer, on no plate (see `labelTexture` for why not). Its own
  * canvas, not the label cache -- every line said would stay in that.
@@ -1136,17 +1153,88 @@ export function createPlayerFigure({
   let clock = 0;
   const ending = [];
 
+  // A robe's inertia (this figure only: a crowd of mobiles keeps the baked
+  // skirt). The clips drive skirtL/R and skirt2L/R to follow the thighs and
+  // shins; this adds a damped spring per leg on top, after the mixer, for
+  // fore-aft swing (bone-local X: +X sends the hem back, measured in the page)
+  // and sideways swing (local Z: +Z sends it towards -x of the figure, i.e.
+  // its right, on both legs). Left out when the rig has no skirt bones.
+  const skirt = ['L', 'R'].map((side) => {
+    const hip = made.group.getObjectByName(`skirt${side}`);
+    const knee = made.group.getObjectByName(`skirt2${side}`);
+    return hip && knee ? { hip, knee, p: 0, pv: 0, r: 0, rv: 0, sign: side === 'L' ? 1 : -1 } : null;
+  });
+  const skirtOn = skirt.every(Boolean);
+  const skirtQ = new THREE.Quaternion();
+  const skirtE = new THREE.Euler();
+  const skirtAt = new THREE.Vector3();
+  const skirtV = { x: 0, y: 0, z: 0, fresh: false };
+  let skirtYaw = 0;
+  let skirtGate = 1;
+
+  /**
+   * The springs, one frame, from the figure's velocity in the world (m/s) and
+   * the yaw it turned by this frame (`skirtYaw`).
+   */
+  function swingSkirt(dt, vx, vy, vz) {
+    const h = Math.min(dt, 1 / 30);
+    // Velocity smoothed over ~80 ms: a frame's position is quantised by the
+    // tick rate and its second difference is noise otherwise.
+    const k = Math.min(1, h * 12);
+    const nx = skirtV.x + (vx - skirtV.x) * k;
+    const ny = skirtV.y + (vy - skirtV.y) * k;
+    const nz = skirtV.z + (vz - skirtV.z) * k;
+    const ax = (nx - skirtV.x) / h;
+    const ay = (ny - skirtV.y) / h;
+    const az = (nz - skirtV.z) / h;
+    skirtV.x = nx; skirtV.y = ny; skirtV.z = nz;
+    // The figure's own frame: forward is (sin yaw, cos yaw), its left (cos, -sin).
+    const sn = Math.sin(yawNow);
+    const cs = Math.cos(yawNow);
+    const accFwd = ax * sn + az * cs;
+    const accLeft = ax * cs - az * sn;
+    const turnRate = THREE.MathUtils.clamp(skirtYaw / h, -SKIRT.maxTurn, SKIRT.maxTurn);
+    const fall = Math.max(0, -ny);
+    // Pulled down while the feet push up (takeoff, landing), out while falling.
+    const flare = THREE.MathUtils.clamp(-SKIRT.lift * ay + SKIRT.drag * fall, -SKIRT.maxFlare, SKIRT.maxFlare);
+    skirtGate += ((posed ? 0 : 1) - skirtGate) * Math.min(1, h * 5);
+    for (const leg of skirt) {
+      // The hem lags what the body does: back when it speeds up, to the side it
+      // is pushed from, and against the turn on each side of the midline.
+      const dp = SKIRT.gain * accFwd + leg.sign * SKIRT.twist * turnRate;
+      const dr = SKIRT.gain * accLeft - leg.sign * flare;
+      leg.pv += (dp - SKIRT.w2 * leg.p - SKIRT.damp * leg.pv) * h;
+      leg.rv += (dr - SKIRT.w2 * leg.r - SKIRT.damp * leg.rv) * h;
+      leg.p = THREE.MathUtils.clamp(leg.p + leg.pv * h, -SKIRT.wind * SKIRT.max, SKIRT.wind * SKIRT.max);
+      leg.r = THREE.MathUtils.clamp(leg.r + leg.rv * h, -SKIRT.wind * SKIRT.max, SKIRT.wind * SKIRT.max);
+      // tanh keeps the swing under the leg-clearance limit without a hard stop.
+      const px = SKIRT.max * Math.tanh(leg.p / SKIRT.max) * skirtGate;
+      const rz = SKIRT.max * Math.tanh(leg.r / SKIRT.max) * skirtGate;
+      skirtQ.setFromEuler(skirtE.set(px, 0, rz));
+      leg.hip.quaternion.multiply(skirtQ);
+      skirtQ.setFromEuler(skirtE.set(px * SKIRT.knee, 0, rz * SKIRT.knee));
+      leg.knee.quaternion.multiply(skirtQ);
+    }
+  }
+
   /**
    * One frame: stand at `feet`, face `yaw` (the camera's convention: forward
    * is (-sin, -cos)), and move the legs for `pace` metres a second.
    */
   function update(dt, feet, yaw, pace) {
+    // Read before the position moves: this frame's travel, for the robe.
+    const hop = skirtOn && !lying && skirtAt.lengthSq() > 0 ? Math.hypot(feet.x - skirtAt.x, feet.y - skirtAt.y, feet.z - skirtAt.z) : -1;
+    const vx = hop >= 0 ? (feet.x - skirtAt.x) / dt : 0;
+    const vy = hop >= 0 ? (feet.y - skirtAt.y) / dt : 0;
+    const vz = hop >= 0 ? (feet.z - skirtAt.z) / dt : 0;
+    skirtAt.set(feet.x, feet.y, feet.z);
     group.position.set(feet.x, feet.y, feet.z);
     // A figure faces +Z at yaw 0; the camera looks down -Z.
     const want = yaw + Math.PI;
     if (yawNow === null) yawNow = want;
     const turn = Math.atan2(Math.sin(want - yawNow), Math.cos(want - yawNow));
-    yawNow += turn * Math.min(1, dt * 10);
+    skirtYaw = turn * Math.min(1, dt * 10);
+    yawNow += skirtYaw;
     if (lying) group.rotation.y = yawNow; else made.group.rotation.y = yawNow;
     speed += (pace - speed) * Math.min(1, dt * 6);
     placeShadows();
@@ -1184,6 +1272,10 @@ export function createPlayerFigure({
     actions.walk.timeScale = Math.max(0.4, speed / walkSpeed);
     actions.run.timeScale = Math.max(0.6, speed / runSpeed);
     made.mixer.update(dt);
+    // A teleport (a recall, a new zone) or a long frame is not a move to swing at.
+    if (!skirtOn || lying || dt <= 0) return;
+    if (hop < 0 || hop > 18 * dt) { skirtV.x = skirtV.y = skirtV.z = 0; return; }
+    swingSkirt(dt, vx, vy, vz);
   }
 
   /**
