@@ -691,7 +691,9 @@ export async function startMud({
       const info = [ch.name, ch.title || '', ch.level, ch.class, ch.sex, ch.position, ch.act & (PLR.KILLER | PLR.THIEF),
         ch.maxHit > 0 ? Math.round((100 * ch.hit) / ch.maxHit) : 0, o.linkdead !== null ? 1 : 0,
         ch.fighting ? (ch.fighting.npc ? { m: slotIndex.get(ch.fighting.slot) } : { p: game.pcOf(ch.fighting)?.id ?? -1 }) : null,
-        ch.equipment[16] ? ch.equipment[16].vnum : 0, ch.equipment[11] ? ch.equipment[11].vnum : 0];
+        ch.equipment[16] ? ch.equipment[16].vnum : 0, ch.equipment[11] ? ch.equipment[11].vnum : 0,
+        // Everything else worn, as [wearLoc, vnum]: what a passer-by sees on you anyway (a robe's colour), never the pack.
+        ch.equipment.flatMap((o, loc) => (o && loc !== 16 && loc !== 11 ? [[loc, o.vnum]] : []))];
       const key = JSON.stringify(info);
       if (s.sent.roster.get(o.pc.id) !== key) { s.sent.roster.set(o.pc.id, key); roster.push([o.pc.id, ...info]); }
       const c = local(s, p);

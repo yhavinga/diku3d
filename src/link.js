@@ -533,11 +533,11 @@ export function attachSocketLink(link, game, host, enter) {
     host.place(msg);
   }));
   offs.push(link.on('who', (msg) => {
-    for (const [rid, name, title, level, cls, sex, position, flags, percent, linkdead, fighting, weapon, shield] of msg.add) {
-      const info = { name, title, level, cls, sex, position, flags, percent, linkdead, fighting, weapon, shield };
+    for (const [rid, name, title, level, cls, sex, position, flags, percent, linkdead, fighting, weapon, shield, worn] of msg.add) {
+      const info = { name, title, level, cls, sex, position, flags, percent, linkdead, fighting, weapon, shield, worn };
       const known = remotes.get(rid);
       // A change of gear is a change of body; anything else is only the record.
-      if (known && (known.info.weapon !== weapon || known.info.shield !== shield || known.info.cls !== cls)) dropRemote(rid);
+      if (known && (known.info.weapon !== weapon || known.info.shield !== shield || JSON.stringify(known.info.worn) !== JSON.stringify(worn) || known.info.cls !== cls)) dropRemote(rid);
       if (remotes.has(rid)) { Object.assign(remotes.get(rid).info, info); syncRemoteCh(remotes.get(rid)); } else addRemote(rid, info);
     }
     for (const rid of msg.del) dropRemote(rid);
@@ -568,7 +568,7 @@ export function attachSocketLink(link, game, host, enter) {
     const pc = game.addRemote(ch, rid);
     const figure = createPlayerFigure({
       library: host.library, name: info.name, title: info.title, cls: info.cls, sex: info.sex, level: info.level,
-      weapon: info.weapon, shield: info.shield, objProtos: host.world.objProtos, roomAt: host.roomAt,
+      weapon: info.weapon, shield: info.shield, worn: info.worn.map(([wearLoc, vnum]) => ({ vnum, wearLoc })), objProtos: host.world.objProtos, roomAt: host.roomAt,
     });
     host.scene.add(figure.group);
     figure.group.visible = false;

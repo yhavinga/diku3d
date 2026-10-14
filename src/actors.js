@@ -1085,11 +1085,12 @@ function speechSprite(text, height = 0.36) {
 }
 
 export function createPlayerFigure({
-  library, name, title = '', cls = 3, sex = 1, level = 1, weapon = 0, shield = 0, objProtos = null, roomAt = null,
+  library, name, title = '', cls = 3, sex = 1, level = 1, weapon = 0, shield = 0, worn = [], objProtos = null, roomAt = null,
   lying = false,
 }) {
   const trade = ['mage', 'cleric', 'thief', 'warrior'][cls] || 'warrior';
-  const gear = [[weapon, 16], [shield, 11]]
+  // `worn` is every other slot as { vnum, wearLoc }: personOf reads armour (a robe's colour) off the same list a mobile's resets give it.
+  const gear = [[weapon, 16], [shield, 11], ...worn.map((w) => [w.vnum, w.wearLoc])]
     .map(([vnum, wearLoc]) => (vnum && objProtos && objProtos.get(vnum) ? { proto: objProtos.get(vnum), wearLoc } : null))
     .filter(Boolean);
   const proto = {

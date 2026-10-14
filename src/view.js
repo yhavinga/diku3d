@@ -126,12 +126,14 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     const ch = game.state;
     const weapon = ch.equipment[WIELD]?.vnum || 0;
     const shield = ch.equipment[SHIELD]?.vnum || 0;
-    const key = [ch.name, ch.class, ch.sex, ch.level, weapon, shield].join('|');
+    const worn = [];
+    ch.equipment.forEach((o, wearLoc) => { if (o && wearLoc !== WIELD && wearLoc !== SHIELD) worn.push({ vnum: o.vnum, wearLoc }); });
+    const key = [ch.name, ch.class, ch.sex, ch.level, weapon, shield, worn.map((w) => `${w.wearLoc}:${w.vnum}`).join(',')].join('|');
     if (figure && key === looks) return;
     if (figure) figure.dispose();
     figure = createPlayerFigure({
       library, name: ch.displayName || ch.name || 'you', cls: ch.class, sex: ch.sex, level: ch.level,
-      weapon, shield, objProtos: world.objProtos, roomAt,
+      weapon, shield, worn, objProtos: world.objProtos, roomAt,
     });
     // Your own name is not written over your own head.
     figure.group.traverse((o) => { if (o.isSprite) o.visible = false; });
