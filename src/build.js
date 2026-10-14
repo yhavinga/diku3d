@@ -15,7 +15,7 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { SECTOR, ROOM_INDOORS, EX_ISDOOR, EX_CLOSED, EX_LOCKED, DIR_STEP, DIR_NAME, REVERSE_DIR } from './are.js';
+import { SECTOR, ROOM_INDOORS, EX_ISDOOR, EX_CLOSED, EX_LOCKED, DIR_STEP, DIR_NAME, REVERSE_DIR, ACT_SENTINEL, ACT_AGGRESSIVE } from './are.js';
 import { InstanceBatch, StaticBatches } from './assets.js';
 import { OVERLAY_LAYER } from './render.js';
 import { buildGrass } from './grass.js';
@@ -2189,7 +2189,6 @@ function crossingPlan(layout, world, river, cellKey) {
   const water = (l) => river.has(cellKey(l.from.level, l.from.x, l.from.z)) && river.has(cellKey(l.to.level, l.to.x, l.to.z))
     && isWater(l.from.room) && isWater(l.to.room);
   const links = layout.links.filter((l) => l.kind === 'alley' && l.to && !water(l));
-  const midgaard = (l) => [l.from, l.to].some((c) => c.room.areaFile === 'midgaard.are');
   const through = new Map();
   for (const link of links) {
     const chain = [link.from, ...link.path, link.to];
@@ -2199,34 +2198,48 @@ function crossingPlan(layout, world, river, cellKey) {
       through.get(k).push({ link, i, chain, x: chain[i].x, z: chain[i].z, a: dirBetween(chain[i], chain[i - 1]), b: dirBetween(chain[i], chain[i + 1]) });
     }
   }
-  const conflict = new Map();
-  for (const [k, list] of through) {
-    if (list.length < 2 || !list.every((e) => midgaard(e.link))) continue;
-    if (list.some((e, p) => list.some((f, q) => q > p && !harmless(e.link, f.link)))) conflict.set(k, list);
-  }
-  // Clusters: conflict cells next to each other along a street through both.
-  const parent = new Map([...conflict.keys()].map((k) => [k, k]));
-  const find = (k) => { while (parent.get(k) !== k) k = parent.get(k); return k; };
-  for (const [k, list] of conflict) {
-    for (const e of list) {
-      for (const j of [e.i - 1, e.i + 1]) {
-        if (j <= 0 || j >= e.chain.length - 1) continue;
-        const n = cellKey(e.link.from.level, e.chain[j].x, e.chain[j].z);
-        if (conflict.has(n)) parent.set(find(n), find(k));
+  // Midgaard's first; then its graveyard's paths where the park's cross them
+  // (`fencePlan`), but only in clusters no street of the first takes part in:
+  // all at once, the graveyard's joined two of Midgaard's and none of the
+  // three had an answer, 29 cells where Midgaard alone had 32.
+  const inArea = (files) => (l) => [l.from, l.to].some((c) => files.includes(c.room.areaFile));
+  const plan = new Map();
+  const carriedLinks = new Set();
+  const scopes = [inArea(['midgaard.are']), inArea(['midgaard.are', 'grave.are'])];
+  for (const [pass, scope] of scopes.entries()) {
+    const before = new Set(carriedLinks);
+    const conflict = new Map();
+    for (const [k, list] of through) {
+      if (plan.has(k) || list.length < 2 || !list.every((e) => scope(e.link))) continue;
+      if (list.some((e, p) => list.some((f, q) => q > p && !harmless(e.link, f.link)))) conflict.set(k, list);
+    }
+    // Clusters: conflict cells next to each other along a street through both.
+    const parent = new Map([...conflict.keys()].map((k) => [k, k]));
+    const find = (k) => { while (parent.get(k) !== k) k = parent.get(k); return k; };
+    for (const [k, list] of conflict) {
+      for (const e of list) {
+        for (const j of [e.i - 1, e.i + 1]) {
+          if (j <= 0 || j >= e.chain.length - 1) continue;
+          const n = cellKey(e.link.from.level, e.chain[j].x, e.chain[j].z);
+          if (conflict.has(n)) parent.set(find(n), find(k));
+        }
       }
     }
-  }
-  const clusters = new Map();
-  for (const k of conflict.keys()) {
-    const r = find(k);
-    if (!clusters.has(r)) clusters.set(r, []);
-    clusters.get(r).push(k);
-  }
-  const plan = new Map();
-  for (const cells of clusters.values()) {
-    const solved = solveCrossings({ cells, conflict, through, harmless, river, cellKey });
-    if (!solved) continue;
-    for (const [k, entry] of solved) plan.set(k, entry);
+    const clusters = new Map();
+    for (const k of conflict.keys()) {
+      const r = find(k);
+      if (!clusters.has(r)) clusters.set(r, []);
+      clusters.get(r).push(k);
+    }
+    for (const cells of clusters.values()) {
+      if (pass > 0 && cells.some((k) => conflict.get(k).some((e) => before.has(e.link)))) continue;
+      const solved = solveCrossings({ cells, conflict, through, harmless, river, cellKey });
+      if (!solved) continue;
+      for (const [k, entry] of solved) {
+        plan.set(k, entry);
+        for (const s of entry.streets) carriedLinks.add(s.link);
+      }
+    }
   }
   return plan;
 }
@@ -2703,6 +2716,391 @@ function buildCrossings({ plan, batcher, chunkOf, addCollider, addPlatform, rais
 }
 
 
+// ------------------------------------------------------------- the fences ----
+
+/**
+ * Ground the mud keeps apart. Where some of a zone's rooms are joined to the
+ * rest only through a door the resets shut or past a guard (a mobile that
+ * stays put and attacks on sight; a wimpy one only jumps a sleeper), the page
+ * let a body walk round the door or the guard: off a park path onto the
+ * graveyard's gravel, round the dustdigger over the open sand -- the
+ * werklijst's door/guard places, 111 of the 112 the wave-15 review saw with
+ * the doors open still walked in wave 18. So (the user, 2026-10-14: the rule,
+ * Midgaard's zone first) the zone's rooms are split into regions joined
+ * without those doors and guards; the largest is left open, and every other
+ * one with a room out of doors is fenced round -- its rooms' cells, its
+ * streets and the open cells they close in -- with a gap where a way out
+ * crosses the line: the gate's width where its door hangs on that edge, the
+ * lane's where it does not. A street between two regions is the side's the
+ * door does not hang on, or the guard's. The fence is what the ground it
+ * closes in would have: the graveyard's iron railing, a dune in the desert,
+ * reeds in the marsh, a hedge in the fields, a wall in a town -- every one
+ * held to `FENCE_HOLD`, over a jump and the step after it. A cell two
+ * regions' streets share is the crossings' to keep apart (`crossingPlan`) and
+ * is left open; so is a cell the river or a crossing builds.
+ */
+const FENCE_IN = 0.35;    // the line a railing stands on, in from the cell's edge (`buildIronFence`'s)
+const FENCE_HOLD = 2.0;   // a jump lifts the feet 1.14 m and a step goes 0.62 m more
+const FENCE_LANE = 6.6;   // the gap a street through the line leaves (a crossing's lane)
+const FENCE_H = 1.9;      // the graveyard's railing, scaled up from the model's 1.1 m
+/** game.js's: an aggressive mobile that only jumps you in your sleep. */
+const ACT_WIMPY = 128;
+
+const isGuard = (room) => (room.mobs || []).some((m) => (m.proto.act & ACT_SENTINEL) && (m.proto.act & ACT_AGGRESSIVE) && !(m.proto.act & ACT_WIMPY));
+
+/** What closes in ground that is like this room's. */
+function fenceKind(room) {
+  if (GRAVEYARD.test(room.name)) return 'iron';
+  if (isShire(room)) return 'hedge';
+  if (room.areaFile === 'eastern.are' || room.sector === SECTOR.DESERT) return 'dune';
+  if (room.areaFile === 'marsh.are' || isWater(room)) return 'reeds';
+  if (room.sector === SECTOR.CITY && !isShire(room)) return 'wall';
+  if (!isOpenAir(room)) return 'wall';
+  return 'hedge';
+}
+
+/**
+ * The fences of one zone (above): a list of cell edges, each with the cell
+ * it is built in (`level`, `x`, `z`), the side (`dir`), its `kind` and the
+ * gaps along it ([a0, a1] from the side's middle, x for a north or south
+ * side, z for an east or west one); and `fenced`, the `cellKey|dir` of each.
+ */
+function fencePlan({ layout, cellKey, apart }) {
+  const edges = []; const fenced = new Set();
+  // Midgaard's zone only, for now (the user, 2026-10-14).
+  if (!layout.cells.has(3001)) return { edges, fenced, shared: 0 };
+  const cellOf = (v) => layout.cells.get(v);
+  const shut = (e) => !!(e.locks & EX_ISDOOR) && !!(e.locks & EX_CLOSED);
+  // The regions: rooms joined by exits that are neither a door the resets
+  // shut nor into a guard's room. A guard's room is a region of its own.
+  const region = new Map(); const members = [];
+  for (const [v, cell] of layout.cells) {
+    if (region.has(v)) continue;
+    const id = members.length; members.push([v]); region.set(v, id);
+    if (isGuard(cell.room)) continue;
+    const queue = [cell.room];
+    while (queue.length) {
+      const room = queue.pop();
+      for (const e of room.exits) {
+        if (!e || !layout.cells.has(e.to) || region.has(e.to) || shut(e)) continue;
+        const next = cellOf(e.to).room;
+        if (isGuard(next)) continue;
+        region.set(e.to, id); members[id].push(e.to); queue.push(next);
+      }
+    }
+  }
+  const main = members.reduce((best, m, i) => (m.length > members[best].length ? i : best), 0);
+  // ...one with a room out of doors, or a street of its own that is: the
+  // cabin's (#6010) ran out of its door onto the forest floor.
+  const openStreet = new Set();
+  const fencedRegion = (r) => r !== main && (openStreet.has(r) || members[r].some((v) => isOpenAir(cellOf(v).room)));
+  // Who has ground on each cell: the region of its room, of its streets.
+  const owners = new Map();
+  const claim = (k, r) => { if (!owners.has(k)) owners.set(k, new Set()); owners.get(k).add(r); };
+  for (const [v, cell] of layout.cells) claim(cellKey(cell.level, cell.x, cell.z), region.get(v));
+  // The door a room hangs on the way a link leaves it by: out of doors on its
+  // cell's edge, indoors in its wall.
+  const doorOn = (cell, dir) => !!(cell.room.exits[dir] && (cell.room.exits[dir].locks & EX_ISDOOR));
+  const streetOwner = (link) => {
+    const ra = region.get(link.from.vnum); const rb = region.get(link.to.vnum);
+    if (ra === rb) return ra;
+    const back = link.to.room.exits[REVERSE_DIR[link.dir]];
+    const da = doorOn(link.from, link.dir); const db = !!back && back.to === link.from.vnum && !!(back.locks & EX_ISDOOR);
+    if (da && !db) return rb;
+    if (db && !da) return ra;
+    if (da && db) return ra === main || rb === main ? main : ra;
+    if (isGuard(link.to.room)) return rb;
+    return ra;
+  };
+  const streetRoom = new Map(); // a street cell -> the room out of doors at an end of a street through it
+  const steps = new Map(); // an edge a street crosses: `cellKey|dir` (either side) -> [{ link, at, door }]
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || !link.to || !link.path) continue;
+    const r = streetOwner(link);
+    if (link.path.length && (isOpenAir(link.from.room) || isOpenAir(link.to.room))) openStreet.add(r);
+    const outside = isOpenAir(link.from.room) ? link.from.room : link.to.room;
+    for (const c of link.path) {
+      const k = cellKey(link.from.level, c.x, c.z);
+      if (!streetRoom.has(k)) streetRoom.set(k, outside);
+      if (!apart.has(k)) claim(k, r);
+    }
+    const chain = [link.from, ...link.path, link.to];
+    for (let i = 0; i + 1 < chain.length; i++) {
+      const p = chain[i]; const q = chain[i + 1];
+      const d = dirBetween(p, q);
+      if (d < 0) continue;
+      // A door hangs on this edge if an end room out of doors hangs one on its side here.
+      const door = (i === 0 && isOpenAir(link.from.room) && doorOn(link.from, d))
+        || (i + 1 === chain.length - 1 && isOpenAir(link.to.room) && doorOn(link.to, REVERSE_DIR[d]));
+      for (const [cell, dir] of [[p, d], [q, REVERSE_DIR[d]]]) {
+        const k = `${cellKey(link.from.level, cell.x, cell.z)}|${dir}`;
+        if (!steps.has(k)) steps.set(k, []);
+        steps.get(k).push({ door });
+      }
+    }
+  }
+  // One owner per cell, or none (the main region's), or -1: shared.
+  const own = new Map();
+  let shared = 0;
+  for (const [k, set] of owners) {
+    const fencedHere = [...set].filter((r) => fencedRegion(r));
+    if (!fencedHere.length) continue;
+    if (set.size > 1) { own.set(k, -1); shared++; continue; }
+    own.set(k, fencedHere[0]);
+  }
+  // The open cells a region closes in: not reached from outside its box
+  // without crossing its own ground.
+  const parse = (k) => { const c = k.indexOf(':'); const m = k.indexOf(',', c); return [Number(k.slice(0, c)), Number(k.slice(c + 1, m)), Number(k.slice(m + 1))]; };
+  const byRegion = new Map();
+  for (const [k, r] of own) {
+    if (r < 0) continue;
+    const [level] = parse(k);
+    const key = `${r}|${level}`;
+    if (!byRegion.has(key)) byRegion.set(key, []);
+    byRegion.get(key).push(k);
+  }
+  for (const [key, keys] of byRegion) {
+    const r = Number(key.split('|')[0]);
+    const cells = keys.map(parse);
+    const level = cells[0][0];
+    const x0 = Math.min(...cells.map((c) => c[1])) - 1; const x1 = Math.max(...cells.map((c) => c[1])) + 1;
+    const z0 = Math.min(...cells.map((c) => c[2])) - 1; const z1 = Math.max(...cells.map((c) => c[2])) + 1;
+    const seen = new Set(); const queue = [];
+    for (let x = x0; x <= x1; x++) for (const z of [z0, z1]) queue.push([x, z]);
+    for (let z = z0; z <= z1; z++) for (const x of [x0, x1]) queue.push([x, z]);
+    while (queue.length) {
+      const [x, z] = queue.pop();
+      const k = cellKey(level, x, z);
+      if (x < x0 || x > x1 || z < z0 || z > z1 || seen.has(k) || own.get(k) === r) continue;
+      seen.add(k);
+      for (const [dx, , dz] of DIR_STEP.slice(0, 4)) queue.push([x + dx, z + dz]);
+    }
+    for (let x = x0 + 1; x < x1; x++) {
+      for (let z = z0 + 1; z < z1; z++) {
+        const k = cellKey(level, x, z);
+        if (!seen.has(k) && !owners.has(k) && !apart.has(k)) own.set(k, r);
+      }
+    }
+  }
+  // The edges: round each fenced region's ground, built from its own side
+  // (the lower region where two meet), gapped where a street crosses.
+  const roomAt = (level, x, z, r) => {
+    const v = layout.at(level, x, z);
+    if (v !== undefined) return cellOf(v).room;
+    const k = cellKey(level, x, z);
+    if (streetRoom.has(k)) return streetRoom.get(k);
+    const rooms = members[r].map((m) => cellOf(m).room);
+    return rooms.find((room) => isOpenAir(room)) ?? rooms[0];
+  };
+  for (const [k, r] of own) {
+    if (r < 0) continue;
+    const [level, x, z] = parse(k);
+    for (let dir = 0; dir < 4; dir++) {
+      const [dx, , dz] = DIR_STEP[dir];
+      const nk = cellKey(level, x + dx, z + dz);
+      const o = own.get(nk);
+      if (o === r) continue;
+      const crossing = steps.get(`${k}|${dir}`) || [];
+      // ...and where a room's side holds an arch, a gate into another zone or
+      // a shaft: the way through them is not a street, but it is a way.
+      const v = layout.at(level, x, z); const nv = layout.at(level, x + dx, z + dz);
+      const arch = [[v, dir], [nv, REVERSE_DIR[dir]]].some(([u, d]) => u !== undefined && ['portal', 'gate', 'shaft'].includes(layout.sides.get(u)?.[d]?.kind));
+      const gaps = crossing.length
+        ? [crossing.some((s) => s.door) ? [-DOOR_W / 2 - 0.1, DOOR_W / 2 + 0.1] : [-FENCE_LANE / 2, FENCE_LANE / 2]]
+        : arch ? [[-FENCE_LANE / 2, FENCE_LANE / 2]] : [];
+      edges.push({
+        level, x, z, dir, gaps, region: r, beyond: o, kind: fenceKind(roomAt(level, x, z, r)),
+        door: gaps.length > 0 && crossing.some((st) => st.door),
+      });
+    }
+  }
+  // Which regions a fence closes. Not one whose own street runs on into a
+  // cell another's street shares: there the two are one ground, and only a
+  // crossing parts them. Nor, then, one with a gap that holds no door onto
+  // ground that is open -- the street of a guard whose own region is not
+  // closed is anyone's -- unless it is the guard's: to walk in is to meet it.
+  // The desert's streets cross one another all over its nine rooms and the
+  // graveyard's cross the park's where the crossings found no answer; such a
+  // region keeps what it had, and is counted.
+  const guarded = (r) => members[r].length === 1 && isGuard(cellOf(members[r][0]).room);
+  const closed = new Set(edges.map((e) => e.region));
+  for (const e of edges) if (e.gaps.length && e.beyond === -1) closed.delete(e.region);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const e of edges) {
+      if (!closed.has(e.region) || !e.gaps.length || e.door || guarded(e.region)) continue;
+      if (e.beyond === undefined || e.beyond < 0 || !closed.has(e.beyond)) { closed.delete(e.region); changed = true; }
+    }
+  }
+  const leaky = new Set(edges.map((e) => e.region).filter((r) => !closed.has(r)));
+  // Where two closed regions meet, the lower one builds the fence between.
+  const kept = edges.filter((e) => closed.has(e.region) && !(e.beyond >= 0 && closed.has(e.beyond) && e.beyond < e.region));
+  for (const e of kept) fenced.add(`${cellKey(e.level, e.x, e.z)}|${e.dir}`);
+  // A gate between two rooms out of doors -- a door on a street, which no
+  // reset need shut -- has the street between its leaves walled along both
+  // sides, where nothing else runs through its cells: shut, it was walked
+  // round over the next cell's ground (#3041/#3053, the East Gate).
+  const through = new Map();
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || !link.to || !link.path) continue;
+    for (const c of link.path) { const k = cellKey(link.from.level, c.x, c.z); through.set(k, (through.get(k) || 0) + 1); }
+  }
+  let gates = 0;
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || !link.to || !link.path?.length) continue;
+    if (!isOpenAir(link.from.room) || !isOpenAir(link.to.room)) continue;
+    const back = link.to.room.exits[REVERSE_DIR[link.dir]];
+    if (!doorOn(link.from, link.dir) && !(back && back.to === link.from.vnum && (back.locks & EX_ISDOOR))) continue;
+    gates++;
+    const chain = [link.from, ...link.path, link.to];
+    for (let i = 1; i < chain.length - 1; i++) {
+      const c = chain[i];
+      const k = cellKey(link.from.level, c.x, c.z);
+      if (through.get(k) !== 1 || apart.has(k)) continue;
+      const along = [dirBetween(c, chain[i - 1]), dirBetween(c, chain[i + 1])];
+      for (let dir = 0; dir < 4; dir++) {
+        if (along.includes(dir) || fenced.has(`${k}|${dir}`)) continue;
+        kept.push({ level: link.from.level, x: c.x, z: c.z, dir, gaps: [], region: -1, kind: fenceKind(link.from.room) });
+        fenced.add(`${k}|${dir}`);
+      }
+    }
+  }
+  const name = (r) => cellOf(members[r][0]).room.name;
+  return { edges: kept, fenced, shared, gates, leaky: [...leaky].map((r) => `${name(r)} (${members[r].length})`), closed: [...new Set(kept.map((e) => e.region).filter((r) => r >= 0))].map((r) => `${name(r)} (${members[r].length})`) };
+}
+
+/** Across a dune ridge, out from its crest towards the cell's edge, and how high there as a share of the crest. */
+const DUNE_PROFILE = [[-1.7, 0], [-1.1, 0.42], [-0.5, 0.84], [0, 1], [0.35, 0.86], [0.7, 0.45], [1.0, 0]];
+const DUNE_CREST = HALF - 1.25;
+/**
+ * A ridge of sand from `a0` to `a1` along a side (`at(a, o)`, `o` out from
+ * the cell's centre), as world-space triangles with smooth normals. `run0`
+ * and `run1`: carry on 1.3 m past that end, falling away, to lap the next
+ * one; otherwise slope down over the last 1.4 m.
+ */
+function duneRidge({ at, a0, a1, run0, run1, y, salt }) {
+  const s0 = a0 - (run0 ? 1.3 : 0); const s1 = a1 + (run1 ? 1.3 : 0);
+  const n = Math.max(2, Math.ceil((s1 - s0) / 0.9));
+  const pos = []; const idx = [];
+  const W = DUNE_PROFILE.length;
+  for (let i = 0; i <= n; i++) {
+    const a = s0 + ((s1 - s0) * i) / n;
+    const wave = Math.sin(a * 0.9 + salt) * 0.18 + Math.sin(a * 0.37 + salt * 1.7) * 0.22;
+    let h = 2.35 + wave;
+    // Past a corner it falls away outside the cell, at full height to the
+    // cell's edge; at a gap it slopes down inside the run.
+    // Down to the sand at either end, or the open end shows a slit of shadow under it.
+    if (run0) h *= a < a0 ? (a - s0) / 1.3 : 1; else h *= Math.min(1, (a - s0) / 1.4);
+    if (run1) h *= a > a1 ? (s1 - a) / 1.3 : 1; else h *= Math.min(1, (s1 - a) / 1.4);
+    for (const [o, f] of DUNE_PROFILE) {
+      const p = at(a, DUNE_CREST + o + wave * 0.4);
+      pos.push(p.x, y + h * f - (f === 0 ? 0.02 : 0), p.z);
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < W - 1; j++) {
+      const p = i * W + j; const q = p + W;
+      idx.push(p, q, p + 1, p + 1, q, q + 1);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  // Wound so the normals face up whichever way the side runs.
+  const nor = geo.attributes.normal;
+  if (nor.getY(Math.floor(W / 2)) < 0) {
+    for (let t = 0; t < idx.length; t += 3) [idx[t + 1], idx[t + 2]] = [idx[t + 2], idx[t + 1]];
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+  }
+  return geo;
+}
+
+/** The fences of `fencePlan`, run by run between their gaps. */
+function buildFences({ plan, batcher, instances, model, chunkOf, addCollider }) {
+  const was = batcher.indoor;
+  batcher.indoor = false;
+  for (const e of plan.edges) {
+    const chunk = chunkOf(e);
+    const px = e.x * CELL; const pz = e.z * CELL; const y = e.level * LEVEL_H;
+    const [dx, , dz] = DIR_STEP[e.dir];
+    const alongZ = dx !== 0;
+    // A point `a` along the side from its middle, `o` out from the cell's centre towards it.
+    const at = (a, o) => (alongZ ? { x: px + dx * o, z: pz + a } : { x: px + a, z: pz + dz * o });
+    const box3 = (a0, a1, o0, o1, y0, y1, material, collide = true) => {
+      const p = at(a0, o0); const q = at(a1, o1);
+      const r = { x0: Math.min(p.x, q.x), x1: Math.max(p.x, q.x), z0: Math.min(p.z, q.z), z1: Math.max(p.z, q.z) };
+      if (material) {
+        batcher.add(box(r.x1 - r.x0, y1 - y0, r.z1 - r.z0, 1, 1, 1), material,
+          place((r.x0 + r.x1) / 2, y + (y0 + y1) / 2, (r.z0 + r.z1) / 2), { chunk, ao: wallAo(y) });
+      }
+      if (collide) addCollider(r.x0, r.x1, r.z0, r.z1, y + y0, y + y1);
+    };
+    // Runs between the gaps, each with whether its ends stop at one.
+    const runs = [];
+    let from = -HALF; let fromGap = false;
+    for (const [g0, g1] of [...e.gaps].sort((p, q) => p[0] - q[0])) {
+      if (g0 - from > 0.2) runs.push([from, g0, fromGap, true]);
+      from = Math.max(from, g1); fromGap = true;
+    }
+    if (HALF - from > 0.2) runs.push([from, HALF, fromGap, false]);
+    for (const [a0, a1, gap0, gap1] of runs) {
+      const len = a1 - a0;
+      const seed = hash3(e.x * 4 + e.dir, e.z, Math.round(a0), 311);
+      if (e.kind === 'iron' && instances && model(['iron_fence'], 0)) {
+        // Panels from their origin along +X, as `buildIronFence` lays them.
+        const n = Math.max(1, Math.round(len / FENCE_PITCH));
+        for (let i = 0; i < n; i++) {
+          const p = at(a0 + (i * len) / n, HALF - FENCE_IN);
+          instances.add('iron_fence', { x: p.x, y, z: p.z, rotY: alongZ ? -Math.PI / 2 : 0, scaleX: len / n / FENCE_PITCH, scaleY: FENCE_H / 1.1 }, chunk);
+        }
+        box3(a0, a1, HALF - FENCE_IN - 0.25, HALF - FENCE_IN + 0.25, 0, FENCE_HOLD + 0.2, null);
+      } else if (e.kind === 'hedge' && instances && model(['hedge_row'], 0)) {
+        // Its 2 m of depth from the edge in, pieces lapping a little.
+        const n = Math.max(1, Math.ceil(len / 6.4));
+        for (let i = 0; i < n; i++) {
+          const p = at(a0 + ((i + 0.5) * len) / n, HALF - 1.1);
+          instances.add('hedge_row', {
+            x: p.x, y, z: p.z, rotY: alongZ ? Math.PI / 2 : 0,
+            scaleX: (len / n + 0.4) / 6.75, scaleY: 1.0 + hash3(e.x, e.z, i, 313) * 0.15,
+          }, chunk);
+        }
+        box3(a0, a1, HALF - 2.0, HALF - 0.2, 0, FENCE_HOLD, null);
+      } else if (e.kind === 'reeds' && instances && model(['reed_clump'], 0)) {
+        // Two staggered rows of tall reeds on a strip of peat.
+        box3(a0, a1, HALF - 2.1, HALF - 0.1, -0.05, 0.12, 'peat', false);
+        const n = Math.max(1, Math.round(len / 1.1));
+        for (let i = 0; i < n; i++) {
+          for (const [row, o] of [[0, HALF - 0.65], [1, HALF - 1.55]]) {
+            const p = at(a0 + ((i + 0.5 * row + 0.25) * len) / n, o + (hash3(e.x, e.z, i * 2 + row, 317) - 0.5) * 0.3);
+            instances.add('reed_clump', {
+              x: p.x, y, z: p.z, rotY: hash3(e.x, e.z, i * 2 + row, 319) * Math.PI * 2,
+              scale: 0.75 + hash3(e.x, e.z, i * 2 + row, 321) * 0.3, scaleY: 1.0 + hash3(e.x, e.z, i * 2 + row, 323) * 0.3,
+            }, chunk);
+          }
+        }
+        box3(a0, a1, HALF - 2.0, HALF - 0.2, 0, FENCE_HOLD, null);
+      } else if (e.kind === 'dune') {
+        // A ridge of sand, steep on the side that faces out: one mesh down the
+        // run, its crest wandering a little. Where the run meets the next
+        // edge's it runs on past the corner, so the two lap and no saddle
+        // opens between them; at a gap it slopes down to the path.
+        const geo = duneRidge({ at, a0, a1, run0: !gap0, run1: !gap1, y, salt: e.x * 31 + e.z * 17 + e.dir });
+        batcher.add(geo, 'sand', new THREE.Matrix4(), { chunk, normals: true });
+        geo.dispose();
+        box3(a0, a1, HALF - 2.5, HALF - 0.3, 0, FENCE_HOLD, null);
+      } else {
+        // A wall with a coping, the stone of the town round it.
+        box3(a0, a1, HALF - FENCE_IN - 0.25, HALF - FENCE_IN + 0.25, 0, FENCE_HOLD + 0.1, 'stonewall');
+        box3(a0, a1, HALF - FENCE_IN - 0.33, HALF - FENCE_IN + 0.33, FENCE_HOLD + 0.1, FENCE_HOLD + 0.24, 'stonewall', false);
+      }
+    }
+  }
+  batcher.indoor = was;
+}
+
+
 /**
  * The paint and the blood: every decal quad in the world, merged by
  * material, laid a centimetre off whatever it is on.
@@ -2842,6 +3240,8 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   // ...and the crossings carried one street over the other (`buildCrossings`).
   const carried = crossingPlan(layout, world, river, cellKey);
   const builtApart = { has: (k) => river.has(k) || carried.has(k) };
+  // ...and the fences round ground the mud joins only by a shut door or past a guard (`fencePlan`).
+  const fences = fencePlan({ layout, cellKey, apart: builtApart });
   // What this build may put down on a cell that is neither a room nor a
   // street: not where a vista stands (`options.clear`), nor, in a vista,
   // where the drawn zone already builds.
@@ -3414,7 +3814,9 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         // Nothing walls a room under the canopy: `buildForest` stands a picket
         // of trees along every side there is no way out of, and a rock kerb
         // behind that is the level editor showing through.
-        if (!canopy && dir !== fort) buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog, instances, gap });
+        if (!canopy && dir !== fort && !fences.fenced.has(`${cellKey(cell.level, cell.x, cell.z)}|${dir}`)) {
+          buildOutdoorEdge({ batcher, chunk, room, pos, dir, open, addCollider, bog, instances, gap });
+        }
         // ...and the steps' own backs are on the edge, with nothing behind
         // them: on the chain a body stood on the third step and stepped back
         // off it. Behind the gap, outside the cell, so no step lies in it.
@@ -3944,6 +4346,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   }
   buildRiver({ plan: river, layout, rooms, batcher, instances, chunkOf, addCollider, addPlatform, decor, sunkRects });
   buildCrossings({ plan: carried, batcher, chunkOf, addCollider, addPlatform, raised, groundAt, cellKey });
+  buildFences({ plan: fences, batcher, instances, model, chunkOf, addCollider });
 
   for (const plan of stairPlans) {
     // A drop is a shaft, and only the way down it is an exit.
@@ -4219,10 +4622,20 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   for (const cell of layout.order) {
     if (GRAVEYARD.test(cell.room.name)) graveCells.add(cellKey(cell.level, cell.x, cell.z));
   }
+  // ...and the edges its ways out cross, the grate's among them.
+  const graveWays = new Set();
   for (const link of layout.links) {
-    if (link.kind !== 'alley') continue;
-    if (!GRAVEYARD.test(link.from.room.name) || !GRAVEYARD.test(link.to.room.name)) continue;
-    for (const c of link.path) graveCells.add(cellKey(link.from.level, c.x, c.z));
+    if (link.kind !== 'alley' || !link.to || !link.path) continue;
+    const from = GRAVEYARD.test(link.from.room.name); const to = GRAVEYARD.test(link.to.room.name);
+    if (from && to) for (const c of link.path) graveCells.add(cellKey(link.from.level, c.x, c.z));
+    if (!from && !to) continue;
+    const chain = [link.from, ...link.path, link.to];
+    for (let i = 0; i + 1 < chain.length; i++) {
+      const d = dirBetween(chain[i], chain[i + 1]);
+      if (d < 0) continue;
+      graveWays.add(`${cellKey(link.from.level, chain[i].x, chain[i].z)}|${d}`);
+      graveWays.add(`${cellKey(link.from.level, chain[i + 1].x, chain[i + 1].z)}|${REVERSE_DIR[d]}`);
+    }
   }
   for (const key of graveCells) {
     const colon = key.indexOf(':');
@@ -4239,8 +4652,12 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       // railing never lands across a way out -- including the iron grate the
       // mud puts between #3600 and the Concourse. Which is the same test as
       // "the gravel runs that way", so the two are one branch: an arm of road
-      // where you can walk out, railings where you cannot.
-      if (layout.at(level, nx, nz) !== undefined || layout.isPath(level, nx, nz)) {
+      // where you can walk out, railings where you cannot. Where the
+      // graveyard's region is fenced (`fencePlan`) only its own ground and its
+      // ways out are: a park path beside it is not; but its paths cross the
+      // park's where no crossing could part them, so for now it is not.
+      const ground = layout.at(level, nx, nz) !== undefined || layout.isPath(level, nx, nz);
+      if (graveCells.has(cellKey(level, nx, nz)) || graveWays.has(`${key}|${dir}`) || (ground && !fences.fenced.has(`${key}|${dir}`))) {
         const [aw, ad] = dx ? [HALF, GRAVEL_W] : [GRAVEL_W, HALF];
         const gx = cx * CELL + dx * HALF / 2; const gz = cz * CELL + dz * HALF / 2;
         // Not across the hole a way down goes through: a tomb's slab lies in
@@ -4260,6 +4677,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         }
         continue;
       }
+      if (fences.fenced.has(`${key}|${dir}`)) continue;
       // ...and the empty cell between two graveyard rooms is inside, not out.
       if (graveCells.has(cellKey(level, nx + dx, nz + dz))) continue;
       buildIronFence({
@@ -4387,6 +4805,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   stats.hills = hills;
   stats.lanes = lanes;
   // The streets carried over another, for the tools: cell, and the streets over and under.
+  stats.fences = { edges: fences.edges.length, shared: fences.shared, gates: fences.gates, closed: fences.closed, leaky: fences.leaky, byKind: fences.edges.reduce((m, e) => ({ ...m, [e.kind]: (m[e.kind] || 0) + 1 }), {}), list: fences.edges.map((e) => [e.level, e.x, e.z, e.dir, e.kind, e.gaps.length]) };
   stats.carried = [...carried.values()].map((c) => ({
     x: c.x, z: c.z, splits: c.splits.length, river: c.river, plain: c.plain,
     streets: c.streets.map((t) => ({ link: [t.link.from.vnum, t.link.to.vnum], a: t.a, b: t.b, ha: t.ha, hm: t.hm, hb: t.hb, half: t.half })),
@@ -7461,8 +7880,8 @@ function buildGrateRailing({ instances, model, chunk, pos, dir, addCollider }) {
     for (let a = DOOR_W / 2 + 0.1; a + FENCE_PITCH <= HALF + 0.05; a += FENCE_PITCH) {
       const from = s > 0 ? a : -a - FENCE_PITCH;
       instances.add(name, alongZ
-        ? { x: lx, y: pos.y, z: lz + from, rotY }
-        : { x: lx + from, y: pos.y, z: lz, rotY }, chunk);
+        ? { x: lx, y: pos.y, z: lz + from, rotY, scaleY: FENCE_H / 1.1 }
+        : { x: lx + from, y: pos.y, z: lz, rotY, scaleY: FENCE_H / 1.1 }, chunk);
     }
     const a0 = s > 0 ? DOOR_W / 2 + 0.1 : -HALF;
     const a1 = s > 0 ? HALF : -DOOR_W / 2 - 0.1;
@@ -7482,9 +7901,10 @@ function buildIronFence({ instances, model, chunk, x, y, z, dir, addCollider }) 
   const n = Math.round(CELL / FENCE_PITCH);
   for (let i = 0; i < n; i++) {
     const a = -HALF + i * FENCE_PITCH;
+    // As tall as a cemetery's railing: the model's 1.1 m was a 2.2 m collider's front.
     instances.add(name, alongZ
-      ? { x: x + dx * out, y, z: z + a, rotY }
-      : { x: x + a, y, z: z + dz * out, rotY }, chunk);
+      ? { x: x + dx * out, y, z: z + a, rotY, scaleY: FENCE_H / 1.1 }
+      : { x: x + a, y, z: z + dz * out, rotY, scaleY: FENCE_H / 1.1 }, chunk);
   }
   const [w, d] = alongZ ? [0.5, CELL] : [CELL, 0.5];
   const cx = x + dx * out;
