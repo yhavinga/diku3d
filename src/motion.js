@@ -2467,8 +2467,8 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
   const RANGE = 46;
   const _player = { x: 0, z: 0 };
 
-  function update(dt, camera) {
-    _player.x = camera.position.x; _player.z = camera.position.z;
+  function update(dt, camera, eye = camera.position) {
+    _player.x = eye.x; _player.z = eye.z;
     const player = _player;
 
     // Who is near whom, for the ones worth steering.

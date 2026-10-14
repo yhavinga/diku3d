@@ -76,6 +76,14 @@ const yawAlong = (a, b) => Math.atan2(-(b.x - a.x), -(b.z - a.z));
 export class Player {
   constructor(camera, domElement, world) {
     this.camera = camera;
+    // Where the player's body is, for code that means the body and not the
+    // view. In first person it is the camera's own pose, so nothing changes;
+    // src/view.js swaps these when the camera stands back from the figure.
+    this.body = {
+      eye: (out) => out.copy(this.camera.position),
+      heading: () => this.camera.rotation.y,
+      forward: (out) => this.camera.getWorldDirection(out),
+    };
     // PointerLockControls works in YXZ; match it so the strafe roll below can
     // touch rotation.z without fighting the look direction.
     camera.rotation.order = 'YXZ';

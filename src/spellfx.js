@@ -1199,7 +1199,6 @@ class HeatPass extends Pass {
   }
 }
 const _heatClear = new THREE.Color();
-const _down = new THREE.Vector3(0, -0.3, 0);
 
 // ------------------------------------------------------------- the module ----
 
@@ -1434,18 +1433,46 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
 
   const forwardOf = (fig, out) => out.set(Math.sin(fig.object.rotation.y), 0, Math.cos(fig.object.rotation.y));
 
+  // The player's own points. They are the camera's until a third-person view
+  // sets its own (setSelf), because the camera is then not where the body is.
+  let self = null;
+
+  function selfHand(out) {
+    if (self) return self.hand(out);
+    // Your own hand, where the view model has it -- so a bolt leaves the
+    // fist you can see thrusting out, not a point in the middle of the air.
+    if (viewModel && viewModel.castPoint) return viewModel.castPoint(out);
+    camera.getWorldDirection(_v);
+    _w.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    out.copy(camera.position).addScaledVector(_v, 0.62).addScaledVector(_w, 0.2);
+    out.y -= 0.24;
+    return out;
+  }
+
+  const selfMouth = (out) => (self ? self.mouth(out) : selfHand(out));
+
+  function selfChest(out, near) {
+    if (self) return self.chest(out, near);
+    camera.getWorldDirection(_v);
+    return out.copy(camera.position).addScaledVector(_v, near ? 0.8 : 1.7).add({ x: 0, y: near ? -0.22 : -0.3, z: 0 });
+  }
+
+  const selfFeet = (out) => (self ? self.feet(out) : out.set(camera.position.x, camera.position.y - 1.72, camera.position.z));
+
+  // The eye a sight line or a drifting mote starts from: the camera, or the
+  // body's mouth when a view has set one.
+  const selfEye = (out) => (self ? self.mouth(out) : out.copy(camera.position));
+
+  // A point `dist` ahead of the player and `drop` below, for what flies at
+  // you; a set view aims at its chest instead, since "ahead" is the camera's.
+  function selfAhead(out, dist, drop) {
+    if (self) return self.chest(out, true);
+    return camera.getWorldDirection(out).multiplyScalar(dist).add(camera.position).add({ x: 0, y: drop, z: 0 });
+  }
+
   /** Where a caster's spell leaves from: its hand, or just in front of your chest. */
   function handPoint(who, out) {
-    if (who.player) {
-      // Your own hand, where the view model has it -- so a bolt leaves the
-      // fist you can see thrusting out, not a point in the middle of the air.
-      if (viewModel && viewModel.castPoint) return viewModel.castPoint(out);
-      camera.getWorldDirection(_v);
-      _w.set(1, 0, 0).applyQuaternion(camera.quaternion);
-      out.copy(camera.position).addScaledVector(_v, 0.62).addScaledVector(_w, 0.2);
-      out.y -= 0.24;
-      return out;
-    }
+    if (who.player) return selfHand(out);
     const fig = figureOf(who.slot);
     if (!fig) return who.slot ? out.set(who.slot.pos.x, who.slot.pos.y + 1.3, who.slot.pos.z) : out.copy(camera.position);
     const hand = handOf(fig);
@@ -1466,7 +1493,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
 
   /** A dragon's mouth, or a head. */
   function mouthPoint(who, out) {
-    if (who.player) return handPoint(who, out);
+    if (who.player) return selfMouth(out);
     const fig = figureOf(who.slot);
     if (!fig) return handPoint(who, out);
     forwardOf(fig, _w);
@@ -1481,17 +1508,14 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
    * enough for a burst to go off without filling the frame otherwise.
    */
   function chestPoint(who, out, near = false) {
-    if (who.player) {
-      camera.getWorldDirection(_v);
-      return out.copy(camera.position).addScaledVector(_v, near ? 0.8 : 1.7).add({ x: 0, y: near ? -0.22 : -0.3, z: 0 });
-    }
+    if (who.player) return selfChest(out, near);
     const fig = figureOf(who.slot);
     if (!fig) return who.slot ? out.set(who.slot.pos.x, who.slot.pos.y + 1.1, who.slot.pos.z) : out.copy(camera.position);
     return out.set(fig.at.x, fig.at.y + fig.height * 0.6, fig.at.z);
   }
 
   function feetPoint(who, out) {
-    if (who.player) return out.set(camera.position.x, camera.position.y - 1.72, camera.position.z);
+    if (who.player) return selfFeet(out);
     const fig = figureOf(who.slot);
     if (!fig) return who.slot ? out.set(who.slot.pos.x, who.slot.pos.y, who.slot.pos.z) : out.set(camera.position.x, camera.position.y - 1.72, camera.position.z);
     return out.set(fig.at.x, fig.at.y, fig.at.z);
@@ -1820,7 +1844,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     const a = fx.aim;
     const blocked = (p, q) => nav.sightBlocked(p.x, p.y, p.z, q.x, q.y, q.z);
     if (!blocked(src, a)) { flightCounts.clear++; return; }
-    const eye = fx.from.player ? camera.position : mouthPoint(fx.from, new THREE.Vector3());
+    const eye = fx.from.player ? selfEye(new THREE.Vector3()) : mouthPoint(fx.from, new THREE.Vector3());
     if (!blocked(eye, a)) {
       const d = eye.distanceTo(a);
       const via = new THREE.Vector3().lerpVectors(eye, a, Math.min(0.45, 1.6 / Math.max(1e-3, d)));
@@ -1989,7 +2013,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         if (!fx.to) break;
         const pos = fx.data.ballPos || (fx.data.ballPos = new THREE.Vector3());
         // At you, it bursts at arm's length (see impact), so it flies there.
-        const end = fx.to.player ? camera.getWorldDirection(_w).multiplyScalar(2.6).add(camera.position).add({ x: 0, y: -0.35, z: 0 }) : (fx.data.wall || aim);
+        const end = fx.to.player ? selfAhead(_w, 2.6, -0.35) : (fx.data.wall || aim);
         if (fx.data.via && !fx.data.wall) {
           // Out round the corner and on: a quadratic through the eye's line.
           const s1 = 1 - u; const v = fx.data.via;
@@ -2169,7 +2193,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     // pours past the edges of the frame instead of arriving as one sprite
     // pressed to the lens (which the size cap would fade to nothing).
     const atYou = fx.to.player;
-    const aim = atYou ? camera.getWorldDirection(fx.aim).multiplyScalar(1.1).add(camera.position).add(_down) : chestPoint(fx.to, fx.aim, true);
+    const aim = atYou ? selfAhead(fx.aim, 1.1, -0.3) : chestPoint(fx.to, fx.aim, true);
     const dir = _v.subVectors(aim, src);
     const len = Math.max(0.5, dir.length()); dir.normalize();
     const tail = 1 - smooth((tf - (fx.data.stream - 0.2)) / 0.2);
@@ -2267,7 +2291,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         freeSphere(fx.data.ball); fx.data.ball = null;
         // On you it goes off at arm's length and a size that leaves the frame
         // readable: the wash at the edges says the rest.
-        if (onYou) { camera.getWorldDirection(_v); aim.copy(camera.position).addScaledVector(_v, 2.6); aim.y -= 0.35; }
+        if (onYou) selfAhead(aim, 2.6, -0.35);
         if (fx.data.wall) {
           // Stopped by what was in the way: it goes off there, on the ground below it.
           explode(fx.data.wall, feet.set(fx.data.wall.x, feet.y, fx.data.wall.z), fx.saved ? 0.8 : 1);
@@ -2795,8 +2819,9 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   function updateOwnMantle(dt) {
     if (!(game.state.affectedBy & AFF.SANCTUARY) || Math.random() >= 5 * dt * budget.density) return;
     camera.getWorldDirection(_v);
+    const eye = selfEye(_w);
     const a2 = rand(0, TAU); const r = rand(1.2, 2.6);
-    light.spawn({ x: camera.position.x + Math.cos(a2) * r + _v.x * 0.8, y: camera.position.y + rand(-1.1, 0.2), z: camera.position.z + Math.sin(a2) * r + _v.z * 0.8, vx: 0, vy: rand(0.3, 0.6), vz: 0, life: rand(1.5, 2.4), size: rand(0.025, 0.04), color: PAL.sanctuary.mote, shape: 1, drag: 0.5, fadeIn: 0.4, occ: 0.25 });
+    light.spawn({ x: eye.x + Math.cos(a2) * r + _v.x * 0.8, y: eye.y + rand(-1.1, 0.2), z: eye.z + Math.sin(a2) * r + _v.z * 0.8, vx: 0, vy: rand(0.3, 0.6), vz: 0, life: rand(1.5, 2.4), size: rand(0.025, 0.04), color: PAL.sanctuary.mote, shape: 1, drag: 0.5, fadeIn: 0.4, occ: 0.25 });
   }
 
   /** A blow that sanctuary took half of: the mantle flares where it landed. */
@@ -3147,6 +3172,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
 
   return {
     update,
+    /** The player's own points ({ hand, mouth, chest, feet }, each (out[, near]) => out), or null for the camera's. */
+    setSelf(points) { self = points; },
     /** 0 at night, 1 at noon: from applyTime, alongside fx.setAmbient. */
     setDaylight(k) {
       const d = clamp(k, 0, 1);

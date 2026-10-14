@@ -5115,7 +5115,7 @@ function* peopleOf(world, layout, built, options = {}) {
     if (fig.buried) fig.buried.value += THREE.MathUtils.clamp(fig.buriedWant - fig.buried.value, -dt * 2, dt * 2);
   }
 
-  function update(dt, time, camera) {
+  function update(dt, time, camera, eye = camera.position) {
     if (flameSystem) flameSystem.material.uniforms.time.value = time;
     if (emberSystem) emberSystem.material.uniforms.time.value = time;
     if (mistSystem) {
@@ -5153,7 +5153,7 @@ function* peopleOf(world, layout, built, options = {}) {
     // Where everyone walks, and what their bodies do: motion.js. Beyond 46 m
     // a person is a few pixels tall and not worth a skinning pass, so there
     // it only moves the position along.
-    motion.update(dt, camera);
+    motion.update(dt, camera, eye);
     indoorTick++;
     for (let i = 0; i < figures.length; i++) {
       const fig = figures[i];
@@ -5189,7 +5189,7 @@ function* peopleOf(world, layout, built, options = {}) {
     }
 
     for (const door of doors) {
-      if (door.spec.oneWay && camera) oneWayGate(door, camera.position);
+      if (door.spec.oneWay && camera) oneWayGate(door, eye);
       const want = door.open ? 1 : 0;
       if (Math.abs(door.t - want) > 0.001) {
         door.t += Math.sign(want - door.t) * Math.min(Math.abs(want - door.t), dt * 2.2);

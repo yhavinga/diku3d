@@ -472,7 +472,7 @@ export function createItems({ scene, game, library, built }) {
    * the eye, near the middle of the view. Corpses count (you loot them with
    * E); scenery comes through actors.js's own list.
    */
-  function lookable(camera) {
+  function lookable(camera, eye = camera.position) {
     camera.getWorldDirection(_fwd);
     let best = null;
     let bestScore = -Infinity;
@@ -480,7 +480,7 @@ export function createItems({ scene, game, library, built }) {
       if (!built.rooms.has(obj.inRoom)) continue;
       if (!(obj.wearFlags & TAKE) && !game.isContainer(obj)) continue;
       if (!(obj.wearFlags & TAKE) && !(obj.slot)) continue;
-      _to.set(obj.at.x - camera.position.x, obj.at.y + 0.15 - camera.position.y, obj.at.z - camera.position.z);
+      _to.set(obj.at.x - eye.x, obj.at.y + 0.15 - eye.y, obj.at.z - eye.z);
       const d = _to.length();
       if (d > 3.6) continue;
       _to.divideScalar(d);

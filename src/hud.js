@@ -471,7 +471,7 @@ export class Hud {
     this.el.stats.textContent = text;
   }
 
-  update(dt, camera, roomVnum) {
+  update(dt, camera, roomVnum, eye = camera.position) {
     if (this.readLeft > 0) {
       this.readLeft -= dt;
       if (this.readLeft <= 0 && !this.brief) this.setBrief(true);
@@ -479,7 +479,7 @@ export class Hud {
     // Walking, the panels step back: the street is what you are reading then.
     // Smoothed over about half a second, so a stop between strides does not
     // flash them up; a jump (goto, an exit taken by arrow) is not a walk.
-    const p = camera.position;
+    const p = eye;
     if (this.lastEye && dt > 0) {
       const v = Math.hypot(p.x - this.lastEye.x, p.z - this.lastEye.z) / dt;
       this.moving += ((v > 0.8 && v < 20 ? 1 : 0) - this.moving) * Math.min(1, dt * 2.5);
