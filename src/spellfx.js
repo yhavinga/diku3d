@@ -1803,8 +1803,11 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     // windup onto the robe, the floor and the walls round you.
     if (spoken && !fx.lost && from.player && palette.light) {
       const at = new THREE.Vector3();
+      // Seen from outside the hand is a hand's breadth off the robe, and a
+      // lamp that close washes the chest and shoulders grey: lift it clear.
+      const up = close(from) ? 0 : 0.8;
       takeLight(palette.light, (t) => (t < e.windup + 0.12
-        ? { p: handPoint(from, at), intensity: 1.5 + 9 * smooth(Math.min(1, t / Math.max(0.1, e.windup))), distance: 7 }
+        ? { p: handPoint(from, at).add({ x: 0, y: up, z: 0 }), intensity: 1.5 + 9 * smooth(Math.min(1, t / Math.max(0.1, e.windup))), distance: 7 }
         : null));
     }
     S.gather(fx.hand, fx.family, e.windup);
@@ -1902,8 +1905,56 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       const pal2 = PAL[key];
       while (acc.b >= 1) { acc.b -= 1; light.spawn({ x: h.x + rand(-0.05, 0.05), y: h.y - 0.03, z: h.z + rand(-0.05, 0.05), vx: 0, vy: -0.2, vz: 0, life: rand(0.5, 0.8), size: rand(0.025, 0.045), color: pal2.drop || pal2.glow, shape: 6, drag: 0.2, gravity: 6, fadeIn: 0.05, occ: 0.5 }); }
       while (acc.a >= 3) { acc.a -= 3; light.spawn({ x: rand(-0.12, 0.12), y: rand(-0.05, 0.1), z: rand(-0.12, 0.12), anchor: fx.anchor, vx: 0, vy: 0.15, vz: 0, life: rand(0.4, 0.7), size: rand(0.03, 0.05), color: pal2.glow, shape: 5, drag: 0.5, fadeIn: 0.2 }); }
+    } else if (key === 'heal' || key === 'bless' || key === 'sanctuary' || key === 'holy') {
+      gatherGold(fx, key, u, dt, acc);
     } else {
       acc.a = 0; acc.b = 0;
+    }
+  }
+
+  /**
+   * The cleric's words, seen from outside: gold drawn up the body into the
+   * raised hands, a halo of motes turning slowly at the shoulders, a pool of
+   * light on the ground. Holy is whiter and hotter, sanctuary paler and wider.
+   * The rates ride on `acc`, which gatherKind already scales by the budget.
+   */
+  const GOLD = {
+    heal: { wisp: PAL.heal.mote, pool: PAL.heal.glow, reach: 1, size: 1, pool0: 1.3 },
+    bless: { wisp: PAL.bless.mote, pool: PAL.bless.glow, reach: 1, size: 1, pool0: 1.3 },
+    sanctuary: { wisp: PAL.sanctuary.mote, pool: PAL.sanctuary.glow, reach: 1.7, size: 0.8, pool0: 2.2 },
+    holy: { wisp: C(4.2, 3.9, 3), pool: C(2.6, 2.4, 1.8), reach: 1.1, size: 1.4, pool0: 1.6 },
+  };
+  function gatherGold(fx, key, u, dt, acc) {
+    const g = GOLD[key];
+    const h = fx.hand;
+    const feet = feetPoint(fx.from, _v);
+    const body = heightOf(fx.from);
+    if (!fx.data.pool) {
+      fx.data.pool = true;
+      const win = Math.max(0.2, fx.windup);
+      decal(feet, g.pool0, 2, g.pool, win + 0.5, (d, uu, t) => { uu.uAlpha.value = 0.75 * smooth(Math.min(1, t / win)) * (t > win ? Math.max(0, 1 - (t - win) / 0.5) : 1); });
+    }
+    // Up the body: from a ring round the feet, in to the hand over the time
+    // it takes to rise, so what reaches the fist is what the ground gave.
+    const holy = key === 'holy' ? 1.5 : 1;
+    while (acc.a >= 1) {
+      acc.a -= 1;
+      const a = rand(0, TAU); const r = rand(0.35, 0.6) * g.reach;
+      const x = feet.x + Math.cos(a) * r; const z = feet.z + Math.sin(a) * r;
+      const t = rand(0.5, 0.8);
+      light.spawn({ x, y: feet.y + 0.05, z, vx: (h.x - x) / t, vy: (h.y - feet.y) / t, vz: (h.z - z) / t, life: t, size: rand(0.04, 0.075) * g.size, color: g.wisp, shape: 1, drag: 0, swirl: rand(1.5, 3), fadeIn: 0.15, occ: 0.25 });
+      if (holy > 1 && Math.random() < 0.5) acc.a += 0.5;
+    }
+    // The halo: a stream born round the shoulders at the angle the clock
+    // gives, so the ring turns without any particle having to orbit.
+    acc.c = (acc.c || 0) + dt * budget.density * (14 + 20 * u) * holy;
+    const sh = feet.y + body * 0.86;
+    const R = (key === 'sanctuary' ? 0.85 : 0.5) + 0.1 * u;
+    const w = 1.5;
+    while (acc.c >= 1) {
+      acc.c -= 1;
+      const a = clock * w + rand(0, TAU / 3);
+      light.spawn({ x: feet.x + Math.cos(a) * R, y: sh + rand(-0.05, 0.05), z: feet.z + Math.sin(a) * R, vx: -Math.sin(a) * R * w, vy: rand(0.03, 0.12), vz: Math.cos(a) * R * w, life: rand(0.35, 0.55), size: rand(0.035, 0.06) * g.size, color: g.wisp, shape: 1, drag: 0, fadeIn: 0.25, occ: 0.25 });
     }
   }
 
@@ -2462,9 +2513,25 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         const big = fx.spell === 'heal';
         motes(target || fx.from, palette.mote, big ? 60 : 36, big ? 1.8 : 1.4);
         decal(feet, big ? 1.2 : 0.95, 2, palette.glow.clone().multiplyScalar(0.8), 1.3, (d, u, t) => { u.uAlpha.value = Math.sin(Math.PI * clamp(t / 1.3, 0, 1)); });
-        auraPulse(target || fx.from, palette.glow, 1.2, big ? 1.6 : 1);
-        takeLight(palette.light, (t) => (t < 1.1 ? { p: aim, intensity: (big ? 14 : 8) * Math.sin(Math.PI * t / 1.1), distance: 7 } : null));
-        if (big && !(target || fx.from).player) column(feet, palette.mote, 1.4);
+        // Seen from outside the full shell draws glass lines round the head
+        // and arms; the soft rim lights only the body's own edge. Sparks lift
+        // off the ground up the body.
+        const w = target || fx.from;
+        if (close(w) || !big) auraPulse(w, palette.glow, 1.2, big ? 1.6 : 1);
+        else auraPulse(w, palette.glow, 0.6, 1.6, 1);
+        if (!close(w)) {
+          const h = heightOf(w);
+          for (let k = 0; k < n(big ? 40 : 22); k++) {
+            const a = rand(0, TAU); const r = rand(0.25, 0.5);
+            light.spawn({ x: feet.x + Math.cos(a) * r, y: feet.y + rand(0, 0.3), z: feet.z + Math.sin(a) * r, vx: 0, vy: rand(1.2, 2.4) * (h / 1.8), vz: 0, life: rand(0.7, 1.2), size: rand(0.03, 0.06), color: palette.mote, shape: 1, drag: 0.3, swirl: rand(1.5, 3), fadeIn: 0.1, occ: 0.25 });
+          }
+        }
+        // From outside a lamp at the chest lights the robe from inside and
+        // the figure goes white; above the head it falls on the shoulders
+        // and the ground the way the column's light would.
+        const lit = close(w) ? aim : chestPoint(w, new THREE.Vector3()).add({ x: 0, y: 1.3, z: 0 });
+        takeLight(palette.light, (t) => (t < 1.1 ? { p: lit, intensity: (big ? 14 : 8) * (close(w) ? 1 : 0.6) * Math.sin(Math.PI * t / 1.1), distance: 7 } : null));
+        if (big && !close(target || fx.from)) column(feet, palette.mote, 1.4);
         S.chord(aim, fx.spell === 'refresh' ? 440 : 392, big ? 1.5 : 1);
         if ((target || fx.from).player) flashScreen('radial-gradient(ellipse at 50% 55%, rgba(255,225,160,0.45) 0%, rgba(255,210,140,0) 75%)', 0.7, 1100);
         break;
@@ -2481,7 +2548,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         } else {
           motes(w, palette.mote, strong ? 50 : 28, strong ? 1.8 : 1.2);
         }
-        if (strong && !w.player) column(feet, palette.mote, 1.8);
+        if (strong && !close(w)) column(feet, palette.mote, 1.8);
         decal(feet, strong ? 1.3 : 1.0, 1, palette.glow, 0.7, (d, u, t) => { u.uRadius.value = smooth(t / 0.6); u.uAlpha.value = 1 - t / 0.7; });
         takeLight(palette.light, (t) => (t < 0.9 ? { p: aim, intensity: (strong ? 16 : 7) * Math.sin(Math.PI * t / 0.9), distance: 7 } : null));
         S.chord(aim, strong ? 523 : f === 'bless' ? 440 : 349, strong ? 2 : 1);
@@ -2544,7 +2611,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         auraPulse(w, PAL.dispel.glow, 1.5, 0.7);
         burst(light, chestPoint(w, new THREE.Vector3()), 24, { speed: [1.5, 3.5], flat: true, life: [0.3, 0.6], size: [0.03, 0.05], color: PAL.dispel.glow, drag: 2.5, shape: 1 });
         S.chord(aim, 470, 1);
-        if ((fx.spell === 'teleport' || fx.spell === 'word of recall') && !w.player) column(feetPoint(w, new THREE.Vector3()), C(2, 2.4, 3), 1.2);
+        if ((fx.spell === 'teleport' || fx.spell === 'word of recall') && !close(w)) column(feetPoint(w, new THREE.Vector3()), C(2, 2.4, 3), 1.2);
         break;
       }
       case 'quake': {
@@ -2591,7 +2658,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       }
       case 'teleport': {
         const w = target || fx.from;
-        if (!w.player) column(feetPoint(w, new THREE.Vector3()), C(2.2, 2.6, 3.2), 1.4);
+        if (!close(w)) column(feetPoint(w, new THREE.Vector3()), C(2.2, 2.6, 3.2), 1.4);
         auraPulse(w, PAL.dispel.glow, 2, 0.9);
         S.chord(aim, 587, 1.5);
         break;
@@ -3084,21 +3151,31 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   const _tip = new THREE.Vector3();
   let tipMotes = 0;
   function updateOwnStaff(dt) {
-    if (!self || !self.staff || game.state.class !== 0) return;
-    const tip = self.staff(_tip);
-    if (!tip) return;
+    // A mage's knot is violet, a cleric's gold; the rest carry nothing.
+    const cls = game.state.class;
+    if (!self || (cls !== 0 && cls !== 1)) return;
+    let tip = self.staff && self.staff(_tip);
+    // A cleric's mace, or bare hands, still carry the glow at the fist -- but
+    // only with the figure in view, or first person would grow a light in the lens.
+    const staff = !!tip;
+    if (!tip) {
+      if (cls !== 1 || !(self.figure && self.figure()) || !self.hand) return;
+      tip = self.hand(_tip);
+    }
+    const pal2 = cls === 0 ? { glow: PAL.missile.glow, core: PAL.missile.core } : { glow: PAL.bless.glow, core: PAL.bless.mote };
+    const size = staff ? 1 : 0.6;
     const full = clamp(game.state.mana / Math.max(1, game.state.maxMana), 0, 1);
     const beat = 0.85 + 0.15 * Math.sin(clock * 2.6);
     // No lamp of its own: one more light is one more in every shader's key.
     // A wide faint halo stands in for the light it would throw.
-    light.spawn({ x: tip.x, y: tip.y, z: tip.z, life: 0.05, size: 0.7 * full * beat, color: PAL.missile.glow, alpha: 0.3 * full, shape: 0, drag: 0, fadeIn: 0 });
-    light.spawn({ x: tip.x, y: tip.y, z: tip.z, life: 0.05, size: (0.12 + 0.2 * full) * beat, color: PAL.missile.glow, alpha: 0.45 + 0.55 * full, shape: 0, drag: 0, fadeIn: 0 });
+    light.spawn({ x: tip.x, y: tip.y, z: tip.z, life: 0.05, size: 0.7 * size * full * beat, color: pal2.glow, alpha: 0.3 * full, shape: 0, drag: 0, fadeIn: 0 });
+    light.spawn({ x: tip.x, y: tip.y, z: tip.z, life: 0.05, size: (0.12 + 0.2 * full) * size * beat, color: pal2.glow, alpha: 0.45 + 0.55 * full, shape: 0, drag: 0, fadeIn: 0 });
     // The heart in the spell's own HDR colour, so the bloom takes it up.
-    light.spawn({ x: tip.x, y: tip.y, z: tip.z, life: 0.05, size: 0.04 + 0.06 * full, color: PAL.missile.core, alpha: 0.25 + 0.75 * full, shape: 0, drag: 0, fadeIn: 0 });
-    tipMotes += dt * (0.5 + 3.5 * full) * budget.density;
+    light.spawn({ x: tip.x, y: tip.y, z: tip.z, life: 0.05, size: (0.04 + 0.06 * full) * size, color: pal2.core, alpha: 0.25 + 0.75 * full, shape: 0, drag: 0, fadeIn: 0 });
+    tipMotes += dt * (0.5 + 3.5 * full) * budget.density * size;
     while (tipMotes >= 1) {
       tipMotes -= 1;
-      light.spawn({ x: tip.x + rand(-0.03, 0.03), y: tip.y, z: tip.z + rand(-0.03, 0.03), vx: rand(-0.05, 0.05), vy: rand(0.15, 0.35), vz: rand(-0.05, 0.05), life: rand(0.6, 1.1), size: rand(0.012, 0.022), color: PAL.missile.glow, shape: 1, drag: 0.6, swirl: rand(1, 2), fadeIn: 0.2 });
+      light.spawn({ x: tip.x + rand(-0.03, 0.03), y: tip.y, z: tip.z + rand(-0.03, 0.03), vx: rand(-0.05, 0.05), vy: rand(0.15, 0.35), vz: rand(-0.05, 0.05), life: rand(0.6, 1.1), size: rand(0.012, 0.022), color: pal2.glow, shape: 1, drag: 0.6, swirl: rand(1, 2), fadeIn: 0.2 });
     }
   }
 
