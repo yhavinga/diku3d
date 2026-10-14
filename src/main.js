@@ -41,6 +41,7 @@ import { attachSocketLink, SocketLink } from './link.js';
 import { createDashboard } from './dashboard.js';
 import { createConnectUi } from './link-ui.js';
 import { OUTDOOR_FILL } from './dress.js';
+import { createView } from './view.js';
 
 const params = new URLSearchParams(location.search);
 // The default world is no longer one town. Midgaard plus the five areas
@@ -761,6 +762,11 @@ async function boot() {
     scene, camera, composer, actors: liveActors, game, audio, player, library: assets, sun, hemi, built: liveBuilt, lightPool,
   });
   const spellfx = createSpellFx({ scene, camera, renderer, composer, game, actors: liveActors, audio, player, quality, viewModel: fx.viewModel });
+  // The view over the shoulder (V): src/view.js.
+  const view = createView({
+    camera, player, scene, getBuilt: () => built, library: assets, world, game, spellfx,
+    roomAt: (x, y, z) => built.rooms.get(actors.nav.roomAt(x, y, z)),
+  });
   {
     // Screen position of a world point, for the foe plate and damage numbers.
     const p = new THREE.Vector3();
@@ -775,10 +781,10 @@ async function boot() {
   // Recall and teleport: a room in the drawn zone is a jump, any other a crossing.
   game.onTeleport = (x, y, z, vnum) => {
     if (vnum !== undefined && plan.zoneOf(vnum) && plan.zoneOf(vnum) !== zone) {
-      crossTo(vnum, { yaw: camera.rotation.y, why: 'recall' });
+      crossTo(vnum, { yaw: player.body.heading(), why: 'recall' });
       return;
     }
-    player.spawn(x, y, z, camera.rotation.y);
+    player.spawn(x, y, z, player.body.heading());
   };
   game.setTimeOfDay(state.time);
 
@@ -808,7 +814,7 @@ async function boot() {
         return;
       }
       const info = built.rooms.get(vnum) || built.rooms.get(START_VNUM);
-      if (info) player.spawn(info.center.x, info.center.y, info.center.z, camera.rotation.y);
+      if (info) player.spawn(info.center.x, info.center.y, info.center.z, player.body.heading());
     },
   });
   const mudQuit = game.quit;
@@ -1149,13 +1155,15 @@ async function boot() {
   fileInteractables();
   const forward = new THREE.Vector3();
   const toTarget = new THREE.Vector3();
+  const bodyEye = new THREE.Vector3();
 
   function findLookTarget() {
     camera.getWorldDirection(forward);
+    player.body.eye(bodyEye);
     let best = null;
     let bestScore = -Infinity;
-    const cx = Math.floor(camera.position.x / 16);
-    const cz = Math.floor(camera.position.z / 16);
+    const cx = Math.floor(bodyEye.x / 16);
+    const cz = Math.floor(bodyEye.z / 16);
     for (let dx = -1; dx <= 1; dx++) {
       for (let dz = -1; dz <= 1; dz++) {
         const bucket = interactGrid.get(`${cx + dx},${cz + dz}`);
@@ -1165,11 +1173,11 @@ async function boot() {
     }
     for (const item of walkers) {
       if (!item.figure.object.visible || item.figure.m.dead) continue;
-      if (Math.abs(item.position.x - camera.position.x) > 7 || Math.abs(item.position.z - camera.position.z) > 7) continue;
+      if (Math.abs(item.position.x - bodyEye.x) > 7 || Math.abs(item.position.z - bodyEye.z) > 7) continue;
       consider(item);
     }
     // Something on the ground right under your eye wins over the wall behind it.
-    const lying = items.lookable(camera);
+    const lying = items.lookable(camera, bodyEye);
     if (lying) return groundTarget(lying);
     if (best && best.reset) {
       // Scenery the reset table put there (a fountain, a desk): the game's object.
@@ -1180,7 +1188,7 @@ async function boot() {
     return best;
 
     function consider(item) {
-      toTarget.copy(item.position).sub(camera.position);
+      toTarget.copy(item.position).sub(bodyEye);
       const distance = toTarget.length();
       if (distance > 7) return;
       toTarget.divideScalar(distance);
@@ -1298,7 +1306,8 @@ async function boot() {
       quality.apply(next);
       hud.toast(`${next} · ${quality.preset.fps || 'uncapped'} fps`);
     }
-    if (event.code === 'KeyV') { player.noclip = !player.noclip; hud.toast(player.noclip ? 'noclip on' : 'noclip off'); }
+    if (event.code === 'KeyN') { player.noclip = !player.noclip; hud.toast(player.noclip ? 'noclip on' : 'noclip off'); }
+    if (event.code === 'KeyV') hud.toast(view.toggle() ? 'over the shoulder' : 'first person');
     if (event.code === 'KeyM') hud.toast(audio.toggleMute() ? 'sound off' : 'sound on');
     if (event.code === 'KeyG') {
       game.forceLocks();
@@ -1450,7 +1459,7 @@ async function boot() {
       // stop you. Carry it across, so standing still stays standing still and
       // a fall keeps falling onto the new floor.
       const carried = player.velocity.clone();
-      const yaw = DIR_YAW[dir] ?? camera.rotation.y;
+      const yaw = DIR_YAW[dir] ?? player.body.heading();
       player.spawn(target.center.x, target.center.y, target.center.z, yaw);
       player.velocity.copy(carried);
       dom.fade.style.opacity = '0';
@@ -1497,7 +1506,7 @@ async function boot() {
     dom.fade.style.opacity = '1';
     audio.portal();
     setTimeout(() => {
-      player.spawn(target.center.x, target.center.y, target.center.z, camera.rotation.y);
+      player.spawn(target.center.x, target.center.y, target.center.z, player.body.heading());
       dom.fade.style.opacity = '0';
     }, 260);
   }
@@ -1750,7 +1759,7 @@ async function boot() {
   function walkIntoCrossing(dt) {
     if (pressing < 0) { pressing = Math.min(0, pressing + dt); return; }
     if (!player.keys.has('KeyW')) { pressing = 0; return; }
-    const gate = crossingAt(player.position.x, player.position.y - 1.72, player.position.z, camera.rotation.y);
+    const gate = crossingAt(player.position.x, player.position.y - 1.72, player.position.z, player.body.heading());
     if (gate) {
       pressing += dt;
       if (pressing > 0.25) {
@@ -1763,8 +1772,8 @@ async function boot() {
     const room = state.roomVnum !== null ? world.rooms.get(state.roomVnum) : null;
     const info = room && built.rooms.get(room.vnum);
     if (!info) { pressing = 0; return; }
-    const fx = -Math.sin(camera.rotation.y);
-    const fz = -Math.cos(camera.rotation.y);
+    const fx = -Math.sin(player.body.heading());
+    const fz = -Math.cos(player.body.heading());
     // wave13-temple: up and down into another zone -- the temple's steps up
     // to the Mud School end in a doorway, and walking into it has to take you
     // through. Its marker (build.js `climb`, `fixture`) hangs 2.7 m over the
@@ -1933,20 +1942,20 @@ async function boot() {
     actors: () => actors,
     scene, library: assets, world,
     eye: () => player.position,
-    yaw: () => camera.rotation.y,
+    yaw: () => player.body.heading(),
     crossing: () => !!state.crossing,
     roomAt: (x, y, z) => built.rooms.get(actors.nav.roomAt(x, y, z)),
     /** Where the server put you: a jump in the drawn zone, a crossing to another. */
     teleport(vnum) {
-      if (plan.zoneOf(vnum) && plan.zoneOf(vnum) !== zone) { crossTo(vnum, { yaw: camera.rotation.y, why: 'recall' }); return; }
+      if (plan.zoneOf(vnum) && plan.zoneOf(vnum) !== zone) { crossTo(vnum, { yaw: player.body.heading(), why: 'recall' }); return; }
       const info = built.rooms.get(vnum);
       if (!info) throw new Error(`link: the server put you in #${vnum}, which this zone did not build`);
-      player.spawn(info.center.x, info.center.y, info.center.z, camera.rotation.y);
+      player.spawn(info.center.x, info.center.y, info.center.z, player.body.heading());
     },
     /** Put back where the server has you ({ zone, x, y, z, room }: y is the floor). */
     place({ zone: zoneId, x, y, z, room }) {
       if (zoneId !== zone.id || x === null) { linkHost.teleport(room); return; }
-      player.spawn(x, y, z, camera.rotation.y);
+      player.spawn(x, y, z, player.body.heading());
     },
     walk: (dir) => step(dir, true),
     leaveToTitle,
@@ -2047,9 +2056,10 @@ async function boot() {
     fps += ((1 / Math.max(dt, 0.0001)) - fps) * 0.08;
 
     if (!state.paused) player.update(dt);
+    view.update(dt, { active: !reeling, aiming: !!game.state.fighting });
     if (reeling) titleReel.update(dt);
     camera.updateMatrixWorld();
-    if (!state.paused) game.update(dt, player.position, camera.getWorldDirection(forward));
+    if (!state.paused) game.update(dt, player.position, player.body.forward(forward));
     // Connected, the others and the sending go on with the mouse let go too.
     if (connected) connected.update(dt);
     gameUi.update();
@@ -2097,9 +2107,10 @@ async function boot() {
     // snapped to a grid: the map is only redrawn every few metres of walking
     // instead of every frame, which also stops the shadow edges crawling.
     const snap = 6;
-    const anchorX = Math.round(camera.position.x / snap) * snap;
-    const anchorY = Math.round(camera.position.y / snap) * snap;
-    const anchorZ = Math.round(camera.position.z / snap) * snap;
+    player.body.eye(bodyEye);
+    const anchorX = Math.round(bodyEye.x / snap) * snap;
+    const anchorY = Math.round(bodyEye.y / snap) * snap;
+    const anchorZ = Math.round(bodyEye.z / snap) * snap;
     if (anchorX !== shadowAnchor.x || anchorY !== shadowAnchor.y || anchorZ !== shadowAnchor.z) {
       shadowAnchor.set(anchorX, anchorY, anchorZ);
       sun.target.position.copy(shadowAnchor);
@@ -2115,9 +2126,10 @@ async function boot() {
     lightPool.update(camera.position, elapsed);
     built.horizon?.update(camera.position, dt);
     built.thresholds?.shimmer(elapsed, renderer.toneMappingExposure);
-    actors.update(dt, elapsed, camera);
+    actors.update(dt, elapsed, camera, player.body.eye(bodyEye));
     fx.update(dt);
     if (reeling) fx.viewModel.scene.visible = false; // no fists in the title's reel
+    if (view.third) fx.viewModel.scene.visible = false; // the figure's own hands are in view
     spellfx.update(state.paused ? 0 : dt);
     kick.update(dt);
     audio.update(built.rooms.get(state.roomVnum)?.room.sector === 1, state.time);
@@ -2139,7 +2151,7 @@ async function boot() {
     if (fadeTimer > 0) fadeTimer -= dt;
 
     options.update(dt);
-    hud.update(dt, camera, state.roomVnum);
+    hud.update(dt, camera, state.roomVnum, player.body.eye(bodyEye));
     if (state.showStats) {
       const info = renderer.info.render;
       hud.setStats(`${fps.toFixed(0)} fps · ${info.calls} draws · ${(info.triangles / 1000).toFixed(0)}k tris`
@@ -2169,7 +2181,7 @@ async function boot() {
     dashboard,
     /** What the texture bake did: bakes, cache hits, ms, workers; `stored` resolves to the cache's bytes. */
     bake: bakeStats,
-    player, hud, world, applyTime, applyWeather, state, audio,
+    player, hud, world, applyTime, applyWeather, state, audio, view,
     // The drawn zone's, so read through: a crossing replaces all four.
     get layout() { return layout; },
     get built() { return built; },

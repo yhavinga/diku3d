@@ -22,10 +22,11 @@ const GROUPS = [
       [['Space'], 'jump'],
       [['←', '↑', '→', '↓'], "take the exit west, north, east or south — the mud's own compass, so north is north however you face"],
       [['PgUp', 'PgDn'], 'take the exit up or down'],
-      [['V'], 'noclip: walk through walls'],
+      [['N'], 'noclip: walk through walls'],
     ] },
     { title: 'Looking and using', rows: [
       [['mouse'], 'look around'],
+      [['V'], 'view: through your own eyes, or over the shoulder of your figure'],
       [['E'], 'examine, open, unlock (with the key you carry), drink, search a body, pick up — press again to close'],
       [['Tab'], "the room's full description again, or fold it"],
     ] },
