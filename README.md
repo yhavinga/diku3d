@@ -256,8 +256,9 @@ wizlocked; an implementor opens it with `wizlock`.
 Visitor statistics come from the site's own nginx log, never from the
 visitor's browser: the config in `tools/deploy/` logs the real address
 (Cloudflare's `CF-Connecting-IP`, trusted from Cloudflare's ranges only) to
-`/var/log/nginx/diku3d.access.log`, and `tools/deploy/stats.sh` turns that
-log, rotated files included, into one GoAccess HTML page and opens it. Like
+`/var/log/diku3d/access.log`, rotated daily and never thrown away
+(`logrotate-diku3d.conf`), and `tools/deploy/stats.sh` turns that log, every
+day of it, into one GoAccess HTML page and opens it. Like
 `deploy.sh` it reads the host from the gitignored `.env`; nothing in the
 repository names the machine.
 

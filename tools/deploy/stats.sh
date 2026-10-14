@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 . "$ROOT/.env"
 : "${DEPLOY_HOST:?DEPLOY_HOST ontbreekt in .env}"
 OUT="${1:-/tmp/diku3d-stats.html}"
-ssh "$DEPLOY_HOST" 'cd /var/log/nginx && { sudo zcat -f $(ls -tr diku3d.access.log* 2>/dev/null); } \
+ssh "$DEPLOY_HOST" 'cd /var/log/diku3d && { sudo zcat -f $(ls -tr access.log* 2>/dev/null); } \
   | goaccess - --log-format=COMBINED --ignore-crawlers --html-report-title="diku3d.com" -o html' > "$OUT"
 echo "✓ $OUT"
 command -v open >/dev/null && open "$OUT" || true

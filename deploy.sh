@@ -49,6 +49,10 @@ echo "▸ Rooktest"
 echo "▸ nginx"
 # GoAccess leest de eigen log van de site uit (tools/deploy/stats.sh).
 ssh "$SERVER" "command -v goaccess >/dev/null || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq goaccess >/dev/null"
+# Die log blijft bewaard, in een eigen map: de rotatie van nginx zelf gooit in
+# /var/log/nginx alles weg wat ouder is dan 14 dagen.
+ssh "$SERVER" "sudo install -d -m 755 /var/log/diku3d && sudo tee /etc/logrotate.d/diku3d >/dev/null" < "$ROOT/tools/deploy/logrotate-diku3d.conf"
+ssh "$SERVER" "sudo logrotate -d /etc/logrotate.d/diku3d >/dev/null 2>&1 || { echo '✗  logrotate keurt /etc/logrotate.d/diku3d af' >&2; sudo logrotate -d /etc/logrotate.d/diku3d; exit 1; }"
 ssh "$SERVER" "sudo tee /etc/nginx/sites-available/$SITE.new >/dev/null" < "$ROOT/tools/deploy/nginx-diku3d.conf"
 ssh "$SERVER" "set -e
   cd /etc/nginx/sites-available
