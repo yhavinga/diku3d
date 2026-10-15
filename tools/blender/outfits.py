@@ -1636,7 +1636,14 @@ def pouch(body, arm, C, x, y, z, size=(0.075, 0.05, 0.085), mat="leather", name=
 def hero_belt(body, arm, C, z, under, mat="leather", width=0.05, buckle="gold", ease=0.012):
     bt = belt(body, z, under=under, width=width, mat=mat, buckle=buckle, ease=ease)
     for b in bt:
-        hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
+        # The buckle is a plate on the hips. Hung like the belt it came out
+        # wholly on skirt2 (the shin's twin), and at every sprint stride the
+        # heel's kick swung it round the knee and out behind the hips like a
+        # paddle. The townsfolk's buckles still hang that way.
+        if b.name.startswith("buckle"):
+            rig.set_rigid(b, "hips")
+        else:
+            hang(b, arm, body, C, C.z(0.80), C.zl(0.7))
     return bt
 
 
