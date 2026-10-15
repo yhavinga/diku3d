@@ -111,6 +111,24 @@ is an opinion.
 - **Easing the vector also made every mouse turn lag.** Only the length is
   eased now; the direction is the one just checked.
 
+### What an art review found, and what it did not
+
+- **A buckle hung like a belt lands on the shin's twin.** `hang()` on a
+  belt gave its buckle box 100% `skirt2`. That holds in every archetype
+  since the first outfits: the peasant, the watch, the rogue. It only
+  showed once a player sprinted, when the heel's kick swung the gilt plate
+  round the knee and out behind the hips. It was found by reading the
+  weights per material and height band (`tools/glb-weights.mjs`), after a
+  side strip showed something flat at the hip. The hero outfits are fixed;
+  the townsfolk's buckles still hang that way.
+- **"Idle is dead" was aliasing.** Six frames over 5 s of a 2 s loop,
+  sampled once a second, show one pose. Sampling a bone's travel over time
+  settles it: the old idle moved a hand 1.5 cm, so it was alive but slight.
+  `idle_hero` moves it 8 to 15 cm.
+- **A headless strip misses what is short.** At 70 to 120 ms a screenshot,
+  a fireball's flash and colour spray's cone fall between frames; the
+  review called them invisible.
+
 ### Testing a figure from outside
 
 - **In a pinned side shot W runs at the camera.** player.js moves along the
