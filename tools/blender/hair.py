@@ -386,12 +386,46 @@ def tangent(fm, p, d):
 
 # --- styles -------------------------------------------------------------------
 
-def _finish(S, P, parts, name, face_weights=False):
+# Where along the hair chain (rig.HAIR_BONES) each bone takes over from the
+# one above: the head at 0, the last bone at 1. Linear between, so a lock
+# bends through the whole chain rather than hinging at one joint.
+HANG_KNOTS = (0.0, 0.28, 0.62, 1.0)
+
+
+def hang_weights(obj, hangs):
+    """Weight what hangs (`hangs`: vertex -> how far down the chain, 0..1) to
+    the hair bones in a smooth gradient, root to the head, tip to the last
+    bone. Everything else stays rigid on the head."""
+    rig.set_rigid(obj, "head")
+    names = ("head",) + rig.HAIR_BONES
+    groups = [obj.vertex_groups.get(n) or obj.vertex_groups.new(name=n) for n in names]
+    for i, t in hangs.items():
+        t = min(1.0, max(0.0, t))
+        for k in range(3):
+            lo, hi = HANG_KNOTS[k], HANG_KNOTS[k + 1]
+            if t <= hi or k == 2:
+                u = (t - lo) / (hi - lo)
+                groups[k].add([i], 1.0 - u, "REPLACE")
+                groups[k + 1].add([i], u, "REPLACE")
+                break
+        if k:
+            groups[0].remove([i])
+
+
+def _finish(S, P, parts, name, face_weights=False, hang=None):
     """Into the body's head frame, joined, on the head bone (or, for what
-    grows on the face, weighted with the jaw like the skin under it)."""
+    grows on the face, weighted with the jaw like the skin under it).
+    `hang` maps a part to a function of its canonical vertex coordinates
+    giving how far down the hair chain each one hangs (see `hang_weights`)."""
     import people
+    marks = {}
     for o in parts:
         co = np.array([v.co[:] for v in o.data.vertices])
+        if hang and o in hang:
+            g = o.vertex_groups.new(name="HANGT")
+            for i, t in enumerate(hang[o](co)):
+                # A weight of exactly 0 is "not in the group": offset it.
+                g.add([i], 0.001 + 0.998 * float(t), "REPLACE")
         w, _ = heads.to_world(P, co)
         for v, x in zip(o.data.vertices, w):
             v.co = x
@@ -399,6 +433,14 @@ def _finish(S, P, parts, name, face_weights=False):
     obj.data.name = name
     if face_weights:
         heads.rig_weights(obj, P)
+    elif hang:
+        g = obj.vertex_groups["HANGT"]
+        for v in obj.data.vertices:
+            for e in v.groups:
+                if e.group == g.index:
+                    marks[v.index] = (e.weight - 0.001) / 0.998
+        hang_weights(obj, marks)
+        obj.vertex_groups.remove(obj.vertex_groups["HANGT"])
     else:
         rig.set_rigid(obj, "head")
     return obj
@@ -568,8 +610,10 @@ def style_braid(S, P, name="hair_braid", seed=17, length=0.30):
         a = p + np.array([side * w * 0.35, 0.0, 0.010])
         b = p + np.array([-side * w * 0.25, 0.004, -length / n * 0.9])
         locks.append(Lock([a, (a + b) / 2 + np.array([0, 0.004, 0]), b], w, w * 0.4, rnd.uniform(0.9, 1.05)))
-    parts.append(lock_mesh(locks, fcoll, name + "_plait", root_dark=0.85))
-    return _finish(S, P, parts, name)
+    plait = lock_mesh(locks, fcoll, name + "_plait", root_dark=0.85)
+    parts.append(plait)
+    # Down from the nape, where the plait leaves the head, to its tie.
+    return _finish(S, P, parts, name, hang={plait: lambda co: (-0.02 - co[:, 2]) / length})
 
 
 def style_tail(S, P, name="hair_tail", seed=19, length=0.22):
@@ -583,12 +627,15 @@ def style_tail(S, P, name="hair_tail", seed=19, length=0.22):
         pts = grow_lock(fcoll, fcoll, r, (0, 0.5, -1), lambda p: np.array([0, 0.15, -1.0]),
                         length * rnd.uniform(0.85, 1.1), step=0.014, hug=0.004, fall=0.5, rnd=rnd)
         locks.append(Lock(pts, 0.016, 0.006, rnd.uniform(0.88, 1.06), curl=rnd.uniform(-0.2, 0.2)))
-    parts.append(lock_mesh(locks, fcoll, name + "_tail"))
+    tail = lock_mesh(locks, fcoll, name + "_tail")
+    parts.append(tail)
     tie_ring = heads.mesh_field(lambda p: heads.ell(p, tie, (0.012, 0.010, 0.008)), name + "_tie",
                                 tuple(tie), level=3, target=80)
     heads.set_colors(tie_ring, np.full((len(tie_ring.data.vertices), 3), 0.5))
     parts.append(tie_ring)
-    return _finish(S, P, parts, name)
+    # The tie holds the root; the tail swings from just below it.
+    return _finish(S, P, parts, name,
+                   hang={tail: lambda co: (np.linalg.norm(co - tie, axis=1) - 0.03) / (length * 0.95)})
 
 
 def style_fringe(S, P, name="hair_fringe", seed=23):
@@ -826,9 +873,11 @@ def style_warrior(S, P, name="hair_warrior", seed=41):
     bpy.data.objects.remove(fm_obj, do_unlink=True)
     parts = [sculpt(fm, grow, locks, name + "_mass", target=1300)]
     parts += _topknot(knot + np.array([0.0, 0.014, 0.012]), name, rnd)
-    parts.append(lock_mesh(_plait(knot + np.array([0.0, 0.026, -0.006]), 0.30, fcoll, rnd, w0=0.026, lean=0.03),
-                           fcoll, name + "_plait", root_dark=0.85))
-    return _finish(S, P, parts, name)
+    plait = lock_mesh(_plait(knot + np.array([0.0, 0.026, -0.006]), 0.30, fcoll, rnd, w0=0.026, lean=0.03),
+                      fcoll, name + "_plait", root_dark=0.85)
+    parts.append(plait)
+    # The first of it lies over the back of the skull and stays there.
+    return _finish(S, P, parts, name, hang={plait: lambda co: (0.06 - co[:, 2]) / 0.26})
 
 
 def style_ponyhigh(S, P, name="hair_ponyhigh", seed=43):
@@ -859,12 +908,15 @@ def style_ponyhigh(S, P, name="hair_ponyhigh", seed=43):
             pts.append(tie + np.array([x, y, z]))
         tail_locks.append(Lock(pts, 0.022 * (1.0 - 0.15 * ring[1]), 0.0075, rnd.uniform(0.86, 1.1),
                                curl=rnd.uniform(-0.25, 0.25), taper=0.7))
-    parts.append(lock_mesh(tail_locks, fcoll, name + "_tail", root_dark=0.8))
+    tail = lock_mesh(tail_locks, fcoll, name + "_tail", root_dark=0.8)
+    parts.append(tail)
     tie_ring = heads.mesh_field(lambda p: heads.ell(p, tie + np.array([0.0, 0.006, 0.002]), (0.016, 0.014, 0.011)),
                                 name + "_tie", tuple(tie), level=3, target=80)
     heads.set_colors(tie_ring, np.full((len(tie_ring.data.vertices), 3), 0.5))
     parts.append(tie_ring)
-    return _finish(S, P, parts, name)
+    # Distance from the tie, not height: the tail leaves it up and out first.
+    return _finish(S, P, parts, name,
+                   hang={tail: lambda co: (np.linalg.norm(co - tie, axis=1) - 0.035) / 0.30})
 
 
 def style_crown(S, P, name="hair_crown", seed=47):

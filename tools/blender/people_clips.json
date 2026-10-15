@@ -51,17 +51,17 @@
    "hit": 0.5833333333333334
   },
   "cast_pray": {
-   "body_gap": 0.045,
+   "body_gap": 0.0466,
    "duration": 1.0,
    "frames": 24,
-   "head_gap": 0.2162,
+   "head_gap": 0.2006,
    "hit": 0.5833333333333334
   },
   "cast_sweep": {
    "body_gap": 0.0522,
    "duration": 1.0,
    "frames": 24,
-   "head_gap": 0.1108,
+   "head_gap": 0.0515,
    "hit": 0.5833333333333334
   },
   "cast_thrust": {
@@ -103,6 +103,11 @@
    "duration": 3.75,
    "frames": 90,
    "head_gap": 0.0348
+  },
+  "idle_hero": {
+   "duration": 7.0,
+   "frames": 168,
+   "head_gap": 0.3074
   },
   "jog": {
    "duration": 0.6666666666666666,
@@ -271,17 +276,17 @@
    "hit": 0.5833333333333334
   },
   "cast_pray": {
-   "body_gap": 0.0249,
+   "body_gap": 0.0271,
    "duration": 1.0,
    "frames": 24,
-   "head_gap": 0.1849,
+   "head_gap": 0.171,
    "hit": 0.5833333333333334
   },
   "cast_sweep": {
    "body_gap": 0.0294,
    "duration": 1.0,
    "frames": 24,
-   "head_gap": 0.1182,
+   "head_gap": 0.0711,
    "hit": 0.5833333333333334
   },
   "cast_thrust": {
@@ -319,6 +324,11 @@
    "duration": 3.75,
    "frames": 90,
    "head_gap": 0.0288
+  },
+  "idle_hero": {
+   "duration": 7.0,
+   "frames": 168,
+   "head_gap": 0.2568
   },
   "jog": {
    "duration": 0.6666666666666666,
@@ -479,17 +489,17 @@
    "hit": 0.5833333333333334
   },
   "cast_pray": {
-   "body_gap": 0.0426,
+   "body_gap": 0.0443,
    "duration": 1.0,
    "frames": 24,
-   "head_gap": 0.2085,
+   "head_gap": 0.1934,
    "hit": 0.5833333333333334
   },
   "cast_sweep": {
    "body_gap": 0.0485,
    "duration": 1.0,
    "frames": 24,
-   "head_gap": 0.1279,
+   "head_gap": 0.0765,
    "hit": 0.5833333333333334
   },
   "cast_thrust": {
@@ -527,6 +537,11 @@
    "duration": 3.75,
    "frames": 90,
    "head_gap": 0.033
+  },
+  "idle_hero": {
+   "duration": 7.0,
+   "frames": 168,
+   "head_gap": 0.2814
   },
   "jog": {
    "duration": 0.6666666666666666,
@@ -687,17 +702,17 @@
    "hit": 0.5833333333333334
   },
   "cast_pray": {
-   "body_gap": 0.2314,
+   "body_gap": 0.2302,
    "duration": 1.0,
    "frames": 24,
-   "head_gap": 0.3026,
+   "head_gap": 0.2176,
    "hit": 0.5833333333333334
   },
   "cast_sweep": {
    "body_gap": 0.2685,
    "duration": 1.0,
    "frames": 24,
-   "head_gap": 0.1393,
+   "head_gap": 0.0557,
    "hit": 0.5833333333333334
   },
   "cast_thrust": {
@@ -735,6 +750,11 @@
    "duration": 3.75,
    "frames": 90,
    "head_gap": 0.0339
+  },
+  "idle_hero": {
+   "duration": 7.0,
+   "frames": 168,
+   "head_gap": 0.5036
   },
   "jog": {
    "duration": 0.6666666666666666,

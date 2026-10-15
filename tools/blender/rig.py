@@ -106,7 +106,12 @@ def bone_table(P):
 # the nose) and X is the figure's left, like every other bone here. Created
 # non-deforming, so bone heat on the body never hands them the neck; switched
 # to deforming once the body is bound (`deform_face`).
-FACE_BONES = ("eye.L", "eye.R", "jaw", "nose")
+#
+# The hair's chain is of the same kind: three bones hanging from the back of
+# the crown down the nape, which only the viewer's spring moves (a ponytail,
+# a plait and a tail are weighted to them in hair.py).
+HAIR_BONES = ("hairtail.1", "hairtail.2", "hairtail.3")
+FACE_BONES = ("eye.L", "eye.R", "jaw", "nose") + HAIR_BONES
 SKIRT_BONES = ("skirt.L", "skirt.R", "skirt2.L", "skirt2.R")
 
 
@@ -122,6 +127,15 @@ def face_bones(P):
     for name, at in (("jaw", heads.JAW_PIVOT), ("nose", heads.NOSE_PIVOT)):
         c = heads.canon_to_world(P, at)
         out.append((name, c, tuple(V(c) + V(fwd)), "head", False))
+    # In the head's canonical frame (y back, z up), down the line of the nape.
+    # The joints are where the hair bends. One chain serves four styles whose
+    # ties are at different heights, so it starts at the back of the skull and
+    # each style's weights (hair.py `hang_weights`) say where along it they hang.
+    chain = ((0.092, 0.050), (0.104, -0.040), (0.106, -0.140), (0.108, -0.250))
+    for i, name in enumerate(HAIR_BONES):
+        a = heads.canon_to_world(P, (0.0, chain[i][0], chain[i][1]))
+        b = heads.canon_to_world(P, (0.0, chain[i + 1][0], chain[i + 1][1]))
+        out.append((name, a, b, "head" if i == 0 else HAIR_BONES[i - 1], False))
     return out
 
 
@@ -1856,36 +1870,49 @@ def blend_feet(arm, a, b, t):
 
 
 def anim_cast_sweep(arm):
-    """Colour spray, burning hands, breath. The right arm is drawn across the
-    body to the left shoulder and the trunk twists after it, the weight on the
-    left leg (frames 1-9); then the trunk unwinds through the front and the
-    arm goes with it in a flat arc at shoulder height, passing the line to
-    the target on frame 15 -- the release -- and carrying on out to the right
-    as the weight crosses to the right foot. The left arm swings against it."""
+    """Colour spray, burning hands, breath. A small turn away first, the
+    shoulders giving a breath of room (frames 1-4); then the right arm is
+    drawn across the body to the left shoulder and the trunk twists after it,
+    the weight on the left leg, and coils one notch further (5-11); then the
+    trunk unwinds through the front and the arm goes with it in a wide flat
+    arc at shoulder height, the elbow soft all the way and the wrist trailing
+    behind the forearm until it whips through, passing the line to the target
+    on frame 15 -- the release -- and carrying on out to the right (19) as the
+    weight crosses to the right foot, then easing back (22). The left arm
+    swings against it."""
     rest = _rest_feet(arm)
+    back_b = merge(HANG, {"spine": (2, -4, 0), "chest": (2, -5, 0), "neck": (0, 3, 0), "head": (-1, 4, 0),
+                          "upperarm.R": (-14, 8, 10), "forearm.R": (-34, 0, 0), "hand.R": (0, 0, 0),
+                          "upperarm.L": (-2, 0, -8), "forearm.L": (-20, 0, 0)})
     wind_b = merge(HANG, {"spine": (4, 16, 0), "chest": (4, 22, 0), "neck": (2, -14, 0), "head": (-2, -20, 0),
                           "upperarm.R": (-74, -38, 0), "forearm.R": (-84, 0, 0), "hand.R": (0, 0, 0),
                           "upperarm.L": (-8, 0, -34), "forearm.L": (-30, 0, 0), "hand.L": (-10, 0, 0)})
+    coil_b = merge(wind_b, {"spine": (5, 21, 0), "chest": (5, 29, 0), "neck": (2, -20, 0), "head": (-2, -26, 0),
+                            "upperarm.R": (-78, -46, 0), "forearm.R": (-96, 0, 0), "hand.R": (0, 0, -12),
+                            "upperarm.L": (-6, 0, -40), "forearm.L": (-34, 0, 0)})
     cross_b = merge(wind_b, {"spine": (4, 8, 0), "chest": (5, 10, 0), "neck": (0, -8, 0), "head": (-3, -10, 0),
-                             "upperarm.R": (-84, -12, 0), "forearm.R": (-30, 0, 0),
+                             "upperarm.R": (-86, -14, 0), "forearm.R": (-46, 0, 0), "hand.R": (0, 0, -22),
                              "upperarm.L": (4, 0, -42), "forearm.L": (-30, 0, 0)})
     fire_b = merge(HANG, {"spine": (6, -4, 0), "chest": (6, -4, 0), "neck": (-2, 4, 0), "head": (-5, 6, 0),
-                          "upperarm.R": (-88, 14, 0), "forearm.R": (-4, 0, 0), "hand.R": (-20, 0, 0),
+                          "upperarm.R": (-88, 14, 0), "forearm.R": (-24, 0, 0), "hand.R": (-20, 0, 8),
                           "upperarm.L": (14, 0, -52), "forearm.L": (-48, 0, 0)})
     out_b = merge(HANG, {"spine": (6, -14, 0), "chest": (6, -20, 0), "neck": (-2, 12, 0), "head": (-6, 16, 0),
-                         "upperarm.R": (-88, 58, 0), "forearm.R": (-2, 0, 0), "hand.R": (-20, 0, 0),
+                         "upperarm.R": (-86, 62, 0), "forearm.R": (-20, 0, 0), "hand.R": (-20, 0, 10),
                          "upperarm.L": (22, 0, -26), "forearm.L": (-60, 0, 0)})
     ease_b = merge(out_b, {"spine": (4, -8, 0), "chest": (4, -10, 0), "neck": (0, 6, 0), "head": (-3, 8, 0),
-                           "upperarm.R": (-56, 46, 0), "forearm.R": (-22, 0, 0),
+                           "upperarm.R": (-56, 46, 0), "forearm.R": (-34, 0, 0),
                            "upperarm.L": (10, 0, -14), "forearm.L": (-30, 0, 0)})
     left_f = {"L": _foot(arm, "L", dy=-0.04, yaw=12), "R": _foot(arm, "R", dy=0.05, toes=8, yaw=-20)}
     right_f = {"L": _foot(arm, "L", dy=0.04, toes=8, yaw=24), "R": _foot(arm, "R", dy=-0.08, yaw=-16)}
+    half_f = blend_feet(arm, rest, left_f, 0.5)
     k = [
         (1, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
-        (5, blend(HANG_STAFF, wind_b, 0.5), _hips(arm, x=0.02, knee=18, lead="L", feet=blend_feet(arm, rest, left_f, 0.5), yaw=7),
-         blend_feet(arm, rest, left_f, 0.5)),
+        (3, blend(HANG_STAFF, back_b, 1.0), _hips(arm, x=-0.008, knee=8, lead="R", feet=rest, yaw=-4, roll=-1), rest),
+        (6, blend(HANG_STAFF, wind_b, 0.6), _hips(arm, x=0.03, knee=20, lead="L", feet=blend_feet(arm, rest, left_f, 0.7), yaw=9),
+         blend_feet(arm, rest, left_f, 0.7)),
         (9, wind_b, _hips(arm, x=0.05, y=0.02, knee=30, lead="L", feet=left_f, pitch=2, yaw=15, roll=3), left_f),
-        (12, cross_b, _hips(arm, x=0.0, knee=34, lead="L", feet=blend_feet(arm, left_f, right_f, 0.5), pitch=3, yaw=0, roll=0),
+        (11, coil_b, _hips(arm, x=0.058, y=0.025, knee=33, lead="L", feet=left_f, pitch=3, yaw=19, roll=4), left_f),
+        (13, cross_b, _hips(arm, x=0.0, knee=34, lead="L", feet=blend_feet(arm, left_f, right_f, 0.5), pitch=3, yaw=0, roll=0),
          blend_feet(arm, left_f, right_f, 0.5)),
         (15, fire_b, _hips(arm, x=-0.035, y=-0.03, knee=36, lead="R", feet=right_f, pitch=4, yaw=-10, roll=-3), right_f),
         (19, out_b, _hips(arm, x=-0.045, y=-0.04, knee=36, lead="R", feet=right_f, pitch=4, yaw=-18, roll=-3), right_f),
@@ -1894,49 +1921,129 @@ def anim_cast_sweep(arm):
         (25, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
     ]
     end = _cast_clip(arm, "cast_sweep", k)
-    _aim_fist(arm, {1: UP, 9: UP, 12: UP, 15: AT_IT, 19: AT_IT, 22: UP, 25: UP})
+    _aim_fist(arm, {1: UP, 3: UP, 6: UP, 9: UP, 11: UP, 13: UP, 15: AT_IT, 19: AT_IT, 22: UP, 25: UP})
     return "cast_sweep", (1, end), (CAST_RELEASE - 1) / 24.0
 
 
 def anim_cast_pray(arm):
-    """Heal, bless, sanctuary, the wards. The head bows and the hands come
-    together at the breast as the breath goes out and the knees give a little
-    (frames 1-11); at the release (15) the arms open up and out, palms up,
-    the chest lifting, the head rising after the hands and the heels coming
-    off the floor a finger's breadth; then the hands settle (25). A staff in
-    the right hand stays upright throughout: it is held, not wielded."""
+    """Heal, bless, sanctuary, the wards. The hands rise and meet at the breast
+    with the head bowed over them and the knees giving (frames 1-9); the whole
+    body gathers one breath further in, the hands drawn to the chest, the head
+    lower (12, the anticipation); then the elbows lead the arms up and out, the
+    palms turning to the sky, and at the release (15) they are open and the
+    chest lifted with the gaze following the hands up; they rise a little
+    further and the head goes back (19) before everything settles (25). The
+    elbows are never straight and the wrists lead the hands, which arrive a
+    beat after them. A staff in the right hand stays upright: it is held, not
+    wielded."""
     rest = _rest_feet(arm)
+    reach_b = merge(HANG, {"spine": (4, 0, 0), "chest": (4, 0, 0), "neck": (6, 0, 0), "head": (8, 0, 0),
+                           "upperarm.R": (-18, 0, -8), "forearm.R": (-72, 0, 0), "hand.R": (12, 0, 0),
+                           "upperarm.L": (-18, 0, 8), "forearm.L": (-72, 0, 0), "hand.L": (12, 0, 0)})
     bow_b = merge(HANG, {"spine": (7, 0, 0), "chest": (8, 0, 0), "neck": (10, 0, 0), "head": (14, 0, 0),
                          "upperarm.R": (-30, 0, -20), "forearm.R": (-108, 0, 0), "hand.R": (-8, 0, 0),
                          "upperarm.L": (-30, 0, 20), "forearm.L": (-108, 0, 0), "hand.L": (-8, 0, 0)})
-    still_b = merge(bow_b, {"spine": (8, 0, 0), "chest": (9, 0, 0), "head": (16, 0, 0)})
-    lift_b = merge(HANG, {"spine": (-2, 0, 0), "chest": (-6, 0, 0), "neck": (-2, 0, 0), "head": (-4, 0, 0),
-                          "upperarm.R": (-48, 0, 16), "forearm.R": (-70, 0, 0), "hand.R": (-20, 0, 0),
-                          "upperarm.L": (-48, 0, -16), "forearm.L": (-70, 0, 0), "hand.L": (-20, 0, 0)})
-    open_b = merge(HANG, {"spine": (-4, 0, 0), "chest": (-8, 0, 0), "neck": (-4, 0, 0), "head": (-8, 0, 0),
-                          "upperarm.R": (-28, 0, 100), "forearm.R": (-34, 0, 0), "hand.R": (-30, 0, 0),
-                          "upperarm.L": (-28, 0, -100), "forearm.L": (-34, 0, 0), "hand.L": (-30, 0, 0)})
-    hold_b = merge(open_b, {"spine": (-3, 0, 0), "chest": (-7, 0, 0), "neck": (-4, 0, 0), "head": (-8, 0, 0),
-                            "upperarm.R": (-24, 0, 90), "upperarm.L": (-24, 0, -90)})
-    soft_b = merge(HANG, {"spine": (2, 0, 0), "chest": (1, 0, 0), "head": (2, 0, 0),
-                          "upperarm.R": (-22, 0, 40), "forearm.R": (-50, 0, 0),
-                          "upperarm.L": (-22, 0, -40), "forearm.L": (-50, 0, 0)})
+    # The gather: a breath held in, the hands pressed in and the head lower.
+    still_b = merge(bow_b, {"spine": (10, 0, 0), "chest": (11, 0, 0), "neck": (12, 0, 0), "head": (18, 0, 0),
+                            "upperarm.R": (-26, 0, -24), "forearm.R": (-114, 0, 0), "hand.R": (-4, 0, 0),
+                            "upperarm.L": (-26, 0, 24), "forearm.L": (-114, 0, 0), "hand.L": (-4, 0, 0)})
+    # The elbows go first and the hands are still turned in: the wrists lead.
+    lift_b = merge(HANG, {"spine": (0, 0, 0), "chest": (-4, 0, 0), "neck": (4, 0, 0), "head": (6, 0, 0),
+                          "upperarm.R": (-38, 22, 34), "forearm.R": (-98, 0, 0), "hand.R": (-26, 0, -8),
+                          "upperarm.L": (-38, -22, -34), "forearm.L": (-98, 0, 0), "hand.L": (-26, 0, 8)})
+    open_b = merge(HANG, {"spine": (-4, 0, 0), "chest": (-9, 0, 0), "neck": (-5, 0, 0), "head": (-12, 0, 0),
+                          "upperarm.R": (-26, 45, 66), "forearm.R": (-48, 0, 0), "hand.R": (-20, 0, 0),
+                          "upperarm.L": (-26, -45, -66), "forearm.L": (-48, 0, 0), "hand.L": (-20, 0, 0)})
+    hold_b = merge(open_b, {"spine": (-5, 0, 0), "chest": (-11, 0, 0), "neck": (-7, 0, 0), "head": (-16, 0, 0),
+                            "upperarm.R": (-30, 50, 70), "forearm.R": (-46, 0, 0), "hand.R": (-12, 0, 0),
+                            "upperarm.L": (-30, -50, -70), "forearm.L": (-46, 0, 0), "hand.L": (-12, 0, 0)})
+    soft_b = merge(HANG, {"spine": (1, 0, 0), "chest": (0, 0, 0), "neck": (-2, 0, 0), "head": (-3, 0, 0),
+                          "upperarm.R": (-24, 10, 38), "forearm.R": (-54, 0, 0), "hand.R": (-8, 0, 0),
+                          "upperarm.L": (-24, -10, -38), "forearm.L": (-54, 0, 0), "hand.L": (-8, 0, 0)})
     sink_f = rest
     toe_f = {"L": _foot(arm, "L", toes=9), "R": _foot(arm, "R", toes=9)}
     k = [
         (1, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
-        (6, blend(HANG_STAFF, bow_b, 0.8), _hips(arm, knee=16, lead="L", feet=sink_f, pitch=2), sink_f),
-        (10, bow_b, _hips(arm, knee=24, lead="L", feet=sink_f, pitch=3), sink_f),
-        (12, still_b, _hips(arm, knee=26, lead="L", feet=sink_f, pitch=3.5), sink_f),
-        (13, lift_b, _hips(arm, rise=0.012, pitch=0), blend_feet(arm, rest, toe_f, 0.4)),
-        (15, open_b, _hips(arm, rise=0.026, pitch=-2), toe_f),
-        (19, hold_b, _hips(arm, rise=0.026, pitch=-2), toe_f),
+        (4, blend(HANG_STAFF, reach_b, 1.0), _hips(arm, knee=10, lead="L", feet=sink_f, pitch=1), sink_f),
+        (8, bow_b, _hips(arm, knee=22, lead="L", feet=sink_f, pitch=3), sink_f),
+        (11, still_b, _hips(arm, knee=32, lead="L", feet=sink_f, pitch=5), sink_f),
+        (13, lift_b, _hips(arm, rise=0.004, pitch=0), blend_feet(arm, rest, toe_f, 0.4)),
+        (15, open_b, _hips(arm, rise=0.026, pitch=-3), toe_f),
+        (19, hold_b, _hips(arm, rise=0.030, pitch=-4), toe_f),
         (22, soft_b, _hips(arm, rise=0.008), blend_feet(arm, toe_f, rest, 0.7)),
         (25, HANG_STAFF, ((0, 0, -0.004), 0, 0, 0), rest),
     ]
     end = _cast_clip(arm, "cast_pray", k)
-    _aim_fist(arm, {f: UP for f in (1, 6, 10, 12, 13, 15, 19, 22, 25)})
+    _aim_fist(arm, {f: UP for f in (1, 4, 8, 11, 13, 15, 19, 22, 25)})
     return "cast_pray", (1, end), (CAST_RELEASE - 1) / 24.0
+
+
+# --- idle_hero: the player's stance ---------------------------------------------
+#
+# `idle` is two seconds of a figure at rest, written for a crowd. The player
+# is looked at from three metres behind for hours, and at two seconds with a
+# centimetre of hand travel it read as a pose with the power off. This one is
+# seven seconds: the weight goes from the right leg to the left and back (the
+# hips travel over the standing foot while both feet stay planted, a little
+# apart and turned out, the leading one forward so its knee stays soft), the
+# chest breathes twice, the head looks to one side and then the other, and the
+# arms hang loose with the hands a little forward. First key = last key, and
+# every key is sampled from periodic curves so nothing can fail to close.
+
+IDLE_HERO_FRAMES = 168
+
+
+def anim_idle_hero(arm):
+    """The loop is a function of t in [0, 1): `w` is where the weight is (0
+    on the right foot, 1 on the left) and moves twice, `breath` is two
+    breaths, `look` is a glance to one side then a longer one to the other."""
+    rest = _rest_feet(arm)
+    # Left foot forward and out, right back: neither is moved after this, so
+    # neither can skate. Each foot's yaw is its toe turned a little outward.
+    feet = {"L": _foot(arm, "L", dx=0.045, dy=-0.07, yaw=14), "R": _foot(arm, "R", dx=-0.045, dy=0.015, yaw=-12)}
+
+    def ease(x):
+        x = min(max(x, 0.0), 1.0)
+        return x * x * (3.0 - 2.0 * x)
+
+    def bump(t, c, wdt):
+        # A periodic bell: the distance to c is taken round the loop.
+        d = (t - c + 0.5) % 1.0 - 0.5
+        return math.exp(-(d / wdt) ** 2)
+
+    k = []
+    step = 6
+    frames = list(range(1, IDLE_HERO_FRAMES + 1, step)) + [IDLE_HERO_FRAMES + 1]
+    for f in frames:
+        t = ((f - 1) % IDLE_HERO_FRAMES) / IDLE_HERO_FRAMES
+        # Onto the left foot over 0.36-0.52 of the loop, back over 0.80-0.95.
+        w = ease((t - 0.36) / 0.16) - ease((t - 0.80) / 0.15)
+        s = 2.0 * w - 1.0
+        breath = 0.5 - 0.5 * math.cos(2.0 * math.pi * (2.0 * t - 0.1))
+        look = 0.85 * bump(t, 0.27, 0.07) - 0.55 * bump(t, 0.68, 0.08)
+        sway = math.sin(2.0 * math.pi * t)
+        # The arms swing a little against the hips and ride the breath.
+        arms = {
+            "upperarm.L": (-9 + 2.5 * s - 1.0 * breath, 0, -6 - 1.5 * breath),
+            "upperarm.R": (-9 - 2.5 * s - 1.0 * breath, 0, 6 + 1.5 * breath),
+            "forearm.L": (-26 - 3.0 * breath + 2.0 * s, 0, 0),
+            "forearm.R": (-26 - 3.0 * breath - 2.0 * s, 0, 0),
+            "hand.L": (-6, 0, 3), "hand.R": (-6, 0, -3),
+            "shoulder.L": (0, 0, -1.0 * breath), "shoulder.R": (0, 0, 1.0 * breath),
+        }
+        trunk = {
+            "spine": (-0.8 - 1.2 * breath, 0.8 * look * 4.0, 1.4 * s),
+            "chest": (-1.4 - 2.4 * breath, 1.6 * look * 4.0, -1.4 * s),
+            "neck": (-1.0 + 0.6 * breath, 14.0 * look, 0.8 * s),
+            "head": (-1.5 + 1.2 * bump(t, 0.27, 0.07) - 0.4 * breath, 20.0 * look, -0.6 * s),
+        }
+        # The hips ride over the standing foot and dip as the weight crosses.
+        dip = -0.010 * (1.0 - abs(s) ** 1.5)
+        hips = _hips(arm, x=0.040 * s, y=0.004 * sway, rise=dip, yaw=2.0 * s + 3.0 * look, roll=2.6 * s,
+                     pitch=-0.5 * breath)
+        k.append((f, merge(HANG, arms, trunk), hips, feet))
+    end = _cast_clip(arm, "idle_hero", k)
+    return "idle_hero", (1, end)
 
 
 CAST_ANIMS = [anim_cast_thrust, anim_cast_overhead, anim_cast_sweep, anim_cast_pray]
@@ -2006,7 +2113,7 @@ def measure_casts(arm, P, info):
 CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "block", "death",
          "cast", "sit", "lean", "talk", "jump", "land", "kick", "backstab", "disarm",
          "jog", "sprint", "strafe_l", "strafe_r", "back", "turn_l", "turn_r",
-         "cast_thrust", "cast_overhead", "cast_sweep", "cast_pray")
+         "cast_thrust", "cast_overhead", "cast_sweep", "cast_pray", "idle_hero")
 
 
 def make_all(arm, measure=True, P=None, extra=()):
@@ -2023,7 +2130,7 @@ def make_all(arm, measure=True, P=None, extra=()):
            anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk,
            anim_jump, anim_land, anim_kick, anim_backstab, anim_disarm, anim_jog, anim_sprint,
            anim_strafe_l, anim_strafe_r, anim_back, anim_turn_l, anim_turn_r] + list(extra)
-    fns += CAST_ANIMS
+    fns += CAST_ANIMS + [anim_idle_hero]
     for fn in fns:
         r = fn(arm)
         name, frames = r[0], r[1]
@@ -2051,7 +2158,7 @@ def make_all(arm, measure=True, P=None, extra=()):
     if measure and P is not None:
         for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2", "lean", "talk", "jump", "land",
                      "kick", "backstab", "disarm", "jog", "sprint", "strafe_l", "strafe_r", "back", "turn_l",
-                     "turn_r"):
+                     "turn_r", "idle_hero"):
             arm.animation_data.action = bpy.data.actions[name]
             gap, f, limb = head_clearance(arm, P, (0, info[name]["frames"]))
             info[name]["head_gap"] = round(gap, 4)

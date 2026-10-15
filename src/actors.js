@@ -602,7 +602,7 @@ function carriedClip(asset, name, carry) {
   if (name === 'fight') return guardClip(set, clip, carry);
   // The player's gaits too: a sprint keyed with both arms pumping swung the
   // sword over the head every stride. The free arm still pumps.
-  if (!['idle', 'idle2', 'walk', 'run', 'jog', 'sprint', 'strafe_l', 'strafe_r', 'back', 'turn_l', 'turn_r'].includes(name)) return clip;
+  if (!['idle', 'idle2', 'idle_hero', 'walk', 'run', 'jog', 'sprint', 'strafe_l', 'strafe_r', 'back', 'turn_l', 'turn_r'].includes(name)) return clip;
   const key = `${name}|${carry.right}|${carry.left}`;
   if (set.carried.has(key)) return set.carried.get(key);
   const swap = new Map();
@@ -1079,6 +1079,29 @@ const SKIRT = {
   gain: 3.3, twist: 1.5, lift: 0.6, drag: 2, maxTurn: 20, maxFlare: 40,
 };
 
+/**
+ * The hair's chain (createPlayerFigure): hairtail1-3, three bones down the
+ * nape that the ponytail, the plait and the tail are weighted to. Each bone is
+ * a damped spring about its parent, pulled to where hair would hang if the
+ * apparent gravity at its root (gravity less that point's acceleration, so a
+ * turn, a stride's bob and a landing all count) were the world's. `share` is
+ * the part of the swing each bone takes (normalised, the tip's reach is all of
+ * it); `w2`/`damp` fall towards the tip, so the end lags the root as a whip
+ * does: 2.2, 1.8 and 1.5 Hz at about a fifth of critical damping, which rings
+ * twice and is still in a second. `back` and `body` bound the pitch the whole
+ * chain is pulled to, in radians, away from the back and towards it, `side` the
+ * sideways swing. In a sprint, a jump, a turn and a cast the hair tip stays as
+ * far from the upper back as without the spring to within ~1 cm on the
+ * plait, the tail and the warrior's, and the plait lies on the back at rest, so
+ * towards it there is hardly anything to give, while away from it hair may fly.
+ * `droop` is the extra pitch a vertical load puts on the lifted ponytail
+ * (|apparent gravity| / g - 1 times it): a landing drops it, a take-off lifts it.
+ */
+const HAIR = {
+  share: [0.4, 0.35, 0.35], w2: [190, 130, 90], damp: [6.0, 5.0, 4.0],
+  back: 0.6, body: 0.03, side: 0.12, droop: 0.12,
+};
+
 /** How much heavier than the idle beneath it a cast gesture plays (see perform). */
 const GESTURE_WEIGHT = 5;
 
@@ -1198,6 +1221,17 @@ export function createPlayerFigure({
   let speechLeft = 0;
 
   const actions = made.actions || null;
+  // The player stands in `idle_hero` (seven seconds of weight shifting, breath
+  // and glances) where a mobile stands in `idle`. Everything below -- the
+  // weights, BASE, the bearing -- keeps saying `idle`, so the one clip is
+  // swapped in under that name and the crowd's idle is stopped, as the swan's
+  // `float` is.
+  if (actions && actions.idle_hero) {
+    actions.idle.stop();
+    actions.idle = actions.idle_hero;
+    actions.idle.setEffectiveWeight(1);
+    made.mixer.update(0); // posed before anything draws, as createFigure does
+  }
   const natural = (clip, fallback) => (made.stride && made.clips && made.clips[clip] && made.stride[clip] ? made.stride[clip] / made.clips[clip] : fallback);
   // The speed each locomotion clip covers the ground at when played as
   // authored (rig.py: stride over the length of the cycle). A clip is only
@@ -1251,6 +1285,28 @@ export function createPlayerFigure({
   const skirtV = { x: 0, y: 0, z: 0, fresh: false };
   let skirtYaw = 0;
   let skirtGate = 1;
+
+  // The hair: three bones no clip keys (rig.py HAIR_BONES), so the spring
+  // writes their whole rotation each frame, from the rest one, and nothing
+  // accumulates. A rig without them is left as it is.
+  const hair = [1, 2, 3].map((i, k) => {
+    const bone = made.group.getObjectByName(`hairtail${i}`);
+    return bone ? { bone, rest: bone.quaternion.clone(), p: 0, pv: 0, r: 0, rv: 0, k } : null;
+  });
+  const hairOn = hair.every(Boolean) && !!made.group.getObjectByName('head');
+  const hairHead = hairOn ? made.group.getObjectByName('head') : null;
+  const hairAt = new THREE.Vector3();
+  const hairV = new THREE.Vector3();
+  const hairDown = new THREE.Vector3();
+  const hairPull = new THREE.Vector3();
+  const hairQ = new THREE.Quaternion();
+  const hairQ2 = new THREE.Quaternion();
+  const hairE = new THREE.Euler();
+  let hairKnown = false;
+  // Which way is down in the head's own frame when it hangs as modelled:
+  // taken from the first frame, with the head as the idle holds it.
+  const hairRest = new THREE.Vector3();
+  let hairRestKnown = false;
 
   // The bearing: bones looked up once; a rig without them is left as it is.
   const bearing = {
@@ -1333,6 +1389,71 @@ export function createPlayerFigure({
       leg.hip.quaternion.multiply(skirtQ);
       skirtQ.setFromEuler(skirtE.set(px * SKIRT.knee, 0, rz * SKIRT.knee));
       leg.knee.quaternion.multiply(skirtQ);
+    }
+  }
+
+  // Soft limits that differ by side: `pos` is the room to swing positive, `neg` negative.
+  const softSide = (x, pos, neg) => (x >= 0 ? pos * Math.tanh(x / pos) : neg * Math.tanh(x / neg));
+
+  /**
+   * The hair, one frame. The point it hangs from is followed in the world:
+   * its velocity (smoothed over ~50 ms, as the skirt's is) and the change in
+   * that is the acceleration the hair feels, whatever caused it.
+   */
+  function swingHair(dt) {
+    const h = Math.min(dt, 1 / 30);
+    const root = hair[0].bone;
+    root.updateWorldMatrix(true, false);
+    const px = root.matrixWorld.elements[12];
+    const py = root.matrixWorld.elements[13];
+    const pz = root.matrixWorld.elements[14];
+    const hop = hairKnown ? Math.hypot(px - hairAt.x, py - hairAt.y, pz - hairAt.z) : -1;
+    const vx = hop >= 0 ? (px - hairAt.x) / dt : 0;
+    const vy = hop >= 0 ? (py - hairAt.y) / dt : 0;
+    const vz = hop >= 0 ? (pz - hairAt.z) / dt : 0;
+    hairAt.set(px, py, pz);
+    hairKnown = true;
+    // A teleport (a recall, a new zone) is not a move to swing at.
+    if (hop > 18 * dt) { hairV.set(0, 0, 0); return; }
+    const k = Math.min(1, h * 20);
+    const ax = (vx - hairV.x) * k / h;
+    const ay = (vy - hairV.y) * k / h;
+    const az = (vz - hairV.z) * k / h;
+    hairV.x += (vx - hairV.x) * k; hairV.y += (vy - hairV.y) * k; hairV.z += (vz - hairV.z) * k;
+    // Apparent gravity, in the head's frame.
+    hairHead.getWorldQuaternion(hairQ);
+    hairQ.invert();
+    hairPull.set(-ax, -9.81 - ay, -az);
+    const load = hairPull.length() / 9.81;
+    hairPull.normalize().applyQuaternion(hairQ);
+    // Standing still in the idle is how the hair was modelled to hang, so that
+    // is what "down" is measured against: the head's own tilt at rest (the
+    // bearing, the idle's breath) would otherwise lean it on the back all day.
+    if (!hairRestKnown) { hairRest.copy(hairPull); hairRestKnown = true; }
+    else if (weights.idle > 0.95 && speed < 0.2 && !posed && !airborne) hairRest.lerp(hairPull, Math.min(1, h * 3)).normalize();
+    // Where hair hangs from the head now against where it hangs as modelled,
+    // as a turn about the head's axes; its pitch is the bone's own X, its
+    // sideways swing the head's Z reversed (the bones point down, the head up).
+    // Weak loads (free fall) pull to the modelled shape, not to a direction noise gives.
+    hairQ2.setFromUnitVectors(hairRest, hairPull);
+    const angle = 2 * Math.acos(THREE.MathUtils.clamp(hairQ2.w, -1, 1)) * Math.min(1, load);
+    const sine = Math.sqrt(Math.max(1e-9, 1 - hairQ2.w * hairQ2.w));
+    // The limits bound what the spring is pulled to, not what it is allowed to
+    // reach: a stride's head bob gives a pull well past 45 degrees, and with
+    // the bound on the output instead the state rails at its clamp and the hair
+    // chatters from one side to the other. Bounded, the spring stays linear.
+    const eqP = softSide((hairQ2.x / sine) * angle + HAIR.droop * (load - 1), HAIR.back, HAIR.body);
+    const eqR = HAIR.side * Math.tanh((-(hairQ2.z / sine) * angle) / HAIR.side);
+    for (const link of hair) {
+      const i = link.k;
+      const sh = HAIR.share[i] / HAIR.share.reduce((a, b) => a + b, 0);
+      link.pv += (HAIR.w2[i] * (sh * eqP - link.p) - HAIR.damp[i] * link.pv) * h;
+      link.rv += (HAIR.w2[i] * (sh * eqR - link.r) - HAIR.damp[i] * link.rv) * h;
+      // A ring past the target may go a little beyond it, not without end.
+      link.p = THREE.MathUtils.clamp(link.p + link.pv * h, -1.5 * sh * HAIR.body, 1.5 * sh * HAIR.back);
+      link.r = THREE.MathUtils.clamp(link.r + link.rv * h, -1.5 * sh * HAIR.side, 1.5 * sh * HAIR.side);
+      hairQ.setFromEuler(hairE.set(link.p, 0, link.r));
+      link.bone.quaternion.copy(link.rest).multiply(hairQ);
     }
   }
 
@@ -1489,6 +1610,7 @@ export function createPlayerFigure({
     made.mixer.update(dt);
     if (bearingOn && !lying) holdBearing(dt);
     leanIntoMotion(dt);
+    if (hairOn && !lying && dt > 0) swingHair(dt);
     // A teleport (a recall, a new zone) or a long frame is not a move to swing at.
     if (!skirtOn || lying || dt <= 0) return;
     if (hop < 0 || hop > 18 * dt) { skirtV.x = skirtV.y = skirtV.z = 0; return; }
