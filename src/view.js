@@ -173,6 +173,10 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
   let hover = 0;
   let seated = 0;
   let facingUntil = 0;
+  // What the body turns to while it holds its facing: the one it casts at or
+  // strikes, which the crosshair need not be on (a spell at a name, a fight
+  // beside you), or a fireball left the hand backwards over the shoulder.
+  let faceSlot = null;
   let air = { up: false, since: 0 };
   const pending = [];
   // The lens, the pivot's weight and the dust asked of fx.js (which owns the particles).
@@ -358,7 +362,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
       const clip = castClipOf(e.family);
       later(0, () => figure && figure.perform(figure.has(clip) ? clip : 'cast', { contactIn: e.windup || 0.6 }));
       // A spell at something faces it; one on yourself leaves you as you stand.
-      if (!e.self) facingUntil = clock + (e.windup || 0.6) + CAST_FACE;
+      if (!e.self) { facingUntil = clock + (e.windup || 0.6) + CAST_FACE; faceSlot = e.to || null; }
       return;
     }
     // The skills carry their own events (rules/skills.js): the body does the
@@ -368,6 +372,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     const skill = (name, contactIn) => {
       later(0, () => figure && figure.perform(figure.has(name) ? name : 'attack', { contactIn }));
       facingUntil = clock + contactIn + 0.4;
+      faceSlot = e.to || null;
     };
     if ((e.kind === 'kick' || e.kind === 'backstab') && !e.from) { skill(e.kind, SKILL_CONTACT); return; }
     if (e.kind === 'disarm' && (e.from !== undefined || e.to !== undefined)) {
@@ -379,6 +384,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     if (!e.from && e.to) {
       later(0, () => figure && figure.perform(e.beat % 2 ? 'attack2' : 'attack', { contactIn: delay }));
       facingUntil = clock + delay + 0.4;
+      faceSlot = e.to;
     } else if (e.from && !e.to) {
       if (e.kind === 'hit') later(delay, () => figure && figure.perform('hit', { whole: true }));
       else if (e.kind === 'parry' || e.kind === 'dodge') later(Math.max(0, delay - 0.15), () => figure && figure.perform('block', { whole: true }));
@@ -450,9 +456,20 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
   let released = false;
 
   /** Which way the body faces: where it is going, or where you look when it fights or casts. */
-  function turn(dt, moved, aiming) {
+  /** The yaw that faces the one being cast at or struck, while the facing is held; else null. */
+  function faceYaw() {
+    if (clock >= facingUntil || !faceSlot || typeof faceSlot !== 'object') return null;
+    const at = faceSlot.figure && faceSlot.figure.at;
+    if (!at) return null;
+    const dx = at.x - player.position.x; const dz = at.z - player.position.z;
+    if (dx * dx + dz * dz < 0.09) return null;
+    // The camera looks down -Z at yaw 0: facing a point is atan2 of the negated offset.
+    return Math.atan2(-dx, -dz);
+  }
+
+  function turn(dt, moved, aiming, aimAt = null) {
     let target = heading;
-    if (aiming) target = camera.rotation.y;
+    if (aiming) target = aimAt ?? camera.rotation.y;
     else if (moved.lengthSq() > (0.3 * dt) ** 2) target = Math.atan2(-moved.x, -moved.z);
     const d = Math.atan2(Math.sin(target - heading), Math.cos(target - heading));
     // Going back on yourself, the body pivots at twice the rate it swings round.
@@ -493,12 +510,14 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     // A pinned camera is somewhere else's view: the body keeps its own facing.
     const pace = dt > 0 ? moved.length() / dt : 0;
     if (pace > LET_GO) released = true; else if (pace < TAKE_BACK) released = false;
-    const locked = !pinned && (aiming || clock < facingUntil) && !released;
-    turn(dt, moved, locked);
+    // A target turns the body even under a pinned camera: it is the body's own business.
+    const aimAt = faceYaw();
+    const locked = ((!pinned && (aiming || clock < facingUntil)) || aimAt !== null) && !released;
+    turn(dt, moved, locked, aimAt);
     feet.set(player.position.x, player.position.y - EYE, player.position.z);
     // The movement in the body's own frame, for the legs: forward and to the
     // left, against the yaw it is held to (the camera's, not the lagging heading).
-    const held = camera.rotation.y;
+    const held = aimAt ?? camera.rotation.y;
     figure.update(dt, feet, heading, pace, {
       locked, face: held,
       fwd: dt > 0 ? (-moved.x * Math.sin(held) - moved.z * Math.cos(held)) / dt : 0,
