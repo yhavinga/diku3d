@@ -3408,7 +3408,7 @@ function winterField(frost) {
     x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
   }
   const margin = WINTER_REACH + WINTER_WANDER + WINTER_BAND + 8;
-  const at = (px, pz) => {
+  const edge = (px, pz) => {
     const cx = Math.round(px / CELL); const cz = Math.round(pz / CELL);
     let d = Infinity;
     for (let dx = -reach; dx <= reach; dx++) {
@@ -3419,37 +3419,79 @@ function winterField(frost) {
     }
     const wander = (terrainNoise(px * 0.035, pz * 0.035, 901) - 0.5) * 2 * WINTER_WANDER
       + (terrainNoise(px * 0.12, pz * 0.12, 902) - 0.5) * 2 * 5;
-    const e = d - (WINTER_REACH + wander);
+    return d - (WINTER_REACH + wander);
+  };
+  const at = (px, pz) => {
+    const e = edge(px, pz);
     return e < -WINTER_BAND / 2 ? 'snow' : e < WINTER_BAND / 2 ? 'trodden' : 'earth';
   };
-  return { at, box: { x0: x0 * CELL - HALF - margin, x1: x1 * CELL + HALF + margin, z0: z0 * CELL - HALF - margin, z1: z1 * CELL + HALF + margin } };
+  return { at, edge, box: { x0: x0 * CELL - HALF - margin, x1: x1 * CELL + HALF + margin, z0: z0 * CELL - HALF - margin, z1: z1 * CELL + HALF + margin } };
 }
 
-/** Flat ground over a rectangle, in 3 m tiles each given its surface by `field`; `skip(x, z)` leaves holes. */
+/**
+ * Flat ground over a rectangle, its surface chosen by `field.edge` -- the
+ * signed distance to the snow line, negative in the snow. The line is found
+ * between the grid's corners, not at them: each 2 m triangle is cut along
+ * the two contours that bound the trodden band, at the point the distance
+ * says, so the edge is a smooth wandering line and not a staircase of tiles.
+ * `skip(x, z)` leaves holes.
+ */
 function groundTiles({ batcher, chunk, field, x0, x1, z0, z1, y, earth = 'grass', skip = null }) {
   const STEP = 2;
   const nx = Math.max(1, Math.ceil((x1 - x0) / STEP)); const nz = Math.max(1, Math.ceil((z1 - z0) / STEP));
-  const bins = new Map();
+  const px = (i) => x0 + (x1 - x0) * i / nx; const pz = (j) => z0 + (z1 - z0) * j / nz;
+  const E = new Float32Array((nx + 1) * (nz + 1));
+  for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) E[j * (nx + 1) + i] = field.edge(px(i), pz(j));
+  const lo = -WINTER_BAND / 2; const hi = WINTER_BAND / 2;
+  const bins = { snow: [], trodden: [], [earth]: [] };
+  // Keep the part of a convex polygon where lo <= e <= hi, e being linear on it.
+  const clip = (poly, a, b) => {
+    const cut = (pts, keep) => {
+      const out = [];
+      for (let k = 0; k < pts.length; k++) {
+        const p = pts[k]; const q = pts[(k + 1) % pts.length];
+        const kp = keep(p); const kq = keep(q);
+        if (kp >= 0) out.push(p);
+        if ((kp >= 0) !== (kq >= 0)) {
+          const t = kp / (kp - kq);
+          out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t]);
+        }
+      }
+      return out;
+    };
+    let out = poly;
+    if (Number.isFinite(a)) out = cut(out, (v) => v[2] - a);
+    if (out.length && Number.isFinite(b)) out = cut(out, (v) => b - v[2]);
+    return out;
+  };
+  const put = (list, poly) => {
+    for (let k = 1; k + 1 < poly.length; k++) for (const v of [poly[0], poly[k], poly[k + 1]]) list.push(v[0], v[1]);
+  };
   for (let j = 0; j < nz; j++) {
     for (let i = 0; i < nx; i++) {
-      const ax = x0 + (x1 - x0) * i / nx; const bx = x0 + (x1 - x0) * (i + 1) / nx;
-      const az = z0 + (z1 - z0) * j / nz; const bz = z0 + (z1 - z0) * (j + 1) / nz;
-      const mx = (ax + bx) / 2; const mz = (az + bz) / 2;
-      if (skip && skip(mx, mz)) continue;
-      const kind = field.at(mx, mz);
-      const material = kind === 'snow' ? 'snow' : kind === 'trodden' && batcher.materials.trodden ? 'trodden' : earth;
-      if (!bins.has(material)) bins.set(material, []);
-      bins.get(material).push(ax, az, bx, bz);
+      if (skip && skip((px(i) + px(i + 1)) / 2, (pz(j) + pz(j + 1)) / 2)) continue;
+      const c = (ii, jj) => [px(ii), pz(jj), E[jj * (nx + 1) + ii]];
+      const a = c(i, j); const b = c(i + 1, j); const d = c(i, j + 1); const f = c(i + 1, j + 1);
+      for (const tri of [[a, d, b], [b, d, f]]) {
+        const m = Math.min(tri[0][2], tri[1][2], tri[2][2]); const M = Math.max(tri[0][2], tri[1][2], tri[2][2]);
+        if (M < lo) put(bins.snow, tri);
+        else if (m > hi) put(bins[earth], tri);
+        else if (m >= lo && M <= hi) put(bins.trodden, tri);
+        else {
+          put(bins.snow, clip(tri, -Infinity, lo));
+          put(bins.trodden, clip(tri, lo, hi));
+          put(bins[earth], clip(tri, hi, Infinity));
+        }
+      }
     }
   }
   const frost = batcher.frost;
   batcher.frost = null; // the field has chosen; the per-cell table must not choose again
-  for (const [material, list] of bins) {
+  for (const [name, list] of Object.entries(bins)) {
+    if (!list.length) continue;
+    const material = name === 'trodden' && !batcher.materials.trodden ? earth : name;
     const p = []; const n = [];
-    for (let k = 0; k < list.length; k += 4) {
-      const [ax, az, bx, bz] = [list[k], list[k + 1], list[k + 2], list[k + 3]];
-      for (const v of [[ax, az], [ax, bz], [bx, az], [bx, az], [ax, bz], [bx, bz]]) { p.push(v[0], y, v[1]); n.push(0, 1, 0); }
-    }
+    for (let k = 0; k < list.length; k += 2) { p.push(list[k], y, list[k + 1]); n.push(0, 1, 0); }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
