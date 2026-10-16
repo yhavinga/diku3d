@@ -2605,7 +2605,7 @@ const SURFACES = {
     const grain = fbm(u * 60, v * 60, 60, 3313, 2);
     // One texel in a hundred: a 512 lattice, which is the bake's own size.
     const glint = hash2(Math.floor(u * 512), Math.floor(v * 512), 512, 3319) > 0.988 ? 1 : 0;
-    const lit = mix(rgb(0xb2bfd0), rgb(0xd0d9e5), ripple * 0.6 + grain * 0.3);
+    const lit = mix(rgb(0x98a5b8), rgb(0xb0bccd), ripple * 0.6 + grain * 0.3);
     s.color = mix(mix(lit, rgb(0x7f9ac2), clamp01((0.55 - drift) * 2.0)), rgb(0xffffff), glint * 0.9);
     s.height = 0.5 + drift * 0.3 + ripple * 0.16 + grain * 0.02;
     s.rough = 0.78 - glint * 0.5 - ripple * 0.06;
@@ -2622,7 +2622,7 @@ const SURFACES = {
     const grit = hash2(Math.floor(u * 256), Math.floor(v * 256), 256, 3341) > 0.993 ? 1 : 0;
     const brown = clamp01(fbm(u * 6, v * 6, 6, 3343, 3) * 2.2 - 0.9);
     const polish = clamp01((fbmA(u * 5, v * 38, 5, 38, 3347, 3) - 0.55) * 5);
-    let c = mix(rgb(0x9aa4b0), rgb(0xc8d0da), lump * 0.7 + rut * 0.3);
+    let c = mix(rgb(0x7a8490), rgb(0xa6afbb), lump * 0.7 + rut * 0.3);
     c = mix(c, rgb(0x8c8274), brown * 0.5);
     s.color = mix(c, rgb(0x6a6764), grit * 0.6);
     s.height = 0.5 + lump * 0.3 - (1 - rut) * 0.18 + grit * 0.1;
@@ -2643,8 +2643,8 @@ const SURFACES = {
     const packed = clamp01((1 - clamp01((edge - 0.012) * 26)) * 1.3 + (1 - clamp01((edge - 0.03) * 14)) * 0.55);
     const rime = clamp01(fbm(u * 15, v * 15, 15, 3359, 3) * 1.9 - 0.7);
     const powder = clamp01(fbm(u * 11, v * 11, 11, 3361, 3) * 2.4 - 1.05);
-    let c = mix(s.color, rgb(0xb7c4d4), rime * 0.45 + powder * 0.5);
-    c = mix(c, rgb(0xdbe4ee), packed);
+    let c = mix(s.color, rgb(0xb7c4d4), rime * 0.2 + powder * 0.3);
+    c = mix(c, rgb(0xaab6c4), packed * 0.8);
     s.color = c;
     s.height = Math.max(s.height * (1 - packed * 0.6), 0.5 + packed * 0.2) + powder * 0.08;
     s.rough = 0.9 - packed * 0.12;
@@ -3048,14 +3048,14 @@ const RECIPES = {
   // into slush under overcast.
   snow: { surface: 'snow', scale: 3.0, normalScale: 0.7, env: 0.8, wet: 0, detail: 0.3 },
   trodden: { surface: 'trodden', scale: 3.2, normalScale: 0.7, env: 1.1, wet: 0, detail: 0.5 },
-  snowcobble: { surface: 'frostcobble', scale: 2.2, normalScale: 1.0, env: 1.0, wet: 0, detail: 0.5, snowy: { cover: 0.5, foot: 0 } },
-  snowrock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0, detail: 0.6, triplanar: true, snowy: { cover: 0.5, foot: 0 } },
+  snowcobble: { surface: 'frostcobble', scale: 2.2, normalScale: 1.0, env: 1.0, wet: 0, detail: 0.5, snowy: { cover: 0.18, foot: 0, dark: 0.6 } },
+  snowrock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0, detail: 0.6, triplanar: true, snowy: { cover: 0.28, foot: 0, dark: 0.6 } },
   // The mountain under Mahn-Tor's city (mahntor_cliff.py): bedded cave rock, snow where it settles.
-  snowcrag: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0, detail: 0.6, triplanar: true, snowy: { cover: 0.55, foot: 0 } },
-  frostwall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55, snowy: { cover: 0.6, foot: 0.6 } },
-  frosttimber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45, snowy: { cover: 0.55, foot: 0.5 } },
-  snowroof: { surface: 'rooftile', scale: 2.6, normalScale: 0.05, env: 1.0, wet: 0, detail: 0, snowy: { cover: 1.0, foot: 0 } },
-  snowthatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7, snowy: { cover: 1.0, foot: 0 } },
+  snowcrag: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0, detail: 0.6, triplanar: true, snowy: { cover: 0.15, foot: 0, dark: 0.72 } },
+  frostwall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55, snowy: { cover: 0.1, foot: 0.3, dark: 0.48 } },
+  frosttimber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45, snowy: { cover: 0.1, foot: 0.25, dark: 0.6 } },
+  snowroof: { surface: 'rooftile', scale: 2.6, normalScale: 0.05, env: 1.0, wet: 0, detail: 0, snowy: { cover: 0.35, foot: 0, dark: 0.75 } },
+  snowthatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7, snowy: { cover: 0.4, foot: 0, dark: 0.75 } },
   iceblock: { surface: 'iceblock', scale: 3.0, normalScale: 0.4, env: 1.6, wet: 0, detail: 0.1, ice: true },
 };
 
@@ -4363,6 +4363,7 @@ function decorate(material, recipe, macro, grain) {
     shader.uniforms.dikuMoss = { value: recipe.moss ?? 0 };
     shader.uniforms.dikuSnowCover = { value: recipe.snowy?.cover ?? 0 };
     shader.uniforms.dikuSnowFoot = { value: recipe.snowy?.foot ?? 0 };
+    shader.uniforms.dikuSnowDark = { value: recipe.snowy?.dark ?? 1 };
     shader.uniforms.dikuEnv = envUniform(material);
 
     shader.vertexShader = shader.vertexShader
@@ -4411,6 +4412,7 @@ function decorate(material, recipe, macro, grain) {
         uniform float dikuMoss;
         uniform float dikuSnowCover;
         uniform float dikuSnowFoot;
+        uniform float dikuSnowDark;
         uniform float dikuEnv;
         #if defined( DIKU_TRIPLANAR ) || defined( DIKU_MOSS ) || defined( DIKU_SNOW )
           varying vec3 vDikuWorld;
@@ -4542,17 +4544,22 @@ function decorate(material, recipe, macro, grain) {
           float dikuSnowN = texture2D( macroMap, vDikuWorld.xz * 0.19 + vDikuWorld.y * 0.11 ).r;
           float dikuSnowF = texture2D( macroMap, ( vDikuWorld.xz + vDikuWorld.zy ) * 1.7 ).g;
           float dikuSnowC = texture2D( detailMap, ( vDikuWorld.xz + vDikuWorld.yx * 0.6 ) * 0.8 ).x;
-          float dikuSnowD = ( dikuSnowN - 0.5 ) * 1.1 + ( dikuSnowF - 0.5 ) * 0.55 + ( dikuSnowC - 0.5 ) * 0.3;
+          // Centred on what the sampler returns (the map's mean is 0.65 once it is
+          // filtered), so cover is the share that is white and not a bias.
+          float dikuSnowD = ( dikuSnowN - 0.65 ) * 1.5 + ( dikuSnowF - 0.66 ) * 0.45 + ( dikuSnowC - 0.5 ) * 0.3;
           float dikuSnowTop = smoothstep( 0.3, 0.75, dikuWN.y ) * smoothstep( 0.05, 0.4, dikuSnowCover + dikuSnowD );
           float dikuSnowBank = dikuSnowFoot > 0.0
             ? ( 1.0 - smoothstep( 0.0, dikuSnowFoot * max( 0.45, 0.7 + 0.6 * ( dikuSnowF + dikuSnowD ) ), dikuStorey ) )
               * dikuVertical * smoothstep( 0.0, 0.2, dikuSnowCover + dikuSnowD + 0.35 )
             : 0.0;
           float dikuSnowAmt = clamp( max( dikuSnowTop, dikuSnowBank ), 0.0, 1.0 );
+          // What the snow does not cover is the mountain's own dark stone,
+          // cold and wet, so the white has something to stand against.
+          diffuseColor.rgb = max( diffuseColor.rgb * dikuSnowDark, vec3( 0.045, 0.05, 0.058 ) * step( dikuSnowDark, 0.99 ) );
           // A fine glint: the same grain map the close-range normals use, a
           // few texels in a hundred, so the white is not a flat paint.
           float dikuSnowGl = step( 0.93, texture2D( detailMap, vDikuWorld.xz * 7.3 + vDikuWorld.y * 3.1 ).y );
-          vec3 dikuSnowCol = mix( vec3( 0.46, 0.54, 0.68 ), vec3( 0.62, 0.68, 0.77 ), 0.2 + dikuSnowN * 0.8 ) * ( 1.0 + dikuSnowGl * 0.5 );
+          vec3 dikuSnowCol = mix( vec3( 0.40, 0.47, 0.60 ), vec3( 0.54, 0.60, 0.70 ), 0.2 + dikuSnowN * 0.8 ) * ( 1.0 + dikuSnowGl * 0.5 );
           // A rime on every wall the cold has been at: not snow, but the
           // face of it gone pale and blue in patches, thickest low down.
           float dikuRime = dikuSnowFoot > 0.0

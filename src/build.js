@@ -3841,6 +3841,51 @@ function groundTiles({ batcher, chunk, field, x0, x1, z0, z1, y, earth = 'grass'
   batcher.frost = frost;
 }
 
+
+/**
+ * The walked ways across a frozen square: from the middle of the cell to its
+ * edge along every exit, a strip of grey trodden snow with dark wet cobbles in
+ * the middle of it. "Fine sheet of ice covering all but the most used walk
+ * ways" -- the rest of the ground stays snow. Both edges wander with the
+ * world's noise so no lane is a ruled band, and the pieces are laid a few
+ * centimetres proud of the snow (coplanar ground would take turns).
+ */
+function walkedWays({ batcher, chunk, x, y, z, dirs }) {
+  const SEG = 12;
+  const strip = (material, [dx, dz], from, reach, half, wander, lift, salt) => {
+    const px = -dz; const pz = dx;
+    const p = []; const n = [];
+    const rail = (side) => {
+      const out = [];
+      for (let i = 0; i <= SEG; i++) {
+        const t = from + (reach - from) * i / SEG;
+        const w = half + (terrainNoise((x + dx * t) * 0.31 + side * 7.1, (z + dz * t) * 0.31, salt) - 0.5) * 2 * wander;
+        out.push([x + dx * t + px * w * side, z + dz * t + pz * w * side]);
+      }
+      return out;
+    };
+    const a = rail(1); const b = rail(-1);
+    for (let i = 0; i < SEG; i++) {
+      for (const v of [a[i], a[i + 1], b[i], a[i + 1], b[i + 1], b[i]]) { p.push(v[0], y + lift, v[1]); n.push(0, 1, 0); }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
+    batcher.add(geo, material, new THREE.Matrix4(), { chunk, normals: true });
+    geo.dispose();
+  };
+  const frost = batcher.frost;
+  batcher.frost = null; // chosen here: 'cobble' must stay cobble, not snowed cobble
+  // A cell with one way out is a dead end whose lane begins at its far edge,
+  // where people come up to look over it, and not at the middle of the snow.
+  const from = dirs.length === 1 ? -HALF + 0.5 : 0;
+  for (const [dx, , dz] of dirs) {
+    strip('trodden', [dx, dz], from, HALF + 0.5, 2.9, 0.9, 0.03, 911);
+    strip('cobble', [dx, dz], from, HALF + 0.5, 1.8, 0.5, 0.06, 913);
+  }
+  batcher.frost = frost;
+}
+
 // ------------------------------------------------------------------ main ----
 
 /**
@@ -4248,6 +4293,10 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         half, holes: roomHoles.filter((h) => !h.ceiling), addPlatform, slab: !airborne,
         shade: !openAir, tint: mats.floorTint,
       });
+    }
+    if (openAir && !bridged && mats.floor === 'snow' && isFrozen(room) && batcher.materials.trodden) {
+      const dirs = [0, 1, 2, 3].filter((d) => room.exits[d] && !room.exits[d].offMap).map((d) => DIR_STEP[d]);
+      if (dirs.length) walkedWays({ batcher, chunk, x: pos.x, y: pos.y, z: pos.z, dirs });
     }
     if (lumps && cell === dumpCell) {
       buildDumpGround({ batcher, lumps, y: pos.y, chunk, platforms });
