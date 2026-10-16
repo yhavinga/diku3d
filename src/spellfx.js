@@ -2906,7 +2906,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
   const auras = new Map();   // figure -> { meshes, material, pulse }
   const AURA_KIND = [
     // flag or affect type, colour, intensity, thickness, flicker
-    { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.3, thick: 0.012, flicker: 0.05, soft: 1 },
+    { test: (ch) => ch.affectedBy & AFF.SANCTUARY, color: PAL.sanctuary.glow, intensity: 0.2, thick: 0.012, flicker: 0.05, soft: 1 },
     { test: (ch) => ch.affectedBy & AFF.FAERIE_FIRE, color: PAL.faerie.glow, intensity: 0.9, thick: 0.025, flicker: 0.6 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'shield'), color: PAL.shieldDome.glow, intensity: 0.55, thick: 0.03, flicker: 0 },
     { test: (ch) => ch.affected && ch.affected.some((a) => a.type === 'stone skin'), color: PAL.stone.glow, intensity: 0.6, thick: 0.035, flicker: 0 },
@@ -3117,12 +3117,14 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       const u = s.material.uniforms;
       // A fixed 8 cm is two pixels at 20 m, so the mantle stands further out
       // the further away it is looked at -- what has to read is the figure's
-      // outline in light, not a measured shell.
-      u.uThick.value = clamp(0.07 + 0.011 * d, 0.07, 0.24) * clamp(h / 1.7, 0.4, 1) * (1 + 0.5 * s.flare);
+      // outline in light, not a measured shell. A thin rim and a weak one: at
+      // 0.2 and 0.24 m it was a solid white blob over a boss at dusk, brighter
+      // than the skin it was meant to outline.
+      u.uThick.value = clamp(0.045 + 0.005 * d, 0.045, 0.11) * clamp(h / 1.7, 0.4, 1) * (1 + 0.5 * s.flare);
       // Far off and in the dark the figure is a dark cut-out against any
       // bright ring, so the mantle gives way with both.
       const far = smooth((d - 6) / 16) * (0.45 + 0.55 * dark);
-      u.uIntensity.value = 0.2 * k * (1 - 0.6 * far) * (0.8 + 0.2 * breath + 1.2 * s.flare);
+      u.uIntensity.value = 0.1 * k * (1 - 0.6 * far) * (0.8 + 0.2 * breath + 1.2 * s.flare);
       u.uTime.value = clock + (slot.proto.vnum % 17);
       if (d < 32 && !(s.ground && s.ground.busy && s.ground.owner === s) && rings < SANCT_RINGS) {
         const g = decal({ x: px, y: py, z: pz }, 1.25, 8, SANCT_COLOR, 1e9, (dec, du) => {
