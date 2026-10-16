@@ -26,7 +26,7 @@ import { EX_ISDOOR, EX_CLOSED, EX_LOCKED } from '../src/are.js';
 import { createNotes, createSite } from './store.mjs';
 import { createDash } from './dash.mjs';
 import {
-  createAccounts, hashPassword, checkPassword, checkParseName, properName, EXTRA,
+  createAccounts, hashPassword, checkPassword, checkParseName, properName, EXTRA, createLoginGuard, inMinutes,
 } from './accounts.mjs';
 
 /**
@@ -44,10 +44,55 @@ const LINKDEAD_SECONDS = 180;
 /** Autosave, as char_update's oldest-save-first does every few minutes. */
 const AUTOSAVE_SECONDS = 300;
 
+/**
+ * What a socket may do to the server. `ws` allows 100 MiB a message and any
+ * number of sockets, and everything here is JSON.parse'd on the one thread
+ * that also runs the game. Overridable through startMud's `limits` so a test
+ * need not wait minutes; the defaults are what runs live.
+ */
+export const LIMITS = {
+  /**
+   * The largest message a page sends is a position report or a typed line
+   * (cmd lines are cut at 400 characters; the largest a real page sent in
+   * login, sprinting, typing and casting was 73 bytes), and none carries a
+   * save. 64 KiB is hundreds of times
+   * that and still too small to hurt. The other direction is not capped.
+   */
+  maxPayload: 64 * 1024,
+  /**
+   * Sockets from one address (siteOf): a household behind one IPv4 with a few
+   * pages open, and a dropped link whose old socket lingers for a heartbeat
+   * while the new one logs in. A direct loopback peer carries no x-real-ip
+   * (nginx always sets one) and is a local process, so it is not counted.
+   */
+  socketsPerSite: 4,
+  /**
+   * Messages a socket may send: a page sends 10 position reports a second and
+   * a ping every 2 s; measured peaks in any one second with a real page: 14
+   * sprinting, 24 typing commands at 12 a second, 32 at an absurd 25 a second.
+   * 30 sustained is double a sprint; a burst of 60 covers a pasted list of
+   * commands or a tab waking from throttling, which delivers a second's worth
+   * at once.
+   */
+  ratePerSecond: 30,
+  burst: 60,
+  /**
+   * Past the cap the excess is dropped and the player warned once. A socket
+   * that keeps sending FLOOD_FACTOR times the cap for FLOOD_SECONDS in a row
+   * is a script, not a player, and is closed.
+   */
+  floodFactor: 5,
+  floodSeconds: 3,
+  /** A socket that has not answered a ping in this long is a dropped link nobody told us about; it frees its slot and goes linkdead. */
+  heartbeatMs: 30 * 1000,
+};
+
 export async function startMud({
   root, dataDir, port = 4011, host = '127.0.0.1', seed, tickMs = 50, log = console.log,
-  wizlock = false, server = null,
+  wizlock = false, server = null, limits = {}, loginLimits = {},
 } = {}) {
+  const lim = { ...LIMITS, ...limits };
+  const guard = createLoginGuard(loginLimits);
   const started = Date.now();
   const w = bootWorld(root, { log });
   const accounts = createAccounts(dataDir);
@@ -57,7 +102,7 @@ export async function startMud({
   const sessions = new Set();
   const byPc = new Map();
   let nextPcId = 1;
-  const stats = { refused: 0, events: 0, routed: 0, dropped: 0, msgsOut: 0, bytesOut: 0, msgsIn: 0, bytesIn: 0, dashBytes: 0, ticks: 0, tickMs: 0, tickMax: 0 };
+  const stats = { refused: 0, floodDropped: 0, events: 0, routed: 0, dropped: 0, msgsOut: 0, bytesOut: 0, msgsIn: 0, bytesIn: 0, dashBytes: 0, ticks: 0, tickMs: 0, tickMax: 0 };
 
   // -------------------------------------------------------------- the game --
   const hooks = {
@@ -153,7 +198,8 @@ export async function startMud({
     .filter((o) => o.pc && o.linkdead === null && !(o.pc.ch.act & PLR_MORE.WIZINVIS)).length;
 
   // ------------------------------------------------------------- sockets --
-  const wss = server ? new WebSocketServer({ server }) : new WebSocketServer({ port, host });
+  const wss = server ? new WebSocketServer({ server, maxPayload: lim.maxPayload })
+    : new WebSocketServer({ port, host, maxPayload: lim.maxPayload });
   await new Promise((resolve) => (server ? resolve() : wss.once('listening', resolve)));
   const address = wss.address();
   log(`listening on ws://${host}:${address.port}/ws`);
@@ -183,13 +229,38 @@ export async function startMud({
       ws.close();
       return;
     }
+    // Counted by open sockets: a linkdead body holds no socket, so its owner can always come back.
+    if (!directLoopback(request) && [...sessions].filter((o) => o.open && o.host === s.host).length >= lim.socketsPerSite) {
+      const why = `Too many connections from your address (${lim.socketsPerSite} at most). Close another page and try again.`;
+      log(`${s.host}: connection refused, ${lim.socketsPerSite} sockets open already`);
+      dash.record('site', `${s.host}: connection refused, ${lim.socketsPerSite} sockets open already`, { lvl: 'warn' });
+      s.open = false;
+      ws.on('error', (error) => log(`${s.host}: socket error: ${error.message}`));
+      ws.close(1013, why);
+      return;
+    }
     sessions.add(s);
+    s.alive = true;
+    s.tokens = lim.burst;
+    s.tokenAt = performance.now();
+    s.windowAt = s.tokenAt;
+    s.windowCount = 0;
+    s.hot = 0;
+    s.warned = false;
+    ws.on('pong', () => { s.alive = true; });
+    // ws emits 'error' on a protocol violation (a message past maxPayload is one) and closes
+    // the socket; unhandled, an 'error' event would take the whole mud down.
+    ws.on('error', (error) => {
+      log(`${s.pc ? s.pc.ch.name : '?'}@${s.host}: socket error: ${error.message}`);
+      dash.record('site', `${s.pc ? s.pc.ch.name : '?'}@${s.host}: socket closed: ${error.message}`, { who: s.pc ? s.pc.ch.name : undefined, lvl: 'warn' });
+    });
     // `features`: what this server offers past the protocol; a page asks only for what is listed.
     // `online` is for the title screen, which asks before anyone logs in.
     send(s, { t: 'hello', v: PROTOCOL, features: ['dash'], world: fingerprint, online: online(), motd: 'Welcome to Merc Diku Mud.  May your visit here be ... Mercenary.' });
     ws.on('message', (data) => {
       stats.msgsIn += 1;
       stats.bytesIn += data.length;
+      if (!admit(s)) return;
       let msg;
       try { msg = JSON.parse(data.toString()); } catch (error) { return sendError(s, `bad message: ${error.message}`); }
       // Not swallowed: a command that throws is logged with its stack and the
@@ -214,6 +285,63 @@ export async function startMud({
       dash.forget(s);
     });
   });
+
+  /** A loopback peer with no x-real-ip is a process on this machine, not a player behind nginx. */
+  const directLoopback = (request) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress)
+    && !(request.headers['x-real-ip'] || '').trim();
+
+  /**
+   * A token bucket per socket. True when the message may be handled; false
+   * when it is dropped (warned once per episode) -- and a socket that keeps
+   * at it is closed. Everything a socket sends passes here, before JSON.parse.
+   */
+  function admit(s) {
+    if (s.flooded) return false;
+    const t = performance.now();
+    s.tokens = Math.min(lim.burst, s.tokens + (t - s.tokenAt) / 1000 * lim.ratePerSecond);
+    s.tokenAt = t;
+    // Seconds in a row that the socket sent floodFactor times the cap: counted
+    // over one-second windows; a quiet second ends the run.
+    s.windowCount += 1;
+    if (t - s.windowAt >= 1000) {
+      s.hot = s.windowCount >= lim.floodFactor * lim.ratePerSecond * ((t - s.windowAt) / 1000) ? s.hot + 1 : 0;
+      s.windowAt = t;
+      s.windowCount = 0;
+    }
+    if (s.tokens >= 1) {
+      s.tokens -= 1;
+      if (s.tokens >= lim.burst / 2) s.warned = false;
+      return true;
+    }
+    stats.floodDropped += 1;
+    const who = s.pc ? s.pc.ch.name : '?';
+    if (!s.warned) {
+      s.warned = true;
+      log(`${who}@${s.host}: sending too fast, messages dropped`);
+      dash.record('site', `${who}@${s.host}: over ${lim.ratePerSecond} messages a second, dropping`, { who: s.pc ? who : undefined, lvl: 'warn' });
+      sendError(s, `You are sending too many messages (over ${lim.ratePerSecond} a second); the excess is dropped.`);
+    }
+    if (s.hot >= lim.floodSeconds) {
+      const why = 'Disconnected: you kept sending far too many messages.';
+      log(`${who}@${s.host}: flooding, closed`);
+      dash.record('site', `${who}@${s.host}: flooding, closed the socket`, { who: s.pc ? who : undefined, lvl: 'error' });
+      s.flooded = true;
+      send(s, { t: 'bye', why });
+      s.ws.close(1008, why);
+    }
+    return false;
+  }
+
+  // A browser that vanishes (a laptop lid, a tunnel) sends no FIN; without this its
+  // socket stays "open" for hours, holds a slot of the address's cap and never goes linkdead.
+  const heartbeat = setInterval(() => {
+    for (const s of sessions) {
+      if (!s.open) continue;
+      if (!s.alive) { s.ws.terminate(); continue; }
+      s.alive = false;
+      s.ws.ping();
+    }
+  }, lim.heartbeatMs);
 
   function send(s, msg) {
     if (!s.open || s.ws.readyState !== 1) return;
@@ -255,15 +383,19 @@ export async function startMud({
       if (!body) return send(s, { t: 'login', ok: false, why: 'Your link is gone; log in again.' });
       return enter(s, body.record, false);
     }
+    // Before any scrypt: a paused name or address is told so and nothing is computed.
+    if (!refuseGuess(s, name, false)) return undefined;
     if (!checkParseName(name, w.world)) return send(s, { t: 'login', ok: false, why: 'Illegal name, try another.' });
     const record = accounts.load(name);
     if (!record) return send(s, { t: 'login', ok: false, new: true, name, why: `Did I get that right, ${name} (Y/N)?` });
     if (record.char.act & PLR_MORE.DENY) return send(s, { t: 'login', ok: false, why: 'You are denied access.' });
     if (!(await checkPassword(String(password), record.password))) {
-      log(`${name}@${s.host}: wrong password`);
-      dash.record('conn', `${name}@${s.host}: wrong password`, { who: name, lvl: 'warn', sub: 'refused' });
-      return send(s, { t: 'login', ok: false, why: 'Wrong password.' });
+      const paused = guard.wrong(s.host, name);
+      log(`${name}@${s.host}: wrong password${paused ? `, paused for ${Math.round(paused / 1000)} s` : ''}`);
+      dash.record('conn', `${name}@${s.host}: wrong password${paused ? `, paused for ${inMinutes(paused)}` : ''}`, { who: name, lvl: paused ? 'error' : 'warn', sub: 'refused' });
+      return send(s, { t: 'login', ok: false, why: paused ? `Wrong password. Too many wrong passwords. Try again in ${inMinutes(paused)}.` : 'Wrong password.' });
     }
+    guard.right(s.host, name);
     // IS_HERO: by trust, which is what lets an immortal past a wizlock.
     if (site.wizlock && (record.char.trust || record.char.level) < 36) return send(s, { t: 'login', ok: false, why: 'The game is wizlocked.' });
     enter(s, record, false);
@@ -272,6 +404,7 @@ export async function startMud({
   async function create(s, { name: raw = '', password = '', cls, sex }) {
     if (s.pc) return;
     const name = properName(String(raw).trim());
+    if (!refuseGuess(s, name, true)) return undefined;
     if (!checkParseName(name, w.world)) return send(s, { t: 'login', ok: false, why: 'Illegal name, try another.' });
     if (accounts.exists(name)) return send(s, { t: 'login', ok: false, why: 'That name is taken.' });
     if (String(password).length < 5) return send(s, { t: 'login', ok: false, new: true, name, why: 'Password must be at least five characters long.' });
@@ -279,6 +412,7 @@ export async function startMud({
     const classIndex = Number(cls);
     if (!(classIndex >= 0 && classIndex < CLASS_TABLE.length)) return send(s, { t: 'login', ok: false, new: true, name, why: "That's not a class." });
     const sexIndex = { m: 1, f: 2, n: 0 }[String(sex || 'm').toLowerCase()[0]] ?? 1;
+    guard.created(s.host);
     const ch = createCharacter(classIndex, { sex: sexIndex });
     ch.name = name;
     ch.displayName = name;
@@ -290,6 +424,26 @@ export async function startMud({
     accounts.store(record);
     log(`${name}@${s.host} new player.`);
     enter(s, record, true);
+  }
+
+  /**
+   * login.guard: false (and the player told, in words the page shows) when
+   * this name or address is paused; otherwise the attempt is counted and true.
+   */
+  function refuseGuess(s, name, creating) {
+    const no = guard.refusal(s.host, name, { creating });
+    if (no) {
+      log(`${name}@${s.host}: attempt refused, paused for ${Math.round(no.ms / 1000)} s`);
+      dash.record('conn', `${name}@${s.host}: attempt refused while paused (${inMinutes(no.ms)} left)`, { who: name, lvl: 'warn', sub: 'refused' });
+      send(s, { t: 'login', ok: false, why: no.why, wait: Math.ceil(no.ms / 1000) });
+      return false;
+    }
+    const paused = guard.attempt(s.host);
+    if (paused) {
+      log(`${s.host}: too many login attempts, paused for ${Math.round(paused / 1000)} s`);
+      dash.record('site', `${s.host}: too many login attempts, paused for ${inMinutes(paused)}`, { lvl: 'error' });
+    }
+    return true;
   }
 
   /** CON_READ_MOTD: into the world -- or back into the body a dropped link left. */
@@ -970,6 +1124,7 @@ export async function startMud({
 
   async function close() {
     clearInterval(timer);
+    clearInterval(heartbeat);
     for (const s of [...byPc.values()]) saveSession(s);
     for (const s of sessions) { s.open = false; try { s.ws.close(); } catch { /* already gone */ } }
     await new Promise((resolve) => wss.close(resolve));

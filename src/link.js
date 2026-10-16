@@ -116,7 +116,7 @@ export class SocketLink {
       ws.onerror = () => fail(`Could not reach a game server at ${this.url}. Is it running, and is the address right?`);
       ws.onclose = (event) => {
         clearTimeout(timer);
-        if (!settled) fail(`The connection to ${this.url} closed before the server said hello (code ${event.code}).`);
+        if (!settled) fail(event.reason || `The connection to ${this.url} closed before the server said hello (code ${event.code}).`);
         else { this.closed = true; this.dispatch({ t: 'closed', code: event.code, reason: event.reason }); }
       };
       ws.onmessage = (event) => {
@@ -165,7 +165,7 @@ export class SocketLink {
       const offs = [];
       const done = (msg) => { offs.forEach((off) => off()); resolve(msg); };
       offs.push(this.on('login', done), this.on('enter', (msg) => { this.holding = []; done({ ok: true, enter: msg }); }),
-        this.on('closed', () => done({ ok: false, why: 'The server closed the connection.' })));
+        this.on('closed', (msg) => done({ ok: false, why: msg.reason || 'The server closed the connection.' })));
     });
   }
 
@@ -575,7 +575,7 @@ export function attachSocketLink(link, game, host, enter) {
   }));
   // A lost link can be taken up again while the body stands (see server/mud.mjs login);
   // a quit, a deny or another login cannot.
-  offs.push(link.on('closed', () => host.disconnected('The connection to the server was lost.',
+  offs.push(link.on('closed', (msg) => host.disconnected(msg.reason || 'The connection to the server was lost.',
     token ? { url: link.url, name: enter.name, token } : null)));
 
   function addRemote(rid, info) {
