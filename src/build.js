@@ -2815,9 +2815,14 @@ const ACT_WIMPY = 128;
 
 const isGuard = (room) => (room.mobs || []).some((m) => (m.proto.act & ACT_SENTINEL) && (m.proto.act & ACT_AGGRESSIVE) && !(m.proto.act & ACT_WIMPY));
 
+/** "You stand at the edge of a high cliff" (#2362): the one room that says it. */
+const CLIFF_EDGE = /\bstand at the edge of a (?:high |steep |sheer )?cliff\b/i;
+
 /** What closes in ground that is like this room's. */
 function fenceKind(room) {
   if (GRAVEYARD.test(room.name)) return 'iron';
+  // A cliff is closed in by its own broken lip: a hedge hid the very drop the room names.
+  if (CLIFF_EDGE.test(room.description) && isOpenAir(room)) return 'cliff';
   if (isShire(room)) return 'hedge';
   if (room.areaFile === 'eastern.are' || room.sector === SECTOR.DESERT) return 'dune';
   if (room.areaFile === 'marsh.are' || isWater(room)) return 'reeds';
@@ -2875,7 +2880,7 @@ function regionsOf(layout) {
  * gaps along it ([a0, a1] from the side's middle, x for a north or south
  * side, z for an east or west one); and `fenced`, the `cellKey|dir` of each.
  */
-function fencePlan({ layout, cellKey, apart, parted }) {
+function fencePlan({ layout, cellKey, apart, parted, grand = () => false }) {
   const edges = []; const fenced = new Set();
   const cellOf = (v) => layout.cells.get(v);
   const { region, members, main, doorOn, streetOwner } = regionsOf(layout);
@@ -2910,10 +2915,13 @@ function fencePlan({ layout, cellKey, apart, parted }) {
       // A door hangs on this edge if an end room out of doors hangs one on its side here.
       const door = (i === 0 && isOpenAir(link.from.room) && doorOn(link.from, d))
         || (i + 1 === chain.length - 1 && isOpenAir(link.to.room) && doorOn(link.to, REVERSE_DIR[d]));
+      // ...and it is one of Mahn-Tor's, with a wall of its own across the edge.
+      const grandDoor = (i === 0 && isOpenAir(link.from.room) && grand(link.from.room, d))
+        || (i + 1 === chain.length - 1 && isOpenAir(link.to.room) && grand(link.to.room, REVERSE_DIR[d]));
       for (const [cell, dir] of [[p, d], [q, REVERSE_DIR[d]]]) {
         const k = `${cellKey(link.from.level, cell.x, cell.z)}|${dir}`;
         if (!steps.has(k)) steps.set(k, []);
-        steps.get(k).push({ door, corridor: !isOpenAir(link.from.room) && !isOpenAir(link.to.room) });
+        steps.get(k).push({ door, grand: grandDoor, corridor: !isOpenAir(link.from.room) && !isOpenAir(link.to.room) });
       }
     }
   }
@@ -2984,11 +2992,14 @@ function fencePlan({ layout, cellKey, apart, parted }) {
       const v = layout.at(level, x, z); const nv = layout.at(level, x + dx, z + dz);
       const arch = [[v, dir], [nv, REVERSE_DIR[dir]]].some(([u, d]) => u !== undefined && ['portal', 'gate', 'shaft'].includes(layout.sides.get(u)?.[d]?.kind));
       const gaps = crossing.length
-        ? [crossing.some((s) => s.door) ? [-DOOR_W / 2 - 0.1, DOOR_W / 2 + 0.1] : [-FENCE_LANE / 2, FENCE_LANE / 2]]
+        ? [crossing.some((s) => s.grand) ? [-GRAND_W / 2 - 0.1, GRAND_W / 2 + 0.1]
+          : crossing.some((s) => s.door) ? [-DOOR_W / 2 - 0.1, DOOR_W / 2 + 0.1] : [-FENCE_LANE / 2, FENCE_LANE / 2]]
         : arch ? [[-FENCE_LANE / 2, FENCE_LANE / 2]] : [];
       edges.push({
         level, x, z, dir, gaps, region: r, beyond: o, kind: fenceKind(roomAt(level, x, z, r)), into: nk,
         door: gaps.length > 0 && crossing.some((st) => st.door),
+        // The gate's own wall stands across the whole edge (`buildGrandGate`): no fence to build.
+        grand: crossing.some((st) => st.grand),
         // A gap that leads on to nothing but its own way: an arch, gate or
         // shaft (to go through is to take the exit), a corridor between two
         // walled rooms (walled all along), a walled room (its walls do), a
@@ -3047,6 +3058,8 @@ function fencePlan({ layout, cellKey, apart, parted }) {
     const back = link.to.room.exits[REVERSE_DIR[link.dir]];
     if (!doorOn(link.from, link.dir) && !(back && back.to === link.from.vnum && (back.locks & EX_ISDOOR))) continue;
     gates++;
+    // Between Mahn-Tor's two gate walls the passage has stone sides, not the hedge of the cliff.
+    const grandLink = grand(link.from.room, link.dir) || grand(link.to.room, REVERSE_DIR[link.dir]);
     const chain = [link.from, ...link.path, link.to];
     for (let i = 1; i < chain.length - 1; i++) {
       const c = chain[i];
@@ -3055,7 +3068,7 @@ function fencePlan({ layout, cellKey, apart, parted }) {
       const along = [dirBetween(c, chain[i - 1]), dirBetween(c, chain[i + 1])];
       for (let dir = 0; dir < 4; dir++) {
         if (along.includes(dir) || fenced.has(`${k}|${dir}`)) continue;
-        kept.push({ level: link.from.level, x: c.x, z: c.z, dir, gaps: [], region: -1, kind: fenceKind(link.from.room) });
+        kept.push({ level: link.from.level, x: c.x, z: c.z, dir, gaps: [], region: -1, kind: grandLink ? 'wall' : fenceKind(link.from.room) });
         fenced.add(`${k}|${dir}`);
       }
     }
@@ -3137,6 +3150,7 @@ function buildFences({ plan, batcher, instances, model, chunkOf, addCollider }) 
   const was = batcher.indoor;
   batcher.indoor = false;
   for (const e of plan.edges) {
+    if (e.grand) continue;
     const chunk = chunkOf(e);
     const px = e.x * CELL; const pz = e.z * CELL; const y = e.level * LEVEL_H;
     const [dx, , dz] = DIR_STEP[e.dir];
@@ -3193,6 +3207,19 @@ function buildFences({ plan, batcher, instances, model, chunkOf, addCollider }) 
           instances.add('hedge_row', {
             x: p.x, y, z: p.z, rotY: alongZ ? Math.PI / 2 : 0,
             scaleX: (len / n + 0.4) / 6.75, scaleY: 1.0 + hash3(e.x, e.z, i, 313) * 0.15,
+          }, chunk);
+        }
+        box3(a0, a1, HALF - 2.0, HALF - 0.2, 0, FENCE_HOLD, null);
+      } else if (e.kind === 'cliff' && instances && model(['mahntor_rim'], 0)) {
+        // The lip: a run of broken rock a metre high or so, laid
+        // as the hedge row is. It is held to FENCE_HOLD above its tops, where
+        // nothing is drawn, because a jump lifts the feet that far.
+        const n = Math.max(1, Math.ceil(len / 6.4));
+        for (let i = 0; i < n; i++) {
+          const p = at(a0 + ((i + 0.5) * len) / n, HALF - 1.1);
+          instances.add('mahntor_rim', {
+            x: p.x, y, z: p.z, rotY: (alongZ ? Math.PI / 2 : 0) + (hash3(e.x, e.z, i, 314) > 0.5 ? Math.PI : 0),
+            scaleX: (len / n + 0.4) / 6.75, scaleY: 0.72 + hash3(e.x, e.z, i, 313) * 0.14,
           }, chunk);
         }
         box3(a0, a1, HALF - 2.0, HALF - 0.2, 0, FENCE_HOLD, null);
@@ -3370,7 +3397,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   const carried = crossingPlan(layout, world, river, cellKey);
   const builtApart = { has: (k) => river.has(k) || carried.has(k) };
   // ...and the fences round ground the mud joins only by a shut door or past a guard (`fencePlan`).
-  const fences = fencePlan({ layout, cellKey, apart: builtApart, parted: carried });
+  const fences = fencePlan({ layout, cellKey, apart: builtApart, parted: carried, grand: (room, dir) => !!grandGateFor(room, dir, instances) });
   // What this build may put down on a cell that is neither a room nor a
   // street: not where a vista stands (`options.clear`), nor, in a vista,
   // where the drawn zone already builds.
@@ -4037,10 +4064,18 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         // A door into another zone hangs in its gate, 0.2 m in front of the
         // arch's middle as it did when the arch stood on the cell's edge.
         const gate = openAir && isCrossingSide(side) ? crossingFrame({ pos, dir, openAir }) : null;
+        // Mahn-Tor's gates are not a house door: a wall of their own, to the
+        // scale the prose gives them, and the same door in it (`grandGateFor`).
+        const grand = openAir && !airborne && !hung && !gate && side.kind === 'alley' ? grandGateFor(room, dir, instances) : null;
+        const grandAt = grand ? pos.x + dx * (HALF - 0.3 + grand.set) : 0;
+        const grandAtZ = grand ? pos.z + dz * (HALF - 0.3 + grand.set) : 0;
         doors.push({
-          x: gate ? gate.x - dx * 0.2 : wx + dx * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), y: pos.y,
-          z: gate ? gate.z - dz * 0.2 : wz + dz * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), rotY, dir,
-          width: hung ? hung.width : (tree ? TREE_DOOR_W : DOOR_W), height: hung ? hung.height : (tree ? TREE_DOOR_H : DOOR_H),
+          x: grand ? grandAt : gate ? gate.x - dx * 0.2 : wx + dx * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), y: pos.y,
+          z: grand ? grandAtZ : gate ? gate.z - dz * 0.2 : wz + dz * (openAir ? -0.3 : (WALL_IN + WALL_OUT) / 2), rotY, dir,
+          width: grand ? GRAND_W : hung ? hung.width : (tree ? TREE_DOOR_W : DOOR_W),
+          height: grand ? GRAND_H : hung ? hung.height : (tree ? TREE_DOOR_H : DOOR_H),
+          // Leaves of their own, and a shut door that stops a body across the whole gate and not just the middle of it.
+          grand: grand ? grand.leaf : null, reach: grand ? GRAND_W / 2 + 0.1 : 0,
           single: !!hung || tree,
           // One round leaf covering the whole opening instead of two boarded
           // halves. The opening stays 3.2 x 3.1 -- square to within 3%, which
@@ -4060,7 +4095,8 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
           room: room.vnum,
           leaf: mats.said ? doorLeaf(mats.said.doors[dir], !!mats.sewer || mats.rockCave) : null,
         });
-        if (gated) buildGatehouse({ batcher, instances, chunk, pos, dir, addCollider });
+        if (grand) buildGrandGate({ grand, batcher, instances, chunk, pos, dir, side, room, layout, cell, reserved, cellKey, chunkOf, addCollider });
+        else if (gated) buildGatehouse({ batcher, instances, chunk, pos, dir, addCollider });
         // Out in the open a grate hangs in a railing, not on its own: iron
         // runs from each jamb to the corner of the cell, on the line the
         // graveyard's own railing takes.
@@ -8260,6 +8296,97 @@ function buildGateFlanks({ batcher, instances, chunk, pos, dir, addCollider }) {
   }
 }
 
+// --------------------------------------------------------- Mahn-Tor's gates ----
+
+/**
+ * "You stand at the edge of a high cliff. Directly south, set back off the
+ * cliff's edge, you see a huge pair of gates. These gates appear to be carved
+ * almost completely out of ice" (#2362; #2364 is "just inside the gates", and
+ * the door's own keyword says "huge ice"), and "You stand before a huge keep
+ * that has been carved into the side of the mountain. Huge wooden gates before
+ * you provide entrance to the keep" (#2377).
+ *
+ * What stood there was the stock door -- two plank leaves in a 3.2 m opening --
+ * between a hedge and the rock blocks that front every street: a gate for a
+ * garden. The mud's doors are one system, so these are the same door: the same
+ * `doors` entry, hinge, collider and mirrored exit state, only larger (6.4 x
+ * 7.2 m, which is what "huge" is for a body 1.8 m high), with leaves of their
+ * own (tools/blender/mahntor.py) and, standing round it, the wall the gate is
+ * set in. The prose is what picks them, and only these three rooms say it: the
+ * test is over the exit's keyword (ice) and the room's words (huge wooden
+ * gates to a keep), and without the models the stock door is hung as before.
+ *
+ * The ice gates are built at both ends of the passage, as Midgaard's gate
+ * towers are, because both rooms describe them. The keep's face is built at
+ * the outer end only: the rock goes on 13 m behind it to the entry hall's own
+ * wall, with the passage driven through it, so what the gate opens on is a
+ * tunnel into the mountain and not a street with houses along it.
+ */
+const GRAND_W = 6.4;
+const GRAND_H = 7.2;
+/** `set`: how far past the cell's edge the leaves hang, so the keep's plinth stays off the room's middle. */
+const GRAND_GATES = {
+  ice: { frame: 'mahntor_gatehouse', leaf: 'mahntor_gate_ice', set: 0 },
+  keep: { frame: 'mahntor_keep', leaf: 'mahntor_gate_oak', set: 0.7 },
+};
+const WOODEN_GATES = /\bhuge wooden gates\b/i;
+const KEEP_WORD = /\bkeep\b/i;
+
+/** Which of Mahn-Tor's gates this room's door in direction `dir` is, if any. */
+function grandKindOf(room, dir) {
+  const exit = room.exits[dir];
+  if (dir > 3 || !exit || !(exit.locks & EX_ISDOOR) || exit.offMap || !isOpenAir(room)) return null;
+  const word = exit.keyword || '';
+  if (!/\bgates?\b/i.test(word)) return null;
+  if (/\bice\b/i.test(word)) return 'ice';
+  return WOODEN_GATES.test(room.description) && KEEP_WORD.test(room.description) ? 'keep' : null;
+}
+
+/** The gate to build there, with its models, or null: no models, no gate (the stock door is hung). */
+function grandGateFor(room, dir, instances) {
+  const kind = grandKindOf(room, dir);
+  const gate = kind && GRAND_GATES[kind];
+  return gate && instances && instances.library.get(gate.frame) && instances.library.get(gate.leaf) ? { kind, ...gate } : null;
+}
+
+/**
+ * The wall round a grand gate, and its colliders, in the gate's own frame
+ * (the leaves' plane, `y` out in front as in the models). Walls stand 0.1 m
+ * clear of the shut leaves' ends -- `reach` in the door spec is 3.3 -- and
+ * the open leaves lie in the reveal behind the hinge posts, so a body cannot
+ * pass the gate shut and nothing in the way is left when it is open.
+ */
+function buildGrandGate({ grand, instances, chunk, pos, dir, side, layout, cell, reserved, cellKey, addCollider }) {
+  const [dx, , dz] = DIR_STEP[dir];
+  const gx = pos.x + dx * (HALF - 0.3 + grand.set);
+  const gz = pos.z + dz * (HALF - 0.3 + grand.set);
+  const rotY = FACE_ROT[dir];
+  instances.add(grand.frame, { x: gx, y: pos.y, z: gz, rotY }, chunk, grand.skin || null);
+  if (grand.kind === 'ice') {
+    // The towers, which are the wall either side of the opening: 3.8 to 8.0
+    // from the axis, out 3.8 m in front and flush behind.
+    for (const s of [-1, 1]) {
+      const [a, b] = s < 0 ? [-8.0, -3.55] : [3.55, 8.0];
+      localBox(addCollider, gx, pos.y, gz, rotY, a, b, -3.8, 1.6, 0, 28);
+    }
+    return;
+  }
+  // The keep: the plinths and the facade either side of the portal, then the
+  // rock itself out to 18 m from the axis, 13 m deep.
+  for (const s of [-1, 1]) {
+    const [a, b] = s < 0 ? [-10.3, -3.55] : [3.55, 10.3];
+    localBox(addCollider, gx, pos.y, gz, rotY, a, b, -4.1, 13.0, 0, 40);
+    const [c, d] = s < 0 ? [-18, -10.3] : [10.3, 18];
+    localBox(addCollider, gx, pos.y, gz, rotY, c, d, -1.8, 13.0, 0, 40);
+  }
+  // No houses on the cells beside the passage it runs through: the rock is there.
+  const link = side.link;
+  const [ax, az] = [Math.abs(dz), Math.abs(dx)];
+  for (const c of link.path || []) {
+    for (const o of [-1, 1]) reserved.add(cellKey(cell.level, c.x + ax * o, c.z + az * o));
+  }
+}
+
 // ---------------------------------------------------------------- verges ----
 
 /**
@@ -10569,6 +10696,17 @@ const HILL_GIVE = 1.2;
 const HILL_GRID = 3;
 /** Clear height left over a lower room before the rock overhangs it. */
 const HILL_OVERHANG = 9;
+/**
+ * A cliff's face: metres of ground lost per metre out from the edge (a drop of
+ * the whole 38 m in 7), how far the face runs along beside the room before it
+ * gives way to the hill, how fast it does, and how much the face wanders.
+ */
+const CLIFF_K = 5.5;
+const CLIFF_WING = 14;
+const CLIFF_FLARE = 4;
+const CLIFF_WANDER = 2.4;
+/** The ledges under a cliff's edge are cut into a face, not dug into a bowl: steepness of the wall round them. */
+const CLIFF_GIVE = 4.5;
 
 /**
  * The hill under ground the layout has lifted.
@@ -10632,6 +10770,25 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
   }
   if (!support.size) return { cells: 0, triangles: 0 };
   const held = (level, x, z) => support.has(key(level, x, z));
+  // The edge of a cliff (#2362) is a cliff. The room stands on the hill's
+  // brim with its one way in behind it: the hill falls away from the far
+  // side in a face, and the ledges under it (#2361, #2360, one above the
+  // other in the same column) are cut into that face and not into a bowl.
+  const cliffs = [];
+  const cliffCols = new Set();
+  for (const c of raised) {
+    if (!CLIFF_EDGE.test(c.room.description)) continue;
+    const open = [0, 1, 2, 3].find((d) => {
+      const [dx, , dz] = DIR_STEP[d];
+      return layout.at(c.level, c.x + dx, c.z + dz) !== undefined || layout.isPath(c.level, c.x + dx, c.z + dz);
+    });
+    if (open === undefined) continue;
+    const d = REVERSE_DIR[open];
+    const [dx, , dz] = DIR_STEP[d];
+    if (layout.at(c.level, c.x + dx, c.z + dz) !== undefined || layout.isPath(c.level, c.x + dx, c.z + dz)) continue;
+    cliffs.push({ x: c.x * CELL, z: c.z * CELL, dx, dz, top: c.level * LEVEL_H - 0.04 });
+    cliffCols.add(`${c.x},${c.z}`);
+  }
   // The streets between them, and what fronts the streets and stands among them.
   for (const l of layout.links) {
     if (l.kind !== 'alley' || !l.to || alleyEnclosed(l)) continue;
@@ -10655,7 +10812,7 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
   const holds = [];
   const consider = (level, x, z) => {
     if (level < 0 || held(level, x, z)) return;
-    holds.push({ x: x * CELL, z: z * CELL, limit: level * LEVEL_H - SLAB - 0.15 });
+    holds.push({ x: x * CELL, z: z * CELL, limit: level * LEVEL_H - SLAB - 0.15, give: cliffCols.has(`${x},${z}`) ? CLIFF_GIVE : HILL_GIVE });
   };
   for (const c of layout.order) {
     if (!built(c)) continue;
@@ -10667,7 +10824,7 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
   // And a raised room lower than its neighbours holds the hill to its own
   // floor: the cliffside is a ledge cut into the city's hill, not a room
   // buried in its flank.
-  for (const sup of support.values()) holds.push({ x: sup.x, z: sup.z, limit: sup.top });
+  for (const sup of support.values()) holds.push({ x: sup.x, z: sup.z, limit: sup.top, give: HILL_GIVE });
 
   const props = [...support.values()].map((s) => {
     // Something built lower down in the same column -- the layout keeps three
@@ -10706,7 +10863,17 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
       }
       if (h > floor) {
         for (const c of holds) {
-          const v = c.limit + HILL_GIVE * square(px, pz, c.x, c.z);
+          const v = c.limit + c.give * square(px, pz, c.x, c.z);
+          if (v < h) h = Math.max(floor, v);
+        }
+        // The face: from the room's far edge the ground falls away steeply,
+        // ragged, and over the length of the wing lets the hill back in.
+        for (const f of cliffs) {
+          const out = (px - f.x) * f.dx + (pz - f.z) * f.dz - HALF;
+          if (out <= 0) continue;
+          const along = Math.abs((px - f.x) * Math.abs(f.dz) + (pz - f.z) * Math.abs(f.dx));
+          const wander = (terrainNoise(px * 0.19, pz * 0.19, 833) - 0.5) * 2 * CLIFF_WANDER;
+          const v = f.top - CLIFF_K * Math.max(0, out + wander) + CLIFF_FLARE * Math.max(0, along - HALF - CLIFF_WING);
           if (v < h) h = Math.max(floor, v);
         }
       }

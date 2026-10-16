@@ -45,6 +45,7 @@ MODULES = [
     "furniture",
     "clutter",
     "setpiece",
+    "mahntor",
     "statues",
     "hatches",
 ]
@@ -186,7 +187,10 @@ BUDGET = {
     "clutter_pelts": 2000,
     # setpiece.py: one of each in the world, or four gatehouses. The fortress
     # is a whole castle seen from a hundred metres.
-    "gatehouse": 6000, "fortress": 20000, "monolith": 400, "statue_worm": 7000,
+    "gatehouse": 6000, "fortress": 20000,
+    # mahntor.py: one gate wall to each end of the passage, one keep, and the
+    # leaves are carved on both faces (the ice one with ten bulls' heads).
+    "mahntor_gatehouse": 4500, "mahntor_gate_ice": 6000, "mahntor_keep": 16000, "mahntor_gate_oak": 2500, "mahntor_rim": 1200, "monolith": 400, "statue_worm": 7000,
     # statues.py. One Odin in the world (two with the mirror Midgaard), seen
     # from three metres at the altar: the face and beard are carved on a 5 mm
     # grid of their own, and a pair each of wolves and ravens sit on it.

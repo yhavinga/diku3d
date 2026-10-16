@@ -4996,6 +4996,19 @@ function* peopleOf(world, layout, built, options = {}) {
   };
   // Same hinge and reference size as `door_leaf`, in iron bars: a grate.
   const grateAsset = assets ? assets.get('grate_leaf') : null;
+  /**
+   * Mahn-Tor's gates (build.js `grandGateFor`): a leaf modelled at 3.2 x 7.2 m
+   * and carved on both faces, hung like every other leaf -- hinge edge at x =
+   * 0, running out along +x -- and scaled to the opening it was given.
+   */
+  const GRAND_LEAF = [3.2, 7.2];
+  const makeGrandLeaf = (spec, leafWidth) => {
+    const asset = assets ? assets.get(spec.grand) : null;
+    if (!asset) throw new Error(`actors: grand gate leaf ${spec.grand} is missing`);
+    const leaf = primitivesOf(asset);
+    leaf.scale.set(leafWidth / GRAND_LEAF[0], spec.height / GRAND_LEAF[1], 1);
+    return leaf;
+  };
   const makeLeaf = (leafWidth, height, grate = false, buried = false) => {
     if (grate && grateAsset) {
       const leaf = primitivesOf(grateAsset, buried);
@@ -5389,7 +5402,8 @@ function* peopleOf(world, layout, built, options = {}) {
       const pivot = new THREE.Group();
       pivot.position.set(spec.x + side * ux * spec.width / 2, spec.y, spec.z + side * uz * spec.width / 2);
       pivot.rotation.y = spec.rotY;
-      const leaf = spec.shire && shireLeafAsset ? makeShireLeaf(spec.width, spec.paint)
+      const leaf = spec.grand ? makeGrandLeaf(spec, leafWidth)
+        : spec.shire && shireLeafAsset ? makeShireLeaf(spec.width, spec.paint)
         : spec.round
         ? makeRoundLeaf(Math.min(spec.width, spec.height))
         : (spec.leaf && !spec.grate ? makeSlab(leafWidth, spec.height, spec.leaf) : makeLeaf(leafWidth, spec.height, spec.grate, spec.y < -2));
@@ -5460,8 +5474,12 @@ function* peopleOf(world, layout, built, options = {}) {
     });
     // Every door gets its collider, shut or not: the mayor closes the city
     // gates at night, and a gate that was open at boot has to stop you then.
+    // A grand gate's is as wide as the gate and no deeper than a door's.
+    const along = spec.reach || 1.2;
+    const alongZ = Math.abs(Math.sin(spec.rotY)) > 0.5;
     built.colliders.push({
-      x0: spec.x - 1.2, x1: spec.x + 1.2, z0: spec.z - 1.2, z1: spec.z + 1.2,
+      x0: spec.x - (alongZ ? 1.2 : along), x1: spec.x + (alongZ ? 1.2 : along),
+      z0: spec.z - (alongZ ? along : 1.2), z1: spec.z + (alongZ ? along : 1.2),
       y0: spec.y, y1: spec.y + spec.height, door,
     });
   }

@@ -63,7 +63,8 @@ function takeColour(geometry) {
 // are the feather surface: rows of overlapping scallops is what both of them
 // are, and at the size either is seen the two read the same.
 // Wool is the cloth recipe under its own tint; plate is worked steel.
-const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', wool: 'cloth', plate: 'steel', scales: 'feather', wicker: 'rope' };
+// `snow` stands in as plaster until the snow recipe lands (the models of mahntor.py tag it).
+const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', wool: 'cloth', plate: 'steel', scales: 'feather', wicker: 'rope', snow: 'plaster' };
 // (linen and wool have recipes of their own now; the aliases are the fallback.)
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
@@ -962,6 +963,8 @@ export const ASSET_NAMES = [
   'shire_lantern_post', 'shire_waterwheel',
   // Landmarks the prose names out of doors: tools/blender/setpiece.py.
   'gatehouse', 'fortress', 'monolith', 'statue_worm',
+  // Mahn-Tor's ice gates and wooden keep gates, and the walls they are in: tools/blender/mahntor.py.
+  'mahntor_gatehouse', 'mahntor_gate_ice', 'mahntor_keep', 'mahntor_gate_oak', 'mahntor_rim',
   // The rooms' furniture: tools/blender/furniture.py.
   ...FURNITURE_NAMES,
   // What the rooms' prose puts in them: tools/blender/clutter.py.
