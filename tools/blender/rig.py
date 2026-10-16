@@ -1249,6 +1249,346 @@ FOLDED = {"upperarm.R": (-30, -60, 30), "forearm.R": (-100, 0, 0), "hand.R": (10
           "upperarm.L": (-50, 60, -50), "forearm.L": (-100, 0, 0), "hand.L": (10, 0, 0)}
 
 
+# --- resting and sleeping on the ground ---------------------------------------
+
+# A body to measure the ground against: make_all is handed one of the dressed
+# meshes (the peasant, the woman, the troll, a guard) and these clips settle
+# the pelvis onto the floor by where its vertices really are, not by a number
+# written for a man's legs.
+_REF = None
+# The body's table, for the clips that measure their own clearance of the head.
+_P = None
+# What the clips found out about themselves, for make_all to put in the facts.
+FACTS = {}
+
+
+_VERTS = {}
+
+
+def _verts_of(groups):
+    """Indices of the reference body's vertices whose heaviest weight is in
+    `groups`, worked out once per body."""
+    key = (_REF.name, tuple(groups))
+    if key not in _VERTS:
+        names = [g.name for g in _REF.vertex_groups]
+        out = []
+        for v in _REF.data.vertices:
+            if v.groups:
+                g = max(v.groups, key=lambda e: e.weight)
+                if names[g.group] in groups:
+                    out.append(v.index)
+        _VERTS[key] = out
+    return _VERTS[key]
+
+
+def _floor_of(groups=None, which=False):
+    """The lowest z of the reference body in the pose on screen, over every
+    vertex or only those whose heaviest weight is in `groups`. With `which`,
+    (z, group, position) of that vertex."""
+    if _REF is None:
+        raise RuntimeError("rig: a ground clip needs a body to measure (make_all(ref=...))")
+    ev = _REF.evaluated_get(bpy.context.evaluated_depsgraph_get())
+    me = ev.to_mesh()
+    names = [g.name for g in _REF.vertex_groups]
+    M = ev.matrix_world
+    low = (9.0, None, None)
+    for i in (range(len(me.vertices)) if groups is None else _verts_of(groups)):
+        v = me.vertices[i]
+        co = M @ v.co
+        if co.z < low[0]:
+            g = max(v.groups, key=lambda e: e.weight) if v.groups else None
+            low = (co.z, names[g.group] if g else None, tuple(round(c, 3) for c in co))
+    ev.to_mesh_clear()
+    return low if which else low[0]
+
+
+PELVIS = ("hips", "thigh.L", "thigh.R", "skirt.L", "skirt.R")
+
+
+def _palm_local(arm, tag):
+    """Which way the palm faces, in the hand bone's own frame: the fist sits
+    on the palm's side of the hand's axis (bone_table), so the grip bone's
+    head, taken off that axis, is the palm's normal."""
+    b = arm.data.bones
+    hand = b["hand." + tag]
+    axis = (hand.tail_local - hand.head_local).normalized()
+    off = b["grip." + tag].head_local - hand.head_local
+    n = (off - axis * off.dot(axis)).normalized()
+    return hand.matrix_local.to_3x3().inverted() @ n
+
+
+def _arm_set(arm, tag, v):
+    p = arm.pose.bones
+    r = math.radians
+    p["upperarm." + tag].rotation_euler = (r(v[0]), r(v[1]), r(v[2]))
+    p["forearm." + tag].rotation_euler = (r(v[3]), r(v[4]), 0.0)
+    p["hand." + tag].rotation_euler = (r(v[5]), r(v[6]), r(v[7]))
+
+
+def _solve_arm(arm, tag, start, terms, prefer=None):
+    """Joint angles (upper arm xyz, forearm x and twist, hand xyz, in degrees)
+    that bring the arm to `terms` -- [(what, target, weight)], what being
+    'elbow', 'wrist', 'tip' (a point in armature space), 'palm' (target a
+    unit vector the palm should face) or 'floor'. Pattern search from `start` on the
+    pose on screen; a hint of `prefer` keeps whatever the targets leave
+    free from wandering. Returns (angles, cost)."""
+    p = arm.pose.bones
+    view = bpy.context.view_layer
+    pn = _palm_local(arm, tag)
+    prefer = list(prefer if prefer is not None else start)
+    lo = [-200, -200, -200, -150, -100, -70, -60, -60]
+    hi = [200, 200, 200, 0, 100, 70, 60, 60]
+
+    def cost(v):
+        _arm_set(arm, tag, v)
+        view.update()
+        c = 0.0
+        for (what, want, w) in terms:
+            if what == "elbow":
+                c += w * (p["forearm." + tag].head - V(want)).length
+            elif what == "wrist":
+                c += w * (p["hand." + tag].head - V(want)).length
+            elif what == "tip":
+                c += w * (p["hand." + tag].tail - V(want)).length
+            elif what == "palm":
+                n = (p["hand." + tag].matrix.to_3x3() @ pn).normalized()
+                c += w * (1.0 - n.dot(V(want))) * 0.1
+            elif what == "floor":
+                # `want` is (groups, height): the lowest vertex of those
+                # groups is to lie at that height, so a hand rests on the
+                # ground by its skin and not by its bone.
+                c += w * abs(_floor_of(want[0]) - want[1])
+        return c + 3e-6 * sum((a - b) ** 2 for a, b in zip(v, prefer))
+
+    v = list(start)
+    best = cost(v)
+    if any(t[0] == "elbow" for t in terms):
+        # Pattern search only finds the nearest valley: from a hanging arm
+        # the elbow target may be a long way off, so the upper arm is put on
+        # the best of a coarse grid first.
+        for ux in range(-180, 1, 30):
+            for uy in range(-90, 91, 45):
+                for uz in range(-90, 91, 30):
+                    w = [ux, uy, uz] + v[3:]
+                    c = cost(w)
+                    if c < best:
+                        v, best = w, c
+    step = 16.0
+    for _ in range(600):
+        if step < 0.5:
+            break
+        moved = False
+        for i in range(8):
+            for s in (step, -step):
+                w = list(v)
+                w[i] = min(hi[i], max(lo[i], w[i] + s))
+                c = cost(w)
+                if c < best - 1e-7:
+                    v, best, moved = w, c, True
+                    break
+        if not moved:
+            step *= 0.5
+    return v, best
+
+
+def _key_arm(arm, tag, frame, v):
+    p = arm.pose.bones
+    fk(p["upperarm." + tag], frame, *v[0:3])
+    fk(p["forearm." + tag], frame, v[3], v[4], 0.0)
+    fk(p["hand." + tag], frame, *v[5:8])
+
+
+def _look(frame, turns):
+    """A head turn in degrees at `frame` from [(frame, degrees)] keys, eased
+    between them, so a long rest is not one held glance."""
+    for (f0, a0), (f1, a1) in zip(turns, turns[1:]):
+        if f0 <= frame <= f1:
+            return a0 + (a1 - a0) * _smoothstep((frame - f0) / float(f1 - f0))
+    return turns[-1][1]
+
+
+REST_FRAMES = 144
+SIT_STEP = 12
+
+
+def _settle(arm, build, frames, groups, goal):
+    """Run `build(drop)` until the lowest vertex of `groups` over `frames`
+    lies `goal` above the floor on average. `build` writes the whole clip
+    for a hip height `drop` below standing and returns nothing."""
+    scene = bpy.context.scene
+    drop = arm.data.bones["hips"].head_local.z - 0.14
+    last = None
+    for _ in range(4):
+        build(drop)
+        gaps = []
+        for f in frames:
+            scene.frame_set(f)
+            bpy.context.view_layer.update()
+            gaps.append(_floor_of(groups) - goal)
+        last = sum(gaps) / len(gaps)
+        if abs(last) < 0.002:
+            break
+        drop += last
+    return drop, last
+
+
+def anim_rest_ground(arm):
+    """Six seconds sitting on the ground, as an adventurer rests: the right
+    knee up with that wrist laid across it, the left leg folded in under it,
+    the left hand planted behind to lean on, the back leaning off it a
+    little. The chest rises and falls, the head turns to look at something
+    and back. The pelvis is on the floor: the hip height is searched until
+    the lowest vertex of the pelvis and thighs is within a centimetre of it,
+    not written for a man's legs."""
+    ls = _leg_scale(arm)
+    hb = arm.data.bones
+    hip = hb["hips"].head_local
+    ankle = {t: rest_ankle(arm, t) for t in "LR"}
+    frames = list(range(1, REST_FRAMES + 2, SIT_STEP))
+    turns = [(1, 0), (31, 0), (53, 16), (85, 16), (103, -7), (127, 0), (145, 0)]
+    trunk = {"spine": (5, 0, 0), "chest": (4, 0, 0), "neck": (9, 0, 0), "head": (8, 0, 0)}
+    cache = {}
+
+    def build(drop, arms=False):
+        new_action(arm, "rest_ground")
+        for f in frames:
+            b = math.sin(2 * math.pi * (f - 1) / 48.0)
+            look = _look(f, turns)
+            bones = merge(HANG, {
+                "spine": (trunk["spine"][0] + 0.5 * b, -look * 0.1, 0),
+                "chest": (trunk["chest"][0] + 1.2 * b, look * 0.2, 0),
+                "neck": (trunk["neck"][0] - 0.4 * b, look * 0.4, 0),
+                "head": (trunk["head"][0] - 0.5 * b, look * 0.6, 0)})
+            hips = ((0.0, 0.03 * ls, -drop), -22.0 + 0.4 * b, 6.0, 0.0)
+            pose(arm, f, bones, hips, feet=False)
+            top = hip.z - drop
+            # The right foot flat a long step out, the knee up over it; the
+            # left folded in across, its knee out to the side. Poles are
+            # keyed because the hips are now far below where they rest.
+            fr = ankle["R"] + V((-0.050, -0.55 * ls, 0.0))
+            fl = ankle["L"] + V((-0.250, -0.30 * ls, 0.0))
+            place(arm, "foot_ik.R", f, foot_matrix(arm, "R", fr, 0.0, -6.0))
+            place(arm, "foot_ik.L", f, foot_matrix(arm, "L", fl, 0.0, -48.0))
+            place(arm, "pole.R", f, Matrix.Translation(V((-0.14, -0.20 * ls, top + 0.9))))
+            place(arm, "pole.L", f, Matrix.Translation(V((0.65, -0.12 * ls, top + 0.02))))
+        if arms:
+            solve(drop)
+
+    def solve(drop):
+        scene = bpy.context.scene
+        for i, f in enumerate(frames):
+            scene.frame_set(f)
+            bpy.context.view_layer.update()
+            knee = arm.pose.bones["shin.R"].head.copy()
+            wrist_r = knee + V((-0.01, -0.03, 0.095))
+            ground = 0.034
+            wrist_l = V((0.33 * ls, hip.y + 0.27 * ls, ground))
+            tip_l = wrist_l + V((0.045, -0.080, -0.006))
+            r, _ = _solve_arm(arm, "R", cache.get("R", [-30, 0, 15, -40, 0, 0, 0, 0]),
+                              [("wrist", wrist_r, 1.0), ("palm", (0, 0, -1), 0.3)],
+                              prefer=[-24, 0, 14, -34, 0, 6, 0, 0])
+            l, _ = _solve_arm(arm, "L", cache.get("L", [20, 0, -20, -20, 0, 70, 0, 0]),
+                              [("wrist", wrist_l, 0.5), ("tip", tip_l, 0.5), ("palm", (0, 0, -1), 3.0),
+                               ("floor", (("hand.L",), 0.004), 2.0)],
+                              prefer=[20, 0, -20, -20, 0, 50, 0, 0])
+            cache["R"], cache["L"] = r, l
+            _key_arm(arm, "R", f, r)
+            _key_arm(arm, "L", f, l)
+
+    drop, gap = _settle(arm, build, frames, PELVIS, 0.006)
+    build(drop, arms=True)
+    FACTS["rest_ground"] = {"seat_drop": round(drop, 4), "seat_gap": round(gap, 4)}
+    return "rest_ground", (1, frames[-1])
+
+
+def _lie_hips(arm, offset, tilt=0.0, twist=90.0):
+    """The hips laid down on one side with the head to the back: the figure
+    turned `twist` degrees about its own long axis (90 puts the face to its
+    left and the left side to the ground) and then laid back, pitched -90 about
+    the hip joint. `tilt` nods the whole body a few degrees about the hips."""
+    rest = arm.data.bones["hips"].matrix_local.copy()
+    R = (Matrix.Rotation(math.radians(-90.0 + tilt), 4, "X") @
+         Matrix.Rotation(math.radians(twist), 4, "Z"))
+    return Matrix.Translation(rest.to_translation() + V(offset)) @ R @ Matrix(rest.to_3x3()).to_4x4()
+
+
+def anim_sleep(arm):
+    """Six seconds asleep on the ground: on the left side, the head to the
+    back, the left arm under the head for a pillow and the right hand laid on
+    the ground in front, both knees drawn up a little, the upper one more.
+    Two slow breaths. The hip height is searched until the body's lowest
+    vertex is on the floor, so nothing is through it."""
+    ls = _leg_scale(arm)
+    hb = arm.data.bones
+    hip = hb["hips"].head_local
+    frames = list(range(1, REST_FRAMES + 2, SIT_STEP))
+    cache = {}
+
+    def build(drop, arms=False, up=0.0):
+        new_action(arm, "sleep")
+        for f in frames:
+            b = math.sin(2 * math.pi * (f - 1) / 72.0)
+            bones = merge(HANG, {
+                "spine": (14 + 0.6 * b, 0, 0), "chest": (10 + 1.6 * b, 0, 0),
+                "neck": (4, 0, 6 + 0.6 * up), "head": (2, 0, 4 + 0.4 * up),
+                "upperarm.L": (-150, 0, -10), "forearm.L": (-100, 0, 0),
+                "upperarm.R": (-50, 0, 20), "forearm.R": (-80, 0, 0)})
+            M = _lie_hips(arm, (0.0, 0.05, -drop), tilt=0.4 * b)
+            pose(arm, f, bones, ((0, 0, 0), 0, 0, 0), feet=False)
+            place(arm, "hips", f, M)
+            T = M @ hb["hips"].matrix_local.inverted()
+            # The upper leg is drawn in over the lower, so its knee lies on it
+            # and not in the air a hand's breadth above.
+            for tag, thigh, knee, over in (("L", 42.0, 92.0, 0.0), ("R", 56.0, 106.0, 0.07)):
+                dx, dy, dz, pitch = _air_leg(arm, tag, thigh, knee, 0.0)
+                a = rest_ankle(arm, tag) + V((dx + over, dy, dz))
+                relax = -(knee - thigh) - 12.0
+                place(arm, "foot_ik." + tag, f, T @ foot_matrix(arm, tag, a, relax, STANCES["rest"][tag][1]))
+        if arms:
+            solve(drop)
+
+    def solve(drop):
+        scene = bpy.context.scene
+        for f in frames:
+            scene.frame_set(f)
+            bpy.context.view_layer.update()
+            pb = arm.pose.bones
+            sl = pb["upperarm.L"].head.copy()
+            hc = (pb["head"].head + pb["head"].tail) * 0.5
+            # The pillow: the arm along the floor under the head, the
+            # forearm folded back round it. The head rests on it, a few
+            # centimetres off its axis.
+            e = V((hc.x - 0.03, sl.y + 0.27 * ls, 0.04))
+            w = e + V((0.17, -0.10, 0.0))
+            l, _ = _solve_arm(arm, "L", cache.get("L", [-150, 0, -10, -100, 0, 0, 0, 0]),
+                              [("elbow", e, 0.6), ("wrist", w, 0.6),
+                               ("floor", (("upperarm.L", "forearm.L", "hand.L"), 0.004), 1.5)])
+            sr = pb["upperarm.R"].head.copy()
+            r, _ = _solve_arm(arm, "R", cache.get("R", [-50, 0, 20, -80, 0, 0, 0, 0]),
+                              [("wrist", V((0.30 * ls, sl.y - 0.1, 0.05)), 0.5),
+                               ("elbow", V((0.36 * ls, sl.y - 0.20, 0.20)), 0.25),
+                               ("floor", (("hand.R",), 0.004), 1.5)])
+            cache["L"], cache["R"] = l, r
+            _key_arm(arm, "L", f, l)
+            _key_arm(arm, "R", f, r)
+
+    # Arms in the search: the pillow arm is on the floor too, and the body
+    # settles onto whichever of them is lowest.
+    drop, gap = _settle(arm, lambda d: build(d, True), frames, None, 0.004)
+    # The cheek lies a hand's breadth above the arm that pillows it, never in
+    # it: the head is rolled up off the arm by degrees until the measured gap
+    # (head_clearance, the same the build holds every clip to) is a centimetre.
+    for up in (0.0, 6.0, 12.0, 18.0, 24.0, 30.0):
+        if _P is None or up:
+            build(drop, True, up)
+        if _P is None or head_clearance(arm, _P, (frames[0], frames[-1]))[0] >= 0.01:
+            break
+    else:
+        raise RuntimeError("rig: the sleeping head cannot be raised clear of its arm")
+    FACTS["sleep"] = {"lie_drop": round(drop, 4), "lie_gap": round(gap, 4)}
+    return "sleep", (1, frames[-1])
+
+
 def anim_lean(arm):
     """Four seconds leaning back against a wall: the shoulders on it, the
     hips a hand's breadth off it, arms folded, the left foot crossed over in
@@ -2113,14 +2453,19 @@ def measure_casts(arm, P, info):
 CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "block", "death",
          "cast", "sit", "lean", "talk", "jump", "land", "kick", "backstab", "disarm",
          "jog", "sprint", "strafe_l", "strafe_r", "back", "turn_l", "turn_r",
-         "cast_thrust", "cast_overhead", "cast_sweep", "cast_pray", "idle_hero")
+         "cast_thrust", "cast_overhead", "cast_sweep", "cast_pray", "idle_hero", "rest_ground", "sleep")
 
 
-def make_all(arm, measure=True, P=None, extra=()):
+def make_all(arm, measure=True, P=None, extra=(), ref=None):
     """Author every clip on the IK rig, bake them, strip the controls, and
     write the baked clips back as plain actions. Returns what the viewer
     needs to know about them: durations, strides, contact frames, and the
     measured foot slip of the locomotion."""
+    global _REF, _P
+    _REF = ref
+    _P = P
+    _VERTS.clear()
+    FACTS.clear()
     add_controls(arm)
     select_only([arm], arm)
     bpy.ops.object.mode_set(mode="POSE")
@@ -2130,7 +2475,7 @@ def make_all(arm, measure=True, P=None, extra=()):
            anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk,
            anim_jump, anim_land, anim_kick, anim_backstab, anim_disarm, anim_jog, anim_sprint,
            anim_strafe_l, anim_strafe_r, anim_back, anim_turn_l, anim_turn_r] + list(extra)
-    fns += CAST_ANIMS + [anim_idle_hero]
+    fns += CAST_ANIMS + [anim_idle_hero, anim_rest_ground, anim_sleep]
     for fn in fns:
         r = fn(arm)
         name, frames = r[0], r[1]
@@ -2145,6 +2490,7 @@ def make_all(arm, measure=True, P=None, extra=()):
                                                          extra.get("direction"))
         elif extra is not None:
             entry["hit"] = extra
+        entry.update(FACTS.get(name, {}))
         info[name] = entry
     for name in CARRY:
         r = anim_carry(arm, name)
@@ -2158,7 +2504,7 @@ def make_all(arm, measure=True, P=None, extra=()):
     if measure and P is not None:
         for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2", "lean", "talk", "jump", "land",
                      "kick", "backstab", "disarm", "jog", "sprint", "strafe_l", "strafe_r", "back", "turn_l",
-                     "turn_r", "idle_hero"):
+                     "turn_r", "idle_hero", "rest_ground", "sleep"):
             arm.animation_data.action = bpy.data.actions[name]
             gap, f, limb = head_clearance(arm, P, (0, info[name]["frames"]))
             info[name]["head_gap"] = round(gap, 4)
@@ -2172,5 +2518,12 @@ def make_all(arm, measure=True, P=None, extra=()):
                                                     info[name].get("direction"))
     if measure and P is not None:
         measure_casts(arm, P, info)
+        for name in ("rest_ground", "sleep"):
+            arm.animation_data.action = bpy.data.actions[name]
+            gap, f, limb = torso_clearance(arm, P, (0, info[name]["frames"]))
+            info[name]["body_gap"] = round(gap, 4)
+            if gap < 0:
+                raise RuntimeError("%s: %s goes %.0f mm into the trunk at frame %d of %s"
+                                   % (P["name"], limb, -gap * 1000, f, name))
     arm.animation_data.action = bpy.data.actions["idle"]
     return info

@@ -18,6 +18,7 @@
  */
 
 import { createPlayerFigure } from './actors.js';
+import { heldPoseOf } from './view.js';
 import { DIR_NAME, ITEM } from './are.js';
 import { TAR } from './magic.js';
 import { castClipOf } from './people.js';
@@ -664,6 +665,7 @@ export function attachSocketLink(link, game, host, enter) {
     r.pc.position.x = eye.x; r.pc.position.y = eye.y; r.pc.position.z = eye.z;
     game.feetOf(r.ch);
     r.figure.group.visible = true;
+    r.figure.pose(heldPoseOf(r.info.position));
     r.figure.update(dt, { x: eye.x, y: eye.y - 1.72, z: eye.z }, yaw, Math.min(pace, 9));
   }
 

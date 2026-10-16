@@ -44,6 +44,17 @@ const SHOULDER = 0.1;
 const SLAB = 0.45;
 /** The camera's own size: how far it keeps off a wall. */
 const CAMERA_R = 0.22;
+/**
+ * Resting or asleep: on the ground itself, since nobody rests on a bench
+ * that is not there (the 'sit' clip is for the mobiles' real ones). Shared
+ * with link.js, which poses other players from the position the server sends.
+ */
+export function heldPoseOf(position) {
+  if (position === POS.SLEEPING) return 'sleep';
+  if (position === POS.RESTING) return 'rest_ground';
+  return null;
+}
+
 /** Closer than this the figure would fill the view from inside its own head. */
 const NEAR_HIDE = 0.75;
 /** How far the arm may grow back each second once a wall is out of the way. */
@@ -421,8 +432,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
   /** Resting, asleep or down: the body's held pose from the character's position. */
   function poseOf(position) {
     if (position <= POS.STUNNED) return 'death';
-    if (position === POS.SLEEPING || position === POS.RESTING) return 'sit';
-    return null;
+    return heldPoseOf(position);
   }
 
   // Held facing one way (fighting, casting) the body slides and backpedals;

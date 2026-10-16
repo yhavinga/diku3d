@@ -39,10 +39,10 @@ export const HIT_FRAME = { attack: 10 / 19, attack2: 11 / 21, cast: 14 / 24, kic
 // leg length on the others), feet planted a pace forward; lean has the back
 // against a wall behind, arms folded; talk gestures with the right hand.
 export const LOOPS = new Set(['idle', 'idle2', 'idle_hero', 'walk', 'run', 'fight', 'sit', 'lean', 'talk', 'jog', 'sprint', 'strafe_l',
-  'strafe_r', 'back']);
+  'strafe_r', 'back', 'rest_ground', 'sleep']);
 export const CLIPS = ['idle', 'idle2', 'walk', 'run', 'fight', 'attack', 'attack2', 'hit', 'block', 'death', 'cast',
   'sit', 'lean', 'talk', 'jump', 'land', 'kick', 'backstab', 'disarm', 'jog', 'sprint', 'strafe_l', 'strafe_r',
-  'back', 'turn_l', 'turn_r', 'cast_thrust', 'cast_overhead', 'cast_sweep', 'cast_pray', 'idle_hero'];
+  'back', 'turn_l', 'turn_r', 'cast_thrust', 'cast_overhead', 'cast_sweep', 'cast_pray', 'idle_hero', 'rest_ground', 'sleep'];
 
 /**
  * Which gesture a spell is cast with, by the family magic.js gives it (the

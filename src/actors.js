@@ -1183,6 +1183,11 @@ function gaitBands(v) {
   return { walk: 1 - toRun, run: toRun * (1 - toJog), jog: toJog * (1 - toSprint), sprint: toSprint };
 }
 
+/** Poses held until let go (createPlayerFigure's `pose`), each on its own weight. */
+const HELD = ['sit', 'rest_ground', 'sleep'];
+/** Those on the ground itself: no bench, so nothing is held out and the springs lie down. */
+const GROUND = new Set(['rest_ground', 'sleep']);
+
 export function createPlayerFigure({
   library, name, title = '', cls = 3, sex = 1, level = 1, weapon = 0, shield = 0, worn = [], objProtos = null, roomAt = null,
   lying = false,
@@ -1217,6 +1222,47 @@ export function createPlayerFigure({
 
   const shadows = playerShadows();
   group.add(shadows.cast, shadows.contact);
+
+  // What was in the hands while the body is down on the ground: not held out
+  // over nothing, nor through the body, but laid on the ground by its side,
+  // as the items module lays a dropped blade (a flat down, a shield face up).
+  // The markers keep what is held; `stowed` only puts it by (motion.js).
+  const onGround = { group: null, down: false };
+  function gearModel(name, kind) {
+    const asset = library && library.get && library.get(name);
+    if (!asset || !asset.primitives) return null;
+    const indoor = made.indoor && made.indoor.value > 0.5 ? 1 : 0;
+    const holder = new THREE.Group();
+    const lay = new THREE.Group();
+    const min = asset.bounds.min;
+    for (const p of asset.primitives) {
+      const g = p.geometry.clone();
+      g.setAttribute('aIndoor', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count).fill(indoor), 1));
+      const mesh = new THREE.Mesh(g, p.material);
+      mesh.castShadow = false;
+      lay.add(mesh);
+    }
+    if (kind === 'blade') { lay.rotation.z = Math.PI / 2; lay.position.y = -min.x; holder.rotation.y = Math.PI / 2; } else { lay.rotation.x = -Math.PI / 2; lay.position.y = -min.z; }
+    holder.add(lay);
+    return holder;
+  }
+  function layGear(down) {
+    if (down === onGround.down || (!made.weapon && !made.shield)) return;
+    onGround.down = down;
+    for (const o of [made.weapon, made.shield]) if (o) o.stowed = down;
+    if (!down) {
+      if (onGround.group) { onGround.group.removeFromParent(); onGround.group.traverse((o) => { if (o.isMesh) o.geometry.dispose(); }); onGround.group = null; }
+      return;
+    }
+    onGround.group = new THREE.Group();
+    const s = made.scale || 1;
+    // The figure's right is -X: the left hand and knee are the near side.
+    const blade = made.weapon && gearModel(made.weapon.name, 'blade');
+    if (blade) { blade.position.set(-0.5 * s, 0.02, 0); onGround.group.add(blade); }
+    const round = made.shield && gearModel(made.shield.name, 'shield');
+    if (round) { round.position.set(-1.0 * s, 0.02, 0.1 * s); onGround.group.add(round); }
+    made.group.add(onGround.group);
+  }
   let speech = null;
   let speechLeft = 0;
 
@@ -1303,6 +1349,7 @@ export function createPlayerFigure({
   const hairQ2 = new THREE.Quaternion();
   const hairE = new THREE.Euler();
   let hairKnown = false;
+  let hairGate = 1;
   // Which way is down in the head's own frame when it hangs as modelled:
   // taken from the first frame, with the head as the idle holds it.
   const hairRest = new THREE.Vector3();
@@ -1402,6 +1449,9 @@ export function createPlayerFigure({
    */
   function swingHair(dt) {
     const h = Math.min(dt, 1 / 30);
+    // Down on the ground the hair lies as modelled: gravity in the head's frame
+    // is then sideways, and the spring would hang it out over the shoulder.
+    hairGate += ((posed && GROUND.has(posed) ? 0 : 1) - hairGate) * Math.min(1, h * 5);
     const root = hair[0].bone;
     root.updateWorldMatrix(true, false);
     const px = root.matrixWorld.elements[12];
@@ -1452,7 +1502,7 @@ export function createPlayerFigure({
       // A ring past the target may go a little beyond it, not without end.
       link.p = THREE.MathUtils.clamp(link.p + link.pv * h, -1.5 * sh * HAIR.body, 1.5 * sh * HAIR.back);
       link.r = THREE.MathUtils.clamp(link.r + link.rv * h, -1.5 * sh * HAIR.side, 1.5 * sh * HAIR.side);
-      hairQ.setFromEuler(hairE.set(link.p, 0, link.r));
+      hairQ.setFromEuler(hairE.set(link.p * hairGate, 0, link.r * hairGate));
       link.bone.quaternion.copy(link.rest).multiply(hairQ);
     }
   }
@@ -1586,10 +1636,14 @@ export function createPlayerFigure({
       weights[clip] += (aim[clip] - weights[clip]) * Math.min(1, dt * 10);
       if (actions[clip]) actions[clip].setEffectiveWeight(weights[clip]);
     }
-    if (actions.sit) {
-      weights.sit = (weights.sit || 0) + ((posed === 'sit' ? 1 : 0) - (weights.sit || 0)) * Math.min(1, dt * 5);
-      actions.sit.setEffectiveWeight(weights.sit);
+    // Each held pose fades in and out on its own weight (about half a second
+    // to settle), so rest to sleep to standing is one blend, not three cuts.
+    for (const name of HELD) {
+      if (!actions[name]) continue;
+      weights[name] = (weights[name] || 0) + ((posed === name ? 1 : 0) - (weights[name] || 0)) * Math.min(1, dt * 5);
+      actions[name].setEffectiveWeight(weights[name]);
     }
+    layGear(posed && GROUND.has(posed) && (weights[posed] || 0) > 0.5);
     // The shared phase runs at the weighted rate each clip would need on its
     // own to cover its share of the ground at its own stride. A floor on the
     // speed keeps the first step out of slow motion.
@@ -1666,12 +1720,16 @@ export function createPlayerFigure({
       shadows.cast.visible = false;
       return;
     }
-    shadows.contact.position.set(0, 0.02, 0);
-    shadows.contact.scale.set(width * 1.32, 1, width * 1.45);
+    // Asleep, the patch follows the body down: along the facing axis, the head
+    // to the back, and to the left where sleep.lies on its left side.
+    const k = height / 1.7;
+    const w = THREE.MathUtils.clamp(weights.sleep || 0, 0, 1);
+    shadows.contact.position.set(0.2 * k * w, 0.02, -0.05 * k * w);
+    shadows.contact.scale.set(width * 1.32 + (0.85 * k - width * 1.32) * w, 1, width * 1.45 + (1.8 * k - width * 1.45) * w);
     const dirX = -sun.x;
     const dirZ = -sun.z;
     const length = width + (height / tan) * sun.lift;
-    shadows.cast.visible = sun.lift > 0.001;
+    shadows.cast.visible = sun.lift > 0.001 && w < 0.3;
     shadows.cast.position.set(dirX * (length / 2 - width * 0.35), 0.02, dirZ * (length / 2 - width * 0.35));
     shadows.cast.rotation.set(0, Math.atan2(dirX, dirZ), 0);
     shadows.cast.scale.set(width, 1, length);
@@ -1728,11 +1786,14 @@ export function createPlayerFigure({
     action.play();
   }
 
-  /** A held pose: 'sit' (resting, asleep), 'death' (down and staying down), or null. */
+  /** A held pose: 'rest_ground', 'sleep', 'sit' (a bench), 'death' (down and staying down), or null. */
   function pose(name) {
     if (name === posed || !actions) return;
     if (posed === 'death' && actions.death) actions.death.fadeOut(0.3);
     posed = name;
+    // A ground pose is entered from its first frame, not from wherever its
+    // loop was left, so the head turn and the breath start the same way.
+    if (name && HELD.includes(name) && actions[name] && !(weights[name] > 0.05)) actions[name].time = 0;
     if (name === 'death' && actions.death) {
       actions.death.reset();
       actions.death.timeScale = 1;
@@ -1768,6 +1829,7 @@ export function createPlayerFigure({
     staff: made.weaponName === 'weapon_staff',
     dispose() {
       dropSpeech();
+      layGear(false);
       group.removeFromParent();
       label.material.dispose();
     },

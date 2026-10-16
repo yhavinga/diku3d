@@ -144,6 +144,14 @@
    "duration": 2.375,
    "frames": 57
   },
+  "rest_ground": {
+   "body_gap": 0.0748,
+   "duration": 6.0,
+   "frames": 144,
+   "head_gap": 0.2569,
+   "seat_drop": 0.5508,
+   "seat_gap": -0.0
+  },
   "run": {
    "duration": 0.6666666666666666,
    "frames": 16,
@@ -156,6 +164,14 @@
   "sit": {
    "duration": 5.0,
    "frames": 120
+  },
+  "sleep": {
+   "body_gap": 0.064,
+   "duration": 6.0,
+   "frames": 144,
+   "head_gap": 0.0217,
+   "lie_drop": 0.7178,
+   "lie_gap": -0.0006
   },
   "snort": {
    "duration": 1.4583333333333333,
@@ -361,6 +377,14 @@
    "frames": 96,
    "head_gap": 0.1929
   },
+  "rest_ground": {
+   "body_gap": 0.0653,
+   "duration": 6.0,
+   "frames": 144,
+   "head_gap": 0.2253,
+   "seat_drop": 0.4776,
+   "seat_gap": 0.0
+  },
   "run": {
    "duration": 0.6666666666666666,
    "frames": 16,
@@ -373,6 +397,14 @@
   "sit": {
    "duration": 5.0,
    "frames": 120
+  },
+  "sleep": {
+   "body_gap": 0.068,
+   "duration": 6.0,
+   "frames": 144,
+   "head_gap": 0.1123,
+   "lie_drop": 0.6106,
+   "lie_gap": -0.0017
   },
   "sprint": {
    "duration": 0.4583333333333333,
@@ -574,6 +606,14 @@
    "frames": 96,
    "head_gap": 0.2077
   },
+  "rest_ground": {
+   "body_gap": 0.0923,
+   "duration": 6.0,
+   "frames": 144,
+   "head_gap": 0.2424,
+   "seat_drop": 0.6587,
+   "seat_gap": 0.0
+  },
   "run": {
    "duration": 0.6666666666666666,
    "frames": 16,
@@ -586,6 +626,14 @@
   "sit": {
    "duration": 5.0,
    "frames": 120
+  },
+  "sleep": {
+   "body_gap": 0.1075,
+   "duration": 6.0,
+   "frames": 144,
+   "head_gap": 0.0471,
+   "lie_drop": 0.7374,
+   "lie_gap": -0.0009
   },
   "sprint": {
    "duration": 0.4583333333333333,
@@ -787,6 +835,14 @@
    "frames": 96,
    "head_gap": 0.329
   },
+  "rest_ground": {
+   "body_gap": 0.0594,
+   "duration": 6.0,
+   "frames": 144,
+   "head_gap": 0.4226,
+   "seat_drop": 0.4913,
+   "seat_gap": -0.0
+  },
   "run": {
    "duration": 0.6666666666666666,
    "frames": 16,
@@ -799,6 +855,14 @@
   "sit": {
    "duration": 5.0,
    "frames": 120
+  },
+  "sleep": {
+   "body_gap": 0.1851,
+   "duration": 6.0,
+   "frames": 144,
+   "head_gap": 0.0886,
+   "lie_drop": 0.5017,
+   "lie_gap": -0.0012
   },
   "sprint": {
    "duration": 0.4583333333333333,

@@ -922,7 +922,9 @@ def build_file(fname):
         box_uv(o)
         if o.parent is None:
             rig.bind_groups(arm, o)
-    info = rig.make_all(arm, P=P, extra=_bull.CLIPS if P.get("bull") else ())
+    # The first archetype is the one measured against: the ground clips put a
+    # pelvis on the floor by where its vertices are.
+    info = rig.make_all(arm, P=P, extra=_bull.CLIPS if P.get("bull") else (), ref=meshes[0])
     for o in meshes:
         o.data.name = o.name
         o.data.validate()
