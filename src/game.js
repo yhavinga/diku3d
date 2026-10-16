@@ -1009,6 +1009,12 @@ const AGGRO = 9;        // an aggressive mobile notices you
 const BREAK = 14;       // out this far the fight is over -- this is do_flee
 const MOB_SPEED = 2.6;  // metres a second, closing
 const LEASH = 26;       // how far a mobile will chase before going home
+// How far a sentinel steps from its post to meet a foe: as far as a fight can
+// last and still end in a blow. Past BREAK - MELEE from the post a foe that is
+// out of reach is also out of the sentinel's reach for good, so a longer leash
+// would only move the band a caster is safe in, never close it.
+const SENTRY = BREAK - MELEE;
+const SENTRY_AHEAD = 0.6; // how far on the next step is looked at, for room and leash
 
 /**
  * Presentation beats, in seconds after the pulse that resolved them. Every
@@ -2284,6 +2290,9 @@ export function createGame({
       const mob = slot.instance;
       if (!mob || mob.fighting || !isAwake(mob)) continue;
       if (!(mob.act & ACT_AGGRESSIVE)) continue;
+      // A sentinel walking home from a broken-off fight would take the same
+      // foe up again at once, and never get there.
+      if (slot.sentry && !slot.sentry.there) continue;
       if ((mob.act & ACT_WIMPY) && isAwake(state)) continue;
       if (!canSee(mob, state)) continue;        // hidden: act_move.c's do_hide pays off here
       // DIVERGES: the mud's multi_hit here is from anywhere in the room, and
@@ -2594,6 +2603,8 @@ export function createGame({
         slot.pos.x = figure.at.x; slot.pos.y = figure.at.y; slot.pos.z = figure.at.z;
       }
 
+      if (figure && slot.postYaw === undefined && (slot.proto.act & ACT_SENTINEL)) slot.postYaw = figure.object.rotation.y;
+
       if (slot.travel) {
         const o = slot.order;
         if (o && (o.done || o.failed)) {
@@ -2619,10 +2630,12 @@ export function createGame({
       if (mob && mob.fighting) {
         const foe = mob.fighting;
         const target = isNpc(foe) ? foe.slot.pos : (pcOf(foe) ? pcOf(foe).feet : slot.pos);
-        // ACT_SENTINEL never leaves its room in the mud; here it never leaves
-        // the spot it was reset on, and you have to come to it.
-        if (mob.act & ACT_SENTINEL) order(slot, { kind: 'face', target });
-        else if (dist2(slot.pos, slot.anchor) > LEASH * LEASH) {
+        if ((mob.act & ACT_SENTINEL) && slot.record.shop) {
+          // A keeper stays at his counter whoever comes at him.
+          order(slot, { kind: 'face', target });
+        } else if (mob.act & ACT_SENTINEL) {
+          sentryFight(slot, mob, target, !isNpc(foe), dt);
+        } else if (dist2(slot.pos, slot.anchor) > LEASH * LEASH) {
           order(slot, { kind: 'go', to: slot.anchor });
           if (!figure) step(slot, slot.anchor, MOB_SPEED, 0.4, dt);
         } else {
@@ -2631,6 +2644,8 @@ export function createGame({
           order(slot, { kind: 'chase', target, stop: !isNpc(foe) ? 2.0 : 1.5 });
           if (!figure) step(slot, target, MOB_SPEED, MELEE * 0.68, dt);
         }
+      } else if (slot.sentry) {
+        sentryHome(slot, dt);
       } else if (slot.task) {
         // A spec_fun's errand -- spec_janitor walking to the litter, spec_fido
         // to a corpse, spec_thief sidling up to you -- is an order of its own.
@@ -2657,6 +2672,53 @@ export function createGame({
       }
       settleRoom(slot);
     }
+  }
+
+  /**
+   * A sentinel that is fighting steps out to its foe, but only as far as
+   * SENTRY from its post and never out of its room (ACT_SENTINEL in the mud).
+   * At either limit with the foe still out of reach the fight is over -- else
+   * the foe is safe at the limit's edge, still inside BREAK -- and it goes home.
+   */
+  function sentryFight(slot, mob, target, withPc, dt) {
+    const figure = slot.figure;
+    // Whenever it fights it owes its post a walk home afterwards, however the fight ends.
+    if (slot.sentry) { slot.sentry.age = 0; slot.sentry.there = false; } else slot.sentry = { age: 0, there: false };
+    const dx = target.x - slot.pos.x;
+    const dz = target.z - slot.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const ahead = { x: slot.pos.x + (dx / d) * SENTRY_AHEAD, y: slot.pos.y, z: slot.pos.z + (dz / d) * SENTRY_AHEAD };
+    const room = slot.roomVnum;
+    const blocked = d > SENTRY_AHEAD && (dist2(ahead, slot.anchor) > SENTRY * SENTRY
+      || counter.at(ahead, room) !== room || ways.roomAt(ahead.x, ahead.y, ahead.z) !== room);
+    if (blocked && d > MELEE) {
+      ctx.stopFighting(mob);
+      sentryHome(slot, dt);
+      return;
+    }
+    if (blocked) { order(slot, { kind: 'face', target }); return; }
+    order(slot, { kind: 'chase', target, stop: withPc ? 2.0 : 1.5 });
+    if (!figure) step(slot, target, MOB_SPEED, MELEE * 0.68, dt);
+  }
+
+  /** ...and back to its post afterwards, turned the way it was reset. */
+  function sentryHome(slot, dt) {
+    const s = slot.sentry;
+    s.age += dt;
+    const back = Math.hypot(slot.anchor.x - slot.pos.x, slot.anchor.z - slot.pos.z);
+    // A walk that cannot be finished is given up, like a spec_fun's errand.
+    if (s.age > 30) { slot.sentry = null; return; }
+    if (back > 0.5 && !s.there) {
+      order(slot, { kind: 'go', to: slot.anchor });
+      if (!slot.figure) step(slot, slot.anchor, MOB_SPEED, 0.4, dt);
+      return;
+    }
+    s.there = true;
+    const fig = slot.figure;
+    if (!fig || slot.postYaw === undefined) { slot.sentry = null; return; }
+    order(slot, { kind: 'hold', at: slot.anchor, yaw: slot.postYaw });
+    const err = Math.abs(((fig.object.rotation.y - slot.postYaw + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI);
+    if (err < 0.15) slot.sentry = null;
   }
 
   /**
