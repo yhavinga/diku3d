@@ -1930,6 +1930,70 @@ function archedWall({ cx, cz, axis, u0, u1, t, foot, top, half, spring, rise, se
   return { geo, archY };
 }
 
+/** How far a river bank runs in from the street's edge: 3 m down over 3 m is 45 degrees on average, 57 at the steepest of its curve. */
+const BANK_RUN = 3.0;
+/**
+ * The earth bank of a river cell, along each of its `banks` sides: a height
+ * field, the highest of the sides' profiles at each point, so two banks
+ * meeting at a corner meet as a valley does. Each profile is a cosine --
+ * crest rounded where the street ends, toe rounded where it meets the water.
+ * Upper ground is turf, lower is wet stone. A collider holds the foot.
+ */
+function buildRiverBank({ batcher, chunk, px, pz, bed, y0, banks, ends, rect, addCollider }) {
+  const D = y0 - 0.012 - bed;
+  const profile = (dist) => (dist >= BANK_RUN ? 0 : (D * (1 + Math.cos(Math.PI * Math.max(0, dist) / BANK_RUN))) / 2);
+  const H = (x, z) => {
+    let h = 0;
+    for (const d of banks) {
+      const [dx, , dz] = DIR_STEP[d];
+      h = Math.max(h, profile(HALF - ((x - px) * dx + (z - pz) * dz)));
+    }
+    return h;
+  };
+  const N = 52;
+  const grass = []; const stone = [];
+  const at = (i, j) => { const x = px - HALF + (CELL * i) / N; const z = pz - HALF + (CELL * j) / N; return new THREE.Vector3(x, bed + H(x, z), z); };
+  for (let i = 0; i < N; i++) {
+    for (let j = 0; j < N; j++) {
+      const q = [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)];
+      const mean = (q[0].y + q[1].y + q[2].y + q[3].y) / 4 - bed;
+      if (Math.max(...q.map((v) => v.y)) - bed < 0.012) continue;
+      // Turf above, stone below, the line between them not ruled.
+      const cx = (q[0].x + q[2].x) / 2; const cz = (q[0].z + q[2].z) / 2;
+      const patch = Math.sin(cx * 0.83 + cz * 0.21) * Math.sin(cz * 0.67 - cx * 0.29) + 0.5 * Math.sin((cx - cz) * 0.37 + 1.7);
+      // Wet stone along the waterline, turf above it: a line the eye reads as
+      // the high-water mark, wavering a little.
+      const upper = mean + 0.28 * patch > 0.95;
+      for (const t of [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]) {
+        const n = new THREE.Vector3().crossVectors(new THREE.Vector3().subVectors(t[1], t[0]), new THREE.Vector3().subVectors(t[2], t[0]));
+        (upper ? grass : stone).push(n.y >= 0 ? t : [t[0], t[2], t[1]]);
+      }
+    }
+  }
+  // Where the bank runs into stone, a wall of masonry closes the wedge.
+  const wall = [];
+  const M = 12;
+  for (const { d, l } of ends) {
+    const [dx, , dz] = DIR_STEP[d]; const [lx, , lz] = DIR_STEP[l];
+    const P = (b, y) => new THREE.Vector3(px + dx * b + lx * HALF, y, pz + dz * b + lz * HALF);
+    const ring = [];
+    for (let k = 0; k <= M; k++) { const dist = (BANK_RUN * k) / M; ring.push(P(HALF - dist, bed + profile(dist))); }
+    const foot = P(HALF, bed - 0.3);
+    for (let k = 0; k < M; k++) {
+      const t = [foot, ring[k], ring[k + 1]];
+      const n = new THREE.Vector3().crossVectors(new THREE.Vector3().subVectors(t[1], t[0]), new THREE.Vector3().subVectors(t[2], t[0]));
+      wall.push(n.x * lx + n.z * lz >= 0 ? t : [t[0], t[2], t[1]]);
+    }
+  }
+  if (wall.length) addTris(batcher, chunk, 'stonewall', wall);
+  if (grass.length) addTris(batcher, chunk, 'grass', grass);
+  if (stone.length) addTris(batcher, chunk, 'mossrock', stone);
+  for (const d of banks) {
+    const r = rect(d, -HALF, HALF, HALF - BANK_RUN, HALF);
+    addCollider(r.x0, r.x1, r.z0, r.z1, bed - SLAB, y0 - 0.012);
+  }
+}
+
 /**
  * The river's works, cell by cell (`riverPlan`): its bed and water, a quay
  * up every dry side with a parapet on it, a deck wherever a street crosses,
@@ -1943,6 +2007,15 @@ function buildRiver({ plan, layout, rooms, batcher, instances, chunkOf, addColli
   if (!plan.size) return;
   const was = batcher.indoor;
   batcher.indoor = false;
+  // Which sides of which cells are an earth bank rather than a wall (`buildRiverBank`):
+  // a dry side with nothing of stone to build into it -- not the bridge, the
+  // culvert, the rapids or the steps down. A deck over the water lies over the bank.
+  const cellKey = (level, x, z) => `${level}:${x},${z}`;
+  const dryOf = (c, d) => !c.wet.has(d) && d !== c.out && !(c.rapids >= 0 && (d === c.rapids || d === (c.rapids + 2) % 4));
+  const bankSides = new Map();
+  for (const [key, c] of plan) {
+    bankSides.set(key, [0, 1, 2, 3].filter((d) => dryOf(c, d) && !c.under && c.out < 0 && c.rapids < 0 && c.stair !== d));
+  }
   for (const c of plan.values()) {
     const chunk = chunkOf(c);
     const px = c.x * CELL; const pz = c.z * CELL;
@@ -1995,10 +2068,25 @@ function buildRiver({ plan, layout, rooms, batcher, instances, chunkOf, addColli
       if (c.stair === d) out.push([-LANDING_W / 2, LANDING_W / 2]);
       return out;
     };
+    // A plain bank is earth, not a wall: it falls from the street's edge to the
+    // water at a natural angle, steep enough that nobody climbs it (it is
+    // held by a collider at its toe: the prose says the banks are too steep).
+    // Where a stair, the bridge or the culvert shapes the side, the quay is
+    // still a wall of stone, and a bank that runs into one is closed by a wall.
+    const banks = bankSides.get(cellKey(c.level, c.x, c.z));
+    const ends = [];
+    for (const d of banks) {
+      for (const l of [(d + 1) % 4, (d + 3) % 4]) {
+        if (!c.wet.has(l)) continue;
+        const [lx, , lz] = DIR_STEP[l];
+        const next = bankSides.get(cellKey(c.level, c.x + lx, c.z + lz));
+        if (!next || !next.includes(d)) ends.push({ d, l });
+      }
+    }
     for (let d = 0; d < 4; d++) {
       if (!quayed(d)) continue;
       const [a0, a1] = span(d, QUAY_T);
-      solid(rect(d, a0, a1, HALF - QUAY_T, HALF), bed - SLAB, y0 - 0.012, 'stonewall', { opts: { ao: wallAo(bed) } });
+      if (!banks.includes(d)) solid(rect(d, a0, a1, HALF - QUAY_T, HALF), bed - SLAB, y0 - 0.012, 'stonewall', { opts: { ao: wallAo(bed) } });
       // Nothing to hold back where a room's own wall stands.
       const info = neighbour(d);
       if (info && !info.openAir) continue;
@@ -2013,6 +2101,7 @@ function buildRiver({ plan, layout, rooms, batcher, instances, chunkOf, addColli
         from = Math.max(from, g1);
       }
     }
+    if (banks.length) buildRiverBank({ batcher, chunk, px, pz, bed, y0, banks, ends, rect, addCollider });
     // A corner of dry land between two sides the water goes on through.
     for (let d = 0; d < 4; d++) {
       const e = (d + 1) % 4;
@@ -6061,6 +6150,46 @@ function buildCityFrontage({ batcher, instances, model, chunk, room, cell, pos, 
 // --- polygons with their own UVs ---------------------------------------------
 
 const _ident = new THREE.Matrix4();
+/** How far a surface drops where it is within `r` of an edge, so the edge rolls over instead of cutting: a quarter circle. */
+function rolled(distance, r) {
+  if (distance >= r) return 0;
+  const k = (r - Math.max(0, distance)) / r;
+  return r * (1 - Math.sqrt(Math.max(0, 1 - k * k)));
+}
+
+/**
+ * A low block with a height field for its top and plain sides down to `y0`:
+ * a kerb, a step. `P(lx, lz)` is the world {x, z} of a point of the block's own
+ * frame, `h(lx, lz)` its height over `y0`; rounding and wear are the field's.
+ * World triangles wound outwards from the block's middle, for `addTris`.
+ */
+function roundedBlock(P, y0, lx0, lx1, lz0, lz1, nx, nz, h) {
+  const xs = []; const zs = [];
+  for (let i = 0; i <= nx; i++) xs.push(lx0 + ((lx1 - lx0) * i) / nx);
+  for (let j = 0; j <= nz; j++) zs.push(lz0 + ((lz1 - lz0) * j) / nz);
+  const top = (i, j) => { const q = P(xs[i], zs[j]); return new THREE.Vector3(q.x, y0 + Math.max(0.004, h(xs[i], zs[j])), q.z); };
+  const foot = (i, j) => { const q = P(xs[i], zs[j]); return new THREE.Vector3(q.x, y0, q.z); };
+  const mid = P((lx0 + lx1) / 2, (lz0 + lz1) / 2);
+  const inside = new THREE.Vector3(mid.x, y0 - 1, mid.z);
+  const tris = [];
+  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+    facing(tris, top(i, j), top(i + 1, j), top(i + 1, j + 1), inside);
+    facing(tris, top(i, j), top(i + 1, j + 1), top(i, j + 1), inside);
+  }
+  // The sides, so the middle of the block is the thing they face away from.
+  const inner = new THREE.Vector3(mid.x, y0 + 0.01, mid.z);
+  const wall = (a, b, c, d) => { facing(tris, a, b, c, inner); facing(tris, a, c, d, inner); };
+  for (let i = 0; i < nx; i++) {
+    wall(foot(i, 0), foot(i + 1, 0), top(i + 1, 0), top(i, 0));
+    wall(foot(i, nz), foot(i + 1, nz), top(i + 1, nz), top(i, nz));
+  }
+  for (let j = 0; j < nz; j++) {
+    wall(foot(0, j), foot(0, j + 1), top(0, j + 1), top(0, j));
+    wall(foot(nx, j), foot(nx, j + 1), top(nx, j + 1), top(nx, j));
+  }
+  return tris;
+}
+
 /**
  * Triangles in world space, UVs laid in each face's own plane: across a
  * vertical face along its horizontal, up a roof along its eave and up its
@@ -6257,6 +6386,10 @@ const STRAIGHT = { f: () => ROW_FACE, k: () => 0 };
 // Limewash, as the houses of Colmar and Rothenburg wear it: muted, never
 // saturated -- multiplied into the plaster's own off-white.
 const LIMEWASH = [[1, 0.98, 0.93], [1, 0.9, 0.72], [0.98, 0.86, 0.8], [0.88, 0.93, 0.83], [0.86, 0.9, 0.95], [1, 1, 1], [0.96, 0.92, 0.84]];
+/** Foot of a house front: plinth, door step and gutter stone, in metres. */
+const PLINTH_H = 0.16;
+const STEP_H = 0.08;
+const GUTTER_H = 0.012;
 const DOOR_PAINT = ['doorboard', 'doorboard', 'doorgreen', 'doorred', 'doorblue', 'doorboard'];
 
 function rowFrame(pos, dir) {
@@ -6422,6 +6555,24 @@ function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cel
     {
       const p = pw(0, fc0 + back); const q = pw(1, fc1 + back);
       frontColliders(F, addCollider, y0, y0 + h, p.a, p.o, q.a, q.o, HALF);
+    }
+    // A low rounded kerb along the foot of the front, a worn step before the
+    // door and a gutter stone a pace out: all below the 0.32 m that nav.js and
+    // the player's STEP_UP let stand in the way, so they carry no collider and
+    // no platform. Seated inside the wall's face and short of its ends, so none
+    // of it shares a plane with anything (tools/judge/zfight.js).
+    if (!under) {
+      const fr = front(0);
+      const P = (lx, lz) => fr.on(lx, lz);
+      const half = (fr.len - 0.04) / 2;
+      const nx = Math.max(2, Math.round(fr.len / 0.6));
+      addTris(batcher, chunk, 'stonewall', roundedBlock(P, y0, -half, half, -0.06, 0.1, nx, 4, (lx, lz) => PLINTH_H - rolled(0.1 - lz, 0.06)), { ao: wallAo(y0), tint: [0.86, 0.85, 0.83] });
+      if (door) {
+        const w = 0.9;
+        addTris(batcher, chunk, 'stonewall', roundedBlock(P, y0, -w, w, 0.0, 0.5, 16, 8, (lx, lz) => STEP_H - rolled(0.5 - lz, 0.07) - rolled(w - Math.abs(lx), 0.05)
+          - 0.014 * Math.exp(-((lx / 0.38) ** 2)) * Math.exp(-(((lz - 0.3) / 0.16) ** 2))), { ao: wallAo(y0) });
+      }
+      addTris(batcher, chunk, 'flagstone', roundedBlock(P, y0, -half, half, 0.58, 0.88, nx, 2, (lx, lz) => GUTTER_H - rolled(Math.min(lz - 0.58, 0.88 - lz), 0.012)), { tint: [0.6, 0.6, 0.62] });
     }
 
     // Gable to the street on most of the narrow ones, the way a street of
