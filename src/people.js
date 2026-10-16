@@ -676,10 +676,25 @@ const PLAYER_ARCH = { mage: 'mage', cleric: 'priest', thief: 'rogue', warrior: '
  * that as its base does; what it does not do is swap the garment itself.
  */
 const HERO_ARCH = { mage: 'hero_mage', cleric: 'hero_priest', thief: 'hero_rogue', warrior: 'hero_guard' };
-/** Trims for a mage's robe: gold, silver, copper, teal. */
-const MAGE_ROBES = [0x4a2a7a, 0x1f3f8a, 0x7a1f3f, 0x1f6a52, 0x5a2a6a, 0x2a3a7a];
-const MAGE_TRIMS = [0xb08a3a, 0xc9c2b2, 0xa8643a, 0x3a9a9a];
-const THIEF_CLOTHS = [0x2f5a5a, 0x5a2f44, 0x3f5a2f, 0x6b2f2f, 0x2f3a5a];
+/**
+ * A player's cloth is dyed the way a northern town dyed it: woad blues,
+ * madder and kermes reds, lichen purples, weld yellow, greens of woad over
+ * weld, walnut browns, and undyed linen. Rich is deep, not bright: the
+ * electric blue, the blue-violet and the jade the first heroes wore are
+ * what synthetic dyes give, and a turquoise trim no medieval dye-pot could.
+ */
+const DYE = {
+  woad: 0x2f4a6a, woadDeep: 0x22344f, woadSlate: 0x2e3d4c,
+  madder: 0x8a3524, madderDeep: 0x6a2a20, kermes: 0x6e1c28,
+  lichen: 0x4f2d45, weld: 0xa8862e, forest: 0x2c4632, olive: 0x3d4a2a,
+  walnut: 0x5a3e2a, charcoal: 0x2a2a30, linen: 0xc9c2b2,
+};
+/** A mage's robe; its trims are gold or silver thread, or a madder band. */
+const MAGE_ROBES = [DYE.woadDeep, DYE.lichen, DYE.kermes, DYE.forest, DYE.charcoal, DYE.woad];
+const MAGE_TRIMS = [0xb08a3a, DYE.linen, DYE.madder, 0xa8643a];
+const THIEF_CLOTHS = [DYE.woadSlate, DYE.lichen, DYE.olive, DYE.madderDeep, DYE.walnut];
+/** A warrior's surcoat: a strong dye, with gold at its foot and on the shoulders. */
+const SURCOATS = [DYE.madder, DYE.woad, DYE.weld, DYE.forest, DYE.kermes, DYE.woadDeep];
 const THIEF_CLOAKS = [0x2a3a2a, 0x2a2a3a, 0x3a2a2a, 0x2f3a3a];
 const PLAYER_HAIR = {
   male: {
@@ -696,11 +711,11 @@ const PLAYER_HAIR = {
   },
 };
 /**
- * A cleric's vestments: deep crimson, royal blue, forest green, wine, each
- * trimmed in gold. Ivory was one of them and read as a bathrobe or a nun's
- * habit in every lineup, hooded or not.
+ * A cleric's vestments: kermes crimson, woad blue, forest green, deep
+ * madder, each trimmed in gold. Ivory was one of them and read as a
+ * bathrobe or a nun's habit in every lineup, hooded or not.
  */
-const CLERIC_ROBES = [0x7a1a2a, 0x24408a, 0x2a5a32, 0x561e3e];
+const CLERIC_ROBES = [DYE.kermes, DYE.woad, DYE.forest, DYE.madderDeep];
 const CLERIC_GOLD = 0xb08a3a;
 
 function youngPlayer(out, proto, isFemale) {
@@ -747,7 +762,7 @@ function youngPlayer(out, proto, isFemale) {
     default:
       // The surcoat in a strong dye with gold at its foot and on the
       // shoulders.
-      out.tint.cloth = pick(DYED, ts);
+      out.tint.cloth = pick(SURCOATS, ts);
       out.tint.cloth2 = MAGE_TRIMS[0];
       out.tint.leather = 0x4a3322;
   }
