@@ -27,7 +27,7 @@ const RES = 1;
 /** How far past the outermost Shire cell the hills run before they sink to the plain. */
 const MARGIN = 340;
 /** A walled room's pad: half the footprint, and the apron in front of a door. */
-const PAD_HALF = HALF + 0.5;
+const PAD_HALF = HALF + 1;
 const APRON_LEN = HALF + 4.5;
 const APRON_HALF = 2.9;
 /** How far the pad takes to give way to the hill. */
@@ -97,6 +97,32 @@ function swell(x, z) {
   return 4.8 * smooth(0.2, 0.9, n);
 }
 
+/**
+ * The hills round the village, as in Hobbiton: from `BOWL_START` past the
+ * outermost street or frontage the open ground rises over a run that follows
+ * the hill's own height -- 15 to 30 m, each place a different size, with
+ * crests and saddles -- at 22 degrees on average and a third more at the
+ * steepest, and comes down on the far side. Round at the crest and at the
+ * toe, nowhere vertical. Not near other areas' ground: Midgaard is flat.
+ */
+const BOWL_START = 38;
+const TURF = Math.tan((22 * Math.PI) / 180);
+function bowlHeight(x, z) {
+  const n = 0.62 * noise(x / 130 + 3.3, z / 130 + 7.1, 21) + 0.38 * noise(x / 70 + 9.2, z / 70 + 1.4, 23);
+  return 15 + 15 * smooth(0.2, 0.8, n);
+}
+function bowl(x, z, dRoad, dForeign) {
+  const h = bowlHeight(x, z);
+  const run = h / TURF;
+  const up = smooth(BOWL_START, BOWL_START + run, dRoad);
+  const down = 1 - smooth(BOWL_START + run + 30, BOWL_START + run + 120, dRoad);
+  return h * up * down * smooth(10, 70, dForeign);
+}
+/** Mounds a metre or three high in the open ground that is not a street. */
+function mounds(x, z, dRoad) {
+  return 2.8 * smooth(0.5, 0.88, noise(x / 24 + 1.7, z / 24 + 6.3, 31)) * smooth(7, 17, dRoad);
+}
+
 const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 
 /**
@@ -158,6 +184,9 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
     for (const c of chain) for (let z = c.z * CELL - HALF; z <= c.z * CELL + HALF; z += RES) for (let x = c.x * CELL - HALF; x <= c.x * CELL + HALF; x += RES) stamp(dForeign, x, z);
   }
   chamfer(dRoad, nx, nz); chamfer(dForeign, nx, nz);
+  // The bowl's own distance, rounded: the road network's distance has creases.
+  const dBowl = Float32Array.from(dRoad);
+  for (let k = 0; k < 3; k++) { blur(dBowl, nx, nz, 14, true); blur(dBowl, nx, nz, 14, false); }
 
   // --- the pads -----------------------------------------------------------
   const walled = [...mine, ...under.filter((c) => c.x * CELL > x0 && c.x * CELL < x1 && c.z * CELL > z0 && c.z * CELL < z1)].filter((c) => !openAir(c.room));
@@ -169,10 +198,8 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
     for (const n of knolls) k += n.h * bell(Math.hypot(x - n.x, z - n.z), n.r);
     // Two knolls over each other make one hill, not a taller: a soft ceiling.
     k = CREST * (1 - Math.exp(-k / CREST));
-    let rim = 0;
-    for (const n of rimHills) rim += n.h * bell(Math.hypot(x - n.x, z - n.z), n.r);
-    rim = CREST * (1 - Math.exp(-rim / CREST));
-    return ((k * quiet + rim) + swell(x, z) * (0.55 + 0.45 * quiet)) * smooth(14, 120, dForeign[j * nx + i]) * fade;
+    const fm = smooth(14, 120, dForeign[j * nx + i]) * fade;
+    return (k * quiet + swell(x, z) * (0.55 + 0.45 * quiet) + mounds(x, z, dRoad[j * nx + i])) * fm + bowl(x, z, dBowl[j * nx + i], dForeign[j * nx + i]);
   };
   let road = 0.5;
   let quiet = 1;
@@ -180,7 +207,6 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
     const c = layout.cells.get(vnum);
     return c && c.room.areaFile === areaFile ? [{ x: c.x * CELL + dx, z: c.z * CELL + dz, h, r }] : [];
   });
-  const rimHills = place(RIM);
   const knolls = KNOLLS.flatMap(([vnum, dx, dz, h, r]) => {
     const c = layout.cells.get(vnum);
     return c && c.room.areaFile === areaFile ? [{ x: c.x * CELL + dx, z: c.z * CELL + dz, h, r }] : [];
@@ -199,13 +225,37 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
   });
   // The hill a smial is dug into: behind it, away from its doors, and round
   // its sides, as high as its own dome, so that the dome comes out of the hill.
+  // Smials, and the rooms beside them in a row along the hill, share one
+  // ridge: a long hill behind the row, the domes dug into its face.
+  const ridges = [];
+  const taken = new Set();
+  for (const p of pads) {
+    if (!p.smial || !p.back || taken.has(p)) continue;
+    const [bx, bz] = p.back; const lat = [-bz, bx];
+    const coord = (q) => [(q.x - p.x) * bx + (q.z - p.z) * bz, (q.x - p.x) * lat[0] + (q.z - p.z) * lat[1]];
+    const members = [p]; taken.add(p);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const q of pads) {
+        if (taken.has(q) || q.height === undefined) continue;
+        const [qa, ql] = coord(q);
+        if (Math.abs(qa) > 8) continue;
+        if (members.some((m) => Math.abs(coord(m)[1] - ql) < CELL * 2 + 1)) { members.push(q); taken.add(q); grew = true; }
+      }
+    }
+    const ls = members.map((m) => coord(m)[1]);
+    ridges.push({ p, lo: Math.min(...ls), hi: Math.max(...ls) });
+  }
+  // The hill a smial is dug into: behind it, away from its doors, and round
+  // its sides, as high as its own dome, so that the dome comes out of the hill.
   const bumpOf = (x, z) => {
     let b = 0;
-    for (const p of pads) {
-      if (!p.smial || !p.back) continue;
-      const cx = p.x + p.back[0] * (PAD_HALF + 10); const cz = p.z + p.back[1] * (PAD_HALF + 10);
-      const along = (x - cx) * p.back[0] + (z - cz) * p.back[1];
-      const across = (x - cx) * -p.back[1] + (z - cz) * p.back[0];
+    for (const { p, lo, hi } of ridges) {
+      const [bx, bz] = p.back;
+      const cx = p.x + bx * (PAD_HALF + 10); const cz = p.z + bz * (PAD_HALF + 10);
+      const along = (x - cx) * bx + (z - cz) * bz;
+      const lat = (x - p.x) * -bz + (z - p.z) * bx;
+      const across = Math.max(0, lo - lat, lat - hi);
       const d = Math.hypot(along / (along > 0 ? 20 : 15), across / 26);
       b += 9.5 * (1 - smooth(0, 1, d));
     }
@@ -236,6 +286,7 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
     }
     // Let the pads in.
     const W = new Float32Array(nx * nz); const P = new Float32Array(nx * nz);
+    const INSIDE = new Float32Array(nx * nz).fill(NaN);
     for (const p of pads) {
       const reach = Math.max(PAD_HALF, APRON_LEN) + PAD_BLEND + 1;
       const ia = Math.max(0, Math.floor(I(p.x - reach))); const ib = Math.min(nx - 1, Math.ceil(I(p.x + reach)));
@@ -253,6 +304,8 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
           const behind = p.smial && p.back && x * p.back[0] + z * p.back[1] > PAD_HALF * 0.5;
           const w = 1 - smooth(0, behind ? 3 : PAD_BLEND, d);
           if (w <= 0) continue;
+          // Over a floor the pad is level and nothing else moves it.
+          if (Math.abs(x) <= PAD_HALF && Math.abs(z) <= PAD_HALF) INSIDE[j * nx + i] = p.height;
           W[j * nx + i] += w; P[j * nx + i] += w * p.height;
         }
       }
@@ -260,6 +313,7 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
     for (let k = 0; k < H.length; k++) {
       const w = W[k];
       if (w > 0) H[k] = (H[k] * Math.max(0, 1 - w) + P[k]) / Math.max(1, w);
+      if (!Number.isNaN(INSIDE[k])) H[k] = INSIDE[k];
     }
   }
 
@@ -413,4 +467,20 @@ export function dumpLumps(cx, cz, salt = 3030) {
       return [lo, hi];
     },
   };
+}
+
+/** A running-mean blur of `r` metres each side, along x or along z, in place. */
+function blur(a, nx, nz, r, alongX) {
+  const n = alongX ? nx : nz; const m = alongX ? nz : nx;
+  const line = new Float32Array(n);
+  for (let t = 0; t < m; t++) {
+    for (let u = 0; u < n; u++) line[u] = a[alongX ? t * nx + u : u * nx + t];
+    let sum = 0; let cnt = 0;
+    for (let u = 0; u < Math.min(n, r); u++) { sum += line[u]; cnt++; }
+    for (let u = 0; u < n; u++) {
+      if (u + r < n) { sum += line[u + r]; cnt++; }
+      if (u - r - 1 >= 0) { sum -= line[u - r - 1]; cnt--; }
+      a[alongX ? t * nx + u : u * nx + t] = sum / cnt;
+    }
+  }
 }

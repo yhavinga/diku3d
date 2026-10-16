@@ -575,14 +575,14 @@ function buildDumpGround({ batcher, lumps, y, chunk, platforms }) {
  * only turns on the spot. `instances.add` lifts each by the heap under it.
  */
 const REFUSE_SCATTER = [
-  ['crate', 0.9, 1], ['crate', 0.9, 1], ['barrel', 0.9, 1], ['barrel', 0.9, 1], ['cartwheel', 0.5, 0], ['cartwheel', 0.4, 0],
-  ['sack', 0.8, 0], ['sack', 0.8, 0], ['sack', 0.8, 0], ['bucket', 0.7, 0], ['planks_pile', 0.8, 0], ['bone_pile', 0.9, 0],
-  ['bone_pile', 0.9, 0], ['clutter_bones', 0.8, 0], ['clutter_skull', 0.6, 0], ['herb_pots', 0.6, 0], ['broom', 0.5, 0],
-  ['firewood_pile', 0.8, 0], ['stacked_crates', 0.8, 1], ['rubble_heap', 0.6, 0], ['refuse_heap', 0.7, 0], ['refuse_heap', 0.7, 0],
-  ['rubble_heap', 0.6, 0], ['sack', 0.8, 0], ['barrel', 0.9, 1], ['crate', 0.9, 1],
+  ['crate', 1.0, 1, 0.9], ['crate', 1.0, 1, 0.8], ['barrel', 1.0, 1, 0.9], ['cartwheel', 0.8, 0, 0.45],
+  ['sack', 0.9, 0, 1], ['sack', 0.9, 0, 1], ['sack', 0.9, 0, 0.9], ['bucket', 0.8, 0, 1], ['planks_pile', 0.9, 0, 0.9],
+  ['bone_pile', 0.9, 0, 1], ['clutter_bones', 0.8, 0, 1], ['clutter_skull', 0.6, 0, 1], ['herb_pots', 0.7, 0, 0.9],
+  ['broom', 0.6, 0, 1], ['firewood_pile', 0.9, 0, 0.9], ['stacked_crates', 0.9, 1, 0.8], ['rubble_heap', 0.6, 0, 1.1],
+  ['refuse_heap', 0.7, 0, 1.1], ['rubble_heap', 0.6, 0, 1.1],
 ];
 function scatterRefuse({ instances, lumps, room, pos, chunk, addCollider }) {
-  REFUSE_SCATTER.forEach(([name, sink, solid], i) => {
+  REFUSE_SCATTER.forEach(([name, sink, solid, size], i) => {
     // Away from the track down the middle and from the way in from the east.
     for (let attempt = 0; attempt < 12; attempt++) {
       const u = (hash3(room.vnum, i, attempt, 3101) - 0.5) * 11.4;
@@ -592,12 +592,43 @@ function scatterRefuse({ instances, lumps, room, pos, chunk, addCollider }) {
       // On a heap, or at the foot of one.
       if (lumps.at(x, z) < 0.3) continue;
       const rotY = hash3(room.vnum, i, attempt, 3103) * Math.PI * 2;
-      const scale = 0.8 + hash3(room.vnum, i, attempt, 3104) * 0.4;
-      if (!instances.add(name, { x, y: pos.y - sink * (0.35 + hash3(room.vnum, i, attempt, 3105) * 0.45) * scale, z, rotY, scale }, chunk)) return;
+      const scale = size * (0.85 + hash3(room.vnum, i, attempt, 3104) * 0.3);
+      if (!instances.add(name, { x, y: pos.y - sink * (0.55 + hash3(room.vnum, i, attempt, 3105) * 0.5) * Math.max(scale, 0.8), z, rotY, scale }, chunk)) return;
       if (solid) addCollider(x - 0.5 * scale, x + 0.5 * scale, z - 0.5 * scale, z + 0.5 * scale, pos.y, pos.y + 0.6);
       return;
     }
   });
+}
+
+/**
+ * Clumps of oak and hedge on the bowl's slopes, in the sheep-walk pattern of a
+ * lattice thinned by a noise: sparse, never on the steepest turf, and none
+ * near a street or a room. Each is a model set on the ground it stands on
+ * (`instances.add` lifts it by the relief).
+ */
+function plantBowl({ relief, instances, chunkOf }) {
+  const models = ['tree_oak', 'hedge_clump', 'hedge_clump', 'tree_oak', 'hedge_row'].filter((m) => instances.library.get(m));
+  if (!models.length) return;
+  const b = relief.box; const STEP = 24;
+  for (let gz = Math.ceil(b.z0 / STEP) * STEP; gz < b.z1; gz += STEP) {
+    for (let gx = Math.ceil(b.x0 / STEP) * STEP; gx < b.x1; gx += STEP) {
+      const x = gx + (hash3(gx, gz, 1, 4401) - 0.5) * STEP * 0.8; const z = gz + (hash3(gx, gz, 2, 4401) - 0.5) * STEP * 0.8;
+      const h = relief.at(x, z);
+      if (h < 5) continue;
+      const [sx, sz] = relief.grad(x, z);
+      if (Math.hypot(sx, sz) > 0.5) continue;
+      // Clumpy: a coarse noise says where the woods and hedges grow.
+      if (terrainNoise(x * 0.012, z * 0.012, 4402) < 0.52 || hash3(gx, gz, 3, 4401) > 0.5) continue;
+      const name = models[Math.floor(hash3(gx, gz, 4, 4401) * models.length)];
+      const n = name === 'tree_oak' ? 2 + Math.floor(hash3(gx, gz, 5, 4401) * 3) : 1;
+      for (let k = 0; k < n; k++) {
+        const cx = x + (hash3(gx, gz, 10 + k, 4401) - 0.5) * 9; const cz = z + (hash3(gx, gz, 20 + k, 4401) - 0.5) * 9;
+        const scale = 0.8 + hash3(gx, gz, 30 + k, 4401) * 0.7;
+        instances.add(name, { x: cx, y: 0, z: cz, rotY: hash3(gx, gz, 40 + k, 4401) * 6.28, scale: name === 'hedge_row' ? 1 : scale },
+          chunkOf({ level: 0, x: Math.round(cx / CELL), z: Math.round(cz / CELL) }));
+      }
+    }
+  }
 }
 
 /** Does this (world-space) geometry stand where the ground is not flat? */
@@ -5526,6 +5557,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
 
   // The ground the layout lifted, under it.
   const hills = buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY, instances, winter });
+  if (relief && instances) plantBowl({ relief, instances, chunkOf });
 
   yield 0.288;
   // No tree grows through a room's walls. A forest fir is modelled with its
