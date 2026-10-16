@@ -16,6 +16,7 @@
 
 import { DIR_STEP, REVERSE_DIR } from './are.js';
 import { wayLid, isDrop, LID_FLIGHT, DROP_OPENING } from './shells.js';
+import { topAt, lowAt } from './surface.js';
 
 // build.js's own numbers, repeated for the reason above.
 const CELL = 13;
@@ -162,7 +163,7 @@ export function createNav({ layout, built, world }) {
     const based = mounds.around(cx * CELL, cz * CELL, []);
     const up = based.reduce((m, p) => Math.max(m, p.top - p.base), 0);
     // A river's channel is ground cut below its level (build.js `buildRiver`).
-    const down = based.reduce((m, p) => Math.min(m, p.top - p.base), 0);
+    const down = based.reduce((m, p) => Math.min(m, lowAt(p) - p.base), 0);
     const boxes = solids.around(cx * CELL, cz * CELL, _near).filter((c) => c.y1 > y + BAND_LO + down && c.y0 < y + BAND_HI + up);
     const doors = doorways(level, cx, cz) || [];
     const wet = waters.filter((w) => Math.abs(w.y - y) < 1);
@@ -176,14 +177,16 @@ export function createNav({ layout, built, world }) {
         let low = null; let floored = false;
         for (const p of floors) {
           if (x < p.x0 || x > p.x1 || z < p.z0 || z > p.z1) continue;
+          // A ramp's floor is where the sample is, not its highest point.
+          const top = topAt(p, x, z);
           if (p.base !== undefined) {
             if (Math.abs(p.base - y) <= FLOOR_TOL) {
               ground = true;
-              if (p.top < y - FLOOR_TOL) low = low === null ? p.top : Math.max(low, p.top);
-              else g = Math.max(g, p.top);
+              if (top < y - FLOOR_TOL) low = low === null ? top : Math.max(low, top);
+              else g = Math.max(g, top);
             }
-          } else if (Math.abs(p.top - y) <= FLOOR_TOL) { ground = true; floored = true; }
-          else if (p.top > y + FLOOR_TOL && p.top < y + BAND_HI) raised = true;
+          } else if (Math.abs(top - y) <= FLOOR_TOL) { ground = true; floored = true; }
+          else if (top > y + FLOOR_TOL && top < y + BAND_HI) raised = true;
         }
         // In the channel the ground is its bed; where a deck crosses it, the deck.
         if (low !== null && !floored && g === y) g = low;
@@ -251,12 +254,13 @@ export function createNav({ layout, built, world }) {
     let top = null;
     for (const p of mounds.around(x, z, _mound)) {
       if (x < p.x0 || x > p.x1 || z < p.z0 || z > p.z1 || Math.abs(p.base - base) > FLOOR_TOL) continue;
-      if (top === null || p.top > top) top = p.top;
+      const h = topAt(p, x, z);
+      if (top === null || h > top) top = h;
     }
     // Under a deck over the river's channel, the deck is the ground.
     if (top !== null && top < base) {
       for (const p of platforms.around(x, z, _deck)) {
-        if (p.base === undefined && x >= p.x0 && x <= p.x1 && z >= p.z0 && z <= p.z1 && Math.abs(p.top - base) <= FLOOR_TOL) return null;
+        if (p.base === undefined && x >= p.x0 && x <= p.x1 && z >= p.z0 && z <= p.z1 && Math.abs(topAt(p, x, z) - base) <= FLOOR_TOL) return null;
       }
     }
     return top;

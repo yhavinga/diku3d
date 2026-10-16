@@ -24,6 +24,7 @@
 
 import * as THREE from 'three';
 import { createPlayerFigure } from './actors.js';
+import { topAt } from './surface.js';
 import { POS } from './game.js';
 import { AFF } from './magic.js';
 import { castClipOf } from './people.js';
@@ -271,7 +272,10 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     for (const q of player.platforms.near(p.x, p.z, scratch)) {
       if (q.door && q.door.open) continue;
       if (p.x < q.x0 - CAMERA_R || p.x > q.x1 + CAMERA_R || p.z < q.z0 - CAMERA_R || p.z > q.z1 + CAMERA_R) continue;
-      if (p.y - CAMERA_R < q.top && p.y + CAMERA_R > q.top - SLAB) { lastBlock = `platform top ${q.top.toFixed(2)}`; lastTop = q.top; return true; }
+      // The highest the platform gets within the camera's reach: on a ramp the
+      // slab rises towards the uphill side, and a sphere there touches it first.
+      const top = q.slope ? Math.max(topAt(q, p.x, p.z), topAt(q, p.x + CAMERA_R * Math.sign(q.slope.ax), p.z + CAMERA_R * Math.sign(q.slope.az))) : q.top;
+      if (p.y - CAMERA_R < top && p.y + CAMERA_R > top - SLAB) { lastBlock = `platform top ${top.toFixed(2)}`; lastTop = top; return true; }
     }
     for (const c of player.colliders.near(p.x, p.z, scratch)) {
       if (c.door && (c.whenOpen ? !c.door.open : c.door.open)) continue;

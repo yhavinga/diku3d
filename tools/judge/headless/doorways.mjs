@@ -74,6 +74,8 @@ const load = (f) => import(pathToFileURL(path.join(opt.repo, f)).href);
 const { bootWorld, CELL, LEVEL_H } = await load('server/world.mjs');
 const { DIR_STEP, DIR_SHORT, REVERSE_DIR } = await load('src/are.js');
 const { openAirIn } = await load('src/shells.js');
+// The page's own reading of a platform's height, ramps included.
+const { topAt } = await load('src/surface.js');
 
 const w = bootWorld(opt.repo);
 const openAir = openAirIn(w.world);
@@ -288,7 +290,7 @@ if (opt.page) {
       d.state.paused = true;
       const col = [];
       for (const c of d.built.colliders) if (!c.door) col.push(Math.min(c.x0, c.x1), Math.max(c.x0, c.x1), Math.min(c.z0, c.z1), Math.max(c.z0, c.z1), c.y0, c.y1, c.r || 0);
-      const plat = []; for (const p of d.built.platforms) plat.push(p.x0, p.x1, p.z0, p.z1, p.top);
+      const plat = []; for (const p of d.built.platforms) plat.push(p.x0, p.x1, p.z0, p.z1, p.top, p.slope ? p.slope.top0 : NaN, p.slope ? p.slope.ax : 0, p.slope ? p.slope.az : 0);
       const rooms = {};
       for (const [vnum, info] of d.built.rooms) {
         if (info.unbuilt || d.plan.zoneOf(vnum) !== zone) continue;
@@ -312,14 +314,16 @@ if (opt.page) {
       }
       return m;
     };
-    const P = data.plat, C = data.col; const pb = bucketsOf(P, 5), cb = bucketsOf(C, 7);
+    const P = data.plat, C = data.col; const pb = bucketsOf(P, 8), cb = bucketsOf(C, 7);
+    const PL = new Map();
+    for (let k = 0; k < P.length; k += 8) PL.set(k, { x0: P[k], x1: P[k + 1], z0: P[k + 2], z1: P[k + 3], top: P[k + 4], slope: !Number.isFinite(P[k + 5]) ? undefined : { top0: P[k + 5], ax: P[k + 6], az: P[k + 7] } });
     const near = (m, x, z) => m.get(bucketKey(Math.floor(x / B), Math.floor(z / B))) || [];
     /** player.js groundAt: the highest platform under the body, a step or less above the feet. */
     const groundAt = (x, z, feet, reach = STEP_UP) => {
       let best = -Infinity;
       for (const k of near(pb, x, z)) {
         if (x < P[k] - RADIUS || x > P[k + 1] + RADIUS || z < P[k + 2] - RADIUS || z > P[k + 3] + RADIUS) continue;
-        const top = P[k + 4]; if (top <= feet + reach && top > best) best = top;
+        const top = topAt(PL.get(k), x, z); if (top <= feet + reach && top > best) best = top;
       }
       return best;
     };

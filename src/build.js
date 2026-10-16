@@ -25,6 +25,7 @@ import {
   wayLid, isDrop, LID_FLIGHT, lidOpening, lidCeiling, DROP_OPENING, sunkRivers, RIVER_DROP,
 } from './shells.js';
 import { BESIDE } from './layout.js';
+import { planeOf, inclines, inclineLift, inclineCell, addTerraces } from './surface.js';
 import { placeClutter, ALTAR_MIDDLE, STATUE_OF_ODIN, STATUE_DEPTH } from './clutter.js';
 import { MURAL_REGIONS, faceRegion, bloodRegion } from './textures.js';
 
@@ -3673,6 +3674,8 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   classifyCanopy(world);
   classifyShells(world, (room) => sectorOf(room) !== SECTOR.AIR && !isOpenAir(room));
   const lifts = mounds(world, layout);
+  // The streets between rooms of different height, which are ramps (surface.js).
+  const inclineMap = inclines(layout, lifts, (v) => isOpenAir(world.rooms.get(v)));
   // Ground raised under a building, which nav.js and motion.js stand
   // people on (`platform.base`): see `mounds`.
   const raised = [];
@@ -3816,7 +3819,10 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     const lift = lifts.get(room.vnum) || 0;
     if (lift) {
       pos.y += lift;
-      if (lift > 0) buildPodium({ batcher, chunk: chunkOf(cell), x: pos.x, y: pos.y - lift, z: pos.z, lift, addCollider, addPlatform, raised, steps: true, sides: layout.sides.get(cell.vnum) });
+      // A terrace is a level square, not a building: nothing is built under it,
+      // its streets are the ramps that climb to it.
+      if (lift > 0 && isOpenAir(room)) raised.push({ x0: pos.x - HALF, x1: pos.x + HALF, z0: pos.z - HALF, z1: pos.z + HALF, y: pos.y - lift, lift });
+      else if (lift > 0) buildPodium({ batcher, chunk: chunkOf(cell), x: pos.x, y: pos.y - lift, z: pos.z, lift, addCollider, addPlatform, raised, steps: true, sides: layout.sides.get(cell.vnum) });
     }
     // A room the river runs under (the bridge): `buildRiver` lays its street.
     const bridged = !!river.get(cellKey(cell.level, cell.x, cell.z))?.under;
@@ -4802,24 +4808,40 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     const liftFrom = lifts.get(link.from.vnum) || 0; const liftTo = lifts.get(link.to.vnum) || 0;
     // On one mound, on it; from a mound or out of the river's channel, at
     // the street's own level, and the steps are the mound's or the river's.
+    const ramped = link.path.length > 0 && inclineMap.has(cellKey(link.from.level, link.path[0].x, link.path[0].z));
+    const loLift = Math.min(liftFrom, liftTo); const hiLift = Math.max(liftFrom, liftTo);
+    // Steps between the temple's mound and the square's tier: the street the
+    // steps stand in is level, at the lower room's height.
+    const stepped = !ramped && liftFrom !== liftTo && loLift >= 0 && hiLift > 0 && link.path.length > 0 && link.kind === 'alley';
     buildAlley({
       batcher, instances, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins, groundAt,
-      cellKey, streetCells: openStreet, lift: liftFrom === liftTo ? liftFrom : 0, streetClutter, river: builtApart,
+      cellKey, streetCells: openStreet, lift: liftFrom === liftTo ? liftFrom : stepped ? loLift : 0, streetClutter, river: builtApart,
+      inclineMap, groundY,
     });
     if (leadsNowhere(link, world)) sealStreet({ batcher, instances, link, worldOf, chunkOf, addCollider, layout });
-    if (liftFrom > 0 && liftTo > 0) {
+    if (liftFrom > 0 && liftFrom === liftTo) {
       for (const c of link.path) {
         const at = worldOf({ ...c, level: link.from.level });
         buildPodium({ batcher, chunk: chunkOf({ ...c, level: link.from.level }), x: at.x, y: at.y, z: at.z, lift: liftFrom, addCollider, addPlatform, raised, steps: false });
       }
-    } else if ((liftFrom > 0 || liftTo > 0) && link.path.length && link.kind === 'alley') {
-      // "Huge marble steps lead up to the temple gate."
-      const top = liftFrom ? link.from : link.to;
-      const first = liftFrom ? link.path[0] : link.path[link.path.length - 1];
+    } else if (stepped) {
+      // "Huge marble steps lead up to the temple gate." From the street's own
+      // height, which is the lower room's: the square's tier is a lift too.
+      const top = liftFrom > liftTo ? link.from : link.to;
+      const first = liftFrom > liftTo ? link.path[0] : link.path[link.path.length - 1];
       buildMoundStair({
         batcher, chunk: chunkOf({ ...first, level: top.level }), at: worldOf({ ...first, level: top.level }),
-        dir: dirBetween(first, top), lift: liftFrom || liftTo, addCollider, addPlatform, raised,
+        dir: dirBetween(first, top), lift: hiLift - loLift, yOff: loLift, addCollider, addPlatform, raised,
       });
+      if (loLift > 0) {
+        for (const c of link.path) {
+          const at = worldOf({ ...c, level: link.from.level });
+          raised.push({ x0: at.x - HALF, x1: at.x + HALF, z0: at.z - HALF, z1: at.z + HALF, y: at.y, lift: loLift });
+          const d = dirBetween(c, top);
+          const [ddx, , ddz] = DIR_STEP[d];
+          buildBanks({ batcher, chunk: chunkOf({ ...c, level: link.from.level }), cx: at.x, cz: at.z, dx: ddx, dz: ddz, edge: () => at.y + loLift, groundY });
+        }
+      }
     }
     // The neighborhood's anchor is Wall Road, and its passages into No Man's
     // Land are barricaded.
@@ -6389,7 +6411,7 @@ const LIMEWASH = [[1, 0.98, 0.93], [1, 0.9, 0.72], [0.98, 0.86, 0.8], [0.88, 0.9
 /** Foot of a house front: plinth, door step and gutter stone, in metres. */
 const PLINTH_H = 0.16;
 const STEP_H = 0.08;
-const GUTTER_H = 0.012;
+const GUTTER_H = 0.02;
 const DOOR_PAINT = ['doorboard', 'doorboard', 'doorgreen', 'doorred', 'doorblue', 'doorboard'];
 
 function rowFrame(pos, dir) {
@@ -9363,7 +9385,7 @@ function sealStreet({ batcher, instances, link, worldOf, chunkOf, addCollider, l
  * buildings that fill the cells beside it become the street frontage; between
  * two indoor rooms it gets walls and a ceiling and becomes a corridor.
  */
-function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null, streetCells = null, lift = 0, streetClutter = null, river = null }) {
+function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addCollider, addPlatform, lights, decor, mistCells, cabins = [], groundAt = null, cellKey = null, streetCells = null, lift = 0, streetClutter = null, river = null, inclineMap = null, groundY = 0 }) {
   const enclosed = alleyEnclosed(link);
   batcher.indoor = enclosed;
   const source = isOpenAir(link.from.room) ? link.from.room : link.to.room;
@@ -9439,6 +9461,14 @@ function buildAlley({ batcher, instances = null, link, worldOf, chunkOf, addColl
 
     // A Shire covered way takes a strip of the cell; the rest of it is the
     // field the way crosses, not a thirteen-metre deck of floorboards.
+    // A street between rooms of different height is a ramp: one plane, laid
+    // here, walked on as the plane (`surface.js`), with earth banked against
+    // its open sides.
+    const inc = !enclosed && inclineMap && cellKey ? inclineMap.get(cellKey(level, c.x, c.z)) : null;
+    if (inc) {
+      buildRampCell({ batcher, chunk, inc, floor: mats.floor, addPlatform, groundY });
+      continue;
+    }
     batcher.add(plane(CELL, CELL, 6), passage ? 'grass' : mats.floor, place(pos.x, y, pos.z), {
       chunk, ao: enclosed && !passage ? floorAo(pos.x, pos.z, HALF, HALF) : null, indoor: passage ? false : batcher.indoor,
     });
@@ -9589,9 +9619,74 @@ function mounds(world, layout) {
       }
     }
   }
+  // The square under the temple's steps is the first tier of the hill.
+  addTerraces(world, layout, lifts, (v) => isOpenAir(world.rooms.get(v)), MOUND_LIFT);
   // The river in its channel lies under its level instead (`buildRiver`).
   for (const vnum of sunkRivers(world, layout)) lifts.set(vnum, -RIVER_DROP);
   return lifts;
+}
+
+/**
+ * One cell of an incline (surface.js): its floor as the plane it is, the
+ * platform that is that same plane, and the bank of earth along both of its
+ * sides. Nothing is built under the floor but the ground it stands on, so
+ * the bank is what closes the view under it.
+ */
+function buildRampCell({ batcher, chunk, inc, floor, addPlatform, groundY }) {
+  const base = inc.level * LEVEL_H;
+  const cp = inclineCell(inc, base);
+  const { x0, x1, z0, z1 } = cp.rect;
+  const geo = new THREE.PlaneGeometry(CELL, CELL, 6, 6);
+  geo.rotateX(-Math.PI / 2);
+  const p = geo.attributes.position;
+  const cx = (x0 + x1) / 2; const cz = (z0 + z1) / 2;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i) + cx; const z = p.getZ(i) + cz;
+    p.setXYZ(i, x, cp.slope.top0 + cp.slope.ax * (x - x0) + cp.slope.az * (z - z0), z);
+  }
+  batcher.add(geo, floor, _ident, { chunk });
+  geo.dispose();
+  const plat = addPlatform(x0, x1, z0, z1, cp.top);
+  plat.slope = cp.slope;
+  plat.base = base;
+  buildBanks({ batcher, chunk, cx, cz, dx: inc.dx, dz: inc.dz, edge: (a) => base + inclineLift(inc, cx + a * inc.dx, cz + a * inc.dz), groundY });
+}
+
+/**
+ * Earth banked against the two long sides of a cell of street that stands
+ * above the ground: from the street's edge, crest rounded, it falls at a
+ * natural angle (about 28 degrees on average, a cosine's 40 at the steepest)
+ * and runs out under the turf at its toe. `edge(a)` is the street's height at
+ * `a` metres along the cell from its middle, the way (dx, dz) it travels.
+ */
+function buildBanks({ batcher, chunk, cx, cz, dx, dz, edge, groundY, material = 'grass' }) {
+  const NA = 13; const NW = 8;
+  const tris = [];
+  for (const side of [-1, 1]) {
+    const lat = { x: -dz * side, z: dx * side };
+    const at = (a, w, h) => new THREE.Vector3(cx + dx * a + lat.x * (HALF + w), h, cz + dz * a + lat.z * (HALF + w));
+    const heightOf = (a, w) => {
+      const D = edge(a) - groundY + 0.03;
+      if (D <= 0.02) return groundY - 0.03;
+      const R = D / Math.tan(0.49);
+      const u = Math.min(1, w / R);
+      return edge(a) - D * (1 - Math.cos(Math.PI * u)) / 2;
+    };
+    const wMax = (a) => (edge(a) - groundY + 0.03) / Math.tan(0.49);
+    for (let i = 0; i < NA; i++) {
+      const a0 = -HALF + (CELL * i) / NA; const a1 = -HALF + (CELL * (i + 1)) / NA;
+      for (let j = 0; j < NW; j++) {
+        const ring = (a, k) => at(a, (wMax(a) * k) / NW, heightOf(a, (wMax(a) * k) / NW));
+        const q = [ring(a0, j), ring(a1, j), ring(a1, j + 1), ring(a0, j + 1)];
+        if (q[0].y <= groundY && q[1].y <= groundY && q[2].y <= groundY && q[3].y <= groundY) continue;
+        for (const t of [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]) {
+          const n = new THREE.Vector3().crossVectors(new THREE.Vector3().subVectors(t[1], t[0]), new THREE.Vector3().subVectors(t[2], t[0]));
+          tris.push(n.y >= 0 ? t : [t[0], t[2], t[1]]);
+        }
+      }
+    }
+  }
+  if (tris.length) addTris(batcher, chunk, material, tris);
 }
 
 /** Marble under a raised cell, stepped back twice outside the walls like a temple's base. */
@@ -9625,7 +9720,7 @@ function buildPodium({ batcher, chunk, x, y, z, lift, addCollider, addPlatform, 
  * the raised room: a landing at the top against the cell edge, then treads
  * down away from it, wide as a temple's steps are, between marble cheeks.
  */
-function buildMoundStair({ batcher, chunk, at, dir, lift, addCollider, addPlatform, raised }) {
+function buildMoundStair({ batcher, chunk, at, dir, lift, yOff = 0, addCollider, addPlatform, raised }) {
   const n = Math.round(lift / MOUND_RISE);
   const going = 0.48; const W = 8.6; const landing = 1.8;
   const [dx, , dz] = DIR_STEP[dir];
@@ -9634,8 +9729,9 @@ function buildMoundStair({ batcher, chunk, at, dir, lift, addCollider, addPlatfo
   const slab = (d0, d1, top) => {
     const a = along((d0 + d1) / 2); const len = d1 - d0;
     const w = dx ? len : W; const dd = dx ? W : len;
-    batcher.add(box(w, top, dd, 2, 1, 2), 'marble', place(a.x, at.y + top / 2, a.z), { chunk, ao: () => 0.92 });
-    addPlatform(a.x - w / 2, a.x + w / 2, a.z - dd / 2, a.z + dd / 2, at.y + top);
+    // Down to the ground the flight stands on, under the street's own height.
+    batcher.add(box(w, top + yOff, dd, 2, 1, 2), 'marble', place(a.x, at.y + (top + yOff) / 2, a.z), { chunk, ao: () => 0.92 });
+    addPlatform(a.x - w / 2, a.x + w / 2, a.z - dd / 2, a.z + dd / 2, at.y + yOff + top);
   };
   slab(HALF - landing, HALF, lift);
   for (let i = 0; i < n - 1; i++) {
@@ -9653,14 +9749,14 @@ function buildMoundStair({ batcher, chunk, at, dir, lift, addCollider, addPlatfo
       const cx = a.x + (dx ? 0 : s * (W / 2 + 0.3)); const cz = a.z + (dz ? 0 : s * (W / 2 + 0.3));
       const len = d1 - d0;
       const w = dx ? len : 0.6; const dd = dx ? 0.6 : len;
-      batcher.add(box(w, top, dd), 'marble', place(cx, at.y + top / 2, cz), { chunk, ao: () => 0.9 });
-      addCollider(cx - w / 2, cx + w / 2, cz - dd / 2, cz + dd / 2, at.y, at.y + top);
+      batcher.add(box(w, top, dd), 'marble', place(cx, at.y + yOff + top / 2, cz), { chunk, ao: () => 0.9 });
+      addCollider(cx - w / 2, cx + w / 2, cz - dd / 2, cz + dd / 2, at.y + yOff, at.y + yOff + top);
     }
   }
   const a = along((foot + HALF) / 2); const len = HALF - foot;
   raised.push({
     x0: a.x - (dx ? len / 2 : W / 2), x1: a.x + (dx ? len / 2 : W / 2),
-    z0: a.z - (dz ? len / 2 : W / 2), z1: a.z + (dz ? len / 2 : W / 2), y: at.y, lift,
+    z0: a.z - (dz ? len / 2 : W / 2), z1: a.z + (dz ? len / 2 : W / 2), y: at.y, lift: lift + yOff,
   });
 }
 

@@ -34,6 +34,7 @@ import { planZones, layoutZone, HOME_AREAS } from '../src/zones.js';
 import { createNav } from '../src/nav.js';
 import { readShell, shellAttrs, openAirIn, wayLid, isDrop, shaftsOf, shaftAt, sunkRivers, RIVER_DROP } from '../src/shells.js';
 import { AFF } from '../src/rules/handler.js';
+import { addTerraces, inclines, inclineLift } from '../src/surface.js';
 
 /** build.js's grid, as nav.js and game-check.mjs repeat it. */
 export const CELL = 13;
@@ -117,6 +118,10 @@ export function bootWorld(root, { log = () => {} } = {}) {
   const liftAt = (x, y, z) => {
     const zone = zoneAtX(x);
     if (!zone) return 0;
+    // On a street that climbs to a terrace the floor is a plane (surface.js).
+    const level = Math.round(y / LEVEL_H);
+    const inc = (zone.inclines ||= inclines(zone.layout, lifts, (v) => openAir(world.rooms.get(v)))).get(`${level}:${Math.round((x - zone.offset) / CELL)},${Math.round(z / CELL)}`);
+    if (inc) return inclineLift(inc, x - zone.offset, z);
     const vnum = navOf(zone).roomAt(x - zone.offset, y, z);
     return lifts.get(vnum) || 0;
   };
@@ -402,6 +407,9 @@ function mounds(world, zones) {
         }
       }
     }
+    // Out of doors by the same words build.js reads, not by the sector.
+    const outOfDoors = openAirIn(world);
+    addTerraces(world, layout, lifts, (v) => outOfDoors(world.rooms.get(v)), MOUND_LIFT);
     // The river in its channel lies under its level instead (shells.js
     // `sunkRivers`), as build.js lays it.
     for (const vnum of sunkRivers(world, layout)) lifts.set(vnum, -RIVER_DROP);

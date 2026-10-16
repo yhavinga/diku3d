@@ -8,6 +8,7 @@
 
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { topAt } from './surface.js';
 
 const EYE = 1.72;
 const RADIUS = 0.42;
@@ -352,8 +353,9 @@ export class Player {
       // A shut lid is floor; an open one is a hole.
       if (p.door && p.door.open) continue;
       if (x < p.x0 - RADIUS || x > p.x1 + RADIUS || z < p.z0 - RADIUS || z > p.z1 + RADIUS) continue;
-      if (p.top > feetY + STEP_UP) continue;
-      if (p.top > best) best = p.top;
+      const top = topAt(p, x, z);
+      if (top > feetY + STEP_UP) continue;
+      if (top > best) best = top;
     }
     return best;
   }

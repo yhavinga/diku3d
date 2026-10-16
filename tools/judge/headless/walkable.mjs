@@ -83,6 +83,8 @@ for (let i = 0; i < args.length; i++) {
 if (!opt.repo) throw new Error('walkable: --repo <the diku3d checkout> is needed, for the server code');
 const { bootWorld, CELL, LEVEL_H } = await import(pathToFileURL(path.join(opt.repo, 'server/world.mjs')).href);
 const { EX_ISDOOR, EX_CLOSED, EX_LOCKED, ACT_SENTINEL, ACT_AGGRESSIVE } = await import(pathToFileURL(path.join(opt.repo, 'src/are.js')).href);
+// The page's own reading of a platform's height, ramps included.
+const { topAt } = await import(pathToFileURL(path.join(opt.repo, 'src/surface.js')).href);
 
 // player.js's body.
 const RADIUS = 0.42, STEP_UP = 0.62, HEIGHT = 1.8, EYE = 1.72, GRAVITY = 24, JUMP = 7.4;
@@ -204,7 +206,7 @@ for (const zoneId of zoneIds) {
       if (keep) col.push(c.x0, c.x1, c.z0, c.z1, c.y0, c.y1, c.r || 0);
     }
     const plat = [];
-    for (const p of d.built.platforms) if (!p.door || shut) plat.push(p.x0, p.x1, p.z0, p.z1, p.top);
+    for (const p of d.built.platforms) if (!p.door || shut) plat.push(p.x0, p.x1, p.z0, p.z1, p.top, p.slope ? p.slope.top0 : NaN, p.slope ? p.slope.ax : 0, p.slope ? p.slope.az : 0);
     // The page keeps a lid's portal only while the lid is open; here every
     // lid is open or every lid is shut.
     const portals = [...d.built.portals.filter((p) => !p.hatch), ...(shut ? [] : d.built.hatchPortals || [])]
@@ -240,14 +242,17 @@ for (const zoneId of zoneIds) {
     return m;
   };
   const P = data.plat, C = data.col;
-  const pb = bucketsOf(P, 5), cb = bucketsOf(C, 7);
+  const pb = bucketsOf(P, 8), cb = bucketsOf(C, 7);
+  // A platform as the page holds it (surface.js `topAt` reads it), by its offset in P.
+  const PL = new Map();
+  for (let k = 0; k < P.length; k += 8) PL.set(k, { x0: P[k], x1: P[k + 1], z0: P[k + 2], z1: P[k + 3], top: P[k + 4], slope: !Number.isFinite(P[k + 5]) ? undefined : { top0: P[k + 5], ax: P[k + 6], az: P[k + 7] } });
   const near = (m, x, z) => m.get(bucketKey(Math.floor(x / B), Math.floor(z / B))) || [];
   /** player.js groundAt: the highest platform under (x, z), a body's radius round, a step or less above the feet. */
   const groundAt = (x, z, feet, reach = STEP_UP) => {
     let best = -Infinity;
     for (const k of near(pb, x, z)) {
       if (x < P[k] - RADIUS || x > P[k + 1] + RADIUS || z < P[k + 2] - RADIUS || z > P[k + 3] + RADIUS) continue;
-      const top = P[k + 4];
+      const top = topAt(PL.get(k), x, z);
       if (top <= feet + reach && top > best) best = top;
     }
     return best;

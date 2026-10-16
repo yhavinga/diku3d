@@ -286,6 +286,8 @@ async function main() {
   if (!opt.repo) throw new Error('roomcount: --repo <the diku3d checkout> is needed');
   const mod = (p) => import(pathToFileURL(path.join(opt.repo, p)).href);
   const { bootWorld, CELL, LEVEL_H } = await mod('server/world.mjs');
+  // The page's own reading of a platform's height, ramps included.
+  const { topAt } = await mod('src/surface.js');
   const makeReference = await loadReference(opt.repo);
   const RULES = opt.rules.split(',');
   let gameCounter = null;
@@ -327,7 +329,7 @@ async function main() {
     const file = opt.geo && path.join(opt.geo, `geo-${zoneId}.json`);
     if (file && fs.existsSync(file)) {
       const geo = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (geo.format !== 2) throw new Error(`roomcount: ${file} was written before the lids (format ${geo.format}); point --geo at an empty directory`);
+      if (geo.format !== 3) throw new Error(`roomcount: ${file} was written before the ramps (format ${geo.format}); point --geo at an empty directory`);
       return geo;
     }
     const drawn = await drawZone(zoneId);
@@ -347,7 +349,7 @@ async function main() {
       }
       // A shut lid's floor is ground only while it is shut; its portal exists only while it is open.
       const plat = []; const platShut = [];
-      for (const p of d.built.platforms) (p.door ? platShut : plat).push(p.x0, p.x1, p.z0, p.z1, p.top);
+      for (const p of d.built.platforms) (p.door ? platShut : plat).push(p.x0, p.x1, p.z0, p.z1, p.top, p.slope ? p.slope.top0 : NaN, p.slope ? p.slope.ax : 0, p.slope ? p.slope.az : 0);
       const portals = d.built.portals.filter((p) => !p.hatch).map((p) => [p.x, p.y, p.z, p.radius]);
       const hatchPortals = (d.built.hatchPortals || []).map((p) => [p.x, p.y, p.z, p.radius]);
       const rooms = [];
@@ -356,7 +358,7 @@ async function main() {
         const arrive = own && !info.unbuilt ? d.player.resolvePoint(info.center.x, info.center.z, info.center.y) : [info.center.x, info.center.z];
         rooms.push({ vnum, own, unbuilt: !!info.unbuilt, center: [info.center.x, info.center.y, info.center.z], arrive });
       }
-      return { format: 2, col, doors, plat, platShut, portals, hatchPortals, rooms, bounds: d.layout.bounds };
+      return { format: 3, col, doors, plat, platShut, portals, hatchPortals, rooms, bounds: d.layout.bounds };
     });
     if (file) { fs.mkdirSync(opt.geo, { recursive: true }); fs.writeFileSync(file, JSON.stringify(geo)); }
     return geo;
@@ -382,13 +384,15 @@ async function main() {
       }
       return m;
     };
-    const pb = bucketsOf(P, 5), cb = bucketsOf(C, 7);
+    const pb = bucketsOf(P, 8), cb = bucketsOf(C, 7);
+    const PL = new Map();
+    for (let k = 0; k < P.length; k += 8) PL.set(k, { x0: P[k], x1: P[k + 1], z0: P[k + 2], z1: P[k + 3], top: P[k + 4], slope: !Number.isFinite(P[k + 5]) ? undefined : { top0: P[k + 5], ax: P[k + 6], az: P[k + 7] } });
     const near = (m, x, z) => m.get(bk(Math.floor(x / B), Math.floor(z / B))) || [];
     const groundAt = (x, z, feet, reach = STEP_UP) => {
       let best = -Infinity;
       for (const k of near(pb, x, z)) {
         if (x < P[k] - RADIUS || x > P[k + 1] + RADIUS || z < P[k + 2] - RADIUS || z > P[k + 3] + RADIUS) continue;
-        const top = P[k + 4]; if (top <= feet + reach && top > best) best = top;
+        const top = topAt(PL.get(k), x, z); if (top <= feet + reach && top > best) best = top;
       }
       return best;
     };

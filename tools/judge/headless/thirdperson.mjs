@@ -44,6 +44,8 @@ const PLACES = [
   { name: 'clerics', vnum: 3004, offsets: [[3.5, 0], [-3.5, 0], [0, 3.5], [0, -3.5], [0, 0]] },
   { name: 'sewer', vnum: 7001, offsets: [[2, 0], [-2, 0], [0, 2], [0, -2], [0, 0]] },
   { name: 'street', key: 'street', offsets: [[0, 0], [1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]] },
+  // The street up to the Temple Square: a ramp, 2.6 degrees (surface.js).
+  { name: 'ramp', vnum: 3014, offsets: [[0, -9], [0, -13], [0, -17], [0, -21], [3, -13]] },
   { name: 'market', vnum: 3014, offsets: [[3.5, 0], [-3.5, 0], [0, 3.5], [0, -3.5], [0, 0]] },
   { name: 'temple-night', vnum: 3001, time: 'night', offsets: [[3.5, 0], [-3.5, 0], [0, 0]] },
   { name: 'boarbar-night', vnum: 3007, time: 'night', offsets: [[3.5, 0], [-3.5, 0], [0, 0]] },
@@ -84,6 +86,8 @@ await page.evaluate(() => {
 // Everything below runs in the page, one place at a time.
 const sweepPlace = async ({ place, headings, pitches, frame, limits }) => {
   const THREE = await import('three');
+  // The page's own reading of a platform's height, ramps included.
+  const { topAt } = await import('/src/surface.js');
   const d = window.diku;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const frames = (n) => new Promise((r) => { let i = 0; const s = () => (++i >= n ? r() : requestAnimationFrame(s)); requestAnimationFrame(s); });
@@ -158,7 +162,8 @@ const sweepPlace = async ({ place, headings, pitches, frame, limits }) => {
         for (const q of d.player.platforms.near(cam.x, cam.z, [])) {
           if (q.door && q.door.open) continue;
           if (cam.x < q.x0 || cam.x > q.x1 || cam.z < q.z0 || cam.z > q.z1) continue;
-          if (cam.y < q.top && cam.y > q.top - 0.45) why.push({ platform: +(q.top - c.y).toFixed(2) });
+          const top = topAt(q, cam.x, cam.z);
+          if (cam.y < top && cam.y > top - 0.45) why.push({ platform: +(top - c.y).toFixed(2) });
         }
         if (why.length) { res.inside++; res.fails.push({ kind: 'inside', ...at, arm: +dist.toFixed(2), cam: [+(cam.x - c.x).toFixed(2), +(cam.y - c.y).toFixed(2), +(cam.z - c.z).toFixed(2)], blockedAt: d.view.state.blockedAt, why }); }
         // 3. The figure, in the composited frame.
