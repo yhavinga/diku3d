@@ -4,11 +4,14 @@
  *  - room music: a tavern, a temple, a bard's table play while you stand in
  *    them -- a piece, then a few minutes' quiet, then another;
  *  - an area piece: every several minutes in play, one short piece chosen by
- *    the .are file, fading in under the ambience and out again.
+ *    the .are file, fading in under the ambience and out again;
+ *  - a fight: while the player is fighting, a looped piece (a heavier one for a
+ *    strong foe) takes over from whatever plays, and a few seconds after the
+ *    last blow gives the place's own music back.
  * What plays where is in soundmap.js; this is the player. Clock is the audio
  * clock, so a suspended context (title before the first click) does not run it.
  */
-import { roomMusicFor, areaMusicFor, TITLE_MUSIC } from './soundmap.js';
+import { roomMusicFor, areaMusicFor, TITLE_MUSIC, FIGHT_MUSIC, FIGHT_GRACE } from './soundmap.js';
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const FIRST_AREA_PIECE = [150, 270];    // seconds of play before the first one
@@ -30,18 +33,23 @@ export class Music {
     this.areaDue = null;        // set when the game begins
     this.title = false;
     this.titleDue = 0;
+    this.fightWant = null;      // 'fight' | 'boss' | null, set every frame by audio.js
+    this.fightOver = null;      // audio-clock time the grace after the last blow runs out
+    this.fightStarting = null;  // clip id being loaded, so a frame does not ask twice
+    this.fightRetry = 0;
     this.requested = 0;         // bumped by every play(), so a late decode can be dropped
   }
 
   // ---------------------------------------------------------------- play ----
 
-  async play(id, kind, { fadeIn = 3, level = 1 } = {}) {
+  async play(id, kind, { fadeIn = 3, level = 1, loop = false } = {}) {
     if (!this.enabled || this.current) return false;
     const ticket = ++this.requested;
     const buffer = await this.audio.clips.load(id);
     if (!buffer || ticket !== this.requested || this.current || !this.enabled) return false;
     const source = this.ctx.createBufferSource();
     source.buffer = buffer;
+    source.loop = loop;
     const gain = this.ctx.createGain();
     const now = this.ctx.currentTime;
     gain.gain.setValueAtTime(0.0001, now);
@@ -79,6 +87,43 @@ export class Music {
       if (cur.kind === 'area') this.areaDue = now + rand(...BETWEEN_AREA_PIECES);
       if (cur.kind === 'title') this.titleDue = now + rand(14, 24);
     }
+  }
+
+  // --------------------------------------------------------------- fights ----
+
+  /** The pieces are big; fetched once the game begins so the first blow is not met with silence. */
+  preloadFight() {
+    for (const id of Object.values(FIGHT_MUSIC)) this.audio.clips.load(id);
+  }
+
+  setFight(kind) { this.fightWant = kind; }
+
+  /** True while a fight owns the music (it has taken over, is loading, or is in its grace). */
+  updateFight(now) {
+    const id = this.fightWant && FIGHT_MUSIC[this.fightWant];
+    const cur = this.current;
+    if (id) {
+      this.fightOver = null;
+      if (cur && cur.kind === 'fight' && cur.id === id) return true;
+      if (this.fightStarting === id) return true;
+      if (now < this.fightRetry) return false; // the piece would not play (missing file): the synth has no fight music, and no retry per frame
+      // Crossfade: whatever plays (a calm piece, or the other fight piece) dies away under the new one.
+      if (cur) this.stop(cur.kind === 'fight' ? 2 : 1.5);
+      this.fightStarting = id;
+      this.play(id, 'fight', { fadeIn: 1.5, level: 0.9, loop: true }).then((ok) => { if (!ok) this.fightRetry = this.ctx.currentTime + 15; }).finally(() => { this.fightStarting = null; });
+      return true;
+    }
+    if (cur && cur.kind === 'fight') {
+      if (this.fightOver === null) this.fightOver = now + FIGHT_GRACE;
+      if (now < this.fightOver) return true;
+      this.fightOver = null;
+      this.stop(5);
+      // The place's own music comes back rather than waiting out the minutes between pieces.
+      if (this.room) this.roomDue = now + 2;
+      else this.areaDue = now + 2;
+      return false;
+    }
+    return !!this.fightStarting;
   }
 
   // --------------------------------------------------------------- title ----
@@ -119,6 +164,7 @@ export class Music {
       if (!this.current && now >= this.titleDue) this.play(TITLE_MUSIC, 'title', { fadeIn: 4, level: 1.1 });
       return;
     }
+    if (this.updateFight(now)) return;
     if (this.current && this.current.kind === 'area' && this.room) this.stop(4); // walked into a tavern
     if (this.current) return;
     if (this.room && now >= this.roomDue) {
@@ -141,6 +187,7 @@ export class Music {
     return {
       enabled: this.enabled,
       playing: this.current && { id: this.current.id, kind: this.current.kind, gain: +this.current.gain.gain.value.toFixed(3) },
+      fight: this.fightWant,
       room: this.room && this.room.id,
       roomInSeconds: this.room ? Math.round(this.roomDue - now) : null,
       areaInSeconds: this.areaDue === null ? null : Math.round(this.areaDue - now),

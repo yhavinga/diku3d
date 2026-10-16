@@ -275,6 +275,8 @@ function post(clip, rawFile) {
   if (clip.kind === 'footstep' || clip.kind === 'sfx') pcm = trim(pcm, p.trimDb ?? -48);
   // Speech: the API pads both ends; cut to the words and close them with a short fade so nothing clicks.
   if (clip.kind === 'voice') pcm = fade(trim(pcm, p.trimDb ?? -45, 0.04), 0.01, 0.04);
+  // The music API ends every piece with a fade-out; a loop cut there would dip, so drop it first.
+  if (p.cutTail) pcm = pcm.slice(0, pcm.length - Math.round(p.cutTail * SR) * CH);
   if (clip.loop) pcm = loopify(pcm, p.crossfade ?? 1.5);
   else if (clip.kind === 'music') pcm = fade(trim(pcm, -55, 0.02), p.fadeIn ?? 0.05, p.fadeOut ?? 2.5);
   let steps = null;

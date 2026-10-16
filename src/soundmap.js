@@ -54,6 +54,9 @@ export const SOUNDS = {
   death_human: { clips: ['cmb_death_human', 'cmb_death_human_b'], gain: 0.8 },
   death_beast: { clips: ['cmb_death_beast'], gain: 0.8 },
   death_small: { clips: ['cmb_death_small'], gain: 0.7 },
+  death_minotaur: { clips: ['cr_minotaur_death'], gain: 0.9 },
+  death_troll: { clips: ['cr_troll_death'], gain: 0.9 },
+  death_dragon: { clips: ['cr_dragon_death'], gain: 0.95 },
   bodyfall: { clips: ['cmb_bodyfall'], gain: 0.9 },
   pain: { clips: ['cmb_pain'], gain: 0.7 },
   levelup: { clips: ['ui_levelup'], gain: 0.55 },
@@ -102,12 +105,16 @@ export const PRELOAD = Object.keys(SOUNDS).filter((name) => name !== 'thunder');
  * neighbouring prose to mistake it for). First match wins.
  *   idle   clips for a call now and then while it is within `reach` metres
  *   fight  clips while it is fighting; `death` the sound it makes dying
+ *   roar   clips for the moment it takes up a fight, and when a blow takes a
+ *          good part of its strength; `fightGain`/`fightRate` replace gain and
+ *          rate for fight and roar (a minotaur's idle call is a cow pitched down,
+ *          its bellow is not)
  *   night  only after dark; `rate` pitch range (a lizard is a small snake)
  * Silent on purpose: rabbits, worms, slimes, fish.
  */
 export const CREATURES = [
   { id: 'baby dragon', re: /\b(hatchling|baby|young|pet|fairy)\b.*\bdragon\b|\bdragon\b.*\b(hatchling|baby|pet)\b/, idle: ['cr_cat'], rate: [1.5, 1.8], gain: 0.5, every: [14, 40], reach: 12, death: 'death_small' },
-  { id: 'dragon', re: /\b(dragon|wyrm|wyvern|hydra)\b/, idle: ['cr_dragon'], fight: ['cr_dragon'], gain: 0.8, every: [30, 80], reach: 30, death: 'death_beast' },
+  { id: 'dragon', re: /\b(dragon|wyrm|wyvern|hydra)\b/, idle: ['cr_dragon'], fight: ['cr_dragon'], roar: ['cr_dragon'], gain: 0.8, every: [30, 80], reach: 40, death: 'death_dragon' },
   { id: 'spider', re: /\b(spider|arachnos|arachnid|tarantula)\b/, idle: ['cr_spider'], fight: ['cr_spider'], gain: 0.55, every: [15, 50], reach: 14, death: 'death_small' },
   { id: 'wolf', re: /\b(wolf|wolves|werewolf|wargs?)\b/, idle: ['cr_wolf'], night: true, fight: ['cr_dog_growl'], gain: 0.7, every: [25, 70], reach: 45, rate: [0.9, 1.05], death: 'death_beast' },
   { id: 'dog', re: /\b(dog|hound|fido|beagle|cooshee|pit ?bull|puppy|rottweiler|doberman|mastiff)\b/, idle: ['cr_dog'], fight: ['cr_dog_growl', 'cr_dog'], gain: 0.7, every: [12, 40], reach: 20, death: 'death_beast' },
@@ -120,7 +127,9 @@ export const CREATURES = [
   // No harpy's cry was recorded: a bat's screech, slowed, until one is.
   { id: 'harpy', re: /\bharp(y|ies)\b/, idle: ['cr_bat'], fight: ['cr_bat'], rate: [0.5, 0.6], gain: 0.6, every: [15, 45], reach: 18, death: 'death_small' },
   // A golem has no breath to make a sound with: silent but for its blows.
-  { id: 'minotaur', re: /\bminotaurs?\b/, idle: ['cr_cow'], fight: ['cr_beast'], rate: [0.62, 0.72], gain: 0.6, every: [30, 90], reach: 18, death: 'death_beast' },
+  { id: 'minotaur', re: /\bminotaurs?\b/, idle: ['cr_cow'], fight: ['cr_minotaur'], roar: ['cr_minotaur'], fightGain: 0.9, fightRate: [0.95, 1.05], rate: [0.62, 0.72], gain: 0.6, every: [30, 90], reach: 26, death: 'death_minotaur' },
+  // Ogres and trolls are monsters whatever their trade: a "shaman ogre" roars.
+  { id: 'ogre', re: /^(?!.*\b(baby|small|young)\b).*\b(ogres?|trolls?)\b/, idle: [], fight: ['cr_troll'], roar: ['cr_troll'], fightGain: 0.85, fightRate: [0.92, 1.05], gain: 0.7, every: [30, 90], reach: 26, death: 'death_troll' },
   { id: 'golem', re: /\bgolems?\b/, idle: [], gain: 0.7, every: [60, 120], reach: 16, death: 'death_beast' },
   { id: 'lamia', re: /\blamias?\b/, idle: [], fight: ['cr_dog_growl'], rate: [0.72, 0.82], gain: 0.6, every: [20, 60], reach: 14, death: 'death_beast' },
   { id: 'horse', re: /\b(horse|pegasus|pony|mule|donkey|stallion|mare|unicorn)\b/, idle: ['cr_horse'], gain: 0.7, every: [15, 50], reach: 22, death: 'death_beast' },
@@ -143,8 +152,8 @@ const creatureCache = new Map();
 /** The voice rule for a mobile's words, or null. Cached on the words. */
 export function creatureOf(words) {
   const key = (words || '').toLowerCase();
-  // A minotaur is a person with a bull's throat: its bellow, whatever its trade.
-  if (!creatureCache.has(key)) creatureCache.set(key, (PERSON.test(key) && !/\bminotaurs?\b/.test(key) ? null : CREATURES.find((c) => c.re.test(key))) || null);
+  // A minotaur is a person with a bull's throat, an ogre or troll one with a monster's: their voice, whatever their trade.
+  if (!creatureCache.has(key)) creatureCache.set(key, (PERSON.test(key) && !/\b(minotaurs?|ogres?|trolls?)\b/.test(key) ? null : CREATURES.find((c) => c.re.test(key))) || null);
   return creatureCache.get(key);
 }
 
@@ -203,6 +212,8 @@ const TAVERN = /\b(taverns?|inn|pub|taproom|alehouse|ale|bar|boar|saloon|bard'?s
 const TEMPLE = /\b(temples?|chapel|church|altar|shrine|cathedral|sanctum|sanctuary|monastery|abbey|cloister)\b/i;
 const MARKET = /\b(market|bazaar|marketplace)\b/i;
 const HALL = /\b(hall|throne|keep|castle|armou?ry|barracks|guardroom|dining|great|library|vault|dungeon|gatehouse)\b/i;
+// The frigid wastes, the cliff and the city of Mahn-Tor; the same area's ogre village and forest are not frozen.
+const FROZEN = /\b(frigid|cliffside|Mahn-Tor)\b/i;
 const CAVE = /\b(caves?|caverns?|catacombs?|crypts?|tombs?|tunnels?|mines?|grotto|underground|dungeon|passage|sewer|drain)\b/i;
 
 /**
@@ -214,6 +225,9 @@ export const AMBIENCE = [
   { id: 'sewer', when: (p) => p.areaFile === 'sewer.are' || /sewer/i.test(p.name) || p.floor === 'sludge' || p.floor === 'sewerflag', beds: ['amb_sewer'] },
   { id: 'temple', when: (p) => !p.openAir && TEMPLE.test(p.name), beds: ['amb_temple'] },
   { id: 'cave', when: (p) => !p.openAir && (p.cave || CAVE.test(p.name) || (inAreas(...UNDERGROUND_AREAS)(p) && !p.outdoor)), beds: ['amb_cave', 'amb_cave_b'], gain: 0.9 },
+  // Mahn-Tor is a frozen city on a cliff: its wastes and streets have their own wind, not the town's bustle or a mild mountain's.
+  { id: 'frozen cliff', when: (p) => p.openAir && p.areaFile === 'mahntor.are' && p.sector === S.MOUNTAIN && FROZEN.test(p.name), beds: ['amb_frozen_cliff'] },
+  { id: 'frozen street', when: (p) => p.openAir && p.areaFile === 'mahntor.are' && p.sector === S.CITY && FROZEN.test(p.name), beds: ['amb_frozen_street'] },
   { id: 'shallows', when: (p) => p.sector === S.SHALLOW, beds: ['amb_water', 'amb_shore'], gain: 0.8 },
   { id: 'shore', when: (p) => p.sector === S.DEEP || (p.openAir && WATERY.test(p.name)), beds: ['amb_shore'] },
   { id: 'tavern', when: (p) => !p.openAir && TAVERN.test(p.name), beds: ['amb_tavern', 'amb_tavern_b'] },
@@ -280,6 +294,27 @@ export function areaMusicFor(place) {
 }
 
 export const TITLE_MUSIC = 'music_title';
+
+// ------------------------------------------------------------ fight music --
+
+/** Looped pieces, one for a fight and a heavier one for a strong foe. */
+export const FIGHT_MUSIC = { fight: 'music_fight', boss: 'music_boss' };
+/** Seconds the music stays on after the last blow before it gives way to the place's own. */
+export const FIGHT_GRACE = 6;
+/** A foe this many levels over you is a boss; so is any level-30 foe that is not below you (Mahn-Tor's masters, dragons). */
+export const BOSS_GAP = 6;
+export const BOSS_LEVEL = 30;
+
+/**
+ * Which piece a fight calls for, from the foe you are fighting and yourself, or
+ * null for none. Only the fight the player is in counts: mobiles brawling
+ * elsewhere are not the player's music.
+ */
+export function fightMusicFor(foe, me) {
+  if (!foe || !me || !Number.isFinite(foe.level) || !Number.isFinite(me.level)) return null;
+  const gap = foe.level - me.level;
+  return gap >= BOSS_GAP || (foe.level >= BOSS_LEVEL && gap >= 0) ? 'boss' : 'fight';
+}
 
 /** The shape `Audio.setPlace` builds from build.js's room record. */
 export function placeOf(info, hour) {

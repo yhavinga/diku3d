@@ -97,6 +97,8 @@ export class Creatures {
     this.audio = audio;
     this.next = 0;
     this.growls = new Map();
+    this.engaged = new Map();   // slot -> its strength when last seen fighting, for the roar on taking up a fight
+    this.roared = new Map();
     this.tick = 0;
   }
 
@@ -117,14 +119,30 @@ export class Creatures {
       // A wall between: a muffled version of the same call.
       const walls = slot.roomVnum !== player && sheltered ? 0.35 : 1;
       fit.push({ slot, rule, heard, walls });
+      // Within earshot: have its fight voice and death cry decoded before they are needed, or the first one is lost.
+      for (const id of [...(rule.roar || []), ...(rule.fight || []), ...(rule.death ? SOUNDS[rule.death].clips : [])]) this.audio.clips.load(id);
     }
     if (!fit.length) return;
     for (const { slot, rule, heard, walls } of fit) {
-      if (!rule.fight || !slot.instance || !slot.instance.fighting) continue;
+      const mob = slot.instance;
+      if (!mob || !mob.fighting) { this.engaged.delete(slot); continue; }
+      if (rule.roar) {
+        // A big creature bellows as it takes up a fight and when a blow takes a good part of its strength.
+        const before = this.engaged.get(slot);
+        const hurt = before !== undefined && before - mob.hit >= 0.12 * mob.maxHit;
+        this.engaged.set(slot, mob.hit);
+        if ((before === undefined || hurt) && now >= (this.roared.get(slot) ?? 0)) {
+          this.roared.set(slot, now + 2.5);
+          this.growls.set(slot, now + rand(3, 7));
+          this.say(rule, pick(rule.roar), heard, walls, true);
+          continue;
+        }
+      }
+      if (!rule.fight) continue;
       const due = this.growls.get(slot) ?? 0;
       if (now < due) continue;
       this.growls.set(slot, now + rand(3, 7));
-      this.say(rule, pick(rule.fight), heard, walls);
+      this.say(rule, pick(rule.fight), heard, walls, true);
     }
     if (now < this.next) return;
     const callers = fit.filter(({ rule }) => rule.idle.length && (!rule.night || (night && this.audio.place && this.audio.place.openAir)));
@@ -134,9 +152,10 @@ export class Creatures {
     this.say(who.rule, pick(who.rule.idle), who.heard, who.walls);
   }
 
-  say(rule, id, heard, walls) {
-    const [lo, hi] = rule.rate || [0.95, 1.05];
-    this.audio.foley.playClip(id, { pan: heard.pan, gain: heard.gain * rule.gain * walls, rate: rand(lo, hi), name: `creature:${rule.id}`, spread: 0 });
+  say(rule, id, heard, walls, fighting = false) {
+    const [lo, hi] = (fighting && rule.fightRate) || rule.rate || [0.95, 1.05];
+    const gain = (fighting && rule.fightGain) || rule.gain;
+    this.audio.foley.playClip(id, { pan: heard.pan, gain: heard.gain * gain * walls, rate: rand(lo, hi), name: `creature:${rule.id}${fighting ? ':fight' : ''}`, spread: 0 });
   }
 }
 

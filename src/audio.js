@@ -9,7 +9,7 @@
 import { Clips, Steps, Soundscape } from './soundscape.js';
 import { Music } from './music.js';
 import { Foley, Creatures, Places, Weather, listenToGame } from './foley.js';
-import { placeOf, creatureOf } from './soundmap.js';
+import { placeOf, creatureOf, fightMusicFor } from './soundmap.js';
 import { Voices, listenToVoices } from './voices.js';
 
 /** game.js ATTACK_TABLE words that cut or tear in a way of their own. */
@@ -98,6 +98,7 @@ export class Audio {
     this.soundscape = new Soundscape(this);
     this.steps.preload();
     this.foley.preload();
+    this.music.preloadFight();
     this.creatures = new Creatures(this);
     this.places = new Places(this);
     this.weather = new Weather(this);
@@ -626,6 +627,10 @@ export class Audio {
       this.place.hour = hour;
       this.soundscape.resolve();
     }
+    // state.fighting is the player's own fight, on a page that runs the rules
+    // and on one mirroring a server alike (game.js mirrorSelf, mirrorMob).
+    const game = window.diku && window.diku.game;
+    this.music.setFight(game && game.state.fighting && this.stopEvents ? fightMusicFor(game.state.fighting, game.state) : null);
     this.music.update();
     if (this.muted) return;
     if (this.places && window.diku && window.diku.built && window.diku.game) {

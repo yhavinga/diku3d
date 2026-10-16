@@ -24662,6 +24662,466 @@
     "peak": -9.8,
     "lra": 20
    }
+  },
+  {
+   "id": "music_fight",
+   "file": "music_fight.ogg",
+   "kind": "music",
+   "api": "music",
+   "loop": true,
+   "prompt": "Ordinary fight: steady frame drums and tabor over a bowed drone, hurdy-gurdy riff, tense and loopable",
+   "settings": {
+    "composition_plan": {
+     "positive_global_styles": [
+      "medieval early music",
+      "steady driving frame drum and tabor pulse",
+      "bowed vielle drone on open fifths",
+      "hurdy-gurdy riff with buzzing drone string",
+      "Dorian mode",
+      "tense and martial, tempo around 108 bpm",
+      "steady loop with the same intensity throughout, no build-up, no long pauses",
+      "recorded live in a small wooden room, dry, rough, historically informed, instrumental only"
+     ],
+     "negative_global_styles": [
+      "orchestra",
+      "orchestral strings",
+      "orchestra hits",
+      "brass fanfare",
+      "choir",
+      "vocals",
+      "singing",
+      "trailer",
+      "synthesizer",
+      "electronic",
+      "pads",
+      "drum kit",
+      "modern",
+      "pop",
+      "rock",
+      "metal",
+      "electric guitar",
+      "bass drop",
+      "Celtic",
+      "bodhran",
+      "tin whistle",
+      "Irish pub",
+      "jig",
+      "film score",
+      "epic cinematic"
+     ],
+     "sections": [
+      {
+       "section_name": "Pulse",
+       "positive_local_styles": [
+        "frame drums and tabor in a steady pattern, vielle drone",
+        "hurdy-gurdy plays a short repeating riff"
+       ],
+       "negative_local_styles": [
+        "synthesizer",
+        "orchestra",
+        "film score"
+       ],
+       "duration_ms": 25000,
+       "lines": []
+      },
+      {
+       "section_name": "Riff",
+       "positive_local_styles": [
+        "hurdy-gurdy riff continues, rough double-stopped vielle line answers it",
+        "same steady drums"
+       ],
+       "negative_local_styles": [
+        "synthesizer",
+        "orchestra",
+        "film score"
+       ],
+       "duration_ms": 25000,
+       "lines": []
+      },
+      {
+       "section_name": "Return",
+       "positive_local_styles": [
+        "back to the first pulse, drums and drone, hurdy-gurdy riff, ends on the same energy it began with"
+       ],
+       "negative_local_styles": [
+        "synthesizer",
+        "orchestra",
+        "film score"
+       ],
+       "duration_ms": 20000,
+       "lines": []
+      }
+     ]
+    }
+   },
+   "post": {
+    "lufs": -25,
+    "kbps": 64,
+    "crossfade": 3
+   },
+   "duration": 67.03,
+   "bytes": 576114,
+   "steps": null,
+   "loudness": {
+    "lufs": -25,
+    "peak": -11.7,
+    "lra": 5.5
+   }
+  },
+  {
+   "id": "music_boss",
+   "file": "music_boss.ogg",
+   "kind": "music",
+   "api": "music",
+   "loop": true,
+   "prompt": "Boss fight: heavy frame drums and tabor, two shawms in harsh parallel fifths over a deep bowed drone, hurdy-gurdy ostinato, grim and loopable",
+   "settings": {
+    "composition_plan": {
+     "positive_global_styles": [
+      "medieval early music",
+      "heavy slow frame drums struck hard with tabor on the offbeat",
+      "deep bowed vielle drone, low open fifth",
+      "two loud harsh shawms in parallel fifths playing a short grim phrase",
+      "hurdy-gurdy ostinato with buzzing drone string",
+      "Phrygian-tinged Dorian mode, tempo around 92 bpm",
+      "menacing and relentless, the same weight throughout, loopable",
+      "recorded live in a stone hall, rough, historically informed, instrumental only, dense, no pauses"
+     ],
+     "negative_global_styles": [
+      "orchestra",
+      "orchestral strings",
+      "orchestra hits",
+      "brass fanfare",
+      "choir",
+      "vocals",
+      "singing",
+      "trailer",
+      "synthesizer",
+      "electronic",
+      "pads",
+      "drum kit",
+      "modern",
+      "pop",
+      "rock",
+      "metal",
+      "electric guitar",
+      "bass drop",
+      "Celtic",
+      "bodhran",
+      "tin whistle",
+      "Irish pub",
+      "jig",
+      "film score",
+      "epic cinematic"
+     ],
+     "sections": [
+      {
+       "section_name": "Drums and drone",
+       "positive_local_styles": [
+        "hard frame drums in a heavy pattern, low drone, hurdy-gurdy ostinato"
+       ],
+       "negative_local_styles": [
+        "synthesizer",
+        "orchestra",
+        "film score"
+       ],
+       "duration_ms": 28000,
+       "lines": []
+      },
+      {
+       "section_name": "Shawms",
+       "positive_local_styles": [
+        "two shawms enter with a grim phrase over the same heavy drums and ostinato"
+       ],
+       "negative_local_styles": [
+        "synthesizer",
+        "orchestra",
+        "film score"
+       ],
+       "duration_ms": 28000,
+       "lines": []
+      },
+      {
+       "section_name": "Return",
+       "positive_local_styles": [
+        "shawms drop out, drums, drone and hurdy-gurdy ostinato continue with the same weight"
+       ],
+       "negative_local_styles": [
+        "synthesizer",
+        "orchestra",
+        "film score"
+       ],
+       "duration_ms": 20000,
+       "lines": []
+      }
+     ]
+    }
+   },
+   "post": {
+    "lufs": -23,
+    "kbps": 64,
+    "crossfade": 3,
+    "cutTail": 9
+   },
+   "duration": 64.07,
+   "bytes": 525614,
+   "steps": null,
+   "loudness": {
+    "lufs": -23,
+    "peak": -9.7,
+    "lra": 3.5
+   }
+  },
+  {
+   "id": "cr_minotaur",
+   "file": "cr_minotaur.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Four separate bellowing roars of a huge minotaur, a deep furious bull-like bellow with a rough human growl inside it, each about two seconds long and followed by two seconds of silence, in a stone hall, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 14,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.5,
+    "stepMax": 3.2,
+    "stepMin": 0.6
+   },
+   "duration": 12.73,
+   "bytes": 66048,
+   "steps": [
+    [
+     0,
+     2.61
+    ],
+    [
+     2.61,
+     1.92
+    ],
+    [
+     8.68,
+     3.65
+    ]
+   ],
+   "loudness": {
+    "lufs": -11.9,
+    "peak": -4,
+    "lra": 13
+   }
+  },
+  {
+   "id": "cr_minotaur_death",
+   "file": "cr_minotaur_death.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Three separate death cries of a huge minotaur, a bellow that breaks into a wet gurgling groan and sinks into a last rattling breath, each followed by three seconds of silence, in a stone hall, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 12,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 2,
+    "stepMax": 4,
+    "stepMin": 0.8
+   },
+   "duration": 12,
+   "bytes": 56111,
+   "steps": [
+    [
+     0,
+     3.39
+    ],
+    [
+     4.8,
+     4.03
+    ]
+   ],
+   "loudness": {
+    "lufs": -15.8,
+    "peak": -4,
+    "lra": 14.9
+   }
+  },
+  {
+   "id": "cr_troll",
+   "file": "cr_troll.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Four separate roars of a giant troll, a hoarse guttural bellow and snarl, thick and wet in the throat, each about two seconds long and followed by two seconds of silence, in a cave, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 14,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.5,
+    "stepMax": 3.2,
+    "stepMin": 0.6
+   },
+   "duration": 11.03,
+   "bytes": 57002,
+   "steps": [
+    [
+     0,
+     3.53
+    ],
+    [
+     7.75,
+     2.86
+    ]
+   ],
+   "loudness": {
+    "lufs": -12,
+    "peak": -4,
+    "lra": 17.5
+   }
+  },
+  {
+   "id": "cr_troll_death",
+   "file": "cr_troll_death.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Three separate death cries of a giant troll, a gargling roar that falls into a deep groan and a heavy last breath, each followed by three seconds of silence, in a cave, close microphone. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 12,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 2,
+    "stepMax": 4,
+    "stepMin": 0.8
+   },
+   "duration": 12,
+   "bytes": 56336,
+   "steps": [
+    [
+     0,
+     3.39
+    ],
+    [
+     5.72,
+     4.55
+    ]
+   ],
+   "loudness": {
+    "lufs": -12.9,
+    "peak": -4,
+    "lra": 16.6
+   }
+  },
+  {
+   "id": "cr_dragon_death",
+   "file": "cr_dragon_death.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Three separate death cries of a huge dragon, a screeching roar that breaks into a wheezing rasp and a long dying exhale, each followed by three seconds of silence, in a large cave. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 14,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 2,
+    "stepMax": 4.5,
+    "stepMin": 0.8
+   },
+   "duration": 10.51,
+   "bytes": 49888,
+   "steps": [
+    [
+     0,
+     4.25
+    ],
+    [
+     5.81,
+     4.12
+    ]
+   ],
+   "loudness": {
+    "lufs": -14.3,
+    "peak": -4,
+    "lra": 11.3
+   }
+  },
+  {
+   "id": "amb_frozen_cliff",
+   "file": "amb_frozen_cliff.ogg",
+   "kind": "ambience",
+   "api": "sfx",
+   "loop": true,
+   "prompt": "Freezing wind howling and hissing over a high snow-covered cliff and frozen wastes, thin ice crystals ticking on rock, a deep low moan in the gusts, lonely and wide, steady, no sudden standout events, no traffic, no engines, no electronic hum, no music.",
+   "settings": {
+    "duration_seconds": 25,
+    "loop": true,
+    "prompt_influence": 0.2
+   },
+   "post": {
+    "lufs": -27,
+    "crossfade": 2,
+    "kbps": 48
+   },
+   "duration": 23,
+   "bytes": 127965,
+   "steps": null,
+   "loudness": {
+    "lufs": -27,
+    "peak": -7.9,
+    "lra": 4.7
+   }
+  },
+  {
+   "id": "amb_frozen_street",
+   "file": "amb_frozen_street.ogg",
+   "kind": "ambience",
+   "api": "sfx",
+   "loop": true,
+   "prompt": "Cold wind moaning between stone walls of a frozen mountain city, wind-blown snow hissing along empty streets, a loose shutter creaking far away, ice ticking, hollow and bleak, steady, no sudden standout events, no traffic, no engines, no electronic hum, no music.",
+   "settings": {
+    "duration_seconds": 25,
+    "loop": true,
+    "prompt_influence": 0.2
+   },
+   "post": {
+    "lufs": -27,
+    "crossfade": 2,
+    "kbps": 48
+   },
+   "duration": 23,
+   "bytes": 122320,
+   "steps": null,
+   "loudness": {
+    "lufs": -27.1,
+    "peak": -1,
+    "lra": 5.6
+   }
   }
  ]
 }
