@@ -25122,6 +25122,32 @@
     "peak": -1,
     "lra": 5.6
    }
+  },
+  {
+   "id": "sting_threat",
+   "file": "sting_threat.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "combat",
+   "loop": false,
+   "prompt": "One single massive low drum hit, a giant war drum struck once in a stone hall, a deep boom with a short dark rumbling tail that fades to silence, ominous, close and heavy. Only one hit. No other sounds, no music, no melody, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 3,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -3,
+    "kbps": 40,
+    "mono": true
+   },
+   "duration": 3,
+   "bytes": 11950,
+   "steps": null,
+   "loudness": {
+    "lufs": -20.4,
+    "peak": -3,
+    "lra": 20
+   }
   }
  ]
 }

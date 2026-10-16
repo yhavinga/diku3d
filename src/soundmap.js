@@ -90,6 +90,8 @@ export const SOUNDS = {
   spell_prism: { clips: ['sp_prism'], gain: 0.55 },
   spell_portal: { clips: ['sp_portal'], gain: 0.6 },
   spell_roar: { clips: ['cr_dragon'], gain: 0.8 },
+  // One drum hit, the moment a boss's attention falls on you (presence.js).
+  threat: { clips: ['sting_threat'], gain: 1 },
 };
 
 /**

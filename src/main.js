@@ -43,6 +43,7 @@ import { createDashboard } from './dashboard.js';
 import { createConnectUi } from './link-ui.js';
 import { OUTDOOR_FILL } from './dress.js';
 import { createView } from './view.js';
+import { createPresence } from './presence.js';
 
 const params = new URLSearchParams(location.search);
 // The default world is no longer one town. Midgaard plus the five areas
@@ -845,6 +846,10 @@ async function boot() {
     camera, player, scene, getBuilt: () => built, library: assets, world, game, spellfx,
     roomAt: (x, y, z) => built.rooms.get(actors.nav.roomAt(x, y, z)),
   });
+  // A boss that has noticed you changes the frame, the lens and the music (presence.js).
+  const presence = createPresence({ game, nav: () => actors.nav, onTurn: () => audio.threatHit() });
+  const fogOf = { fog: null, density: 0, color: new THREE.Color(), touched: false };
+  const FOG_COLD = new THREE.Color(0x6f7f94);
   {
     // Screen position of a world point, for the foe plate and damage numbers.
     const p = new THREE.Vector3();
@@ -2138,6 +2143,21 @@ async function boot() {
     fps += ((1 / Math.max(dt, 0.0001)) - fps) * 0.08;
 
     if (!state.paused) player.update(dt);
+    {
+      // The weight of a boss's attention. It touches the scene only while above 0,
+      // and puts the preset's own fog back exactly when it has gone.
+      const p = reeling ? 0 : presence.update(dt, player.body.eye(bodyEye));
+      view.presence = p;
+      pipeline.output.uniforms.uPresence.value = p;
+      pipeline.output.uniforms.uAspect.value = window.innerWidth / window.innerHeight;
+      const fog = scene.fog;
+      if (fog && fog !== fogOf.fog) { fogOf.fog = fog; fogOf.density = fog.density; fogOf.color.copy(fog.color); fogOf.touched = false; }
+      if (fog && (p > 0 || fogOf.touched)) {
+        fog.density = fogOf.density * (1 + 1.0 * p);
+        fog.color.copy(fogOf.color).lerp(FOG_COLD, 0.35 * p);
+        fogOf.touched = p > 0;
+      }
+    }
     view.update(dt, { active: !reeling, aiming: !!game.state.fighting });
     if (reeling) titleReel.update(dt);
     camera.updateMatrixWorld();
@@ -2171,7 +2191,7 @@ async function boot() {
       rain.setIntensity(outdoorNow ? level : 0);
       rain.update(dt, camera.position);
       // Mahn-Tor's snow falls whatever the barometer says, and only under the sky.
-      snow.setIntensity(state.climate === 'frost' && outdoorNow ? state.snowLevel : 0);
+      snow.setIntensity(state.climate === 'frost' && outdoorNow ? state.snowLevel + 0.3 * presence.value : 0);
       snow.update(dt, camera.position, quality.pixelRatio() * window.innerHeight * 0.5 * camera.projectionMatrix.elements[5],
         camera.position.y - 1.65);
       // The ground remembers the rain after the streaks stop. Unlike the
@@ -2264,7 +2284,7 @@ async function boot() {
     // `wetness` is exposed because it is a slow-moving number nothing on screen
     // reports: reading .value against .target() is how you tell a street that is
     // drying from one that has dried.
-    pipeline, environment, materials, wetness, assets, impostors, occlusion,
+    pipeline, environment, materials, wetness, assets, impostors, occlusion, presence,
     dashboard,
     /** What the texture bake did: bakes, cache hits, ms, workers; `stored` resolves to the cache's bytes. */
     bake: bakeStats,

@@ -40,6 +40,9 @@ import { SKILL_CONTACT, DISARM_FLICK } from './fx.js';
 const ARM = 3.4;
 const RISE = 0.62;
 const SHOULDER = 0.1;
+/** Under a boss's eye (presence 1) the lens closes this many degrees and the arm drops this many metres. */
+const PRESENCE_FOV = 4;
+const PRESENCE_DROP = 0.3;
 /** A floor or a tread is a slab this thick: under a stair, under the room upstairs. */
 const SLAB = 0.45;
 /** The camera's own size: how far it keeps off a wall. */
@@ -136,6 +139,7 @@ const SEATED = { rest_ground: 0.85, sleep: 1.25 };
 
 export function createView({ camera, player, scene, getBuilt, library, world, game, roomAt, spellfx }) {
   let third = false;
+  let presence = 0;
   // A camera put somewhere by hand (diku.look, a judge's shot): the figure
   // goes on living and the arm leaves the camera where it was put.
   let pinned = false;
@@ -526,7 +530,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     own.at.copy(feet);
 
     // The sprint opens the lens. A pinned camera is a judge's, and is left alone.
-    lens(dt, !pinned && pace > SPRINT_PACE && player.onGround ? FOV_KICK : 0);
+    lens(dt, (!pinned && pace > SPRINT_PACE && player.onGround ? FOV_KICK : 0) - presence * PRESENCE_FOV);
 
     // The pivot's weight: pace is followed lazily and the gap between the
     // two is what the camera lags (speeding up) or leads (stopping) by.
@@ -580,7 +584,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
       pivot.add(offset);
       if (blocked(pivot)) pivot.copy(player.position);
     }
-    want.copy(pivot).addScaledVector(forward, -ARM).addScaledVector(right, SHOULDER).addScaledVector(up, RISE);
+    want.copy(pivot).addScaledVector(forward, -ARM).addScaledVector(right, SHOULDER).addScaledVector(up, RISE - presence * PRESENCE_DROP);
     // Never under the feet: looking up swings the camera down towards the floor.
     want.y = Math.max(want.y, feet.y + 0.4);
     if (ceiling.indoor) want.y = Math.min(want.y, feet.y + INDOOR_TOP);
@@ -671,6 +675,9 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
 
   const api = {
     get third() { return third; },
+    /** 0..1, set each frame by main.js from presence.js; only the lens and the arm read it. */
+    get presence() { return presence; },
+    set presence(v) { presence = v; },
     get figure() { return figure; },
     toggle() { set(!third); return third; },
     pin(on) { pinned = !!on; if (pinned) { pinAt.copy(camera.position); pinTurn.copy(camera.rotation); } },

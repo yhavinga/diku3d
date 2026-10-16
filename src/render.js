@@ -601,6 +601,52 @@ class ScaledGTAOPass extends GTAOPass {
   }
 }
 
+// -------------------------------------------------------------- presence ----
+
+/**
+ * The look of a boss close by (presence.js), folded into the output pass.
+ *
+ * It lives in the last pass, behind one `if`, because that is the only way to
+ * leave the frame exactly as it was at 0: another pass with a strength of 0
+ * still flips the composer's buffers, and a pass of its own would need an
+ * extra full-frame read for what is one colour operation. The grade works on
+ * the display value, after tone mapping and the sRGB curve, so it cannot move
+ * what the bloom or the tone curve already decided and a lit window stays lit.
+ *
+ * Colder and a little darker, with the colour drawn out of the midtones and the
+ * shadows taken towards blue-grey -- lifted, not crushed, so nothing reaches
+ * RGB 0 that was not there -- then a vignette that closes the frame in from the
+ * corners. The fog and the lens are not here: they are the scene's and the
+ * camera's, and main.js sets them from the same number.
+ */
+function addPresenceGrade(output) {
+  output.uniforms.uPresence = { value: 0 };
+  output.uniforms.uAspect = { value: 1 };
+  const GRADE = /* glsl */`
+    if ( uPresence > 0.0 ) {
+      float p = uPresence;
+      vec3 c = gl_FragColor.rgb;
+      float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+      float shade = 1.0 - smoothstep( 0.0, 0.5, l );
+      c = mix( vec3( l ), c, 1.0 - 0.38 * p );
+      c *= mix( vec3( 1.0 ), vec3( 0.84, 0.95, 1.10 ), p * ( 0.3 + 0.7 * shade ) );
+      c *= 1.0 - 0.16 * p;
+      vec2 q = ( vUv - 0.5 ) * vec2( uAspect, 1.0 );
+      float edge = smoothstep( 0.3, 1.0, length( q ) / length( vec2( uAspect, 1.0 ) * 0.5 ) );
+      c *= 1.0 - 0.62 * p * edge * edge;
+      c += vec3( 0.008, 0.013, 0.026 ) * p * shade;
+      gl_FragColor.rgb = clamp( c, 0.0, 1.0 );
+    }
+  `;
+  let src = output.material.fragmentShader;
+  src = src.replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse;\n\t\tuniform float uPresence;\n\t\tuniform float uAspect;');
+  src = src.replace(/\}\s*$/, `${GRADE}\n\t\t}`);
+  if (!src.includes('uPresence > 0.0') || !src.includes('uniform float uAspect')) {
+    throw new Error('render.js addPresenceGrade: OutputShader changed and the grade no longer fits');
+  }
+  output.material.fragmentShader = src;
+}
+
 // -------------------------------------------------------------- pipeline ----
 
 /**
@@ -669,6 +715,7 @@ export function createPipeline({ renderer, scene, camera, width, height }) {
   smaa.enabled = false;
 
   const output = new OutputPass();
+  addPresenceGrade(output);
 
   composer.addPass(render);
   composer.addPass(gtao);

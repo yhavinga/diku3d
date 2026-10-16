@@ -366,6 +366,12 @@ export class Audio {
     osc.stop(now + 0.8);
   }
 
+  /** The one heavy hit when a boss turns to you; silent rather than synthesised if the clip is not loaded. */
+  threatHit() {
+    if (!this.ctx || this.muted) return;
+    this.foley.play('threat');
+  }
+
   bell() {
     if (!this.ctx || this.muted) return;
     if (this.foley.play('bell', { pan: (Math.random() - 0.5) * 0.4 })) return;
@@ -630,7 +636,9 @@ export class Audio {
     // state.fighting is the player's own fight, on a page that runs the rules
     // and on one mirroring a server alike (game.js mirrorSelf, mirrorMob).
     const game = window.diku && window.diku.game;
-    this.music.setFight(game && game.state.fighting && this.stopEvents ? fightMusicFor(game.state.fighting, game.state) : null);
+    // Before any blow, a boss that has taken notice of you (presence.js) has the boss piece too.
+    const threat = window.diku && window.diku.presence && window.diku.presence.threat;
+    this.music.setFight(game && game.state.fighting && this.stopEvents ? fightMusicFor(game.state.fighting, game.state) : (threat && this.stopEvents ? 'boss' : null));
     this.music.update();
     if (this.muted) return;
     if (this.places && window.diku && window.diku.built && window.diku.game) {
