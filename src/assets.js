@@ -66,6 +66,9 @@ function takeColour(geometry) {
 // `ice` on a model (only mahntor.py's gates carry it) is the translucent block, not the
 // opaque rink-ice a room's floor takes: the gates are carved from it.
 const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', wool: 'cloth', plate: 'steel', scales: 'feather', wicker: 'rope', ice: 'iceblock' };
+// An alias that wins over a baked surface of the same name: `ice` is itself a recipe, so the
+// alias above would never be reached.
+const TAG_OVERRIDES = new Set(['ice']);
 // (linen and wool have recipes of their own now; the aliases are the fallback.)
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },
@@ -154,6 +157,7 @@ export class AssetLibrary {
    * unrecognised tag is recorded rather than silently dressed as stone.
    */
   materialFor(tag) {
+    if (TAG_OVERRIDES.has(tag) && this.materials[TAG_ALIASES[tag]]) return this.materials[TAG_ALIASES[tag]];
     if (this.materials[tag]) return this.materials[tag];
     if (tag === 'glow') return this.glow();
     const alias = TAG_ALIASES[tag];

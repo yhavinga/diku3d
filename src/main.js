@@ -384,7 +384,7 @@ const FROST = {
   // How far each hour is taken towards the cold colour, and the cold colours.
   // Night keeps most of its own deep blue: it is cold already.
   dawn: { t: 0.5, haze: 1.9, sun: 0.8 },
-  noon: { t: 0.55, haze: 1.7, sun: 0.62, exposure: 0.8, bounce: 0.3 },
+  noon: { t: 0.55, haze: 1.7, sun: 0.55, exposure: 0.72, bounce: 0.25, sunT: 0.25, groundT: 0.12, bleach: 0.25 },
   dusk: { t: 0.5, haze: 1.9, sun: 0.8 },
   night: { t: 0.25, haze: 1.3, sun: 0.9 },
 };
@@ -396,17 +396,21 @@ const CLIMATE = {
     const cover = (v, to) => v + (to - v) * 0.6;
     return {
       ...p,
-      sun: mixHex(p.sun, 0xcfe0ff, f.t),
+      // The key is cold but the stone it falls on keeps its own colour: at noon a
+      // sun bluer than this turned every wall white.
+      sun: mixHex(p.sun, 0xcfe0ff, f.sunT ?? f.t),
       sunIntensity: p.sunIntensity * f.sun,
       sky: mixHex(p.sky, 0xa9bdd6, f.t),
       hemiSky: p.hemiSky === undefined ? undefined : mixHex(p.hemiSky, 0xa9bdd6, f.t),
-      ground: mixHex(p.ground, 0x8fa0b8, f.t),
+      // At noon the hemisphere's ground half is the sunlit ground's bounce, and over snow
+      // that is white, not blue: a blue one turned every wall it lit white-blue.
+      ground: mixHex(p.ground, f.groundT === undefined ? 0x8fa0b8 : 0xc8cdd4, f.groundT ?? f.t),
       bounce: mixHex(p.bounce, 0xa7b8d0, night ? 0.2 : (f.bounce ?? 0.65)),
       exposure: p.exposure * (f.exposure ?? 1),
       haze: mixHex(p.haze, 0xc6d4e6, f.t),
       fog: mixHex(p.fog, 0xc3d1e3, night ? 0.25 : 0.6),
       density: p.density * f.haze,
-      skyBleachTint: mixHex(p.skyBleachTint ?? 0xffffff, 0xe6eeff, 0.7),
+      skyBleachTint: mixHex(p.skyBleachTint ?? 0xffffff, 0xe6eeff, f.bleach ?? 0.7),
       // The deck is most of the way to overcast, and the sky's turbidity up
       // with it: a pale, milky sky and no sun disc to speak of.
       cloud: night ? p.cloud : [cover(p.cloud[0], 0.04), cover(p.cloud[1], 1.0), cover(p.cloud[2], 2.0), p.cloud[3]],

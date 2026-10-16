@@ -2601,13 +2601,13 @@ const SURFACES = {
    */
   snow(u, v, s) {
     const drift = fbm(u * 5, v * 5, 5, 3301, 4);
-    const ripple = fbmA(u * 16, v * 8, 16, 8, 3307, 3);
+    const ripple = fbmA(u * 20, v * 9, 20, 9, 3307, 3);
     const grain = fbm(u * 60, v * 60, 60, 3313, 2);
     // One texel in a hundred: a 512 lattice, which is the bake's own size.
     const glint = hash2(Math.floor(u * 512), Math.floor(v * 512), 512, 3319) > 0.988 ? 1 : 0;
-    const lit = mix(rgb(0xc2cddb), rgb(0xd8e0ea), ripple * 0.35 + grain * 0.3);
-    s.color = mix(mix(lit, rgb(0x93aed2), clamp01((0.5 - drift) * 1.3)), rgb(0xffffff), glint * 0.9);
-    s.height = 0.5 + drift * 0.3 + ripple * 0.05 + grain * 0.02;
+    const lit = mix(rgb(0xb2bfd0), rgb(0xd0d9e5), ripple * 0.6 + grain * 0.3);
+    s.color = mix(mix(lit, rgb(0x7f9ac2), clamp01((0.55 - drift) * 2.0)), rgb(0xffffff), glint * 0.9);
+    s.height = 0.5 + drift * 0.3 + ripple * 0.16 + grain * 0.02;
     s.rough = 0.78 - glint * 0.5 - ripple * 0.06;
   },
 
@@ -3046,12 +3046,12 @@ const RECIPES = {
   // `cover` is how readily (0..1) and `foot` how high (m) it banks against a
   // wall. Nothing here is `wet`: snow is dry, and the damp pass would turn it
   // into slush under overcast.
-  snow: { surface: 'snow', scale: 3.0, normalScale: 0.45, env: 0.8, wet: 0, detail: 0.3 },
+  snow: { surface: 'snow', scale: 3.0, normalScale: 0.7, env: 0.8, wet: 0, detail: 0.3 },
   trodden: { surface: 'trodden', scale: 3.2, normalScale: 0.7, env: 1.1, wet: 0, detail: 0.5 },
   snowcobble: { surface: 'frostcobble', scale: 2.2, normalScale: 1.0, env: 1.0, wet: 0, detail: 0.5, snowy: { cover: 0.5, foot: 0 } },
   snowrock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0, detail: 0.6, snowy: { cover: 0.5, foot: 0 } },
-  frostwall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55, snowy: { cover: 0.6, foot: 1.9 } },
-  frosttimber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45, snowy: { cover: 0.55, foot: 1.5 } },
+  frostwall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55, snowy: { cover: 0.6, foot: 0.6 } },
+  frosttimber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45, snowy: { cover: 0.55, foot: 0.5 } },
   snowroof: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0, detail: 0.5, snowy: { cover: 1.0, foot: 0 } },
   snowthatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7, snowy: { cover: 1.0, foot: 0 } },
   iceblock: { surface: 'iceblock', scale: 3.0, normalScale: 0.4, env: 1.6, wet: 0, detail: 0.1, ice: true },
@@ -4550,13 +4550,13 @@ function decorate(material, recipe, macro, grain) {
           // A fine glint: the same grain map the close-range normals use, a
           // few texels in a hundred, so the white is not a flat paint.
           float dikuSnowGl = step( 0.93, texture2D( detailMap, vDikuWorld.xz * 7.3 + vDikuWorld.y * 3.1 ).y );
-          vec3 dikuSnowCol = mix( vec3( 0.55, 0.63, 0.76 ), vec3( 0.70, 0.75, 0.82 ), 0.35 + dikuSnowN * 0.65 ) * ( 1.0 + dikuSnowGl * 0.5 );
+          vec3 dikuSnowCol = mix( vec3( 0.46, 0.54, 0.68 ), vec3( 0.62, 0.68, 0.77 ), 0.2 + dikuSnowN * 0.8 ) * ( 1.0 + dikuSnowGl * 0.5 );
           // A rime on every wall the cold has been at: not snow, but the
           // face of it gone pale and blue in patches, thickest low down.
           float dikuRime = dikuSnowFoot > 0.0
-            ? dikuVertical * ( 0.04 + 0.12 * smoothstep( 0.2, 0.8, dikuSnowN + dikuSnowF * 0.5 ) ) * ( 1.0 - 0.5 * smoothstep( 0.0, 5.0, dikuStorey ) )
+            ? dikuVertical * 0.05 * smoothstep( 0.2, 0.8, dikuSnowN + dikuSnowF * 0.5 ) * ( 1.0 - smoothstep( 0.0, 1.5, dikuStorey ) )
             : 0.0;
-          diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.58, 0.68, 0.82 ), dikuRime * ( 1.0 - dikuSnowAmt ) );
+          diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.40, 0.46, 0.56 ), dikuRime * ( 1.0 - dikuSnowAmt ) );
           diffuseColor.rgb = mix( diffuseColor.rgb, dikuSnowCol, dikuSnowAmt );
         #endif
         #ifdef DIKU_ICE
