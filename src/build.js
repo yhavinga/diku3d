@@ -3388,6 +3388,77 @@ function frostCells(layout) {
   return cells;
 }
 
+/**
+ * Where Mahn-Tor's snow stops on open ground. `frostCells` says which cells
+ * are frozen, and a cell is a square with a straight edge; snow stops at a
+ * distance from those cells instead, with a wandering line and a band of
+ * trodden, half-thawed ground before the earth. In metres, so it never
+ * follows the grid: `at(x, z)` is 'snow', 'trodden' or 'earth'. Null where
+ * nothing is frozen.
+ */
+const WINTER_REACH = 44;
+const WINTER_WANDER = 18;
+const WINTER_BAND = 9;
+function winterField(frost) {
+  if (!frost || !frost.size) return null;
+  const reach = Math.ceil((WINTER_REACH + WINTER_WANDER + WINTER_BAND) / CELL) + 1;
+  let x0 = Infinity; let x1 = -Infinity; let z0 = Infinity; let z1 = -Infinity;
+  for (const key of frost) {
+    const [x, z] = key.split(',').map(Number);
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
+  }
+  const margin = WINTER_REACH + WINTER_WANDER + WINTER_BAND + 8;
+  const at = (px, pz) => {
+    const cx = Math.round(px / CELL); const cz = Math.round(pz / CELL);
+    let d = Infinity;
+    for (let dx = -reach; dx <= reach; dx++) {
+      for (let dz = -reach; dz <= reach; dz++) {
+        if (!frost.has(`${cx + dx},${cz + dz}`)) continue;
+        d = Math.min(d, Math.hypot(Math.max(0, Math.abs(px - (cx + dx) * CELL) - HALF), Math.max(0, Math.abs(pz - (cz + dz) * CELL) - HALF)));
+      }
+    }
+    const wander = (terrainNoise(px * 0.035, pz * 0.035, 901) - 0.5) * 2 * WINTER_WANDER
+      + (terrainNoise(px * 0.12, pz * 0.12, 902) - 0.5) * 2 * 5;
+    const e = d - (WINTER_REACH + wander);
+    return e < -WINTER_BAND / 2 ? 'snow' : e < WINTER_BAND / 2 ? 'trodden' : 'earth';
+  };
+  return { at, box: { x0: x0 * CELL - HALF - margin, x1: x1 * CELL + HALF + margin, z0: z0 * CELL - HALF - margin, z1: z1 * CELL + HALF + margin } };
+}
+
+/** Flat ground over a rectangle, in 3 m tiles each given its surface by `field`; `skip(x, z)` leaves holes. */
+function groundTiles({ batcher, chunk, field, x0, x1, z0, z1, y, earth = 'grass', skip = null }) {
+  const STEP = 2;
+  const nx = Math.max(1, Math.ceil((x1 - x0) / STEP)); const nz = Math.max(1, Math.ceil((z1 - z0) / STEP));
+  const bins = new Map();
+  for (let j = 0; j < nz; j++) {
+    for (let i = 0; i < nx; i++) {
+      const ax = x0 + (x1 - x0) * i / nx; const bx = x0 + (x1 - x0) * (i + 1) / nx;
+      const az = z0 + (z1 - z0) * j / nz; const bz = z0 + (z1 - z0) * (j + 1) / nz;
+      const mx = (ax + bx) / 2; const mz = (az + bz) / 2;
+      if (skip && skip(mx, mz)) continue;
+      const kind = field.at(mx, mz);
+      const material = kind === 'snow' ? 'snow' : kind === 'trodden' && batcher.materials.trodden ? 'trodden' : earth;
+      if (!bins.has(material)) bins.set(material, []);
+      bins.get(material).push(ax, az, bx, bz);
+    }
+  }
+  const frost = batcher.frost;
+  batcher.frost = null; // the field has chosen; the per-cell table must not choose again
+  for (const [material, list] of bins) {
+    const p = []; const n = [];
+    for (let k = 0; k < list.length; k += 4) {
+      const [ax, az, bx, bz] = [list[k], list[k + 1], list[k + 2], list[k + 3]];
+      for (const v of [[ax, az], [ax, bz], [bx, az], [bx, az], [ax, bz], [bx, bz]]) { p.push(v[0], y, v[1]); n.push(0, 1, 0); }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
+    batcher.add(geo, material, new THREE.Matrix4(), { chunk, normals: true });
+    geo.dispose();
+  }
+  batcher.frost = frost;
+}
+
 // ------------------------------------------------------------------ main ----
 
 /**
@@ -3403,6 +3474,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   const batcher = new Batcher(materials);
   markFrost(world);
   batcher.frost = frostCells(layout);
+  const winter = winterField(batcher.frost);
   // Modelled assets are optional everywhere: if the library is absent or a
   // particular model has not been made yet, the procedural geometry stands in.
   // Two batches, split on the chunk's level: see `buildZones`.
@@ -3427,6 +3499,19 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     instances.add = (name, ...rest) => (vista.dropModel(name, rest[0]) ? true : add(name, ...rest));
   }
 
+  // Mahn-Tor's cliff (`buildHills`): the cells of mountain round the gate that
+  // stood as 11 m cubes of rock -- the boxes under a city -- are the hill's own
+  // rock now, and the one beyond the edge has no ground to stand on.
+  const cliffFaces = [];
+  for (const c of layout.order) {
+    if (c.level <= 0 || !isOpenAir(c.room)) continue;
+    const face = cliffFacing(layout, c);
+    if (face) cliffFaces.push({ c, face });
+  }
+  const rockMasses = cliffFaces.length > 0 && !!instances && instances.library.get('mahntor_cliff_a');
+  const beyondFace = (spot) => cliffFaces.some(({ c, face }) => spot.level === c.level
+    && (spot.x - c.x) * face.dx + (spot.z - c.z) * face.dz >= 1
+    && Math.abs((spot.x - c.x) * Math.abs(face.dz) + (spot.z - c.z) * Math.abs(face.dx)) <= 1);
   const colliders = [];   // {x0,x1,z0,z1,y0,y1}
   const platforms = [];   // {x0,x1,z0,z1,top}
   const lights = [];      // {x,y,z,color,intensity,radius,flicker}
@@ -3568,7 +3653,16 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   for (const c of river.values()) {
     if (c.level === 0) groundHoles.push({ x0: c.x * CELL - HALF, x1: c.x * CELL + HALF, z0: c.z * CELL - HALF, z1: c.z * CELL + HALF });
   }
-  for (const r of vista ? [] : rectsAround({ x0: gx0, x1: gx1, z0: gz0, z1: gz1 }, groundHoles)) {
+  // Where something is frozen the lowland round it is snow out to a wandering
+  // line, laid in tiles over its own box: the box's edge is out where the
+  // field says earth, so the plane beside it is the same grass.
+  const inHole = (x, z) => groundHoles.some((h) => x > h.x0 && x < h.x1 && z > h.z0 && z < h.z1);
+  const winterBox = !vista && winter ? winter.box : null;
+  if (winterBox) {
+    groundTiles({ batcher, chunk: 'ground', field: winter, ...winterBox, y: groundY, skip: inHole });
+    for (const r of rectsAround(winterBox, groundHoles)) addPlatform(r.x0, r.x1, r.z0, r.z1, groundY);
+  }
+  for (const r of vista ? [] : rectsAround({ x0: gx0, x1: gx1, z0: gz0, z1: gz1 }, winterBox ? [...groundHoles, winterBox] : groundHoles)) {
     const w = r.x1 - r.x0; const d = r.z1 - r.z0;
     const seg = Math.max(1, Math.min(32, Math.round(Math.max(w, d) / 60)));
     batcher.add(plane(w, d, seg), 'grass', place((r.x0 + r.x1) / 2, groundY, (r.z0 + r.z1) / 2), { chunk: 'ground' });
@@ -4533,9 +4627,13 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     if (cell.level > 0 && layout.at(cell.level - 1, cell.x, cell.z) === undefined && !airborne) {
       const h = LEVEL_H;
       const s = openAir ? HALF : SHELL;
-      batcher.add(box(s * 2, h, s * 2), 'stonewall', place(pos.x, pos.y - SLAB - h / 2, pos.z), {
-        chunk, ao: wallAo(pos.y - SLAB - h),
-      });
+      // Mahn-Tor's city stands on its mountain, which is the hill and the masses of rock
+      // (`buildHills`): no wall of dressed stone under an open-air room, only the solid.
+      if (!(rockMasses && openAir)) {
+        batcher.add(box(s * 2, h, s * 2), 'stonewall', place(pos.x, pos.y - SLAB - h / 2, pos.z), {
+          chunk, ao: wallAo(pos.y - SLAB - h),
+        });
+      }
       addCollider(pos.x - s, pos.x + s, pos.z - s, pos.z + s, pos.y - SLAB - h, pos.y - SLAB);
     }
   }
@@ -4818,6 +4916,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       chunk: chunkOf(spot),
       sector: spot.east ? SECTOR.DESERT : spot.sector, bog: spot.bog, shire: spot.shire, x: pos.x, y: pos.y, z: pos.z,
       seed: hash3(spot.x, spot.z, spot.level, 17), addCollider, lights, decor,
+      bare: rockMasses && spot.level > 0, off: rockMasses && beyondFace(spot), winter,
       // Sides where a room with walls stands next door: nothing grows through them.
       walled: [0, 1, 2, 3].map((d) => {
         const vn = layout.at(spot.level, spot.x + DIR_STEP[d][0], spot.z + DIR_STEP[d][2]);
@@ -4990,7 +5089,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   });
 
   // The ground the layout lifted, under it.
-  const hills = buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY });
+  const hills = buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY, instances, winter });
 
   yield 0.288;
   // No tree grows through a room's walls. A forest fir is modelled with its
@@ -10806,6 +10905,37 @@ const CLIFF_K = 5.5;
 const CLIFF_WING = 14;
 const CLIFF_FLARE = 4;
 const CLIFF_WANDER = 2.4;
+/**
+ * Which way a cliff-edge room (#2362) looks out over its drop, as the step
+ * (dx, dz) from its cell to the air beyond: the side opposite its one way in,
+ * and only where that side has nothing on it. Null for a room that is not one.
+ */
+function cliffFacing(layout, c) {
+  if (!CLIFF_EDGE.test(c.room.description)) return null;
+  const open = [0, 1, 2, 3].find((d) => {
+    const [dx, , dz] = DIR_STEP[d];
+    return layout.at(c.level, c.x + dx, c.z + dz) !== undefined || layout.isPath(c.level, c.x + dx, c.z + dz);
+  });
+  if (open === undefined) return null;
+  const [dx, , dz] = DIR_STEP[REVERSE_DIR[open]];
+  if (layout.at(c.level, c.x + dx, c.z + dz) !== undefined || layout.isPath(c.level, c.x + dx, c.z + dz)) return null;
+  return { dx, dz };
+}
+
+/**
+ * The masses of rock set against a cliff (`buildHills`): the lattice they are
+ * looked for on, in cells, how steep the ground has to be (rise over run) and
+ * how far it has to fall along its fall line, and how far out from the face
+ * the scree lies.
+ */
+const MASS_LATTICE = 3;
+/** Mahn-Tor's snow line on the hills below the city, and how far it wanders. */
+const SNOW_LINE = 13;
+const SNOW_WANDER = 12;
+const SNOW_BAND = 1.6;
+const MASS_SLOPE = 1.25;
+const MASS_DROP = 9;
+const MASS_SCREE = 4.6;
 /** The ledges under a cliff's edge are cut into a face, not dug into a bowl: steepness of the wall round them. */
 const CLIFF_GIVE = 4.5;
 
@@ -10830,7 +10960,7 @@ const CLIFF_GIVE = 4.5;
  * two raised rooms in five are -- Arachnos's webs, the Machine Dreams, the
  * Galaxy -- keeps all of its rooms where they hang.
  */
-function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
+function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY, instances = null, winter = null }) {
   const key = (l, x, z) => `${l}:${x},${z}`;
   const below = (c) => layout.at(c.level - 1, c.x, c.z) !== undefined || layout.isPath(c.level - 1, c.x, c.z);
   const built = (c) => { const info = rooms.get(c.vnum); return !!info && !info.unbuilt && sectorOf(c.room) !== SECTOR.AIR; };
@@ -10878,16 +11008,9 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
   const cliffs = [];
   const cliffCols = new Set();
   for (const c of raised) {
-    if (!CLIFF_EDGE.test(c.room.description)) continue;
-    const open = [0, 1, 2, 3].find((d) => {
-      const [dx, , dz] = DIR_STEP[d];
-      return layout.at(c.level, c.x + dx, c.z + dz) !== undefined || layout.isPath(c.level, c.x + dx, c.z + dz);
-    });
-    if (open === undefined) continue;
-    const d = REVERSE_DIR[open];
-    const [dx, , dz] = DIR_STEP[d];
-    if (layout.at(c.level, c.x + dx, c.z + dz) !== undefined || layout.isPath(c.level, c.x + dx, c.z + dz)) continue;
-    cliffs.push({ x: c.x * CELL, z: c.z * CELL, dx, dz, top: c.level * LEVEL_H - 0.04 });
+    const face = cliffFacing(layout, c);
+    if (!face) continue;
+    cliffs.push({ x: c.x * CELL, z: c.z * CELL, dx: face.dx, dz: face.dz, top: c.level * LEVEL_H - 0.04 });
     cliffCols.add(`${c.x},${c.z}`);
   }
   // The streets between them, and what fronts the streets and stands among them.
@@ -10994,6 +11117,65 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
     const l = Math.hypot(gx, 1, gz);
     return [-gx / l, 1 / l, -gz / l];
   };
+
+  // Mahn-Tor's cliff (#2362): where the ground falls steeply the mountain is
+  // rock, not a slope of triangles -- masses of fractured, bedded stone
+  // (tools/blender/mahntor_cliff.py) are set against every steep stretch of the
+  // field, along the fall line and sunk into the hill, so the heightfield is
+  // the core and the mass is the face. Only where a cliff stands, and only
+  // with the models.
+  const massif = cliffs.length > 0 && !!instances && ['mahntor_cliff_a', 'mahntor_cliff_b', 'mahntor_cliff_c', 'mahntor_scree']
+    .every((m) => instances.library.get(m));
+  let masses = 0;
+  if (massif) {
+    const SWAP = { crag: batcher.materials.snowcrag ? 'snowcrag' : 'snowrock', gravel: 'trodden' };
+    const nearest = (px, pz) => at(Math.round((px - x0) / HILL_GRID), Math.round((pz - z0) / HILL_GRID));
+    const scree = new Set();
+    const floors = [...support.values()].filter((f) => f.floor);
+    for (let j = MASS_LATTICE; j < nz - MASS_LATTICE; j += MASS_LATTICE) {
+      for (let i = MASS_LATTICE; i < nx - MASS_LATTICE; i += MASS_LATTICE) {
+        let gx = 0; let gz = 0;
+        for (let dj = -1; dj <= 1; dj++) {
+          for (let di = -1; di <= 1; di++) {
+            gx += (at(i + di + 1, j + dj) - at(i + di - 1, j + dj)) / (2 * HILL_GRID);
+            gz += (at(i + di, j + dj + 1) - at(i + di, j + dj - 1)) / (2 * HILL_GRID);
+          }
+        }
+        gx /= 9; gz /= 9;
+        const slope = Math.hypot(gx, gz);
+        if (slope < MASS_SLOPE) continue;
+        const dx = -gx / slope; const dz = -gz / slope; // downhill
+        const px = x0 + i * HILL_GRID; const pz = z0 + j * HILL_GRID;
+        let hi = -Infinity; let lo = Infinity;
+        for (let t = -9; t <= 0; t += 3) hi = Math.max(hi, nearest(px + dx * t, pz + dz * t));
+        for (let t = 0; t <= 12; t += 3) lo = Math.min(lo, nearest(px + dx * t, pz + dz * t));
+        const drop = hi - lo;
+        if (drop < MASS_DROP) continue;
+        // A face that looks into a room -- the walls of the ledge -- stays the
+        // hill's: a mass there would stand in the room.
+        if (floors.some((f) => f.top > lo - 1 && f.top < hi + 1
+          && [3, 6, 9].some((t) => Math.abs(px + dx * t - f.x) < HALF + 0.5 && Math.abs(pz + dz * t - f.z) < HALF + 0.5))) continue;
+        const need = drop + 3;
+        const hash = hash3(i, j, 0, 4101);
+        const name = need < 18 ? 'mahntor_cliff_c' : (hash < 0.5 ? 'mahntor_cliff_a' : 'mahntor_cliff_b');
+        const height = name === 'mahntor_cliff_c' ? 14 : 30;
+        const scaleY = THREE.MathUtils.clamp(need / height, 0.55, 1.28);
+        const rotY = Math.atan2(dx, dz);
+        const wx = px - dx * 0.8; const wz = pz - dz * 0.8;
+        instances.add(name, { x: wx, y: hi + 0.4 - scaleY * height, z: wz, rotY, scaleY },
+          chunkOf({ level: Math.max(0, Math.floor(hi / LEVEL_H)), x: Math.round(wx / CELL), z: Math.round(wz / CELL) }), SWAP);
+        masses++;
+        // What came off it lies at the foot, where the foot is the lowland.
+        if (lo < floor + 3 && !scree.has(`${Math.round(px / 6)},${Math.round(pz / 6)}`)) {
+          scree.add(`${Math.round(px / 6)},${Math.round(pz / 6)}`);
+          const sx = px + dx * MASS_SCREE; const sz = pz + dz * MASS_SCREE;
+          instances.add('mahntor_scree', { x: sx, y: groundY - 0.1, z: sz, rotY },
+            chunkOf({ level: 0, x: Math.round(sx / CELL), z: Math.round(sz / CELL) }), SWAP);
+        }
+      }
+    }
+  }
+  const snowy = cliffs.length > 0 && !!batcher.materials.snowrock && !!batcher.materials.snow;
   const earthOf = new Map();
   for (const s of props) {
     if (!s.floor) continue;
@@ -11013,7 +11195,27 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
     const vx = c[0] - a[0]; const vy = c[1] - a[1]; const vz = c[2] - a[2];
     const fy = uz * vx - ux * vz; const fl = Math.hypot(uy * vz - uz * vy, fy, ux * vy - uy * vx);
     const steep = fy / fl < 0.72;
-    const material = steep ? 'rock' : earth;
+    let material = steep ? 'rock' : earth;
+    if (snowy) {
+      // Winter by height and slope rather than by which cell a triangle is
+      // in (which is a staircase): bare rock where it is steep, with the
+      // edge of it wandering; snow above a line that wanders, grass below.
+      const n = fy / fl;
+      const jitter = (hash3(Math.round((a[0] + b[0] + c[0]) * 0.23), Math.round((ys[0] + ys[1] + ys[2]) * 0.23), Math.round((a[2] + b[2] + c[2]) * 0.23), 91) - 0.5) * 0.16;
+      if (n + jitter < 0.76) material = 'snowrock';
+      else {
+        const gy = (ys[0] + ys[1] + ys[2]) / 3;
+        const line = SNOW_LINE + SNOW_WANDER * (terrainNoise(((a[0] + b[0] + c[0]) / 3) * 0.045, ((a[2] + b[2] + c[2]) / 3) * 0.045, 877) - 0.5);
+        // A band of trodden, thawed snow between the white and the green, so the
+        // edge is a gradient and not a saw of triangles.
+        material = gy > line + SNOW_BAND ? 'snow' : gy > line - SNOW_BAND && batcher.materials.trodden ? 'trodden' : earth;
+        // The lowland's own snow reaches up the foot of the hill as far as the ground's does.
+        if (winter && material !== 'snow') {
+          const w = winter.at((a[0] + b[0] + c[0]) / 3, (a[2] + b[2] + c[2]) / 3);
+          if (w === 'snow' || (w === 'trodden' && material === earth)) material = w === 'snow' ? 'snow' : 'trodden';
+        }
+      }
+    }
     const cx = (a[0] + b[0] + c[0]) / 3; const cz = (a[2] + b[2] + c[2]) / 3; const cy = (ys[0] + ys[1] + ys[2]) / 3;
     const chunk = chunkOf({ level: Math.max(0, Math.floor(cy / LEVEL_H)), x: Math.round(cx / CELL), z: Math.round(cz / CELL) });
     const k = `${material}|${chunk}`;
@@ -11039,10 +11241,35 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
     if (s.under === -Infinity) continue;
     const y0 = s.under + HILL_OVERHANG; const y1 = s.top - 0.02;
     if (y1 - y0 < 0.5) continue;
+    // The cliff's ledge (#2361) is roofed by the mountain, not by a box: the
+    // brow over it, and beside it where the city's floor goes on over the
+    // ledge's flanks. What stands out beyond the face has nothing under it.
+    if (massif && instances.library.get('mahntor_cliff_brow')) {
+      const px = Math.round(s.x / CELL); const pz = Math.round(s.z / CELL);
+      const along = (f) => Math.abs((s.x - f.x) * Math.abs(f.dz) + (s.z - f.z) * Math.abs(f.dx));
+      const out = (f) => (s.x - f.x) * f.dx + (s.z - f.z) * f.dz;
+      // Beyond the face, the cell in front of the room: no box, and the cell is no promontory.
+      if (cliffs.some((f) => out(f) > CELL * 0.7 && along(f) < CELL * 0.6)) continue;
+      // Over the ledge itself, or beside it along the face.
+      const face = cliffs.find((f) => Math.abs(out(f)) < 1 && along(f) < CELL * 1.6);
+      if (face) {
+        const lift = cliffCols.has(`${px},${pz}`) ? 0 : 0.06;
+        instances.add(cliffCols.has(`${px},${pz}`) || !instances.library.get('mahntor_cliff_brow_b') ? 'mahntor_cliff_brow' : 'mahntor_cliff_brow_b', {
+          // The ledge's own brow and the two beside it lap by 0.6 m; the flanks stand a few
+          // centimetres higher so no two share a soffit.
+          x: s.x + face.dx * HALF, y: y0 + lift, z: s.z + face.dz * HALF, rotY: Math.atan2(face.dx, face.dz), scaleY: (y1 - y0 - lift) / 14.37,
+        }, chunkOf({ level: s.level, x: px, z: pz }), { crag: batcher.materials.snowcrag ? 'snowcrag' : 'snowrock' });
+        continue;
+      }
+    }
     batcher.add(box(CELL, y1 - y0, CELL, 3, 3, 3), 'rock', place(s.x, (y0 + y1) / 2, s.z),
       { chunk: chunkOf({ level: s.level, x: Math.round(s.x / CELL), z: Math.round(s.z / CELL) }) });
     triangles += 108;
   }
+  // Where `snowy` chose the materials the table that turns them to winter
+  // by the cell they are in has nothing left to say.
+  const frost = batcher.frost;
+  if (snowy) batcher.frost = null;
   for (const { material, chunk, p, n } of bins.values()) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
@@ -11050,7 +11277,8 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY }) {
     batcher.add(geo, material, new THREE.Matrix4(), { chunk, normals: true, ao: () => 0.92, uvScale: material === 'grass' ? TURF_UV : null });
     geo.dispose();
   }
-  return { cells: support.size, triangles };
+  batcher.frost = frost;
+  return { cells: support.size, triangles, masses };
 }
 
 function buildMassif({ layout, batcher, instances, addCollider, chunkOf, cellKey, keep = null }) {
@@ -13856,7 +14084,7 @@ const FILLER_GROUND = {
 };
 
 /** Scenery for an empty cell: houses along a street, trees along a path. */
-function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, shire, x, y, z, seed, addCollider, lights, decor, walled = [] }) {
+function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, shire, x, y, z, seed, addCollider, lights, decor, walled = [], bare = false, off = false, winter = null }) {
   const GROUND = FILLER_GROUND;
   // A bog is what its rooms say, and so is everything between them. Half the
   // Old Marsh is sectored MOUNTAIN, and taken at its word that put an
@@ -13864,7 +14092,8 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
   // bottom of a quarry. Reed beds and dead timber on peat instead, and nothing
   // to wall it in: the kerbs on the rooms themselves are the barrier.
   if (bog) {
-    batcher.add(plane(CELL, CELL, 3), 'peat', place(x, y, z), { chunk });
+    if (off) return;
+    batcher.add(plane(CELL, CELL, 3), bare ? 'snow' : 'peat', place(x, y, z), { chunk });
     if (!instances) return;
     scatterUndergrowth({
       instances, chunk, x, y, z,
@@ -13886,8 +14115,10 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
     return;
   }
   const ground = shire && sector === SECTOR.CITY ? 'grass' : GROUND[sector];
-  if (ground) {
-    batcher.add(plane(CELL, CELL, 3), ground, place(x, y, z), { chunk });
+  if (ground && !off && winter && !bare && ground === 'grass') {
+    groundTiles({ batcher, chunk, field: winter, x0: x - HALF, x1: x + HALF, z0: z - HALF, z1: z + HALF, y });
+  } else if (ground && !off) {
+    batcher.add(plane(CELL, CELL, 3), bare ? 'snow' : ground, place(x, y, z), { chunk });
   }
 
   switch (sector) {
@@ -14003,7 +14234,8 @@ function buildFiller({ batcher, instances, model, faceRot, chunk, sector, bog, s
     }
     case SECTOR.MOUNTAIN: {
       const h = 11;
-      batcher.add(box(CELL, h, CELL, 3, 3, 3), 'rock', place(x, y + h / 2 - 0.8, z), { chunk, ao: wallAo(y) });
+      // Where it is the mountain's own rock (`bare`) the collider stays and the cube does not.
+      if (!bare) batcher.add(box(CELL, h, CELL, 3, 3, 3), 'rock', place(x, y + h / 2 - 0.8, z), { chunk, ao: wallAo(y) });
       addCollider(x - HALF, x + HALF, z - HALF, z + HALF, y, y + h - 0.8);
       break;
     }

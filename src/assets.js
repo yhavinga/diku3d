@@ -970,6 +970,8 @@ export const ASSET_NAMES = [
   'gatehouse', 'fortress', 'monolith', 'statue_worm',
   // Mahn-Tor's ice gates and wooden keep gates, and the walls they are in: tools/blender/mahntor.py.
   'mahntor_gatehouse', 'mahntor_gate_ice', 'mahntor_keep', 'mahntor_gate_oak', 'mahntor_rim',
+  // The mountain under the city, and the scree at its foot: tools/blender/mahntor_cliff.py.
+  'mahntor_cliff_a', 'mahntor_cliff_b', 'mahntor_cliff_c', 'mahntor_cliff_brow', 'mahntor_cliff_brow_b', 'mahntor_scree',
   // The rooms' furniture: tools/blender/furniture.py.
   ...FURNITURE_NAMES,
   // What the rooms' prose puts in them: tools/blender/clutter.py.

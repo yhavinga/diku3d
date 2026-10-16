@@ -3049,7 +3049,9 @@ const RECIPES = {
   snow: { surface: 'snow', scale: 3.0, normalScale: 0.7, env: 0.8, wet: 0, detail: 0.3 },
   trodden: { surface: 'trodden', scale: 3.2, normalScale: 0.7, env: 1.1, wet: 0, detail: 0.5 },
   snowcobble: { surface: 'frostcobble', scale: 2.2, normalScale: 1.0, env: 1.0, wet: 0, detail: 0.5, snowy: { cover: 0.5, foot: 0 } },
-  snowrock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0, detail: 0.6, snowy: { cover: 0.5, foot: 0 } },
+  snowrock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0, detail: 0.6, triplanar: true, snowy: { cover: 0.5, foot: 0 } },
+  // The mountain under Mahn-Tor's city (mahntor_cliff.py): bedded cave rock, snow where it settles.
+  snowcrag: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0, detail: 0.6, triplanar: true, snowy: { cover: 0.55, foot: 0 } },
   frostwall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55, snowy: { cover: 0.6, foot: 0.6 } },
   frosttimber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45, snowy: { cover: 0.55, foot: 0.5 } },
   snowroof: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0, detail: 0.5, snowy: { cover: 1.0, foot: 0 } },

@@ -46,6 +46,7 @@ MODULES = [
     "clutter",
     "setpiece",
     "mahntor",
+    "mahntor_cliff",
     "statues",
     "hatches",
 ]
@@ -190,7 +191,9 @@ BUDGET = {
     "gatehouse": 6000, "fortress": 20000,
     # mahntor.py: one gate wall to each end of the passage, one keep, and the
     # leaves are carved on both faces (the ice one with ten bulls' heads).
-    "mahntor_gatehouse": 4500, "mahntor_gate_ice": 6000, "mahntor_keep": 16000, "mahntor_gate_oak": 2500, "mahntor_rim": 1200, "monolith": 400, "statue_worm": 7000,
+    "mahntor_gatehouse": 4500, "mahntor_gate_ice": 6000, "mahntor_keep": 16000, "mahntor_gate_oak": 2500, "mahntor_rim": 1200,
+    # mahntor_cliff.py: masses of rock set against the steep ground under the city, a brow over the ledge, and the scree at the foot.
+    "mahntor_cliff_a": 9000, "mahntor_cliff_b": 9000, "mahntor_cliff_c": 5000, "mahntor_cliff_brow": 6000, "mahntor_cliff_brow_b": 6000, "mahntor_scree": 4500, "monolith": 400, "statue_worm": 7000,
     # statues.py. One Odin in the world (two with the mirror Midgaard), seen
     # from three metres at the altar: the face and beard are carved on a 5 mm
     # grid of their own, and a pair each of wolves and ravens sit on it.
