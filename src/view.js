@@ -127,6 +127,12 @@ const RING_FROM = 9;
 const DUSTY = new Set(['cobble', 'flagstone', 'dirt', 'sand', 'rock', 'ash']);
 /** Flying (the spell), the body rides this high over its feet, bobbing. */
 const HOVER = 0.32;
+/**
+ * How far the pivot comes down while the body rests on the ground or sleeps:
+ * at the standing eye a seated figure sat at the foot of the frame and a
+ * sleeper was half under the panels.
+ */
+const SEATED = { rest_ground: 0.85, sleep: 1.25 };
 
 export function createView({ camera, player, scene, getBuilt, library, world, game, roomAt, spellfx }) {
   let third = false;
@@ -165,6 +171,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
   const current = new THREE.Vector3();
   let clock = 0;
   let hover = 0;
+  let seated = 0;
   let facingUntil = 0;
   let air = { up: false, since: 0 };
   const pending = [];
@@ -546,9 +553,10 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     forward.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
     right.set(Math.cos(yaw), 0, -Math.sin(yaw));
     pivot.copy(player.position);
+    seated += ((SEATED[poseOf(game.state.position)] || 0) - seated) * Math.min(1, dt * 3);
     // The weight moves the pivot only where a camera could stand: a lag
     // into a wall is dropped, since the arm's checks begin at the pivot.
-    offset.copy(swayNow).setY(-dip);
+    offset.copy(swayNow).setY(-dip - seated);
     if (offset.lengthSq() > 1e-8) {
       pivot.add(offset);
       if (blocked(pivot)) pivot.copy(player.position);
