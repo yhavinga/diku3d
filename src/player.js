@@ -14,6 +14,8 @@ const EYE = 1.72;
 const RADIUS = 0.42;
 const HEIGHT = 1.8;
 const STEP_UP = 0.62;
+/** The steepest rolling ground (`field` platforms: hills, heaps) a body will climb: 40 degrees. */
+const MAX_SLOPE = Math.tan((40 * Math.PI) / 180);
 const GRAVITY = 24;
 const WALK = 4.8;
 const SPRINT = 9.5;
@@ -349,13 +351,14 @@ export class Player {
   groundAt(x, z, feetY) {
     const items = this.platforms.near(x, z, this._scratch);
     let best = -Infinity;
+    this._groundField = false;
     for (const p of items) {
       // A shut lid is floor; an open one is a hole.
       if (p.door && p.door.open) continue;
       if (x < p.x0 - RADIUS || x > p.x1 + RADIUS || z < p.z0 - RADIUS || z > p.z1 + RADIUS) continue;
       const top = topAt(p, x, z);
       if (top > feetY + STEP_UP) continue;
-      if (top > best) best = top;
+      if (top > best) { best = top; this._groundField = !!p.field; }
     }
     return best;
   }
@@ -455,6 +458,8 @@ export class Player {
     }
 
     const feetY = this.position.y - EYE;
+    const fromX = this.position.x; const fromZ = this.position.z;
+    const fromField = this._groundField && this.onGround;
 
     // horizontal move, then push out of anything we ended up inside
     const stepX = wishX * speed * dt;
@@ -465,7 +470,17 @@ export class Player {
     this.resolveCollisions(feetY);
 
     // vertical
-    const ground = this.groundAt(this.position.x, this.position.z, feetY);
+    let ground = this.groundAt(this.position.x, this.position.z, feetY);
+    // Rolling ground that is too steep is a wall: not an invisible one, the
+    // slope itself. Only where both the feet were and are on such ground, so
+    // that a stair's tread (a step, not a slope) is left to STEP_UP.
+    if (fromField && this._groundField && ground > -Infinity && this.onGround) {
+      const run = Math.hypot(this.position.x - fromX, this.position.z - fromZ);
+      if (run > 1e-5 && (ground - feetY) / run > MAX_SLOPE) {
+        this.position.x = fromX; this.position.z = fromZ;
+        ground = this.groundAt(fromX, fromZ, feetY);
+      }
+    }
     const targetFeet = ground === -Infinity ? feetY : ground;
     // Rising is never "standing": a jump leaves the ground only on the next
     // frame, and judged by height alone that frame still reads as grounded --

@@ -2295,6 +2295,7 @@ async function boot() {
     // The drawn zone's, so read through: a crossing replaces all four.
     get layout() { return layout; },
     get built() { return built; },
+    get relief() { return built.relief; },
     get actors() { return actors; },
     get visibility() { return visibility; },
     /** The neighbouring zones drawn past the crossings (vista.js). */

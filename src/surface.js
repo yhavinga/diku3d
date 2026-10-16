@@ -6,6 +6,8 @@
  * at the rectangle's (x0, z0) corner and the rise per metre along x and z.
  * Every reader of a platform's height asks `topAt`, so a ramp is as true to
  * the player, the camera, the mobiles' grid and the tools as a flat floor is.
+ * A platform may instead carry `field`, a function of (x, z) added to its
+ * flat height `rest`: the Shire's rolling ground (relief.js).
  * `top` stays the highest the platform gets, which is what a reader that only
  * needs an upper bound (a sort, a filter) keeps using.
  *
@@ -30,14 +32,17 @@ export const TERRACE_LIFT = 0.9;
  */
 export function topAt(p, x, z) {
   const s = p.slope;
-  if (!s) return p.top;
+  const f = p.field;
+  if (!s && !f) return p.top;
   const cx = x < p.x0 ? p.x0 : x > p.x1 ? p.x1 : x;
   const cz = z < p.z0 ? p.z0 : z > p.z1 ? p.z1 : z;
+  // `field`: ground that rolls (relief.js `at`) over a floor `rest` high on the flat.
+  if (f) return p.rest + f(cx, cz);
   return s.top0 + s.ax * (cx - p.x0) + s.az * (cz - p.z0);
 }
 
 /** The lowest a platform gets. */
-export const lowAt = (p) => (p.slope ? p.slope.low ?? p.top : p.top);
+export const lowAt = (p) => (p.field ? p.low : p.slope ? p.slope.low ?? p.top : p.top);
 
 /**
  * The plane through a rectangle for a rise `dh` over `along` metres in

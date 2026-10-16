@@ -26,6 +26,7 @@ import {
 } from './shells.js';
 import { BESIDE } from './layout.js';
 import { planeOf, inclines, inclineLift, inclineCell, addTerraces } from './surface.js';
+import { buildRelief, dumpLumps, LOWEST as RELIEF_LOWEST } from './relief.js';
 import { placeClutter, ALTAR_MIDDLE, STATUE_OF_ODIN, STATUE_DEPTH } from './clutter.js';
 import { MURAL_REGIONS, faceRegion, bloodRegion } from './textures.js';
 
@@ -373,6 +374,9 @@ class Batcher {
     this.indoor = false;
     // The grid cells (`x,z`) that are in winter, or null: see WINTER.
     this.frost = null;
+    // The Shire's rolling ground (relief.js), or null: everything filed from
+    // level `RELIEF_LOWEST` up rides on it. See `splitForRelief`, `liftToRelief`.
+    this.relief = null;
   }
 
   /**
@@ -390,14 +394,19 @@ class Batcher {
     const material = this.materials[materialName];
     if (!material) throw new Error(`build: unknown material ${materialName}`);
     const {
-      tint = null, ao = null, chunk = '0', uvScale = null, indoor = this.indoor, normals = false, keepUv = false,
+      tint = null, ao = null, chunk = '0', uvScale = null, indoor = this.indoor, normals = false, keepUv = false, flat = false,
     } = options;
 
-    const geo = geometry.index ? geometry.toNonIndexed() : geometry.clone();
+    let geo = geometry.index ? geometry.toNonIndexed() : geometry.clone();
     geo.applyMatrix4(matrix);
     // `normals` keeps the ones a curved surface came with; recomputed on a
     // non-indexed geometry they are one per face, and a vault turns faceted.
     if (!normals) geo.computeVertexNormals();
+    // Over the Shire's hills: a surface long enough for the ground to bend
+    // under it is cut up first, so that it can; the lift itself comes last,
+    // after the UVs and the shading are read off the flat piece.
+    const rides = !flat && !!this.relief && !(Number.parseInt(chunk, 10) < RELIEF_LOWEST) && relief3(geo, this.relief);
+    if (rides && !keepUv) geo = splitForRelief(geo, this.relief);
 
     const pos = geo.attributes.position;
     const nor = geo.attributes.normal;
@@ -425,6 +434,7 @@ class Batcher {
       col[i * 3 + 2] = t[2] * shade;
     }
 
+    if (rides) liftToRelief(geo, this.relief);
     geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     // Written on every batched geometry, not only the indoor ones: mergeGeometries
@@ -454,6 +464,176 @@ class Batcher {
     }
     return { triangles };
   }
+}
+
+// ----------------------------------------------- the Shire's rolling ground ----
+
+/** The longest a surface may run, in plan, over ground that bends under it. */
+const RELIEF_EDGE = 4;
+/** Ground that varies by less than this across a piece is not worth cutting. */
+const RELIEF_FLAT = 0.012;
+
+/**
+ * The ground the Shire's hills make, laid over the flat plane in tiles four
+ * metres a side wherever the ground is not flat: a row of tiles is one strip,
+ * and a tile a hole in the ground cuts (a stair going down) is cut round it.
+ * Heights and normals are the relief's own, so the hills shade smoothly.
+ */
+function buildReliefGround({ batcher, relief, y, holes }) {
+  const T = 4;
+  const b = relief.box;
+  const grow = (xs, z0, z1) => {
+    // xs: the x of each column edge; one strip of quads from z0 to z1.
+    const pos = []; const nor = []; const idx = [];
+    for (const x of xs) {
+      for (const z of [z0, z1]) {
+        const [gx, gz] = relief.grad(x, z);
+        const l = Math.hypot(gx, 1, gz);
+        pos.push(x, y + relief.at(x, z), z); nor.push(-gx / l, 1 / l, -gz / l);
+      }
+    }
+    for (let i = 0; i < xs.length - 1; i++) {
+      const k = i * 2;
+      // Wound so the faces look up.
+      idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    geo.setIndex(idx);
+    batcher.add(geo, 'grass', IDENTITY, { chunk: 'ground', flat: true, normals: true });
+    geo.dispose();
+  };
+  const gz0 = Math.floor(b.z0 / T) * T; const gx0 = Math.floor(b.x0 / T) * T;
+  for (let z = gz0; z < b.z1; z += T) {
+    let run = [];
+    const flush = () => { if (run.length > 1) grow(run, z, z + T); run = []; };
+    for (let x = gx0; x < b.x1; x += T) {
+      const [, hi] = relief.range(x, x + T, z, z + T);
+      if (hi <= 0.0005) { flush(); continue; }
+      const cut = holes.filter((h) => h.x1 > x && h.x0 < x + T && h.z1 > z && h.z0 < z + T);
+      if (cut.length) {
+        flush();
+        for (const r of rectsAround({ x0: x, x1: x + T, z0: z, z1: z + T }, cut)) grow([r.x0, r.x1], r.z0, r.z1);
+        continue;
+      }
+      if (!run.length) run.push(x);
+      run.push(x + T);
+    }
+    flush();
+  }
+}
+
+/**
+ * The Dump's ground: a mesh over the floor, 0.5 m a side, in the dirt, with
+ * the rubble where a heap is high and the peat where the ground is lowest;
+ * and a platform whose height is the same function, so that a body walks on
+ * what it sees. Over the floor and not in it: the flat floor stays under it.
+ */
+function buildDumpGround({ batcher, lumps, y, chunk, platforms }) {
+  const S = 0.5;
+  const nx = Math.round((lumps.x1 - lumps.x0) / S);
+  const nz = Math.round((lumps.z1 - lumps.z0) / S);
+  const vertex = (i, j) => {
+    const x = lumps.x0 + i * S; const z = lumps.z0 + j * S;
+    const [gx, gz] = lumps.grad(x, z);
+    const l = Math.hypot(gx, 1, gz);
+    return [x, y + lumps.at(x, z), z, -gx / l, 1 / l, -gz / l];
+  };
+  const bins = new Map();
+  const push = (tri) => {
+    const h = (tri[0][1] + tri[1][1] + tri[2][1]) / 3 - y;
+    const material = h > 1.05 ? 'rubble' : h > 0.45 ? 'wasteground' : h < 0.14 ? 'peat' : 'dirt';
+    if (!bins.has(material)) bins.set(material, { p: [], n: [] });
+    const b = bins.get(material);
+    for (const v of tri) { b.p.push(v[0], v[1], v[2]); b.n.push(v[3], v[4], v[5]); }
+  };
+  for (let j = 0; j < nz; j++) {
+    for (let i = 0; i < nx; i++) {
+      const a = vertex(i, j); const b = vertex(i + 1, j); const c = vertex(i, j + 1); const d = vertex(i + 1, j + 1);
+      push([a, c, b]); push([b, c, d]);
+    }
+  }
+  for (const [material, { p, n }] of bins) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
+    batcher.add(geo, material, IDENTITY, { chunk, flat: true, normals: true });
+    geo.dispose();
+  }
+  platforms.push({ x0: lumps.x0, x1: lumps.x1, z0: lumps.z0, z1: lumps.z1, top: y + lumps.max, rest: y, low: y, base: y, field: lumps.at });
+}
+
+/** Does this (world-space) geometry stand where the ground is not flat? */
+function relief3(geo, relief) {
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  const b = geo.boundingBox;
+  if (!relief.touches(b.min.x, b.max.x, b.min.z, b.max.z)) return false;
+  const [lo, hi] = relief.range(b.min.x, b.max.x, b.min.z, b.max.z);
+  return hi > 0.0005 || lo > 0.0005;
+}
+
+/**
+ * Cut every triangle longer than RELIEF_EDGE in plan, where the ground differs
+ * over it, into four, until none is. Without this a floor of six segments
+ * would be a chord across a hill and not the hill. Non-indexed in, out.
+ */
+function splitForRelief(geo, relief) {
+  const P = geo.attributes.position.array; const N = geo.attributes.normal.array;
+  const pos = []; const nor = [];
+  const at = (x, z) => relief.at(x, z);
+  // By bisecting the longest edge, so a sliver is halved along its length and
+  // not into four slivers.
+  const split = (t, n, depth) => {
+    const L = [Math.hypot(t[3] - t[0], t[5] - t[2]), Math.hypot(t[6] - t[3], t[8] - t[5]), Math.hypot(t[0] - t[6], t[2] - t[8])];
+    const e = L[0] >= L[1] && L[0] >= L[2] ? 0 : L[1] >= L[2] ? 1 : 2;
+    let go = depth < 18 && L[e] > RELIEF_EDGE;
+    if (go) {
+      const [ax, , az, bx, , bz, cx, , cz] = t;
+      const hs = [at(ax, az), at(bx, bz), at(cx, cz), at((ax + bx) / 2, (az + bz) / 2), at((bx + cx) / 2, (bz + cz) / 2), at((cx + ax) / 2, (cz + az) / 2), at((ax + bx + cx) / 3, (az + bz + cz) / 3)];
+      go = Math.max(...hs) - Math.min(...hs) > RELIEF_FLAT;
+    }
+    if (!go) { pos.push(...t); nor.push(...n); return; }
+    // Rotate so that the longest edge is P-Q.
+    const o = e * 3;
+    const idx = [o, (o + 3) % 9, (o + 6) % 9];
+    const V = idx.map((i) => t.slice(i, i + 3)); const M = idx.map((i) => n.slice(i, i + 3));
+    const mid = (u, v) => [(u[0] + v[0]) / 2, (u[1] + v[1]) / 2, (u[2] + v[2]) / 2];
+    const nm = (u, v) => { const m = mid(u, v); const l = Math.hypot(...m) || 1; return [m[0] / l, m[1] / l, m[2] / l]; };
+    const m = mid(V[0], V[1]); const nmid = nm(M[0], M[1]);
+    split([...V[0], ...m, ...V[2]], [...M[0], ...nmid, ...M[2]], depth + 1);
+    split([...m, ...V[1], ...V[2]], [...nmid, ...M[1], ...M[2]], depth + 1);
+    if (pos.length > 6e6) throw new Error('build: the hills cut a surface into more than two million triangles (splitForRelief)');
+  };
+  for (let i = 0; i < P.length; i += 9) split(Array.from(P.subarray(i, i + 9)), Array.from(N.subarray(i, i + 9)), 0);
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.dispose();
+  return out;
+}
+
+/**
+ * Shear a geometry up onto the ground: every vertex rises by the relief under
+ * it and every normal is carried through the same shear, so that a flat floor
+ * leans with the hill and a wall stays a wall.
+ */
+function liftToRelief(geo, relief) {
+  const p = geo.attributes.position; const n = geo.attributes.normal;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i); const z = p.getZ(i);
+    const h = relief.at(x, z);
+    const [gx, gz] = relief.grad(x, z);
+    p.setY(i, p.getY(i) + h);
+    if (gx !== 0 || gz !== 0) {
+      const ny = n.getY(i);
+      const nx = n.getX(i) - gx * ny; const nz = n.getZ(i) - gz * ny;
+      const l = Math.hypot(nx, ny, nz) || 1;
+      n.setXYZ(i, nx / l, ny / l, nz / l);
+    }
+  }
+  p.needsUpdate = true; n.needsUpdate = true;
+  geo.boundingBox = null; geo.boundingSphere = null;
 }
 
 // -------------------------------------------------------------- helpers ----
@@ -3668,14 +3848,58 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   const reserved = new Set(options.clear || []); // cells something other than a house stands on
 
   // Each returns what it added: a lid's (`buildLidStair`) is told which door it belongs to.
-  const addCollider = (x0, x1, z0, z1, y0, y1) => { const c = { x0, x1, z0, z1, y0, y1 }; colliders.push(c); return c; };
-  const addPlatform = (x0, x1, z0, z1, top) => { const p = { x0, x1, z0, z1, top }; platforms.push(p); return p; };
+  // Over the Shire's hills a collider stands from the lowest ground under it
+  // to the highest, and a platform is the ground itself: `topAt` reads `field`.
+  const rides = (y) => y > (RELIEF_LOWEST - 0.5) * LEVEL_H;
+  const addCollider = (x0, x1, z0, z1, y0, y1) => {
+    const c = { x0, x1, z0, z1, y0, y1 };
+    if (batcher.relief && rides(y1)) {
+      const [lo, hi] = batcher.relief.range(x0, x1, z0, z1);
+      c.y0 += lo; c.y1 += hi;
+    }
+    // On the Dump's heaps.
+    if (lumps && y0 > -1 && x1 > lumps.x0 && x0 < lumps.x1 && z1 > lumps.z0 && z0 < lumps.z1) {
+      const [lo, hi] = lumps.range(Math.max(x0, lumps.x0), Math.min(x1, lumps.x1), Math.max(z0, lumps.z0), Math.min(z1, lumps.z1));
+      c.y0 += lo; c.y1 += hi;
+    }
+    colliders.push(c);
+    return c;
+  };
+  const addPlatform = (x0, x1, z0, z1, top) => {
+    const p = { x0, x1, z0, z1, top };
+    if (batcher.relief && rides(top)) {
+      const [lo, hi] = batcher.relief.range(x0, x1, z0, z1);
+      if (hi > 0.0005) {
+        p.field = batcher.relief.at; p.rest = top; p.top = top + hi; p.low = top + lo; p.base = top;
+      }
+    }
+    platforms.push(p);
+    return p;
+  };
   // The portals a lid shuts: actors.js keeps each in `portals` only while its lid is open.
   const hatchPortals = [];
 
   classifySewer(world);
   classifyCanopy(world);
   classifyShells(world, (room) => sectorOf(room) !== SECTOR.AIR && !isOpenAir(room));
+  // The Shire's rolling ground (relief.js): what is filed on it rides up with it.
+  const relief = vista ? null : buildRelief(layout, { openAir: isOpenAir });
+  batcher.relief = relief;
+  // The Dump's heaps and ruts (relief.js `dumpLumps`), over its floor.
+  const dumpCell = vista ? null : layout.order.find((c) => c.level === 0 && c.room.areaFile === 'midgaard.are' && REFUSE.test(c.room.name) && isOpenAir(c.room));
+  const lumps = dumpCell ? dumpLumps(dumpCell.x * CELL, dumpCell.z * CELL) : null;
+  const lumpAt = (x, z) => (lumps && lumps.inside(x, z) ? lumps.at(x, z) : 0);
+  if ((relief || lumps) && instances) {
+    const add = instances.add.bind(instances);
+    instances.add = (name, transform, chunk, swap) => {
+      const level = Number.parseInt(chunk, 10);
+      if (level < RELIEF_LOWEST) return add(name, transform, chunk, swap);
+      // Whether a model stands in a room is asked where it stood on the flat.
+      const indoor = transform.indoor ?? !!instances.indoorAt?.(transform.x, transform.y, transform.z);
+      const lift = (relief ? relief.at(transform.x, transform.z) : 0) + (level === 0 ? lumpAt(transform.x, transform.z) : 0);
+      return add(name, { ...transform, indoor, y: transform.y + lift }, chunk, swap);
+    };
+  }
   const lifts = mounds(world, layout);
   footedHere = ({ level, x, z }) => {
     const v = layout.at(level, x, z);
@@ -3804,11 +4028,22 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     groundTiles({ batcher, chunk: 'ground', field: winter, ...winterBox, y: groundY, skip: inHole });
     for (const r of rectsAround(winterBox, groundHoles)) addPlatform(r.x0, r.x1, r.z0, r.z1, groundY);
   }
+  // Over the Shire's hills the flat plane stays as the floor under them, and
+  // what you stand on is the rolling ground laid over it in 4 m tiles
+  // (`buildReliefGround`); the platforms are the hills' own, so the plane is
+  // cut at the hills' box for them.
+  const hillBox = relief ? { x0: relief.box.x0, x1: relief.box.x1, z0: relief.box.z0, z1: relief.box.z1 } : null;
   for (const r of vista ? [] : rectsAround({ x0: gx0, x1: gx1, z0: gz0, z1: gz1 }, winterBox ? [...groundHoles, winterBox] : groundHoles)) {
     const w = r.x1 - r.x0; const d = r.z1 - r.z0;
     const seg = Math.max(1, Math.min(32, Math.round(Math.max(w, d) / 60)));
-    batcher.add(plane(w, d, seg), 'grass', place((r.x0 + r.x1) / 2, groundY, (r.z0 + r.z1) / 2), { chunk: 'ground' });
-    addPlatform(r.x0, r.x1, r.z0, r.z1, groundY);
+    batcher.add(plane(w, d, seg), 'grass', place((r.x0 + r.x1) / 2, groundY, (r.z0 + r.z1) / 2), { chunk: 'ground', flat: true });
+    if (!hillBox) addPlatform(r.x0, r.x1, r.z0, r.z1, groundY);
+  }
+  if (hillBox) {
+    const keep = winterBox ? [...groundHoles, winterBox] : groundHoles;
+    for (const r of rectsAround({ x0: gx0, x1: gx1, z0: gz0, z1: gz1 }, [...keep, hillBox])) addPlatform(r.x0, r.x1, r.z0, r.z1, groundY);
+    for (const r of rectsAround(hillBox, keep)) addPlatform(r.x0, r.x1, r.z0, r.z1, groundY);
+    buildReliefGround({ batcher, relief, y: groundY, holes: keep });
   }
   // ...and something for it to end against, out where the fog is thick enough
   // to do the work.
@@ -3946,6 +4181,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         shade: !openAir, tint: mats.floorTint,
       });
     }
+    if (lumps && cell === dumpCell) buildDumpGround({ batcher, lumps, y: pos.y, chunk, platforms });
 
     // "A huge fountain graces the center of the square, but the extreme cold
     // has turned it into an ice sculpture": the fountain, in ice. Off the
@@ -5365,8 +5601,25 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       }
     }
   }
+  // What was set down at a room's own height rides up with the ground under it
+  // (colliders, platforms, geometry and models were lifted as they were filed).
+  if (relief) {
+    // Once each: an item may sit in two of these lists.
+    const lifted = new Set();
+    const up = (o) => { if (o && !lifted.has(o) && o.y > (RELIEF_LOWEST - 0.5) * LEVEL_H) { lifted.add(o); o.y += relief.at(o.x, o.z); } };
+    for (const list of [decor, lights, portals, hatchPortals, doors, crossings, veils]) list.forEach(up);
+    for (const info of rooms.values()) if (info.center.y > (RELIEF_LOWEST - 0.5) * LEVEL_H) info.center.y += relief.at(info.center.x, info.center.z);
+    for (const w of stats.clutter?.where || []) up(w);
+  }
+  if (lumps) {
+    const onto = (o) => { if (o && o.y > -1 && o.y < LEVEL_H / 2) o.y += lumpAt(o.x, o.z); };
+    for (const list of [decor, lights, portals, hatchPortals, doors]) list.forEach(onto);
+    for (const w of stats.clutter?.where || []) onto(w);
+    const home = rooms.get(dumpCell.vnum);
+    if (home) home.center.y += lumpAt(home.center.x, home.center.z);
+  }
   const thresholds = buildThresholds(veils, zones);
-  return { group, colliders, platforms, lights, portals, hatchPortals, doors, rooms, decor, mist, horizon, stats, zones, grass, thresholds, crossings };
+  return { group, colliders, platforms, lights, portals, hatchPortals, doors, rooms, decor, mist, horizon, stats, zones, grass, thresholds, crossings, relief };
 }
 
 /** A sub-step's own 0..1 progress, as a stretch [a, b] of its caller's. */
