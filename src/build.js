@@ -3677,6 +3677,11 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   classifyCanopy(world);
   classifyShells(world, (room) => sectorOf(room) !== SECTOR.AIR && !isOpenAir(room));
   const lifts = mounds(world, layout);
+  footedHere = ({ level, x, z }) => {
+    const v = layout.at(level, x, z);
+    const room = v !== undefined ? world.rooms.get(v) : layout.passageAt(level, x, z)?.from.room;
+    return room?.areaFile === 'midgaard.are';
+  };
   // The streets between rooms of different height, which are ramps (surface.js).
   const inclineMap = inclines(layout, lifts, (v) => isOpenAir(world.rooms.get(v)));
   // Ground raised under a building, which nav.js and motion.js stand
@@ -6411,6 +6416,12 @@ const STRAIGHT = { f: () => ROW_FACE, k: () => 0 };
 // Limewash, as the houses of Colmar and Rothenburg wear it: muted, never
 // saturated -- multiplied into the plaster's own off-white.
 const LIMEWASH = [[1, 0.98, 0.93], [1, 0.9, 0.72], [0.98, 0.86, 0.8], [0.88, 0.93, 0.83], [0.86, 0.9, 0.95], [1, 1, 1], [0.96, 0.92, 0.84]];
+/**
+ * Whether the houses of a cell get a kerb, a worn step and a gutter stone:
+ * Midgaard's, for now (the relief wave is Midgaard's). Set by `raise`, which
+ * knows the layout; a street cell is read by the street through it.
+ */
+let footedHere = () => false;
 /** Foot of a house front: plinth, door step and gutter stone, in metres. */
 const PLINTH_H = 0.16;
 const STEP_H = 0.08;
@@ -6586,7 +6597,7 @@ function buildHouseRow({ batcher, instances = null, chunk, pos, dir, a0, a1, cel
     // the player's STEP_UP let stand in the way, so they carry no collider and
     // no platform. Seated inside the wall's face and short of its ends, so none
     // of it shares a plane with anything (tools/judge/zfight.js).
-    if (!under) {
+    if (!under && footedHere(cell)) {
       const fr = front(0);
       const P = (lx, lz) => fr.on(lx, lz);
       const half = (fr.len - 0.04) / 2;
