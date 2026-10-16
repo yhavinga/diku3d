@@ -15,6 +15,7 @@
 import { fightMusicFor } from './soundmap.js';
 import { POS } from './game.js';
 import { ACT_AGGRESSIVE } from './are.js';
+import { canSee } from './rules/handler.js';
 
 /** Within this many metres, with nothing between, a boss that has seen you counts in full. */
 export const NEAR = 15;
@@ -65,7 +66,7 @@ export function createPresence({ game, nav, onTurn = null }) {
       const dx = slot.pos.x - eye.x; const dz = slot.pos.z - eye.z;
       const d = Math.hypot(dx, dz);
       if (d >= FAR || Math.abs(slot.pos.y - (eye.y - 1.72)) > STOREY) continue;
-      if (!aware(slot, dx, dz, d)) continue;
+      if (!threatens(slot, me)) continue;
       // Chest height, from the eye: a wall or a crate between is not "near".
       if (sight && sight.sightBlocked(eye.x, eye.y, eye.z, slot.pos.x, slot.pos.y + 1.4, slot.pos.z)) continue;
       // At the edge of its reach it only just counts; close up it is nearly all of you.
@@ -75,14 +76,18 @@ export function createPresence({ game, nav, onTurn = null }) {
     return best;
   }
 
-  /** Awake and looking your way, or the sort that does not need to look. */
-  function aware(slot, dx, dz, d) {
-    if (slot.notice || (slot.instance && slot.instance.fighting)) return true;
-    if (slot.proto.act & ACT_AGGRESSIVE) return true;
-    const yaw = slot.figure.object.rotation.y;
-    // A figure faces +z at yaw 0 (game.js facingAway): -1 is straight at you.
-    const away = d > 0 ? -(Math.sin(yaw) * dx + Math.cos(yaw) * dz) / d : 1;
-    return away < 0.3;
+  /**
+   * A threat to you, not merely a glance: one that is already fighting you or
+   * your group, or an aggressive one that can see you. A mobile that faces you
+   * or turned at your footsteps (`slot.notice`) is just a guard on its post --
+   * with BOSS_GAP at 6 every cityguard is "strong" to a first-level player.
+   */
+  function threatens(slot, me) {
+    const foe = slot.instance && slot.instance.fighting;
+    if (foe && (foe === me || foe.leader === me || foe.master === me)) return true;
+    if (!(slot.proto.act & ACT_AGGRESSIVE)) return false;
+    // An unwoken mobile has no character yet; its prototype's affects decide what it can see.
+    return canSee(slot.instance || { npc: true, affectedBy: slot.proto.affected }, me);
   }
 
   /** Called every frame; `eye` is where the player's eyes are. */
