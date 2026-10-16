@@ -19,15 +19,17 @@ import { listen } from './foley.js';
 /**
  * The speakers. `id` is an ElevenLabs premade voice (the API key cannot read the
  * shared library, so premade voices are what is reachable). `say` is the
- * incantation delivery -- slow, even -- and `line` the speaking one.
+ * incantation delivery -- slow, even -- `cry` the same words exclaimed (a spell
+ * cast in a fight: forceful, quicker, more style and less stability, so it
+ * reads as a command and not as a scream), and `line` the speaking one.
  */
 export const VOICES = {
-  mage_m: { name: 'George', id: 'JBFqnCBsd6RMkjVDRZzb', say: { stability: 0.7, similarity_boost: 0.8, style: 0.25, speed: 0.85 } },
-  mage_f: { name: 'Alice', id: 'Xb7hH8MSUJpSbSDYk0k2', say: { stability: 0.7, similarity_boost: 0.8, style: 0.25, speed: 0.85 } },
-  cleric_m: { name: 'Daniel', id: 'onwK4e9ZLuTAKqWW03F9', say: { stability: 0.8, similarity_boost: 0.8, style: 0.2, speed: 0.8 } },
-  cleric_f: { name: 'Lily', id: 'pFZP5JQG7iQjIQuC4Bku', say: { stability: 0.8, similarity_boost: 0.8, style: 0.2, speed: 0.8 } },
-  monster: { name: 'Callum', id: 'N2lVS1w4EtoT3dr4eOWO', say: { stability: 0.45, similarity_boost: 0.8, style: 0.7, speed: 0.75 } },
-  witch: { name: 'Glinda', id: 'z9fAnlkpzviPz146aGWa', say: { stability: 0.5, similarity_boost: 0.8, style: 0.6, speed: 0.8 } },
+  mage_m: { name: 'George', id: 'JBFqnCBsd6RMkjVDRZzb', say: { stability: 0.7, similarity_boost: 0.8, style: 0.25, speed: 0.85 }, cry: { stability: 0.4, similarity_boost: 0.8, style: 0.65, speed: 1.05 } },
+  mage_f: { name: 'Alice', id: 'Xb7hH8MSUJpSbSDYk0k2', say: { stability: 0.7, similarity_boost: 0.8, style: 0.25, speed: 0.85 }, cry: { stability: 0.4, similarity_boost: 0.8, style: 0.65, speed: 1.05 } },
+  cleric_m: { name: 'Daniel', id: 'onwK4e9ZLuTAKqWW03F9', say: { stability: 0.8, similarity_boost: 0.8, style: 0.2, speed: 0.8 }, cry: { stability: 0.4, similarity_boost: 0.8, style: 0.65, speed: 1.05 } },
+  cleric_f: { name: 'Lily', id: 'pFZP5JQG7iQjIQuC4Bku', say: { stability: 0.8, similarity_boost: 0.8, style: 0.2, speed: 0.8 }, cry: { stability: 0.4, similarity_boost: 0.8, style: 0.65, speed: 1.05 } },
+  monster: { name: 'Callum', id: 'N2lVS1w4EtoT3dr4eOWO', say: { stability: 0.45, similarity_boost: 0.8, style: 0.7, speed: 0.75 }, cry: { stability: 0.35, similarity_boost: 0.8, style: 0.8, speed: 1.0 } },
+  witch: { name: 'Glinda', id: 'z9fAnlkpzviPz146aGWa', say: { stability: 0.5, similarity_boost: 0.8, style: 0.6, speed: 0.8 }, cry: { stability: 0.4, similarity_boost: 0.8, style: 0.75, speed: 1.05 } },
   mayor: { name: 'Joseph', id: 'Zlb1dXrM653N07WRdFW3', line: { stability: 0.55, similarity_boost: 0.8, style: 0.55, speed: 0.92 } },
   guard_m: { name: 'Clyde', id: '2EiwWnXFnvU5JabPnv8n', line: { stability: 0.4, similarity_boost: 0.8, style: 0.7, speed: 1.0 } },
   guard_f: { name: 'Dorothy', id: 'ThT5KcBeYPX3keUQqHPh', line: { stability: 0.4, similarity_boost: 0.8, style: 0.7, speed: 1.0 } },
@@ -59,8 +61,21 @@ const MONSTROUS = /\b(zombie|skeleton|ghoul|wraith|wight|spectre|spectral|vampir
 const WITCHY = /\b(witch|hag)\b/i;
 const KID = /\b(youth|brat|kid|child|baby|boy|girl|lad|lass|urchin|smurf)\b/i;
 
+/**
+ * The spells that are cried out in a fight: everything a caster casts mid-fight
+ * (offensive, the cleric's heals, the buffs). `monster` and `witch` cry every
+ * spell they have; the rest are never cast in a fight and keep their incantation.
+ */
+export const CRY_SPELLS = ['acid blast', 'armor', 'bless', 'blindness', 'burning hands', 'call lightning', 'cause critical', 'cause light',
+  'cause serious', 'chill touch', 'colour spray', 'cure critical', 'cure light', 'cure serious', 'curse', 'dispel evil', 'dispel magic',
+  'earthquake', 'energy drain', 'faerie fire', 'fireball', 'flamestrike', 'harm', 'heal', 'lightning bolt', 'magic missile', 'poison',
+  'sanctuary', 'shield', 'shocking grasp', 'weaken'];
+export const hasCry = (kind, spell) => (kind === 'monster' || kind === 'witch' ? MONSTER_SPELLS : CRY_SPELLS).includes(spell);
+
 export const spellSlug = (name) => name.replace(/ /g, '_');
 export const spellClipId = (kind, spell, form) => `vo_${kind}_${spellSlug(spell)}_${form}`;
+/** A cry's forms: `nx` the real name exclaimed, `cx` the cipher exclaimed. */
+export const cryForm = (form) => `${form}x`;
 export const adeptClipId = (kind, spell) => `vo_${kind}_adept_${spellSlug(spell)}`;
 
 const wordsOf = (slot) => `${slot.proto.keywords} ${slot.proto.short || ''}`;
@@ -133,6 +148,14 @@ function lineKind(speaker, slot) {
 
 // ------------------------------------------------------------------- plan ---
 
+/** Was the caster fighting as the words left them? magic.js records it on the event; a mobile's own instance is the fallback. */
+const fightingAt = (e, slot) => (e.fighting !== undefined ? !!e.fighting : !!(slot && slot.instance && slot.instance.fighting));
+
+/** The cry if the caster is in a fight and the spell has one, else the incantation. */
+function formFor(kind, e, slot, form) {
+  return fightingAt(e, slot) && hasCry(kind, e.spell) ? { form: cryForm(form), shout: true } : { form, shout: false };
+}
+
 /**
  * What an event sounds like: `{ id, slot, own, shout }` or null. `hear` is the
  * listener: `{ cls, sex }`, the player's class (mage 0, cleric 1, thief 2,
@@ -167,7 +190,8 @@ function castPlan(e, hear) {
     const base = hear.cls === 0 ? 'mage' : hear.cls === 1 ? 'cleric' : null;
     if (!base) return null;
     const kind = `${base}_${hear.sex === 2 ? 'f' : 'm'}`;
-    return { id: spellClipId(kind, e.spell, 'n'), slot: null, own: true, shout: false, kind };
+    const f = formFor(kind, e, null, 'n');
+    return { id: spellClipId(kind, e.spell, f.form), slot: null, own: true, shout: f.shout, kind };
   }
   const slot = e.from;
   if (!slot || !slot.proto || !slot.record) return null;
@@ -182,7 +206,8 @@ function castPlan(e, hear) {
   if (!kind) return null;
   // Your own class hears the real name; anyone else, the cipher (magic.c say_spell).
   const form = hear.cls === CASTER_CLASS[special] ? 'n' : 'c';
-  return { id: spellClipId(kind, e.spell, form), slot, own: false, shout: false, kind };
+  const f = formFor(kind, e, slot, form);
+  return { id: spellClipId(kind, e.spell, f.form), slot, own: false, shout: f.shout, kind };
 }
 
 // ---------------------------------------------------------------- playback --
@@ -210,7 +235,7 @@ export class Voices {
     const kind = `${base}_${sex === 2 ? 'f' : 'm'}`;
     const prefix = `vo_${kind}_`;
     this.audio.clips.index().then((entries) => {
-      for (const id of entries.keys()) if (id.startsWith(prefix) && id.endsWith('_n')) this.audio.clips.load(id);
+      for (const id of entries.keys()) if (id.startsWith(prefix) && (id.endsWith('_n') || id.endsWith('_nx'))) this.audio.clips.load(id);
     });
   }
 

@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArea, buildWorld } from '../../src/are.js';
 import { SPELLS } from '../../src/magic.js';
-import { planFor, CASTER_CLASS, ADEPT_WORDS, MONSTER_SPELLS, LINES, VOICES } from '../../src/voices.js';
+import { planFor, CASTER_CLASS, ADEPT_WORDS, MONSTER_SPELLS, CRY_SPELLS, hasCry, LINES, VOICES } from '../../src/voices.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const dir = join(root, 'merc21', 'area');
@@ -75,10 +75,44 @@ for (const line of LINES) {
     census[`${line.speaker}: ${p.kind} (${VOICES[p.kind].name})`] = 1;
   }
 }
+// The cry rule: a cast in a fight is cried (`nx`/`cx`), out of a fight it is the incantation (`n`/`c`),
+// for the player (the event says so, from the game's `fighting`) and for a mobile (its instance's `fighting`).
+const cryFault = process.argv.includes('--break-rule');   // a deliberate fault: proves this section can fail
+const rule = (fighting) => (fighting !== cryFault ? 'x' : '');
+const expectId = (p, kind, spell, form, fighting) => {
+  const want = `vo_${kind}_${spell.replace(/ /g, '_')}_${form}${hasCry(kind, spell) ? rule(fighting) : ''}`;
+  if (!p || p.id !== want) fail(`cry rule ${kind} ${spell} fighting=${fighting}: wanted ${want}, got ${p && p.id}`);
+  else if (!manifest.has(p.id) || !existsSync(join(root, 'assets', 'audio', manifest.get(p.id).file))) fail(`cry rule: ${p.id} missing from manifest or disk`);
+  else if (fighting && hasCry(kind, spell) && !p.shout) fail(`cry rule ${p.id}: not given the shout reach`);
+  else if (!fighting && p.shout) fail(`incantation ${p.id} given the shout reach`);
+  plans++; crySeen += fighting && hasCry(kind, spell) ? 1 : 0;
+};
+let crySeen = 0;
+for (const fighting of [true, false]) {
+  for (const [cls, sex, kind] of [[0, 1, 'mage_m'], [0, 2, 'mage_f'], [1, 1, 'cleric_m'], [1, 2, 'cleric_f']]) {
+    for (const spell of SAID) {
+      expectId(planFor({ kind: 'cast', source: 'cast', fromPlayer: true, spell, fighting }, { cls, sex }), kind, spell, 'n', fighting);
+    }
+  }
+  // A mobile: the caster's own instance says whether it is fighting; the event carries nothing.
+  const mob = (sex, words, special) => ({ proto: { keywords: words, short: words, sex }, record: { special }, here: true, instance: { fighting: fighting ? {} : null } });
+  const cases = [[mob(1, 'a mage', 'spec_cast_mage'), 'mage_m', 0], [mob(2, 'a mage', 'spec_cast_mage'), 'mage_f', 0],
+    [mob(1, 'a priest', 'spec_cast_cleric'), 'cleric_m', 1], [mob(2, 'a priest', 'spec_cast_cleric'), 'cleric_f', 1],
+    [mob(1, 'a skeleton', 'spec_cast_undead'), 'monster', 0], [mob(2, 'a witch', 'spec_cast_mage'), 'witch', 0]];
+  for (const [slot, kind, caster] of cases) for (const hearer of [caster, 1 - caster]) {
+    for (const spell of kind === 'monster' || kind === 'witch' ? MONSTER_SPELLS : SAID) {
+      const p = planFor({ kind: 'cast', source: 'spec', spell, from: slot }, { cls: hearer, sex: 1 });
+      expectId(p, kind, spell, hearer === caster ? 'n' : 'c', fighting);
+    }
+  }
+}
+if (!crySeen) fail('no cry was ever planned');
+for (const spell of CRY_SPELLS) if (!SAID.includes(spell)) fail(`CRY_SPELLS has ${spell}, which is not a said spell`);
 // Player chat is never voiced.
 if (planFor({ kind: 'say', speaker: 'Bob', said: 'Hello Honey!' }, { cls: 0, sex: 1 })) fail('player chat was voiced');
 const files = [...manifest.values()].filter((c) => c.kind === 'voice');
 for (const c of files) if (!existsSync(join(root, 'assets', 'audio', c.file))) fail(`${c.id}: no file`);
+console.log(`${crySeen} cries planned in fights`);
 console.log(`${plans} plans checked, ${files.length} voice clips in the manifest, ${bad} failures`);
 console.log(Object.keys(census).filter((k) => !k.includes('silent')).sort().join('\n'));
 process.exit(bad ? 1 : 0);

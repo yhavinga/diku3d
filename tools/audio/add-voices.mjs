@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SPELLS, mysticWords } from '../../src/magic.js';
-import { VOICES, LINES, SPEAKER_KINDS, ADEPT_WORDS, MONSTER_SPELLS, spellClipId, adeptClipId, lineClipId } from '../../src/voices.js';
+import { VOICES, LINES, SPEAKER_KINDS, ADEPT_WORDS, MONSTER_SPELLS, CRY_SPELLS, cryForm, spellClipId, adeptClipId, lineClipId } from '../../src/voices.js';
 
 const path = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'audio', 'manifest.json');
 const manifest = JSON.parse(readFileSync(path, 'utf8'));
@@ -18,17 +18,22 @@ const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 // word or a language it guesses (it said Finnish). A vowelless word gets a 'u' between its letters.
 const speakable = (t) => t.split(' ').map((w) => (/[aeiou]/.test(w) ? w : w.split('').join('u'))).join(' ');
 
+const addCry = (kind, name) => {
+  add(spellClipId(kind, name, cryForm('n')), kind, `${cap(name)}!`, 'spell-name-cry', 'cry', -23);
+  add(spellClipId(kind, name, cryForm('c')), kind, `${cap(speakable(mysticWords(name)))}!`, 'spell-cipher-cry', 'cry', -23);
+};
+
 // A spell that is said: not a breath (the dragon has no words) and not the judges' ammunition.
 const SAID = SPELLS.filter((s) => !s.family.startsWith('breath') && !['general purpose', 'high explosive'].includes(s.name));
 
 const wanted = [];
-const add = (id, kind, text, role, mode) => {
+const add = (id, kind, text, role, mode, lufs = -24) => {
   const v = VOICES[kind];
   wanted.push({
     id, file: `${id}.ogg`, kind: 'voice', api: 'tts', role, loop: false,
     voice: { id: v.id, name: v.name, kind }, text,
     settings: { model_id: MODEL, ...v[mode] },
-    post: { lufs: -24, mono: true, kbps: 28, highpass: 70 },
+    post: { lufs, mono: true, kbps: 28, highpass: 70 },
   });
 };
 
@@ -36,12 +41,15 @@ for (const kind of ['mage_m', 'mage_f', 'cleric_m', 'cleric_f']) {
   for (const sp of SAID) {
     add(spellClipId(kind, sp.name, 'n'), kind, cap(sp.name), 'spell-name', 'say');
     add(spellClipId(kind, sp.name, 'c'), kind, cap(speakable(mysticWords(sp.name))), 'spell-cipher', 'say');
+    // Cried out when cast in a fight (voices.js CRY_SPELLS), a little hotter than the incantation.
+    if (CRY_SPELLS.includes(sp.name)) addCry(kind, sp.name);
   }
 }
 for (const kind of ['monster', 'witch']) {
   for (const name of MONSTER_SPELLS) {
     add(spellClipId(kind, name, 'n'), kind, cap(name), 'spell-name', 'say');
     add(spellClipId(kind, name, 'c'), kind, cap(speakable(mysticWords(name))), 'spell-cipher', 'say');
+    addCry(kind, name);
   }
 }
 for (const kind of ['cleric_m', 'cleric_f']) for (const [spell, word] of Object.entries(ADEPT_WORDS)) add(adeptClipId(kind, spell), kind, cap(word), 'adept-word', 'say');

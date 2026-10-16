@@ -831,7 +831,7 @@ export function createMagic(deps) {
     const id = nextId++;
     emit({
       kind: 'cast', id, spell: sp.name, family: sp.family, source, level,
-      from: slotOf(ch), fromPlayer: ch === player,
+      from: slotOf(ch), fromPlayer: ch === player, fighting: !!ch.fighting,
       to: victim ? slotOf(victim) : undefined, toPlayer: victim === player, self: victim === ch,
       area: sp.target === TAR.IGNORE, windup, flight, text: words || '', item: item ? item.name : null,
       ...sides(ch, victim),
