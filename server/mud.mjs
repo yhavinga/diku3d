@@ -203,6 +203,8 @@ export async function startMud({
   await new Promise((resolve) => (server ? resolve() : wss.once('listening', resolve)));
   const address = wss.address();
   log(`listening on ws://${host}:${address.port}/ws`);
+  // The hills are worked out now, after listening, and not on the first player's first report.
+  setImmediate(() => { for (const z of w.zones) z.relief; });
 
   // Behind nginx and Cloudflare every socket comes from loopback; the
   // player's own address is in the header nginx passes on. Only trusted

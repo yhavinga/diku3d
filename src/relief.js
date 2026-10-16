@@ -272,14 +272,72 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
   };
 
 
-  function compute() {
+  let pull = null;
+  function padPulls() {
+    const K = []; const Wt = []; const PD = []; const IK = []; const IP = [];
+    const W = new Float32Array(nx * nz);
+    pads.forEach((p, pi) => {
+      const reach = Math.max(PAD_HALF, APRON_LEN) + PAD_BLEND + 1;
+      const ia = Math.max(0, Math.floor(I(p.x - reach))); const ib = Math.min(nx - 1, Math.ceil(I(p.x + reach)));
+      const ja = Math.max(0, Math.floor(J(p.z - reach))); const jb = Math.min(nz - 1, Math.ceil(J(p.z + reach)));
+      for (let j = ja; j <= jb; j++) {
+        for (let i = ia; i <= ib; i++) {
+          const x = x0 + i * RES - p.x; const z = z0 + j * RES - p.z;
+          let d = Math.hypot(Math.max(0, Math.abs(x) - PAD_HALF), Math.max(0, Math.abs(z) - PAD_HALF));
+          for (const dir of p.open) {
+            const [dx, dz] = DIRS[dir];
+            const along = x * dx + z * dz; const across = Math.abs(x * dz - z * dx);
+            d = Math.min(d, Math.hypot(along < 0 ? -along : Math.max(0, along - APRON_LEN), Math.max(0, across - APRON_HALF)));
+          }
+          // Behind a smial the hill is let come close: its blend is short.
+          const behind = p.smial && p.back && x * p.back[0] + z * p.back[1] > PAD_HALF * 0.5;
+          // Each pad's pull grows without bound as the point nears it, so that
+          // another pad beside it cannot lift it off its own height.
+          const sd = smooth(0, behind ? 3 : PAD_BLEND, d);
+          const w = sd >= 1 ? 0 : ((1 - sd) * (1 - sd)) / (sd * sd + 0.02);
+          if (w <= 0) continue;
+          const k = j * nx + i;
+          // Over a floor the pad is level and nothing else moves it.
+          if (Math.abs(x) <= HALF + 0.51 && Math.abs(z) <= HALF + 0.51 && dForeign[k] > 1.5) { IK.push(k); IP.push(pi); }
+          // ...and another area's ground is not let down to it.
+          if (dForeign[k] < 1.5) continue;
+          W[k] += w; K.push(k); Wt.push(w); PD.push(pi);
+        }
+      }
+    });
+    return { k: Int32Array.from(K), w: Float32Array.from(Wt), pad: Int32Array.from(PD), ik: Int32Array.from(IK), ip: Int32Array.from(IP), W };
+  }
+  let terms = null;
+  function fieldTerms() {
+    const n = nx * nz;
+    const t = { A: new Float32Array(n), S: new Float32Array(n), Mo: new Float32Array(n), Bw: new Float32Array(n), Bp: new Float32Array(n), Dp: new Float32Array(n) };
     for (let j = 0; j < nz; j++) {
       const z = z0 + j * RES;
       for (let i = 0; i < nx; i++) {
-        const x = x0 + i * RES;
-        H[j * nx + i] = (base(x, z, i, j) + bumpOf(x, z) * (0.25 + 0.75 * quiet) * smooth(8, 26, dForeign[j * nx + i])) * smooth(10, 90, dDeep[j * nx + i]);
+        const x = x0 + i * RES; const k = j * nx + i;
+        const fm = smooth(14, 120, dForeign[k]) * (1 - smooth(220, 330, dRoad[k]));
+        t.Dp[k] = smooth(10, 90, dDeep[k]);
+        t.Bw[k] = bowl(x, z, dBowl[k], dForeign[k]);
+        if (fm > 0) {
+          let kn = 0;
+          for (const nn of knolls) kn += nn.h * bell(Math.hypot(x - nn.x, z - nn.z), nn.r);
+          t.A[k] = CREST * (1 - Math.exp(-kn / CREST)) * fm;
+          t.S[k] = swell(x, z) * fm;
+          t.Mo[k] = mounds(x, z, dRoad[k]) * fm;
+        }
+        const sf = smooth(8, 26, dForeign[k]);
+        if (sf > 0) t.Bp[k] = bumpOf(x, z) * sf;
       }
     }
+    return t;
+  }
+  function compute() {
+    // The hills are linear in `quiet`, which the fit below changes up to fourteen
+    // times: the parts that do not depend on it are worked out once.
+    if (!terms) terms = fieldTerms();
+    const { A, S, Mo, Bw, Bp, Dp } = terms;
+    const sq = 0.55 + 0.45 * quiet; const bq = 0.25 + 0.75 * quiet;
+    for (let k = 0; k < H.length; k++) H[k] = ((A[k] * quiet + S[k] * sq + Mo[k]) + Bw[k] + Bp[k] * bq) * Dp[k];
     // A pad stands where its streets meet it: the hill's height at the ends
     // of its aprons (or, with none, over its footprint), so the streets
     // leave it level with the ground they go on across.
@@ -323,42 +381,13 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
     }
     // Rooms stacked in one column stand on one pad.
     for (const p of pads) p.height = byCell.get(`${p.x},${p.z}`).height;
-    // Let the pads in.
-    const W = new Float32Array(nx * nz); const P = new Float32Array(nx * nz);
-    const INSIDE = new Float32Array(nx * nz).fill(NaN);
-    for (const p of pads) {
-      const reach = Math.max(PAD_HALF, APRON_LEN) + PAD_BLEND + 1;
-      const ia = Math.max(0, Math.floor(I(p.x - reach))); const ib = Math.min(nx - 1, Math.ceil(I(p.x + reach)));
-      const ja = Math.max(0, Math.floor(J(p.z - reach))); const jb = Math.min(nz - 1, Math.ceil(J(p.z + reach)));
-      for (let j = ja; j <= jb; j++) {
-        for (let i = ia; i <= ib; i++) {
-          const x = x0 + i * RES - p.x; const z = z0 + j * RES - p.z;
-          let d = Math.hypot(Math.max(0, Math.abs(x) - PAD_HALF), Math.max(0, Math.abs(z) - PAD_HALF));
-          for (const dir of p.open) {
-            const [dx, dz] = DIRS[dir];
-            const along = x * dx + z * dz; const across = Math.abs(x * dz - z * dx);
-            d = Math.min(d, Math.hypot(along < 0 ? -along : Math.max(0, along - APRON_LEN), Math.max(0, across - APRON_HALF)));
-          }
-          // Behind a smial the hill is let come close: its blend is short.
-          const behind = p.smial && p.back && x * p.back[0] + z * p.back[1] > PAD_HALF * 0.5;
-          // Each pad's pull grows without bound as the point nears it, so that
-          // another pad beside it cannot lift it off its own height.
-          const sd = smooth(0, behind ? 3 : PAD_BLEND, d);
-          const w = sd >= 1 ? 0 : ((1 - sd) * (1 - sd)) / (sd * sd + 0.02);
-          if (w <= 0) continue;
-          // Over a floor the pad is level and nothing else moves it.
-          if (Math.abs(x) <= HALF + 0.51 && Math.abs(z) <= HALF + 0.51 && dForeign[j * nx + i] > 1.5) INSIDE[j * nx + i] = p.height;
-          // ...and another area's ground is not let down to it.
-          if (dForeign[j * nx + i] < 1.5) continue;
-          W[j * nx + i] += w; P[j * nx + i] += w * p.height;
-        }
-      }
-    }
-    for (let k = 0; k < H.length; k++) {
-      // The hill is worth 1, and each pad whatever it pulls with.
-      if (W[k] > 0) H[k] = (H[k] + P[k]) / (1 + W[k]);
-      if (!Number.isNaN(INSIDE[k])) H[k] = INSIDE[k];
-    }
+    // Let the pads in. Where each pad reaches, and how hard it pulls, do not
+    // change with the heights: they are worked out once, and kept.
+    if (!pull) pull = padPulls();
+    const P = new Float32Array(nx * nz);
+    for (let e = 0; e < pull.k.length; e++) P[pull.k[e]] += pull.w[e] * pads[pull.pad[e]].height;
+    for (let k = 0; k < H.length; k++) if (pull.W[k] > 0) H[k] = (H[k] + P[k]) / (1 + pull.W[k]);
+    for (let e = 0; e < pull.ik.length; e++) H[pull.ik[e]] = pads[pull.ip[e]].height;
   }
 
   // --- the roads climb no more than ROAD_GRADE ----------------------------

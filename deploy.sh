@@ -105,8 +105,16 @@ ssh "$SERVER" "set -e
     sudo mv diku3d-server.service.new diku3d-server.service && sudo systemctl daemon-reload && echo '  unit vernieuwd'
   else sudo rm diku3d-server.service.new; fi
   sudo systemctl enable --quiet diku3d-server
+  start=\$(date +%s.%N)
   sudo systemctl restart diku3d-server
-  sleep 2
+  # De server laadt de wereld voor hij luistert; tot dan geeft nginx 502. Wacht tot poort 4000
+  # antwoordt (hoogstens 60 s), zodat de controles hieronder niet in dat gat vallen.
+  for i in \$(seq 60); do
+    c=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 1 http://127.0.0.1:4000/ws || true)
+    [ \"\$c\" != 000 ] && break
+    sleep 1
+  done
+  echo \"  server luistert na \$(awk -v a=\$start -v b=\$(date +%s.%N) 'BEGIN{printf \"%.1f\", b-a}') s (HTTP \$c)\"
   systemctl is-active --quiet diku3d-server || { sudo journalctl -u diku3d-server -n 30 --no-pager; exit 1; }"
 
 # --- 5. Van buitenaf, door Cloudflare: de pagina, de eerste module, een

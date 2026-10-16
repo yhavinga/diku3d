@@ -112,10 +112,16 @@ export function bootWorld(root, { log = () => {} } = {}) {
     links.push(...layout.links);
     // One map a zone, by the zone's own cells: two zones' shafts can share one.
     // The ground that rolls (src/relief.js, shared with build.js): the Shire's hills, and the Dump's heaps.
-    const relief = buildRelief(layout, { openAir });
-    const dumpCell = findDump(layout, openAir);
-    const lumps = dumpCell ? dumpLumps(dumpCell.x * CELL, dumpCell.z * CELL) : null;
-    zones.push({ zone, index, offset, layout, local, nav: null, shafts: shaftsOf(world, layout.links), relief, lumps });
+    // Worked out the first time anything asks (a report in the zone, or `warm`), not at boot:
+    // the hills are a third of a second of the work and nobody needs them to listen.
+    const z = { zone, index, offset, layout, local, nav: null, shafts: shaftsOf(world, layout.links) };
+    let ground = null;
+    const rolling = () => (ground ||= (() => {
+      const dumpCell = findDump(layout, openAir);
+      return { relief: buildRelief(layout, { openAir }), lumps: dumpCell ? dumpLumps(dumpCell.x * CELL, dumpCell.z * CELL) : null };
+    })());
+    Object.defineProperties(z, { relief: { get: () => rolling().relief }, lumps: { get: () => rolling().lumps } });
+    zones.push(z);
   }
   const byId = new Map(zones.map((z) => [z.zone.id, z]));
   const lifts = mounds(world, zones);
