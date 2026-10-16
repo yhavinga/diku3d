@@ -21,7 +21,7 @@
 export const CELL = 13;
 const HALF = CELL / 2;
 /** The square under the temple's mound stands this high over its level. */
-export const TERRACE_LIFT = 0.6;
+export const TERRACE_LIFT = 0.9;
 
 /**
  * The height of platform `p` at (x, z). A point off the rectangle is taken

@@ -1961,10 +1961,13 @@ function buildRiverBank({ batcher, chunk, px, pz, bed, y0, banks, ends, rect, ad
       if (Math.max(...q.map((v) => v.y)) - bed < 0.012) continue;
       // Turf above, stone below, the line between them not ruled.
       const cx = (q[0].x + q[2].x) / 2; const cz = (q[0].z + q[2].z) / 2;
-      const patch = Math.sin(cx * 0.83 + cz * 0.21) * Math.sin(cz * 0.67 - cx * 0.29) + 0.5 * Math.sin((cx - cz) * 0.37 + 1.7);
-      // Wet stone along the waterline, turf above it: a line the eye reads as
-      // the high-water mark, wavering a little.
-      const upper = mean + 0.28 * patch > 0.95;
+      // Two patchwork noises, a broad one and a finer one: the water has worn
+      // stone bare in tongues and pools up the bank, and turf has crept down
+      // it in places, so the line between them is nowhere a line.
+      const broad = Math.sin(cx * 0.83 + cz * 0.21) * Math.sin(cz * 0.67 - cx * 0.29);
+      const fine = Math.sin(cx * 2.1 + cz * 0.8) * Math.sin(cz * 1.7 - cx * 0.6);
+      const patch = broad + 0.5 * Math.sin((cx - cz) * 0.37 + 1.7) + 0.7 * fine;
+      const upper = mean + 0.62 * patch > 1.05;
       for (const t of [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]) {
         const n = new THREE.Vector3().crossVectors(new THREE.Vector3().subVectors(t[1], t[0]), new THREE.Vector3().subVectors(t[2], t[0]));
         (upper ? grass : stone).push(n.y >= 0 ? t : [t[0], t[2], t[1]]);
