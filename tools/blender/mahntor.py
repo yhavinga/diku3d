@@ -74,7 +74,7 @@ def reset(seed):
 
 # --- the bull ---------------------------------------------------------------
 
-def bull_head(cx, cy, cz, s, face=-1, m="polished", horn=None, name="bull", depth=1.0):
+def bull_head(cx, cy, cz, s, face=-1, m="polished", horn=None, name="bull", depth=1.0, rock=None):
     """A bull's head looking out of a wall: `s` is the width across the brow,
     (cx, cy, cz) the middle of the skull's back against the wall, `face` -1 to
     look out along -Y and +1 along +Y, `depth` how much of its relief stands
@@ -112,6 +112,15 @@ def bull_head(cx, cy, cz, s, face=-1, m="polished", horn=None, name="bull", dept
         # Eye sockets, sunk darkly under the brow.
         out.append(block((0.07 * s, 0.05 * s, 0.045 * s), (cx + sx * 0.22 * s, cy + face * 0.20 * s * depth, cz + 0.21 * s),
                          "blackstone", name="eye"))
+    if rock:
+        # Carved out of the mountain, not set on it: the hulls are weathered
+        # (the horns, lofted, only roughened), the eyes and the ring are not.
+        seed, amp = rock
+        for i, o in enumerate(out):
+            if o.name.startswith("horn"):
+                weather(o, seed + i, amp * 0.5, 0.0, 0, 0.0)
+            elif o.name.startswith(name):
+                weather(o, seed + i, amp, 0.0, 1, 0.0)
     # The ring through the nose.
     ring = lib.torus(0.13 * s, 0.014 * s, (cx, cy + face * 0.47 * s * depth, cz - 0.58 * s), (math.pi / 2, 0, 0),
                      major_seg=12, minor_seg=5, name="nose-ring", mat="iron")
@@ -119,11 +128,49 @@ def bull_head(cx, cy, cz, s, face=-1, m="polished", horn=None, name="bull", dept
     return out
 
 
-def colossus(cx, cy, z0, H, face=-1, m="polished", inward=1, flat=0.55):
+def weather(obj, seed, amp, bevel=0.1, level=1, bed=0.0, crease=0.4):
+    """Turn a hull into carved, weathered rock: the edges are bevelled and the
+    facets rounded by one subdivision, then every vertex is moved along its
+    normal by a noise that is the same wherever the part stands, so the
+    pieces of one figure share a grain, and by a sawtooth of beds that runs
+    level across them as the strata of the mountain do. A hull alone is a
+    gemstone; this is what makes it a boulder with a purpose."""
+    bpy.context.view_layer.objects.active = obj
+    for name, kind, setup in (("bevel", "BEVEL", {"width": bevel, "segments": 1, "limit_method": "ANGLE",
+                                                   "angle_limit": math.radians(25)}),
+                              ("sub", "SUBSURF", {"levels": level, "render_levels": level})):
+        if (kind == "BEVEL" and bevel <= 0) or (kind == "SUBSURF" and level <= 0):
+            continue
+        if kind == "SUBSURF":
+            # Creased edges keep the carver's planes: subdivision here is to
+            # give the noise vertices to move, not to round the stone off.
+            attr = obj.data.attributes.get("crease_edge") or obj.data.attributes.new("crease_edge", "FLOAT", "EDGE")
+            attr.data.foreach_set("value", [crease] * len(obj.data.edges))
+        mod = obj.modifiers.new(name, kind)
+        for k, v in setup.items():
+            setattr(mod, k, v)
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+    me = obj.data
+    me.update()
+    for poly in me.polygons:
+        poly.use_smooth = True
+    for v in me.vertices:
+        x, y, z = v.co
+        n = D.fbm3((x * 1.1, y * 1.1, z * 0.8), seed, 4) - 0.5
+        k = abs(D.fbm3((x * 2.3, y * 2.3, z * 1.6), seed + 31, 3) - 0.5)
+        layer = (z * 0.85 + n * 1.2) % 1.0
+        d = amp * (2.0 * n - 1.2 * k) + bed * (layer - 0.5)
+        v.co = v.co + v.normal * d
+    me.update()
+    return obj
+
+
+def colossus(cx, cy, z0, H, face=-1, m="crag", inward=1, flat=0.7, seed=11):
     """A guardian of the gate, half man and half bull, standing against the
-    wall with a spear grounded beside it: blocky and cut from the wall's own
-    stone, because at twelve metres it is a silhouette and a shadow. H is the
-    height of the horns' tips."""
+    wall with a spear grounded beside it: cut out of the mountain itself, in
+    the cliff's dark `crag` with only a little snow settled on the top of it,
+    and weathered like a standing stone and not a stack of bricks. H is the
+    height of the horns' tips; its footprint is the old figure's."""
     p = []
     u = H / 14.0
     f = face
@@ -132,29 +179,67 @@ def colossus(cx, cy, z0, H, face=-1, m="polished", inward=1, flat=0.55):
         # `flat` presses the figure against the wall: it is seen from the front.
         return (cx + x * u, cy + f * y * u * flat, z0 + z * u)
 
+    def rock(points, name, amp=0.26, bevel=0.0, bed=0.14, level=2, k=0):
+        o = weather(hull(points, m, name), seed + k, amp * u, bevel * u, level, bed * u)
+        p.append(o)
+        return o
+
+    def limb(x, y, zb, zt, wb, wt, depth, name, k):
+        """A tapered limb, wb wide at its foot and wt at its top."""
+        rock([at(x - wb / 2, y - depth / 2, zb), at(x + wb / 2, y - depth / 2, zb),
+              at(x - wb / 2, y + depth / 2, zb), at(x + wb / 2, y + depth / 2, zb),
+              at(x - wt / 2, y - depth / 2, zt), at(x + wt / 2, y - depth / 2, zt),
+              at(x - wt / 2, y + depth / 2, zt), at(x + wt / 2, y + depth / 2, zt)], name, k=k)
+
+    k = 0
     for sx in (-1, 1):
-        # Legs and the greaves' flare at the foot.
-        p.append(beam((1.5 * u, 1.7 * u, 4.6 * u), at(sx * 0.95, 0.9, 2.3), m, cham=0.08 * u, name="leg"))
-        p.append(block((1.9 * u, 2.4 * u, 0.6 * u), at(sx * 0.95, 1.1, 0.3), m, name="foot"))
-        # Arms, the upper hanging and the fore bent to the spear.
-        p.append(beam((1.3 * u, 1.3 * u, 3.0 * u), at(sx * 3.1, 0.9, 8.2), m, cham=0.08 * u, name="arm"))
-    p.append(beam((1.2 * u, 1.2 * u, 2.6 * u), at(inward * 3.2, 1.9, 6.1), m, cham=0.08 * u, name="forearm"))
-    p.append(beam((1.2 * u, 1.2 * u, 2.4 * u), at(-inward * 3.2, 1.2, 6.2), m, cham=0.08 * u, name="forearm"))
-    # The kilt, the belt and the chest.
-    p.append(hull([at(-1.9, 0.2, 4.2), at(1.9, 0.2, 4.2), at(-2.3, 2.0, 3.8), at(2.3, 2.0, 3.8),
-                   at(-1.7, -0.2, 6.1), at(1.7, -0.2, 6.1), at(-1.9, 1.8, 6.1), at(1.9, 1.8, 6.1),
-                   at(-2.2, 0.0, 4.0), at(2.2, 0.0, 4.0)], m, "kilt"))
-    p.append(hull([at(-1.9, 0.0, 6.0), at(1.9, 0.0, 6.0), at(-2.7, 0.0, 9.7), at(2.7, 0.0, 9.7),
-                   at(-1.8, 1.9, 6.0), at(1.8, 1.9, 6.0), at(-2.8, 1.8, 9.6), at(2.8, 1.8, 9.6),
-                   at(-1.0, 1.3, 10.3), at(1.0, 1.3, 10.3)], m, "chest"))
-    p.append(beam((6.2 * u, 2.4 * u, 0.5 * u), at(0, 0.9, 6.15), m, cham=0.05 * u, name="belt"))
+        k += 1
+        # Legs, greaves flaring at the foot, and a broad foot of rock.
+        limb(sx * 0.95, 0.9, 0.5, 4.6, 1.9, 1.5, 1.7, "leg", k)
+        limb(sx * 0.95, 1.5, 2.3, 3.5, 1.3, 1.3, 1.0, "knee", k + 10)
+        rock([at(sx * 0.95 - 1.0, 0.1, 0.0), at(sx * 0.95 + 1.0, 0.1, 0.0),
+              at(sx * 0.95 - 1.1, 2.4, 0.0), at(sx * 0.95 + 1.1, 2.4, 0.0),
+              at(sx * 0.95 - 0.9, 0.2, 0.7), at(sx * 0.95 + 0.9, 0.2, 0.7),
+              at(sx * 0.95 - 0.8, 2.0, 0.55), at(sx * 0.95 + 0.8, 2.0, 0.55)], "foot", k=k + 20)
+        # Shoulders, great lumps of rock the arms hang from.
+        rock([at(sx * 2.3, 0.0, 9.9), at(sx * 3.6, 0.1, 9.5), at(sx * 2.3, 1.8, 9.7), at(sx * 3.7, 1.6, 9.3),
+              at(sx * 2.6, 0.2, 10.7), at(sx * 3.2, 0.5, 10.5), at(sx * 2.6, 1.4, 10.6), at(sx * 3.2, 1.3, 10.3),
+              at(sx * 3.8, 0.9, 8.6)], "shoulder", amp=0.12, k=k + 40)
+        # The upper arm hangs; the fore bends to the spear.
+        limb(sx * 3.2, 0.9, 6.8, 9.2, 1.1, 1.3, 1.3, "arm", k + 60)
+    for sgn, (x, y, zb, zt) in ((1, (3.2, 1.9, 4.9, 7.3)), (-1, (-3.2, 1.2, 5.0, 7.4))):
+        limb(inward * x, y, zb, zt, 1.1, 1.2, 1.2, "forearm", 80 + sgn)
+    # The kilt, the belt and the chest: heavier and rounder than the wall.
+    rock([at(-1.9, 0.2, 4.2), at(1.9, 0.2, 4.2), at(-2.3, 2.0, 3.8), at(2.3, 2.0, 3.8),
+          at(-1.7, -0.2, 6.1), at(1.7, -0.2, 6.1), at(-1.9, 1.8, 6.1), at(1.9, 1.8, 6.1),
+          at(-2.2, 0.0, 4.0), at(2.2, 0.0, 4.0)], "kilt", amp=0.11, k=100)
+    rock([at(-1.9, 0.0, 6.0), at(1.9, 0.0, 6.0), at(-2.7, 0.0, 9.7), at(2.7, 0.0, 9.7),
+          at(-1.8, 1.9, 6.0), at(1.8, 1.9, 6.0), at(-2.8, 1.8, 9.6), at(2.8, 1.8, 9.6),
+          at(-1.0, 1.3, 10.3), at(1.0, 1.3, 10.3), at(-1.4, 2.7, 8.9), at(1.4, 2.7, 8.9), at(-0.5, 2.5, 7.0), at(0.5, 2.5, 7.0),
+          at(-2.1, 2.1, 8.2), at(2.1, 2.1, 8.2)], "chest", amp=0.12, k=101)
+    rock([at(-3.1, 0.7, 6.0), at(3.1, 0.7, 6.0), at(-3.1, 1.9, 6.0), at(3.1, 1.9, 6.0),
+          at(-3.1, 0.7, 6.4), at(3.1, 0.7, 6.4), at(-3.1, 1.9, 6.4), at(3.1, 1.9, 6.4)], "belt", amp=0.05, k=102)
+    # The neck, short and thick, under the bull's head.
+    rock([at(-1.0, 0.5, 10.0), at(1.0, 0.5, 10.0), at(-1.0, 1.4, 10.0), at(1.0, 1.4, 10.0),
+          at(-0.9, 0.5, 11.1), at(0.9, 0.5, 11.1), at(-0.9, 1.2, 11.1), at(0.9, 1.2, 11.1)], "neck", k=103)
     # The head: a bull's, bigger than a man's for the distance it is seen from.
-    p += bull_head(cx, cy + f * 0.3 * u * flat, z0 + 11.4 * u, 3.2 * u, face=f, m=m, horn=m, name="head", depth=flat)
-    # The spear, grounded on the gate's side, its leaf bladed like a halberd's.
+    p += bull_head(cx, cy + f * 0.3 * u * flat, z0 + 11.4 * u, 3.2 * u, face=f, m=m, horn=m, name="head", depth=flat,
+                   rock=(seed + 120, 0.05 * u))
+    # The spear, grounded on the gate's side, its blade a leaf of the same rock.
     sx_ = inward * 4.3
-    p.append(beam((0.32 * u, 0.32 * u, 13.2 * u), at(sx_, 2.9, 6.6), m, cham=0.04 * u, name="shaft"))
-    p.append(hull([at(sx_, 2.9, 13.4), at(sx_ - 0.7, 2.9, 12.0), at(sx_ + 0.7, 2.9, 12.0),
-                   at(sx_, 2.9, 12.1), at(sx_, 3.3, 12.4), at(sx_, 2.5, 12.4)], m, "blade"))
+    p.append(weather(beam((0.34 * u, 0.34 * u, 13.2 * u), at(sx_, 2.9, 6.6), m, cham=0.04 * u, name="shaft"),
+                     seed + 130, 0.03 * u, 0.0, 0, 0.0))
+    rock([at(sx_, 2.9, 13.4), at(sx_ - 0.7, 2.9, 12.0), at(sx_ + 0.7, 2.9, 12.0),
+          at(sx_, 2.9, 12.1), at(sx_, 3.3, 12.4), at(sx_, 2.5, 12.4)], "blade", amp=0.03, bed=0.0, level=0, k=131)
+    # What settles: a drift on each shoulder and on the poll between the
+    # horns, flat caps and no more, because the rest of the snow is the
+    # rock's own (snowcrag lays it on whatever faces up).
+    for sx in (-1, 1):
+        p.append(hull([at(sx * 2.4, 0.2, 10.6), at(sx * 3.3, 0.5, 10.4), at(sx * 2.4, 1.5, 10.5),
+                       at(sx * 3.2, 1.4, 10.2), at(sx * 2.8, 0.8, 10.95)], "snow", "snow-cap"))
+    p.append(hull([at(-0.9, 0.4, 12.7), at(0.9, 0.4, 12.7), at(-0.9, 0.9, 12.7), at(0.9, 0.9, 12.7),
+                   at(-0.55, 0.55, 13.15), at(0.55, 0.55, 13.15), at(-0.55, 0.8, 13.1), at(0.55, 0.8, 13.1)],
+                  "snow", "snow-cap"))
     return p
 
 
@@ -336,6 +421,7 @@ def build_gate_ice():
 
 # --- the keep ---------------------------------------------------------------
 
+ROCK_TINT = (0.2, 0.2, 0.22)
 KEEP_DEPTH = 13.0    # the passage runs to the entry hall's outer wall, 13.1 m behind the leaves
 FACADE_W = 9.8
 FACADE_TOP = 24.5
@@ -451,7 +537,9 @@ def build_keep():
     for sx in (-1, 1):
         p.append(beam((0.4, 1.1, GH), (sx * (w - 0.2), 0.0, GH / 2), D_, cham=0.04, name="post"))
     p.append(beam((2 * w, 2.4, 0.1), (0, -0.2, -0.04), D_, cham=0.02, name="sill"))
-    return deliver(p, "mahntor_keep")
+    # The guardians' rock is darker than the cliff's own pale grain, as the
+    # mountain's wet face is: a tint the `crag` surface is multiplied by.
+    return deliver(p, "mahntor_keep", colours={"crag": ROCK_TINT})
 
 
 # --- the keep's leaf ---------------------------------------------------------
