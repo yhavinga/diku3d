@@ -305,15 +305,16 @@ def build_gatehouse():
     # toe on is not what a gate has.
     p.append(beam((2 * w, 3.0, 0.1), (0, 0, -0.04), D_, cham=0.02, name="sill"))
 
-    # The towers: a square shaft, a battered foot, a corbelled head with its
+    # The towers: a square shaft, a corbelled head with its
     # merlons, a slate roof with a cap of snow.
     depth = TY1 - TY0
     tcy = (TY0 + TY1) / 2
     for sx in (-1, 1):
         cx = sx * TCX
-        p.append(beam((2 * TW, depth, TOWER_TOP - 1.0), (cx, tcy, (TOWER_TOP - 1.0) / 2 + 1.0), WALL, cham=0.07, name="shaft"))
-        p.append(beam((2 * TW + 0.7, depth + 0.7, 1.0), (cx, tcy, 0.5), D_, cham=0.08, name="foot"))
-        p.append(beam((2 * TW + 0.35, depth + 0.35, 0.28), (cx, tcy, 1.14), D_, cham=0.04, name="foot-top"))
+        # Straight down to the ground: the battered foot it had stood out 0.35 m
+        # past the collider as a knee-high white wall in the street, one a body
+        # walked into and a jump could climb.
+        p.append(beam((2 * TW, depth, TOWER_TOP + 0.05), (cx, tcy, (TOWER_TOP - 0.05) / 2), WALL, cham=0.07, name="shaft"))
         front = TY0 - 0.02
         for zz in (5.0, 9.0, 13.0, 17.0):
             p.append(block((0.34, 0.1, 2.0), (cx, front - 0.0, zz), "obsidian", name="slit"))
