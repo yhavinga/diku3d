@@ -422,7 +422,7 @@ def build_gate_ice():
 
 # --- the keep ---------------------------------------------------------------
 
-ROCK_TINT = (0.2, 0.2, 0.22)
+ROCK_TINT = (0.3, 0.3, 0.33)
 KEEP_DEPTH = 13.0    # the passage runs to the entry hall's outer wall, 13.1 m behind the leaves
 FACADE_W = 9.8
 FACADE_TOP = 24.5
