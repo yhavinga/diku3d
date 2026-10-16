@@ -5627,8 +5627,11 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   // merges its geometry away.
   const grass = vista ? null : yield* within(0.294, 0.915, buildGrass({
     groups: batcher.groups, instances, colliders, layout, rooms, materials, cell: CELL, biomeOf: grassBiome,
-    keepOff: options.clear?.size
-      ? (x, y, z) => options.clear.has(cellKey(Math.round(y / LEVEL_H), Math.round(x / CELL), Math.round(z / CELL))) : null,
+    // Nothing grows on the flat plane that lies under the hills: it is buried, and its blades would
+    // stand up through the turf laid over it (doubled, and as tall as the hill is deep).
+    keepOff: options.clear?.size || relief
+      ? (x, y, z) => (!!options.clear?.size && options.clear.has(cellKey(Math.round(y / LEVEL_H), Math.round(x / CELL), Math.round(z / CELL))))
+        || (!!relief && y > -1 && y < relief.at(x, z) + groundY - 0.05) : null,
   }));
   if (grass) zones.surface.add(grass);
   const batches = new StaticBatches();
