@@ -4548,7 +4548,13 @@ function decorate(material, recipe, macro, grain) {
           float dikuSnowC = texture2D( detailMap, ( vDikuWorld.xz + vDikuWorld.yx * 0.6 ) * 0.8 ).x;
           // Centred on what the sampler returns (the map's mean is 0.65 once it is
           // filtered), so cover is the share that is white and not a bias.
-          float dikuSnowD = ( dikuSnowN - 0.65 ) * 1.5 + ( dikuSnowF - 0.66 ) * 0.45 + ( dikuSnowC - 0.5 ) * 0.3;
+          // The 5 m map above repeats every 5 m, and as the main term it printed a
+          // regular polka-dot on the slopes: the patches come from two maps of
+          // tens of metres (83 m and 138 m repeats, which do not line up), and the
+          // fine ones are only the ragged edge of a patch.
+          float dikuSnowL = ( texture2D( macroMap, vDikuWorld.xz * 0.021 ).r - 0.65 ) * 1.5
+            + ( texture2D( macroMap, vDikuWorld.xz * 0.0113 + 0.37 ).g - 0.66 ) * 1.1;
+          float dikuSnowD = dikuSnowL + ( dikuSnowN - 0.65 ) * 0.35 + ( dikuSnowF - 0.66 ) * 0.3 + ( dikuSnowC - 0.5 ) * 0.25;
           float dikuSnowTop = smoothstep( 0.3, 0.75, dikuWN.y ) * smoothstep( 0.05, 0.4, dikuSnowCover + dikuSnowD );
           float dikuSnowBank = dikuSnowFoot > 0.0
             ? ( 1.0 - smoothstep( 0.0, dikuSnowFoot * max( 0.45, 0.7 + 0.6 * ( dikuSnowF + dikuSnowD ) ), dikuStorey ) )
