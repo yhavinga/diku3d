@@ -387,7 +387,10 @@ const FROST = {
   dawn: { t: 0.5, haze: 1.9, sun: 0.8 },
   noon: { t: 0.55, haze: 1.7, sun: 0.55, exposure: 0.72, bounce: 0.25, sunT: 0.25, groundT: 0.12, bleach: 0.25 },
   dusk: { t: 0.5, haze: 1.9, sun: 0.8 },
-  night: { t: 0.25, haze: 1.3, sun: 0.9 },
+  // Night fog is the hour's own, thinned: the air is lit by nothing but the moon, so a
+  // milky colour at 1.3x the density read as a flat grey-blue wall (106,115,132) over
+  // every far roof, keep and cliff from a height, where the moonlit snow is under 60.
+  night: { t: 0.25, haze: 0.65, sun: 0.9 },
 };
 const CLIMATE = {
   temperate: (p) => p,
@@ -409,7 +412,7 @@ const CLIMATE = {
       bounce: mixHex(p.bounce, 0xa7b8d0, night ? 0.2 : (f.bounce ?? 0.65)),
       exposure: p.exposure * (f.exposure ?? 1),
       haze: mixHex(p.haze, 0xc6d4e6, f.t),
-      fog: mixHex(p.fog, 0xc3d1e3, night ? 0.25 : 0.6),
+      fog: mixHex(p.fog, 0xc3d1e3, night ? 0.08 : 0.6),
       density: p.density * f.haze,
       skyBleachTint: mixHex(p.skyBleachTint ?? 0xffffff, 0xe6eeff, f.bleach ?? 0.7),
       // The deck is most of the way to overcast, and the sky's turbidity up
