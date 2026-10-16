@@ -63,8 +63,9 @@ function takeColour(geometry) {
 // are the feather surface: rows of overlapping scallops is what both of them
 // are, and at the size either is seen the two read the same.
 // Wool is the cloth recipe under its own tint; plate is worked steel.
-// `snow` stands in as plaster until the snow recipe lands (the models of mahntor.py tag it).
-const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', wool: 'cloth', plate: 'steel', scales: 'feather', wicker: 'rope', snow: 'plaster' };
+// `ice` on a model (only mahntor.py's gates carry it) is the translucent block, not the
+// opaque rink-ice a room's floor takes: the gates are carved from it.
+const TAG_ALIASES = { cloth2: 'cloth', linen: 'cloth', wool: 'cloth', plate: 'steel', scales: 'feather', wicker: 'rope', ice: 'iceblock' };
 // (linen and wool have recipes of their own now; the aliases are the fallback.)
 const TAG_MATERIALS = {
   cloth: { color: 0x6b4a42, roughness: 0.95, metalness: 0 },

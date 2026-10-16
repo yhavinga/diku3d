@@ -9,7 +9,7 @@ import { Sky } from 'three/addons/objects/Sky.js';
 import { createPipeline, SkyEnvironment, clampSkyHighlights, OVERLAY_LAYER } from './render.js';
 import { parseArea, buildWorld, DIR_STEP, DIR_NAME, REVERSE_DIR, SECTOR, SECTOR_NAME, EX_CLOSED } from './are.js';
 import { AFF } from './magic.js';
-import { planZones, layoutZone, zoneWorld, arrivalYaw, HOME_AREAS, HOME_START, HOME_MAX_ROOMS } from './zones.js';
+import { planZones, layoutZone, zoneWorld, arrivalYaw, climateOf, HOME_AREAS, HOME_START, HOME_MAX_ROOMS } from './zones.js';
 import { createZoneCard, levelsOf, firstLine } from './zonecard.js';
 import { collectResources, disposeZoneGraph } from './teardown.js';
 import { createMaterials, bakeJobs, runBake } from './textures.js';
@@ -28,6 +28,7 @@ import { createGameUi } from './game-ui.js';
 import { createFx } from './fx.js';
 import { createSpellFx } from './spellfx.js';
 import { createRain } from './rain.js';
+import { createSnow } from './snow.js';
 import { createItems } from './items.js';
 import { installSave, peekSave } from './save.js';
 import { createKick } from './kick.js';
@@ -363,6 +364,60 @@ const WEATHER = {
 };
 
 /**
+ * Climate: the zone's own air, a third axis after the hour and the weather,
+ * and applied last. Like weather it hands back a modified copy of the preset,
+ * so everything `applyTime` sets -- the sky, the bake, the fog, the shadows --
+ * is cold together or not at all, and `temperate` is the identity: leaving a
+ * zone and coming back to one without a climate rebuilds exactly the preset
+ * it had, because nothing here is ever written to the shared ones.
+ *
+ * `frost` is Mahn-Tor's: a pale, high overcast with the light gone blue-white,
+ * the sun's share down a fifth, and the air low and milky -- the density is
+ * the hour's several times over, and its colour the sky's own, so a street
+ * fades into the snow-light and not into a grey. The ground bounces white
+ * snow, which is brighter and bluer than the warm paving every hour's own
+ * `bounce` assumes. `skyBleach` and the moon are kept: they are not weather
+ * but how the town is lit at night, and `...p` carries them through.
+ */
+const mixHex = (a, b, t) => new THREE.Color(a).lerp(new THREE.Color(b), t).getHex();
+const FROST = {
+  // How far each hour is taken towards the cold colour, and the cold colours.
+  // Night keeps most of its own deep blue: it is cold already.
+  dawn: { t: 0.5, haze: 1.9, sun: 0.8 },
+  noon: { t: 0.55, haze: 1.7, sun: 0.62, exposure: 0.8, bounce: 0.3 },
+  dusk: { t: 0.5, haze: 1.9, sun: 0.8 },
+  night: { t: 0.25, haze: 1.3, sun: 0.9 },
+};
+const CLIMATE = {
+  temperate: (p) => p,
+  frost: (p, name) => {
+    const f = FROST[name] || FROST.dusk;
+    const night = name === 'night';
+    const cover = (v, to) => v + (to - v) * 0.6;
+    return {
+      ...p,
+      sun: mixHex(p.sun, 0xcfe0ff, f.t),
+      sunIntensity: p.sunIntensity * f.sun,
+      sky: mixHex(p.sky, 0xa9bdd6, f.t),
+      hemiSky: p.hemiSky === undefined ? undefined : mixHex(p.hemiSky, 0xa9bdd6, f.t),
+      ground: mixHex(p.ground, 0x8fa0b8, f.t),
+      bounce: mixHex(p.bounce, 0xa7b8d0, night ? 0.2 : (f.bounce ?? 0.65)),
+      exposure: p.exposure * (f.exposure ?? 1),
+      haze: mixHex(p.haze, 0xc6d4e6, f.t),
+      fog: mixHex(p.fog, 0xc3d1e3, night ? 0.25 : 0.6),
+      density: p.density * f.haze,
+      skyBleachTint: mixHex(p.skyBleachTint ?? 0xffffff, 0xe6eeff, 0.7),
+      // The deck is most of the way to overcast, and the sky's turbidity up
+      // with it: a pale, milky sky and no sun disc to speak of.
+      cloud: night ? p.cloud : [cover(p.cloud[0], 0.04), cover(p.cloud[1], 1.0), cover(p.cloud[2], 2.0), p.cloud[3]],
+      turbidity: night ? p.turbidity : Math.max(p.turbidity, 7),
+      stars: p.stars * 0.7,
+      shafts: p.shafts * 0.5,
+    };
+  },
+};
+
+/**
  * Diku's own direction order -- north, east, south, west, up, down -- on the
  * arrow keys, with the two vertical ones where a keyboard already puts "further
  * up" and "further down". WASD is taken by the body and every letter that would
@@ -387,6 +442,19 @@ const ARROW_DIR = {
  */
 const DIR_YAW = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
 
+/**
+ * How hard it snows in a room, from its own words: "the snow falls lightly
+ * here and the wind is not very fierce" (#2360) against "snow falls all
+ * around" (#2364) and "swirling snow and wind" (the wastes). Read when you
+ * step into a room, not each frame.
+ */
+function snowLevelOf(room) {
+  const text = room.description;
+  if (/\b(?:swirl\w*|falls all around|blizzard|driven snow)\b/i.test(text)) return 1;
+  if (/\bfalls lightly\b/i.test(text)) return 0.45;
+  return 0.7;
+}
+
 const TONE_MAPPING = {
   agx: THREE.AgXToneMapping,
   aces: THREE.ACESFilmicToneMapping,
@@ -404,6 +472,11 @@ const state = {
   // second, so nothing but `applyWeather` has to know a mode exists.
   weatherMode: weatherParam === 'overcast' || weatherParam === 'auto' ? weatherParam : 'clear',
   weather: weatherParam === 'overcast' ? 'overcast' : 'clear',
+  // The zone's climate (zones.js `climateOf`), the third axis on the hour after
+  // weather: 'temperate' is the identity, so a zone with none changes nothing.
+  climate: 'temperate',
+  // How much of Mahn-Tor's snow is falling in the room you stand in, 0..1.
+  snowLevel: 0,
   rainLevel: 0,
   // `null` means the mud's barometer decides, which is nearly always. Anything
   // else is `diku.forceRain` holding it there so rain can be looked at without
@@ -703,6 +776,7 @@ async function boot() {
   }
   const environment = new SkyEnvironment(renderer);
   const rain = createRain(scene);
+  const snow = createSnow(scene);
 
   // Torches and lamps from the builder, plus one behind every lit window.
   const lightPool = new LightPool(scene, 14, built.lights.concat(actors.lights));
@@ -966,6 +1040,7 @@ async function boot() {
     },
   };
 
+  state.climate = climateOf(zone);
   applyTime(state.time);
 
   function applyTime(name, { quiet = false } = {}) {
@@ -974,7 +1049,7 @@ async function boot() {
     // a preset of its own: everything below reads `preset` and nothing below
     // reads `state.weather`, so there is no way for the sky, the bake and the
     // shadows to end up in different weather.
-    const preset = (WEATHER[state.weather] || WEATHER.clear)(base, name);
+    const preset = (CLIMATE[state.climate] || CLIMATE.temperate)((WEATHER[state.weather] || WEATHER.clear)(base, name), name);
     state.time = name;
     game.setTimeOfDay(name);
     const phi = THREE.MathUtils.degToRad(90 - preset.elevation);
@@ -1031,6 +1106,7 @@ async function boot() {
     // Rain is lit by the hour's own haze, so it reads silver by day and all
     // but disappears at night, which is how night rain behaves.
     rain.setColour(preset.haze);
+    snow.setColour(preset.haze);
     // The bog's ground mist, lit by the same haze the rain is and thickest when
     // the ground is coldest. Only the marsh has any, so this is null elsewhere.
     built.mist?.setHour(preset.haze, preset.elevation);
@@ -1569,7 +1645,9 @@ async function boot() {
     items.setBuilt(built);
     game.enterZone({ layout, built, actors });
     fileInteractables();
-    // The hour's light on this zone's mist, horizon and figures.
+    // The hour's light on this zone's mist, horizon and figures -- and its
+    // climate, which is part of what the hour is here.
+    state.climate = climateOf(zone);
     applyTime(state.time, { quiet: true });
     state.worldStats = describeWorld();
   }
@@ -2088,6 +2166,10 @@ async function boot() {
       const outdoorNow = state.roomVnum !== null && (built.rooms.get(state.roomVnum)?.outdoor ?? true);
       rain.setIntensity(outdoorNow ? level : 0);
       rain.update(dt, camera.position);
+      // Mahn-Tor's snow falls whatever the barometer says, and only under the sky.
+      snow.setIntensity(state.climate === 'frost' && outdoorNow ? state.snowLevel : 0);
+      snow.update(dt, camera.position, quality.pixelRatio() * window.innerHeight * 0.5 * camera.projectionMatrix.elements[5],
+        camera.position.y - 1.65);
       // The ground remembers the rain after the streaks stop. Unlike the
       // streaks this is not gated on standing outdoors: it is raining on the
       // town, not on you, so a street seen from a doorway is still wet.
@@ -2100,6 +2182,7 @@ async function boot() {
       const info = built.rooms.get(vnum);
       hud.setRoom(info.room);
       audio.setOutdoor(info.outdoor);
+      state.snowLevel = snowLevelOf(info.room);
       audio.setPlace(info, state.time);
     }
 
@@ -2197,7 +2280,7 @@ async function boot() {
     /** Which way walking on from (x, z) facing `yaw` would cross, or null (tools/judge/headless/crossings.mjs). */
     crossingAt: (x, z, yaw, feetY = player.position.y - 1.72) => crossingAt(x, feetY, z, yaw)?.dir ?? null,
     zoneCard,
-    times: TIMES, overcast: OVERCAST, rain,
+    times: TIMES, overcast: OVERCAST, rain, snow, climate: CLIMATE,
     /**
      * Make it rain now, whatever the mud's barometer says.
      *

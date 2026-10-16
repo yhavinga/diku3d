@@ -2593,6 +2593,90 @@ const SURFACES = {
     s.height = 0.5 + cloud * 0.08 - line * 0.18 + bubble * 0.05;
     s.rough = 0.08 + line * 0.3 + cloud * 0.06;
   },
+  /**
+   * Fresh snow: a soft blue where the drift lies low, wind ripples along it,
+   * and a sparse sparkle of single texels that catch the light -- in the
+   * albedo, and in the roughness so the glints are also the only glossy
+   * points on an otherwise matt surface. Snow is dry: no `wet`.
+   */
+  snow(u, v, s) {
+    const drift = fbm(u * 5, v * 5, 5, 3301, 4);
+    const ripple = fbmA(u * 16, v * 8, 16, 8, 3307, 3);
+    const grain = fbm(u * 60, v * 60, 60, 3313, 2);
+    // One texel in a hundred: a 512 lattice, which is the bake's own size.
+    const glint = hash2(Math.floor(u * 512), Math.floor(v * 512), 512, 3319) > 0.988 ? 1 : 0;
+    const lit = mix(rgb(0xc2cddb), rgb(0xd8e0ea), ripple * 0.35 + grain * 0.3);
+    s.color = mix(mix(lit, rgb(0x93aed2), clamp01((0.5 - drift) * 1.3)), rgb(0xffffff), glint * 0.9);
+    s.height = 0.5 + drift * 0.3 + ripple * 0.05 + grain * 0.02;
+    s.rough = 0.78 - glint * 0.5 - ripple * 0.06;
+  },
+
+  /**
+   * Snow that has been walked on, carted over and sanded: grey-blue and
+   * dense, ruts running one way, brown where the slush froze again, a few
+   * grit stones, and patches of polish from boots that the sky shows in.
+   */
+  trodden(u, v, s) {
+    const rut = fbmA(u * 4, v * 44, 4, 44, 3331, 4);
+    const lump = fbm(u * 9, v * 9, 9, 3337, 4);
+    const grit = hash2(Math.floor(u * 256), Math.floor(v * 256), 256, 3341) > 0.993 ? 1 : 0;
+    const brown = clamp01(fbm(u * 6, v * 6, 6, 3343, 3) * 2.2 - 0.9);
+    const polish = clamp01((fbmA(u * 5, v * 38, 5, 38, 3347, 3) - 0.55) * 5);
+    let c = mix(rgb(0x9aa4b0), rgb(0xc8d0da), lump * 0.7 + rut * 0.3);
+    c = mix(c, rgb(0x8c8274), brown * 0.5);
+    s.color = mix(c, rgb(0x6a6764), grit * 0.6);
+    s.height = 0.5 + lump * 0.3 - (1 - rut) * 0.18 + grit * 0.1;
+    // Polished ice in the ruts takes the sky; the rest is crust.
+    s.rough = 0.82 - polish * 0.58 + grit * 0.1;
+  },
+
+  /**
+   * Cobbles with the winter in them: the cobble's own stones, snow packed
+   * into every joint and along the rim of each sett, a rime of frost over the
+   * faces and the odd patch of powder. How much of the street is white is
+   * the shader's call (`snowy`), in the world, so the lanes people walk show
+   * their stones and nothing repeats at the tile.
+   */
+  frostcobble(u, v, s) {
+    SURFACES.cobble(u, v, s);
+    const [, edge] = cellular(u * 18, v * 18, 18, 11, 0.38);
+    const packed = clamp01((1 - clamp01((edge - 0.012) * 26)) * 1.3 + (1 - clamp01((edge - 0.03) * 14)) * 0.55);
+    const rime = clamp01(fbm(u * 15, v * 15, 15, 3359, 3) * 1.9 - 0.7);
+    const powder = clamp01(fbm(u * 11, v * 11, 11, 3361, 3) * 2.4 - 1.05);
+    let c = mix(s.color, rgb(0xb7c4d4), rime * 0.45 + powder * 0.5);
+    c = mix(c, rgb(0xdbe4ee), packed);
+    s.color = c;
+    s.height = Math.max(s.height * (1 - packed * 0.6), 0.5 + packed * 0.2) + powder * 0.08;
+    s.rough = 0.9 - packed * 0.12;
+  },
+
+  /**
+   * Ice that carries a lot of light into it: a deep teal body clouded white
+   * where it froze fast, two layers of fractures -- broad pale planes down in
+   * the block and fine scratches on the skin -- and bubbles. The depth is the
+   * shader's (`ice`): it slides a second copy of this map under the first
+   * with the view, so the fractures lie inside the block rather than on it.
+   */
+  iceblock(u, v, s) {
+    const cloud = fbm(u * 3, v * 3, 3, 3501, 4);
+    const band = fbmA(u * 2, v * 8, 2, 8, 3503, 3);
+    const [, deep] = cellular(u * 4, v * 4, 4, 3509, 0.5);
+    const [, mid] = cellular(u * 9, v * 9, 9, 3517, 0.5);
+    const [, skin] = cellular(u * 17, v * 17, 17, 3521, 0.5);
+    const plane = clamp01(1 - deep * 9);
+    const fracture = clamp01(1 - mid * 20);
+    const scratch = clamp01(1 - skin * 30);
+    const bx = u * 40; const by = v * 40; const ix = Math.floor(bx); const iy = Math.floor(by);
+    const jx = hash2(ix, iy, 40, 3527) * 0.6 + 0.2; const jy = hash2(ix, iy, 40, 3529) * 0.6 + 0.2;
+    const bubble = hash2(ix, iy, 40, 3533) > 0.82 ? clamp01(1 - Math.hypot(bx - ix - jx, by - iy - jy) * 8) : 0;
+    const froth = clamp01((cloud - 0.6) * 3.2);
+    let c = mix(rgb(0x3f8196), rgb(0x9fd0d6), cloud * 0.75 + band * 0.25);
+    c = mix(c, rgb(0xeaf6f8), plane * 0.5 + fracture * 0.38 + bubble * 0.55 + froth * 0.5);
+    c = mix(c, rgb(0xf4fafb), scratch * 0.3);
+    s.color = c;
+    s.height = 0.5 + cloud * 0.12 - scratch * 0.14 - fracture * 0.05 + bubble * 0.04;
+    s.rough = 0.07 + cloud * 0.08 + scratch * 0.3 + froth * 0.25;
+  },
 };
 
 // -------------------------------------------------------------- baking ----
@@ -2956,6 +3040,21 @@ const RECIPES = {
   polisheddeep: { surface: 'polished', scale: 3.0, normalScale: 0.45, env: 1, wet: 0, detail: 0.2, buried: true },
   livingwood: { surface: 'livingwood', scale: 2.4, normalScale: 0.45, env: 0.7, wet: 0, detail: 0.4 },
   ice: { surface: 'ice', scale: 3.0, normalScale: 0.5, env: 1.4, wet: 0, detail: 0.15 },
+
+  // Mahn-Tor (shells.js `isFrozen`): winter in the recipes. `snowy` lays snow
+  // over the surface in the shader, in the world, where it would settle --
+  // `cover` is how readily (0..1) and `foot` how high (m) it banks against a
+  // wall. Nothing here is `wet`: snow is dry, and the damp pass would turn it
+  // into slush under overcast.
+  snow: { surface: 'snow', scale: 3.0, normalScale: 0.45, env: 0.8, wet: 0, detail: 0.3 },
+  trodden: { surface: 'trodden', scale: 3.2, normalScale: 0.7, env: 1.1, wet: 0, detail: 0.5 },
+  snowcobble: { surface: 'frostcobble', scale: 2.2, normalScale: 1.0, env: 1.0, wet: 0, detail: 0.5, snowy: { cover: 0.5, foot: 0 } },
+  snowrock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0, detail: 0.6, snowy: { cover: 0.5, foot: 0 } },
+  frostwall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55, snowy: { cover: 0.6, foot: 1.9 } },
+  frosttimber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45, snowy: { cover: 0.55, foot: 1.5 } },
+  snowroof: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0, detail: 0.5, snowy: { cover: 1.0, foot: 0 } },
+  snowthatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7, snowy: { cover: 1.0, foot: 0 } },
+  iceblock: { surface: 'iceblock', scale: 3.0, normalScale: 0.4, env: 1.6, wet: 0, detail: 0.1, ice: true },
 };
 
 // --------------------------------------------------------------- decals ----
@@ -4260,6 +4359,8 @@ function decorate(material, recipe, macro, grain) {
     buriedUniforms(shader.uniforms);
     shader.uniforms.dikuTriScale = { value: 1 / recipe.scale };
     shader.uniforms.dikuMoss = { value: recipe.moss ?? 0 };
+    shader.uniforms.dikuSnowCover = { value: recipe.snowy?.cover ?? 0 };
+    shader.uniforms.dikuSnowFoot = { value: recipe.snowy?.foot ?? 0 };
     shader.uniforms.dikuEnv = envUniform(material);
 
     shader.vertexShader = shader.vertexShader
@@ -4269,7 +4370,7 @@ function decorate(material, recipe, macro, grain) {
         '#include <worldpos_vertex>\n\tvSurfacePos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;'
         + '\n\tvIndoor = aIndoor;',
       );
-    if (material.defines?.DIKU_TRIPLANAR || material.defines?.DIKU_MOSS) {
+    if (material.defines?.DIKU_TRIPLANAR || material.defines?.DIKU_MOSS || material.defines?.DIKU_SNOW) {
       // `vSurfacePos` leaves out the instance matrix, which is fine for
       // mottling and wrong for a projection: a triplanar rock placed as an
       // instance has to be sampled where it actually stands.
@@ -4279,6 +4380,11 @@ function decorate(material, recipe, macro, grain) {
         vec4 dikuWorld = vec4( transformed, 1.0 );
         #ifdef USE_INSTANCING
           dikuWorld = instanceMatrix * dikuWorld;
+        #endif
+        #if defined( USE_BATCHING ) && defined( DIKU_SNOW )
+          // A modelled kit in a batch is placed by the batch's matrix, which
+          // the snow needs to find where it stands in the street.
+          dikuWorld = batchingMatrix * dikuWorld;
         #endif
         vDikuWorld = ( modelMatrix * dikuWorld ).xyz;`);
     }
@@ -4301,8 +4407,10 @@ function decorate(material, recipe, macro, grain) {
         ${BURIED_DECLS}
         uniform float dikuTriScale;
         uniform float dikuMoss;
+        uniform float dikuSnowCover;
+        uniform float dikuSnowFoot;
         uniform float dikuEnv;
-        #if defined( DIKU_TRIPLANAR ) || defined( DIKU_MOSS )
+        #if defined( DIKU_TRIPLANAR ) || defined( DIKU_MOSS ) || defined( DIKU_SNOW )
           varying vec3 vDikuWorld;
         #endif
         // Three projections of one map, blended by how much the surface faces
@@ -4361,7 +4469,7 @@ function decorate(material, recipe, macro, grain) {
         #endif
       `)
       .replace('#include <map_fragment>', /* glsl */`
-        #if defined( DIKU_TRIPLANAR ) || defined( DIKU_MOSS )
+        #if defined( DIKU_TRIPLANAR ) || defined( DIKU_MOSS ) || defined( DIKU_SNOW )
           // The world normal, from the interpolated view normal: the
           // perturbed one does not exist yet at this point in the shader.
           vec3 dikuWN = normalize( ( vec4( normalize( vNormal ) * ( gl_FrontFacing ? 1.0 : - 1.0 ), 0.0 ) * viewMatrix ).xyz );
@@ -4422,6 +4530,56 @@ function decorate(material, recipe, macro, grain) {
         diffuseColor.rgb *= 1.0 - dikuSplash * 0.24 * ( 0.6 + dikuMacro.r * 0.7 );
         diffuseColor.rgb *= 1.0 + dikuSheltered * 0.06;
         #endif
+        #ifdef DIKU_SNOW
+          // Snow where snow would settle, from the world and not from the
+          // tile, so a roof is white the whole way along the street and no
+          // two cobbles in a lane are snowed alike. It lies on what faces up
+          // -- a pitched roof, a ledge, the street -- thinning at a ragged
+          // edge, and banks against the foot of a wall to dikuSnowFoot metres
+          // (the storey's own height again, as with the splash line above).
+          float dikuSnowN = texture2D( macroMap, vDikuWorld.xz * 0.19 + vDikuWorld.y * 0.11 ).r;
+          float dikuSnowF = texture2D( macroMap, ( vDikuWorld.xz + vDikuWorld.zy ) * 1.7 ).g;
+          float dikuSnowC = texture2D( detailMap, ( vDikuWorld.xz + vDikuWorld.yx * 0.6 ) * 0.8 ).x;
+          float dikuSnowD = ( dikuSnowN - 0.5 ) * 1.1 + ( dikuSnowF - 0.5 ) * 0.55 + ( dikuSnowC - 0.5 ) * 0.3;
+          float dikuSnowTop = smoothstep( 0.3, 0.75, dikuWN.y ) * smoothstep( 0.05, 0.4, dikuSnowCover + dikuSnowD );
+          float dikuSnowBank = dikuSnowFoot > 0.0
+            ? ( 1.0 - smoothstep( 0.0, dikuSnowFoot * max( 0.45, 0.7 + 0.6 * ( dikuSnowF + dikuSnowD ) ), dikuStorey ) )
+              * dikuVertical * smoothstep( 0.0, 0.2, dikuSnowCover + dikuSnowD + 0.35 )
+            : 0.0;
+          float dikuSnowAmt = clamp( max( dikuSnowTop, dikuSnowBank ), 0.0, 1.0 );
+          // A fine glint: the same grain map the close-range normals use, a
+          // few texels in a hundred, so the white is not a flat paint.
+          float dikuSnowGl = step( 0.93, texture2D( detailMap, vDikuWorld.xz * 7.3 + vDikuWorld.y * 3.1 ).y );
+          vec3 dikuSnowCol = mix( vec3( 0.55, 0.63, 0.76 ), vec3( 0.70, 0.75, 0.82 ), 0.35 + dikuSnowN * 0.65 ) * ( 1.0 + dikuSnowGl * 0.5 );
+          // A rime on every wall the cold has been at: not snow, but the
+          // face of it gone pale and blue in patches, thickest low down.
+          float dikuRime = dikuSnowFoot > 0.0
+            ? dikuVertical * ( 0.04 + 0.12 * smoothstep( 0.2, 0.8, dikuSnowN + dikuSnowF * 0.5 ) ) * ( 1.0 - 0.5 * smoothstep( 0.0, 5.0, dikuStorey ) )
+            : 0.0;
+          diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.58, 0.68, 0.82 ), dikuRime * ( 1.0 - dikuSnowAmt ) );
+          diffuseColor.rgb = mix( diffuseColor.rgb, dikuSnowCol, dikuSnowAmt );
+        #endif
+        #ifdef DIKU_ICE
+          // The depth of ice, faked: a second look at the same map, slid
+          // along the view across the surface's own tangent plane, so the
+          // fractures lie some way under the skin and swim as you move. The
+          // frame comes from the screen derivatives -- none exists yet this
+          // early in the shader -- and the lower layer is darker and bluer
+          // the more squarely it is looked into.
+          vec3 dikuIq0 = dFdx( - vViewPosition ); vec3 dikuIq1 = dFdy( - vViewPosition );
+          vec2 dikuIs0 = dFdx( vMapUv ); vec2 dikuIs1 = dFdy( vMapUv );
+          vec3 dikuIN = normalize( vNormal ) * ( gl_FrontFacing ? 1.0 : - 1.0 );
+          vec3 dikuIT = normalize( dikuIq0 * dikuIs1.t - dikuIq1 * dikuIs0.t );
+          vec3 dikuIB = normalize( cross( dikuIN, dikuIT ) );
+          vec3 dikuIV = normalize( vViewPosition );
+          float dikuIFacing = clamp( dot( dikuIV, dikuIN ), 0.0, 1.0 );
+          vec2 dikuIShift = vec2( dot( dikuIV, dikuIT ), dot( dikuIV, dikuIB ) ) / max( dikuIFacing, 0.25 );
+          vec3 dikuDeep = texture2D( map, vMapUv * 0.63 + vec2( 0.31, 0.17 ) - dikuIShift * 0.07 ).rgb;
+          dikuDeep *= vec3( 0.42, 0.78, 0.95 );
+          diffuseColor.rgb = mix( diffuseColor.rgb, dikuDeep, 0.42 * ( 0.4 + 0.6 * dikuIFacing ) );
+          // Glancing, the skin is what you see: paler, and it mirrors.
+          diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * 1.5 + vec3( 0.03, 0.05, 0.06 ), pow( 1.0 - dikuIFacing, 3.0 ) * 0.5 );
+        #endif
       `)
       .replace('#include <roughnessmap_fragment>', /* glsl */`
         #include <roughnessmap_fragment>
@@ -4430,6 +4588,9 @@ function decorate(material, recipe, macro, grain) {
         #endif
         #ifdef DIKU_MOSS
           roughnessFactor = mix( roughnessFactor, 0.95, dikuMossAmt );
+        #endif
+        #ifdef DIKU_SNOW
+          roughnessFactor = mix( roughnessFactor, 0.8 - dikuSnowGl * 0.5, dikuSnowAmt );
         #endif
         roughnessFactor *= 0.84 + dikuMacro.b * 0.32;
         #ifdef DIKU_WET
@@ -4479,6 +4640,10 @@ function decorate(material, recipe, macro, grain) {
           // A mat of moss is soft: most of the rock's relief goes under it.
           normal = normalize( mix( normal, nonPerturbedNormal, dikuMossAmt * 0.7 ) );
         #endif
+        #ifdef DIKU_SNOW
+          // Snow is a soft layer over the relief, not a skin on it.
+          normal = normalize( mix( normal, nonPerturbedNormal, dikuSnowAmt * 0.8 ) );
+        #endif
         #ifdef DIKU_FOLIAGE
           // A needle card's normals are baked to point out of the crown, and
           // both faces of the card are the same needles: undo the two-sided
@@ -4516,13 +4681,16 @@ function decorate(material, recipe, macro, grain) {
   if (recipe.triplanar) material.defines = { ...material.defines, DIKU_TRIPLANAR: 1 };
   if (recipe.moss) material.defines = { ...material.defines, DIKU_MOSS: 1 };
   if (recipe.glisten) material.defines = { ...material.defines, DIKU_GLISTEN: 1 };
+  if (recipe.snowy) material.defines = { ...material.defines, DIKU_SNOW: 1 };
+  if (recipe.ice) material.defines = { ...material.defines, DIKU_ICE: 1 };
   // Our injected source differs from stock, so it needs a key of its own or
   // three will hand us a program compiled for an undecorated material.
   material.customProgramCacheKey = () => `diku|${material.defines?.DIKU_DETAIL ? 1 : 0}`
     + `|${material.defines?.DIKU_WET ? 1 : 0}|${material.defines?.DIKU_BURIED ? 1 : 0}`
     + `|${material.defines?.DIKU_MOVING ? 1 : 0}|${material.defines?.DIKU_LIFT ? 1 : 0}`
     + `|${material.defines?.DIKU_FOLIAGE ? 1 : 0}|${material.defines?.DIKU_TRIPLANAR ? 1 : 0}`
-    + `|${material.defines?.DIKU_MOSS ? 1 : 0}|${material.defines?.DIKU_GLISTEN ? 1 : 0}`;
+    + `|${material.defines?.DIKU_MOSS ? 1 : 0}|${material.defines?.DIKU_GLISTEN ? 1 : 0}`
+    + `|${material.defines?.DIKU_SNOW ? 1 : 0}|${material.defines?.DIKU_ICE ? 1 : 0}`;
 }
 
 const MACRO_PX = 128;

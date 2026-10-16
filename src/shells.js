@@ -780,3 +780,39 @@ export function sunkRivers(world, layout) {
   }
   return sunk;
 }
+
+// ------------------------------------------------------------- winter ----
+
+/**
+ * Where it is winter, by area and by the room's own words. Not by words alone:
+ * across the 45 stock areas the vocabulary also takes Hood's "Ice Dragon Way"
+ * (a street named for a dragon), a cavern's "icy" chill, a Gnome stream that
+ * is "frigid" and a High Tower bedroom, and none of those is snowed on. Mahn-
+ * Tor says it in its prose -- "the ice and snow covered shops and homes",
+ * "the frigid wastelands", "the cold here" -- and the area is the licence to
+ * believe it; the forest, hills and marsh below the cliff say none of it, and
+ * the cliffside is bare rock in a cloud.
+ */
+export const FROZEN_AREAS = new Set(['mahntor.are']);
+const FROST_WORDS = /\b(snow\w*|ice|icy|frost\w*|frozen|frigid|arctic|glaciers?|blizzards?|cold)\b/i;
+export const isFrozen = (room) => FROZEN_AREAS.has(room.areaFile) && isOpenAir(room)
+  && FROST_WORDS.test(`${room.name} ${room.description}`);
+
+/**
+ * A walled room that opens onto frozen ground: the shop, the tavern and the
+ * guard houses of Mahn-Tor, whose outsides stand in the snow. Not the keep,
+ * which is carved out of the mountain and has no outer wall to frost.
+ */
+const frontsFrozen = new WeakSet();
+const NOT_A_FRONT = /\b(keep|hall|chambers?|sanctum|study|throne)\b/i;
+export function markFrost(world) {
+  for (const room of world.rooms.values()) {
+    if (!FROZEN_AREAS.has(room.areaFile) || isOpenAir(room) || NOT_A_FRONT.test(room.name)) continue;
+    const onto = room.exits.some((exit, dir) => {
+      const next = exit && !exit.offMap && dir < 4 && world.rooms.get(exit.to);
+      return next && isFrozen(next);
+    });
+    if (onto) frontsFrozen.add(room);
+  }
+}
+export const frontsFrost = (room) => frontsFrozen.has(room);

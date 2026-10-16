@@ -21,7 +21,7 @@ import { OVERLAY_LAYER } from './render.js';
 import { buildGrass } from './grass.js';
 import {
   classifyShells, shellFor, shellAttrs, isOutdoor, sectorOf, isTreeLined, classifyCanopy, isCanopy, isOpenAir,
-  isSewer, isEastern, eastStyle, isDeep, isHood, hoodStyle, isPark,
+  isSewer, isEastern, eastStyle, isDeep, isHood, hoodStyle, isPark, isFrozen, markFrost, frontsFrost,
   wayLid, isDrop, LID_FLIGHT, lidOpening, lidCeiling, DROP_OPENING, sunkRivers, RIVER_DROP,
 } from './shells.js';
 import { BESIDE } from './layout.js';
@@ -150,7 +150,7 @@ const WATER_LAP = 0.7;
  * Shire, and the next buried area with a door should not have to find it again.
  */
 /** Outer skins a window is dressed in stone for, rather than framed in oak. */
-const MASONRY = new Set(['stonewall', 'sootwall', 'brick', 'marble', 'crag', 'cliff', 'rock', 'caverock']);
+const MASONRY = new Set(['stonewall', 'frostwall', 'sootwall', 'brick', 'marble', 'crag', 'cliff', 'rock', 'caverock']);
 
 const isBuried = (mats, cell) => mats.cave && (cell.level < 0 || !!mats.inRock);
 
@@ -340,6 +340,27 @@ export function hash3(a, b, c, salt = 0) {
 const _matrix = new THREE.Matrix4();
 const IDENTITY = new THREE.Matrix4();
 const WHITE = [1, 1, 1];
+const _centre = new THREE.Vector3();
+
+/** The fountain's stone and metal, frozen: it is all one block of ice. */
+const FROZEN_FOUNTAIN = { stonewall: 'iceblock', marble: 'iceblock', flagstone: 'iceblock', iron: 'iceblock' };
+/** Plants a frozen cell leaves out: `instances.add` of these places nothing. */
+const WINTER_BARE = /^(bramble|bush|fern|grass_tuft|hedge_clump|hedge_row|herb_pots|nettles|reed_clump|salal_bush|shire_flowerbed|tall_weeds|tussock|tree_oak)$/;
+/** The same, for the tags a modelled kit's surfaces carry (assets.js `swap`). */
+const WINTER_TAGS = { stonewall: 'frostwall', timber: 'frosttimber', rooftile: 'snowroof', thatch: 'snowthatch' };
+
+/**
+ * What a surface becomes where it is winter (`Batcher.frost`). The builders
+ * name their materials where they use them -- a frontage block is `stonewall`
+ * and `rooftile` whoever's street it faces -- so winter is a table applied as
+ * geometry is filed, to the cells shells.js `isFrozen` names, and not a
+ * second answer in every builder.
+ */
+const WINTER = {
+  cobble: 'snowcobble', grass: 'snow', dirt: 'trodden', gravel: 'trodden', sand: 'snow',
+  rock: 'snowrock', crag: 'snowrock', stonewall: 'frostwall', timber: 'frosttimber',
+  rooftile: 'snowroof', thatch: 'snowthatch',
+};
 
 class Batcher {
   constructor(materials) {
@@ -349,6 +370,8 @@ class Batcher {
     // once per cell rather than passed through a dozen builders; see the note
     // on `indoorBounce` in textures.js for what reads it.
     this.indoor = false;
+    // The grid cells (`x,z`) that are in winter, or null: see WINTER.
+    this.frost = null;
   }
 
   /**
@@ -356,6 +379,13 @@ class Batcher {
    * paint vertex colours, and file it under (chunk, material).
    */
   add(geometry, materialName, matrix, options = {}) {
+    if (this.frost && WINTER[materialName]) {
+      // By where the piece's middle is, which is right for everything the
+      // builders hand over: a plane or a box inside one cell, never a span.
+      if (!geometry.boundingBox) geometry.computeBoundingBox();
+      geometry.boundingBox.getCenter(_centre).applyMatrix4(matrix);
+      if (this.frost.has(`${Math.round(_centre.x / CELL)},${Math.round(_centre.z / CELL)}`)) materialName = WINTER[materialName];
+    }
     const material = this.materials[materialName];
     if (!material) throw new Error(`build: unknown material ${materialName}`);
     const {
@@ -946,6 +976,21 @@ function pickMaterials(room, area, passage = false) {
   else if (hood === 'court') floor = 'flagstone';
   else if (hood === 'street' || hood === 'nml' || hood === 'wall') floor = 'brokencobble';
   if (hood && hood !== 'ruin' && !holy && !wood) wallOut = 'sootwall';
+
+  // Winter, last: what the room's own words and its neighbours' say is under
+  // snow overrules the sector, as the bog does. Open ground is snow, paving
+  // is snowed-over paving, and a road up the mountain is trodden. A walled
+  // room that opens onto frozen ground keeps its inside and wears the snow on
+  // its outer skin and its roof. See shells.js `isFrozen`.
+  if (isFrozen(room)) {
+    if (floor === 'cobble') floor = 'snowcobble';
+    else if (floor === 'rock' && /\b(road|street|path|way)\b/i.test(room.name)) floor = 'trodden';
+    else if (['rock', 'grass', 'dirt', 'sand', 'gravel', 'flagstone'].includes(floor)) floor = 'snow';
+  }
+  if (isFrozen(room) || frontsFrost(room)) {
+    wallOut = ({ stonewall: 'frostwall', timber: 'frosttimber' })[wallOut] || wallOut;
+    roof = ({ rooftile: 'snowroof', thatch: 'snowthatch' })[roof] || roof;
+  }
   return {
     floor, wallIn, wallOut, roof, ceil, holy, cave, smial, wallUv, sewer: style, inRock: inRock || rockCave, hood,
     rockCave, shire, shell, wallInTint, floorTint, ceilTint, toldWall, said,
@@ -2823,6 +2868,8 @@ function fenceKind(room) {
   if (GRAVEYARD.test(room.name)) return 'iron';
   // A cliff is closed in by its own broken lip: a hedge hid the very drop the room names.
   if (CLIFF_EDGE.test(room.description) && isOpenAir(room)) return 'cliff';
+  // A mountain city closes its ground with stone, not with hedges that cannot grow.
+  if (isFrozen(room)) return 'wall';
   if (isShire(room)) return 'hedge';
   if (room.areaFile === 'eastern.are' || room.sector === SECTOR.DESERT) return 'dune';
   if (room.areaFile === 'marsh.are' || isWater(room)) return 'reeds';
@@ -3310,6 +3357,37 @@ function buildDecals(group, decals, materials) {
 }
 
 
+/**
+ * The grid cells in winter: those of the frozen rooms, and the cells of a
+ * street between two of them -- not one that runs on to a room that is not
+ * (the cliff stair down to the forest), whose ground is the country's.
+ * Null when the zone has none, which is every zone but Mahn-Tor's.
+ */
+function frostCells(layout) {
+  const cells = new Set();
+  // The walled rooms that open onto the snow stand in it too: their outsides
+  // are the town's frontage, and their roofs its skyline.
+  for (const cell of layout.cells.values()) if (isFrozen(cell.room) || frontsFrost(cell.room)) cells.add(`${cell.x},${cell.z}`);
+  if (!cells.size) return null;
+  for (const link of layout.links) {
+    if (link.kind !== 'alley' || !isFrozen(link.from.room) || !isFrozen(link.to.room)) continue;
+    for (const c of link.path) cells.add(`${c.x},${c.z}`);
+  }
+  // One ring round them: a street's houses stand in the cells beside it, and
+  // the ground between the town and the cliff is the town's. Not a cell
+  // another room stands in -- the forest and the hills keep their own.
+  const roomed = new Set();
+  for (const cell of layout.cells.values()) roomed.add(`${cell.x},${cell.z}`);
+  for (const key of [...cells]) {
+    const [x, z] = key.split(',').map(Number);
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      const k = `${x + dx},${z + dz}`;
+      if (!roomed.has(k)) cells.add(k);
+    }
+  }
+  return cells;
+}
+
 // ------------------------------------------------------------------ main ----
 
 /**
@@ -3323,11 +3401,24 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   const group = new THREE.Group();
   group.name = 'world';
   const batcher = new Batcher(materials);
+  markFrost(world);
+  batcher.frost = frostCells(layout);
   // Modelled assets are optional everywhere: if the library is absent or a
   // particular model has not been made yet, the procedural geometry stands in.
   // Two batches, split on the chunk's level: see `buildZones`.
   const instances = assets ? new InstanceBatch(assets) : null;
   const model = (names, seed) => (assets ? assets.choose(names, seed) : null);
+  // The modelled kits are placed by name too, so winter reaches them as the
+  // surface they wear: a model standing in a frozen cell swaps its tags.
+  if (instances && batcher.frost) {
+    const add = instances.add.bind(instances);
+    instances.add = (name, transform, chunk, swap) => {
+      if (!batcher.frost.has(`${Math.round(transform.x / CELL)},${Math.round(transform.z / CELL)}`)) return add(name, transform, chunk, swap);
+      // Nothing green grows in the snow: no hedge, no herbs in a pot.
+      if (WINTER_BARE.test(name)) return false;
+      return add(name, transform, chunk, swap || WINTER_TAGS);
+    };
+  }
   // A vista leaves out what is too small to read from past a gate, and rock
   // that would hang in the air without the rooms round it: it is placed as
   // if it stood there, so nothing falls back to geometry instead.
@@ -3615,6 +3706,16 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         half, holes: roomHoles.filter((h) => !h.ceiling), addPlatform, slab: !airborne,
         shade: !openAir, tint: mats.floorTint,
       });
+    }
+
+    // "A huge fountain graces the center of the square, but the extreme cold
+    // has turned it into an ice sculpture": the fountain, in ice. Off the
+    // exact centre, where the player arrives; its water is the ice it froze to.
+    if (openAir && instances && isFrozen(room) && /\bfountain\b[^.]*\b(?:cold|frozen|ice)\b/i.test(room.description)) {
+      const fx = pos.x - 2.6; const fz = pos.z + 2.6;
+      if (instances.add('fountain', { x: fx, y: pos.y, z: fz, rotY: 0.6 }, chunk, FROZEN_FOUNTAIN)) {
+        addCollider(fx - 1.7, fx + 1.7, fz - 1.7, fz + 1.7, pos.y, pos.y + 1.4);
+      }
     }
 
     // Six of the marsh's rooms are sectored as open water and only two of them

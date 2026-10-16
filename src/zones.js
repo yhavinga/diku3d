@@ -40,6 +40,14 @@ export const HOME_MAX_ROOMS = 640;
  */
 export const ZONE_GROUPS = [['ofcol.are', 'ofcol2.are']];
 
+/**
+ * A zone's climate, by the area it is: the third axis on the hour and the
+ * weather (main.js `CLIMATE`). Only Mahn-Tor has one; the rest are the
+ * temperate default, which changes nothing.
+ */
+export const ZONE_CLIMATE = { mahntor: 'frost' };
+export const climateOf = (zone) => ZONE_CLIMATE[zone.id] || 'temperate';
+
 const zoneName = (file) => file.replace(/\.are$/, '');
 
 /**

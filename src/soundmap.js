@@ -26,6 +26,8 @@ export const SURFACE = {
   planks: 'wood',
   dirt: 'dirt', wasteground: 'dirt', ash: 'dirt',
   grass: 'grass',
+  // Mahn-Tor's winter (textures.js): snow crunches like turf, packed snow like earth.
+  snow: 'grass', trodden: 'dirt', snowcobble: 'stone', snowrock: 'stone',
   duff: 'litter',
   sand: 'sand',
   peat: 'mud', sludge: 'mud',
