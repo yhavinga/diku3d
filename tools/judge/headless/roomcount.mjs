@@ -274,11 +274,12 @@ function gridOf(list) {
 
 async function main() {
   const args = process.argv.slice(2);
-  const opt = { repo: null, port: 8173, zones: 'all', rules: 'old,spec', geo: null, out: null, pageCheck: 0, shut: false };
+  const opt = { repo: null, port: 8173, zones: 'all', rules: 'old,spec', geo: null, out: null, pageCheck: 0, shut: false, fault: null };
   for (let i = 0; i < args.length; i++) {
     const a = args[i], v = args[i + 1];
     if (a === '--repo') { opt.repo = v; i++; } else if (a === '--port') { opt.port = +v; i++; }
     else if (a === '--zones') { opt.zones = v; i++; } else if (a === '--rules') { opt.rules = v; i++; }
+    else if (a === '--fault') { opt.fault = v; i++; }
     else if (a === '--geo') { opt.geo = v; i++; } else if (a === '--out') { opt.out = v; i++; }
     else if (a === '--page-check') { opt.pageCheck = +v; i++; } else if (a === '--shut') opt.shut = true;
     else throw new Error(`roomcount: what is ${a}?`);
@@ -329,7 +330,7 @@ async function main() {
     const file = opt.geo && path.join(opt.geo, `geo-${zoneId}.json`);
     if (file && fs.existsSync(file)) {
       const geo = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (geo.format !== 3) throw new Error(`roomcount: ${file} was written before the ramps (format ${geo.format}); point --geo at an empty directory`);
+      if (geo.format !== 4) throw new Error(`roomcount: ${file} was written before the ramps (format ${geo.format}); point --geo at an empty directory`);
       return geo;
     }
     const drawn = await drawZone(zoneId);
@@ -349,7 +350,7 @@ async function main() {
       }
       // A shut lid's floor is ground only while it is shut; its portal exists only while it is open.
       const plat = []; const platShut = [];
-      for (const p of d.built.platforms) (p.door ? platShut : plat).push(p.x0, p.x1, p.z0, p.z1, p.top, p.slope ? p.slope.top0 : NaN, p.slope ? p.slope.ax : 0, p.slope ? p.slope.az : 0);
+      for (const p of d.built.platforms) (p.door ? platShut : plat).push(p.x0, p.x1, p.z0, p.z1, p.top, p.slope ? p.slope.top0 : NaN, p.slope ? p.slope.ax : 0, p.slope ? p.slope.az : 0, p.field ? (p.field === d.lumps?.at ? 2 : 1) : 0, p.rest ?? 0);
       const portals = d.built.portals.filter((p) => !p.hatch).map((p) => [p.x, p.y, p.z, p.radius]);
       const hatchPortals = (d.built.hatchPortals || []).map((p) => [p.x, p.y, p.z, p.radius]);
       const rooms = [];
@@ -358,7 +359,7 @@ async function main() {
         const arrive = own && !info.unbuilt ? d.player.resolvePoint(info.center.x, info.center.z, info.center.y) : [info.center.x, info.center.z];
         rooms.push({ vnum, own, unbuilt: !!info.unbuilt, center: [info.center.x, info.center.y, info.center.z], arrive });
       }
-      return { format: 3, col, doors, plat, platShut, portals, hatchPortals, rooms, bounds: d.layout.bounds };
+      return { format: 4, col, doors, plat, platShut, portals, hatchPortals, rooms, bounds: d.layout.bounds };
     });
     if (file) { fs.mkdirSync(opt.geo, { recursive: true }); fs.writeFileSync(file, JSON.stringify(geo)); }
     return geo;
@@ -384,9 +385,11 @@ async function main() {
       }
       return m;
     };
-    const pb = bucketsOf(P, 8), cb = bucketsOf(C, 7);
+    const pb = bucketsOf(P, 10), cb = bucketsOf(C, 7);
     const PL = new Map();
-    for (let k = 0; k < P.length; k += 8) PL.set(k, { x0: P[k], x1: P[k + 1], z0: P[k + 2], z1: P[k + 3], top: P[k + 4], slope: !Number.isFinite(P[k + 5]) ? undefined : { top0: P[k + 5], ax: P[k + 6], az: P[k + 7] } });
+    // Rolling ground (src/relief.js): the server's copy of the zone gives the function back.
+    const fieldOf = (kind) => (kind === 1 ? Z.relief.at : kind === 2 ? Z.lumps.at : undefined);
+    for (let k = 0; k < P.length; k += 10) PL.set(k, { x0: P[k], x1: P[k + 1], z0: P[k + 2], z1: P[k + 3], top: P[k + 4], slope: !Number.isFinite(P[k + 5]) ? undefined : { top0: P[k + 5], ax: P[k + 6], az: P[k + 7] }, field: fieldOf(P[k + 8]), rest: P[k + 9] });
     const near = (m, x, z) => m.get(bk(Math.floor(x / B), Math.floor(z / B))) || [];
     const groundAt = (x, z, feet, reach = STEP_UP) => {
       let best = -Infinity;
@@ -451,7 +454,11 @@ async function main() {
     const find = (s) => { let r = s; while (parent[r] !== r) r = parent[r]; while (parent[s] !== r) { const q = parent[s]; parent[s] = r; s = q; } return r; };
     for (let s = 0; s < n; s++) for (const t of edges[s]) { const a = find(s), b = find(t); if (a !== b) parent[a] = b; }
     const comp = new Int32Array(n); for (let s = 0; s < n; s++) comp[s] = find(s);
-    return { n, I, J, F, edges, comp, seeds, x: (s) => (I[s] + 0.5) * RES, z: (s) => (J[s] + 0.5) * RES };
+    // What the rules are given is what the server gives its game: the feet with the ground's lift
+    // taken off (`liftAt`: the mounds, the river's channel, the Shire's hills).
+    // --fault nolift: the lift is left on, as a server without `liftAt`'s hills would give it.
+    const Y = (s) => (opt.fault === 'nolift' ? F[s] : F[s] - w.liftAt((I[s] + 0.5) * RES + Z.offset, F[s], (J[s] + 0.5) * RES));
+    return { n, I, J, F, Y, edges, comp, seeds, x: (s) => (I[s] + 0.5) * RES, z: (s) => (J[s] + 0.5) * RES };
   }
 
   // ----------------------------------------------------------- the rules --
@@ -486,7 +493,7 @@ async function main() {
     const where = new Int8Array(G.n); const cellRoom = new Int32Array(G.n).fill(-1);
     const pieceRooms = new Map();
     for (let s = 0; s < G.n; s++) {
-      const here = ref.region({ x: G.x(s), y: G.F[s], z: G.z(s) });
+      const here = ref.region({ x: G.x(s), y: G.Y(s), z: G.z(s) });
       if (here.room !== undefined) {
         where[s] = 1; cellRoom[s] = here.room;
         if (!pieceRooms.has(G.comp[s])) pieceRooms.set(G.comp[s], new Set());
@@ -495,7 +502,7 @@ async function main() {
     }
     const exactIndex = new Map();
     const exactOpen = (s) => {
-      const level = Math.round(G.F[s] / LEVEL_H), c = G.comp[s], k = `${c}|${level}`;
+      const level = Math.round(G.Y(s) / LEVEL_H), c = G.comp[s], k = `${c}|${level}`;
       if (!exactIndex.has(k)) {
         const set = pieceRooms.get(c) || new Set();
         exactIndex.set(k, gridOf([...ref.entries.values()].filter((e) => e.level === level && set.has(e.vnum))));
@@ -503,7 +510,7 @@ async function main() {
       const ix = exactIndex.get(k);
       return ix ? ix.nearest(G.x(s), G.z(s)) : null;
     };
-    const exactAt = (s, last) => (where[s] === 1 ? cellRoom[s] : where[s] === 2 ? ref.at({ x: G.x(s), y: G.F[s], z: G.z(s) }, last) : exactOpen(s));
+    const exactAt = (s, last) => (where[s] === 1 ? cellRoom[s] : where[s] === 2 ? ref.at({ x: G.x(s), y: G.Y(s), z: G.z(s) }, last) : exactOpen(s));
     const ruleFns = {};
     for (const name of RULES) {
       if (name === 'old') { const f = oldRule(geo); ruleFns.old = (p) => f(p); }
@@ -543,7 +550,7 @@ async function main() {
         const k = q.pop(), s = q.pop();
         current = s;
         const last = k === NONE ? null : vlist[k];
-        const p = { x: G.x(s), y: G.F[s], z: G.z(s) };
+        const p = { x: G.x(s), y: G.Y(s), z: G.z(s) };
         const got = fn(p, last);
         // The page's own function must decide exactly as the reference, decision by decision.
         if (name === 'game') {
@@ -627,7 +634,7 @@ async function main() {
         const lasts = [null, ...ref.entries.keys()];
         for (let k = 0; k < opt.pageCheck; k++) {
           const s = Math.floor(rand() * G.n);
-          asks.push([G.x(s), G.F[s], G.z(s), lasts[Math.floor(rand() * lasts.length)]]);
+          asks.push([G.x(s), G.Y(s), G.z(s), lasts[Math.floor(rand() * lasts.length)]]);
         }
         const answers = await page.evaluate((asks) => {
           const game = window.diku.game;

@@ -206,7 +206,7 @@ for (const zoneId of zoneIds) {
       if (keep) col.push(c.x0, c.x1, c.z0, c.z1, c.y0, c.y1, c.r || 0);
     }
     const plat = [];
-    for (const p of d.built.platforms) if (!p.door || shut) plat.push(p.x0, p.x1, p.z0, p.z1, p.top, p.slope ? p.slope.top0 : NaN, p.slope ? p.slope.ax : 0, p.slope ? p.slope.az : 0);
+    for (const p of d.built.platforms) if (!p.door || shut) plat.push(p.x0, p.x1, p.z0, p.z1, p.top, p.slope ? p.slope.top0 : NaN, p.slope ? p.slope.ax : 0, p.slope ? p.slope.az : 0, p.field ? (p.field === d.lumps?.at ? 2 : 1) : 0, p.rest ?? 0);
     // The page keeps a lid's portal only while the lid is open; here every
     // lid is open or every lid is shut.
     const portals = [...d.built.portals.filter((p) => !p.hatch), ...(shut ? [] : d.built.hatchPortals || [])]
@@ -242,10 +242,12 @@ for (const zoneId of zoneIds) {
     return m;
   };
   const P = data.plat, C = data.col;
-  const pb = bucketsOf(P, 8), cb = bucketsOf(C, 7);
+  const pb = bucketsOf(P, 10), cb = bucketsOf(C, 7);
   // A platform as the page holds it (surface.js `topAt` reads it), by its offset in P.
   const PL = new Map();
-  for (let k = 0; k < P.length; k += 8) PL.set(k, { x0: P[k], x1: P[k + 1], z0: P[k + 2], z1: P[k + 3], top: P[k + 4], slope: !Number.isFinite(P[k + 5]) ? undefined : { top0: P[k + 5], ax: P[k + 6], az: P[k + 7] } });
+  // ...rolling ground (src/relief.js) is a function the server's own copy of the zone gives back.
+  const fieldOf = (kind) => (kind === 1 ? Z.relief.at : kind === 2 ? Z.lumps.at : undefined);
+  for (let k = 0; k < P.length; k += 10) PL.set(k, { x0: P[k], x1: P[k + 1], z0: P[k + 2], z1: P[k + 3], top: P[k + 4], slope: !Number.isFinite(P[k + 5]) ? undefined : { top0: P[k + 5], ax: P[k + 6], az: P[k + 7] }, field: fieldOf(P[k + 8]), rest: P[k + 9] });
   const near = (m, x, z) => m.get(bucketKey(Math.floor(x / B), Math.floor(z / B))) || [];
   /** player.js groundAt: the highest platform under (x, z), a body's radius round, a step or less above the feet. */
   const groundAt = (x, z, feet, reach = STEP_UP) => {

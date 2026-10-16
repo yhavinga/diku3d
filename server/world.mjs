@@ -35,6 +35,7 @@ import { createNav } from '../src/nav.js';
 import { readShell, shellAttrs, openAirIn, wayLid, isDrop, shaftsOf, shaftAt, sunkRivers, RIVER_DROP } from '../src/shells.js';
 import { AFF } from '../src/rules/handler.js';
 import { addTerraces, inclines, inclineLift } from '../src/surface.js';
+import { buildRelief, dumpLumps, findDump, LOWEST as RELIEF_LOWEST } from '../src/relief.js';
 
 /** build.js's grid, as nav.js and game-check.mjs repeat it. */
 export const CELL = 13;
@@ -110,7 +111,11 @@ export function bootWorld(root, { log = () => {} } = {}) {
     }
     links.push(...layout.links);
     // One map a zone, by the zone's own cells: two zones' shafts can share one.
-    zones.push({ zone, index, offset, layout, local, nav: null, shafts: shaftsOf(world, layout.links) });
+    // The ground that rolls (src/relief.js, shared with build.js): the Shire's hills, and the Dump's heaps.
+    const relief = buildRelief(layout, { openAir });
+    const dumpCell = findDump(layout, openAir);
+    const lumps = dumpCell ? dumpLumps(dumpCell.x * CELL, dumpCell.z * CELL) : null;
+    zones.push({ zone, index, offset, layout, local, nav: null, shafts: shaftsOf(world, layout.links), relief, lumps });
   }
   const byId = new Map(zones.map((z) => [z.zone.id, z]));
   const lifts = mounds(world, zones);
@@ -118,12 +123,18 @@ export function bootWorld(root, { log = () => {} } = {}) {
   const liftAt = (x, y, z) => {
     const zone = zoneAtX(x);
     if (!zone) return 0;
+    // Over the Shire's hills, as build.js lifts them: everything from the lowest
+    // level that rides, and nothing in the rock below it. What level a point is
+    // on is read off what is left once the ground is taken away.
+    const hill = zone.relief && y > (RELIEF_LOWEST - 0.5) * LEVEL_H ? zone.relief.at(x - zone.offset, z) : 0;
+    const level = Math.round((y - hill) / LEVEL_H);
     // On a street that climbs to a terrace the floor is a plane (surface.js).
-    const level = Math.round(y / LEVEL_H);
     const inc = (zone.inclines ||= inclines(zone.layout, lifts, (v) => openAir(world.rooms.get(v)))).get(`${level}:${Math.round((x - zone.offset) / CELL)},${Math.round(z / CELL)}`);
     if (inc) return inclineLift(inc, x - zone.offset, z);
-    const vnum = navOf(zone).roomAt(x - zone.offset, y, z);
-    return lifts.get(vnum) || 0;
+    // ...and the Dump's heaps, on the ground.
+    const heap = zone.lumps && level === 0 && zone.lumps.inside(x - zone.offset, z) ? zone.lumps.at(x - zone.offset, z) : 0;
+    const vnum = navOf(zone).roomAt(x - zone.offset, y - hill - heap, z);
+    return (lifts.get(vnum) || 0) + hill + heap;
   };
   const zoneOfVnum = (vnum) => byId.get(plan.zoneOf(vnum)?.id) || null;
   const zoneAtX = (x) => zones[Math.floor((x + SPAN / 2) / SPAN)] || null;

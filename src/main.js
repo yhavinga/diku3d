@@ -683,7 +683,7 @@ async function boot() {
   const raising = `${layout.cells.size} rooms of ${zone.name || 'the town'}`;
   await progress(bar.raise[0], 'raising the town', raising);
   let built = await buildScene(viewOf(zone), layout, materials, assets,
-    (fraction) => progress(along(bar.raise, fraction), null, raising), { clear: vistas.cellsOf(sites) });
+    (fraction) => progress(along(bar.raise, fraction), null, raising), { clear: vistas.cellsOf(sites), hills: params.get('hills') !== 'off' });
 
   const peopling = 'mobiles, their clothes and what they carry';
   await progress(bar.people[0], 'peopling the rooms', peopling);
@@ -1798,7 +1798,7 @@ async function boot() {
         await zoneCard.progress(CROSS_BAR.build[0]);
         t = performance.now();
         built = await buildScene(viewOf(zone), layout, materials, assets,
-          (fraction) => zoneCard.progress(along(CROSS_BAR.build, fraction)), { clear: vistas.cellsOf(sites) });
+          (fraction) => zoneCard.progress(along(CROSS_BAR.build, fraction)), { clear: vistas.cellsOf(sites), hills: params.get('hills') !== 'off' });
         timing.build = performance.now() - t;
         await zoneCard.progress(CROSS_BAR.populate[0]);
         t = performance.now();
@@ -2299,6 +2299,7 @@ async function boot() {
     get layout() { return layout; },
     get built() { return built; },
     get relief() { return built.relief; },
+    get lumps() { return built.lumps; },
     get actors() { return actors; },
     get visibility() { return visibility; },
     /** The neighbouring zones drawn past the crossings (vista.js). */

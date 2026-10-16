@@ -26,7 +26,7 @@ import {
 } from './shells.js';
 import { BESIDE } from './layout.js';
 import { planeOf, inclines, inclineLift, inclineCell, addTerraces } from './surface.js';
-import { buildRelief, dumpLumps, LOWEST as RELIEF_LOWEST } from './relief.js';
+import { buildRelief, dumpLumps, findDump, LOWEST as RELIEF_LOWEST } from './relief.js';
 import { placeClutter, ALTAR_MIDDLE, STATUE_OF_ODIN, STATUE_DEPTH } from './clutter.js';
 import { MURAL_REGIONS, faceRegion, bloodRegion } from './textures.js';
 
@@ -474,13 +474,13 @@ const RELIEF_EDGE = 4;
 const RELIEF_FLAT = 0.012;
 
 /**
- * The ground the Shire's hills make, laid over the flat plane in tiles four
+ * The ground the Shire's hills make, laid over the flat plane in tiles two
  * metres a side wherever the ground is not flat: a row of tiles is one strip,
  * and a tile a hole in the ground cuts (a stair going down) is cut round it.
  * Heights and normals are the relief's own, so the hills shade smoothly.
  */
 function buildReliefGround({ batcher, relief, y, holes }) {
-  const T = 4;
+  const T = 2;
   const b = relief.box;
   const grow = (xs, z0, z1) => {
     // xs: the x of each column edge; one strip of quads from z0 to z1.
@@ -525,13 +525,13 @@ function buildReliefGround({ batcher, relief, y, holes }) {
 }
 
 /**
- * The Dump's ground: a mesh over the floor, 0.5 m a side, in the dirt, with
+ * The Dump's ground: a mesh over the floor, 0.25 m a side, in the dirt, with
  * the rubble where a heap is high and the peat where the ground is lowest;
  * and a platform whose height is the same function, so that a body walks on
  * what it sees. Over the floor and not in it: the flat floor stays under it.
  */
 function buildDumpGround({ batcher, lumps, y, chunk, platforms }) {
-  const S = 0.5;
+  const S = 0.25;
   const nx = Math.round((lumps.x1 - lumps.x0) / S);
   const nz = Math.round((lumps.z1 - lumps.z0) / S);
   const vertex = (i, j) => {
@@ -546,8 +546,8 @@ function buildDumpGround({ batcher, lumps, y, chunk, platforms }) {
     // Patches of what was thrown away, not bands of height: ash and cinders,
     // broken stone, dark wet earth in the hollows, and bare dirt between.
     const mx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3; const mz = (tri[0][2] + tri[1][2] + tri[2][2]) / 3;
-    const n = terrainNoise(mx * 0.55, mz * 0.55, 3031);
-    const material = h < 0.14 ? 'peat' : h > 1.2 && n > 0.35 ? 'rubble' : n < 0.2 ? 'charred' : n < 0.4 ? 'dirt' : n < 0.56 ? 'wasteground' : n < 0.78 ? 'ash' : 'rubble';
+    const n = terrainNoise(mx * 0.9, mz * 0.9, 3031);
+    const material = h < 0.14 ? 'peat' : h > 1.2 && n > 0.35 ? 'rubble' : n < 0.25 ? 'charred' : n < 0.45 ? 'dirt' : n < 0.62 ? 'wasteground' : n < 0.8 ? 'rubble' : 'charred';
     if (!bins.has(material)) bins.set(material, { p: [], n: [] });
     const b = bins.get(material);
     for (const v of tri) { b.p.push(v[0], v[1], v[2]); b.n.push(v[3], v[4], v[5]); }
@@ -578,8 +578,8 @@ const REFUSE_SCATTER = [
   ['crate', 1.0, 1, 0.9], ['crate', 1.0, 1, 0.8], ['barrel', 1.0, 1, 0.9], ['cartwheel', 0.8, 0, 0.45],
   ['sack', 0.9, 0, 1], ['sack', 0.9, 0, 1], ['sack', 0.9, 0, 0.9], ['bucket', 0.8, 0, 1], ['planks_pile', 0.9, 0, 0.9],
   ['bone_pile', 0.9, 0, 1], ['clutter_bones', 0.8, 0, 1], ['clutter_skull', 0.6, 0, 1], ['herb_pots', 0.7, 0, 0.9],
-  ['broom', 0.6, 0, 1], ['firewood_pile', 0.9, 0, 0.9], ['stacked_crates', 0.9, 1, 0.8], ['rubble_heap', 0.6, 0, 1.1],
-  ['refuse_heap', 0.7, 0, 1.1], ['rubble_heap', 0.6, 0, 1.1],
+  ['broom', 0.6, 0, 1], ['firewood_pile', 0.9, 0, 0.9], ['stacked_crates', 0.9, 1, 0.8], ['refuse_heap', 0.7, 0, 1.1],
+  ['sack', 0.9, 0, 0.9], ['crate', 1.0, 1, 0.8],
 ];
 function scatterRefuse({ instances, lumps, room, pos, chunk, addCollider }) {
   REFUSE_SCATTER.forEach(([name, sink, solid, size], i) => {
@@ -3950,10 +3950,11 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
   classifyCanopy(world);
   classifyShells(world, (room) => sectorOf(room) !== SECTOR.AIR && !isOpenAir(room));
   // The Shire's rolling ground (relief.js): what is filed on it rides up with it.
-  const relief = vista ? null : buildRelief(layout, { openAir: isOpenAir });
+  // `?hills=off` leaves the ground flat everywhere, to see what the hills change.
+  const relief = vista || options.hills === false ? null : buildRelief(layout, { openAir: isOpenAir });
   batcher.relief = relief;
   // The Dump's heaps and ruts (relief.js `dumpLumps`), over its floor.
-  const dumpCell = vista ? null : layout.order.find((c) => c.level === 0 && c.room.areaFile === 'midgaard.are' && REFUSE.test(c.room.name) && isOpenAir(c.room));
+  const dumpCell = vista || options.hills === false ? null : findDump(layout, isOpenAir);
   const lumps = dumpCell ? dumpLumps(dumpCell.x * CELL, dumpCell.z * CELL) : null;
   const lumpAt = (x, z) => (lumps && lumps.inside(x, z) ? lumps.at(x, z) : 0);
   if ((relief || lumps) && instances) {
@@ -5690,7 +5691,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     if (home) home.center.y += lumpAt(home.center.x, home.center.z);
   }
   const thresholds = buildThresholds(veils, zones);
-  return { group, colliders, platforms, lights, portals, hatchPortals, doors, rooms, decor, mist, horizon, stats, zones, grass, thresholds, crossings, relief };
+  return { group, colliders, platforms, lights, portals, hatchPortals, doors, rooms, decor, mist, horizon, stats, zones, grass, thresholds, crossings, relief, lumps };
 }
 
 /** A sub-step's own 0..1 progress, as a stretch [a, b] of its caller's. */

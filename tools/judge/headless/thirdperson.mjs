@@ -24,7 +24,7 @@
 //
 //   cp <repo>/tools/judge/headless/thirdperson.mjs /tmp/pw/
 //   timeout 1500 node /tmp/pw/thirdperson.mjs --port 8173 [--out /tmp/tp.json]
-//        [--places boar,temple | all] [--query "areas=midgaard"]
+//        [--places boar,temple | all] [--fault sunk] [--query "areas=midgaard"]
 //        [--headings 8] [--pitches -0.1,-0.35,-0.6,0.4] [--no-frame]
 //
 // Prints one line per place and the worst offenders; exits 1 if a hard limit
@@ -47,6 +47,12 @@ const PLACES = [
   // The street up to the Temple Square: a ramp, 2.6 degrees (surface.js).
   { name: 'ramp', vnum: 3014, offsets: [[0, -9], [0, -13], [0, -17], [0, -21], [3, -13]] },
   { name: 'market', vnum: 3014, offsets: [[3.5, 0], [-3.5, 0], [0, 3.5], [0, -3.5], [0, 0]] },
+  // The Shire's hills (src/relief.js): on Took Hill, on the Bywater Road, in Bag End's hillside, and the Dump's heaps.
+  { name: 'shire-hill', vnum: 1126, offsets: [[3.5, 0], [-3.5, 0], [0, 3.5], [0, -3.5], [0, 0]] },
+  { name: 'shire-road', vnum: 1118, offsets: [[3.5, 0], [-3.5, 0], [0, 3.5], [0, -3.5], [0, 0]] },
+  { name: 'shire-bagend', vnum: 1135, offsets: [[3.5, 0], [-3.5, 0], [0, 3.5], [0, -3.5], [0, 0]] },
+  // (The cart track down the middle: a body is put down where it is not inside a heap.)
+  { name: 'dump', vnum: 3030, offsets: [[0, 0], [0, 3], [0, -3], [1.2, 1.5], [-1.2, -1.5]] },
   { name: 'temple-night', vnum: 3001, time: 'night', offsets: [[3.5, 0], [-3.5, 0], [0, 0]] },
   { name: 'boarbar-night', vnum: 3007, time: 'night', offsets: [[3.5, 0], [-3.5, 0], [0, 0]] },
 ];
@@ -57,7 +63,7 @@ const MAX_BLACK = 0.02;
 const FEET_TOL = 0.03;
 
 const args = process.argv.slice(2);
-const opt = { port: 8173, out: null, places: 'all', query: '', headings: 12, pitches: [-0.1, -0.35, -0.6, 0.4], frame: true, wait: 15000 };
+const opt = { port: 8173, out: null, places: 'all', query: '', headings: 12, pitches: [-0.1, -0.35, -0.6, 0.4], frame: true, wait: 15000, fault: null };
 for (let i = 0; i < args.length; i++) {
   const a = args[i], v = args[i + 1];
   if (a === '--port') { opt.port = +v; i++; }
@@ -68,6 +74,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--pitches') { opt.pitches = v.split(',').map(Number); i++; }
   else if (a === '--no-frame') opt.frame = false;
   else if (a === '--wait') { opt.wait = +v; i++; }
+  else if (a === '--fault') { opt.fault = v; i++; }
 }
 const only = opt.places === 'all' ? null : new Set(opt.places.split(','));
 const list = PLACES.filter((p) => !only || only.has(p.name));
@@ -78,10 +85,13 @@ page.on('pageerror', (e) => console.log('pageerror', e.message));
 await page.goto(`http://localhost:${opt.port}/?${opt.query}`);
 await page.waitForFunction(() => window.diku && window.diku.built, null, { timeout: opt.wait * 4 });
 await page.waitForTimeout(opt.wait);
-await page.evaluate(() => {
+await page.evaluate((fault) => {
   for (const id of ['title', 'loading']) document.getElementById(id)?.classList.add('hidden');
   window.diku.state.paused = false;
-});
+  // --fault sunk: the rolling ground's platforms stand 0.3 m under the mesh, so the figure's feet are in the turf.
+  if (fault === 'sunk') { for (const p of window.diku.built.platforms) if (p.field) p.rest -= 0.3; }
+  else if (fault) throw new Error(`thirdperson: what is --fault ${fault}?`);
+}, opt.fault);
 
 // Everything below runs in the page, one place at a time.
 const sweepPlace = async ({ place, headings, pitches, frame, limits }) => {

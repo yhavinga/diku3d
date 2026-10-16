@@ -26,8 +26,16 @@
 //
 //   cp <repo>/tools/judge/headless/ramps.mjs /tmp/pw/
 //   timeout 900 node /tmp/pw/ramps.mjs --repo <repo> --port 8173 [--res 0.5] [--out /tmp/ramps.json]
-//        [--fault float|steep|server]  (puts a deliberate fault in the first ramp,
+//        [--fault float|steep|server|norelief|dump|rollfloat]  (puts a deliberate fault in the first ramp,
 //                                    to show that this fails: see below)
+//
+// Rolling ground (src/relief.js: the Shire's hills, the Dump's heaps) is held
+// the same way, at seeded random points in the village, the bowl and the dump:
+// the picture against the platform (`field`), the player's reading, the
+// mobiles' grid, and the server's `liftAt`, which must give the page's own
+// height over the flat. `--fault norelief` has the server leave the hills out,
+// and `--fault dump` has it leave the heaps out, and `--fault rollfloat` lifts the
+// rolling platforms off their mesh; each must fail.
 //
 // Prints one line per ramp and exits 1 if any limit fails. `--fault float`
 // lifts the first ramp's platform 0.2 m off its mesh; `--fault steep` makes
@@ -62,12 +70,12 @@ await page.goto(`http://localhost:${opt.port}/?${opt.query}`);
 await page.waitForFunction(() => window.diku && window.diku.built, null, { timeout: opt.wait * 4 });
 await page.waitForTimeout(opt.wait);
 
-const result = await page.evaluate(async ({ res, fault, tol, join, maxGrade }) => {
+const pageResult = await page.evaluate(async ({ res, fault, tol, join, maxGrade }) => {
   const THREE = await import('three');
   const { topAt } = await import('/src/surface.js');
   const d = window.diku;
   const ramps = d.built.platforms.filter((p) => p.slope);
-  if (fault && ramps.length) {
+  if (['float', 'steep', 'server'].includes(fault) && ramps.length) {
     const p = ramps[0];
     // A fault in the platform only: the mesh stays as it was drawn.
     if (fault === 'float') { p.slope = { ...p.slope, top0: p.slope.top0 + 0.2 }; p.top += 0.2; }
@@ -120,8 +128,43 @@ const result = await page.evaluate(async ({ res, fault, tol, join, maxGrade }) =
     r.plane = { x0: p.x0, x1: p.x1, z0: p.z0, z1: p.z1, base: p.base, slope: p.slope, zone: d.zone.id };
     out.push(r);
   }
-  return out;
+  // --fault rollfloat: the rolling ground's platforms stand 0.3 m off the mesh drawn over them.
+  if (fault === 'rollfloat') for (const p of d.built.platforms) if (p.field) p.rest += 0.3;
+  // Rolling ground: seeded points, and what each reader says there.
+  const rolling = [];
+  if (d.relief || d.lumps) {
+    let seed = 20261016;
+    const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+    const sets = [];
+    if (d.relief) {
+      for (let i = 0; i < 250; i++) sets.push(['village', -340 + rnd() * 320, -200 + rnd() * 240]);
+      const b = d.relief.box;
+      for (let i = 0; i < 150; i++) sets.push(['bowl', b.x0 + rnd() * (b.x1 - b.x0), b.z0 + rnd() * (b.z1 - b.z0)]);
+    }
+    if (d.lumps) for (let i = 0; i < 150; i++) sets.push(['dump', d.lumps.x0 + 0.5 + rnd() * 12, d.lumps.z0 + 0.5 + rnd() * 12]);
+    for (const [set, x, z] of sets) {
+      const hill = d.relief ? d.relief.at(x, z) : 0;
+      const heap = d.lumps && d.lumps.inside(x, z) ? d.lumps.at(x, z) : 0;
+      const g = d.player.groundAt(x, z, hill + heap + 2);
+      const r = { set, x, z, hill, heap, g, mesh: null, nav: null, fails: [] };
+      // Where the ground is flat this is not what is held here.
+      if (hill + heap < 0.05) { r.flat = true; rolling.push(r); continue; }
+      if (g === -Infinity) { r.fails.push('no ground'); rolling.push(r); continue; }
+      rc.set(new THREE.Vector3(x, g + 3, z), down);
+      const hits = rc.intersectObject(d.built.group, true).filter((h) => h.object.visible && !h.object.isSprite && !(h.object.material && h.object.material.transparent) && Math.abs(h.point.y - g) < 1.5);
+      if (hits.length) r.mesh = Math.min(...hits.map((h) => Math.abs(h.point.y - g)));
+      const m = d.actors.nav.moundY(x, z, 0);
+      if (m !== null) r.nav = Math.abs(m - g);
+      // The ground is at least as high as the hills and heaps say, over a floor at or under level.
+      if (g < hill + heap - 0.6) r.fails.push('under the hill');
+      if (r.mesh !== null && r.mesh > 0.15) r.fails.push(`mesh ${r.mesh.toFixed(3)}`);
+      if (r.nav !== null && r.nav > tol) r.fails.push(`nav ${r.nav.toFixed(3)}`);
+      rolling.push(r);
+    }
+  }
+  return { out, rolling };
 }, { res: opt.res, fault: opt.fault, tol: TOL, join: JOIN, maxGrade: MAX_GRADE });
+const result = pageResult.out;
 
 // 4. the server's floor, from its own boot of the same checkout.
 if (opt.repo) {
@@ -146,6 +189,42 @@ if (opt.repo) {
   }
 }
 
+// Rolling ground, the server's side: its `liftAt` at each point, with the page's feet on the ground.
+let rollingBad = 0;
+if (opt.repo && pageResult.rolling.length) {
+  const { bootWorld } = await import(pathToFileURL(path.join(opt.repo, 'server/world.mjs')).href);
+  const w = bootWorld(opt.repo);
+  const Z = w.byId.get('home');
+  const stats = {};
+  for (const r of pageResult.rolling) {
+    if (r.flat) continue;
+    if (r.g === -Infinity) { r.server = null; }
+    else {
+      // The flat height of the floor the feet are on: level 0's floor, or the ground plane under it.
+      const near = w.nav.roomAt(r.x + Z.offset, r.g - r.hill - r.heap, r.z);
+      if (near !== undefined && (w.lifts.get(near) || 0) !== 0) {
+        // Open ground the layout leaves to the nearest room: where that is a sunk river's room the
+        // server lifts by the river's own drop, as it does for the flat ground there, and that is
+        // not what this holds to the hills.
+        r.skipped = true; r.server = null; r.nav = null; r.fails = r.fails.filter((f) => !String(f).startsWith('nav'));
+      } else {
+        let lift = w.liftAt(r.x + Z.offset, r.g, r.z);
+        if (opt.fault === 'norelief') lift -= r.hill;
+        if (opt.fault === 'dump') lift -= r.heap;
+        // Whatever the page lifted by, the server must lift by (the floor's own height is 0 or -0.47).
+        const want = r.hill + r.heap;
+        r.server = Math.abs(lift - want);
+        if (r.server > TOL) r.fails.push(`server ${lift.toFixed(3)} want ${want.toFixed(3)}`);
+      }
+    }
+    const s = (stats[r.set] ||= { skipped: 0, n: 0, bad: 0, maxServer: 0, maxMesh: 0, maxNav: 0, maxHill: 0 });
+    s.n++; if (r.skipped) s.skipped++; if (r.fails.length) s.bad++;
+    s.maxServer = Math.max(s.maxServer, r.server ?? 0); s.maxMesh = Math.max(s.maxMesh, r.mesh ?? 0); s.maxNav = Math.max(s.maxNav, r.nav ?? 0); s.maxHill = Math.max(s.maxHill, r.hill + r.heap);
+    if (r.fails.length) { rollingBad++; if (rollingBad <= 6) console.log('   rolling', r.set, [r.x, r.z].map((v) => +v.toFixed(1)), r.fails.join('; ')); }
+  }
+  for (const [k, s] of Object.entries(stats)) console.log(`rolling ${k}: ${s.n} points (${s.skipped} by a sunk river's room, server and nav not asked), up to ${s.maxHill.toFixed(1)} m  mesh dev ${s.maxMesh.toFixed(3)}  nav ${s.maxNav.toFixed(3)}  server ${s.maxServer.toFixed(3)}  ${s.bad ? s.bad + ' FAIL' : 'ok'}`);
+}
+
 let bad = 0;
 for (const r of result) {
   const failed = r.fails.length || r.noHit;
@@ -153,7 +232,8 @@ for (const r of result) {
   console.log(`ramp ${JSON.stringify(r.rect)} grade ${r.grade} deg  ${r.samples} samples  mesh dev ${r.maxMesh}  player ${r.maxPlayer}  nav ${r.maxNav}  join ${r.maxJoin}  server ${r.maxServer ?? 'n/a'}  no hit ${r.noHit}  ${failed ? 'FAIL' : 'ok'}`);
   for (const f of r.fails.slice(0, 3)) console.log('   ', JSON.stringify(f));
 }
-console.log(`${result.length} ramps, ${bad} failing${opt.fault ? ` (with --fault ${opt.fault})` : ''}`);
+console.log(`${result.length} ramps, ${bad} failing; ${rollingBad} rolling-ground points failing${opt.fault ? ` (with --fault ${opt.fault})` : ''}`);
+bad += rollingBad;
 if (opt.out) fs.writeFileSync(opt.out, JSON.stringify(result, null, 1));
 await browser.close();
 process.exit(bad || !result.length ? 1 : 0);
