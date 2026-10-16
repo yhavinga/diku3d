@@ -543,7 +543,11 @@ function buildDumpGround({ batcher, lumps, y, chunk, platforms }) {
   const bins = new Map();
   const push = (tri) => {
     const h = (tri[0][1] + tri[1][1] + tri[2][1]) / 3 - y;
-    const material = h > 1.05 ? 'rubble' : h > 0.45 ? 'wasteground' : h < 0.14 ? 'peat' : 'dirt';
+    // Patches of what was thrown away, not bands of height: ash and cinders,
+    // broken stone, dark wet earth in the hollows, and bare dirt between.
+    const mx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3; const mz = (tri[0][2] + tri[1][2] + tri[2][2]) / 3;
+    const n = terrainNoise(mx * 0.55, mz * 0.55, 3031);
+    const material = h < 0.14 ? 'peat' : h > 1.2 && n > 0.35 ? 'rubble' : n < 0.2 ? 'charred' : n < 0.4 ? 'dirt' : n < 0.56 ? 'wasteground' : n < 0.78 ? 'ash' : 'rubble';
     if (!bins.has(material)) bins.set(material, { p: [], n: [] });
     const b = bins.get(material);
     for (const v of tri) { b.p.push(v[0], v[1], v[2]); b.n.push(v[3], v[4], v[5]); }
@@ -562,6 +566,38 @@ function buildDumpGround({ batcher, lumps, y, chunk, platforms }) {
     geo.dispose();
   }
   platforms.push({ x0: lumps.x0, x1: lumps.x1, z0: lumps.z0, z1: lumps.z1, top: y + lumps.max, rest: y, low: y, base: y, field: lumps.at });
+}
+
+/**
+ * What was thrown away, lying in and on the dump's heaps, half sunk: the
+ * crate with a side stove in, the barrel on its side, a cartwheel, rags and
+ * bones. Models stand upright and are sunk into the heap, since an instance
+ * only turns on the spot. `instances.add` lifts each by the heap under it.
+ */
+const REFUSE_SCATTER = [
+  ['crate', 0.9, 1], ['crate', 0.9, 1], ['barrel', 0.9, 1], ['barrel', 0.9, 1], ['cartwheel', 0.5, 0], ['cartwheel', 0.4, 0],
+  ['sack', 0.8, 0], ['sack', 0.8, 0], ['sack', 0.8, 0], ['bucket', 0.7, 0], ['planks_pile', 0.8, 0], ['bone_pile', 0.9, 0],
+  ['bone_pile', 0.9, 0], ['clutter_bones', 0.8, 0], ['clutter_skull', 0.6, 0], ['herb_pots', 0.6, 0], ['broom', 0.5, 0],
+  ['firewood_pile', 0.8, 0], ['stacked_crates', 0.8, 1], ['rubble_heap', 0.6, 0], ['refuse_heap', 0.7, 0], ['refuse_heap', 0.7, 0],
+  ['rubble_heap', 0.6, 0], ['sack', 0.8, 0], ['barrel', 0.9, 1], ['crate', 0.9, 1],
+];
+function scatterRefuse({ instances, lumps, room, pos, chunk, addCollider }) {
+  REFUSE_SCATTER.forEach(([name, sink, solid], i) => {
+    // Away from the track down the middle and from the way in from the east.
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const u = (hash3(room.vnum, i, attempt, 3101) - 0.5) * 11.4;
+      const v = (hash3(room.vnum, i, attempt, 3102) - 0.5) * 11.4;
+      if (Math.abs(u) < 1.5 || Math.hypot(u - 6.3, v) < 2.6 || Math.hypot(u, v) < 2) continue;
+      const x = pos.x + u; const z = pos.z + v;
+      // On a heap, or at the foot of one.
+      if (lumps.at(x, z) < 0.3) continue;
+      const rotY = hash3(room.vnum, i, attempt, 3103) * Math.PI * 2;
+      const scale = 0.8 + hash3(room.vnum, i, attempt, 3104) * 0.4;
+      if (!instances.add(name, { x, y: pos.y - sink * (0.35 + hash3(room.vnum, i, attempt, 3105) * 0.45) * scale, z, rotY, scale }, chunk)) return;
+      if (solid) addCollider(x - 0.5 * scale, x + 0.5 * scale, z - 0.5 * scale, z + 0.5 * scale, pos.y, pos.y + 0.6);
+      return;
+    }
+  });
 }
 
 /** Does this (world-space) geometry stand where the ground is not flat? */
@@ -4181,7 +4217,10 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         shade: !openAir, tint: mats.floorTint,
       });
     }
-    if (lumps && cell === dumpCell) buildDumpGround({ batcher, lumps, y: pos.y, chunk, platforms });
+    if (lumps && cell === dumpCell) {
+      buildDumpGround({ batcher, lumps, y: pos.y, chunk, platforms });
+      if (instances) scatterRefuse({ instances, lumps, room, pos, chunk, addCollider });
+    }
 
     // "A huge fountain graces the center of the square, but the extreme cold
     // has turned it into an ice sculpture": the fountain, in ice. Off the

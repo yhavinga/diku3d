@@ -1973,7 +1973,10 @@ async function boot() {
    * room round open ground -- and the HUD and the game could name two rooms.
    */
   function currentRoom() {
-    const at = game.roomAt({ x: player.position.x, y: player.position.y - 1.72, z: player.position.z }, game.state.roomVnum);
+    // On the Shire's hills the feet are as high over the level as the ground is.
+    const feet = player.position.y - 1.72;
+    const hill = built.relief && feet > -11 ? built.relief.at(player.position.x, player.position.z) : 0;
+    const at = game.roomAt({ x: player.position.x, y: feet - hill, z: player.position.z }, game.state.roomVnum);
     return at ?? game.state.roomVnum ?? undefined;
   }
 

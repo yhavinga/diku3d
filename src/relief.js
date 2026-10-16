@@ -32,8 +32,10 @@ const APRON_LEN = HALF + 4.5;
 const APRON_HALF = 2.9;
 /** How far the pad takes to give way to the hill. */
 const PAD_BLEND = 12;
-/** The steepest a road may climb along its own length: 6 degrees. */
-export const ROAD_GRADE = Math.tan((6 * Math.PI) / 180);
+/** The steepest a road may climb along its own length: 7 degrees. */
+export const ROAD_GRADE = Math.tan((7 * Math.PI) / 180);
+/** ...and a lane between two walls, a short pitch between two level floors, 9. */
+const LANE_GRADE = Math.tan((9 * Math.PI) / 180);
 /** The most a hill rises over the plain. */
 const CREST = 19;
 /** How far a pad may be cut into the hill beside it. */
@@ -70,11 +72,13 @@ function noise(x, z, salt) {
  * crest and the toe are round.
  */
 const KNOLLS = [
-  [1126, -20, -6, 8.5, 235],
-  [1135, 8, -60, 9.5, 215],
-  [1117, -10, -190, 7, 190],
-  [1129, -100, 20, 6, 170],
-  [1100, -14, 90, 6.5, 150],
+  [1126, -24, -6, 8.5, 215],   // Took Hill, which the Bywater Road climbs to
+  [1104, -14, -34, 6.5, 95],     // the rise the road crosses east of the bridge
+  [1118, 10, 85, 5.5, 75],     // and the one south of the bridge end
+  [1135, 8, -60, 9.5, 190],    // Bag End's hill, up Delving Lane
+  [1117, -10, -190, 7, 170],
+  [1129, -100, 20, 6, 150],
+  [1100, -14, 90, 6.5, 130],
 ];
 /** The hills round the dale, well off the roads, which no road has to climb: [room, dx, dz, height, radius]. */
 const RIM = [
@@ -89,8 +93,8 @@ const bell = (d, r) => (d >= r ? 0 : (0.5 + 0.5 * Math.cos((Math.PI * d) / r)) *
 
 /** Low rolling swell under everything, 0 to about 3 m. */
 function swell(x, z) {
-  const n = 0.7 * noise(x / 140 + 11.3, z / 140 + 4.1, 3) + 0.3 * noise(x / 70 + 2.7, z / 70 + 8.9, 5);
-  return 3.4 * smooth(0.25, 0.95, n);
+  const n = 0.7 * noise(x / 125 + 11.3, z / 125 + 4.1, 3) + 0.3 * noise(x / 58 + 2.7, z / 58 + 8.9, 5);
+  return 4.8 * smooth(0.2, 0.9, n);
 }
 
 const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
@@ -99,11 +103,14 @@ const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
  * Build the relief of a layout, or null where there is no such area in it.
  * `openAir(room)` is the walls' answer (shells.js `isOpenAir`).
  */
-export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName = /\b(smial|bag ?end)\b/i } = {}) {
+export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName = /\b(smial|bag ?end)\b/i, fit = true } = {}) {
   const mine = layout.order.filter((c) => c.room.areaFile === areaFile);
   if (!mine.length) return null;
   // Deeper than this the ground is not shifted, so nothing there is in the way.
-  const foreign = layout.order.filter((c) => c.room.areaFile !== areaFile && c.level >= LOWEST);
+  const foreign = layout.order.filter((c) => c.room.areaFile !== areaFile && c.level >= 0);
+  // ...and what is built at the lowest level that rides, of another area (the sewer
+  // under the road), is a room like ours: level over its own footprint, with the hill over it.
+  const under = layout.order.filter((c) => c.room.areaFile !== areaFile && c.level === LOWEST);
 
   let x0 = Infinity; let x1 = -Infinity; let z0 = Infinity; let z1 = -Infinity;
   for (const c of mine) {
@@ -133,7 +140,7 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
       const a = chain[k - 1]; const b = chain[k];
       // A lane between two walls is a short pitch between two level floors.
       const run = [];
-      run.limit = l.to && !openAir(l.from.room) && !openAir(l.to.room) ? ROAD_GRADE * 1.5 : ROAD_GRADE;
+      run.limit = l.to && !openAir(l.from.room) && !openAir(l.to.room) ? LANE_GRADE : ROAD_GRADE;
       for (let t = 0; t <= 1.0001; t += 0.5 / CELL) stamp(dRoad, (a.x + (b.x - a.x) * t) * CELL, (a.z + (b.z - a.z) * t) * CELL);
       for (let t = 0; t <= 1.0001; t += 2 / CELL) run.push([(a.x + (b.x - a.x) * t) * CELL, (a.z + (b.z - a.z) * t) * CELL]);
       runs.push(run);
@@ -146,14 +153,14 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
     for (let z = cz - HALF; z <= cz + HALF; z += RES) for (let x = cx - HALF; x <= cx + HALF; x += RES) stamp(dForeign, x, z);
   }
   for (const l of layout.links) {
-    if (l.from.level < LOWEST || (l.from.room.areaFile === areaFile && (!l.to || l.to.room.areaFile === areaFile))) continue;
+    if (l.from.level < 0 || (l.from.room.areaFile === areaFile && (!l.to || l.to.room.areaFile === areaFile))) continue;
     const chain = [l.from, ...(l.path || []), ...(l.to ? [l.to] : [])];
     for (const c of chain) for (let z = c.z * CELL - HALF; z <= c.z * CELL + HALF; z += RES) for (let x = c.x * CELL - HALF; x <= c.x * CELL + HALF; x += RES) stamp(dForeign, x, z);
   }
   chamfer(dRoad, nx, nz); chamfer(dForeign, nx, nz);
 
   // --- the pads -----------------------------------------------------------
-  const walled = mine.filter((c) => !openAir(c.room));
+  const walled = [...mine, ...under.filter((c) => c.x * CELL > x0 && c.x * CELL < x1 && c.z * CELL > z0 && c.z * CELL < z1)].filter((c) => !openAir(c.room));
   const held = (i, j) => road + (1 - road) * smooth(12, 80, dRoad[j * nx + i]);
   const base = (x, z, i, j) => {
     // The hills are the village's own: they sink to the plain a few hundred metres out.
@@ -165,7 +172,7 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
     let rim = 0;
     for (const n of rimHills) rim += n.h * bell(Math.hypot(x - n.x, z - n.z), n.r);
     rim = CREST * (1 - Math.exp(-rim / CREST));
-    return ((k * quiet + rim) + swell(x, z) * held(i, j)) * smooth(16, 130, dForeign[j * nx + i]) * fade;
+    return ((k * quiet + rim) + swell(x, z) * (0.55 + 0.45 * quiet)) * smooth(14, 120, dForeign[j * nx + i]) * fade;
   };
   let road = 0.5;
   let quiet = 1;
@@ -182,7 +189,7 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
 
   const pads = walled.map((c) => {
     const sides = layout.sides.get(c.vnum) || [];
-    const open = [0, 1, 2, 3].filter((d) => sides[d] && (sides[d].link || sides[d].exit));
+    const open = c.room.areaFile !== areaFile ? [] : [0, 1, 2, 3].filter((d) => sides[d] && (sides[d].link || sides[d].exit));
     const smial = c.level === 0 && smialName.test(c.room.name);
     // A smial's hill rises behind it, away from the doors.
     let bx = 0; let bz = 0;
@@ -190,23 +197,28 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
     const bl = Math.hypot(bx, bz);
     return { x: c.x * CELL, z: c.z * CELL, open, smial, back: bl ? [bx / bl, bz / bl] : null, height: 0 };
   });
+  // The hill a smial is dug into: behind it, away from its doors, and round
+  // its sides, as high as its own dome, so that the dome comes out of the hill.
   const bumpOf = (x, z) => {
     let b = 0;
     for (const p of pads) {
       if (!p.smial || !p.back) continue;
-      const cx = p.x + p.back[0] * (PAD_HALF + 2); const cz = p.z + p.back[1] * (PAD_HALF + 2);
-      const d = Math.hypot(x - cx, z - cz);
-      b += 6.5 * (1 - smooth(0, 17, d));
+      const cx = p.x + p.back[0] * (PAD_HALF + 10); const cz = p.z + p.back[1] * (PAD_HALF + 10);
+      const along = (x - cx) * p.back[0] + (z - cz) * p.back[1];
+      const across = (x - cx) * -p.back[1] + (z - cz) * p.back[0];
+      const d = Math.hypot(along / (along > 0 ? 20 : 15), across / 26);
+      b += 9.5 * (1 - smooth(0, 1, d));
     }
     return b;
   };
+
 
   function compute() {
     for (let j = 0; j < nz; j++) {
       const z = z0 + j * RES;
       for (let i = 0; i < nx; i++) {
         const x = x0 + i * RES;
-        H[j * nx + i] = base(x, z, i, j) + bumpOf(x, z) * smooth(16, 130, dForeign[j * nx + i]);
+        H[j * nx + i] = base(x, z, i, j) + bumpOf(x, z) * (0.6 + 0.4 * quiet) * smooth(8, 26, dForeign[j * nx + i]);
       }
     }
     // A pad stands where its streets meet it: the hill's height at the ends
@@ -237,7 +249,9 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
             const along = x * dx + z * dz; const across = Math.abs(x * dz - z * dx);
             d = Math.min(d, Math.hypot(along < 0 ? -along : Math.max(0, along - APRON_LEN), Math.max(0, across - APRON_HALF)));
           }
-          const w = 1 - smooth(0, PAD_BLEND, d);
+          // Behind a smial the hill is let come close: its blend is short.
+          const behind = p.smial && p.back && x * p.back[0] + z * p.back[1] > PAD_HALF * 0.5;
+          const w = 1 - smooth(0, behind ? 3 : PAD_BLEND, d);
           if (w <= 0) continue;
           W[j * nx + i] += w; P[j * nx + i] += w * p.height;
         }
@@ -271,10 +285,10 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
   };
   compute();
   let measured = worst();
-  for (let n = 0; n < 8 && measured > ROAD_GRADE * 1.04; n++) {
+  for (let n = 0; fit && n < 8 && measured > ROAD_GRADE * 1.04; n++) {
     // Everything comes down together: the road is held by the same ratio as the hills over it.
     const f = Math.max(0.5, (ROAD_GRADE / measured) * 0.97);
-    quiet *= f; road *= f;
+    quiet = Math.max(0.45, quiet * f); road = Math.max(0.2, road * f);
     compute();
     measured = worst();
   }
@@ -289,6 +303,12 @@ export function buildRelief(layout, { areaFile = 'shire.are', openAir, smialName
     road,
     grade: measured,
     at,
+    /** Where a road climbs more than it may, as [x, z, degrees] (for tools). */
+    steep: () => runs.flatMap((run) => run.slice(1).map((q, k) => [q[0], q[1], Math.atan(Math.abs(at(q[0], q[1]) - at(run[k][0], run[k][1])) / Math.hypot(q[0] - run[k][0], q[1] - run[k][1]) / run.limit * ROAD_GRADE) * 180 / Math.PI]).filter((v) => v[2] > 7.05)),
+    quiet,
+    /** The hills before the pads are let in (for tools). */
+    raw: (x, z) => { const i = Math.round(I(x)); const j = Math.round(J(z)); return base(x, z, i, j) + bumpOf(x, z) * (0.6 + 0.4 * quiet) * smooth(8, 26, dForeign[j * nx + i]); },
+    dForeign: (x, z) => dForeign[Math.round(J(z)) * nx + Math.round(I(x))],
     /** The slope at (x, z): [d/dx, d/dz]. */
     grad: (x, z) => [(at(x + E, z) - at(x - E, z)) / (2 * E), (at(x, z + E) - at(x, z - E)) / (2 * E)],
     /** Lowest and highest over a rectangle. */
@@ -347,29 +367,38 @@ function chamfer(d, nx, nz) {
  */
 export function dumpLumps(cx, cz, salt = 3030) {
   const x0 = cx - HALF; const x1 = cx + HALF; const z0 = cz - HALF; const z1 = cz + HALF;
-  // [u, v, height, radius, squash]: u east, v south, from the cell's middle.
+  // [u, v, height, radius along, radius across, turn]: ridges and lobes, not cones.
   const heaps = [
-    [-4.3, -3.4, 1.9, 2.8, 0.8], [-3.7, 3.9, 0.7, 2.6, 1.1], [3.9, -3.9, 1.7, 2.5, 0.85], [3.4, 3.9, 0.6, 2.2, 1],
-    [-5.4, 0.2, 0.55, 2.0, 1.2], [-2.4, -5.2, 0.5, 1.6, 1], [2.9, 5.2, 0.55, 1.7, 1],
-    [-2.7, 1.1, 0.4, 1.6, 1], [2.5, -2.5, 0.4, 1.8, 1.2], [4.9, -1.9, 0.35, 1.5, 1],
+    [-4.2, -3.2, 1.9, 3.3, 2.0, 0.6], [-3.6, 4.0, 0.7, 2.9, 1.7, -0.4], [4.0, -3.7, 1.7, 2.8, 2.1, -0.9], [3.5, 4.0, 0.6, 2.4, 1.6, 0.3],
+    [-5.3, 0.4, 0.55, 2.3, 1.4, 1.4], [-2.2, -5.3, 0.5, 2.0, 1.3, 0.1], [2.8, 5.2, 0.55, 2.2, 1.2, -0.2],
+    [-2.7, 1.2, 0.4, 1.7, 1.2, 0.8], [2.7, -2.0, 0.4, 2.0, 1.1, -0.5], [5.0, -1.4, 0.35, 1.8, 1.0, 1.2],
+    [-1.0, 5.4, 1.15, 2.2, 1.3, 1.5], [1.2, -5.6, 0.9, 2.4, 1.4, -1.1],
   ];
   const at = (x, z) => {
     const u = x - cx; const v = z - cz;
     const edge = Math.min(HALF - Math.abs(u), HALF - Math.abs(v));
     if (edge <= 0) return 0;
-    let h = 0.26 + 0.1 * (noise(u * 0.9 + 4.1, v * 0.9 + 9.3, salt) - 0.5);
-    for (const [hu, hv, hh, hr, sq] of heaps) {
-      const d = Math.hypot((u - hu) / sq, (v - hv) * sq);
-      const k = d >= hr ? 0 : (0.5 + 0.5 * Math.cos((Math.PI * d) / hr)) ** 1.5;
-      // The refuse is lumpy: a ragged crown over the smooth heap.
-      h += hh * k * (1 + 0.14 * (noise(u * 1.2 + hu, v * 1.2 + hv, salt + 7) - 0.5));
+    // The ground is dragged about by the carts: warp where the heaps lie.
+    const wu = u + 0.9 * (noise(u * 0.45 + 2.2, v * 0.45 + 6.1, salt + 3) - 0.5) * 2;
+    const wv = v + 0.9 * (noise(u * 0.45 + 8.8, v * 0.45 + 1.7, salt + 5) - 0.5) * 2;
+    let h = 0.24 + 0.16 * (noise(u * 0.7 + 4.1, v * 0.7 + 9.3, salt) - 0.5);
+    for (const [hu, hv, hh, ra, rb, turn] of heaps) {
+      const c = Math.cos(turn); const sn = Math.sin(turn);
+      const du = wu - hu; const dv = wv - hv;
+      const d = Math.hypot((du * c + dv * sn) / ra, (-du * sn + dv * c) / rb);
+      if (d >= 1) continue;
+      // A broad, uneven crown and a soft foot, not a point.
+      const k = smooth(0, 0.85, 1 - d);
+      const crown = 0.72 + 0.56 * noise(u * 1.1 + hu, v * 1.1 + hv, salt + 7);
+      h += hh * k * crown;
     }
-    // The cart's ruts, and a hollow where the rain stands.
+    // Rags and shards: a low roughness on everything.
+    h += 0.07 * (noise(u * 2.6, v * 2.6, salt + 13) - 0.5) * (h > 0.4 ? 1.6 : 0.8);
+    // The cart's ruts, and hollows where the rain stands.
     const track = Math.exp(-(((Math.abs(u) - 0.75) / 0.35) ** 2)) * smooth(-HALF, -HALF + 2, v) * (1 - smooth(HALF - 2, HALF, v));
     h -= 0.2 * track * (0.7 + 0.3 * noise(v * 0.6, 3.3, salt + 11));
-    const pond = Math.hypot(u - 0.2, v - 2.6);
-    h -= 0.16 * (1 - smooth(0, 1.6, pond));
-    return Math.max(0.05, h) * smooth(0, 2.6, edge) ;
+    for (const [pu, pv, pr] of [[0.2, 2.6, 1.7], [-1.9, -2.4, 1.3], [2.4, 0.6, 1.1]]) h -= 0.17 * (1 - smooth(0, pr, Math.hypot(u - pu, v - pv)));
+    return Math.max(0.05, h) * smooth(0, 2.6, edge);
   };
   let max = 0;
   for (let u = -HALF; u <= HALF; u += 0.25) for (let v = -HALF; v <= HALF; v += 0.25) max = Math.max(max, at(cx + u, cz + v));
