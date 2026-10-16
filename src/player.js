@@ -21,6 +21,10 @@ const GRID = 8;
 class SpatialGrid {
   constructor(items) {
     this.cells = new Map();
+    this.add(items);
+  }
+
+  add(items) {
     for (const item of items) {
       const x0 = Math.floor(item.x0 / GRID); const x1 = Math.floor(item.x1 / GRID);
       const z0 = Math.floor(item.z0 / GRID); const z1 = Math.floor(item.z1 / GRID);
@@ -120,6 +124,11 @@ export class Player {
     document.addEventListener('keydown', down);
     document.addEventListener('keyup', up);
     window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  /** Solid things that arrive after the zone is built: the vistas' bodies (vista.js). */
+  addColliders(items) {
+    this.colliders.add(items);
   }
 
   /** Another zone's floors and walls (main.js crossTo). */

@@ -1391,7 +1391,7 @@ async function boot() {
       quality.apply(next);
       hud.toast(`${next} · ${quality.preset.fps || 'uncapped'} fps`);
     }
-    if (event.code === 'KeyN') { player.noclip = !player.noclip; hud.toast(player.noclip ? 'noclip on' : 'noclip off'); }
+    if (event.code === 'KeyN') { player.noclip = !player.noclip; hud.setNoclip(player.noclip); hud.toast(player.noclip ? 'noclip on' : 'noclip off'); }
     if (event.code === 'KeyV') hud.toast(view.toggle() ? 'over the shoulder' : 'first person');
     if (event.code === 'KeyM') hud.toast(audio.toggleMute() ? 'sound off' : 'sound on');
     if (event.code === 'KeyG') {
@@ -1909,12 +1909,13 @@ async function boot() {
         renderer.setRenderTarget(target);
         await ready;
       },
-      onReady: () => {
+      onReady: (ready) => {
         // Their trees go to cards past the crossfade, and cull.js indexes
         // their instances, as the zone's own were at its first frame.
         // Reindexed first: that puts every compacted instance buffer back,
         // and the cards are sized from the meshes' full counts.
         visibility.reindex();
+        for (const result of ready) player.addColliders(result.colliders);
         if (impostors) { impostors.release(); impostors.adopt(scene); }
         // And the AO prepass looks for what to leave out again now, not
         // within the next ninety frames: the vistas are `horizon-` too.

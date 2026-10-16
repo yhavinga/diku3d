@@ -182,7 +182,23 @@ export function createVistas({ world, plan, layoutOf, viewOf }) {
       }
     });
     root.updateMatrixWorld(true);
-    return { site, vista, root, rooms: vista.near.size, far: vista.far.length, ms: performance.now() - t0, triangles };
+    // The vista's solid bodies, in the drawn zone's frame: a mass of rock you
+    // could walk into looked from inside like a hole in the world. The
+    // openings raise() left in its walls are still openings. A turn is a
+    // whole number of quarter-turns, so a box stays a box.
+    const cos = Math.round(Math.cos(theta)); const sin = Math.round(Math.sin(theta));
+    const colliders = built.colliders.filter((c) => !c.door).map((c) => {
+      const xs = [c.x0 * cos + c.z0 * sin, c.x1 * cos + c.z0 * sin, c.x0 * cos + c.z1 * sin, c.x1 * cos + c.z1 * sin];
+      const zs = [-c.x0 * sin + c.z0 * cos, -c.x1 * sin + c.z0 * cos, -c.x0 * sin + c.z1 * cos, -c.x1 * sin + c.z1 * cos];
+      const out = {
+        x0: Math.min(...xs) + root.position.x, x1: Math.max(...xs) + root.position.x,
+        z0: Math.min(...zs) + root.position.z, z1: Math.max(...zs) + root.position.z,
+        y0: c.y0 + root.position.y, y1: c.y1 + root.position.y,
+      };
+      if (c.r) out.r = c.r;
+      return out;
+    });
+    return { site, vista, root, colliders, rooms: vista.near.size, far: vista.far.length, ms: performance.now() - t0, triangles };
   }
 
   /**
