@@ -2149,7 +2149,6 @@ async function boot() {
       const p = reeling ? 0 : presence.update(dt, player.body.eye(bodyEye));
       view.presence = p;
       pipeline.output.uniforms.uPresence.value = p;
-      pipeline.output.uniforms.uAspect.value = window.innerWidth / window.innerHeight;
       const fog = scene.fog;
       if (fog && fog !== fogOf.fog) { fogOf.fog = fog; fogOf.density = fog.density; fogOf.color.copy(fog.color); fogOf.touched = false; }
       if (fog && (p > 0 || fogOf.touched)) {

@@ -613,35 +613,46 @@ class ScaledGTAOPass extends GTAOPass {
  * the display value, after tone mapping and the sRGB curve, so it cannot move
  * what the bloom or the tone curve already decided and a lit window stays lit.
  *
- * Colder and a little darker, with the colour drawn out of the midtones and the
- * shadows taken towards blue-grey -- lifted, not crushed, so nothing reaches
- * RGB 0 that was not there -- then a vignette that closes the frame in from the
- * corners. The fog and the lens are not here: they are the scene's and the
+ * Colder and harder: the colour drawn out of shadow and midtone but not out of
+ * bright saturated light, an S-curve that sinks the shade to a blue-black held
+ * above RGB 0, mids to slate, and an oval vignette that also takes the top off
+ * the sky. A flat desaturation lifted the shadows and read as overcast, not as
+ * a threat, which is why the warm lights are kept apart. The fog and the lens are not here: they are the scene's and the
  * camera's, and main.js sets them from the same number.
  */
 function addPresenceGrade(output) {
   output.uniforms.uPresence = { value: 0 };
-  output.uniforms.uAspect = { value: 1 };
   const GRADE = /* glsl */`
     if ( uPresence > 0.0 ) {
       float p = uPresence;
-      vec3 c = gl_FragColor.rgb;
+      // The curve below is only an S between 0 and 1; past it, it turns back down.
+      vec3 c = clamp( gl_FragColor.rgb, 0.0, 1.0 );
       float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
-      float shade = 1.0 - smoothstep( 0.0, 0.5, l );
-      c = mix( vec3( l ), c, 1.0 - 0.38 * p );
-      c *= mix( vec3( 1.0 ), vec3( 0.84, 0.95, 1.10 ), p * ( 0.3 + 0.7 * shade ) );
-      c *= 1.0 - 0.16 * p;
-      vec2 q = ( vUv - 0.5 ) * vec2( uAspect, 1.0 );
-      float edge = smoothstep( 0.3, 1.0, length( q ) / length( vec2( uAspect, 1.0 ) * 0.5 ) );
-      c *= 1.0 - 0.62 * p * edge * edge;
-      c += vec3( 0.008, 0.013, 0.026 ) * p * shade;
-      gl_FragColor.rgb = clamp( c, 0.0, 1.0 );
+      float hi = max( c.r, max( c.g, c.b ) );
+      // Light that is bright and saturated -- a lantern, a window, a spell, fire --
+      // is what the cold is set against, so it keeps its colour and its level.
+      float glow = smoothstep( 0.55, 0.9, hi ) * smoothstep( 0.12, 0.4, hi - min( c.r, min( c.g, c.b ) ) );
+      c = mix( vec3( l ), c, 1.0 - 0.55 * p * ( 1.0 - glow ) );
+      // An S about mid-grey: shadows sink, lights stay.
+      c = mix( c, c * c * ( 3.0 - 2.0 * c ), 0.75 * p );
+      // The mids go to slate and teal; warm light is left alone.
+      float mid = 4.0 * l * ( 1.0 - l );
+      c *= mix( vec3( 1.0 ), vec3( 0.84, 0.99, 1.07 ), p * ( 0.35 + 0.65 * mid ) * ( 1.0 - glow ) );
+      // The frame closes in from the edges, wider than tall, the middle third clear;
+      // and the bright sky over the top of it is pulled down.
+      vec2 q = ( vUv - 0.5 ) * vec2( 1.0, 1.2 );
+      float edge = smoothstep( 0.3, 0.78, length( q ) );
+      float sky = smoothstep( 0.5, 1.0, vUv.y ) * smoothstep( 0.35, 0.75, l );
+      c *= ( 1.0 - 0.8 * p * edge * edge * ( 1.0 - 0.6 * glow ) ) * ( 1.0 - 0.35 * p * sky * ( 1.0 - 0.6 * glow ) );
+      // Deep blue-black for the darkest shade, never 0.
+      vec3 floorC = vec3( 0.034, 0.044, 0.070 ) * p;
+      gl_FragColor.rgb = clamp( floorC + c * ( 1.0 - floorC ), 0.0, 1.0 );
     }
   `;
   let src = output.material.fragmentShader;
-  src = src.replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse;\n\t\tuniform float uPresence;\n\t\tuniform float uAspect;');
+  src = src.replace('uniform sampler2D tDiffuse;', 'uniform sampler2D tDiffuse;\n\t\tuniform float uPresence;');
   src = src.replace(/\}\s*$/, `${GRADE}\n\t\t}`);
-  if (!src.includes('uPresence > 0.0') || !src.includes('uniform float uAspect')) {
+  if (!src.includes('uPresence > 0.0')) {
     throw new Error('render.js addPresenceGrade: OutputShader changed and the grade no longer fits');
   }
   output.material.fragmentShader = src;
