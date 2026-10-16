@@ -3054,7 +3054,7 @@ const RECIPES = {
   snowcrag: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0, detail: 0.6, triplanar: true, snowy: { cover: 0.55, foot: 0 } },
   frostwall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55, snowy: { cover: 0.6, foot: 0.6 } },
   frosttimber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45, snowy: { cover: 0.55, foot: 0.5 } },
-  snowroof: { surface: 'rooftile', scale: 2.6, normalScale: 1.1, env: 1.0, wet: 0, detail: 0.5, snowy: { cover: 1.0, foot: 0 } },
+  snowroof: { surface: 'rooftile', scale: 2.6, normalScale: 0.05, env: 1.0, wet: 0, detail: 0, snowy: { cover: 1.0, foot: 0 } },
   snowthatch: { surface: 'thatch', scale: 3, normalScale: 1.2, env: 0.55, wet: 0, detail: 0.7, snowy: { cover: 1.0, foot: 0 } },
   iceblock: { surface: 'iceblock', scale: 3.0, normalScale: 0.4, env: 1.6, wet: 0, detail: 0.1, ice: true },
 };
