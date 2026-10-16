@@ -3831,6 +3831,7 @@ function* peopleOf(world, layout, built, options = {}) {
   // --- mobiles ------------------------------------------------------------
 
   const figures = [];
+  const POST_CLEAR = 1.2;
   let roomsDone = 0;
   for (const [vnum, info] of built.rooms) {
     yield 0.45 * (roomsDone++ / built.rooms.size);
@@ -3857,14 +3858,31 @@ function* peopleOf(world, layout, built, options = {}) {
       // A creature that is itself a light (the Will-O-Wisp) joins the pool.
       if (made.light) windowLights.push(made.light);
       // Never at the centre of the room: that is where you arrive.
-      const angle = (index / count) * Math.PI * 2 + strHash(mob.proto.keywords, 1) * 2;
-      const radius = 2.1 + strHash(mob.proto.short, 2) * 1.5;
+      let angle = (index / count) * Math.PI * 2 + strHash(mob.proto.keywords, 1) * 2;
+      let radius = 2.1 + strHash(mob.proto.short, 2) * 1.5;
+      // ...nor against or inside a wall, a gate tower or a fence: a post that
+      // fell within POST_CLEAR of one is turned round the room to the first
+      // that does not. Posts that were clear stay where they were.
+      const blockedAt = (a) => {
+        const x = info.center.x + Math.cos(a) * radius;
+        const z = info.center.z + Math.sin(a) * radius;
+        return built.colliders.some((c) => !c.door && x > c.x0 - POST_CLEAR && x < c.x1 + POST_CLEAR
+          && z > c.z0 - POST_CLEAR && z < c.z1 + POST_CLEAR && c.y0 < info.center.y + 0.5 && c.y1 > info.center.y + 1.8);
+      };
+      if (blockedAt(angle)) {
+        for (let k = 1; k <= 12; k++) {
+          const a = angle + Math.ceil(k / 2) * (k % 2 ? 1 : -1) * 0.3;
+          if (!blockedAt(a)) { angle = a; break; }
+        }
+      }
       fig.position.set(
         info.center.x + Math.cos(angle) * radius,
         info.center.y,
         info.center.z + Math.sin(angle) * radius,
       );
       fig.rotation.y = -angle + Math.PI / 2;
+      // A guard at a grand gate stands with the gate behind him, facing whoever comes.
+      if ((mob.proto.act & ACT_SENTINEL) && built.doors.some((dr) => dr.room === vnum && dr.grand)) fig.rotation.y += Math.PI;
       group.add(fig);
       holdWhileHidden(fig);
       if (made.roost && !info.outdoor) {
