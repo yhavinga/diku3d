@@ -147,6 +147,14 @@
     border: 1px solid var(--edge); border-radius: 2px;
   }
   #toast.visible { opacity: 1; }
+  /* Noclip is a debug state that walks you through every wall; the toast that
+     announces it is gone in 2.6 s, so this stays until N turns it off. */
+  #noclip {
+    position: absolute; left: 50%; top: 54px; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+    color: var(--gold); opacity: 0.9; pointer-events: none;
+  }
+  #noclip[hidden] { display: none; }
 
   /* ------------------------------------------------------------ screens -- */
   #loading, #title {
@@ -440,6 +448,7 @@
   <div id="crosshair"></div>
   <div id="look"></div>
   <div id="toast"></div>
+  <div id="noclip" hidden>NOCLIP · N</div>
   <div id="stats"></div>
 
   <div id="examine" class="panel">

@@ -344,6 +344,7 @@ export class Hud {
       stats: root.querySelector('#stats'),
       minimap: root.querySelector('#minimap'),
       toast: root.querySelector('#toast'),
+      noclip: root.querySelector('#noclip'),
     };
     this.ctx = this.el.minimap.getContext('2d');
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -442,6 +443,11 @@ export class Hud {
 
   hideExamine() {
     this.el.examine.classList.remove('visible');
+  }
+
+  /** The marker that stays while noclip is on; the toast is gone in seconds. */
+  setNoclip(on) {
+    this.el.noclip.hidden = !on;
   }
 
   toast(text) {
