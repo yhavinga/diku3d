@@ -346,9 +346,9 @@ const _centre = new THREE.Vector3();
 /** The fountain's stone and metal, frozen: it is all one block of ice. */
 const FROZEN_FOUNTAIN = { stonewall: 'iceblock', marble: 'iceblock', flagstone: 'iceblock', iron: 'iceblock' };
 /** Plants a frozen cell leaves out: `instances.add` of these places nothing. */
-const WINTER_BARE = /^(bramble|bush|fern|grass_tuft|hedge_clump|hedge_row|herb_pots|nettles|reed_clump|salal_bush|shire_flowerbed|tall_weeds|tussock|tree_oak)$/;
+const WINTER_BARE = /^(bramble|bush|dead_log|fern|grass_tuft|hedge_clump|hedge_row|herb_pots|nettles|reed_clump|salal_bush|shire_flowerbed|tall_weeds|tussock|tree_oak)$/;
 /** The same, for the tags a modelled kit's surfaces carry (assets.js `swap`). */
-const WINTER_TAGS = { stonewall: 'frostwall', timber: 'frosttimber', rooftile: 'snowroof', thatch: 'snowthatch' };
+const WINTER_TAGS = { stonewall: 'frostwall', timber: 'frosttimber', rooftile: 'snowroof', thatch: 'snowthatch', crag: 'snowcrag', gravel: 'trodden' };
 
 /**
  * What a surface becomes where it is winter (`Batcher.frost`). The builders
