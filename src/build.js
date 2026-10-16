@@ -3883,6 +3883,37 @@ function walkedWays({ batcher, chunk, x, y, z, dirs }) {
     strip('trodden', [dx, dz], from, HALF + 0.5, 2.9, 0.9, 0.03, 911);
     strip('cobble', [dx, dz], from, HALF + 0.5, 1.8, 0.5, 0.06, 913);
   }
+  // Beside the lane the snow is scoured in ragged patches of dark rock.
+  // Bare frozen earth rather than snowrock: the snow shader's own large-scale
+  // noise can be solid white over a whole cell, which would hide the patch.
+  const rock = batcher.materials.peat ? 'peat' : null;
+  if (rock) {
+    const lane = (px, pz, r) => dirs.some(([dx, , dz]) => {
+      const t = Math.max(from, Math.min(HALF + 0.5, (px - x) * dx + (pz - z) * dz));
+      return Math.hypot(px - x - dx * t, pz - z - dz * t) < 3.4 + r * 0.7;
+    });
+    for (let k = 0; k < 40; k++) {
+      const cx = x + (hash3(k, Math.round(x), Math.round(z), 921) - 0.5) * 2 * (HALF - 0.6);
+      const cz = z + (hash3(k, Math.round(z), Math.round(x), 923) - 0.5) * 2 * (HALF - 0.6);
+      const r0 = 0.7 + 0.9 * hash3(k, Math.round(x + z), 1, 925);
+      if (lane(cx, cz, r0)) continue;
+      const ring = [];
+      for (let i = 0; i < 14; i++) {
+        const a = i / 14 * Math.PI * 2;
+        const r = r0 * (0.65 + 0.7 * terrainNoise(cx * 1.3 + Math.cos(a) * 1.7, cz * 1.3 + Math.sin(a) * 1.7, 927));
+        ring.push([cx + Math.cos(a) * r, cz + Math.sin(a) * r]);
+      }
+      const p = []; const n = [];
+      for (let i = 0; i < 14; i++) {
+        for (const v of [[cx, cz], ring[(i + 1) % 14], ring[i]]) { p.push(v[0], y + 0.045, v[1]); n.push(0, 1, 0); }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
+      batcher.add(geo, rock, new THREE.Matrix4(), { chunk, normals: true });
+      geo.dispose();
+    }
+  }
   batcher.frost = frost;
 }
 
@@ -11808,7 +11839,7 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY, instan
     .every((m) => instances.library.get(m));
   let masses = 0;
   if (massif) {
-    const SWAP = { crag: batcher.materials.snowcrag ? 'snowcrag' : 'snowrock', gravel: 'trodden' };
+    const SWAP = { crag: batcher.materials.snowcliff ? 'snowcliff' : 'snowrock', gravel: 'trodden' };
     const nearest = (px, pz) => at(Math.round((px - x0) / HILL_GRID), Math.round((pz - z0) / HILL_GRID));
     const scree = new Set();
     const floors = [...support.values()].filter((f) => f.floor);
@@ -11855,6 +11886,24 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY, instan
       }
     }
   }
+  // Outcrops poke through the snow of the plateau and its flanks: the cliff's
+  // own masses, small, on ground the hill has not given to a room or a street.
+  if (massif) {
+    for (let j = 2; j < nz - 2; j += 3) {
+      for (let i = 2; i < nx - 2; i += 3) {
+        if (hash3(i, j, 0, 4301) > 0.09) continue;
+        const gy = H[j * nx + i];
+        if (gy <= floor + 1.5 || normal(i, j)[1] < 0.8) continue;
+        const px = x0 + i * HILL_GRID; const pz = z0 + j * HILL_GRID;
+        if (props.some((q) => square(px, pz, q.x, q.z) < 5)) continue;
+        const sc = 0.15 + 0.12 * hash3(i, j, 1, 4303);
+        instances.add(hash3(i, j, 2, 4305) < 0.5 ? 'mahntor_cliff_c' : 'mahntor_cliff_a',
+          { x: px, y: gy - 1.0, z: pz, rotY: hash3(i, j, 3, 4307) * Math.PI * 2, scale: sc },
+          chunkOf({ level: Math.max(0, Math.floor(gy / LEVEL_H)), x: Math.round(px / CELL), z: Math.round(pz / CELL) }),
+          { crag: batcher.materials.snowcliff ? 'snowcliff' : 'snowrock', gravel: 'trodden' });
+      }
+    }
+  }
   const snowy = cliffs.length > 0 && !!batcher.materials.snowrock && !!batcher.materials.snow;
   const earthOf = new Map();
   for (const s of props) {
@@ -11882,7 +11931,8 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY, instan
       // edge of it wandering; snow above a line that wanders, grass below.
       const n = fy / fl;
       const jitter = (hash3(Math.round((a[0] + b[0] + c[0]) * 0.23), Math.round((ys[0] + ys[1] + ys[2]) * 0.23), Math.round((a[2] + b[2] + c[2]) * 0.23), 91) - 0.5) * 0.16;
-      if (n + jitter < 0.76) material = 'snowrock';
+      // Over about 33 degrees snow does not lie: the slope sheds it and is rock.
+      if (n + jitter < 0.84) material = 'snowrock';
       else {
         const gy = (ys[0] + ys[1] + ys[2]) / 3;
         const line = SNOW_LINE + SNOW_WANDER * (terrainNoise(((a[0] + b[0] + c[0]) / 3) * 0.045, ((a[2] + b[2] + c[2]) / 3) * 0.045, 877) - 0.5);
@@ -11894,6 +11944,10 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY, instan
           const w = winter.at((a[0] + b[0] + c[0]) / 3, (a[2] + b[2] + c[2]) / 3);
           if (w === 'snow' || (w === 'trodden' && material === earth)) material = w === 'snow' ? 'snow' : 'trodden';
         }
+        // Wind-scoured ground: where the wind has swept the plateau the dark
+        // rock shows through, with its own ragged edge of snow, and the snow
+        // that was taken lies in drifts beside it.
+        if (material === 'snow' && (terrainNoise(((a[0] + b[0] + c[0]) / 3) * 0.05, ((a[2] + b[2] + c[2]) / 3) * 0.05, 931) * 0.7 + terrainNoise(((a[0] + b[0] + c[0]) / 3) * 0.17, ((a[2] + b[2] + c[2]) / 3) * 0.17, 933) * 0.3) > 0.46) material = 'snowrock';
       }
     }
     const cx = (a[0] + b[0] + c[0]) / 3; const cz = (a[2] + b[2] + c[2]) / 3; const cy = (ys[0] + ys[1] + ys[2]) / 3;
@@ -11938,7 +11992,7 @@ function buildHills({ layout, rooms, frontage, batcher, chunkOf, groundY, instan
           // The ledge's own brow and the two beside it lap by 0.6 m; the flanks stand a few
           // centimetres higher so no two share a soffit.
           x: s.x + face.dx * HALF, y: y0 + lift, z: s.z + face.dz * HALF, rotY: Math.atan2(face.dx, face.dz), scaleY: (y1 - y0 - lift) / 14.37,
-        }, chunkOf({ level: s.level, x: px, z: pz }), { crag: batcher.materials.snowcrag ? 'snowcrag' : 'snowrock' });
+        }, chunkOf({ level: s.level, x: px, z: pz }), { crag: batcher.materials.snowcliff ? 'snowcliff' : 'snowrock' });
         continue;
       }
     }

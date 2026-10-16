@@ -2605,7 +2605,7 @@ const SURFACES = {
     const grain = fbm(u * 60, v * 60, 60, 3313, 2);
     // One texel in a hundred: a 512 lattice, which is the bake's own size.
     const glint = hash2(Math.floor(u * 512), Math.floor(v * 512), 512, 3319) > 0.988 ? 1 : 0;
-    const lit = mix(rgb(0x98a5b8), rgb(0xb0bccd), ripple * 0.6 + grain * 0.3);
+    const lit = mix(rgb(0x7d8aa0), rgb(0x92a0b5), ripple * 0.6 + grain * 0.3);
     s.color = mix(mix(lit, rgb(0x7f9ac2), clamp01((0.55 - drift) * 2.0)), rgb(0xffffff), glint * 0.9);
     s.height = 0.5 + drift * 0.3 + ripple * 0.16 + grain * 0.02;
     s.rough = 0.78 - glint * 0.5 - ripple * 0.06;
@@ -3051,7 +3051,9 @@ const RECIPES = {
   snowcobble: { surface: 'frostcobble', scale: 2.2, normalScale: 1.0, env: 1.0, wet: 0, detail: 0.5, snowy: { cover: 0.18, foot: 0, dark: 0.6 } },
   snowrock: { surface: 'rock', scale: 5, normalScale: 1.2, env: 0.9, wet: 0, detail: 0.6, triplanar: true, snowy: { cover: 0.28, foot: 0, dark: 0.6 } },
   // The mountain under Mahn-Tor's city (mahntor_cliff.py): bedded cave rock, snow where it settles.
-  snowcrag: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0, detail: 0.6, triplanar: true, snowy: { cover: 0.15, foot: 0, dark: 0.72 } },
+  snowcrag: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0, detail: 0.6, triplanar: true, snowy: { cover: 0.15, foot: 0, dark: 0.85 } },
+  // The mountain's own face (build.js places it on the cliff models): deeper than the stone the keep and its guardians share the snowcrag tag with.
+  snowcliff: { surface: 'caverock', scale: 7, normalScale: 0.8, env: 0.55, wet: 0, detail: 0.6, triplanar: true, snowy: { cover: 0.15, foot: 0, dark: 0.5 } },
   frostwall: { surface: 'stonewall', scale: 3.6, normalScale: 1.0, env: 0.72, wet: 0, detail: 0.55, snowy: { cover: 0.1, foot: 0.3, dark: 0.48 } },
   frosttimber: { surface: 'timber', scale: 5.2, normalScale: 0.9, env: 0.8, wet: 0, detail: 0.45, snowy: { cover: 0.1, foot: 0.25, dark: 0.6 } },
   snowroof: { surface: 'rooftile', scale: 2.6, normalScale: 0.05, env: 1.0, wet: 0, detail: 0, snowy: { cover: 0.35, foot: 0, dark: 0.75 } },
@@ -4559,7 +4561,7 @@ function decorate(material, recipe, macro, grain) {
           // A fine glint: the same grain map the close-range normals use, a
           // few texels in a hundred, so the white is not a flat paint.
           float dikuSnowGl = step( 0.93, texture2D( detailMap, vDikuWorld.xz * 7.3 + vDikuWorld.y * 3.1 ).y );
-          vec3 dikuSnowCol = mix( vec3( 0.40, 0.47, 0.60 ), vec3( 0.54, 0.60, 0.70 ), 0.2 + dikuSnowN * 0.8 ) * ( 1.0 + dikuSnowGl * 0.5 );
+          vec3 dikuSnowCol = mix( vec3( 0.30, 0.37, 0.50 ), vec3( 0.40, 0.46, 0.57 ), 0.2 + dikuSnowN * 0.8 ) * ( 1.0 + dikuSnowGl * 0.5 );
           // A rime on every wall the cold has been at: not snow, but the
           // face of it gone pale and blue in patches, thickest low down.
           float dikuRime = dikuSnowFoot > 0.0
