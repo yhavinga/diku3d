@@ -131,6 +131,13 @@ const RULES = [
     kind: 'skeleton_seated', at: 'table', many: 5,
     re: /\bskeletons?\b[^.]{0,30}\b(?:sit|sits|sitting|siting|seated)\b|\b(?:sitting|seated)\b[^.]{0,20}\bskeletons?\b/i,
   },
+  // "Bones of previous adventurers lie strewn on the cavern floor": not four
+  // piles of bones but the dead themselves, with what they died in -- skeletons,
+  // skulls, rusted mail and broken weapons, a great many of them.
+  {
+    kind: 'remains', at: 'strew', many: 60,
+    re: /\b(?:bones|skeletons|remains|corpses|bodies)\s+of\s+(?:\w+\s+){0,2}(?:adventurers?|travell?ers|heroes|warriors|knights|explorers)\b/i,
+  },
   // "Two creatures are melted into the floor": what is left of them.
   { kind: 'skeleton', at: 'strew', many: 3, re: /\b(?:creatures?|bodies|adventurers?)\b[^.]{0,25}\bmelted\b/i },
   {
@@ -375,6 +382,8 @@ export function readClutter(room) {
   if (/\bwell\b/.test(fixed)) found.delete('well');
   // Skeletons sitting round a table are the skeletons in the room.
   if (found.has('skeleton_seated') || found.has('skeleton_hanging')) found.delete('skeleton');
+  // ...and the dead of a battlefield are the bones, skulls and skeletons in it.
+  if (found.has('remains')) for (const kind of ['bones', 'skull', 'skeleton']) found.delete(kind);
   return [...found.values()];
 }
 
@@ -422,7 +431,7 @@ const MANTEL_OUT = 0.88;
 // The candelabrum's wicks, as [x, z, height]: where a flame's origin goes, 0.08 under the wax tops in tools/blender/furniture.py build_candelabra (a flame stands 0.1 over its origin).
 const WICKS = [[0.26, 0, 1.45], [-0.26, 0, 1.45], [0, 0.26, 1.45], [0, -0.26, 1.45], [0, 0, 1.53]];
 // Lying flat, walked over: these may lie in a doorway's lane.
-const FLAT = new Set(['bones', 'skull', 'pelts', 'hay', 'carcass', 'skeleton', 'wreckage']);
+const FLAT = new Set(['bones', 'skull', 'pelts', 'hay', 'carcass', 'skeleton', 'wreckage', 'remains']);
 
 /**
  * What each kind puts down. `models` by variant; `solid` is a collider to its
@@ -430,6 +439,7 @@ const FLAT = new Set(['bones', 'skull', 'pelts', 'hay', 'carcass', 'skeleton', '
  */
 const KINDS = {
   skull: { models: ['clutter_skull'] },
+  remains: { models: ['clutter_skeleton', 'clutter_bones', 'clutter_skull'] },
   bones: { models: ['clutter_bones'] },
   skeleton: { models: ['clutter_skeleton'] },
   carcass: { models: ['clutter_carcass'] },
@@ -553,8 +563,10 @@ export function placeClutter(ctx) {
 
     // What is solid in this room, in world coordinates.
     const lo = pos.y + 0.15; const hi = pos.y + 2.0;
-    const solid = colliders.filter((c) => c.y1 > lo && c.y0 < hi && c.x1 > pos.x - 8 && c.x0 < pos.x + 8
-      && c.z1 > pos.z - 8 && c.z0 < pos.z + 8)
+    const cavern = info.great || null;
+    const reach = cavern ? { x0: cavern.ext.x0 - 3, x1: cavern.ext.x1 + 3, z0: cavern.ext.z0 - 3, z1: cavern.ext.z1 + 3 } : { x0: -8, x1: 8, z0: -8, z1: 8 };
+    const solid = colliders.filter((c) => c.y1 > lo && c.y0 < hi && c.x1 > pos.x + reach.x0 && c.x0 < pos.x + reach.x1
+      && c.z1 > pos.z + reach.z0 && c.z0 < pos.z + reach.z1)
       .map((c) => ({ x0: c.x0, x1: c.x1, z0: c.z0, z1: c.z1 }));
     const blocked = [...solid];
     for (const r of small.get(cellOf(pos.x, pos.z)) || []) if (Math.abs(r.y - pos.y) < 2) blocked.push(r);
@@ -645,7 +657,7 @@ export function placeClutter(ctx) {
       };
     };
 
-    const put = (name, x, z, rotY, { scale = 1, collide = false, y = pos.y, far = false, examine = null } = {}) => {
+    const put = (name, x, z, rotY, { scale = 1, collide = false, y = pos.y, far = false, examine = null, rotX = 0, rotZ = 0, wear = swap } = {}) => {
       if (!library.get(name)) return null;
       // Indoors above ground it goes with the furniture (actors.js), which
       // is switched off past 32 m: from the Market Square every room to the
@@ -654,7 +666,7 @@ export function placeClutter(ctx) {
       // room is built round -- Odin is the end of the temple's axis, 33 m
       // from its door -- and is left to the visibility cull like the walls.
       if (!outside && info.cell.level >= 0 && !far) decor.push({ kind: 'prop', name, x, y, z, rotY, scale });
-      else instances.add(name, { x, y, z, rotY, scale }, chunk, swap);
+      else instances.add(name, { x, y, z, rotY, rotX, rotZ, scale }, chunk, wear);
       if (examine) decor.push({ kind: 'examine', x, y: examine.y, z, title: examine.title, body: examine.body });
       where.push({ vnum, name, x: +x.toFixed(2), y: +y.toFixed(2), z: +z.toFixed(2), rotY: +rotY.toFixed(2) });
       const b = library.get(name).bounds;
@@ -793,6 +805,7 @@ export function placeClutter(ctx) {
       if (ask.at === 'corner') { corners(ask); continue; }
       if (ask.kind === 'chair' && here.some((d) => d.kind === 'piece' && /chair/.test(d.piece))) continue;
       if (ask.kind === 'skeleton_seated') { seated(ask); continue; }
+      if (ask.kind === 'remains' && cavern) { remains(ask); continue; }
       if (ask.kind === 'candles') { candles(ask); continue; }
       if (!spec) continue;
       const n = Math.max(1, ask.count);
@@ -923,6 +936,73 @@ export function placeClutter(ctx) {
         }
       }
       return null;
+    }
+
+    /**
+     * The dead of the great cavern, strewn over all of its floor and thick
+     * where the dracolich lies: from the middle of its lair out they thin to
+     * a few by the way in (one of them at the foot of the stair, as if he
+     * almost got out). Flat things only, walked over, kept off the pillars
+     * and the fallen rock, off the disc the lair's own heap of bones rises
+     * from, and off what the room's colliders already hold.
+     */
+    function remains(ask) {
+      const { ext, lair, pillars } = cavern;
+      const LAIR_CLEAR = 1.7; // actors.js rises the dracolich out of a heap of its own here
+      const ARTS = [
+        ['clutter_skeleton', 14, 0.8], ['clutter_bones', 14, 0.5], ['clutter_skull', 13, 0.3],
+        ['weapon_sword', 4, 0.5], ['weapon_dagger', 3, 0.3], ['weapon_axe', 3, 0.5], ['weapon_mace', 3, 0.5],
+        ['weapon_spear', 4, 1.0], ['shield_round', 3, 0.45], ['shield_kite', 2, 0.5],
+      ];
+      const total = ARTS.reduce((n, a) => n + a[1], 0);
+      const gear = { ...BURIED, steel: 'rustiron', iron: 'rustiron', paint: 'rustiron' };
+      const want = Math.min(ask.count, total);
+      const laid = [];
+      // The man at the foot of the stair: the flight starts 4.5 m west of the middle.
+      const first = { x: -6.2, z: 1.3 };
+      let made = 0;
+      const bag = [];
+      for (const [name, n] of ARTS) for (let i = 0; i < n; i++) bag.push(name);
+      for (let t = 0; t < 900 && made < want; t++) {
+        const k = made + t * 0.001;
+        // Out from the lair by a fall-off, or anywhere on the floor: half and half.
+        let lx; let lz;
+        if (made === 0) { lx = first.x; lz = first.z; }
+        else if (roll(room.vnum, t, 101) < 0.62) {
+          const a = roll(room.vnum, t, 103) * Math.PI * 2;
+          const d = LAIR_CLEAR + 9 * roll(room.vnum, t, 105) ** 1.7;
+          lx = lair.x + Math.cos(a) * d; lz = lair.z + Math.sin(a) * d;
+        } else {
+          lx = ext.x0 + 1.6 + roll(room.vnum, t, 107) * (ext.x1 - ext.x0 - 3.2);
+          lz = ext.z0 + 1.6 + roll(room.vnum, t, 109) * (ext.z1 - ext.z0 - 3.2);
+          // sparse at the entrance, which is also where nobody got far
+          if (Math.hypot(lx + 4.5, lz) < 4 && roll(room.vnum, t, 111) < 0.7) continue;
+        }
+        // A wall's foot is 1.4 m in from its line (the collider), so no nearer than that.
+        if (lx < ext.x0 + 1.6 || lx > ext.x1 - 1.6 || lz < ext.z0 + 1.6 || lz > ext.z1 - 1.6) continue;
+        if (Math.hypot(lx - lair.x, lz - lair.z) < LAIR_CLEAR) continue;
+        if (pillars.some(([px, pz, r0]) => Math.hypot(lx - px, lz - pz) < r0 * 2.1 + 0.3)) continue;
+        const name = made === 0 ? 'clutter_skeleton' : bag[Math.floor(roll(room.vnum, t, 113) * bag.length)];
+        const art = ARTS.find((a) => a[0] === name);
+        const x = pos.x + lx; const z = pos.z + lz;
+        const rotY = roll(room.vnum, t, 115) * Math.PI * 2;
+        const rect = { x0: x - art[2], x1: x + art[2], z0: z - art[2], z1: z + art[2] };
+        if (laid.some((q) => overlaps(rect, q, -0.2)) || blocked.some((q) => overlaps(rect, q, -0.02))) continue;
+        let tilt = {};
+        let y = pos.y;
+        if (name === 'weapon_sword' || name === 'weapon_dagger' || name === 'weapon_axe' || name === 'weapon_mace' || name === 'weapon_spear') {
+          // Laid on its side along the floor, a hair up so no face lies in it.
+          tilt = { rotZ: Math.PI / 2 * (roll(room.vnum, t, 117) < 0.5 ? 1 : -1), rotX: (roll(room.vnum, t, 119) - 0.5) * 0.12 };
+          y = pos.y + (name === 'weapon_mace' ? 0.05 : 0.02);
+        } else if (name.startsWith('shield')) {
+          tilt = { rotX: -Math.PI / 2 + (roll(room.vnum, t, 121) - 0.5) * 0.3 };
+          y = pos.y + 0.03;
+        }
+        put(name, x, z, rotY, { collide: false, y, wear: gear, ...tilt });
+        laid.push(rect);
+        made++;
+      }
+      if (made < want * 0.8) missed.push(`${vnum} remains ${made}/${want}`);
     }
 
     // "Around the table five skeletons are siting."

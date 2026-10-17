@@ -23,6 +23,7 @@ export const BURIED_MARK = '~buried';
 
 const _position = new THREE.Vector3();
 const _quaternion = new THREE.Quaternion();
+const _euler = new THREE.Euler();
 const _scale = new THREE.Vector3();
 
 /**
@@ -472,7 +473,9 @@ export class InstanceBatch {
       const byRegion = new Map();
       const matrices = transforms.map((t) => {
         _position.set(t.x, t.y, t.z);
-        _quaternion.setFromAxisAngle(UP, t.rotY || 0);
+        // A heading, and for what lies on its side or leans (a sword on a cavern floor) a tilt first.
+        if (t.rotX || t.rotZ) _quaternion.setFromEuler(_euler.set(t.rotX || 0, t.rotY || 0, t.rotZ || 0, 'YXZ'));
+        else _quaternion.setFromAxisAngle(UP, t.rotY || 0);
         _scale.set(t.scaleX ?? t.scale ?? 1, t.scaleY ?? t.scale ?? 1, t.scaleZ ?? t.scale ?? 1);
         const matrix = new THREE.Matrix4().compose(_position, _quaternion, _scale);
         const region = regionOf ? regionOf(chunk)
