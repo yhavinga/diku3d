@@ -282,6 +282,12 @@ const BLOWS = new Set(['hit', 'miss', 'parry', 'dodge', 'disarm', 'kick', 'backs
 /** The clip each skill has on the rig, and when its contact falls (fx.js). */
 const SKILL_CLIPS = { kick: ['kick', SKILL_CONTACT], backstab: ['backstab', SKILL_CONTACT], disarm: ['disarm', DISARM_FLICK] };
 const SPELLS = new Set(['cast', 'spell', 'spell-fizzle', 'suffer']);
+/** How long a body keeps its face on the one it cast at (view.js CAST_FACE). */
+const CAST_FACE = 0.8;
+/** Out past this a fight is over (game.js BREAK); a body does not turn to a foe further than that. */
+const FACE_REACH = 14;
+/** Faster than this (m/s) a body is running, and faces where it runs. */
+const FACE_PACE = 3.5;
 
 /**
  * Turn the page's game into the server's copy. `host` is what main.js lends
@@ -435,6 +441,16 @@ export function attachSocketLink(link, game, host, enter) {
   }
 
   let stabbedFrom = true;
+  // The link's own clock and what waits on it: a round's blows land a beat apart (event.delay), so a body's swing
+  // and its victim's flinch start when the blow does, as view.js does for your own.
+  let clock = 0;
+  const timers = [];
+  const later = (delay, fn) => { if (delay > 0.02) timers.push({ at: clock + delay, fn }); else fn(); };
+  /** You as a foe: a body to face, with no figure of its own here. */
+  const meSlot = { get pos() { const e = host.eye(); return { x: e.x, z: e.z }; } };
+  const foeOf = (f) => (!f ? null : f.m !== undefined ? mobs[f.m] || null : f.p !== undefined ? (remotes.get(f.p) ? remotes.get(f.p).slot : (f.p === id ? meSlot : null)) : null);
+  /** A swing or a spell turns the body to whom it is aimed at, a moment, as view.js does for your own. */
+  const faceFor = (r, slot, seconds) => { r.face = { slot: slot || meSlot, until: clock + seconds }; };
   /** One event off the wire, back into game.js's terms, and into its stream. */
   function receive(event) {
     for (const key of ['from', 'to', 'slot']) if (key in event) event[key] = local(event[key]);
@@ -452,13 +468,21 @@ export function attachSocketLink(link, game, host, enter) {
       // A skill's blow is the clip of the skill, played from its own event; the
       // hit that follows it is not a second swing. A rig without the clip swings.
       const ofSkill = skill || ((kind === 'hit' || kind === 'miss') && SKILL_CLIPS[event.spell]);
-      if (attacker && skill) attacker.figure?.perform(attacker.figure.has(skill[0]) ? skill[0] : 'attack', { contactIn: skill[1] });
-      else if (attacker && !ofSkill && BLOWS.has(kind)) attacker.figure?.perform(event.attack === 'hit' && !event.armed ? 'attack2' : 'attack');
+      const delay = event.delay || 0;
+      // A kick or a stab is told to the others as the blow it dealt (a 'hit' naming the skill), not as its own event.
+      const sk = skill || (ofSkill && SKILL_CLIPS[event.spell]) || null;
+      if (attacker && sk) { attacker.figure?.perform(attacker.figure.has(sk[0]) ? sk[0] : 'attack', { contactIn: sk[1] }); faceFor(attacker, event.to, sk[1] + 0.4); }
+      else if (attacker && !ofSkill && BLOWS.has(kind)) {
+        const clip = event.attack === 'hit' && !event.armed ? 'attack2' : 'attack';
+        attacker.figure?.perform(clip, { contactIn: delay > 0.05 ? delay : 0.35 });
+        faceFor(attacker, event.to, Math.max(delay, 0.35) + 0.4);
+      }
       if (attacker && kind === 'cast' && !event.lost && !['quaff', 'eat'].includes(event.source)) {
         const clip = castClipOf(event.family);
         attacker.figure?.perform(attacker.figure.has(clip) ? clip : 'cast', { contactIn: event.windup || 0.6 });
+        if (!event.self) faceFor(attacker, event.to, (event.windup || 0.6) + CAST_FACE);
       }
-      if (victim && kind === 'hit') victim.figure?.perform('hit');
+      if (victim && kind === 'hit') later(delay, () => victim.figure?.perform('hit'));
       // fx.js draws the thud, the stab and the flying weapon off these copies.
       if (kind === 'backstab') { stabbedFrom = event.behind; game.inject({ kind: 'skillfx', skill: 'backstab', phase: 'start', from: event.from, to: event.to, behind: event.behind }); }
       else if (kind === 'disarm') game.inject({ kind: 'skillfx', skill: 'disarm', phase: 'disarm', from: event.from, to: event.to, item: event.item });
@@ -651,6 +675,8 @@ export function attachSocketLink(link, game, host, enter) {
   }
 
   function update(dt) {
+    clock += dt;
+    for (let i = timers.length - 1; i >= 0; i--) if (timers[i].at <= clock) timers.splice(i, 1)[0].fn();
     restroll();
     // Where you are, ten times a second, in your zone's own frame.
     sendIn -= dt;
@@ -677,7 +703,7 @@ export function attachSocketLink(link, game, host, enter) {
     const span = b.at - a.at;
     const f = span > 0 ? Math.min(1, Math.max(0, (at - a.at) / span)) : 1;
     const eye = { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, z: a.z + (b.z - a.z) * f };
-    const yaw = a.yaw + Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw)) * f;
+    let yaw = a.yaw + Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw)) * f;
     const pace = span > 0 ? Math.hypot(b.x - a.x, b.z - a.z) / (span / 1000) : 0;
     // Soft separation: nobody stands inside you; a body overlapping yours is
     // nudged aside on screen, never stopped -- the server holds no collision.
@@ -685,6 +711,14 @@ export function attachSocketLink(link, game, host, enter) {
     const dx = eye.x - me.x; const dz = eye.z - me.z;
     const d = Math.hypot(dx, dz);
     if (d > 1e-3 && d < 0.55 && Math.abs(eye.y - me.y) < 1.5) { eye.x = me.x + (dx / d) * 0.55; eye.z = me.z + (dz / d) * 0.55; }
+    // Their facing is where their camera looks, which is not where a body fights: a player in a fight (or mid-swing,
+    // mid-spell) turns to the foe, as your own body does (view.js faceYaw), unless they are running.
+    const foe = r.face && clock < r.face.until ? r.face.slot : foeOf(r.info.fighting);
+    if (foe && foe !== r.slot && pace < FACE_PACE) {
+      const fat = foe.figure && foe.figure.at ? foe.figure.at : foe.pos;
+      const fx = fat.x - eye.x; const fz = fat.z - eye.z; const fd = fx * fx + fz * fz;
+      if (fd > 0.09 && fd < FACE_REACH * FACE_REACH) yaw = Math.atan2(-fx, -fz);
+    }
     r.pc.position.x = eye.x; r.pc.position.y = eye.y; r.pc.position.z = eye.z;
     game.feetOf(r.ch);
     r.figure.group.visible = true;

@@ -3,6 +3,9 @@
 // page that only watches. Three scenes -- A casts at a mobile; A casts at B in PvP; a mobile's gas breath hits
 // A and B -- and on C's page no event may carry fromPlayer/toPlayer, no hit may be on "you" or on nobody, and
 // none of the you-only effects may fire (screen shake, the hurt/flash wash, the "on the player" impact sound).
+// A fourth thing is held in the first scene: a player in a fight turns to the foe on the watcher's page (within 30
+// degrees, as the own body does) and plays a swing clip on her blows -- the others' facing is where their camera
+// looks, which in a fight is anywhere.
 //   node /tmp/pw/mp-onlook.mjs --page 8224 --out /tmp/onlook          (python3 serve.py 8224 beside it)
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -67,7 +70,7 @@ await page.click('#connect-go');
 await page.waitForFunction(() => window.diku && window.diku.link, null, { timeout: 30000 });
 await page.waitForFunction(() => window.diku.game.state.roomVnum === 2362 && window.diku.built.rooms.has(2362), null, { timeout: 240000 });
 await page.waitForTimeout(6000);
-// C: out of the room's reach (the gas breath must not hit her) but where the page is told of it
+// C: placed below
 await page.evaluate(() => {
   const d = window.diku; d.state.paused = false; d.view.set(true);
   d.camera.position.set(31, 42, 328); d.camera.lookAt(26.8, 39.8, 336); d.view.pin(true);
@@ -81,7 +84,8 @@ await page.evaluate(() => {
   const im = d.audio.impact.bind(d.audio); d.audio.impact = (kind, o = {}) => { if (o.onPlayer) window.__you.onPlayer++; return im(kind, o); };
 });
 // C goes where the room's reach does not (the server moves her; her next report is refused and the page follows)
-{ const pc = pcOf('Cleo'); pc.position.x = 312000 + 26.5; pc.position.z = 325.5; }
+// (blows are told to the room, so she watches the first two scenes from inside it; the gas must not reach her)
+{ const pc = pcOf('Cleo'); pc.position.x = 312000 + 25.6; pc.position.z = 334.4; }
 await page.waitForTimeout(2500);
 
 // stage: the guard neither starts fights nor moves; Bob may be attacked (a KILLER), and stands near Anna
@@ -89,20 +93,25 @@ const slot = game.mobs.find((s) => s.proto.vnum === 2316 && s.roomVnum === 2362)
 const inst = game.wakeSlot(slot);
 inst.act &= ~32; inst.hit = inst.maxHit = 5000;
 pcOf('Bob').ch.act |= PLR.KILLER;
-put('Anna', 26.6, 335.5); put('Bob', 27.2, 334.8);
+put('Anna', 27.0, 336.0); put('Bob', 27.2, 334.8);
 for (const n of ['Anna', 'Bob']) pcOf(n).ch.mana = 900;
 await page.waitForTimeout(1200);
 
 const results = [];
-const sv = []; game.listen((e) => { if (e.kind === 'cast' || e.kind === 'spell' || e.kind === 'note' || e.kind === 'out') sv.push(`${e.kind} ${e.spell || ''} pc=${e.pc} fromCh=${!!e.fromCh} ${String(e.text || '').slice(0, 70)}`); });
+const sv = []; game.listen((e) => { if (process.env.DEBUG ? (e.text || e.kind === 'cast' || e.kind === 'spell') : (e.kind === 'cast' || e.kind === 'spell' || e.kind === 'note' || e.kind === 'out')) sv.push(`${e.kind} ${e.spell || ''} pc=${e.pc} fromCh=${!!e.fromCh} ${String(e.text || '').slice(0, 70)}`); });
 async function scene(name, act) {
   sv.length = 0;
+  await page.evaluate(() => {
+    window.__clips = window.__clips || [];
+    for (const r of window.diku.link.remotes.values()) if (!r.__w) { r.__w = true; const p = r.figure.perform; r.figure.perform = (clip, o) => { window.__clips.push([r.info.name, clip]); return p(clip, o); }; }
+    window.__clips.length = 0;
+  });
   await page.evaluate(() => { window.__raw.length = 0; window.__seen.length = 0; window.__you = { shake: 0, wash: 0, onPlayer: 0 }; });
   for (const n of ['Anna', 'Bob']) { const c = pcOf(n).ch; c.hit = c.maxHit; c.mana = 900; c.wait = 0; c.position = game.MERC.POS.STANDING; }
   act();
   await page.waitForTimeout(6500);
   const got = await page.evaluate(() => ({ seen: window.__seen.slice(), you: window.__you, raw: window.__raw.slice() }));
-  if (process.env.DEBUG) console.log('  raw:', JSON.stringify(got.raw.filter((r) => !/^(hit|miss|parry|dodge|room)/.test(r))));
+  if (process.env.DEBUG) console.log('  raw:', JSON.stringify(got.raw.map((r) => r.slice(0, 40))));
   const bad = [];
   for (const e of got.seen) {
     if (e.fromPlayer === true) bad.push(`${e.kind}: fromPlayer on an onlooker`);
@@ -118,18 +127,35 @@ async function scene(name, act) {
   if (got.you.shake) bad.push(`player.shake fired ${got.you.shake}x`);
   if (got.you.wash) bad.push(`screen wash fired ${got.you.wash}x`);
   if (got.you.onPlayer) bad.push(`"on the player" impact sound ${got.you.onPlayer}x`);
+  if (process.env.DEBUG) console.log('  fight', JSON.stringify({ mobHit: inst.hit, mobFightingAnna: inst.fighting === pcOf('Anna').ch, annaFightingMob: pcOf('Anna').ch.fighting === inst, annaPos: [pcOf('Anna').position.x - 312000, pcOf('Anna').position.z], mobPos: [slot.pos.x - 312000, slot.pos.z], pos: pcOf('Anna').ch.position, wait: pcOf('Anna').ch.wait }));
   if (process.env.DEBUG) console.log('  cleo', JSON.stringify([pcOf('Cleo').position.x - 312000, pcOf('Cleo').position.z]), 'mob', JSON.stringify([slot.pos.x - 312000, slot.pos.z]), 'remotes', JSON.stringify(await page.evaluate(() => [...window.diku.link.remotes.values()].map((r) => r.info.name))), JSON.stringify(got.seen.filter((e) => e.hits).map((e) => e.hits)));
-  if (process.env.DEBUG) console.log('  server:', JSON.stringify(sv.slice(0, 12)), 'page:', JSON.stringify(got.seen.map((e) => e.kind + ':' + (e.spell || ''))));
+  if (process.env.DEBUG) console.log('  server:', JSON.stringify(sv.slice(0, 40)), 'page:', JSON.stringify(got.seen.map((e) => e.kind + ':' + (e.spell || ''))));
+  if (name.startsWith('A casts at a mobile')) {
+    const f = await page.evaluate(() => {
+      const d = window.diku; const r = [...d.link.remotes.values()].find((x) => x.info.name === 'Anna');
+      const m = d.game.mobs.find((x) => x.proto.vnum === 2316); const at = m.figure && m.figure.at ? m.figure.at : m.pos;
+      const want = Math.atan2(-(at.x - r.slot.pos.x), -(at.z - r.slot.pos.z));
+      const have = r.figure.body.rotation.y - Math.PI;   // a figure faces +Z at yaw 0, the camera -Z
+      const err = Math.abs(Math.atan2(Math.sin(want - have), Math.cos(want - have))) * 180 / Math.PI;
+      return { fighting: !!r.info.fighting, err: +err.toFixed(1), clips: window.__clips.filter((c) => c[0] === 'Anna').map((c) => c[1]) };
+    });
+    console.log(`  Anna on Cleo's page: fighting ${f.fighting}, ${f.err} degrees off her foe, clips ${JSON.stringify([...new Set(f.clips)])}`);
+    if (!f.fighting) bad.push('the fight the facing check needs was not on');
+    else if (f.err > 30) bad.push(`a fighting player faces ${f.err} degrees off her foe on the watcher's page`);
+    if (!f.clips.some((c) => /^attack/.test(c))) bad.push('no swing clip on her blows');
+  }
   const spells = got.seen.filter((e) => e.kind === 'spell' || e.kind === 'cast').length;
   if (!spells) bad.push('the onlooker was told of no spell at all');
   results.push({ name, events: got.seen.length, spells, hits: got.seen.flatMap((e) => (e.hits || []).map((h) => h.to)), bad: [...new Set(bad)] });
 }
-await scene('A casts at a mobile, C watches', () => { run('Anna', "cast 'lightning bolt' minotaur"); });
+await scene('A casts at a mobile, C watches', () => { run('Anna', "cast 'lightning bolt' minotaur"); setTimeout(() => run('Anna', 'kill minotaur'), 2200); });
 // Merc refuses an offensive spell on a player ("You can't do that on a player."): PvP is a ward cast on B and blows
 await scene('A casts at B and fights B (PvP), C watches', () => { inst.fighting = null; pcOf('Anna').ch.fighting = null; pcOf('Anna').ch.wait = 0; run('Anna', 'cast armor bob'); setTimeout(() => run('Anna', 'murder bob'), 2200); });
 // the first two scenes may have put either of them down; the third needs both standing in sight of C
 for (const n of ['Anna', 'Bob']) { const c = pcOf(n).ch; c.hit = c.maxHit; c.position = game.MERC.POS.STANDING; c.fighting = null; }
 inst.fighting = null; put('Anna', 26.6, 335.5); put('Bob', 27.2, 334.8);
+{ const pc = pcOf('Cleo'); pc.position.x = 312000 + 26.5; pc.position.z = 325.5; }
+await page.waitForTimeout(1500);
 await page.waitForFunction(() => window.diku.link.remotes.size === 2, null, { timeout: 15000 });
 await page.waitForTimeout(1500);
 await scene('a mobile breathes gas on A and B, C watches', () => { inst.fighting = pcOf('Anna').ch; inst.position = game.MERC.POS.FIGHTING; game.specFuns.spec_breath_gas(slot, inst); });
