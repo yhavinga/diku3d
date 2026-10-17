@@ -9,7 +9,7 @@
 import { Clips, Steps, Soundscape } from './soundscape.js';
 import { Music } from './music.js';
 import { Foley, Creatures, Places, Weather, listenToGame } from './foley.js';
-import { placeOf, creatureOf, fightMusicFor } from './soundmap.js';
+import { placeOf, creatureOf, fightPieceFor, bossFamilyOf } from './soundmap.js';
 import { Voices, listenToVoices } from './voices.js';
 
 /** game.js ATTACK_TABLE words that cut or tear in a way of their own. */
@@ -637,8 +637,12 @@ export class Audio {
     // and on one mirroring a server alike (game.js mirrorSelf, mirrorMob).
     const game = window.diku && window.diku.game;
     // Before any blow, a boss that has taken notice of you (presence.js) has the boss piece too.
-    const threat = window.diku && window.diku.presence && window.diku.presence.threat;
-    this.music.setFight(game && game.state.fighting && this.stopEvents ? fightMusicFor(game.state.fighting, game.state) : (threat && this.stopEvents ? 'boss' : null));
+    const presence = window.diku && window.diku.presence;
+    const threat = presence && presence.threat;
+    // The boss that has noticed you picks its own piece, as one you are fighting does. `cause`
+    // empties a few seconds before the threat eases out; the piece must not change meanwhile.
+    if (threat && presence.cause) this.threatFamily = bossFamilyOf(presence.cause.who);
+    this.music.setFight(game && game.state.fighting && this.stopEvents ? fightPieceFor(game.state.fighting, game.state) : (threat && this.stopEvents ? `boss:${this.threatFamily || 'endboss'}` : null));
     this.music.update();
     if (this.muted) return;
     if (this.places && window.diku && window.diku.built && window.diku.game) {

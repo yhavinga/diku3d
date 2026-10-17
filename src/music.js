@@ -33,7 +33,7 @@ export class Music {
     this.areaDue = null;        // set when the game begins
     this.title = false;
     this.titleDue = 0;
-    this.fightWant = null;      // 'fight' | 'boss' | null, set every frame by audio.js
+    this.fightWant = null;      // 'fight' | 'boss:<family>' | null, set every frame by audio.js
     this.fightOver = null;      // audio-clock time the grace after the last blow runs out
     this.fightStarting = null;  // clip id being loaded, so a frame does not ask twice
     this.fightRetry = 0;
@@ -91,9 +91,13 @@ export class Music {
 
   // --------------------------------------------------------------- fights ----
 
-  /** The pieces are big; fetched once the game begins so the first blow is not met with silence. */
+  /**
+   * The ordinary fight piece is fetched once the game begins so the first blow
+   * is not met with silence. The boss pieces are ~35 MB each once decoded, nine
+   * of them: they load when a boss turns up, and are dropped again after the fight.
+   */
   preloadFight() {
-    for (const id of Object.values(FIGHT_MUSIC)) this.audio.clips.load(id);
+    this.audio.clips.load(FIGHT_MUSIC.fight);
   }
 
   setFight(kind) { this.fightWant = kind; }
@@ -108,7 +112,10 @@ export class Music {
       if (this.fightStarting === id) return true;
       if (now < this.fightRetry) return false; // the piece would not play (missing file): the synth has no fight music, and no retry per frame
       // Crossfade: whatever plays (a calm piece, or the other fight piece) dies away under the new one.
-      if (cur) this.stop(cur.kind === 'fight' ? 2 : 1.5);
+      if (cur) {
+        if (cur.kind === 'fight' && cur.id !== FIGHT_MUSIC.fight) this.audio.clips.buffers.delete(cur.id);
+        this.stop(cur.kind === 'fight' ? 2 : 1.5);
+      }
       this.fightStarting = id;
       this.play(id, 'fight', { fadeIn: 1.5, level: 0.9, loop: true }).then((ok) => { if (!ok) this.fightRetry = this.ctx.currentTime + 15; }).finally(() => { this.fightStarting = null; });
       return true;
@@ -117,6 +124,7 @@ export class Music {
       if (this.fightOver === null) this.fightOver = now + FIGHT_GRACE;
       if (now < this.fightOver) return true;
       this.fightOver = null;
+      if (cur.id !== FIGHT_MUSIC.fight) this.audio.clips.buffers.delete(cur.id); // still playing out its fade from the source's own reference
       this.stop(5);
       // The place's own music comes back rather than waiting out the minutes between pieces.
       if (this.room) this.roomDue = now + 2;

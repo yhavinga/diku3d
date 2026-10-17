@@ -301,8 +301,13 @@ export const TITLE_MUSIC = 'music_title';
 
 // ------------------------------------------------------------ fight music --
 
-/** Looped pieces, one for a fight and a heavier one for a strong foe. */
-export const FIGHT_MUSIC = { fight: 'music_fight', boss: 'music_boss' };
+/**
+ * Looped pieces: one for a fight, and one per kind of boss (`boss:<family>`,
+ * chosen by `bossFamilyOf`). `boss:endboss` is the family for any boss the
+ * rules below do not recognise, so every boss has a piece.
+ */
+export const BOSS_FAMILIES = ['dragon', 'undead', 'giant', 'beast', 'demon', 'elemental', 'sorcerer', 'titan', 'endboss'];
+export const FIGHT_MUSIC = { fight: 'music_fight', ...Object.fromEntries(BOSS_FAMILIES.map((f) => [`boss:${f}`, `music_boss_${f}`])) };
 /** Seconds the music stays on after the last blow before it gives way to the place's own. */
 export const FIGHT_GRACE = 6;
 /** A foe this many levels over you is a boss; so is any level-30 foe that is not below you (Mahn-Tor's masters, dragons). */
@@ -337,4 +342,44 @@ export function placeOf(info, hour) {
     mobs: (room.mobs || []).map((m) => (m.proto && m.proto.keywords) || ''),
     hour,
   };
+}
+
+// A unique whose words say nothing of what it is, by vnum (the survey in
+// tools/audio/boss-music-check.mjs lists them); and whole vnum blocks whose
+// area makes every strong mobile in them the same kind of thing.
+const BOSS_VNUM = { 1: 'dragon', 3410: 'undead', 111: 'sorcerer', 110: 'sorcerer', 7900: 'titan', 601: 'titan', 4704: 'titan', 4706: 'titan' };
+const BOSS_BLOCKS = [
+  [900, 999, 'titan'],     // olympus: the gods
+  [9300, 9399, 'titan'],   // galaxy: the stars and constellations
+  [9100, 9199, 'elemental'], // dylan: the storm clouds (the witch is caught by her words first)
+];
+/** Order matters: the first match wins, so "dracolich" is undead and "minotaur mage master" a minotaur. */
+const BOSS_WORDS = [
+  ['undead', /\b(vampires?|liches?|dracolich|necromancers?|wraiths?|spectres?|ghosts?|spirits?|zombies?|ghouls?|skeletons?|undead|shadows?|horror|flesh eater|hag)\b/],
+  ['dragon', /\b(dragons?|wyrms?|wyverns?|hydras?|pyrohydra|draconian)\b/],
+  ['beast', /\b(minotaurs?|spiders?|arachnos|worms?|beasts?|bears?|basilisks?|pythons?|snakes?|gnolls?|griffins?|harpy|harpies|ki-rin|chreffn|swamp thing|lizards?|mimics?)\b/],
+  ['giant', /\b(ogres?|trolls?|giants?|golems?|cyclops|ettins?)\b/],
+  ['demon', /\b(demons?|devils?|daemons?|fiends?|yochlol|mind ?flayers?|beholders?|slaad|matron mother)\b/],
+  ['elemental', /\b(elementals?|rulers?|effreeti|efreet|roc|storm)\b/],
+  ['sorcerer', /\b(wizards?|mages?|sorcerers?|sorceress|witch|warlock|hierophant|druid(ess)?|mistress|guildmaster|adept|acolyte|priest|cleric|enchanter)\b/],
+  ['titan', /\b(gods?|kings?|queens?|lords?|judge|marshall|knight|chieftain|emperor)\b/],
+];
+
+/** What kind of boss a mobile is, for the piece it fights to: one of BOSS_FAMILIES. */
+export function bossFamilyOf(foe) {
+  if (!foe) return 'endboss';
+  const vnum = foe.vnum ?? (foe.proto && foe.proto.vnum);
+  if (BOSS_VNUM[vnum]) return BOSS_VNUM[vnum];
+  const block = BOSS_BLOCKS.find(([a, b]) => vnum >= a && vnum <= b);
+  const words = `${foe.keywords || ''} ${foe.name || foe.short || ''}`.toLowerCase();
+  // Dylan's block is the exception to a block ruling: its witch is a sorcerer, whatever the sky.
+  if (block && !(block[2] === 'elemental' && /\bwitch\b/.test(words))) return block[2];
+  const hit = BOSS_WORDS.find(([, re]) => re.test(words));
+  return hit ? hit[0] : 'endboss';
+}
+
+/** The key into FIGHT_MUSIC for a fight with `foe`: 'fight', or 'boss:<family>', or null. */
+export function fightPieceFor(foe, me) {
+  const kind = fightMusicFor(foe, me);
+  return kind === 'boss' ? `boss:${bossFamilyOf(foe)}` : kind;
 }

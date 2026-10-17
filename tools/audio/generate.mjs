@@ -277,6 +277,8 @@ function post(clip, rawFile) {
   if (clip.kind === 'voice') pcm = fade(trim(pcm, p.trimDb ?? -45, 0.04), 0.01, 0.04);
   // The music API ends every piece with a fade-out; a loop cut there would dip, so drop it first.
   if (p.cutTail) pcm = pcm.slice(0, pcm.length - Math.round(p.cutTail * SR) * CH);
+  // ...and a loop that starts in the body, not in the build-up the API gives it; both cuts are picked so head and tail match (rhythm, spectrum, level).
+  if (p.cutHead) pcm = pcm.slice(Math.round(p.cutHead * SR) * CH);
   if (clip.loop) pcm = loopify(pcm, p.crossfade ?? 1.5);
   else if (clip.kind === 'music') pcm = fade(trim(pcm, -55, 0.02), p.fadeIn ?? 0.05, p.fadeOut ?? 2.5);
   let steps = null;

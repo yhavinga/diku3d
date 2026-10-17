@@ -100,7 +100,7 @@ export function createPresence({ game, nav, onTurn = null }) {
       sinceScan = 0;
       const found = scan(eye);
       target = found.weight;
-      cause = found.who && { why: found.why, name: found.who.name || found.who.short, level: found.who.level };
+      cause = found.who && { why: found.why, name: found.who.name || found.who.short, level: found.who.level, who: found.who };
     }
     const step = dt / (target > value ? RISE : FALL);
     value = target > value ? Math.min(target, value + step) : Math.max(target, value - step);
