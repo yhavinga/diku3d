@@ -1415,7 +1415,11 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
 
   // -- places ---------------------------------------------------------------------
 
-  const figureOf = (slot) => (slot && slot.figure && slot.figure.m ? slot.figure : null);
+  // Another player's body (link.js) stands in for a mobile's: the same points, none of the motion state.
+  const figureOf = (slot) => (slot && slot.remoteFigure ? slot.remoteFigure : slot && slot.figure && slot.figure.m ? slot.figure : null);
+  /** Every body that wears spells: the zone's mobiles and the other players in sight. */
+  const bodies = () => (game.mirror && game.mirror.remotes && game.mirror.remotes.size
+    ? [...game.mobs, ...[...game.mirror.remotes.values()].map((r) => r.slot)] : game.mobs);
   const handCache = new WeakMap();
 
   /** The bone (or socket) a figure casts from, found once. */
@@ -1718,7 +1722,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
    */
   function performCast(w, contactIn, clip = 'cast') {
     const fig = figureOf(w.slot);
-    if (!fig || !actors.perform) return;
+    // Another player's own page plays their gesture (link.js), on the rig it has.
+    if (!fig || !actors.perform || fig.remote) return;
     const has = (c) => fig.actions && fig.actions[c];
     const name = has(clip) ? clip : has('cast') ? 'cast' : 'attack';
     actors.perform(w.slot, name, { contactIn });
@@ -2146,7 +2151,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
             S.pop(head, 1.4);
             // Each bolt jolts the body as it arrives: a volley reads as a volley.
             const fig = figureOf(fx.to.slot);
-            if (fig && actors.motion && !fx.to.player) actors.motion.react(fig, 'hit', 0.5);
+            if (fig && fig.remote) fx.to.slot.remote.figure.perform('hit');
+            else if (fig && actors.motion && !fx.to.player) actors.motion.react(fig, 'hit', 0.5);
           }
         }
         break;
@@ -2413,7 +2419,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     const scale = onYou ? 0.55 : 1;
     const hurtFigure = (w, strength) => {
       const fig = w && figureOf(w.slot);
-      if (fig && actors.motion && !w.player) actors.motion.react(fig, 'hit', strength);
+      if (fig && fig.remote) w.slot.remote.figure.perform('hit');
+      else if (fig && actors.motion && !w.player) actors.motion.react(fig, 'hit', strength);
     };
     const hitAny = fx.hits && fx.hits.some((h) => h.dam > 0);
     if (fx.failed && !['earthquake'].includes(fx.spell)) {
@@ -2986,7 +2993,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
 
   /** Each visible figure's affects, as a shell and a little matter. */
   function updateAuras(dt) {
-    for (const slot of game.mobs) {
+    for (const slot of bodies()) {
       const fig = figureOf(slot);
       if (fig) auraStep(fig, slot.instance, fig.object.visible && !slot.dead, slot.proto.vnum % 17, dt);
     }
@@ -3089,7 +3096,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     const rate = dt * budget.density;
     let rings = 0;
     for (const s of sanct.values()) if (s.ground && s.ground.busy && s.ground.owner === s) rings++;
-    for (const slot of game.mobs) {
+    for (const slot of bodies()) {
       const fig = figureOf(slot);
       if (!fig) continue;
       const want = sanctuaryOn(slot) && fig.object.visible;

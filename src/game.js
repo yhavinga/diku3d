@@ -705,7 +705,8 @@ function told(ctx, ch, victim, event, m) {
   const reader = !isNpc(ch) ? ch : (!isNpc(victim) ? victim : null);
   ctx.emit({ ...event, text: heard(ch, victim, m), pc: ctx.pcId(reader) });
   if (!isNpc(ch) && !isNpc(victim) && ch !== victim) ctx.emit({ ...event, text: m.toVict, byPlayer: false, defended: undefined, pc: ctx.pcId(victim) });
-  if (reader) ctx.roomcast(victim, { kind: 'room', text: m.toRoom, combat: event.kind, ...blow(ch, victim, ctx) }, [ch, victim]);
+  // dam and maxHp ride along: the onlookers' pages size the thud and the flinch by them (fx.js land).
+  if (reader) ctx.roomcast(victim, { kind: 'room', text: m.toRoom, combat: event.kind, dam: event.dam, maxHp: event.maxHp, spell: event.spell, ...blow(ch, victim, ctx) }, [ch, victim]);
 }
 
 /**

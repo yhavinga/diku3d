@@ -37,6 +37,8 @@ import {
  */
 export const PROTOCOL = 2;
 const ROOM_VNUM_TEMPLE = 3001;
+/** The spell events other players see as well as the caster (magic.js invoke, run, and its fizzles). */
+const SEEN_SPELLS = new Set(['cast', 'spell', 'spell-fizzle']);
 /** How far another player is seen from: the far end of a street, not the zone. */
 const SIGHT = 160;
 /** Seconds a player whose link dropped stays standing in the world. */
@@ -695,6 +697,20 @@ export async function startMud({
     if (event.pc !== undefined && event.pc !== null) {
       const s = byPc.get(event.pc);
       if (s) readers.push(s);
+      // A spell is seen by whoever is in sight of its caster, not only by the caster: the gesture, the
+      // light and where it lands are drawn on their pages off these. The words it carries are the caster's.
+      if (SEEN_SPELLS.has(event.kind) && event.fromCh && s) {
+        const at = event.fromCh.roomVnum !== undefined ? s.pc.position : null;
+        for (const o of playing) {
+          if (o === s || !at) continue;
+          if (o.pc.ch.roomVnum === event.fromCh.roomVnum || Math.hypot(o.pc.position.x - at.x, o.pc.position.z - at.z) < 40) {
+            const out = encode(event, o);
+            if (out.text) out.text = '';
+            o.out.push(out);
+            stats.routed += 1;
+          }
+        }
+      }
     } else if (event.all) {
       readers.push(...playing);
     } else if (event.room !== undefined) {
@@ -849,7 +865,9 @@ export async function startMud({
         ch.fighting ? (ch.fighting.npc ? { m: slotIndex.get(ch.fighting.slot) } : { p: game.pcOf(ch.fighting)?.id ?? -1 }) : null,
         ch.equipment[16] ? ch.equipment[16].vnum : 0, ch.equipment[11] ? ch.equipment[11].vnum : 0,
         // Everything else worn, as [wearLoc, vnum]: what a passer-by sees on you anyway (a robe's colour), never the pack.
-        ch.equipment.flatMap((o, loc) => (o && loc !== 16 && loc !== 11 ? [[loc, o.vnum]] : []))];
+        ch.equipment.flatMap((o, loc) => (o && loc !== 16 && loc !== 11 ? [[loc, o.vnum]] : [])),
+        // The spells on them (sanctuary, bless, armor ...): what the others' pages draw round the body.
+        ch.affectedBy];
       const key = JSON.stringify(info);
       if (s.sent.roster.get(o.pc.id) !== key) { s.sent.roster.set(o.pc.id, key); roster.push([o.pc.id, ...info]); }
       const c = local(s, p);

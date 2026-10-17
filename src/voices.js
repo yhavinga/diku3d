@@ -194,6 +194,16 @@ function castPlan(e, hear) {
     return { id: spellClipId(kind, e.spell, f.form), slot: null, own: true, shout: f.shout, kind };
   }
   const slot = e.from;
+  // Another player (link.js): a mage or cleric says their words as a mobile caster does -- the real name to
+  // your own class, the cipher to anyone else (magic.c say_spell).
+  if (slot && slot.remote && slot.remote.info) {
+    const { cls, sex } = slot.remote.info;
+    const base = cls === 0 ? 'mage' : cls === 1 ? 'cleric' : null;
+    if (!base) return null;
+    const kind = `${base}_${sex === 2 ? 'f' : 'm'}`;
+    const f = formFor(kind, e, slot, hear.cls === cls ? 'n' : 'c');
+    return { id: spellClipId(kind, e.spell, f.form), slot, own: false, shout: f.shout, kind };
+  }
   if (!slot || !slot.proto || !slot.record) return null;
   const special = slot.record.special;
   if (special === 'spec_cast_adept') {

@@ -417,7 +417,7 @@ export function attachSocketLink(link, game, host, enter) {
   const local = (r) => {
     if (!r || typeof r !== 'object') return r;
     if (r.m !== undefined) return mobs[r.m] || null;
-    if (r.p !== undefined) return remotes.get(r.p) ? { remote: remotes.get(r.p) } : null;
+    if (r.p !== undefined) return remotes.get(r.p) ? remotes.get(r.p).slot : null;
     if (r.o !== undefined) return findObject(r.o) || r;
     return r;
   };
@@ -439,28 +439,38 @@ export function attachSocketLink(link, game, host, enter) {
   function receive(event) {
     for (const key of ['from', 'to', 'slot']) if (key in event) event[key] = local(event[key]);
     if (event.obj) event.obj = local(event.obj);
+    // What another player does reaches us as the room's line (kind 'room', the blow's own kind in `combat`).
+    const kind = event.kind === 'room' && BLOWS.has(event.combat) ? event.combat : event.kind;
     const remoteSide = [event.from, event.to].find((side) => side && side.remote);
-    if (remoteSide && (BLOWS.has(event.kind) || SPELLS.has(event.kind))) {
+    if (remoteSide && (BLOWS.has(kind) || SPELLS.has(kind))) {
       // Another player struck or was struck: the room's line, and their body moves.
       const attacker = event.from && event.from.remote;
       const victim = event.to && event.to.remote;
-      const skill = SKILL_CLIPS[event.kind];
+      const skill = SKILL_CLIPS[kind];
       // A skill's blow is the clip of the skill, played from its own event; the
       // hit that follows it is not a second swing. A rig without the clip swings.
-      const ofSkill = skill || ((event.kind === 'hit' || event.kind === 'miss') && SKILL_CLIPS[event.spell]);
+      const ofSkill = skill || ((kind === 'hit' || kind === 'miss') && SKILL_CLIPS[event.spell]);
       if (attacker && skill) attacker.figure?.perform(attacker.figure.has(skill[0]) ? skill[0] : 'attack', { contactIn: skill[1] });
-      else if (attacker && !ofSkill && BLOWS.has(event.kind)) attacker.figure?.perform(event.attack === 'hit' && !event.armed ? 'attack2' : 'attack');
-      if (attacker && event.kind === 'cast' && !event.lost && !['quaff', 'eat'].includes(event.source)) {
+      else if (attacker && !ofSkill && BLOWS.has(kind)) attacker.figure?.perform(event.attack === 'hit' && !event.armed ? 'attack2' : 'attack');
+      if (attacker && kind === 'cast' && !event.lost && !['quaff', 'eat'].includes(event.source)) {
         const clip = castClipOf(event.family);
         attacker.figure?.perform(attacker.figure.has(clip) ? clip : 'cast', { contactIn: event.windup || 0.6 });
       }
-      if (victim && event.kind === 'hit') victim.figure?.perform('hit');
+      if (victim && kind === 'hit') victim.figure?.perform('hit');
       // fx.js draws the thud, the stab and the flying weapon off these copies.
-      if (event.kind === 'backstab') { stabbedFrom = event.behind; game.inject({ kind: 'skillfx', skill: 'backstab', phase: 'start', from: event.from, to: event.to, behind: event.behind }); }
-      else if (event.kind === 'disarm') game.inject({ kind: 'skillfx', skill: 'disarm', phase: 'disarm', from: event.from, to: event.to, item: event.item });
-      else if (ofSkill) game.inject({ kind: 'skillfx', skill: event.spell, phase: 'land', hit: event.kind === 'hit', from: event.from, to: event.to, behind: stabbedFrom, delay: event.delay || 0 });
+      if (kind === 'backstab') { stabbedFrom = event.behind; game.inject({ kind: 'skillfx', skill: 'backstab', phase: 'start', from: event.from, to: event.to, behind: event.behind }); }
+      else if (kind === 'disarm') game.inject({ kind: 'skillfx', skill: 'disarm', phase: 'disarm', from: event.from, to: event.to, item: event.item });
+      else if (ofSkill) game.inject({ kind: 'skillfx', skill: event.spell, phase: 'land', hit: kind === 'hit', from: event.from, to: event.to, behind: stabbedFrom, delay: event.delay || 0 });
+      else if (SPELLS.has(kind)) {
+        // spellfx.js draws the gathering, the flight and the landing, with the remote body as one end.
+        if (event.hits) event.hits = event.hits.map((h) => ({ ...h, to: local(h.to) }));
+        game.inject(event);
+      } else if (['hit', 'miss', 'parry', 'dodge'].includes(kind) && !event.spell) {
+        // fx.js: the mobile's swing, the spark or the flesh, the sound -- the same blow without its line.
+        game.inject({ ...event, kind, text: '' });
+      }
       if (!event.text) return;
-      game.inject({ kind: 'room', text: event.text, combat: event.kind });
+      game.inject({ kind: 'room', text: event.text, combat: kind });
       return;
     }
     if (event.kind === 'teleport' || event.kind === 'recall') {
@@ -552,8 +562,8 @@ export function attachSocketLink(link, game, host, enter) {
     host.place(msg);
   }));
   offs.push(link.on('who', (msg) => {
-    for (const [rid, name, title, level, cls, sex, position, flags, percent, linkdead, fighting, weapon, shield, worn] of msg.add) {
-      const info = { name, title, level, cls, sex, position, flags, percent, linkdead, fighting, weapon, shield, worn };
+    for (const [rid, name, title, level, cls, sex, position, flags, percent, linkdead, fighting, weapon, shield, worn, affectedBy = 0] of msg.add) {
+      const info = { name, title, level, cls, sex, position, flags, percent, linkdead, fighting, weapon, shield, worn, affectedBy };
       const known = remotes.get(rid);
       // A change of gear is a change of body; anything else is only the record.
       if (known && (known.info.weapon !== weapon || known.info.shield !== shield || JSON.stringify(known.info.worn) !== JSON.stringify(worn) || known.info.cls !== cls)) dropRemote(rid);
@@ -582,7 +592,7 @@ export function attachSocketLink(link, game, host, enter) {
     const ch = {
       npc: false, remoteId: rid, name: info.name, displayName: info.name, title: info.title, level: info.level, class: info.cls,
       sex: info.sex, position: info.position, act: info.flags, hit: info.percent, maxHit: 100,
-      equipment: [], inventory: [], affected: [], affectedBy: 0, alignment: 0, fighting: null,
+      equipment: [], inventory: [], affected: [], affectedBy: info.affectedBy, alignment: 0, fighting: null,
     };
     const pc = game.addRemote(ch, rid);
     const figure = createPlayerFigure({
@@ -592,11 +602,23 @@ export function attachSocketLink(link, game, host, enter) {
     host.scene.add(figure.group);
     figure.group.visible = false;
     const r = { id: rid, info, ch, pc, figure, samples: [], shown: null, said: null };
+    // The body as the effects see a mobile's: a slot-like end for an event (from/to), and the figure's
+    // points (spellfx.js reads at, object, height, castPoint, actions) -- kept at the feet by drawRemote.
+    const at = { x: 0, y: 0, z: 0 };
+    r.slot = {
+      remote: r, pos: at, instance: ch, dead: false, here: true, proto: { vnum: 100000 + rid },
+      // The server streams only players in sight, in this zone: counted as in the room the page is in.
+      get roomVnum() { return game.state.roomVnum; },
+      remoteFigure: {
+        remote: true, object: figure.body, at, height: figure.height, castPoint: figure.castPoint,
+        actions: new Proxy({}, { get: (_, clip) => figure.has(clip) }),
+      },
+    };
     remotes.set(rid, r);
     mirror.remotes.set(rid, r);
   }
   function syncRemoteCh(r) {
-    Object.assign(r.ch, { title: r.info.title, level: r.info.level, position: r.info.position, act: r.info.flags, hit: r.info.percent });
+    Object.assign(r.ch, { title: r.info.title, level: r.info.level, position: r.info.position, act: r.info.flags, hit: r.info.percent, affectedBy: r.info.affectedBy });
   }
   function dropRemote(rid) {
     const r = remotes.get(rid);
@@ -666,6 +688,7 @@ export function attachSocketLink(link, game, host, enter) {
     game.feetOf(r.ch);
     r.figure.group.visible = true;
     r.figure.pose(heldPoseOf(r.info.position));
+    r.slot.pos.x = eye.x; r.slot.pos.y = eye.y - 1.72; r.slot.pos.z = eye.z;
     r.figure.update(dt, { x: eye.x, y: eye.y - 1.72, z: eye.z }, yaw, Math.min(pace, 9));
   }
 
