@@ -3011,7 +3011,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       if (!kind && !(a && a.pulse)) { if (a && a.on) { for (const m of a.meshes) m.visible = false; a.on = false; } return; }
       a = a || auraFor(fig);
       const u = a.material.uniforms;
-      let intensity = kind ? kind.intensity : 0;
+      // A soft rim (sanctuary) is eased indoors as the mantle is: see updateSanctuary.
+      let intensity = kind ? kind.intensity * (kind.soft && fig.indoor ? 1 - 0.5 * fig.indoor.value : 1) : 0;
       if (kind) { u.uColor.value.copy(kind.color); u.uThick.value = kind.thick; u.uFlicker.value = kind.flicker; u.uSoft.value = kind.soft || 0; }
       if (a.pulse) {
         a.pulse.t += dt;
@@ -3122,21 +3123,26 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       const dark = smooth(((renderer.toneMappingExposure || 1) - 0.15) / 0.4);
       const breath = 0.5 + 0.5 * Math.sin(clock * SANCT_BREATH + s.phase);
       const u = s.material.uniforms;
+      // The glow is added in display units while the skin under it is lit by
+      // the room: a torch-lit minotaur is a quarter as bright as one in the
+      // sun, so the same glow that is a thin rim out of doors is a white
+      // fog over him indoors. Give way as far indoors as the figure stands.
+      const within = fig.indoor ? fig.indoor.value : 0;
       // A fixed 8 cm is two pixels at 20 m, so the mantle stands further out
       // the further away it is looked at -- what has to read is the figure's
       // outline in light, not a measured shell. A thin rim and a weak one: at
       // 0.2 and 0.24 m it was a solid white blob over a boss at dusk, brighter
       // than the skin it was meant to outline.
-      u.uThick.value = clamp(0.045 + 0.005 * d, 0.045, 0.11) * clamp(h / 1.7, 0.4, 1) * (1 + 0.5 * s.flare);
+      u.uThick.value = clamp(0.045 + 0.005 * d, 0.045, 0.11) * clamp(h / 1.7, 0.4, 1) * (1 + 0.5 * s.flare) * (1 - 0.4 * within);
       // Far off and in the dark the figure is a dark cut-out against any
       // bright ring, so the mantle gives way with both.
       const far = smooth((d - 6) / 16) * (0.45 + 0.55 * dark);
-      u.uIntensity.value = 0.1 * k * (1 - 0.6 * far) * (0.8 + 0.2 * breath + 1.2 * s.flare);
+      u.uIntensity.value = 0.1 * k * (1 - 0.6 * far) * (0.8 + 0.2 * breath + 1.2 * s.flare) * (1 - 0.65 * within);
       u.uTime.value = clock + (slot.proto.vnum % 17);
       if (d < 32 && !(s.ground && s.ground.busy && s.ground.owner === s) && rings < SANCT_RINGS) {
         const g = decal({ x: px, y: py, z: pz }, 1.25, 8, SANCT_COLOR, 1e9, (dec, du) => {
           dec.mesh.position.set(fig.at.x, fig.at.y + 0.04, fig.at.z);
-          du.uAlpha.value = smooth(s.level) * (0.75 + 0.25 * Math.sin(clock * SANCT_BREATH + s.phase)) * (1 + 1.5 * s.flare) * (0.12 + 0.3 * smooth(((renderer.toneMappingExposure || 1) - 0.15) / 0.4));
+          du.uAlpha.value = smooth(s.level) * (0.75 + 0.25 * Math.sin(clock * SANCT_BREATH + s.phase)) * (1 + 1.5 * s.flare) * (0.12 + 0.3 * smooth(((renderer.toneMappingExposure || 1) - 0.15) / 0.4)) * (1 - 0.6 * (fig.indoor ? fig.indoor.value : 0));
           du.uHeat.value = 0.5 + 0.5 * Math.sin(clock * SANCT_BREATH + s.phase);
         });
         if (g) { g.owner = s; s.ground = g; rings++; }
