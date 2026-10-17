@@ -44,6 +44,11 @@ const FAR = /\b(below you|beneath you|above you|in the distance|far below|far ab
 // "The entrance to the well", "a path leads to the treasure": somewhere else.
 const TOWARDS = /\b(?:to|towards?|into|entrance to|way to|door to|path to|leads? to|leading to|reach|reaches)\s+(?:the\s+|a\s+|an\s+)?(?:\w+\s+){0,2}$/i;
 
+// A room that says what is in it is rich: "rich furnishings", "lavish
+// furniture", "the lavishness of the room". Whole phrases, so "lavish
+// gardens" and "a rich man" are not rooms with a chest in them.
+const LAVISH = /\b(?:rich|lavish|opulent|luxurious|sumptuous|expensive|costly)\s+(?:\w+\s+)?(?:furnishings?|furniture|decor(?:ations?)?|trappings|hangings)\b|\b(?:lavishness|opulence|luxury|richness) of (?:the|this) room\b/i;
+
 /**
  * Each rule: the kind it asks for, the words that name it, and where it goes
  * (`at`, read by placeClutter). `not` is that noun's own reject list -- the
@@ -174,6 +179,7 @@ const RULES = [
     re: /\b(?:a|an|the|large|small|big|wooden|old|oak|heavy|treasure)\s+(?:\w+\s+)?chests?\b/i,
     not: /\b(?:your|his|her|its|their|my)\s+(?:\w+\s+)?chests?\b|\bchests?\s+(?:ripped|torn|high|deep|level|height)\b|\bchest[- ]?(?:high|deep)\b|\bto (?:the|your) chest\b/i,
   },
+  { kind: 'chest', at: 'wall', many: 2, indoor: true, re: LAVISH },
   {
     kind: 'treasure', at: 'wall', many: 1,
     re: /\btreasure\b[^.]{0,40}\b(?:strewn|piled|heaped|scattered|lies|lying|everywhere|about)\b|\b(?:piles?|heaps?|mounds?) of (?:gold|coins|treasure|jewels|gems)\b|\btreasure ?(?:room|chamber|vault|hoard)\b|\btreasury\b|\bhoard\b/i,
@@ -214,6 +220,9 @@ const RULES = [
     not: /\bpicture (?:yourself|it|the)\b|\bpicturing\b|\bget the picture\b|\bpicture perfect\b|\bpretty as a picture\b|\b(?:engraved|carved|etched|chiselled)\b[^.]{0,30}\b(?:pictures?|paintings?)\b|\bon the ceiling\b/i,
   },
   { kind: 'tapestry', at: 'hang', many: 3, re: /\btapestr(?:y|ies)\b|\bwall ?hangings?\b/i },
+  // "Piles of furs and other rich furnishings adorn the room": a hanging on
+  // the wall and a chest to keep it in, in a room that says it is rich.
+  { kind: 'tapestry', at: 'hang', many: 2, indoor: true, re: LAVISH },
 
   // Silk.
   {
@@ -237,7 +246,7 @@ const RULES = [
   },
   {
     kind: 'pelts', at: 'strew', many: 3,
-    re: /\b(?:furs|pelts|animal skins|hides)\b[^.]{0,30}\b(?:spread|lie|lying|cover|floor)\b|\b(?:bear ?skin|fur) rugs?\b/i,
+    re: /\b(?:furs|pelts|animal skins|hides)\b[^.]{0,30}\b(?:spread|lie|lying|cover|floor)\b|\b(?:bear ?skin|fur) rugs?\b|\b(?:piles?|heaps?) of (?:furs|pelts)\b/i,
     not: /\bshelves\b/i,
   },
   { kind: 'hay', at: 'strew', many: 3, re: /\b(?:hay|straw)\b[^.]{0,30}\b(?:spread|strewn|scattered|covers?|lies|on the floor)\b|\bbed of (?:hay|straw)\b/i },
@@ -404,6 +413,11 @@ const INDOOR_ONLY = new Set([
 const BURIED = { oldbone: 'bone', rust: 'rustiron', flagstone: 'sewerflag' };
 
 const FACE_ROT = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
+// Where a hearth's mantel shelf is: how high, and how far out from the wall's face.
+const MANTEL_Y = 2.0;
+const MANTEL_OUT = 0.88;
+// The candelabrum's wicks, as [x, z, height]: where a flame's origin goes, 0.08 under the wax tops in tools/blender/furniture.py build_candelabra (a flame stands 0.1 over its origin).
+const WICKS = [[0.26, 0, 1.45], [-0.26, 0, 1.45], [0, 0.26, 1.45], [0, -0.26, 1.45], [0, 0, 1.53]];
 // Lying flat, walked over: these may lie in a doorway's lane.
 const FLAT = new Set(['bones', 'skull', 'pelts', 'hay', 'carcass', 'skeleton', 'wreckage']);
 
@@ -773,7 +787,7 @@ export function placeClutter(ctx) {
       if (ask.at === 'corner') { corners(ask); continue; }
       if (ask.kind === 'chair' && here.some((d) => d.kind === 'piece' && /chair/.test(d.piece))) continue;
       if (ask.kind === 'skeleton_seated') { seated(ask); continue; }
-      if (ask.kind === 'candles') { candles(); continue; }
+      if (ask.kind === 'candles') { candles(ask); continue; }
       if (!spec) continue;
       const n = Math.max(1, ask.count);
       for (let k = 0; k < n; k++) {
@@ -827,6 +841,17 @@ export function placeClutter(ctx) {
         if (!at) missed.push(`${vnum} ${ask.kind} ${name}`);
         if (at && at.r) strewn.push({ x0: at.r.x0 - pos.x, x1: at.r.x1 - pos.x, z0: at.r.z0 - pos.z, z1: at.r.z1 - pos.z });
       }
+    }
+
+    // Furs heaped on the great bed (build.js `GREAT_BED`): the pelts model laid
+    // over the blanket, in a room whose words have furs in them.
+    const great = here.find((d) => d.kind === 'piece' && d.piece === 'bed_great');
+    if (great && /\b(?:furs?|pelts?)\b/i.test(room.description) && library.get('clutter_pelts')) {
+      const base = FACE_ROT[great.dir];
+      const lz = -ROOM / 2 - (great.face || 0) + great.out + 1.55;
+      const bx = great.x + great.along * Math.cos(base) + lz * Math.sin(base);
+      const bz = great.z - great.along * Math.sin(base) + lz * Math.cos(base);
+      put('clutter_pelts', bx, bz, base + (great.spin || 0) + 0.3, { scale: 0.78, y: pos.y + 0.83 });
     }
     // The barrels actors.js stacks against the walls keep out of all of it.
     const loose = here.find((d) => d.kind === 'clutter' && d.x === pos.x && d.z === pos.z);
@@ -913,10 +938,11 @@ export function placeClutter(ctx) {
     }
 
     // "A large burning candle stands directly on the table surface."
-    function candles() {
+    function candles(ask) {
       const table = here.find((d) => d.kind === 'piece' && (d.piece === 'worktable' || d.piece === 'desk'))
         || here.find((d) => d.kind === 'table');
-      if (!table || !library.get('furn_candle')) return;
+      if (!table) { candlesticks(ask); return; }
+      if (!library.get('furn_candle')) return;
       let x = table.x; let z = table.z; let top = 0.83;
       if (table.kind === 'piece') {
         // actors.js's fitting frame: along the wall, then out from it.
@@ -928,6 +954,41 @@ export function placeClutter(ctx) {
       }
       instances.add('furn_candle', { x: x + 0.3, y: pos.y + top, z: z + 0.15, rotY: 0 }, chunk);
       lights.push({ x: x + 0.3, y: pos.y + top + 0.4, z: z + 0.15, color: 0xffb35a, intensity: 3, radius: 6, flicker: true });
+      placed++;
+    }
+
+    // "Candles are everywhere" in a room with no table to stand them on: a
+    // candelabrum out on the floor near the walls, one to the ask's count, and
+    // two candles on the mantel if there is one. A flame over each wick, and
+    // one small light to a stand (the light pool takes the nearest few).
+    function candlesticks(ask) {
+      if (!library.get('furn_candelabra')) return;
+      const n = Math.min(4, Math.max(2, ask.count));
+      for (let k = 0; k < n; k++) {
+        const at = onFloor('furn_candelabra', 40 + k, { pad: 0.5, ring: [3.9, 3.4, 4.3] });
+        if (!at) { missed.push(`${vnum} candles furn_candelabra`); continue; }
+        put('furn_candelabra', at.x, at.z, at.rotY, { collide: true });
+        take(at.r, true);
+        for (const [ox, oz, oy] of WICKS) decor.push({ kind: 'torch', bare: true, candle: true, x: at.x + ox, y: pos.y + oy, z: at.z + oz });
+        lights.push({ x: at.x, y: pos.y + 1.75, z: at.z, color: 0xffb35a, intensity: 5, radius: 8, flicker: true });
+      }
+      const hearth = here.find((d) => d.kind === 'fitting' && d.fitting === 'hearth');
+      if (hearth && library.get('furn_candle')) {
+        const along0 = (hearth.dir === 2 || hearth.dir === 3 ? -1 : 1) * (hearth.shift || 0);
+        const [dx, , dz] = DIR_STEP[hearth.dir];
+        const at = (along) => {
+          const face = wallAt(hearth.dir, along) - MANTEL_OUT;
+          return [pos.x + dx * face + (dz ? along : 0), pos.z + dz * face + (dx ? along : 0)];
+        };
+        for (const da of [-0.85, 0.85]) {
+          const [x, z] = at(along0 + da);
+          instances.add('furn_candle', { x, y: pos.y + MANTEL_Y, z, rotY: 0 }, chunk);
+          decor.push({ kind: 'torch', bare: true, candle: true, x, y: pos.y + MANTEL_Y + 0.146, z });
+          placed++;
+        }
+        const [mx, mz] = at(along0);
+        lights.push({ x: mx, y: pos.y + MANTEL_Y + 0.4, z: mz, color: 0xffb35a, intensity: 3, radius: 6, flicker: true });
+      }
       placed++;
     }
 

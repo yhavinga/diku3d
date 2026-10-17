@@ -1609,6 +1609,71 @@ def build_basket():
     return deliver(p, "furn_basket")
 
 
+def build_bed_great():
+    """"A huge bed fills the room": a four-post bed 2.5 x 3.0 m, head to the
+    wall, a canopy frame at 2.5 m with a valance on three sides, a deep tick
+    heaped under a wide blanket and two bolsters. The furs on it are the
+    pelts clutter.js lays over the top. Wall at y = 0."""
+    reset(72)
+    p = []
+    W, L, HP = 2.5, 3.0, 2.5
+    for (y, hh) in ((-0.1, HP), (-L + 0.1, HP)):
+        for s_ in (-1, 1):
+            x = s_ * (W / 2 - 0.1)
+            p.append(beam((0.16, 0.16, hh), (x, y, hh / 2), cham=0.02, name="post"))
+            # the cap overlaps the post's head, so no two faces share a plane
+            p.append(beam((0.22, 0.22, 0.1), (x, y, hh + 0.02), cham=0.02, name="cap"))
+            p.append(beam((0.2, 0.2, 0.1), (x, y, 0.62), cham=0.02, name="boss"))
+    p.append(board((W - 0.2, 0.07, 1.7), (0, -0.07, 0.95), wear=0.01, m="planks", name="head"))
+    p.append(board((W - 0.2, 0.06, 0.6), (0, -L + 0.1, 0.55), wear=0.01, m="planks", name="foot"))
+    for s_ in (-1, 1):
+        p.append(beam((0.09, L - 0.2, 0.22), (s_ * (W / 2 - 0.1), -L / 2, 0.38), name="rail"))
+    p.append(board((W - 0.2, L - 0.3, 0.05), (0, -L / 2, 0.46), wear=0.006, m="planks", name="deck"))
+    p.append(worn((W - 0.22, L - 0.32, 0.28), (0, -L / 2, 0.62), m="linen", wear=0.07, name="tick"))
+    # the frame over it, and the rafters across
+    for y in (-0.1, -L + 0.1):
+        p.append(beam((W - 0.1, 0.1, 0.12), (0, y, HP - 0.075), cham=0.012, name="tie"))
+    for s_ in (-1, 1):
+        p.append(beam((0.1, L - 0.1, 0.12), (s_ * (W / 2 - 0.1), -L / 2, HP - 0.088), cham=0.012, name="plate"))
+    for k in range(1, 4):
+        p.append(beam((W - 0.2, 0.07, 0.07), (0, -L * k / 4, HP - 0.082), cham=0.01, name="rafter"))
+    # the valance: a cloth hung 0.4 m from the frame on the foot and both sides
+    p.append(board((W - 0.3, 0.025, 0.4), (0, -L + 0.14, HP - 0.3), wear=0.004, m="blanket", name="valance"))
+    for s_ in (-1, 1):
+        p.append(board((0.025, L - 0.3, 0.4), (s_ * (W / 2 - 0.14), -L / 2, HP - 0.3), wear=0.004, m="blanket",
+                       name="valance"))
+    for x in (-0.6, 0.6):
+        bol = lib.loft([(x - 0.45, 0.1, 0.13, 0.82, -0.42), (x + 0.45, 0.1, 0.13, 0.82, -0.42)], sides=8, axis="x",
+                       name="bolster", mat="linen")
+        p.append(tag(bol, "linen"))
+        lib.shade_smooth(bol)
+    bz = 0.8
+    p.append(worn((W - 0.16, 1.9, 0.06), (0.0, -L + 1.2, bz), m="blanket", wear=0.02, name="blanket"))
+    p[-1].rotation_euler = (0, 0, 0.015)
+    p.append(worn((W - 0.2, 0.22, 0.1), (0.0, -L + 2.18, bz + 0.03), m="blanket", wear=0.04, name="fold"))
+    for s_ in (-1, 1):
+        p.append(board((0.035, 1.8, 0.5), (s_ * (W / 2 - 0.08), -L + 1.2, bz - 0.25), wear=0.01, m="blanket",
+                       name="drop"))
+    p.append(board((W - 0.3, 0.035, 0.5), (0, -L + 0.045, bz - 0.2), wear=0.01, m="blanket", name="drop"))
+    return deliver(p, "furn_bed_great")
+
+
+def build_candelabra():
+    """A floor candelabrum: a turned brass stand 1.3 m tall with four curved
+    arms and a fifth candle at the middle, each in its own drip pan. The
+    flames are placed over the wax by build.js: the centre candle's top is at
+    1.606, the four arms' at 1.526, 0.26 m out."""
+    reset(73)
+    p = [lathe([(0, 0.22), (0.03, 0.22), (0.05, 0.14), (0.1, 0.06), (0.2, 0.04), (0.5, 0.032), (0.9, 0.03),
+                (1.15, 0.04), (1.2, 0.07), (1.24, 0.05)], 0, 0, 0, sides=12, m="brass", name="stand")]
+    for (ax, ay) in ((0.26, 0), (-0.26, 0), (0, 0.26), (0, -0.26)):
+        p.append(rod((0, 0, 1.16), (ax * 0.6, ay * 0.6, 1.14), 0.014, m="brass", verts=6, name="arm"))
+        p.append(rod((ax * 0.6, ay * 0.6, 1.14), (ax, ay, 1.28), 0.014, m="brass", verts=6, name="arm"))
+        p.extend(candle(ax, ay, 1.30, m="brass", h=0.14))
+    p.extend(candle(0, 0, 1.38, m="brass", h=0.14))
+    return deliver(p, "furn_candelabra")
+
+
 ASSETS = [
     build_table_trestle, build_table_board, build_bench_plank, build_bench_staked, build_stool, build_settle,
     build_bar_counter, build_shop_counter, build_backbar, build_cask_rack,
@@ -1617,6 +1682,7 @@ ASSETS = [
     build_shelves_goods, build_shelves_bread, build_shelves_jars, build_shelves_hides,
     build_bed, build_desk, build_desk_things, build_chair, build_armchair,
     build_tankard, build_tankard_pewter, build_jug, build_candle, build_scales, build_basket,
+    build_bed_great, build_candelabra,
 ]
 
 

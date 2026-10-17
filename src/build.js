@@ -14404,6 +14404,8 @@ export const PIECES = {
   armour_stand: { model: 'furn_armour_stand', x0: -0.44, x1: 0.44, z0: -0.36, z1: 0.36, h: 1.77 },
   oven: { model: 'furn_oven', x0: -1.0, x1: 1.04, z0: 0, z1: 2.1, h: 1.8, high: 0.6 },
   bed: { model: 'furn_bed', x0: -0.52, x1: 0.52, z0: 0, z1: 2.06, h: 0.6 },
+  // "A huge bed fills the room": the four-post bed, 2.5 x 3.0 m and as tall as its posts, a `high` torch off its wall.
+  bed_great: { model: 'furn_bed_great', x0: -1.25, x1: 1.25, z0: 0, z1: 3.0, h: 2.5, high: 1.4 },
   desk: { model: 'furn_desk', x0: -0.91, x1: 0.91, z0: -0.44, z1: 0.44, h: 0.8 },
   chair: { model: 'furn_chair', x0: -0.24, x1: 0.24, z0: -0.25, z1: 0.23, h: 0.97 },
   armchair: { model: 'furn_armchair', x0: -0.42, x1: 0.42, z0: -0.56, z1: 0.42, h: 0.7 },
@@ -14414,6 +14416,8 @@ export const PIECES = {
 // "A bed, a chair and a table", "two beds to the side" -- a bed the text puts
 // in the room, not a river bed or an armchair that "resembles a bed".
 const BED = /(?<!(?:resembles|like|river|sea|lava|flower|stream)\s+)\b(?:a|the|two|three|several|many|some|his|her|their|small|large|wooden|straw|unmade|soft)\s+(?:\w+\s+)?(beds?|cots?|bunks?)\b/i;
+// "A huge bed", "a giant four-poster": a bed that is a piece of the room's architecture.
+export const GREAT_BED = /\b(?:huge|giant|enormous|massive|great|vast|immense|gigantic|king-?sized|four-?poster|canopied|canopy)\s+(?:\w+\s+)?beds?\b|\bbed\s+fills? the rooms?\b/i;
 const BEDROOM = /\b(bed ?room|barracks|sleeping quarters|dormitory)\b/i;
 const HOW_MANY_BEDS = (text) => (/\b(several|many|rows? of)\b[^.]{0,20}\b(beds|cots|bunks)\b|\bbarracks\b/i.test(text) ? 3
   : /\b(two|pair of)\s+(\w+\s+)?(beds|cots|bunks)\b/i.test(text) ? 2 : 1);
@@ -14683,9 +14687,13 @@ function buildInteriorProps({ room, pos, sides, decor, mats, holes = [], lights 
     }
   }
   if (BEDROOM.test(room.name) || BED.test(room.description)) {
-    for (let i = HOW_MANY_BEDS(text); i > 0; i--) {
-      const at = plan.wall('bed', walls, [-3.9, 3.9, -2.6, 2.6, -1.3, 1.3]);
-      if (at) piece('bed', at);
+    const great = GREAT_BED.test(room.description);
+    for (let i = great ? 1 : HOW_MANY_BEDS(text); i > 0; i--) {
+      let kind = great ? 'bed_great' : 'bed';
+      let at = plan.wall(kind, walls, great ? [3.0, -3.0, 1.2, -1.2, 0] : [-3.9, 3.9, -2.6, 2.6, -1.3, 1.3]);
+      // A room too crowded for the great bed keeps the plain one it had.
+      if (!at && great) { kind = 'bed'; at = plan.wall(kind, walls, [-3.9, 3.9, -2.6, 2.6, -1.3, 1.3]); }
+      if (at) piece(kind, at);
     }
   }
   clearTorches(plan, pos, decor, lights);

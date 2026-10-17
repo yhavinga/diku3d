@@ -177,6 +177,8 @@ BUDGET = {
     "furn_shelves_goods": 5500, "furn_shelves_bread": 5500, "furn_shelves_jars": 5500,
     "furn_shelves_hides": 3400, "furn_weapon_rack": 1800, "furn_weapon_board": 1600,
     "furn_armour_stand": 1500, "furn_settle": 1000, "furn_armchair": 1000, "furn_desk": 1100,
+    # A four-post bed with a canopy, one to a room that says it is huge; a candelabrum is placed a few to a room.
+    "furn_bed_great": 3000, "furn_candelabra": 1400,
     # clutter.py: what the prose puts in a room, one to a handful of each per
     # room that names it and none anywhere else. A skeleton is all thin
     # members -- ribs, fingers, the long bones -- and does not decimate; a

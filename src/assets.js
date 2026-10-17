@@ -908,6 +908,7 @@ export const FURNITURE_NAMES = [
   'furn_shelves_goods', 'furn_shelves_bread', 'furn_shelves_jars', 'furn_shelves_hides',
   'furn_bed', 'furn_desk', 'furn_desk_things', 'furn_chair', 'furn_armchair',
   'furn_tankard', 'furn_tankard_pewter', 'furn_jug', 'furn_candle', 'furn_scales', 'furn_basket',
+  'furn_bed_great', 'furn_candelabra',
 ];
 
 /** Everything the world builder will ask for, so one call loads the lot. */
