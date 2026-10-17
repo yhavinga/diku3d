@@ -335,6 +335,10 @@ const DIR_STEP4 = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]];
 
 // ---------------------------------------------------------------- figures ----
 
+// Set while a merged mesh is being built whose pieces stand in different rooms: each
+// piece then carries `aIndoor`, so a window on a wall inside a keep is lit as the keep is.
+let partIndoor = null;
+
 function pushPart(parts, geometry, colour, matrix) {
   const geo = geometry.clone().applyMatrix4(matrix);
   const count = geo.attributes.position.count;
@@ -343,6 +347,7 @@ function pushPart(parts, geometry, colour, matrix) {
   for (let i = 0; i < count; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   if (geo.attributes.uv) geo.deleteAttribute('uv');
+  if (partIndoor !== null) geo.setAttribute('aIndoor', new THREE.BufferAttribute(new Float32Array(count).fill(partIndoor), 1));
   parts.push(geo);
 }
 
@@ -4945,6 +4950,11 @@ function* peopleOf(world, layout, built, options = {}) {
             if (row === 0 && Math.abs(spread) < 1.5 && w.doorSides) continue; // that is the doorway
             const px = cx + tx * spread;
             const pz = cz + tz * spread;
+            // Lit as the room the face looks into: a surround on a wall inside
+            // a walled room took the open sky's hemisphere and read as a white
+            // box against the dim stone beside it, at noon and at night.
+            const seen = roomInfoAt(px + fnx * 1.0, w.y + 1, pz + fnz * 1.0);
+            partIndoor = seen?.openAir === false && !isBuriedRoom(seen) ? 1 : 0;
             const out = (o) => at(px + fnx * o, y, pz + fnz * o, 0, fry, 0);
             const lit = hash3(Math.round(px * 4), Math.round(y * 4), Math.round(pz * 4), 71) > 0.42;
             if (w.round) {
@@ -5030,6 +5040,7 @@ function* peopleOf(world, layout, built, options = {}) {
         }
       }
     }
+    partIndoor = null;
     if (panes.length) {
       // A lit pane is glass that happens to have a fire behind it, not a lamp
       // set into a wall. This used to be pure emissive at full strength around
