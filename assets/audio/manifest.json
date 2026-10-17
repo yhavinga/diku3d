@@ -36687,6 +36687,288 @@
     "peak": -3,
     "lra": 0
    }
+  },
+  {
+   "id": "cr_dracolich_idle",
+   "file": "cr_dracolich_idle.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Four separate quiet sounds of a pile of ancient dry bones with something unnatural in it, each a faint low breathy whisper and humming shimmer with one small dry bone clicking and settling, each followed by three seconds of silence, in a large stone cave, very quiet. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 14,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 2,
+    "stepMax": 4,
+    "stepMin": 0.6,
+    "splitDepth": 55,
+    "splitGap": 1
+   },
+   "duration": 12.44,
+   "bytes": 57543,
+   "steps": [
+    [
+     0,
+     0.78
+    ],
+    [
+     1.73,
+     3.18
+    ],
+    [
+     4.91,
+     3.77
+    ],
+    [
+     8.68,
+     3.76
+    ]
+   ],
+   "loudness": {
+    "lufs": -31.8,
+    "peak": -4,
+    "lra": 7.6
+   }
+  },
+  {
+   "id": "cr_dracolich_snap",
+   "file": "cr_dracolich_snap.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Five separate attack sounds of a huge skeleton: each a sharp dry crack of a heavy jaw of bone snapping shut with a scraping grind of teeth, followed by a short dry rattling hiss like sand blown through hollow bones, each followed by two seconds of silence, in a large cave. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 12,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.5,
+    "stepMax": 2.5,
+    "stepMin": 0.4
+   },
+   "duration": 10.42,
+   "bytes": 50461,
+   "steps": [
+    [
+     0,
+     2.78
+    ],
+    [
+     3.38,
+     0.86
+    ],
+    [
+     5.76,
+     1.51
+    ],
+    [
+     7.27,
+     1.96
+    ],
+    [
+     9.23,
+     1.19
+    ]
+   ],
+   "loudness": {
+    "lufs": -15.3,
+    "peak": -4,
+    "lra": 4.7
+   }
+  },
+  {
+   "id": "cr_dracolich_call",
+   "file": "cr_dracolich_call.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Three separate calls of a huge undead skeletal dragon, each a hollow ghostly howl like wind forced through an empty ribcage, thin and cold, with a faint deeper echo of a living dragon roar far behind it, no flesh in the voice, each followed by three seconds of silence, in a vast cave with echo. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 14,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 2,
+    "stepMax": 4,
+    "stepMin": 0.8
+   },
+   "duration": 8.64,
+   "bytes": 39132,
+   "steps": [
+    [
+     0.62,
+     3.93
+    ],
+    [
+     4.55,
+     2.44
+    ]
+   ],
+   "loudness": {
+    "lufs": -15.4,
+    "peak": -4,
+    "lra": 12.9
+   }
+  },
+  {
+   "id": "cr_dracolich_hurt",
+   "file": "cr_dracolich_hurt.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Five separate impacts on a huge skeleton: each a dry crack and splintering of thick bones breaking, a few shards clattering down, and a short sizzling crackle of magic flaring, each followed by two seconds of silence, in a large cave. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.2,
+    "stepMax": 2.2,
+    "stepMin": 0.4
+   },
+   "duration": 8.39,
+   "bytes": 37627,
+   "steps": [
+    [
+     0.05,
+     2.14
+    ],
+    [
+     2.19,
+     1.37
+    ],
+    [
+     3.56,
+     1.82
+    ],
+    [
+     7.62,
+     0.66
+    ]
+   ],
+   "loudness": {
+    "lufs": -17.8,
+    "peak": -4,
+    "lra": 11.1
+   }
+  },
+  {
+   "id": "cr_dracolich_breath",
+   "file": "cr_dracolich_breath.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "A huge undead skeleton breathing out a stream of fire: a hollow rushing roar of flame forced through an empty ribcage with a dry rattle of bones in it and a crackling hiss, building and then guttering out, in a vast cave. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 4,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 56,
+    "mono": true
+   },
+   "duration": 4,
+   "bytes": 26044,
+   "steps": null,
+   "loudness": {
+    "lufs": -14.3,
+    "peak": -4,
+    "lra": 5.5
+   }
+  },
+  {
+   "id": "cr_dracolich_death",
+   "file": "cr_dracolich_death.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "A huge undead skeleton dying as the magic that holds it fails: a thin spectral wail that rises and fades away over three seconds with a crackling hiss, then the whole frame of bones collapsing apart with a long loud clattering crash of bones falling onto stone and settling into silence, in a vast cave. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 8,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 56,
+    "mono": true
+   },
+   "duration": 6.78,
+   "bytes": 44153,
+   "steps": null,
+   "loudness": {
+    "lufs": -10.7,
+    "peak": -4,
+    "lra": 16.9
+   }
+  },
+  {
+   "id": "cr_bones_collapse",
+   "file": "cr_bones_collapse.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Four separate sounds of a human skeleton falling apart: each a dry clatter and clicking of bones tumbling onto a stone floor and a skull rolling to a stop, each followed by two seconds of silence, close microphone, dry, no voices. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 10,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -4,
+    "kbps": 40,
+    "mono": true,
+    "sheet": true,
+    "stepGap": 1.5,
+    "stepMax": 2.5,
+    "stepMin": 0.4,
+    "splitGap": 1
+   },
+   "duration": 10,
+   "bytes": 47638,
+   "steps": [
+    [
+     0.12,
+     2.31
+    ],
+    [
+     2.43,
+     2.53
+    ],
+    [
+     6.35,
+     0.65
+    ]
+   ],
+   "loudness": {
+    "lufs": -19,
+    "peak": -4,
+    "lra": 21.8
+   }
   }
  ]
 }
