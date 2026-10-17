@@ -11598,17 +11598,17 @@ function buildGreatCavern({ batcher, instances, chunk, room, cell, layout, pos, 
   // is lit from the back, and a fainter wash of the same where the bones are
   // thickest. `lights` are candidates for the pool, which keeps the nearest 14.
   const lx = pos.x + GREAT_LAIR.x; const lz = pos.z + GREAT_LAIR.z;
-  lights.push({ x: lx + 1.6, y: pos.y + 2.4, z: lz + 1.2, color: 0x8fe8b8, intensity: 20, radius: 28 });
-  lights.push({ x: lx - 1.2, y: pos.y + 1.2, z: lz - 1.6, color: 0x6fd0a0, intensity: 3, radius: 11 });
+  lights.push({ x: lx + 1.6, y: pos.y + 3.6, z: lz + 1.2, color: 0x8fe8b8, intensity: 16, radius: 28 });
+  lights.push({ x: lx - 1.2, y: pos.y + 2.6, z: lz - 1.6, color: 0x6fd0a0, intensity: 3.5, radius: 11 });
   // The cold light does not stop at the lair: it lies on the bones where they
   // are thickest, and a pale wash hangs in the dome over the open floor, so
   // that the pillars and the roof are there to be seen and not only the dark.
   for (const [gx, gz] of [[-4.2, 3.4], [-1, 4.8], [4.5, -4.2], [-8.5, -2.5]]) {
-    lights.push({ x: pos.x + gx, y: pos.y + 1.4, z: pos.z + gz, color: 0x7fe0b8, intensity: 3, radius: 8 });
+    lights.push({ x: pos.x + gx, y: pos.y + 3.0, z: pos.z + gz, color: 0x7fe0b8, intensity: 4, radius: 9 });
   }
   // Low and pale, a few to each stretch of open floor, so that whoever walks the dome is not a silhouette.
   for (const [gx, gz] of [[-14, -5], [-19, 0.5], [-21, 6], [-12, 5.5], [-18, -9], [-15.5, 3.2], [-7.5, 5.8], [-9, -8], [-12.2, 3.6]]) {
-    lights.push({ x: pos.x + gx, y: pos.y + 2.4, z: pos.z + gz, color: 0x7fd8b8, intensity: 8, radius: 10 });
+    lights.push({ x: pos.x + gx, y: pos.y + 3.2, z: pos.z + gz, color: 0x7fd8b8, intensity: 9, radius: 11 });
   }
   for (const [gx, gy, gz] of [[-12, 6.5, -2], [-19, 6.5, -8], [-18, 6, 4], [-9, 7, -12], [-19, 6.2, -1]]) {
     lights.push({ x: pos.x + gx, y: pos.y + gy, z: pos.z + gz, color: 0x7fb0b0, intensity: 10, radius: 24 });
