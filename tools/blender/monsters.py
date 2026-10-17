@@ -2868,6 +2868,8 @@ def dracolich():
                 patch=yellow, h=0.02, tris=7200, mat="bone")
     spec["bones"] = B.quad_bones(L)
     spec["clips"] = B.quad_clips
+    # The dracolich alone has a `heap` and a `rise` (beasts.dracolich_rise).
+    spec["gait"] = dict(D["gait"], rise=True)
     return spec
 
 

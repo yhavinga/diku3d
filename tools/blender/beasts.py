@@ -707,10 +707,13 @@ class Poser:
         b = self.bones[name]
         return self.rest[name] @ V((0, b.length, 0))
 
-    def solve(self, fk, root_loc=V((0, 0, 0)), root_rot=None, ik=None):
+    def solve(self, fk, root_loc=V((0, 0, 0)), root_rot=None, ik=None, off=None):
         """fk: bone -> (pitch, yaw, roll) degrees. ik: leg -> (toe_target,
-        meta_dir, toe_dir) in armature space. Returns bone -> basis quaternion
-        and the root location."""
+        meta_dir, toe_dir) in armature space. `off`: bone -> metres, a
+        displacement of that bone in armature space on top of its place in
+        the chain (a clip's translation track: a bone slid out of its
+        socket, which no rotation can do). A bone on an IK leg takes none.
+        Returns bone -> basis quaternion and the root location."""
         ik = ik or {}
         M = {}
         basis = {}
@@ -739,6 +742,11 @@ class Poser:
                 M[name] = chain @ q.to_matrix().to_4x4()
                 continue
             q = fk_quat(fk.get(name))
+            if off and name in off:
+                loc = chain.to_3x3().inverted() @ V(off[name])
+                basis[name] = (q, loc)
+                M[name] = chain @ mathutils.Matrix.Translation(loc) @ q.to_matrix().to_4x4()
+                continue
             basis[name] = (q, None)
             M[name] = chain @ q.to_matrix().to_4x4()
         self.M = M
@@ -3233,7 +3241,7 @@ class Clip:
             loc0 = V(pose.get("loc", V((0, 0, 0))))
             before = poser.overreach
             poser.overreach = 0.0
-            basis = poser.solve(pose.get("fk", {}), loc0, pose.get("rot"), pose.get("ik"))
+            basis = poser.solve(pose.get("fk", {}), loc0, pose.get("rot"), pose.get("ik"), pose.get("off"))
             # A planted foot the leg cannot reach is dragged: the solver
             # clamps the ankle and the toe tip leaves its mark on the ground.
             # The body comes down to the foot instead -- a few millimetres
@@ -3246,22 +3254,27 @@ class Clip:
                         break
                     trial = best[1] + V((0, 0, sign * best[0] * 1.2))
                     poser.overreach = 0.0
-                    poser.solve(pose.get("fk", {}), trial, pose.get("rot"), pose.get("ik"))
+                    poser.solve(pose.get("fk", {}), trial, pose.get("rot"), pose.get("ik"), pose.get("off"))
                     if poser.overreach >= best[0]:
                         break
                     best = (poser.overreach, trial)
             if best[1] != loc0:
                 pose["loc"] = best[1]
             poser.overreach = 0.0
-            basis = poser.solve(pose.get("fk", {}), best[1], pose.get("rot"), pose.get("ik"))
+            basis = poser.solve(pose.get("fk", {}), best[1], pose.get("rot"), pose.get("ik"), pose.get("off"))
             poser.overreach = max(before, poser.overreach)
             limp = pose.get("limp", 0.0)
-            if limp > 0.0 and pose.get("ik"):
-                loose = poser.solve(pose.get("fk", {}), pose.get("loc", V((0, 0, 0))), pose.get("rot"), None)
+            if (max(limp.values()) if isinstance(limp, dict) else limp) > 0.0 and pose.get("ik"):
+                loose = poser.solve(pose.get("fk", {}), pose.get("loc", V((0, 0, 0))), pose.get("rot"), None, pose.get("off"))
                 for name_, (q, loc) in list(basis.items()):
                     if name_ in poser.leg_of:
-                        basis[name_] = (q.slerp(loose[name_][0], limp), loc)
-                poser.solve(pose.get("fk", {}), pose.get("loc", V((0, 0, 0))), pose.get("rot"), None)
+                        # One number for all four legs, or one per leg: the
+                        # dracolich gets its forelegs under it before its hind.
+                        w = limp[poser.leg_of[name_]] if isinstance(limp, dict) else limp
+                        if loc is None and loose[name_][1] is not None:
+                            loc = loose[name_][1] * w
+                        basis[name_] = (q.slerp(loose[name_][0], w), loc)
+                poser.solve(pose.get("fk", {}), pose.get("loc", V((0, 0, 0))), pose.get("rot"), None, pose.get("off"))
             for name_, (q, loc) in basis.items():
                 prev = last.get(name_)
                 if prev is not None and prev.dot(q) < 0:
@@ -3612,6 +3625,9 @@ def quad_clips(arm, spec):
             # Away from its hoard a dragon still lies down the same way.
             clip.run("loaf", 120, lair, step=2)
 
+    if g.get("rise"):
+        dracolich_rise(clip, poser, rest, g, idle, necks, tails, bones, height, root_h)
+
     if g.get("pastimes"):
         quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pitch, height, bones)
 
@@ -3619,6 +3635,303 @@ def quad_clips(arm, spec):
     report["stride"] = {"walk": S, "run": S2}
     report["overreach"] = clip.reach
     return report
+
+
+def _mix_fk(a, b, k):
+    """Blend two fk dicts bone by bone: angles lerped, a wing's rotation
+    order taken from `b`. k may be a number or a function of the bone name."""
+    out = {}
+    for n in set(a) | set(b):
+        w = k(n) if callable(k) else k
+        x, y = a.get(n, (0, 0, 0)), b.get(n, (0, 0, 0))
+        if w >= 1.0:
+            out[n] = tuple(y)
+        elif w <= 0.0:
+            out[n] = tuple(x)
+        else:
+            v = tuple(x[i] + (y[i] - x[i]) * w for i in range(3))
+            order = y[3] if len(y) > 3 else (x[3] if len(x) > 3 else None)
+            out[n] = v + ((order,) if order else ())
+    return out
+
+
+def _mix_off(a, b, k):
+    out = {}
+    for n in set(a) | set(b):
+        w = k(n) if callable(k) else k
+        out[n] = V(a.get(n, V((0, 0, 0)))).lerp(V(b.get(n, V((0, 0, 0)))), max(0.0, min(1.0, w)))
+    return out
+
+
+def dracolich_rise(clip, poser, rest, g, idle, necks, tails, bones, height, root_h):
+    """`heap` and `rise` for the dracolich alone. The heap is what is left of
+    a dragon that died where it lay: rolled onto its side, the ribcage
+    twisted off the spine, the neck folded round with the skull on its cheek,
+    the legs thrown out, the wings a tangle, the tail in loose coils, and
+    bones slid out of their sockets (translation tracks: no rotation does
+    that). `rise` runs from the heap to the first frame of `idle`, so the
+    crossfade after it has nothing to hide."""
+    S = lambda n: 1 if n.endswith(".L") else -1
+    legs = poser.legs
+    allb = [n for n in poser.order if poser.bones[n].parent is not None]
+    Z = V((0, 0, 0))
+
+    FLOOR = 0.07
+
+    def fit(names, fk, loc, rot, off, flat=1.0, reach=1.9, sweeps=5):
+        """Coordinate descent on `names`' angles: lay them on the floor, in
+        reach of the heap's middle, nothing through the ground. Deterministic,
+        so the model builds the same every time; the pose is found, not
+        hand-guessed, because a rigid bone's angles do not say where its far
+        end lands once nine bones above it have been twisted."""
+        everyone = [n for n in poser.order]
+
+        def cost():
+            poser.solve(fk, loc, rot, None, off)
+            c = 0.0
+            for n in everyone:
+                for end in (False, True):
+                    p = poser.world_of(n, tail=end)
+                    c += 300.0 * max(0.0, FLOOR - p.z) ** 2
+            for n in names:
+                p = poser.world_of(n)
+                c += flat * max(0.0, p.z - 0.3)
+                r = math.hypot(p.x, p.y - 0.0)
+                c += 2.0 * max(0.0, r - reach) ** 2
+            return c
+        best = cost()
+        for sweep in range(sweeps):
+            step = (50.0, 32.0, 20.0, 11.0, 5.0)[min(sweep, 4)]
+            for n in names:
+                cur = tuple(fk.get(n, (0, 0, 0)))
+                for comp in range(3):
+                    for d in (-step, step):
+                        trial = list(cur)
+                        trial[comp] = cur[comp] + d
+                        old = fk.get(n)
+                        fk[n] = tuple(trial) + tuple(cur[3:])
+                        c = cost()
+                        if c < best - 1e-6:
+                            best = c
+                            cur = fk[n]
+                        else:
+                            if old is None:
+                                fk.pop(n, None)
+                            else:
+                                fk[n] = old
+                    fk[n] = cur
+        return best
+
+    def lay_wings(fk, loc, rot, off, spread=1.6):
+        """Each wing flat on the floor, thrown out to the side. A grid over
+        the three angles of the arm and then of the finger-bone, because
+        descent stalls on a wing standing straight up (the way out is a
+        quarter turn the cost cannot see)."""
+        grid = (-90, -60, -30, 0, 30, 60, 90)
+        for sd, t in ((1, ".L"), (-1, ".R")):
+            for name, goal_x, order in (("wing1" + t, 1.1, "YXZ"), ("wing2" + t, spread, None)):
+                best = (1e9, None)
+                for a in grid:
+                    for b in grid:
+                        for c in grid:
+                            fk[name] = (a, b, c) + ((order,) if order else ())
+                            poser.solve(fk, loc, rot, None, off)
+                            p = poser.world_of(name)
+                            cost = 5.0 * (p.z - 0.12) ** 2 + (abs(p.x) - goal_x) ** 2 + 0.2 * (p.y + 0.3) ** 2
+                            lowest = min(poser.world_of(n, tail=True).z for n in ("wing1" + t, name))
+                            if lowest < FLOOR - 0.02:
+                                cost += 10.0
+                            if cost < best[0]:
+                                best = (cost, fk[name])
+                fk[name] = best[1]
+
+    def heap_base():
+        fk = {"pelvis": (-4, 6, 0), "spine": (6, 14, 40), "chest": (10, -24, 80),
+              "neck": (30, 40, 30), "neck2": (34, 44, 10), "neck3": (22, 30, 0),
+              "head": (26, 18, 80), "jaw": (-24, 0, 0)}
+        for i, n in enumerate(tails):
+            fk[n] = (2, -30 - 4 * i, 0)
+        for sd, t in ((1, ".L"), (-1, ".R")):
+            fk["wing1" + t] = (0, 0, 0, "YXZ")
+            fk["wing2" + t] = (0, 0, 0)
+            fk["scapula" + t] = (sd * 8, sd * 20, 0)
+        for leg, info in legs.items():
+            up, lo, meta, toe = info["chain"]
+            sd = S(leg)
+            fk[up] = (-20 * (1 if info["kind"] == "hind" else -1), sd * 40, 0)
+            fk[lo] = (60 if info["kind"] == "hind" else -50, 0, 0)
+            fk[meta] = (-30, 0, 0)
+            fk[toe] = (20, 0, 0)
+        off = {n: Z for n in allb}
+        off.update({"spine": V((0.1, -0.12, 0.0)), "chest": V((0.22, -0.3, 0.0)), "neck": V((0.1, -0.2, 0.0)),
+                    "neck2": V((-0.1, -0.1, 0.0)), "head": V((-0.05, -0.1, 0.0)), "jaw": V((0.02, -0.04, -0.02)),
+                    "wing1.L": V((0.1, -0.1, 0.0)), "wing1.R": V((-0.2, -0.3, 0.0)),
+                    "scapula.L": V((0.12, 0.2, 0.0)), "scapula.R": V((-0.2, -0.1, 0.0)),
+                    "tail1": V((0.12, 0.0, 0.0)), "tail3": V((-0.2, 0.1, 0.0)), "tail5": V((0.15, 0.2, 0.0))})
+        loc = V((0.0, 0.0, -(root_h - 0.5)))
+        rot = None
+        # Wings first (they are the tallest), then the tail, then each leg.
+        lay_wings(fk, loc, rot, off)
+        fit(list(tails), fk, loc, rot, off, reach=2.0)
+        for leg, info in legs.items():
+            fit(list(info["chain"]), fk, loc, rot, off, reach=1.7)
+        fit(list(necks) + ["head"], fk, loc, rot, off, reach=1.9)
+        return fk, off
+
+    HF, HO = heap_base()
+    HROT = None
+    HLOC = V((0.0, 0.0, -(root_h - 0.5)))
+
+    def heap(t):
+        k = math.exp(-((t - 0.3) * 24) ** 2)
+        k2 = math.exp(-((t - 0.72) * 30) ** 2)
+        fk = dict(HF)
+        fk["jaw"] = (HF["jaw"][0] + 3 * k, 0, 0)
+        fk["tail6"] = (HF["tail6"][0], HF["tail6"][1] + 7 * k2, 0)
+        fk["wing2.R"] = (HF["wing2.R"][0] + 5 * k, HF["wing2.R"][1], HF["wing2.R"][2])
+        off = dict(HO)
+        off["wing2.L"] = V((0.0, 0.0, 0.025 * k2))
+        off["head"] = HO["head"] + V((0.0, 0.015 * k, 0.0))
+        return dict(fk=fk, loc=HLOC, rot=HROT, off=off, ik=None)
+    clip.run("heap", 150, heap, step=2)
+
+    # ---- rise: five waypoints, 4.0 s. Each is a whole pose; between them the
+    # bones ease (overshooting where something heavy lands) and in the first
+    # stretch each segment of the spine goes home in its own time, tail first.
+    DUR = 4.0
+    TIMES = (0.0, 1.2, 2.4, 3.2, 3.6, 4.0)
+    base = idle(0.0)
+    ik0 = base["ik"]
+    ik_up = dict(ik0)
+    for leg in legs:
+        if legs[leg]["kind"] == "fore":
+            ik_up[leg] = planted(rest, leg, fwd=-0.25, up=0.5, meta=-30)
+
+    def straight():
+        fk = {n: (0, 0, 0) for n in list(tails) + ["pelvis", "spine", "chest"]}
+        fk.update({n: ((38, 12, -18)[min(i, 2)], 0, 0) for i, n in enumerate(necks)})
+        fk["head"] = (22, 0, 0)
+        fk["jaw"] = (-12, 0, 0)
+        return fk
+    W1 = HF.copy()
+    W1.update(straight())
+    W1o = dict(HO)
+    for n in list(tails) + ["pelvis", "spine", "chest", "head", "jaw"] + list(necks):
+        W1o[n] = Z
+    # Straightened, the wings and legs have to be laid down again: their
+    # angles were found against a ribcage rolled on its side.
+    W1loc = V((0, 0, -(root_h - 0.55)))
+    W1["wing1.L"] = (0, 0, 0, "YXZ")
+    W1["wing1.R"] = (0, 0, 0, "YXZ")
+    for n in ("wing2.L", "wing2.R"):
+        W1[n] = (0, 0, 0)
+    lay_wings(W1, W1loc, None, W1o, spread=2.0)
+    for leg, info in legs.items():
+        fit(list(info["chain"]), W1, W1loc, None, W1o, reach=1.8)
+    # The tail lies out behind, following the floor down from the pelvis.
+    for n, d in zip(tails, (11, 4, 1, -1, -5, -6)):
+        W1[n] = (d, 0, 0)
+    W2 = dict(W1)
+    W2.update({n: (0, 0, 0) for n in ("pelvis", "spine")})
+    W2["chest"] = (-10, 0, 0)
+    for i, n in enumerate(necks):
+        W2[n] = (14, 0, 0)
+    W2["head"] = (16, 0, 0)
+    W2["jaw"] = (-8, 0, 0)
+    for sd, t in ((1, ".L"), (-1, ".R")):
+        W2["wing1" + t] = W1["wing1" + t]
+        W2["wing2" + t] = W1["wing2" + t]
+    W2o = {n: Z for n in allb}
+    W3 = dict(W2)
+    W3.update(wings(open_=0.82, flap=-14))
+    W3["wing2.L"] = (6, 14, 6)
+    W3["wing2.R"] = (-4, -18, -8)
+    for i, n in enumerate(necks):
+        W3[n] = (-8, 8 + 6 * i, 0)
+    W3["head"] = (-12, 14, 0)
+    W3["jaw"] = (-18, 0, 0)
+    W3["chest"] = (-4, 0, 0)
+    W4 = dict(W3)
+    W4.update(wings(open_=1.0, flap=18))
+    W4["wing2.L"] = (-6, 8, 0)
+    W4["wing2.R"] = (-6, -8, 0)
+    for i, n in enumerate(necks):
+        W4[n] = (-16, 0, 0)
+    W4["head"] = (-24, 0, 0)
+    W4["jaw"] = (-40, 0, 0)
+    W4["chest"] = (-14, 0, 0)
+    W4["pelvis"] = (6, 0, 0)
+    WP = [dict(fk=HF, off=HO, loc=HLOC, rot=None, ik=ik0, limp={l: 1.0 for l in legs}),
+          dict(fk=W1, off=W1o, loc=W1loc, rot=None, ik=ik0, limp={l: 1.0 for l in legs}),
+          dict(fk=W2, off=W2o, loc=V((0, 0, -0.62)), rot=mathutils.Quaternion(V((1, 0, 0)), math.radians(-7)), ik=ik0,
+               limp={l: (0.0 if legs[l]["kind"] == "fore" else 0.55) for l in legs}),
+          dict(fk=W3, off=W2o, loc=V((0, 0, -0.18)), rot=None, ik=ik0, limp={l: 0.0 for l in legs}),
+          dict(fk=W4, off=W2o, loc=V((0, 0.12, 0.02)), rot=mathutils.Quaternion(V((1, 0, 0)), math.radians(-17)), ik=ik_up,
+               limp={l: 0.0 for l in legs}),
+          dict(fk=base["fk"], off=W2o, loc=base["loc"], rot=None, ik=ik0, limp={l: 0.0 for l in legs})]
+    # Spine, tail and neck go home one segment after another.
+    ORDER = list(reversed(tails)) + ["pelvis", "spine", "chest"] + list(necks) + ["head", "jaw"]
+    DELAY = {n: 0.06 * i for i, n in enumerate(ORDER)}
+
+    def e_in_out(u):
+        u = max(0.0, min(1.0, u))
+        return u * u * (3 - 2 * u)
+
+    def e_back(u):
+        u = max(0.0, min(1.0, u))
+        c1, c3 = 1.9, 2.9
+        return 1 + c3 * (u - 1) ** 3 + c1 * (u - 1) ** 2
+
+    def e_in(u):
+        u = max(0.0, min(1.0, u))
+        return u * u
+
+    EASE = (e_in_out, e_in_out, e_back, e_back, e_back)
+
+    def lerp_ik(a, b, k):
+        out = {}
+        for leg in a:
+            (ta, ma, na), (tb, mb, nb) = a[leg], b[leg]
+            out[leg] = (V(ta).lerp(V(tb), k), V(ma).lerp(V(mb), k), V(na).lerp(V(nb), k))
+        return out
+
+    def rise(t):
+        T = t * DUR
+        seg = 0
+        while seg < 4 and T > TIMES[seg + 1]:
+            seg += 1
+        A, B_ = WP[seg], WP[seg + 1]
+        u = (T - TIMES[seg]) / (TIMES[seg + 1] - TIMES[seg])
+        a = EASE[seg](u)
+        if seg == 0:
+            kb = lambda n: e_in_out((T - DELAY.get(n, 0.5)) / 0.34) if n in DELAY else a
+        else:
+            kb = a
+        fk = _mix_fk(A["fk"], B_["fk"], kb)
+        off = _mix_off(A["off"], B_["off"], kb)
+        # Bones twitch before they slide: a shiver in each, in its own window.
+        if seg == 0:
+            for i, n in enumerate(ORDER):
+                d = DELAY[n]
+                win = math.exp(-((T - (d - 0.05)) / 0.18) ** 2)
+                x = fk.get(n, (0, 0, 0))
+                fk[n] = (x[0] + 5 * win * math.sin(46 * T + i), x[1], x[2] + 6 * win * math.sin(38 * T + 2 * i)) + tuple(x[3:])
+        loc = A["loc"].lerp(B_["loc"], a)
+        qa = A["rot"] or mathutils.Quaternion()
+        qb = B_["rot"] or mathutils.Quaternion()
+        rot = qa.slerp(qb, max(0.0, min(1.0, a)))
+        ik = lerp_ik(A["ik"], B_["ik"], max(0.0, min(1.0, a)))
+        limp = {l: A["limp"][l] + (B_["limp"][l] - A["limp"][l]) * max(0.0, min(1.0, a)) for l in legs}
+        # The ragged part: the wings do not open together or smoothly.
+        if seg in (2, 3):
+            for sd, tg in ((1, ".L"), (-1, ".R")):
+                j = math.sin(31 * T + (0 if sd > 0 else 2)) * 5 * (1 - abs(a - 0.5) * 2)
+                x = fk["wing2" + tg]
+                fk["wing2" + tg] = (x[0] + j, x[1], x[2])
+        if seg == 4 and u >= 1.0:
+            return dict(fk=base["fk"], loc=base["loc"], ik=ik0, off=None)
+        return dict(fk=fk, loc=loc, rot=rot if (A["rot"] or B_["rot"]) else None, ik=ik, limp=limp, off=off)
+    clip.run("rise", int(DUR * FPS), rise)
 
 
 def sit_drop(poser, rest, pitch, front_back, hind_only=False):
