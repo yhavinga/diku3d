@@ -159,7 +159,7 @@ export class AssetLibrary {
   materialFor(tag) {
     if (TAG_OVERRIDES.has(tag) && this.materials[TAG_ALIASES[tag]]) return this.materials[TAG_ALIASES[tag]];
     if (this.materials[tag]) return this.materials[tag];
-    if (tag === 'glow') return this.glow();
+    if (tag === 'glow' || tag === 'glowcore') return this.glow();
     const alias = TAG_ALIASES[tag];
     if (alias && this.materials[alias]) return this.materials[alias];
     if (this.extra.has(tag)) return this.extra.get(tag);

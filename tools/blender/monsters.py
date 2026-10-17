@@ -2629,19 +2629,41 @@ def camel():
 
 def dracolich():
     """The dracolich: the dragon of beasts.py with the dragon taken off it.
-    Its own skeleton, on the same bones -- a skull with empty orbits and a
-    light in each, a jaw of teeth, vertebrae down the neck, back and tail
-    with their spines, a basket of ribs, the girdles, the long bones of the
-    legs with knuckled joints, and the wings as bare finger-bones hung with
-    a few rags of membrane. `bone` is painted in its vertices; the rags and
-    the scraps of flesh are the coat."""
+    Its own skeleton, on the same bones -- a long horned skull with deep
+    orbits and bared, uneven teeth, vertebrae down the neck, back and tail
+    each with a hooked spine, a basket of ribs you can see through, the
+    girdles, the long bones of the legs with knuckled joints, and the wings
+    as bare finger-bones hung with rags of membrane. Aged bone: ivory worn
+    to yellow, cracks and joints dark (`weather`), with strands of dried
+    sinew still on it. Green fire burns in the orbits (`eye`) and in the
+    ribcage (`ribglow`, its own tag so the viewer can kindle them apart).
+    The rig is the dragon's, bone for bone."""
     D = B.dragon()
     L = D["L"]
     spine, neck, tail = L["spine"], L["neck"], L["tail"]
     bone_c = (0.0, 0.0)
+
+    # Weathering, in the vertex masks the viewer mixes (R pale, G points,
+    # B a noise it thresholds into patches): bleached on the tops, dark in
+    # cracks and the grime of the undersides, yellowed in patches.
+    def weather(co, n, pale, dark):
+        crack = B.patch_noise(co, cell=0.05, seed=21)
+        dirt = B.patch_noise(co, cell=0.17, seed=5)
+        d = (np.clip((crack - 0.72) / 0.12, 0, 1) * 0.8 + np.clip((dirt - 0.8) / 0.15, 0, 1) * 0.4
+             + np.clip((-n[:, 2] - 0.4) / 0.5, 0, 1) * 0.3)
+        d = np.clip(d, 0, 1)
+        p = np.clip((n[:, 2] - 0.35) / 0.5, 0, 1) * 0.6 * (1 - d)
+        return p, d
+
+    def yellow(co):
+        return B.patch_noise(co, cell=0.2, seed=9)
+
+    def bone_part(solids, tris, name, smooth=1, h=0.014):
+        return B.sdf_part(solids, h, tris, name, "bone", smooth=smooth, mask_fn=weather, patch_fn=yellow)
+
     body = []
-    # Vertebrae: a knuckle per joint along neck, back and tail, and a spine
-    # standing up from each.
+    # Vertebrae: a knuckle per joint along neck, back and tail, and a hooked
+    # spine standing up from each.
     # From the skull back: each entry is a joint and the bone of the segment
     # that runs from it to the next.
     col = [(neck[3], "neck3"), (neck[2], "neck2"), (neck[1], "neck"), (neck[0], "chest"),
@@ -2651,14 +2673,22 @@ def dracolich():
     for i in range(len(col) - 1):
         a, b = pts[i], pts[i + 1]
         nm = col[i][1]
-        r = 0.09 if a.y > -1.2 else max(0.03, 0.09 * (1 + (a.y + 1.2) / 4.5))
-        body.append(cone(P(*a), P(*b), r * 0.55, r * 0.5, nm, blend=0.02, group="col"))
+        r = 0.115 if a.y > -1.2 else max(0.04, 0.115 * (1 + (a.y + 1.2) / 4.5))
+        body.append(cone(P(*a), P(*b), r * 0.5, r * 0.46, nm, blend=0.02, group="col"))
         for k in range(3):
             c = a.lerp(b, (k + 0.5) / 3)
-            body.append(ell(P(*c), (r * 1.05, r * 0.55, r * 0.95), nm, blend=0.03))
-            if a.y > -3.5:
-                body.append(cone(P(c.x, c.y, c.z + r * 0.6), P(c.x, c.y - 0.06, c.z + r * 2.4), r * 0.3, r * 0.08, nm, blend=0.02))
-    # Ribs: pairs of arcs hung from the back, closing on a keel of sternum.
+            # A disc of bone with a waist between it and the next, so the
+            # column reads as separate vertebrae and not one rod.
+            body.append(ell(P(*c), (r * 1.15, r * 0.5, r * 1.0), nm, blend=0.03))
+            if a.y > -4.2 and k != 1:
+                h = r * (3.4 if a.y > -1.5 else 2.6)
+                base = P(c.x, c.y, c.z + r * 0.7)
+                mid = P(c.x, c.y - 0.01, c.z + r * 0.7 + h * 0.6)
+                tip = P(c.x, c.y - 0.11 * h / r * 0.3, c.z + r * 0.7 + h)
+                body.append(cone(base, mid, r * 0.34, r * 0.2, nm, blend=0.015, group="sp%d%d" % (i, k)))
+                body.append(cone(mid, tip, r * 0.2, r * 0.03, nm, blend=0.015, group="sp%d%d" % (i, k)))
+    # Ribs: pairs of arcs hung from the back, thick at the spine and tapering,
+    # with a hand's breadth of air between; a keel of sternum under them.
     for k in range(8):
         f = 0.75 - k * 0.2
         top = 1.62 - abs(f - 0.2) * 0.04
@@ -2667,26 +2697,40 @@ def dracolich():
         for side in (1, -1):
             arc = [(side * 0.08, f, top), (side * 0.42, f - 0.04, top - 0.2), (side * 0.52, f - 0.1, top - depth * 0.55),
                    (side * 0.36, f - 0.16, top - depth * 0.95), (side * 0.06, f - 0.18, top - depth * 1.05)]
-            for j in range(len(arc) - 1):
-                body.append(cone(P(*arc[j]), P(*arc[j + 1]), 0.035, 0.03, bone_, blend=0.01, group="rib%d%d" % (k, side)))
-    body.append(cone(P(0, 0.72, 0.62), P(0, -0.3, 0.68), 0.05, 0.035, ("grad", "chest", "spine", P(0, 0.7, 0), P(0, -0.3, 0)), blend=0.03))
-    # Pelvis and shoulder blades.
-    body.append(ell(P(0, -0.8, 1.45), (0.36, 0.3, 0.1), "pelvis", blend=0.05, rot=(20, 0, 0)))
+            # Two of them are snapped short, as an old carcass has.
+            end = len(arc) - 1 - (1 if (k * 3 + (side > 0)) % 7 == 4 else 0)
+            for j in range(end):
+                body.append(cone(P(*arc[j]), P(*arc[j + 1]), 0.05 - j * 0.006, 0.044 - j * 0.006, bone_, blend=0.01,
+                                 group="rib%d%d" % (k, side)))
+    body.append(cone(P(0, 0.72, 0.62), P(0, -0.3, 0.68), 0.04, 0.03, ("grad", "chest", "spine", P(0, 0.7, 0), P(0, -0.3, 0)), blend=0.03))
+    # Pelvis: the sacrum plate, two iliac blades swept up and out, the pubic bar.
+    body.append(ell(P(0, -0.8, 1.45), (0.3, 0.3, 0.09), "pelvis", blend=0.05, rot=(20, 0, 0)))
     for side in (1, -1):
-        body.append(ell(P(side * 0.34, 0.5, 1.55), (0.06, 0.3, 0.2), "scapula" + (".L" if side > 0 else ".R"), blend=0.04, rot=(30, 0, 0)))
-    # The skull: a long case of bone with the orbits and nasal holes cut out.
-    body += [ell(P(0, 2.4, 2.72), (0.19, 0.28, 0.16), "head", blend=0.05),
-             cone(P(0, 2.5, 2.66), P(0, 2.92, 2.5), 0.13, 0.07, "head", blend=0.05, squash=(1.0, 1.0, 0.7)),
-             ell(P(0.12, 2.52, 2.78), (0.075, 0.08, 0.06), "head", blend=0.02, neg=True),
-             ell(P(-0.12, 2.52, 2.78), (0.075, 0.08, 0.06), "head", blend=0.02, neg=True),
-             ell(P(0, 2.9, 2.55), (0.05, 0.04, 0.03), "head", blend=0.01, neg=True),
-             ell(P(0.15, 2.3, 2.68), (0.07, 0.1, 0.06), "head", blend=0.02, neg=True),
-             ell(P(-0.15, 2.3, 2.68), (0.07, 0.1, 0.06), "head", blend=0.02, neg=True)]
-    for s in body:
+        body.append(ell(P(side * 0.3, -0.72, 1.46), (0.1, 0.34, 0.07), "pelvis", blend=0.04, rot=(10, 0, -side * 35)))
+        body.append(cone(P(side * 0.22, -0.95, 1.3), P(side * 0.1, -1.1, 1.0), 0.05, 0.035, "pelvis", blend=0.03))
+    # Shoulder blades: broad plates with a ridge, rocking on the ribs.
+    for side in (1, -1):
+        t = ".L" if side > 0 else ".R"
+        body.append(ell(P(side * 0.34, 0.5, 1.58), (0.035, 0.3, 0.2), "scapula" + t, blend=0.04, rot=(30, 0, 0)))
+        body.append(cone(P(side * 0.36, 0.7, 1.45), P(side * 0.32, 0.3, 1.78), 0.05, 0.035, "scapula" + t, blend=0.03))
+    # The skull: a long case of bone with a nasal ridge, heavy brows over
+    # orbits cut deep, a cheek arch, and the nostrils and temples carved out.
+    skull = [ell(P(0, 2.4, 2.72), (0.23, 0.35, 0.2), "head", blend=0.05),
+             cone(P(0, 2.55, 2.68), P(0, 3.0, 2.5), 0.15, 0.075, "head", blend=0.05, squash=(1.0, 1.0, 0.72)),
+             cone(P(0, 2.56, 2.85), P(0, 2.98, 2.62), 0.04, 0.03, "head", blend=0.03),
+             ell(P(0, 2.2, 2.84), (0.1, 0.12, 0.05), "head", blend=0.03)]
+    for side in (1, -1):
+        skull += [ell(P(side * 0.15, 2.5, 2.88), (0.1, 0.13, 0.04), "head", blend=0.03, rot=(0, 0, side * 14)),
+                 cone(P(side * 0.19, 2.4, 2.7), P(side * 0.15, 2.7, 2.6), 0.032, 0.028, "head", blend=0.02),
+                 cone(P(side * 0.17, 2.26, 2.64), P(side * 0.3, 2.1, 2.62), 0.05, 0.015, "head", blend=0.02),
+                 ell(P(side * 0.13, 2.52, 2.8), (0.085, 0.1, 0.075), "head", blend=0.02, neg=True),
+                 ell(P(side * 0.04, 2.97, 2.56), (0.04, 0.045, 0.03), "head", blend=0.01, neg=True),
+                 ell(P(side * 0.19, 2.32, 2.7), (0.06, 0.1, 0.07), "head", blend=0.02, neg=True)]
+    for s in body + skull:
         s.mask = bone_c
 
     def masks(co, n, pale, dark):
-        return pale * 0, dark * 0
+        return weather(co, n, pale, dark)
 
     def leg_bones():
         out = []
@@ -2695,76 +2739,133 @@ def dracolich():
                 t = ".L" if side > 0 else ".R"
                 q = [B.apply_side(p, side) for p in L[kind]]
                 names = [nm + t for nm in B.LEG_BONES[kind]]
-                radii = (0.08, 0.06, 0.05, 0.04)
+                radii = (0.095, 0.07, 0.055, 0.045)
                 s = []
                 for i in range(3):
                     a, b = V(q[i]), V(q[i + 1])
-                    s.append(cone(P(*a), P(*b), radii[i], radii[i] * 0.8, names[i], blend=0.02, group="l"))
-                    s.append(ell(P(*a), (radii[i] * 1.6,) * 3, names[i], blend=0.04))
-                s.append(ell(P(*q[3]), (0.09, 0.09, 0.06), names[3], blend=0.03))
+                    s.append(cone(P(*a), P(*b), radii[i], radii[i] * 0.72, names[i], blend=0.02, group="l"))
+                    s.append(ell(P(*a), (radii[i] * 1.7,) * 3, names[i], blend=0.04))
+                s.append(ell(P(*q[3]), (0.1, 0.1, 0.065), names[3], blend=0.03))
                 s.append(cone(P(*q[3]), P(*q[4]), 0.05, 0.035, names[3], blend=0.02))
-                out.append(B.sdf_part(s, 0.018, 260, "legbone", "bone", smooth=1))
+                out.append(bone_part(s, 360, "legbone", h=0.018))
         return out
+
+    def strand(p0, p1, sag, r, bone, name):
+        """A strip of dried sinew between two points, hanging a little."""
+        a, b = V(p0), V(p1)
+        m = a.lerp(b, 0.5) + V((0, 0, -sag))
+        return [cone(P(*a), P(*m), r, r * 0.8, bone, blend=0.01, group=name),
+                cone(P(*m), P(*b), r * 0.8, r * 0.5, bone, blend=0.01, group=name)]
 
     def parts(body_solids):
         out = leg_bones()
-        jaw = [cone(P(0, 2.32, 2.54), P(0, 2.86, 2.38), 0.1, 0.05, "jaw", blend=0.04, squash=(0.9, 1, 0.45)),
-               ell(P(0, 2.55, 2.5), (0.07, 0.2, 0.05), "jaw", blend=0.02, neg=True)]
-        out.append(B.sdf_part(jaw, 0.012, 300, "jaw", "bone", smooth=1))
+        # The skull is its own part, at twice the body's resolution: it is
+        # the one thing looked at from a metre away.
+        out.append(B.sdf_part(skull, 0.006, 3600, "skull", "bone", smooth=3, mask_fn=weather, patch_fn=yellow))
+        # Lower jaw: a bone with a gap where the flesh was, hinged at the skull.
+        jaw = [cone(P(0, 2.3, 2.54), P(0, 2.92, 2.38), 0.11, 0.05, "jaw", blend=0.04, squash=(0.9, 1, 0.45)),
+               ell(P(0, 2.55, 2.5), (0.07, 0.2, 0.05), "jaw", blend=0.02, neg=True),
+               cone(P(0.13, 2.28, 2.5), P(0.16, 2.2, 2.62), 0.035, 0.03, "jaw", blend=0.02),
+               cone(P(-0.13, 2.28, 2.5), P(-0.16, 2.2, 2.62), 0.035, 0.03, "jaw", blend=0.02)]
+        out.append(bone_part(jaw, 320, "jaw", h=0.012))
+        # Teeth: long fangs in front and uneven rows behind, a few broken.
         teeth = []
-        for i in range(7):
-            f = 2.42 + i * 0.07
-            for x in (0.075, -0.075):
+        for i in range(8):
+            f = 2.46 + i * 0.07
+            for x in (0.082, -0.082):
                 w = x * (1 - i * 0.07)
-                teeth.append(cone(P(w, f, 2.52), P(w, f + 0.012, 2.43), 0.02, 0.004, "head", blend=0.004, group="t%d%d" % (i, x > 0)))
-                teeth.append(cone(P(w * 0.9, f - 0.02, 2.44), P(w * 0.9, f - 0.01, 2.51), 0.016, 0.004, "jaw", blend=0.004, group="b%d%d" % (i, x > 0)))
-        out.append(B.solid_part(teeth, 0.008, 300, "teeth", "horn", (0.62, 0.58, 0.46), smooth=0))
-        # A light where each eye was.
+                ln = (0.16 if i in (0, 1) else 0.085 + 0.025 * ((i * 5 + (x > 0)) % 3)) * (0.5 if (i * 3 + (x > 0)) % 8 == 5 else 1.0)
+                teeth.append(cone(P(w, f, 2.52), P(w * 1.02, f + 0.012, 2.52 - ln), 0.022, 0.004, "head", blend=0.004, group="t%d%d" % (i, x > 0)))
+                lb = 0.07 + 0.02 * ((i * 7 + (x > 0)) % 3)
+                teeth.append(cone(P(w * 0.9, f - 0.02, 2.44), P(w * 0.9, f - 0.012, 2.44 + lb), 0.017, 0.004, "jaw", blend=0.004, group="b%d%d" % (i, x > 0)))
+        out.append(B.solid_part(teeth, 0.008, 420, "teeth", "horn", (0.72, 0.66, 0.5), smooth=0))
+        # A light where each eye was, and one burning in the ribs.
         for side in (1, -1):
-            out.append(B.solid_part([ell(P(side * 0.11, 2.53, 2.76), (0.035, 0.035, 0.03), "head", blend=0.004)], 0.006, 60,
+            out.append(B.solid_part([ell(P(side * 0.125, 2.47, 2.78), (0.04, 0.04, 0.035), "head", blend=0.004)], 0.006, 70,
                                     "eye", "glow", (1.0, 1.0, 1.0), smooth=0))
+        # A heart of fire hung in the ribs: a knot with tongues licking up
+        # between them, so it reads as a flame and not a lamp.
+        core = [ell(P(0, 0.1, 0.92), (0.15, 0.22, 0.13), "spine", blend=0.06),
+                ell(P(0, 0.42, 0.95), (0.1, 0.14, 0.1), "chest", blend=0.05),
+                ell(P(0, -0.25, 0.95), (0.1, 0.16, 0.1), "spine", blend=0.05),
+                cone(P(0.03, 0.35, 0.95), P(0.0, 0.4, 1.36), 0.075, 0.012, "chest", blend=0.04),
+                cone(P(-0.04, 0.0, 0.95), P(-0.02, -0.02, 1.4), 0.07, 0.01, "spine", blend=0.04),
+                cone(P(0.05, -0.3, 0.95), P(0.03, -0.3, 1.25), 0.06, 0.01, "spine", blend=0.04),
+                cone(P(0.0, 0.18, 0.9), P(0.02, 0.16, 1.2), 0.06, 0.01, "spine", blend=0.04)]
+        out.append(B.solid_part(core, 0.014, 260, "ribglow", "glowcore", (1.0, 1.0, 1.0), smooth=1))
         for side in (1, -1):
             t = ".L" if side > 0 else ".R"
             h0, h1, _ = L["extra"]["horn*"]
             a, b = B.apply_side(h0, side), B.apply_side(h1, side)
-            mid = V(a).lerp(V(b), 0.5) + V((0, 0, -0.06))
-            horn = [cone(P(*a), P(*mid), 0.07, 0.05, "horn" + t, blend=0.02, group="h"),
-                    cone(P(*mid), P(*b), 0.05, 0.01, "horn" + t, blend=0.02, group="h")]
-            out.append(B.solid_part(horn, 0.012, 160, "horn", "horn", (0.3, 0.27, 0.22)))
-        out += B.claws(L, "fore", 3, 0.16, 0.035, 0.008, colour=(0.2, 0.18, 0.14))
-        out += B.claws(L, "hind", 3, 0.14, 0.035, 0.008, colour=(0.2, 0.18, 0.14))
-        # Wings: arm and finger bones, the membrane in rags between them.
+            a = V(a); b = V(b)
+            d = b - a
+            tip = b + d * 0.9 + V((0, -0.06, 0.12))
+            mid = a.lerp(b, 0.5) + V((0, 0, -0.05))
+            horn = [cone(P(*a), P(*mid), 0.075, 0.055, "horn" + t, blend=0.02, group="h"),
+                    cone(P(*mid), P(*b), 0.055, 0.035, "horn" + t, blend=0.02, group="h"),
+                    cone(P(*b), P(*tip), 0.035, 0.008, "horn" + t, blend=0.02, group="h")]
+            out.append(B.solid_part(horn, 0.012, 230, "horn", "horn", (0.32, 0.28, 0.22)))
+        out += B.claws(L, "fore", 3, 0.2, 0.04, 0.008, colour=(0.2, 0.18, 0.14))
+        out += B.claws(L, "hind", 3, 0.18, 0.04, 0.008, colour=(0.2, 0.18, 0.14))
+        # Wings: arm and finger bones to every tip, the membrane in rags --
+        # radial strips of different lengths, torn, with the air between.
+        tips_ls = ((0.5, -1.35, 1.42), (0.53, -0.85, 1.38), (0.5, -0.35, 1.5), (0.4, 0.2, 1.75))
         for side in (1, -1):
             t = ".L" if side > 0 else ".R"
             sh = V(B.apply_side(L["extra"]["wing1*"][0], side))
             wr = V(B.apply_side(L["extra"]["wing1*"][1], side))
             tip = V(B.apply_side(L["extra"]["wing2*"][1], side))
-            wing = [cone(P(*sh), P(*wr), 0.06, 0.04, "wing1" + t, blend=0.02, group="arm"),
-                    cone(P(*wr), P(*tip), 0.04, 0.012, "wing2" + t, blend=0.02, group="arm")]
-            for (df, dz) in ((-0.4, -0.8), (-0.9, -0.6)):
-                ft = V((tip.x, wr.y + df, wr.z + dz))
-                wing.append(cone(P(*wr), P(*ft), 0.03, 0.01, "wing2" + t, blend=0.02, group="f%d" % int(df * 10)))
-            out.append(B.sdf_part(wing, 0.014, 320, "wingbone", "bone", smooth=1))
-            tilt = 16 * side
-            cen = sh * 0.25 + wr * 0.35 + tip * 0.4 + V((0, 0, -0.25))
-            rag = [ell(P(cen.x, cen.y, cen.z), (0.018, 0.95, 0.45), ("grad", "wing1" + t, "wing2" + t, P(*sh), P(*tip)),
-                       blend=0.03, rot=(0, -tilt, 0))]
+            tips = [tip] + [V(B.apply_side(q, side)) for q in tips_ls]
+            wing = [cone(P(*sh), P(*wr), 0.07, 0.045, "wing1" + t, blend=0.02, group="arm"),
+                    ell(P(*wr), (0.085, 0.085, 0.085), "wing1" + t, blend=0.03),
+                    cone(P(*wr), P(*tip), 0.045, 0.012, "wing2" + t, blend=0.02, group="arm")]
+            for i, ft in enumerate(tips[1:]):
+                wing.append(cone(P(*wr), P(*ft), 0.034, 0.01, "wing2" + t, blend=0.02, group="f%d" % i))
+                wing.append(ell(P(*ft.lerp(wr, 0.5)), (0.04, 0.04, 0.04), "wing2" + t, blend=0.02))
+            out.append(bone_part(wing, 520, "wingbone", h=0.014))
             rng = np.random.default_rng(113 + side)
-            for k in range(9):
-                c = cen + V((0, rng.uniform(-0.9, 0.9), rng.uniform(-0.5, 0.35)))
-                rag.append(ell(P(c.x, c.y, c.z), (0.1, rng.uniform(0.08, 0.22), rng.uniform(0.1, 0.25)), "wing2" + t,
-                               blend=0.03, neg=True))
-            out.append(B.sdf_part(rag, 0.012, 340, "rags", "hide", smooth=1, patch_fn=lambda co: np.zeros(len(co))))
-        # Scraps of dried flesh still clinging: on the neck, the flank, the hip.
-        flesh = [ell(P(0.3, 0.2, 1.3), (0.12, 0.35, 0.3), "spine", blend=0.05),
-                 ell(P(-0.25, -0.5, 1.4), (0.14, 0.3, 0.25), "pelvis", blend=0.05),
-                 ell(P(0, 1.5, 2.1), (0.14, 0.2, 0.16), "neck2", blend=0.05)]
-        out.append(B.sdf_part(flesh, 0.014, 400, "flesh", "hide", smooth=1, patch_fn=lambda co: np.zeros(len(co))))
+            rags = []
+            for i in range(len(tips) - 1):
+                a_, b_ = tips[i], tips[i + 1]
+                for j in range(4):
+                    if rng.random() < 0.3:
+                        continue  # a gap where the membrane is gone
+                    e = a_.lerp(b_, (j + 0.5) / 4)
+                    ln = rng.uniform(0.45, 0.97)
+                    near = wr.lerp(e, 0.18)
+                    far = wr.lerp(e, ln) + V((0, 0, -rng.uniform(0.0, 0.16)))
+                    n_ = (e - wr).cross(b_ - a_)
+                    n_.normalize() if n_.length > 1e-6 else None
+                    sq = tuple(max(0.07, abs(n_[k]) * 0.07 + (1 - abs(n_[k])) * 1.0) for k in range(3))
+                    bone = "wing2" + t if i < 3 else ("grad", "wing1" + t, "wing2" + t, P(*sh), P(*wr))
+                    rags.append(cone(P(*near), P(*far), 0.02, rng.uniform(0.055, 0.11) * ln, bone, blend=0.02, squash=sq, group="m%d%d" % (i, j)))
+            # Scraps hanging off the arm bone's leading edge.
+            for k in range(3):
+                p0 = sh.lerp(wr, 0.25 + 0.25 * k)
+                rags.append(cone(P(*p0), P(*(p0 + V((0.02 * side, -0.25, -0.35 - 0.1 * k)))), 0.03, 0.09, "wing1" + t, blend=0.02, squash=(0.12, 1, 1)))
+            out.append(B.sdf_part(rags, 0.014, 700, "rags", "hide", smooth=1, mask_fn=lambda co, n, p, d: (p * 0, d * 0 + 0.5),
+                                  patch_fn=lambda co: np.zeros(len(co))))
+        # Dried sinew still on it: along the neck, across the jaw, from hip
+        # and shoulder to the long bones, and a few flat scraps of hide.
+        sin = []
+        for i in range(3):
+            a, b = V(neck[i]), V(neck[i + 1])
+            for side in (1, -1):
+                sin += strand(a + V((side * 0.1, 0.0, 0.02)), b + V((side * 0.1, 0.0, 0.02)), 0.05, 0.022,
+                              "neck" if i == 0 else "neck%d" % (i + 1), "sn%d%d" % (i, side))
+        for side in (1, -1):
+            sin += strand(V((side * 0.06, 2.74, 2.48)), V((side * 0.06, 2.7, 2.4)), 0.02, 0.012, "head", "jw%d" % side)
+            sin += strand(V((side * 0.35, -0.9, 1.32)), V((side * 0.46, -0.6, 0.95)), 0.06, 0.03, "thigh" + (".L" if side > 0 else ".R"), "hp%d" % side)
+            sin += strand(V((side * 0.36, 0.6, 1.5)), V((side * 0.45, 0.62, 1.1)), 0.05, 0.028, "upperarm" + (".L" if side > 0 else ".R"), "sh%d" % side)
+            sin.append(ell(P(side * 0.5, 0.15, 1.1), (0.03, 0.22, 0.14), "spine", blend=0.03, rot=(0, 0, side * 10)))
+        sin.append(ell(P(0.0, 1.62, 2.18), (0.09, 0.16, 0.05), "neck2", blend=0.03, rot=(-30, 0, 0)))
+        out.append(B.sdf_part(sin, 0.012, 520, "sinew", "hide", smooth=1, mask_fn=lambda co, n, p, d: (p * 0, d * 0 + 0.75),
+                              patch_fn=lambda co: np.zeros(len(co))))
         return out
 
     spec = dict(D)
     spec.update(name="beast_dracolich", archetype="dracolich", body=body, masks=masks, parts=parts,
-                patch=lambda co: np.zeros(len(co)), h=0.02, tris=3900, mat="bone")
+                patch=yellow, h=0.02, tris=7200, mat="bone")
     spec["bones"] = B.quad_bones(L)
     spec["clips"] = B.quad_clips
     return spec

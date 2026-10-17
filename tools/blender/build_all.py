@@ -150,7 +150,9 @@ BUDGET = {
     # fauna.py: the frogs and the Rock Toad, a cow-sized one seen whole.
     "beast_frog": 3400,
     # Bones are all edges: a rib cage and a spine of knuckles do not decimate.
-    "beast_dracolich": 9600,
+    # Raised from 9600 for the skull (3600 of it: the one part looked at from
+    # a metre), the rag-hung wing frames and the hooked spine on every vertebra.
+    "beast_dracolich": 18000,
     # hybrids.py. A taur is a whole animal and a person to the waist, with a
     # sculpted face and a head of hair: the drider's budget, which is the
     # same thing on eight legs.

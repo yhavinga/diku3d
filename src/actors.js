@@ -1961,7 +1961,7 @@ const BEASTS = [
   { test: /\bcamels?\b/, asset: 'beast_camel', scale: 1.0, coat: 0xb48c5c, pale: 0xd6be96, points: 0x8a6a44, box: [1.9, 3, 'quad', 0xb48c5c] },
   // The dracolich lies as a heap of bones until it rises: its idle is the
   // dragon's `lair`, curled on the floor.
-  { test: /\bdracolich\b/, asset: 'beast_dracolich', scale: 0.8, coat: 0xcfc2a2, pale: 0xd9cfb6, points: 0x8a7e66, glow: 0x70ff9a, lair: true, box: [1.7, 9, 'quad', 0xcfc2a2] },
+  { test: /\bdracolich\b/, asset: 'beast_dracolich', scale: 0.8, coat: 0xe0d2ae, pale: 0xf6f0dc, points: 0x6a5236, patch: 0xc4a468, cover: 0.3, glow: 0x70ff9a, lair: true, box: [1.7, 9, 'quad', 0xcfc2a2] },
   { test: /\bwisps?\b|\bwill-o/, wisp: true, glow: 0xa8e0ff, box: [0.3, 0.3, 'bird', 0xa8e0ff] },
   // --- canines. Two ear sets are modelled; `hide` collapses the one a breed
   // does not have.
@@ -2231,7 +2231,7 @@ function paintedGeometry(asset, node, tag, look) {
   _patch.setHex(look.patch);
   // What glows takes the look's own colour: one pair of eyes, burning green
   // on a basilisk and red on a drow.
-  const horn = new THREE.Color(tag === 'glow' ? (look.glow ?? 0xffffff) : (look.horn ?? 0xffffff));
+  const horn = new THREE.Color(tag === 'glow' || tag === 'glowcore' ? (look.glow ?? 0xffffff) : (look.horn ?? 0xffffff));
   const edge = 1 - (look.cover || 0);
   const bands = look.bands ? look.bands.map((hex) => new THREE.Color(hex)) : null;
   const position = geometry.attributes.position;
