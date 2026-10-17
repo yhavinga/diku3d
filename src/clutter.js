@@ -388,6 +388,8 @@ export const CLUTTER_NAMES = [
   'clutter_painting_portrait', 'clutter_painting_landscape', 'clutter_painting_gathering', 'clutter_mural',
   'clutter_arms', 'clutter_tapestry', 'clutter_web', 'clutter_cocoon', 'clutter_cages', 'clutter_globe',
   'clutter_feast', 'clutter_carcass', 'clutter_pelts', 'clutter_hay', 'clutter_wreckage',
+  // a rich room's: the hunting tapestry, two big hides, and the cloth of the great bed
+  'clutter_tapestry_hunt', 'clutter_pelts_rich', 'clutter_bed_curtains',
   'clutter_chain_run', 'clutter_chain_anchor', 'clutter_arm',
   // tools/blender/statues.py
   'statue_odin', 'altar_marble', 'altar_faces', 'relief_face', 'fire_bed',
@@ -403,6 +405,7 @@ const INDOOR_ONLY = new Set([
   'clutter_sign', 'clutter_painting_portrait', 'clutter_painting_landscape', 'clutter_painting_gathering',
   'clutter_mural', 'clutter_arms', 'clutter_tapestry', 'clutter_cocoon', 'clutter_cages', 'clutter_globe',
   'clutter_pelts', 'clutter_wreckage', 'clutter_hoard', 'clutter_arm',
+  'clutter_tapestry_hunt', 'clutter_pelts_rich', 'clutter_bed_curtains',
   'statue_odin', 'altar_marble', 'altar_faces', 'relief_face', 'fire_bed',
   'statue_imp', 'figurine_dragons', 'millstones',
 ]);
@@ -538,13 +541,14 @@ export function placeClutter(ctx) {
     if (info.unbuilt) continue;
     const room = info.room;
     const asks = readClutter(room);
-    if (!asks.length) continue;
     const pos = worldOf(info.cell);
     const outside = openAir(room);
     const chunk = info.chunk;
     const sides = info.sides || [];
     const swap = info.cell.level < 0 ? BURIED : null;
     const here = byCell.get(cellOf(pos.x, pos.z)) || [];
+    // A great bed is dressed whatever else the room's words ask for.
+    if (!asks.length && !here.some((d) => d.kind === 'piece' && d.piece === 'bed_great')) continue;
     const plan = info.plan || null;
 
     // What is solid in this room, in world coordinates.
@@ -770,6 +774,8 @@ export function placeClutter(ctx) {
     };
 
     const strewn = []; // local rects, for the barrels in actors.js
+    const rich = !outside && LAVISH.test(room.description);
+    const chestsAt = []; // where the chests went, for the candles that stand on them
     let tableAt = null; // the table `seated` set down, for what stands on it
     for (const ask of asks) {
       if (ask.outdoor && !outside) continue;
@@ -791,13 +797,17 @@ export function placeClutter(ctx) {
       if (!spec) continue;
       const n = Math.max(1, ask.count);
       for (let k = 0; k < n; k++) {
+        // A rich room's tapestry is the big hunting one, its furs the big hides.
         const name = ask.kind === 'painting' ? paintingModel(ask.why, k)
+          : ask.kind === 'tapestry' && LAVISH.test(ask.why) ? 'clutter_tapestry_hunt'
+          : ask.kind === 'pelts' && rich ? 'clutter_pelts_rich'
           : spec.models[Math.floor(roll(room.vnum, k, 3) * spec.models.length)];
         if (!library.get(name)) continue;
         let at = null;
         if (ask.at === 'hang' || (ask.kind === 'web' && !outside)) {
           const scale = ask.kind === 'web' ? 0.42 : 1;
-          at = onWall(name, ask, k, { hang: !spec.solid, depthPad: 0.02, scale });
+          at = name === 'clutter_tapestry_hunt' ? richTapestry(name, k)
+            : onWall(name, ask, k, { hang: !spec.solid, depthPad: 0.02, scale });
           if (at) {
             // What the mud says you see when you look at it, for E: the
             // plaque's credits to Hatchet, Kahn and Furey.
@@ -813,6 +823,7 @@ export function placeClutter(ctx) {
         } else if (ask.at === 'wall') {
           at = onWall(name, ask, k, { depthPad: 0.1 }) || onFloor(name, k, { pad: 0.2, ring: [3.2] });
           if (at) { put(name, at.x, at.z, at.rotY, { collide: true }); take(at.r, true); }
+          if (at && ask.kind === 'chest') chestsAt.push({ x: at.x, z: at.z, rotY: at.rotY, top: library.get(name).bounds.max.y });
           // Gold is a mirror, and in a dark lair a mirror of nothing is
           // black: it needs a light of its own to glint by.
           if (at && ask.kind === 'treasure') {
@@ -833,6 +844,12 @@ export function placeClutter(ctx) {
           // never across the middle of one; a heap is walked round.
           const heap = !!spec.solid;
           const scale = heap ? 0.75 : 1;
+          // A rich room's hides lie where a lord would have them: before the
+          // fire, and beside the bed.
+          if (ask.kind === 'pelts' && rich && k < 2) {
+            const spot = richPelt(name, k);
+            if (spot) { put(name, spot.x, spot.z, spot.rotY, { scale: 0.9 }); keep.push(spot.r); continue; }
+          }
           at = onFloor(name, k + 7, { pad: 0.05, ring: [2.4 + (k % 3) * 0.8], spinAny: true, flat: heap ? 'core' : FLAT.has(ask.kind), scale });
           if (at) { put(name, at.x, at.z, at.rotY, { scale, collide: heap }); keep.push(at.r); if (heap) blocked.push(at.r); }
         } else if (ask.at === 'edge' || ask.kind === 'web') {
@@ -843,15 +860,22 @@ export function placeClutter(ctx) {
       }
     }
 
-    // Furs heaped on the great bed (build.js `GREAT_BED`): the pelts model laid
-    // over the blanket, in a room whose words have furs in them.
+    // The great bed (build.js `GREAT_BED`) is dressed: its curtains tied back
+    // at the posts, and in a room whose words have furs in them the hides
+    // heaped over the blanket.
     const great = here.find((d) => d.kind === 'piece' && d.piece === 'bed_great');
-    if (great && /\b(?:furs?|pelts?)\b/i.test(room.description) && library.get('clutter_pelts')) {
+    if (great) {
       const base = FACE_ROT[great.dir];
-      const lz = -ROOM / 2 - (great.face || 0) + great.out + 1.55;
-      const bx = great.x + great.along * Math.cos(base) + lz * Math.sin(base);
-      const bz = great.z - great.along * Math.sin(base) + lz * Math.cos(base);
-      put('clutter_pelts', bx, bz, base + (great.spin || 0) + 0.3, { scale: 0.78, y: pos.y + 0.83 });
+      const spin = base + (great.spin || 0);
+      const at = (lz) => [great.x + great.along * Math.cos(base) + lz * Math.sin(base), great.z - great.along * Math.sin(base) + lz * Math.cos(base)];
+      const wall = -ROOM / 2 - (great.face || 0) + great.out;
+      const [wx, wz] = at(wall);
+      put('clutter_bed_curtains', wx, wz, spin, { y: pos.y });
+      if (/\b(?:furs?|pelts?)\b/i.test(room.description)) {
+        const [bx, bz] = at(wall + 1.5);
+        const hides = library.get('clutter_pelts_rich') ? 'clutter_pelts_rich' : 'clutter_pelts';
+        put(hides, bx, bz, spin + 0.3, { scale: 0.8, y: pos.y + 0.96 });
+      }
     }
     // The barrels actors.js stacks against the walls keep out of all of it.
     const loose = here.find((d) => d.kind === 'clutter' && d.x === pos.x && d.z === pos.z);
@@ -957,6 +981,58 @@ export function placeClutter(ctx) {
       placed++;
     }
 
+    // A tall banner, a different wall for each: 1.4 m wide with its pole, so it hangs between a
+    // pilaster and the corner, 4 m off the middle of the wall. Only what stands
+    // against the wall itself is in its way.
+    function richTapestry(name, k) {
+      const b = library.get(name)?.bounds;
+      if (!b) return null;
+      const walls = [0, 1, 2, 3];
+      const turn = k % 4;
+      const order = [...walls.slice(turn), ...walls.slice(0, turn)];
+      for (const dir of order) {
+        // The doorway's own rectangle (4 m along the wall) is no obstacle to a hanging
+        // well to one side of it.
+        const alongWall = (q) => (DIR_STEP[dir][0] ? q.z1 - q.z0 : q.x1 - q.x0);
+        const onWallPlane = keep.filter((q) => q !== arrive && !lanes.includes(q) && alongWall(q) < 3.9);
+        for (const along of [-4.2, 4.2, -4.15, 4.15, -4.05, 4.05]) {
+          const face = wallAt(dir, along) - 0.02;
+          const [dx, , dz] = DIR_STEP[dir];
+          const x = pos.x + dx * face + (dz ? along : 0); const z = pos.z + dz * face + (dx ? along : 0);
+          const rotY = FACE_ROT[dir];
+          const r = footprint(b, x, z, rotY, 1, 0.02);
+          if ((b.max.x - b.min.x) / 2 + Math.abs(along) > ROOM / 2 - 0.08) continue;
+          if (onWallPlane.some((q) => overlaps(r, q))) continue;
+          return { x, z, rotY, dir, r, y: pos.y };
+        }
+      }
+      return null;
+    }
+
+    // The floor in front of a hearth, or beside the great bed, for a hide.
+    function richPelt(name, k) {
+      const b = library.get(name)?.bounds;
+      if (!b) return null;
+      const hearth = here.find((d) => d.kind === 'fitting' && d.fitting === 'hearth');
+      const bed = here.find((d) => d.kind === 'piece' && d.piece === 'bed_great');
+      const cands = [];
+      const frame = (d, along, out) => {
+        const base = FACE_ROT[d.dir];
+        const lz = -ROOM / 2 - (d.face || 0) + (d.out || 0) + out;
+        return { x: d.x + along * Math.cos(base) + lz * Math.sin(base), z: d.z - along * Math.sin(base) + lz * Math.cos(base), rotY: base };
+      };
+      if (k === 0 && hearth) {
+        const a0 = (hearth.dir === 2 || hearth.dir === 3 ? -1 : 1) * (hearth.shift || 0);
+        for (const out of [2.6, 2.9, 3.2]) cands.push(frame({ ...hearth, out: 0 }, a0, out));
+      }
+      if (bed) for (const side of [1, -1]) for (const out of [1.6, 2.2]) cands.push(frame(bed, bed.along + side * 2.7, out));
+      for (const c of cands) {
+        const r = footprint(b, c.x, c.z, c.rotY + 0.3, 0.9, 0.05);
+        if (clear(r, true, true)) return { x: c.x, z: c.z, rotY: c.rotY + 0.3, r };
+      }
+      return null;
+    }
+
     // "Candles are everywhere" in a room with no table to stand them on: a
     // candelabrum out on the floor near the walls, one to the ask's count, and
     // two candles on the mantel if there is one. A flame over each wick, and
@@ -964,13 +1040,46 @@ export function placeClutter(ctx) {
     function candlesticks(ask) {
       if (!library.get('furn_candelabra')) return;
       const n = Math.min(4, Math.max(2, ask.count));
-      for (let k = 0; k < n; k++) {
+      const stand = (x, z, rotY) => {
+        put('furn_candelabra', x, z, rotY, { collide: true });
+        for (const [ox, oz, oy] of WICKS) decor.push({ kind: 'torch', bare: true, candle: true, x: x + ox, y: pos.y + oy, z: z + oz });
+        lights.push({ x, y: pos.y + 1.75, z, color: 0xffb35a, intensity: 5, radius: 8, flicker: true });
+      };
+      let k = 0;
+      // By a great bed, one at each corner of its foot: the bed is lit, not a dark mass.
+      const bed = here.find((d) => d.kind === 'piece' && d.piece === 'bed_great');
+      const sb = library.get('furn_candelabra').bounds;
+      if (bed) {
+        const base = FACE_ROT[bed.dir];
+        for (const side of [-1, 1]) {
+          const lz = -ROOM / 2 - (bed.face || 0) + bed.out + 3.7;
+          const along = bed.along + side * 1.75;
+          const x = bed.x + along * Math.cos(base) + lz * Math.sin(base); const z = bed.z - along * Math.sin(base) + lz * Math.cos(base);
+          const r = footprint(sb, x, z, base, 1, 0.1);
+          if (!clear(r)) continue;
+          stand(x, z, base); take(r, true); k++;
+        }
+        const cz = -ROOM / 2 - (bed.face || 0) + bed.out + 1.5;
+        lights.push({ x: bed.x + bed.along * Math.cos(base) + cz * Math.sin(base), y: pos.y + 1.7, z: bed.z - bed.along * Math.sin(base) + cz * Math.cos(base), color: 0xffb35a, intensity: 6, radius: 7, flicker: true });
+      }
+      for (; k < n; k++) {
         const at = onFloor('furn_candelabra', 40 + k, { pad: 0.5, ring: [3.9, 3.4, 4.3] });
         if (!at) { missed.push(`${vnum} candles furn_candelabra`); continue; }
-        put('furn_candelabra', at.x, at.z, at.rotY, { collide: true });
+        stand(at.x, at.z, at.rotY);
         take(at.r, true);
-        for (const [ox, oz, oy] of WICKS) decor.push({ kind: 'torch', bare: true, candle: true, x: at.x + ox, y: pos.y + oy, z: at.z + oz });
-        lights.push({ x: at.x, y: pos.y + 1.75, z: at.z, color: 0xffb35a, intensity: 5, radius: 8, flicker: true });
+      }
+      // A cluster of candles on each chest.
+      if (library.get('furn_candle')) {
+        for (const c of chestsAt.slice(0, 2)) {
+          const cs = Math.cos(c.rotY); const sn = Math.sin(c.rotY);
+          for (const [lx, lz] of [[-0.22, 0.02], [0.02, 0.1], [0.24, -0.06]]) {
+            const x = c.x + lx * cs + lz * sn; const z = c.z - lx * sn + lz * cs;
+            instances.add('furn_candle', { x, y: pos.y + c.top, z, rotY: 0 }, chunk);
+            decor.push({ kind: 'torch', bare: true, candle: true, x, y: pos.y + c.top + 0.146, z });
+          }
+          lights.push({ x: c.x, y: pos.y + c.top + 0.5, z: c.z, color: 0xffb35a, intensity: 3.5, radius: 6, flicker: true });
+          placed++;
+        }
       }
       const hearth = here.find((d) => d.kind === 'fitting' && d.fitting === 'hearth');
       if (hearth && library.get('furn_candle')) {
