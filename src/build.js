@@ -11607,11 +11607,11 @@ function buildGreatCavern({ batcher, instances, chunk, room, cell, layout, pos, 
     lights.push({ x: pos.x + gx, y: pos.y + 2.6, z: pos.z + gz, color: 0xc4d0d4, intensity: 4, radius: 6 });
   }
   for (const [gx, gz] of [[-14, -5], [-19, 0.5], [-21, 6], [-12, 5.5], [-18, -9], [-15.5, 3.2], [-9, -8], [-12.2, 3.6], [-12, -12.5], [-4, -12], [-18, -13], [0, -10]]) {
-    lights.push({ x: pos.x + gx, y: pos.y + 3.2, z: pos.z + gz, color: 0xa8b4c0, intensity: 9, radius: 10 });
+    lights.push({ x: pos.x + gx, y: pos.y + 3.2, z: pos.z + gz, color: 0xa8b4c0, intensity: 12, radius: 10 });
   }
   // The south-west corner, where the walls are close and the pool's few lights are far.
   for (const [gx, gz] of [[-19.5, 3.6], [-22, 2]]) {
-    lights.push({ x: pos.x + gx, y: pos.y + 3.0, z: pos.z + gz, color: 0xa8b4c0, intensity: 14, radius: 10 });
+    lights.push({ x: pos.x + gx, y: pos.y + 3.0, z: pos.z + gz, color: 0xa8b4c0, intensity: 16, radius: 10 });
   }
   for (const [gx, gy, gz] of [[-12, 6.5, -2], [-19, 6.5, -8], [-18, 6, 4], [-9, 7, -12]]) {
     lights.push({ x: pos.x + gx, y: pos.y + gy, z: pos.z + gz, color: 0x9aa4b0, intensity: 5, radius: 22 });
