@@ -32,7 +32,7 @@ import { join } from 'path';
 import { parseArea, buildWorld, SECTOR, ROOM_INDOORS, EX_CLOSED } from '../src/are.js';
 import { planZones, layoutZone, HOME_AREAS } from '../src/zones.js';
 import { createNav } from '../src/nav.js';
-import { readShell, shellAttrs, openAirIn, wayLid, isDrop, shaftsOf, shaftAt, sunkRivers, RIVER_DROP } from '../src/shells.js';
+import { readShell, shellAttrs, openAirIn, wayLid, isDrop, shaftsOf, shaftAt, sunkRivers, RIVER_DROP, greatCavern } from '../src/shells.js';
 import { AFF } from '../src/rules/handler.js';
 import { addTerraces, inclines, inclineLift } from '../src/surface.js';
 import { buildRelief, dumpLumps, findDump, LOWEST as RELIEF_LOWEST } from '../src/relief.js';
@@ -104,6 +104,8 @@ export function bootWorld(root, { log = () => {} } = {}) {
         // Built with walls round it, and a hollow tree's are round.
         walled: room.sector !== SECTOR.AIR && !openAir(room),
         round: !openAir(room) && shellAttrs(room)?.named === 'tree',
+        // A great cavern (shells.js): its walls are not the box's.
+        great: !openAir(room) ? greatCavern(room) : null,
         materials: {},
       };
       local.rooms.set(vnum, info);
@@ -222,6 +224,7 @@ export function bootWorld(root, { log = () => {} } = {}) {
   /** Within a walled room's walls, seen from above: its box, or a hollow tree's ring. */
   const withinWalls = (info, p) => {
     const dx = p.x - info.center.x; const dz = p.z - info.center.z;
+    if (info.great) return dx > info.great.x0 - 0.35 && dx < info.great.x1 + 0.35 && dz > info.great.z0 - 0.35 && dz < info.great.z1 + 0.35;
     return info.round ? dx * dx + dz * dz < TREE_LINE * TREE_LINE : Math.abs(dx) < WALL_LINE && Math.abs(dz) < WALL_LINE;
   };
   /** The walled room a server point is inside the walls of, on its own level, or null. */

@@ -27,7 +27,7 @@ import {
   SECTOR, REVERSE_DIR, DIR_STEP,
 } from './are.js';
 import { createNav } from './nav.js';
-import { openAirIn, shellAttrs, shaftsOf, shaftAt, sunkRivers, RIVER_DROP } from './shells.js';
+import { openAirIn, shellAttrs, shaftsOf, shaftAt, sunkRivers, RIVER_DROP, greatCavern } from './shells.js';
 import { BESIDE } from './layout.js';
 import {
   COND, OBJ_VNUM, ITEM_TAKE, LEVEL_IMMORTAL, createMoney, makeObject, hasAff, canSee,
@@ -1117,12 +1117,15 @@ export function createRoomCounter({ world, rooms, links, zoneOf = null }) {
     const e = {
       vnum, level: info.cell.level, gx: info.cell.x + ox, gz: info.cell.z + oz, ox, oz,
       walled, round: walled && shellAttrs(room)?.named === 'tree', zone: zoneId(vnum),
+      // A great cavern (shells.js): its walls are not the box's.
+      great: walled ? greatCavern(room) : null,
       doorways: [false, false, false, false],
     };
     e.x = e.gx * CELL; e.z = e.gz * CELL;
     entries.set(vnum, e);
     byCell.set(key(e.level, e.gx, e.gz), e);
   }
+  const greats = [...entries.values()].filter((e) => e.great);
   // Keyed where this counter's rooms are, by way of the upper room's own entry
   // (which has its zone's frame): the server holds every zone side by side, and
   // two zones' shafts can share a layout cell.
@@ -1218,6 +1221,9 @@ export function createRoomCounter({ world, rooms, links, zoneOf = null }) {
     const gz = Math.round(p.z / CELL);
     const below = underDeck.get(key(level, gx, gz));
     if (below !== undefined && p.y < level * LEVEL_H - RIVER_DROP / 2) return { room: below };
+    for (const g of greats) {
+      if (g.level === level && p.x > g.x + g.great.x0 - 0.35 && p.x < g.x + g.great.x1 + 0.35 && p.z > g.z + g.great.z0 - 0.35 && p.z < g.z + g.great.z1 + 0.35) return { room: g.vnum };
+    }
     const r = byCell.get(key(level, gx, gz));
     if (r) {
       if (!r.walled) return { room: r.vnum };

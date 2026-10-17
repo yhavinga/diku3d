@@ -73,6 +73,24 @@ const WELL = /\bold well\b|\bwell house\b|\bwellhouse\b/i;
 const FARM = /\b(gamgee|farm(?:house|stead)?|cottage|homestead)\b/i;
 const INN = /\b(inn|tavern|pub|alehouse|green dragon|ivy bush)\b/i;
 
+/**
+ * "The walls and ceiling seem miles away": #5011 is not drawn in a ten metre
+ * box. Offsets in metres from the room's centre to the inner faces of its
+ * walls (x east, z south). The way up is a flight against the west wall of
+ * the box and rises under the room above (#5010 sits right over the centre),
+ * so everything east and south of the centre stays inside what that floor
+ * covers and the cavern opens out to the west and north, where nothing is
+ * built at this level for six cells in any direction (build.js checks, and
+ * throws if a neighbour ever turns up). game.js and server/world.mjs count a
+ * body in the room by these walls and not by the box's.
+ */
+const MILES_AWAY = /\bwalls and ceiling seem miles away\b/i;
+export const GREAT_CAVERN = { x0: -25, x1: 7.5, z0: -17, z1: 7.5 };
+export function greatCavern(room) {
+  const shell = shellFor(room);
+  return shell && shell.kind === 'cave' && shell.vast && MILES_AWAY.test((room.description || '').replace(/\s+/g, ' ')) ? GREAT_CAVERN : null;
+}
+
 export const SHELL_KINDS = ['cave', 'tomb', 'vault', 'dungeon', 'lair', 'log', 'panelled', 'well', 'farmhouse', 'inn', 'smial'];
 
 /**

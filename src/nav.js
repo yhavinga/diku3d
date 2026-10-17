@@ -15,7 +15,7 @@
  */
 
 import { DIR_STEP, REVERSE_DIR } from './are.js';
-import { wayLid, isDrop, LID_FLIGHT, DROP_OPENING } from './shells.js';
+import { wayLid, isDrop, LID_FLIGHT, DROP_OPENING, greatCavern } from './shells.js';
 import { topAt, lowAt } from './surface.js';
 
 // build.js's own numbers, repeated for the reason above.
@@ -120,6 +120,11 @@ export function createNav({ layout, built, world }) {
       const hx = (d.w ?? d.size) / 2; const hz = (d.d ?? d.size) / 2;
       waters.push({ x0: d.x - hx, x1: d.x + hx, z0: d.z - hz, z1: d.z + hz, y: d.y });
     }
+  }
+  const greats = [];
+  for (const [vnum, cell] of layout.cells) {
+    const box = greatCavern(world.rooms.get(vnum));
+    if (box) greats.push({ vnum, level: cell.level, x: cell.x * CELL, z: cell.z * CELL, box });
   }
   const grids = new Map();
   const _near = [];
@@ -274,6 +279,10 @@ export function createNav({ layout, built, world }) {
    */
   function roomAt(x, y, z) {
     const level = levelOf(y);
+    // A great cavern (shells.js) reaches cells that have no room of their own.
+    for (const g of greats) {
+      if (g.level === level && x > g.x + g.box.x0 - 0.35 && x < g.x + g.box.x1 + 0.35 && z > g.z + g.box.z0 - 0.35 && z < g.z + g.box.z1 + 0.35) return g.vnum;
+    }
     const cx = Math.round(x / CELL);
     const cz = Math.round(z / CELL);
     const here = layout.at(level, cx, cz);

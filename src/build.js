@@ -22,7 +22,7 @@ import { buildGrass } from './grass.js';
 import {
   classifyShells, shellFor, shellAttrs, isOutdoor, sectorOf, isTreeLined, classifyCanopy, isCanopy, isOpenAir,
   isSewer, isEastern, eastStyle, isDeep, isHood, hoodStyle, isPark, isFrozen, markFrost, frontsFrost,
-  wayLid, isDrop, LID_FLIGHT, lidOpening, lidCeiling, DROP_OPENING, sunkRivers, RIVER_DROP,
+  wayLid, isDrop, LID_FLIGHT, lidOpening, lidCeiling, DROP_OPENING, sunkRivers, RIVER_DROP, greatCavern,
 } from './shells.js';
 import { BESIDE } from './layout.js';
 import { planeOf, inclines, inclineLift, inclineCell, addTerraces } from './surface.js';
@@ -4401,7 +4401,26 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
     // a green seam along the foot of every wall. Its ash runs under them.
     const half = airborne ? ROOM / 2 : (openAir || buried || ruin ? HALF : ROOM / 2);
     if (openAir && !bridged) groundAt.set(cellKey(cell.level, cell.x, cell.z), mats.floor);
-    if (!bridged) {
+    // "The walls and ceiling seem miles away" (shells.js `greatCavern`): the
+    // cavern builds its own floor, walls and roof, much larger than the box.
+    const greatExt = !openAir && buried && instances ? greatCavern(room) : null;
+    if (greatExt) {
+      // What lies on the level above this room, as the floor the roof must stay under.
+      const lows = [];
+      for (let dx = Math.floor((greatExt.x0 - HALF) / CELL); dx <= Math.ceil((greatExt.x1 + HALF) / CELL); dx++) {
+        for (let dz = Math.floor((greatExt.z0 - HALF) / CELL); dz <= Math.ceil((greatExt.z1 + HALF) / CELL); dz++) {
+          if (layout.at(cell.level + 1, cell.x + dx, cell.z + dz) !== undefined || layout.isPath(cell.level + 1, cell.x + dx, cell.z + dz)) {
+            lows.push({ x0: dx * CELL - HALF, x1: dx * CELL + HALF, z0: dz * CELL - HALF, z1: dz * CELL + HALF });
+          }
+        }
+      }
+      const ceilHoles = roomHoles.filter((h) => h.ceiling);
+      rooms.get(room.vnum).great = buildGreatCavern({
+        batcher, instances, chunk, room, cell, layout, pos, ext: greatExt, lows, lowTop: ceilingOf(room, cell, layout),
+        hole: ceilHoles.length ? unionRect(ceilHoles) : null, mats, addCollider, addPlatform, lights,
+      });
+    }
+    if (!bridged && !greatExt) {
       buildFloor({
         batcher, chunk, material: mats.floor, x: pos.x, y: pos.y, z: pos.z,
         half, holes: roomHoles.filter((h) => !h.ceiling), addPlatform, slab: !airborne,
@@ -4762,7 +4781,9 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       const wx = pos.x + dx * distance;
       const wz = pos.z + dz * distance;
 
-      if (!openAir && !tree) {
+      if (greatExt) {
+        // The cavern's walls are its own (`buildGreatCavern`).
+      } else if (!openAir && !tree) {
         buildIndoorWall({
           batcher, chunk, mats, x: wx, y: pos.y, z: wz, rotY, open, kit, instances,
           width: ROOM + (WALL_IN + WALL_OUT) * 2, addCollider, dir, room, lights, decor,
@@ -5043,7 +5064,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
       if (tree) {
         buildGreatTree({ batcher, instances, chunk, room, pos, sides, addCollider, addPlatform, decor, lights, materials, cell, layout });
       }
-      if (!ruin && !tree && top !== VAST_CEIL) {
+      if (!ruin && !tree && !greatExt && top !== VAST_CEIL) {
         buildCeiling({
           batcher, chunk, material: mats.ceil, x: pos.x, y: pos.y + top, z: pos.z,
           // Under a hill only the vault's flat crown is ceiling: out to the
@@ -5076,7 +5097,7 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
         room, said: mats.said, pos, sides, batcher, chunk, instances, kit, mats, materials, decor, lights,
         lining: !!instances && (deepStyle(room) === 'cave' || mats.rockCave),
       });
-      if (instances && (deepStyle(room) === 'cave' || mats.rockCave)) {
+      if (instances && !greatExt && (deepStyle(room) === 'cave' || mats.rockCave)) {
         buildCaveLining({
           instances, chunk, room, pos, sides, roofed: !roomHoles.some((h) => h.ceiling), addCollider,
           height: top,
@@ -5145,7 +5166,8 @@ export function* raise(world, layout, materials, assets = null, options = {}) {
           only: shireOut === 'hill' ? hillFaces : null,
         });
       }
-      if (isDeep(room)) buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider });
+      if (greatExt) { /* dressed by `buildGreatCavern` and the clutter placer */ }
+      else if (isDeep(room)) buildSewerRoomProps({ room, pos, sides, decor, lights, instances, chunk, addCollider });
       else if (!ruin && !tree) rooms.get(room.vnum).plan = buildInteriorProps({ room, pos, sides, decor, mats, holes: roomHoles.filter((h) => !h.ceiling), lights, kit });
       // "The inn actually looks fairly functional despite its lack of repair
       // ... It looks as if the beer is still on tap!!!" The one place in the
@@ -11335,6 +11357,258 @@ function buildCaveLining({ instances, chunk, room, pos, sides, roofed, addCollid
       x: pos.x, y: pos.y + height, z: pos.z, rotY: Math.floor(hash3(room.vnum, 83, 0, 2) * 4) * Math.PI / 2,
     }, chunk);
   }
+}
+
+/**
+ * Rock as a soup of quads: each is cut into two triangles wound to face the
+ * way `facing(x, y, z)` says at its middle, so a wall, a roof and a pillar
+ * need no bookkeeping about which way their grid runs. `Batcher.add` shades
+ * every triangle flat, which is the faceted look of broken stone.
+ */
+function rockSoup(quads, facing) {
+  const pos = [];
+  const n = new THREE.Vector3(); const a = new THREE.Vector3(); const b = new THREE.Vector3(); const f = new THREE.Vector3();
+  for (const q of quads) {
+    a.set(q[1][0] - q[0][0], q[1][1] - q[0][1], q[1][2] - q[0][2]);
+    b.set(q[2][0] - q[0][0], q[2][1] - q[0][1], q[2][2] - q[0][2]);
+    n.crossVectors(a, b);
+    const cx = (q[0][0] + q[2][0]) / 2; const cy = (q[0][1] + q[2][1]) / 2; const cz = (q[0][2] + q[2][2]) / 2;
+    f.set(...facing(cx, cy, cz));
+    const flip = n.dot(f) < 0;
+    const tri = flip ? [[q[0], q[2], q[1]], [q[0], q[3], q[2]]] : [[q[0], q[1], q[2]], [q[0], q[2], q[3]]];
+    for (const t of tri) for (const p of t) pos.push(p[0], p[1], p[2]);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  return geo;
+}
+
+/** The fight floor of the great cavern: where the flight comes down and the dracolich lies, kept clear of stone. */
+const GREAT_ARENA = { x0: -11, x1: 7.5, z0: -6.5, z1: 7.5 };
+/**
+ * Where the dracolich lies, from the centre of #5011: actors.js stands a mobile
+ * on a ring 2.1-3.6 m out at an angle its name decides, and this one's is
+ * 1.9 m east and 2.9 m south. It is under the room above, at the back of the
+ * roof's low shelf and in the corner the east and south walls make, so the
+ * cavern's rim light is set here and the bones lie thickest round it.
+ */
+const GREAT_LAIR = { x: 1.9, z: 2.9 };
+
+/**
+ * The vast cavern (shells.js `greatCavern`): a floor the size of the walls, a
+ * wall of broken rock all round, a roof that is low where a floor lies over it
+ * (`lows`, the cells of the level above) and rises into a dome where nothing
+ * does, a few pillars and fallen rocks, and the lights. Everything is in the
+ * room's own frame, offsets from `pos`.
+ *
+ * Fixed by what is around it, not chosen: nothing else is built at this level
+ * within the footprint (checked), the ground plane lies 15 m up, and the room
+ * above sits on the shelf. Returns what the clutter placer and the lights of
+ * other modules need: the extents, the roof's height and the arena.
+ */
+function buildGreatCavern({ batcher, instances, chunk, room, cell, layout, pos, ext, lows, lowTop, hole, mats, addCollider, addPlatform, lights }) {
+  for (let dx = Math.round(ext.x0 / CELL); dx <= Math.round(ext.x1 / CELL); dx++) {
+    for (let dz = Math.round(ext.z0 / CELL); dz <= Math.round(ext.z1 / CELL); dz++) {
+      const other = layout.at(cell.level, cell.x + dx, cell.z + dz);
+      if ((other !== undefined && other !== room.vnum) || layout.isPath(cell.level, cell.x + dx, cell.z + dz)) {
+        throw new Error(`build.js buildGreatCavern: #${room.vnum}'s cavern would stand on ${other !== undefined ? `room #${other}` : 'a passage'} at cell ${cell.x + dx},${cell.z + dz}`);
+      }
+    }
+  }
+  const seed = room.vnum;
+  // The stone is a cold grey-green here, not the sewer's brown: the fill is warm, and this takes some of it out.
+  const rock = [0.8, 0.92, 0.95];
+  const clamp01 = (t) => Math.min(1, Math.max(0, t));
+  const sm = (t) => { const u = clamp01(t); return u * u * (3 - 2 * u); };
+  const fbm = (x, z, salt) => terrainNoise(x, z, salt) * 0.55 + terrainNoise(x * 2.1 + 7, z * 2.1 + 3, salt + 1) * 0.3 + terrainNoise(x * 4.3, z * 4.3, salt + 2) * 0.15;
+  const HIGH = 12.0;
+  const outside = (x, z) => lows.reduce((m, r) => Math.min(m, Math.hypot(Math.max(r.x0 - x, 0, x - r.x1), Math.max(r.z0 - z, 0, z - r.z1))), Infinity);
+  // The roof, relative to the floor. Under a floor above it is that floor's
+  // underside (a little lumpy, never near the stair's opening); out from
+  // under it the roof climbs seven metres to the dome, comes down again
+  // towards the walls, and is lumpy on a scale of metres.
+  const ceilAt = (x, z) => {
+    const cx = Math.min(Math.max(x, ext.x0), ext.x1); const cz = Math.min(Math.max(z, ext.z0), ext.z1);
+    const r = sm((outside(cx, cz) - 0.4) / 7);
+    const wd = Math.min(cx - ext.x0, ext.x1 - cx, cz - ext.z0, ext.z1 - cz);
+    const dome = HIGH - 3.4 * (1 - sm(wd / 10));
+    let h = lowTop + (dome - lowTop) * r + (fbm(cx * 0.2, cz * 0.2, seed) - 0.5) * 3.0 * r;
+    const hd = hole ? Math.hypot(Math.max(hole.x0 - cx, 0, cx - hole.x1), Math.max(hole.z0 - cz, 0, cz - hole.z1)) : 9;
+    h -= (1 - r) * sm(hd / 3) * 0.3 * fbm(cx * 0.8, cz * 0.8, seed + 9);
+    return Math.min(h, lowTop + (HIGH + 1.2 - lowTop));
+  };
+  // How dark a piece of rock is painted before any light reaches it: the
+  // roof and the far walls are lost in it, the rock round the lair is not.
+  const shade = (x, y, z) => {
+    const ry = y - pos.y;
+    const up = 1 - 0.55 * sm((ry - 1.5) / 9);
+    const far = 1 - 0.4 * sm((Math.hypot(x - pos.x - GREAT_LAIR.x, z - pos.z - GREAT_LAIR.z) - 8) / 20);
+    return Math.max(0.55, up * far);
+  };
+  const P = 1.5;
+  const X0 = pos.x + ext.x0; const X1 = pos.x + ext.x1; const Z0 = pos.z + ext.z0; const Z1 = pos.z + ext.z1;
+  const FY = pos.y;
+
+  // The floor, level, to the wall lines; walls hide its edge.
+  batcher.add(plane(X1 - X0, Z1 - Z0, 26), mats.floor, place((X0 + X1) / 2, FY, (Z0 + Z1) / 2), {
+    chunk, tint: rock, ao: (x, y, z) => shade(x, y + 1.6, z) * 0.9,
+  });
+  batcher.add(box(X1 - X0, SLAB, Z1 - Z0), mats.floor, place((X0 + X1) / 2, FY - SLAB / 2 - 0.01, (Z0 + Z1) / 2), { chunk });
+  addPlatform(X0, X1, Z0, Z1, FY);
+
+  // The roof: a grid whose lines include the opening's edges, so the hole is
+  // cut exactly; it runs 3 m on past the walls so nothing shows between.
+  const lineSet = (a, b, cut) => {
+    const v = new Set();
+    for (let t = a - 3; t < b + 3; t += P) v.add(Math.round(t * 100) / 100);
+    v.add(b + 3);
+    for (const c of cut) if (c > a && c < b) v.add(c);
+    return [...v].sort((p, q) => p - q);
+  };
+  const xs = lineSet(ext.x0, ext.x1, hole ? [hole.x0, hole.x1] : []);
+  const zs = lineSet(ext.z0, ext.z1, hole ? [hole.z0, hole.z1] : []);
+  const roof = [];
+  const roofPoint = (x, z) => [pos.x + x + (hash3(Math.round(x * 4), Math.round(z * 4), seed, 3) - 0.5) * 0.5 * (hole && x >= hole.x0 - 0.01 && x <= hole.x1 + 0.01 ? 0 : 1),
+    pos.y + ceilAt(x, z), pos.z + z + (hash3(Math.round(x * 4), Math.round(z * 4), seed, 5) - 0.5) * 0.5 * (hole && z >= hole.z0 - 0.01 && z <= hole.z1 + 0.01 ? 0 : 1)];
+  for (let i = 0; i < xs.length - 1; i++) {
+    for (let j = 0; j < zs.length - 1; j++) {
+      if (hole && xs[i] >= hole.x0 - 0.01 && xs[i + 1] <= hole.x1 + 0.01 && zs[j] >= hole.z0 - 0.01 && zs[j + 1] <= hole.z1 + 0.01) continue;
+      roof.push([roofPoint(xs[i], zs[j]), roofPoint(xs[i + 1], zs[j]), roofPoint(xs[i + 1], zs[j + 1]), roofPoint(xs[i], zs[j + 1])]);
+    }
+  }
+  const roofGeo = rockSoup(roof, () => [0, -1, 0]);
+  batcher.add(roofGeo, mats.ceil, IDENTITY, { chunk, ao: shade, tint: rock });
+  roofGeo.dispose();
+
+  // The walls: broken rock standing up to 1.3 m proud of the line. Each sheet
+  // runs past its corners so the four cross each other, and from below the
+  // floor to above the roof; its collider stops short of the farthest bulge.
+  const BULGE = 1.3;
+  const walls = [
+    { k: 0, base: X0, along: 'z', a0: Z0 - 4, a1: Z1 + 4, inward: [1, 0], cut: [X0 - 3, X0 + BULGE + 0.05, Z0 - 3, Z1 + 3] },
+    { k: 1, base: X1, along: 'z', a0: Z0 - 4, a1: Z1 + 4, inward: [-1, 0], cut: [X1 - BULGE - 0.05, X1 + 3, Z0 - 3, Z1 + 3] },
+    { k: 2, base: Z0, along: 'x', a0: X0 - 4, a1: X1 + 4, inward: [0, 1], cut: [X0 - 3, X1 + 3, Z0 - 3, Z0 + BULGE + 0.05] },
+    { k: 3, base: Z1, along: 'x', a0: X0 - 4, a1: X1 + 4, inward: [0, -1], cut: [X0 - 3, X1 + 3, Z1 - BULGE - 0.05, Z1 + 3] },
+  ];
+  for (const w of walls) {
+    const na = Math.ceil((w.a1 - w.a0) / P);
+    const rows = 10;
+    const grid = [];
+    for (let i = 0; i <= na; i++) {
+      const col = [];
+      const jit = (hash3(i, w.k, seed, 11) - 0.5) * 0.5 * P;
+      const a = w.a0 + i * P + (i === 0 || i === na ? 0 : jit);
+      const bx = w.along === 'z' ? w.base : a; const bz = w.along === 'z' ? a : w.base;
+      const top = pos.y + ceilAt(bx - pos.x, bz - pos.z) + 1.6;
+      for (let j = 0; j <= rows; j++) {
+        const s = j / rows;
+        const y = (pos.y - 0.7) + s * (top - pos.y + 0.7) + (j === 0 || j === rows ? 0 : (hash3(i, j, w.k, 13) - 0.5) * 0.7);
+        const yv = y - pos.y;
+        const lump = fbm(a * 0.3, yv * 0.32, seed + 20 + w.k * 7);
+        const strata = 0.5 + 0.5 * Math.sin(yv * 1.15 + lump * 5);
+        const b = yv < 0 ? 1.0 : Math.min(BULGE, 0.1 + 1.25 * sm(lump * 1.7 - 0.35) + 0.12 * strata);
+        col.push([bx + w.inward[0] * b, y, bz + w.inward[1] * b]);
+      }
+      grid.push(col);
+    }
+    const quads = [];
+    for (let i = 0; i < na; i++) for (let j = 0; j < rows; j++) quads.push([grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]]);
+    const geo = rockSoup(quads, () => [w.inward[0], 0, w.inward[1]]);
+    batcher.add(geo, mats.wallIn, IDENTITY, { chunk, ao: shade, tint: rock });
+    geo.dispose();
+    addCollider(w.cut[0], w.cut[1], w.cut[2], w.cut[3], pos.y, pos.y + HIGH + 3);
+  }
+
+  // Pillars, where the dome is: a column of the roof's own rock coming down
+  // as one, flared where it meets roof and floor.
+  const pillars = [[-10.5, -11, 1.1], [-13, 3.5, 1.4], [-17.5, -6, 1.7], [-19.5, 4.5, 1.2], [-22, -12.5, 1.5], [-8.5, -14, 1.0], [-14.5, -13.5, 1.2]];
+  for (const [px, pz, r0] of pillars) {
+    const cx = pos.x + px; const cz = pos.z + pz;
+    const top = pos.y + ceilAt(px, pz) + 1.2;
+    const seg = 11; const rows = 9;
+    const g = [];
+    for (let j = 0; j <= rows; j++) {
+      const row = [];
+      const s = j / rows;
+      const y = (pos.y - 0.3) + s * (top - pos.y + 0.3);
+      const h = y - pos.y;
+      const flare = 1 + 1.15 * Math.exp(-h / 1.6) + 1.3 * Math.exp(-(top - y) / 2.4);
+      const waist = 0.8 + 0.2 * Math.cos(h * 0.55 + seed);
+      for (let a = 0; a < seg; a++) {
+        const ang = (a / seg) * Math.PI * 2;
+        const rad = r0 * flare * waist * (0.86 + 0.28 * hash3(a, j, Math.round(px * 3), 17));
+        row.push([cx + Math.cos(ang) * rad, y, cz + Math.sin(ang) * rad]);
+      }
+      g.push(row);
+    }
+    const quads = [];
+    for (let j = 0; j < rows; j++) for (let a = 0; a < seg; a++) quads.push([g[j][a], g[j][(a + 1) % seg], g[j + 1][(a + 1) % seg], g[j + 1][a]]);
+    const geo = rockSoup(quads, (x, y, z) => [x - cx, 0, z - cz]);
+    batcher.add(geo, mats.wallIn, IDENTITY, { chunk, ao: shade, tint: rock });
+    geo.dispose();
+    const c = r0 * 1.3;
+    addCollider(cx - c, cx + c, cz - c, cz + c, pos.y, pos.y + HIGH + 3);
+  }
+
+  const inArena = (x, z, m = 0) => x > GREAT_ARENA.x0 - m && x < GREAT_ARENA.x1 + m && z > GREAT_ARENA.z0 - m && z < GREAT_ARENA.z1 + m;
+  const nearPillar = (x, z, m) => pillars.some(([px, pz, r0]) => Math.hypot(x - px, z - pz) < r0 * 2.6 + m);
+  if (instances) {
+    // Fallen rock along the walls and in the dome, never on the fight floor.
+    let rocks = 0;
+    for (let k = 0; k < 90 && rocks < 24; k++) {
+      const rx = ext.x0 + 1.5 + hash3(k, 1, seed, 21) * (ext.x1 - ext.x0 - 3);
+      const rz = ext.z0 + 1.5 + hash3(k, 2, seed, 21) * (ext.z1 - ext.z0 - 3);
+      const wall = Math.min(rx - ext.x0, ext.x1 - rx, rz - ext.z0, ext.z1 - rz);
+      const big = hash3(k, 3, seed, 21);
+      const scale = 0.45 + big * big * 1.15;
+      const model = hash3(k, 4, seed, 21) > 0.5 ? 'cave_rock_b' : 'cave_rock_a';
+      const reach = (model === 'cave_rock_b' ? 2.3 : 1.2) * scale;
+      // Hugging the walls mostly, a few out in the open.
+      if (wall > 5 && hash3(k, 5, seed, 21) > 0.2) continue;
+      if (inArena(rx, rz, reach) || nearPillar(rx, rz, reach) || wall < reach + BULGE) continue;
+      instances.add(model, { x: pos.x + rx, y: pos.y - 0.05, z: pos.z + rz, rotY: hash3(k, 6, seed, 21) * 6.28, scale }, chunk);
+      const c = reach * 0.8;
+      addCollider(pos.x + rx - c, pos.x + rx + c, pos.z + rz - c, pos.z + rz + c, pos.y, pos.y + 1.6 * scale);
+      rocks++;
+    }
+    // Stalactites in the dome: the roof's own, three or four metres long.
+    for (let k = 0; k < 60; k++) {
+      const sx = ext.x0 + 2 + hash3(k, 1, seed, 31) * (ext.x1 - ext.x0 - 4);
+      const sz = ext.z0 + 2 + hash3(k, 2, seed, 31) * (ext.z1 - ext.z0 - 4);
+      if (ceilAt(sx, sz) < lowTop + 2.5) continue;
+      instances.add('stalactites', {
+        x: pos.x + sx, y: pos.y + ceilAt(sx, sz) + 0.25, z: pos.z + sz, rotY: hash3(k, 3, seed, 31) * 6.28, scale: 1.5 + hash3(k, 4, seed, 31) * 2.2,
+      }, chunk);
+    }
+    // And the odd stalagmite standing up from the floor along the walls.
+    for (let k = 0; k < 40; k++) {
+      const gx = ext.x0 + 2 + hash3(k, 1, seed, 41) * (ext.x1 - ext.x0 - 4);
+      const gz = ext.z0 + 2 + hash3(k, 2, seed, 41) * (ext.z1 - ext.z0 - 4);
+      const wall = Math.min(gx - ext.x0, ext.x1 - gx, gz - ext.z0, ext.z1 - gz);
+      if (wall > 7 || inArena(gx, gz, 1.5) || nearPillar(gx, gz, 1.5) || wall < BULGE + 1.5) continue;
+      const scale = 0.9 + hash3(k, 3, seed, 41) * 1.1;
+      instances.add('stalagmites', { x: pos.x + gx, y: pos.y - 0.02, z: pos.z + gz, rotY: hash3(k, 4, seed, 41) * 6.28, scale }, chunk);
+      addCollider(pos.x + gx - scale, pos.x + gx + scale, pos.z + gz - scale, pos.z + gz + scale, pos.y, pos.y + 2 * scale);
+    }
+  }
+
+  // Light. Nothing here has a sky, so all of it is the cave's own: a cold
+  // green light from where the dracolich lies, low and behind it so that it
+  // is lit from the back, and a fainter wash of the same where the bones are
+  // thickest. `lights` are candidates for the pool, which keeps the nearest 14.
+  const lx = pos.x + GREAT_LAIR.x; const lz = pos.z + GREAT_LAIR.z;
+  lights.push({ x: lx + 1.6, y: pos.y + 1.7, z: lz + 1.2, color: 0x8fe8b8, intensity: 28, radius: 30 });
+  lights.push({ x: lx - 1.2, y: pos.y + 0.35, z: lz - 1.6, color: 0x6fd0a0, intensity: 5, radius: 11 });
+  // The cold light does not stop at the lair: it lies on the bones where they
+  // are thickest, and a pale wash hangs in the dome over the open floor, so
+  // that the pillars and the roof are there to be seen and not only the dark.
+  for (const [gx, gz] of [[-3.5, 0.8], [-1, 6.2], [4.5, -4.2], [-8.5, -2.5]]) {
+    lights.push({ x: pos.x + gx, y: pos.y + 0.6, z: pos.z + gz, color: 0x7fe0b8, intensity: 4, radius: 8 });
+  }
+  for (const [gx, gy, gz] of [[-12, 8.5, -2], [-20, 8, -8], [-20, 7.5, 5], [-9, 9.5, -12], [-22.5, 8, -1]]) {
+    lights.push({ x: pos.x + gx, y: pos.y + gy, z: pos.z + gz, color: 0x7fb0b0, intensity: 10, radius: 24 });
+  }
+  return { ext, lair: GREAT_LAIR, arena: GREAT_ARENA, lowTop, ceilAt, pillars };
 }
 
 /** The walled rooms and caves of the sewer, dressed from the same words. */
