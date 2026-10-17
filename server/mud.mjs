@@ -69,6 +69,14 @@ export const LIMITS = {
    */
   socketsPerSite: 4,
   /**
+   * Addresses that may hold more (or fewer) than socketsPerSite: a list of
+   * { site, n }, the first match wins. `site` is an exact IPv4 or IPv6 address
+   * or a CIDR prefix (`2001:db8:1:2::/64`: privacy addresses rotate the low
+   * 64 bits, so a /64 matches every interface id under it). Empty unless the
+   * operator sets DIKU_SITE_SOCKETS (main.mjs).
+   */
+  siteSockets: [],
+  /**
    * Messages a socket may send: a page sends 10 position reports a second and
    * a ping every 2 s; measured peaks in any one second with a real page: 14
    * sprinting, 24 typing commands at 12 a second, 32 at an absurd 25 a second.
@@ -88,6 +96,90 @@ export const LIMITS = {
   /** A socket that has not answered a ping in this long is a dropped link nobody told us about; it frees its slot and goes linkdead. */
   heartbeatMs: 30 * 1000,
 };
+
+/**
+ * An IPv4 or IPv6 address as one 128-bit number. IPv4 and IPv4-mapped IPv6
+ * (::ffff:a.b.c.d) are the same address, so both land in ::ffff:0:0/96.
+ * Returns null for anything else.
+ */
+function addrBits(text) {
+  let t = String(text).trim().toLowerCase();
+  const v4 = (a) => {
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(a);
+    if (!m || m.slice(1).some((o) => +o > 255)) return null;
+    return m.slice(1).reduce((n, o) => (n << 8n) | BigInt(o), 0n);
+  };
+  const plain = v4(t);
+  if (plain !== null) return (0xffffn << 32n) | plain;
+  let tail = [];
+  const dot = t.lastIndexOf(':');
+  if (t.includes('.')) {
+    const n = v4(t.slice(dot + 1));
+    if (n === null) return null;
+    tail = [(n >> 16n).toString(16), (n & 0xffffn).toString(16)];
+    t = t.slice(0, dot + 1) + '0:0';
+  }
+  const halves = t.split('::');
+  if (halves.length > 2) return null;
+  const part = (h) => (h === '' ? [] : h.split(':'));
+  const head = part(halves[0]);
+  const rest = halves.length === 2 ? part(halves[1]) : [];
+  let groups;
+  if (halves.length === 2) {
+    const fill = 8 - head.length - rest.length;
+    if (fill < 1) return null;
+    groups = [...head, ...Array(fill).fill('0'), ...rest];
+  } else groups = head;
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  if (tail.length) { groups[6] = tail[0]; groups[7] = tail[1]; }
+  return groups.reduce((n, g) => (n << 16n) | BigInt(`0x${g}`), 0n);
+}
+
+/** `site` (an address or addr/len) as { bits, len } over 128 bits, or null when it is neither. */
+export function parseSite(site) {
+  const [addr, lenText, extra] = String(site).split('/');
+  if (extra !== undefined) return null;
+  const bits = addrBits(addr);
+  if (bits === null) return null;
+  const v4 = !addr.includes(':');
+  if (lenText === undefined) return { bits, len: 128 };
+  if (!/^\d{1,3}$/.test(lenText) || +lenText > (v4 ? 32 : 128)) return null;
+  return { bits, len: v4 ? 96 + +lenText : +lenText };
+}
+
+/** The first `siteSockets` entry whose address or prefix holds `host`, or null. */
+export function siteEntry(host, lim = LIMITS) {
+  const bits = addrBits(host);
+  if (bits === null) return null;
+  for (const entry of lim.siteSockets || []) {
+    const p = parseSite(entry.site);
+    if (!p) throw new Error(`siteSockets: cannot read ${JSON.stringify(entry.site)}`);
+    const shift = BigInt(128 - p.len);
+    if ((bits >> shift) === (p.bits >> shift)) return entry;
+  }
+  return null;
+}
+
+/** How many open sockets `host` may hold: the first matching `siteSockets` entry, else `socketsPerSite`. */
+export function capFor(host, lim = LIMITS) {
+  const entry = siteEntry(host, lim);
+  return entry ? entry.n : lim.socketsPerSite;
+}
+
+/** DIKU_SITE_SOCKETS ("site=n,site=n") as a siteSockets list; a bad entry throws, naming it. */
+export function parseSiteSockets(text) {
+  if (!text || !text.trim()) return [];
+  return text.split(',').map((raw) => {
+    const entry = raw.trim();
+    const eq = entry.lastIndexOf('=');
+    if (eq < 1) throw new Error(`DIKU_SITE_SOCKETS: entry ${JSON.stringify(entry)} is not site=n`);
+    const site = entry.slice(0, eq).trim();
+    const count = entry.slice(eq + 1).trim();
+    if (!/^[1-9]\d*$/.test(count)) throw new Error(`DIKU_SITE_SOCKETS: entry ${JSON.stringify(entry)} has no positive integer after '='`);
+    if (!parseSite(site)) throw new Error(`DIKU_SITE_SOCKETS: entry ${JSON.stringify(entry)} has an address or prefix that cannot be read`);
+    return { site, n: +count };
+  });
+}
 
 export async function startMud({
   root, dataDir, port = 4011, host = '127.0.0.1', seed, tickMs = 50, log = console.log,
@@ -234,10 +326,14 @@ export async function startMud({
       return;
     }
     // Counted by open sockets: a linkdead body holds no socket, so its owner can always come back.
-    if (!directLoopback(request) && [...sessions].filter((o) => o.open && o.host === s.host).length >= lim.socketsPerSite) {
-      const why = `Too many connections from your address (${lim.socketsPerSite} at most). Close another page and try again.`;
-      log(`${s.host}: connection refused, ${lim.socketsPerSite} sockets open already`);
-      dash.record('site', `${s.host}: connection refused, ${lim.socketsPerSite} sockets open already`, { lvl: 'warn' });
+    const cap = capFor(s.host, lim);
+    // Under a listed prefix every address in it shares the one count: privacy addresses rotate within a /64.
+    const entry = siteEntry(s.host, lim);
+    const sameSite = (o) => (entry ? siteEntry(o.host, lim) === entry : o.host === s.host);
+    if (!directLoopback(request) && [...sessions].filter((o) => o.open && sameSite(o)).length >= cap) {
+      const why = `Too many connections from your address (${cap} at most). Close another page and try again.`;
+      log(`${s.host}: connection refused, ${cap} sockets open already`);
+      dash.record('site', `${s.host}: connection refused, ${cap} sockets open already`, { lvl: 'warn' });
       s.open = false;
       ws.on('error', (error) => log(`${s.host}: socket error: ${error.message}`));
       ws.close(1013, why);

@@ -25,7 +25,7 @@ import { serialize } from '../src/save.js';
 import { titleFor } from '../src/rules/actcomm.js';
 import { bootWorld } from './world.mjs';
 import { createAccounts, hashPassword, checkParseName, properName } from './accounts.mjs';
-import { startMud } from './mud.mjs';
+import { startMud, parseSiteSockets } from './mud.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
@@ -119,8 +119,11 @@ async function makeImplementor({ data, implementor, cls, sex }) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.implementor) return makeImplementor(args);
+  const siteSockets = parseSiteSockets(process.env.DIKU_SITE_SOCKETS);
+  console.log(`${siteSockets.length} per-address socket cap override(s) set`);
   const mud = await startMud({
     root, dataDir: args.data, port: args.port, host: args.host, seed: args.seed,
+    limits: { siteSockets },
     log: (text) => console.log(`${new Date().toISOString().slice(11, 19)} ${text}`),
   });
   mud.onClose = () => process.exit(0);
