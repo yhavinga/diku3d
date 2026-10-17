@@ -2563,7 +2563,11 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
         }
         if (strong && !close(w)) column(feet, palette.mote, 1.8);
         decal(feet, strong ? 1.3 : 1.0, 1, palette.glow, 0.7, (d, u, t) => { u.uRadius.value = smooth(t / 0.6); u.uAlpha.value = 1 - t / 0.7; });
-        takeLight(palette.light, (t) => (t < 0.9 ? { p: aim, intensity: (strong ? 16 : 7) * Math.sin(Math.PI * t / 0.9), distance: 7 } : null));
+        // Seen from outside, a lamp at the chest is a few decimetres from the skin and the
+        // figure goes white (inverse square); above the head it falls on shoulders and floor.
+        const lamp = close(w) ? aim : new THREE.Vector3(aim.x, aim.y + 1.5, aim.z);
+        const lampK = close(w) ? 1 : 3;
+        takeLight(palette.light, (t) => (t < 0.9 ? { p: lamp, intensity: (strong ? 16 : 7) * lampK * Math.sin(Math.PI * t / 0.9), distance: 7 } : null));
         S.chord(aim, strong ? 523 : f === 'bless' ? 440 : 349, strong ? 2 : 1);
         if (w.player) flashScreen(strong ? 'radial-gradient(ellipse closest-side at 50% 50%, rgba(255,244,214,0) 30%, rgba(255,240,205,0.9) 100%)' : 'radial-gradient(ellipse at 50% 50%, rgba(180,200,255,0) 45%, rgba(170,195,255,0.6) 100%)', 0.7, 900);
         break;
