@@ -925,6 +925,13 @@ function damage(ch, victim, dam, dt, ctx) {
 
 /** fight.c: multi_hit. A mobile's extra swings come off its level, a player's off skills. */
 function multiHit(ch, victim, dt, ctx) {
+  // A heap of bones pulling itself together is not there to be struck yet;
+  // the fight is on, the blow waits.
+  if (ctx.rising && ctx.rising(victim)) {
+    if (!ch.fighting) ctx.setFighting(ch, victim);
+    if (!victim.fighting) ctx.setFighting(victim, ch);
+    return;
+  }
   ctx.beat = 0;
   oneHit(ch, victim, dt, ctx);
   if (ch.fighting !== victim || dt === 'backstab') return;
@@ -1492,6 +1499,7 @@ export function createGame({
     }
     slot.instance = mob;
     slot.riseEnds = undefined;
+    slot.rose = false;
     return mob;
   }
 
@@ -1700,6 +1708,8 @@ export function createGame({
     roomcast: (ch, event, except) => roomcast(isNpc(ch) ? ch.slot.roomVnum : ch.roomVnum, event, except),
     /** Seconds of game time, for spacing blows on screen (oneHit). */
     clock: 0,
+    /** Whether a mobile is still getting up out of its bones: no melee lands on it yet. */
+    rising: (ch) => !!(ch && isNpc(ch) && ch.slot && rising(ch.slot)),
     setFighting(ch, victim) {
       ch.fighting = victim;
       ch.position = POS.FIGHTING;
@@ -2245,25 +2255,28 @@ export function createGame({
 
   function violenceRound() {
     for (const pc of players.slice()) withPlayer(pc, playerRound);
-    for (const slot of mobs) {
-      const mob = slot.instance;
-      if (!mob || slot.dead || !mob.fighting) continue;
-      if (!isAwake(mob)) { ctx.stopFighting(mob, false); continue; }
-      if (rising(slot)) continue;
-      // Whoever it is fighting: you, or -- a cityguard answering a scream -- another mobile.
-      const victim = mob.fighting;
-      const there = isNpc(victim) ? (victim.slot && !victim.slot.dead ? victim.slot.pos : null)
-        : (pcOf(victim) ? pcFeet(pcOf(victim)) : null);
-      if (!there || victim.position === POS.DEAD) { ctx.stopFighting(mob, false); continue; }
-      if (dist2(slot.pos, there) > BREAK * BREAK) { ctx.stopFighting(mob); continue; }
-      if (dist2(slot.pos, there) > MELEE * MELEE) continue;
-      if (!isNpc(victim) && pcOf(victim).invulnerable > 0) continue;
-      // The blows land on the victim's screen when the victim is a player.
-      withPlayer(isNpc(victim) ? null : pcOf(victim), () => {
-        multiHit(mob, victim, undefined, ctx);
-        if (mob.fighting) assist(slot, mob, mob.fighting);
-      });
-    }
+    for (const slot of mobs) mobRound(slot);
+  }
+
+  /** One mobile's blows for this round, at whoever it is fighting. */
+  function mobRound(slot) {
+    const mob = slot.instance;
+    if (!mob || slot.dead || !mob.fighting) return;
+    if (!isAwake(mob)) { ctx.stopFighting(mob, false); return; }
+    if (rising(slot)) return;
+    // Whoever it is fighting: you, or -- a cityguard answering a scream -- another mobile.
+    const victim = mob.fighting;
+    const there = isNpc(victim) ? (victim.slot && !victim.slot.dead ? victim.slot.pos : null)
+      : (pcOf(victim) ? pcFeet(pcOf(victim)) : null);
+    if (!there || victim.position === POS.DEAD) { ctx.stopFighting(mob, false); return; }
+    if (dist2(slot.pos, there) > BREAK * BREAK) { ctx.stopFighting(mob); return; }
+    if (dist2(slot.pos, there) > MELEE * MELEE) return;
+    if (!isNpc(victim) && pcOf(victim).invulnerable > 0) return;
+    // The blows land on the victim's screen when the victim is a player.
+    withPlayer(isNpc(victim) ? null : pcOf(victim), () => {
+      multiHit(mob, victim, undefined, ctx);
+      if (mob.fighting) assist(slot, mob, mob.fighting);
+    });
   }
 
   /** The bound player's swings this round, at a mobile -- or another player. */
@@ -2657,7 +2670,13 @@ export function createGame({
       }
 
       if (mob && mob.fighting) {
-        rising(slot);          // the clock starts on the frame the fight does
+        // The clock starts on the frame the fight does. The moment it ends the
+        // thing that rose strikes first, rather than waiting for the next pulse.
+        if (!rising(slot) && RISES.has(slot.proto.vnum) && !slot.rose && !puppet) {
+          slot.rose = true;
+          ctx.round = { player: 0, npc: MOB_BEAT };
+          try { mobRound(slot); } finally { ctx.round = null; ctx.now = undefined; }
+        }
         const foe = mob.fighting;
         const target = isNpc(foe) ? foe.slot.pos : (pcOf(foe) ? pcOf(foe).feet : slot.pos);
         if ((mob.act & ACT_SENTINEL) && slot.record.shop) {

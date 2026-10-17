@@ -52,6 +52,7 @@ export function installSkills(k) {
     const victim = state.fighting;
     if (!victim) return out(false, "You aren't fighting anyone.");
     // Whoever it is: a mobile's feet, or -- on a server -- another player's.
+    if (ctx.rising(victim)) return out(false, `${capitalise(victim.name)} has not risen yet.`);
     const at = k.feetOf(victim);
     const d = Math.hypot(at.x - k.position.x, at.z - k.position.z);
     if (d > MELEE) return out(false, `${capitalise(victim.name)} is out of reach.`);
@@ -75,6 +76,7 @@ export function installSkills(k) {
   function backstab(slot = inReach()) {
     if (!slot) return out(false, 'They aren\'t here.');
     const victim = k.wake(slot);
+    if (ctx.rising(victim)) return out(false, `${capitalise(victim.name)} has not risen yet.`);
     const wield = state.equipment[WEAR_WIELD];
     if (!wield || wield.values[3] !== 11) return out(false, 'You need to wield a piercing weapon.');
     if (victim.fighting) return out(false, "You can't backstab a fighting person.");
