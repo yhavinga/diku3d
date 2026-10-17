@@ -188,7 +188,8 @@ export class Creatures {
       this.say(rule, pick(rule.fight), heard, walls, true);
     }
     if (now < this.next) return;
-    const callers = fit.filter(({ rule }) => rule.idle.length && (!rule.night || (night && this.audio.place && this.audio.place.openAir)));
+    // Idle is idle: a fighter does not whisper.
+    const callers = fit.filter(({ rule, slot }) => rule.idle.length && !(slot.instance && slot.instance.fighting) && (!rule.night || (night && this.audio.place && this.audio.place.openAir)));
     if (!callers.length) return;
     const who = pick(callers);
     this.next = now + rand(...who.rule.every) / Math.sqrt(callers.length);
