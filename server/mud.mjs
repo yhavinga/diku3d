@@ -654,6 +654,11 @@ export async function startMud({
     for (const [key, value] of Object.entries(event)) {
       if (key === 'fromCh' || key === 'toCh' || key === 'pc' || key === 'room' || key === 'except' || key === 'all' || key === 'near') continue;
       if (value === undefined || typeof value === 'function') continue;
+      // Who a spell struck, per reader: "you" (to null, player true) is only the one struck.
+      if (key === 'hits' && Array.isArray(value)) {
+        out.hits = value.map((h) => (h.toCh ? { to: who(h.toCh), player: h.toCh === self, dam: h.dam } : plain(h, reader)));
+        continue;
+      }
       if ((key === 'from' || key === 'to') && ('fromCh' in event || 'toCh' in event)) {
         out[key] = who(key === 'from' ? event.fromCh : event.toCh);
         continue;

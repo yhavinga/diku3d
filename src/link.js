@@ -438,6 +438,8 @@ export function attachSocketLink(link, game, host, enter) {
   /** One event off the wire, back into game.js's terms, and into its stream. */
   function receive(event) {
     for (const key of ['from', 'to', 'slot']) if (key in event) event[key] = local(event[key]);
+    // A victim this page does not know (out of sight, just gone) is not drawn at all, not at the camera.
+    if (event.hits) event.hits = event.hits.map((h) => ({ ...h, to: local(h.to), known: !h.to || !!local(h.to) })).filter((h) => h.known);
     if (event.obj) event.obj = local(event.obj);
     // What another player does reaches us as the room's line (kind 'room', the blow's own kind in `combat`).
     const kind = event.kind === 'room' && BLOWS.has(event.combat) ? event.combat : event.kind;
@@ -463,7 +465,6 @@ export function attachSocketLink(link, game, host, enter) {
       else if (ofSkill) game.inject({ kind: 'skillfx', skill: event.spell, phase: 'land', hit: kind === 'hit', from: event.from, to: event.to, behind: stabbedFrom, delay: event.delay || 0 });
       else if (SPELLS.has(kind)) {
         // spellfx.js draws the gathering, the flight and the landing, with the remote body as one end.
-        if (event.hits) event.hits = event.hits.map((h) => ({ ...h, to: local(h.to) }));
         game.inject(event);
       } else if (['hit', 'miss', 'parry', 'dodge'].includes(kind) && !event.spell) {
         // fx.js: the mobile's swing, the spark or the flesh, the sound -- the same blow without its line.

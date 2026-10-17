@@ -390,7 +390,8 @@ export function createMagic(deps) {
   let hits = null;
   let saved = false;
   function hurt(ch, victim, dam, noun) {
-    if (hits) hits.push({ to: slotOf(victim), player: victim === player, dam });
+    // On a server a hit names its victim (toCh): `to` null and `player` mean "you" only to the one it is for.
+    if (hits) hits.push({ to: slotOf(victim), player: victim === player, dam, ...(deps.tell ? { toCh: victim } : null) });
     deps.damage(ch, victim, dam, noun, ctx);
   }
   const saves = (level, victim) => {
