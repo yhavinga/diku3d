@@ -1611,25 +1611,30 @@ def build_basket():
 
 def build_bed_great():
     """"A huge bed fills the room": a four-post bed 2.5 x 3.0 m, head to the
-    wall, a canopy frame at 2.5 m with a valance on three sides, a deep tick
-    heaped under a wide blanket and two bolsters. The furs on it are the
-    pelts clutter.js lays over the top. Wall at y = 0."""
+    wall: turned posts banded in iron, a canopy frame at 2.5 m, a tick 0.4 m
+    deep under a wide blanket, two bolsters and two square pillows. The cloth
+    over it -- valance and curtains tied back at the posts -- is
+    clutter_bed_curtains and the furs are the pelts, both laid over it by
+    clutter.js. Wall at y = 0."""
     reset(72)
     p = []
     W, L, HP = 2.5, 3.0, 2.5
+    post = [(0, 0.1), (0.04, 0.1), (0.09, 0.075), (0.5, 0.075), (0.56, 0.1), (0.7, 0.1), (0.76, 0.075),
+            (1.55, 0.075), (1.6, 0.09), (1.68, 0.09), (1.73, 0.075), (HP - 0.12, 0.075), (HP - 0.02, 0.07)]
     for (y, hh) in ((-0.1, HP), (-L + 0.1, HP)):
         for s_ in (-1, 1):
             x = s_ * (W / 2 - 0.1)
-            p.append(beam((0.16, 0.16, hh), (x, y, hh / 2), cham=0.02, name="post"))
-            # the cap overlaps the post's head, so no two faces share a plane
-            p.append(beam((0.22, 0.22, 0.1), (x, y, hh + 0.02), cham=0.02, name="cap"))
-            p.append(beam((0.2, 0.2, 0.1), (x, y, 0.62), cham=0.02, name="boss"))
+            p.append(lathe(post, x, y, 0, sides=10, m="wood", name="post"))
+            for hb in (0.3, 1.0, 1.9):
+                p.append(lathe([(hb, 0.088), (hb + 0.05, 0.088)], x, y, 0, sides=10, m="iron", caps=False, name="band"))
+            p.append(lathe([(HP - 0.02, 0.1), (HP + 0.03, 0.13), (HP + 0.1, 0.1), (HP + 0.16, 0.0)], x, y, 0,
+                           sides=10, m="brass", name="finial"))
     p.append(board((W - 0.2, 0.07, 1.7), (0, -0.07, 0.95), wear=0.01, m="planks", name="head"))
     p.append(board((W - 0.2, 0.06, 0.6), (0, -L + 0.1, 0.55), wear=0.01, m="planks", name="foot"))
     for s_ in (-1, 1):
         p.append(beam((0.09, L - 0.2, 0.22), (s_ * (W / 2 - 0.1), -L / 2, 0.38), name="rail"))
     p.append(board((W - 0.2, L - 0.3, 0.05), (0, -L / 2, 0.46), wear=0.006, m="planks", name="deck"))
-    p.append(worn((W - 0.22, L - 0.32, 0.28), (0, -L / 2, 0.62), m="linen", wear=0.07, name="tick"))
+    p.append(worn((W - 0.22, L - 0.32, 0.4), (0, -L / 2, 0.69), m="linen", wear=0.09, name="tick"))
     # the frame over it, and the rafters across
     for y in (-0.1, -L + 0.1):
         p.append(beam((W - 0.1, 0.1, 0.12), (0, y, HP - 0.075), cham=0.012, name="tie"))
@@ -1637,17 +1642,16 @@ def build_bed_great():
         p.append(beam((0.1, L - 0.1, 0.12), (s_ * (W / 2 - 0.1), -L / 2, HP - 0.088), cham=0.012, name="plate"))
     for k in range(1, 4):
         p.append(beam((W - 0.2, 0.07, 0.07), (0, -L * k / 4, HP - 0.082), cham=0.01, name="rafter"))
-    # the valance: a cloth hung 0.4 m from the frame on the foot and both sides
-    p.append(board((W - 0.3, 0.025, 0.4), (0, -L + 0.14, HP - 0.3), wear=0.004, m="blanket", name="valance"))
-    for s_ in (-1, 1):
-        p.append(board((0.025, L - 0.3, 0.4), (s_ * (W / 2 - 0.14), -L / 2, HP - 0.3), wear=0.004, m="blanket",
-                       name="valance"))
     for x in (-0.6, 0.6):
-        bol = lib.loft([(x - 0.45, 0.1, 0.13, 0.82, -0.42), (x + 0.45, 0.1, 0.13, 0.82, -0.42)], sides=8, axis="x",
-                       name="bolster", mat="linen")
+        bol = lib.loft([(x - 0.45, 0.11, 0.14, 1.0, -0.42), (x + 0.45, 0.11, 0.14, 1.0, -0.42)], sides=8,
+                       axis="x", name="bolster", mat="linen")
         p.append(tag(bol, "linen"))
         lib.shade_smooth(bol)
-    bz = 0.8
+    for x, turn in ((-0.62, 0.12), (0.62, -0.1)):
+        pil = worn((0.62, 0.46, 0.2), (x, -0.78, 1.05), m="linen", wear=0.08, name="pillow")
+        pil.rotation_euler = (-0.35, 0, turn)
+        p.append(pil)
+    bz = 0.93
     p.append(worn((W - 0.16, 1.9, 0.06), (0.0, -L + 1.2, bz), m="blanket", wear=0.02, name="blanket"))
     p[-1].rotation_euler = (0, 0, 0.015)
     p.append(worn((W - 0.2, 0.22, 0.1), (0.0, -L + 2.18, bz + 0.03), m="blanket", wear=0.04, name="fold"))

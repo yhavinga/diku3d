@@ -1977,12 +1977,221 @@ def build_arm():
     return deliver(p, "clutter_arm")
 
 
+def hunt_tapestry(u, v):
+    """A bull's head in gold on a deep wine field, spears either side of it,
+    a row of hounds along the foot and a border in madder and gold: simple
+    shapes, the way a keep's lord has his hunt woven."""
+    bw = 0.06
+    edge = min(u, 1 - u, v, 1 - v)
+    if edge < bw:
+        c = (0.30, 0.04, 0.06)
+        if abs(edge - bw * 0.5) < bw * 0.16:
+            c = (0.78, 0.6, 0.22)
+        elif int((u + v) * 50) % 4 == 0:
+            c = (0.52, 0.36, 0.12)
+        return c
+    c = mix((0.16, 0.03, 0.06), (0.07, 0.04, 0.12), v)
+    c = mix(c, (0.2, 0.05, 0.07), 0.25 * (math.sin(u * 140 + v * 20) * math.sin(v * 90 - u * 30)) ** 2)
+    gold, dark = (0.8, 0.62, 0.24), (0.05, 0.03, 0.03)
+    x, y = (u - 0.5) * 0.55, v - 0.5   # a narrow banner: squeeze the motif's width
+    # the sun behind the head
+    d = math.hypot(x / 0.9, y - 0.08)
+    if 0.27 < d < 0.3:
+        c = (0.6, 0.38, 0.12)
+    # head, snout, horns
+    if (x / 0.13) ** 2 + ((y - 0.06) / 0.17) ** 2 < 1:
+        c = gold
+    if (x / 0.075) ** 2 + ((y + 0.14) / 0.075) ** 2 < 1:
+        c = gold
+    for e in (-0.05, 0.05):
+        if ((x - e) / 0.012) ** 2 + ((y + 0.14) / 0.014) ** 2 < 1:
+            c = dark
+    for e in (-0.06, 0.06):
+        if ((x - e) / 0.02) ** 2 + ((y - 0.1) / 0.02) ** 2 < 1:
+            c = dark
+    hu = abs(x)
+    if 0.1 < hu < 0.33 and abs(y - (0.2 + 0.85 * (hu - 0.1) - 2.4 * (hu - 0.1) ** 2)) < 0.032:
+        c = (0.9, 0.82, 0.62)
+    # spears
+    for sx in (-0.34, 0.34):
+        if abs(x - sx) < 0.008 and -0.3 < y < 0.34:
+            c = (0.55, 0.42, 0.2)
+        if 0.34 < y < 0.42 and abs(x - sx) < (0.42 - y) * 0.45:
+            c = gold
+    # hounds
+    if -0.36 < y < -0.28 and abs(x) < 0.4 and int((x + 0.5) * 12) % 2 == 0:
+        if abs(y + 0.32) < 0.04 - abs(((x + 0.5) * 12) % 1 - 0.5) * 0.07:
+            c = (0.62, 0.5, 0.36)
+    return c
+
+
+def build_tapestry_hunt():
+    """"Rich furnishings": a hunting banner, 1.1 x 3.2 m, hung from a pole
+    on turned ends in soft folds: narrow enough to hang between a pilaster
+    and the corner. Back at y = 0, the pole at 3.85 m."""
+    reset(7357)
+    p = []
+    W, H, top = 1.1, 3.2, 3.85
+    p.append(F.rod((-W / 2 - 0.08, -0.08, top + 0.03), (W / 2 + 0.08, -0.08, top + 0.03), 0.026, m="wood", verts=8))
+    for sx in (-1, 1):
+        p.append(blob((sx * (W / 2 + 0.1), -0.08, top + 0.03), 0.035, "wood", seg=8, rings=5, name="finial"))
+        p.append(F.beam((0.03, 0.08, 0.1), (sx * (W / 2 + 0.04), -0.04, top + 0.03), m="iron"))
+    p.append(grid(W, H, 22, 60, hunt_tapestry, y=-0.07, z0=top - H,
+                  bend=lambda u, v: -0.04 * math.sin(u * math.pi * 8.0) * (0.4 + 0.6 * (1 - v)) - 0.02 * (1 - v),
+                  m="weave", name="hanging"))
+    return deliver(p, "clutter_tapestry_hunt", colours=True)
+
+
+def build_pelts_rich():
+    """Two big hides with torn outlines, a tawny bear's and a white wolf's, a
+    hand's breadth of rucked pile: for a floor that has been given furs."""
+    reset(7393)
+    p = []
+    import bmesh
+    for (cx, cy, turn, W, H, col, z) in ((0, 0, 0.2, 2.1, 2.8, (0.62, 0.4, 0.2), 0.014),
+                                         (1.15, 0.7, -0.8, 1.6, 2.2, (0.86, 0.84, 0.78), 0.03)):
+        n = 22
+
+        def colour(u, v, col=col):
+            d = abs(u - 0.5)
+            ring = mix(tuple(c * 0.6 for c in col), col, smooth(0.0, 0.3, d))
+            return mix(ring, tuple(min(1.0, c * 1.25) for c in col), 0.5 * (math.sin(u * 61 + v * 9) * math.sin(v * 47) + 1) * 0.5)
+
+        def shape(u, v):
+            # a ragged edge: the flayed outline pushed in and out by noise
+            if not pelt_shape(u, v):
+                return False
+            x, y = (u - 0.5) * 2, (v - 0.5) * 2
+            return math.hypot(x / 0.9, y / 1.0) < 0.96 + 0.07 * math.sin(math.atan2(y, x) * 5 + cx * 3)
+        sheet = grid(W, H, n, int(n * H / W), colour, m="fur", name="pelt", bend=lambda u, v: 0.0)
+        me = sheet.data
+        keep = []
+        for f in me.polygons:
+            cu = sum(((me.vertices[i].co.x / W) + 0.5) for i in f.vertices) / len(f.vertices)
+            cv = sum(((me.vertices[i].co.z) / H) for i in f.vertices) / len(f.vertices)
+            keep.append(shape(cu, cv))
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bm.faces.ensure_lookup_table()
+        bmesh.ops.delete(bm, geom=[bm.faces[i] for i, k in enumerate(keep) if not k], context="FACES")
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context="VERTS")
+        for v in bm.verts:
+            x, zz = v.co.x, v.co.z - H / 2
+            v.co = V((x, zz, z + 0.025 * math.sin(x * 6 + zz * 4) * math.sin(zz * 3)))
+        for f in bm.faces:
+            f.normal_update()
+            if f.normal.z < 0:
+                f.normal_flip()
+        bmesh.ops.solidify(bm, geom=bm.faces[:], thickness=0.03)
+        bm.to_mesh(me)
+        bm.free()
+        me.update()
+        sheet.rotation_euler = (0, 0, turn)
+        sheet.location = (cx, cy, 0)
+        lib.shade_smooth(sheet, angle=60)
+        p.append(sheet)
+    return deliver(p, "clutter_pelts_rich", colours=True)
+
+
+def drape_sheet(wfun, H, nx, nz, colour, fold=0.05, flip=False, name="drape"):
+    """A curtain in the XZ plane facing -Y, hung from its post at x = 0 and
+    spreading to x = wfun(v) (negative if `flip`), pushed off the plane in
+    folds. Same winding rule as grid()."""
+    import bmesh
+    verts, faces = [], []
+    for j in range(nz + 1):
+        v = j / nz
+        w = wfun(v)
+        for i in range(nx + 1):
+            u = i / nx
+            x = (-1 if flip else 1) * u * w
+            verts.append((x, -fold * math.sin(u * math.pi * 3.0) * (0.3 + 0.7 * u), v * H))
+    cols = []
+    for j in range(nz + 1):
+        for i in range(nx + 1):
+            cols.append(colour(i / nx, j / nz))
+    for j in range(nz):
+        for i in range(nx):
+            a = j * (nx + 1) + i
+            faces.append((a, a + nx + 1, a + nx + 2, a + 1))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    me.update()
+    obj = bpy.data.objects.new(name, me)
+    bpy.context.collection.objects.link(obj)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    for f in bm.faces:
+        f.normal_update()
+    if sum(f.normal.y for f in bm.faces) > 0:
+        for f in bm.faces:
+            f.normal_flip()
+    bm.to_mesh(me)
+    bm.free()
+    me.update()
+    tag(obj, "cloth")
+    attr = me.color_attributes.new("Col", "FLOAT_COLOR", "POINT")
+    for i, c in enumerate(cols):
+        attr.data[i].color = (c[0], c[1], c[2], 1.0)
+    me.color_attributes.active_color = attr
+    me.color_attributes.render_color_index = me.color_attributes.find("Col")
+    return obj
+
+
+def build_bed_curtains():
+    """The cloth of the great bed (furniture.py furn_bed_great: 2.5 x 3.0 m,
+    posts at 2.5 m, wall at y = 0): a valance on the foot and both sides,
+    and a curtain at each post tied back with a gold cord, in deep crimson
+    with a gold fringe."""
+    reset(7394)
+    W, L, HP = 2.5, 3.0, 2.5
+    top, bot = HP - 0.08, 0.5
+    H = top - bot
+    tie = 0.55
+
+    def crimson(u, v):
+        fold = 0.5 + 0.5 * math.sin(u * 40.0 + v * 3.0)
+        c = mix((0.3, 0.03, 0.05), (0.5, 0.07, 0.09), fold * 0.8)
+        if v < 0.035:
+            c = (0.8, 0.62, 0.24) if int(u * 60) % 2 == 0 else (0.55, 0.4, 0.15)
+        if abs(v - tie) < 0.03:
+            c = (0.8, 0.62, 0.24)
+        if v > 0.965:
+            c = (0.7, 0.52, 0.2)
+        return c
+
+    def width(v):
+        # gathered to the post at the cord, a full fall above and a flare below
+        if v > tie:
+            return 0.2 + (0.95 - 0.2) * smooth(tie, 1.0, v) ** 1.4
+        return 0.2 + (0.62 - 0.2) * smooth(tie, 0.0, v)
+    p = []
+    # (x, y, z-rotation, flip): the six curtains
+    for (x, y, rot, flip) in ((W / 2 + 0.04, -L + 0.1, 90, False), (W / 2 + 0.04, -0.1, 90, True),
+                              (-W / 2 - 0.04, -L + 0.1, -90, True), (-W / 2 - 0.04, -0.1, -90, False),
+                              (W / 2 - 0.1, -L - 0.04, 0, True), (-W / 2 + 0.1, -L - 0.04, 0, False)):
+        d = drape_sheet(width, H, 9, 22, crimson, flip=flip)
+        d.rotation_euler = (0, 0, math.radians(rot))
+        d.location = (x, y, bot)
+        p.append(d)
+    # the valance
+    def val(u, v):
+        c = crimson(u, v)
+        return (0.8, 0.62, 0.24) if v < 0.07 and int(u * 70) % 2 == 0 else c
+    for (x, y, rot, w) in ((0, -L - 0.03, 0, W - 0.2), (W / 2 + 0.05, -L / 2, 90, L - 0.2), (-W / 2 - 0.05, -L / 2, -90, L - 0.2)):
+        g = grid(w, 0.42, 30, 6, val, y=0, z0=0, m="cloth", name="valance")
+        g.rotation_euler = (0, 0, math.radians(rot))
+        g.location = (x, y, HP - 0.42)
+        p.append(g)
+    return deliver(p, "clutter_bed_curtains", colours=True)
+
+
 ASSETS = [build_skull, build_bones, build_skeleton, build_skeleton_seated, build_skeleton_hanging,
           build_shackles, build_strongbox, build_chest, build_hoard, build_sarcophagus, build_alchemy,
           build_pentagram, build_blackboard, build_plaque, build_sign, build_painting_portrait,
           build_painting_landscape, build_painting_gathering, build_mural, build_arms, build_tapestry, build_web,
           build_cocoon, build_cages, build_globe, build_feast, build_carcass, build_pelts, build_hay, build_wreckage,
-          build_chain_run, build_chain_anchor, build_arm]
+          build_chain_run, build_chain_anchor, build_arm, build_tapestry_hunt, build_pelts_rich, build_bed_curtains]
 
 
 def build(only=None):

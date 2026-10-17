@@ -190,6 +190,8 @@ BUDGET = {
     "clutter_mural": 4000, "clutter_arms": 2000, "clutter_tapestry": 3100, "clutter_web": 2600,
     "clutter_cages": 1600, "clutter_globe": 900, "clutter_feast": 4100, "clutter_carcass": 2500,
     "clutter_pelts": 2000,
+    # a rich room's: a hunting tapestry woven on a 44 x 60 grid, two big hides, and the cloth of the great bed
+    "clutter_tapestry_hunt": 5600, "clutter_pelts_rich": 3600, "clutter_bed_curtains": 4600,
     # setpiece.py: one of each in the world, or four gatehouses. The fortress
     # is a whole castle seen from a hundred metres.
     "gatehouse": 6000, "fortress": 20000,
