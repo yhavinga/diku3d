@@ -3241,7 +3241,7 @@ const FLAME_FRAG = `
     float body = 1.0 - smoothstep(0.0, 0.34 * taper, abs(p.x));
     float alpha = body * smoothstep(1.0, 0.55, vUv.y) * smoothstep(0.0, 0.1, vUv.y);
     if (alpha < 0.02) discard;
-    vec3 hot = vec3(1.0, 0.92, 0.62);
+    vec3 hot = vec3(1.0, 0.8, 0.42);
     vec3 mid = vec3(1.0, 0.55, 0.16);
     vec3 cool = vec3(0.75, 0.16, 0.03);
     vec3 colour = mix(hot, mid, smoothstep(0.0, 0.5, vUv.y));
@@ -4808,13 +4808,21 @@ function* peopleOf(world, layout, built, options = {}) {
   if (flames.length) {
     flameSystem = makeFlames(flames.length);
     const dummy = new THREE.Object3D();
+    const torchHeadOut = model(['torch_sconce']) ? 0.31 : 0;
     flames.forEach((f, i) => {
       // A hearth fire sits where it was put, and is wider and lower than a
       // torch: it is a bed of logs, not a brand.
       // A torch flame starts a hand lower and a quarter larger than it did:
       // at scale 1 from 0.2 up, the tarred head poked out under it and a
       // review read the head as the flame. The fire has to wrap its fuel.
-      dummy.position.set(f.x, f.y + (f.hearth || f.fire || f.lantern ? 0 : f.lamp ? 0.05 : 0.12), f.z);
+      dummy.position.set(f.x, f.y + (f.hearth || f.fire || f.lantern ? 0 : f.lamp ? 0.05 : 0.1), f.z);
+      // The sconce model's head stands 0.31 m out from the origin it is placed by
+      // (the bracket arm), so a flame left over the origin burns beside its torch
+      // and, seen from above, floats off it.
+      if (!f.bare && !f.lamp && torchHeadOut && instances) {
+        dummy.position.x += Math.sin(f.rotY || 0) * torchHeadOut;
+        dummy.position.z += Math.cos(f.rotY || 0) * torchHeadOut;
+      }
       // A forge's fire is a bed of coals under the blast, not logs.
       if (f.forge) dummy.scale.set(1.5, 0.55, 1.5);
       // A fire the room is full of (clutter.js `fireRing`): tall, and each its own height.
@@ -4826,7 +4834,7 @@ function* peopleOf(world, layout, built, options = {}) {
       else if (f.fire) dummy.scale.setScalar(f.size || 1.6);
       else if (f.candle) dummy.scale.setScalar(0.14);
       else if (f.lantern) dummy.scale.setScalar(0.34);
-      else dummy.scale.setScalar(f.lamp ? 1.15 : 1.28);
+      else dummy.scale.setScalar(f.lamp ? 1.15 : 0.9);
       dummy.updateMatrix();
       flameSystem.mesh.setMatrixAt(i, dummy.matrix);
     });
