@@ -54,6 +54,8 @@ const PLACES = [
   // (The cart track down the middle: a body is put down where it is not inside a heap.)
   { name: 'dump', vnum: 3030, offsets: [[0, 0], [0, 3], [0, -3], [1.2, 1.5], [-1.2, -1.5]] },
   { name: 'temple-night', vnum: 3001, time: 'night', offsets: [[3.5, 0], [-3.5, 0], [0, 0]] },
+  // Mahn-Tor's master bedroom, a keep room the camera has doorway frames and a fireplace wall to meet; load it with --query room=2396.
+  { name: 'bedroom', vnum: 2396, time: 'night', offsets: [[3.5, 0], [-3.5, 0], [0, 3.5], [0, -3.5], [0, 0], [-4.2, 0], [0, -4.2], [-5.35, 0], [0, -5.35]] },
   { name: 'boarbar-night', vnum: 3007, time: 'night', offsets: [[3.5, 0], [-3.5, 0], [0, 0]] },
 ];
 // Limits. BLACK is the max channel at or under which a pixel is "RGB 0".
