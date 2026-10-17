@@ -11417,8 +11417,8 @@ function buildGreatCavern({ batcher, instances, chunk, room, cell, layout, pos, 
     }
   }
   const seed = room.vnum;
-  // The stone is a cold grey-green here, not the sewer's brown: the fill is warm, and this takes some of it out.
-  const rock = [0.8, 0.92, 0.95];
+  // The stone is a neutral cold grey-brown, not the sewer's warm brown: this takes some of the fill's warmth out.
+  const rock = [0.9, 0.93, 0.96];
   const clamp01 = (t) => Math.min(1, Math.max(0, t));
   const sm = (t) => { const u = clamp01(t); return u * u * (3 - 2 * u); };
   const fbm = (x, z, salt) => terrainNoise(x, z, salt) * 0.55 + terrainNoise(x * 2.1 + 7, z * 2.1 + 3, salt + 1) * 0.3 + terrainNoise(x * 4.3, z * 4.3, salt + 2) * 0.15;
@@ -11443,8 +11443,8 @@ function buildGreatCavern({ batcher, instances, chunk, room, cell, layout, pos, 
   const shade = (x, y, z) => {
     const ry = y - pos.y;
     const up = 1 - 0.55 * sm((ry - 1.5) / 9);
-    const far = 1 - 0.4 * sm((Math.hypot(x - pos.x - GREAT_LAIR.x, z - pos.z - GREAT_LAIR.z) - 8) / 20);
-    return Math.max(0.55, up * far);
+    const far = 1 - 0.55 * sm((Math.hypot(x - pos.x - GREAT_LAIR.x, z - pos.z - GREAT_LAIR.z) - 6) / 20);
+    return Math.max(0.4, up * far);
   };
   const P = 1.5;
   const X0 = pos.x + ext.x0; const X1 = pos.x + ext.x1; const Z0 = pos.z + ext.z0; const Z1 = pos.z + ext.z1;
@@ -11593,25 +11593,24 @@ function buildGreatCavern({ batcher, instances, chunk, room, cell, layout, pos, 
     }
   }
 
-  // Light. Nothing here has a sky, so all of it is the cave's own: a cold
-  // green light from where the dracolich lies, low and behind it so that it
-  // is lit from the back, and a fainter wash of the same where the bones are
-  // thickest. `lights` are candidates for the pool, which keeps the nearest 14.
+  // Light. Nothing here has a sky. The green is the dracolich's and stays
+  // within 6-8 m of its heap: a rim light behind it and a low one in front,
+  // both cut off at that radius so the rest of the cavern is dark stone. The
+  // rest is neutral and cold and dim: a few lights along the way from the
+  // stair to the heap so the bones there catch some, and low lights over the
+  // open floor so that whoever walks it is not a silhouette. `lights` are
+  // candidates for the pool, which keeps the nearest 14.
   const lx = pos.x + GREAT_LAIR.x; const lz = pos.z + GREAT_LAIR.z;
-  lights.push({ x: lx + 1.6, y: pos.y + 3.6, z: lz + 1.2, color: 0x8fe8b8, intensity: 16, radius: 28 });
-  lights.push({ x: lx - 1.2, y: pos.y + 2.6, z: lz - 1.6, color: 0x6fd0a0, intensity: 3.5, radius: 11 });
-  // The cold light does not stop at the lair: it lies on the bones where they
-  // are thickest, and a pale wash hangs in the dome over the open floor, so
-  // that the pillars and the roof are there to be seen and not only the dark.
-  for (const [gx, gz] of [[-4.2, 3.4], [-1, 4.8], [4.5, -4.2], [-8.5, -2.5]]) {
-    lights.push({ x: pos.x + gx, y: pos.y + 3.0, z: pos.z + gz, color: 0x7fe0b8, intensity: 4, radius: 9 });
+  lights.push({ x: lx + 1.6, y: pos.y + 3.2, z: lz + 1.2, color: 0x7fe8b0, intensity: 16, radius: 8 });
+  lights.push({ x: lx - 1.2, y: pos.y + 2.2, z: lz - 1.6, color: 0x6fd8a0, intensity: 3, radius: 6 });
+  for (const [gx, gz] of [[-5.8, 1.8], [-3, 3.6], [-0.4, 4.6]]) {
+    lights.push({ x: pos.x + gx, y: pos.y + 2.6, z: pos.z + gz, color: 0xc4d0d4, intensity: 4, radius: 6 });
   }
-  // Low and pale, a few to each stretch of open floor, so that whoever walks the dome is not a silhouette.
-  for (const [gx, gz] of [[-14, -5], [-19, 0.5], [-21, 6], [-12, 5.5], [-18, -9], [-15.5, 3.2], [-7.5, 5.8], [-9, -8], [-12.2, 3.6]]) {
-    lights.push({ x: pos.x + gx, y: pos.y + 3.2, z: pos.z + gz, color: 0x7fd8b8, intensity: 9, radius: 11 });
+  for (const [gx, gz] of [[-14, -5], [-19, 0.5], [-21, 6], [-12, 5.5], [-18, -9], [-15.5, 3.2], [-9, -8], [-12.2, 3.6]]) {
+    lights.push({ x: pos.x + gx, y: pos.y + 3.2, z: pos.z + gz, color: 0xa8b4c0, intensity: 5, radius: 10 });
   }
-  for (const [gx, gy, gz] of [[-12, 6.5, -2], [-19, 6.5, -8], [-18, 6, 4], [-9, 7, -12], [-19, 6.2, -1]]) {
-    lights.push({ x: pos.x + gx, y: pos.y + gy, z: pos.z + gz, color: 0x7fb0b0, intensity: 10, radius: 24 });
+  for (const [gx, gy, gz] of [[-12, 6.5, -2], [-19, 6.5, -8], [-18, 6, 4], [-9, 7, -12]]) {
+    lights.push({ x: pos.x + gx, y: pos.y + gy, z: pos.z + gz, color: 0x9aa4b0, intensity: 5, radius: 22 });
   }
   return { ext, lair: GREAT_LAIR, arena: GREAT_ARENA, lowTop, ceilAt, pillars };
 }
