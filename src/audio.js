@@ -550,8 +550,11 @@ export class Audio {
   }
 
   /** A body meeting the ground, and what it was wearing a moment after. */
-  bodyfall({ pan, gain } = {}) {
+  bodyfall({ pan, gain, name = '' } = {}) {
     if (!this.ctx || this.muted) return;
+    // A heap of bones has just fallen apart in its own death clip.
+    const rule = creatureOf(name);
+    if (rule && rule.fall === false) return;
     if (this.foley.play('bodyfall', { pan, gain })) return;
     const dest = this.out({ pan, gain });
     this.thump(dest, { from: 110, to: 38, gain: 0.14, decay: 0.3 });

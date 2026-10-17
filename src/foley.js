@@ -99,6 +99,8 @@ export class Creatures {
     this.growls = new Map();
     this.engaged = new Map();   // slot -> its strength when last seen fighting, for the roar on taking up a fight
     this.roared = new Map();
+    this.hp = new Map();        // slot -> hit points when last seen fighting, for rules with a `hurt` sound
+    this.hurtAt = new Map();
     this.tick = 0;
   }
 
@@ -139,8 +141,9 @@ export class Creatures {
     const fit = [];
     for (const slot of game.mobs) {
       if (!slot.here || slot.dead || !slot.pos) continue;
-      // Lying in its bones or getting up, it has no voice but the rise's own.
-      if (slot.figure && slot.figure.awaken && slot.figure.awaken.state !== 'up') continue;
+      // Getting up out of its bones it has no voice but the rise's own; lying in them it may only whisper.
+      const aw = slot.figure && slot.figure.awaken;
+      if (aw && aw.state !== 'up' && aw.state !== 'heap') continue;
       const rule = creatureOf(`${slot.proto.keywords} ${slot.proto.short || ''}`);
       if (!rule) continue;
       const heard = listen(diku, slot.pos, { near: 2, scale: 5 });
@@ -149,12 +152,23 @@ export class Creatures {
       const walls = slot.roomVnum !== player && sheltered ? 0.35 : 1;
       fit.push({ slot, rule, heard, walls });
       // Within earshot: have its fight voice and death cry decoded before they are needed, or the first one is lost.
-      for (const id of [...(rule.roar || []), ...(rule.fight || []), ...(rule.death ? SOUNDS[rule.death].clips : [])]) this.audio.clips.load(id);
+      for (const id of [...(rule.roar || []), ...(rule.fight || []), ...(rule.hurt || []), ...(rule.death ? SOUNDS[rule.death].clips : [])]) this.audio.clips.load(id);
     }
     if (!fit.length) return;
     for (const { slot, rule, heard, walls } of fit) {
       const mob = slot.instance;
-      if (!mob || !mob.fighting) { this.engaged.delete(slot); continue; }
+      const aw = slot.figure && slot.figure.awaken;
+      // Still in its heap, or getting up: the rise's own sounds are all it has.
+      if (!mob || !mob.fighting || (aw && aw.state !== 'up')) { this.engaged.delete(slot); this.hp.delete(slot); continue; }
+      if (rule.hurt) {
+        // Its bones crack where a blow lands; the blow's own sound is the impact, this is the frame answering.
+        const was = this.hp.get(slot);
+        this.hp.set(slot, mob.hit);
+        if (was !== undefined && mob.hit < was && now >= (this.hurtAt.get(slot) ?? 0)) {
+          this.hurtAt.set(slot, now + 1.2);
+          this.say(rule, pick(rule.hurt), heard, walls, true);
+        }
+      }
       if (rule.roar) {
         // A big creature bellows as it takes up a fight and when a blow takes a good part of its strength.
         const before = this.engaged.get(slot);

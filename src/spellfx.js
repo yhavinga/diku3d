@@ -40,6 +40,7 @@ import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { OVERLAY_LAYER } from './render.js';
 import { AFF } from './magic.js';
 import { castClipOf } from './people.js';
+import { creatureOf } from './soundmap.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -1619,9 +1620,9 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       audio.thump(dest, { from: 420 * pitch, to: 120 * pitch, gain: 0.12, decay: 0.12 });
       audio.noiseHit(dest, { frequency: 2400 * pitch, q: 1.2, gain: 0.22, decay: 0.08 });
     },
-    roar(p, duration) {
+    roar(p, duration, kind = 'roar') {
       if (!S.ok()) return;
-      if (audio.spell('roar', where(p))) return;
+      if (audio.spell(kind, where(p))) return;
       const dest = audio.out(where(p));
       audio.noiseHit(dest, { frequency: 260, to: 900, q: 0.8, type: 'lowpass', gain: 0.6, attack: duration * 0.6, decay: duration * 0.6, rate: 0.7 });
       audio.noiseHit(dest, { frequency: 1400, q: 1.1, gain: 0.08, attack: duration * 0.5, decay: duration * 0.5, rate: 1.1 });
@@ -2076,7 +2077,9 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       const big = f !== 'flame';
       if (f === 'breath-frost') S.frost(src);
       else if (f === 'breath-acid') S.hiss(src, 1.2);
-      S.roar(src, big ? 1.1 : 0.6);
+      // A skeleton's breath is not a living dragon's roar (soundmap.js CREATURES `breath`).
+      const voice = from.slot && creatureOf(`${from.slot.proto.keywords} ${from.slot.proto.short || ''}`);
+      S.roar(src, big ? 1.1 : 0.6, (voice && voice.breath) || 'roar');
       // The stream outlives the landing: a breath pours on after it hits.
       fx.data.stream = fx.flight + (big ? 0.55 : 0.3);
       fx.data.tongues = Array.from({ length: big ? 6 : 4 }, () => ({ pts: P3(10), phase: rand(0, TAU), ang: rand(0, TAU), wob: rand(0.6, 1.2) }));

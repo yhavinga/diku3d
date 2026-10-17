@@ -62,6 +62,11 @@ export const SOUNDS = {
   // The dracolich getting up (actors.js createAwaken): bones going home as the clip starts, the roar as its jaws open.
   dracolich_rise: { clips: ['cr_dracolich_rise'], gain: 1 },
   dracolich_roar: { clips: ['cr_dracolich_roar'], gain: 1 },
+  // Bone and necromancy, no throat: the magic failing in a wail, then the frame coming apart (the man's body-fall is skipped, `fall: false`).
+  death_dracolich: { clips: ['cr_dracolich_death'], gain: 1 },
+  death_bones: { clips: ['cr_bones_collapse'], gain: 0.9 },
+  // Its breath is fire forced through an empty ribcage, not a living dragon's roar (spellfx.js roar(), CREATURES `breath`).
+  spell_dracolich_breath: { clips: ['cr_dracolich_breath'], gain: 0.9 },
   bodyfall: { clips: ['cmb_bodyfall'], gain: 0.9 },
   pain: { clips: ['cmb_pain'], gain: 0.7 },
   levelup: { clips: ['ui_levelup'], gain: 0.55 },
@@ -116,11 +121,18 @@ export const PRELOAD = Object.keys(SOUNDS).filter((name) => name !== 'thunder');
  *          good part of its strength; `fightGain`/`fightRate` replace gain and
  *          rate for fight and roar (a minotaur's idle call is a cow pitched down,
  *          its bellow is not)
+ *   hurt   clips when it loses hit points in a fight, on top of the blow itself
+ *   breath the spell_ sound its breath weapon makes in place of a dragon's roar
+ *   fall   false when its death clip already is the body hitting the ground
  *   night  only after dark; `rate` pitch range (a lizard is a small snake)
  * Silent on purpose: rabbits, worms, slimes, fish.
  */
 export const CREATURES = [
   { id: 'baby dragon', re: /\b(hatchling|baby|young|pet|fairy)\b.*\bdragon\b|\bdragon\b.*\b(hatchling|baby|pet)\b/, idle: ['cr_cat'], rate: [1.5, 1.8], gain: 0.5, every: [14, 40], reach: 12, death: 'death_small' },
+  // Bare bones held by necromancy: no lungs, so wind through ribs, jaws and breaking bone. A third of its fight calls are the hollow howl.
+  { id: 'dracolich', re: /\bdracolich\b/, idle: ['cr_dracolich_idle'], fight: ['cr_dracolich_snap', 'cr_dracolich_snap', 'cr_dracolich_call'], roar: ['cr_dracolich_call'], hurt: ['cr_dracolich_hurt'], breath: 'dracolich_breath', gain: 0.9, every: [12, 30], reach: 40, death: 'death_dracolich', fall: false },
+  // A plain skeleton: the same jaws and bones, smaller and higher, and a heap of bones for a death.
+  { id: 'skeleton', re: /\b(skeletons?|skeletal)\b/, idle: [], fight: ['cr_dracolich_snap'], hurt: ['cr_dracolich_hurt'], fightRate: [1.25, 1.45], fightGain: 0.6, gain: 0.6, every: [60, 120], reach: 18, death: 'death_bones', fall: false },
   { id: 'dragon', re: /\b(dragon|wyrm|wyvern|hydra)\b/, idle: ['cr_dragon'], fight: ['cr_dragon'], roar: ['cr_dragon'], gain: 0.8, every: [30, 80], reach: 40, death: 'death_dragon' },
   { id: 'spider', re: /\b(spider|arachnos|arachnid|tarantula)\b/, idle: ['cr_spider'], fight: ['cr_spider'], gain: 0.55, every: [15, 50], reach: 14, death: 'death_small' },
   { id: 'wolf', re: /\b(wolf|wolves|werewolf|wargs?)\b/, idle: ['cr_wolf'], night: true, fight: ['cr_dog_growl'], gain: 0.7, every: [25, 70], reach: 45, rate: [0.9, 1.05], death: 'death_beast' },

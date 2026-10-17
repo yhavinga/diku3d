@@ -1484,7 +1484,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
         const p = { x: event.x, y: event.y, z: event.z };
         audio.death && audio.death({ ...where(p), name: event.name });
         // The body meets the ground about three quarters of a second later.
-        queue.push({ at: clock + 0.72, kind: 'fall', p });
+        queue.push({ at: clock + 0.72, kind: 'fall', p, name: event.name });
         break;
       }
       default: break;
@@ -1571,7 +1571,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
         audio.whoosh && audio.whoosh({ ...where(p), weight: e.armed ? 1 : 0.6, miss: e.kind === 'miss' });
       } else if (item.kind === 'fall') {
         dust(item.p, 1.2);
-        audio.bodyfall && audio.bodyfall(where(item.p));
+        audio.bodyfall && audio.bodyfall({ ...where(item.p), name: item.name });
       }
     }
 
