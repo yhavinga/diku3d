@@ -160,7 +160,9 @@ function surfaces(library) {
  * below that, as linear luminance of the surface it ends up as.
  */
 const DYED_MEAN = new Set(['cloth', 'cloth2', 'wool', 'velvet', 'linen', 'leather', 'paint']);
-const TINT_FLOOR = { cloth: 0.05, cloth2: 0.05, wool: 0.05, velvet: 0.05, linen: 0.05, leather: 0.04, paint: 0.05, hair: 0.03 };
+// A fur-brown minotaur's skin was 3% albedo, so its head went near black with a fire behind it
+// while the tabard beside it read; skin is not divided by a mean, so the floor is on the tint itself.
+const TINT_FLOOR = { cloth: 0.05, cloth2: 0.05, wool: 0.05, velvet: 0.05, linen: 0.05, leather: 0.04, paint: 0.05, hair: 0.03, skin: 0.07 };
 
 /** Whose colour a surface takes when a person names none for it: a cloak in
  * wool is the second cloth's colour, a shield's paint the first's. */
