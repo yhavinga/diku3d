@@ -36635,6 +36635,58 @@
     "lra": 1.3
    },
    "target_bpm": 140
+  },
+  {
+   "id": "cr_dracolich_rise",
+   "file": "cr_dracolich_rise.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "Loose bones rattling, grinding and clattering together without a pause for the whole clip: from the first second a dry clicking and scraping of hundreds of bones sliding on stone, getting louder and denser with sharp knocks as they snap into a skeleton, a dry undead hiss rising under it, ending on one heavy clack, in a large cave. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 4.5,
+    "prompt_influence": 0.9
+   },
+   "post": {
+    "peakDb": -3,
+    "kbps": 56,
+    "mono": true
+   },
+   "duration": 3.42,
+   "bytes": 28777,
+   "steps": null,
+   "loudness": {
+    "lufs": -13.7,
+    "peak": -3,
+    "lra": 1
+   }
+  },
+  {
+   "id": "cr_dracolich_roar",
+   "file": "cr_dracolich_roar.ogg",
+   "kind": "sfx",
+   "api": "sfx",
+   "group": "creature",
+   "loop": false,
+   "prompt": "One roar of a huge undead skeletal dragon, a rasping hollow shriek with a dry wheeze in it and no flesh behind the voice, like wind forced through an empty skull, rising then trailing into a long rattling exhale, in a vast cave with echo. No other sounds, no music, no engines, no electronic hum.",
+   "settings": {
+    "duration_seconds": 3.5,
+    "prompt_influence": 0.8
+   },
+   "post": {
+    "peakDb": -3,
+    "kbps": 56,
+    "mono": true
+   },
+   "duration": 2.44,
+   "bytes": 16740,
+   "steps": null,
+   "loudness": {
+    "lufs": -10.3,
+    "peak": -3,
+    "lra": 0
+   }
   }
  ]
 }

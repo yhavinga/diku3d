@@ -102,7 +102,34 @@ export class Creatures {
     this.tick = 0;
   }
 
+  /**
+   * A dracolich lying in its heap or getting up (actors.js createAwaken) asks
+   * for two sounds as its clip reaches them -- the rattle as it begins, the
+   * roar as its jaws open -- so they are played the frame they are asked
+   * for, from where it stands, and not on the half-second beat below. Its
+   * clips are decoded while you are within earshot of a heap, or the first
+   * rise would be silent.
+   */
+  awakenings(diku) {
+    for (const slot of diku.game.mobs) {
+      const aw = slot.figure && slot.figure.awaken;
+      if (!aw || !slot.pos) continue;
+      const heard = listen(diku, slot.pos, { near: 3, scale: 14 });
+      if (aw.state === 'heap' && heard.distance < 70) {
+        for (const id of [...SOUNDS.dracolich_rise.clips, ...SOUNDS.dracolich_roar.clips]) this.audio.clips.load(id);
+      }
+      while (aw.events.length) {
+        const event = aw.events.shift();
+        if (heard.distance > 90) continue;
+        // The rattle is slowed to the clip's four seconds (it was cut at 3.4).
+        this.audio.foley.play(event === 'rattle' ? 'dracolich_rise' : 'dracolich_roar',
+          { pan: heard.pan, gain: heard.gain, rate: event === 'rattle' ? 0.87 : 1 });
+      }
+    }
+  }
+
   update(now, diku) {
+    this.awakenings(diku);
     if (now < this.tick) return;
     this.tick = now + 0.5;
     const game = diku.game;
@@ -112,6 +139,8 @@ export class Creatures {
     const fit = [];
     for (const slot of game.mobs) {
       if (!slot.here || slot.dead || !slot.pos) continue;
+      // Lying in its bones or getting up, it has no voice but the rise's own.
+      if (slot.figure && slot.figure.awaken && slot.figure.awaken.state !== 'up') continue;
       const rule = creatureOf(`${slot.proto.keywords} ${slot.proto.short || ''}`);
       if (!rule) continue;
       const heard = listen(diku, slot.pos, { near: 2, scale: 5 });

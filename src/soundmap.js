@@ -59,6 +59,9 @@ export const SOUNDS = {
   death_minotaur: { clips: ['cr_minotaur_death'], gain: 0.9 },
   death_troll: { clips: ['cr_troll_death'], gain: 0.9 },
   death_dragon: { clips: ['cr_dragon_death'], gain: 0.95 },
+  // The dracolich getting up (actors.js createAwaken): bones going home as the clip starts, the roar as its jaws open.
+  dracolich_rise: { clips: ['cr_dracolich_rise'], gain: 1 },
+  dracolich_roar: { clips: ['cr_dracolich_roar'], gain: 1 },
   bodyfall: { clips: ['cmb_bodyfall'], gain: 0.9 },
   pain: { clips: ['cmb_pain'], gain: 0.7 },
   levelup: { clips: ['ui_levelup'], gain: 0.55 },
