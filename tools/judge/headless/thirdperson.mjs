@@ -53,6 +53,9 @@ const PLACES = [
   { name: 'shire-bagend', vnum: 1135, offsets: [[3.5, 0], [-3.5, 0], [0, 3.5], [0, -3.5], [0, 0]] },
   // (The cart track down the middle: a body is put down where it is not inside a heap.)
   { name: 'dump', vnum: 3030, offsets: [[0, 0], [0, 3], [0, -3], [1.2, 1.5], [-1.2, -1.5]] },
+  // The dracolich's cave (shells.js `greatCavern`): the foot of the flight down from #5010 (4.5 m west of the
+  // middle), the open dome, 6-8 m from where the dracolich lies (1.9 m east, 2.9 m south), and the walls and corners.
+  { name: 'dracolich', vnum: 5011, calm: true, offsets: [[-5.5, 0], [-5.0, -2.3], [-5.0, 2.3], [-12, -3], [-14, 5], [-9, -9], [-19, -12], [-2, -3.5], [-4.5, 6.5], [-4.5, 2.9], [-22.5, 0], [-12, -15.2], [4, -15], [6.0, 6.0], [-23, 5.5]] },
   { name: 'temple-night', vnum: 3001, time: 'night', offsets: [[3.5, 0], [-3.5, 0], [0, 0]] },
   // Mahn-Tor's master bedroom, a keep room the camera has doorway frames and a fireplace wall to meet; load it with --query room=2396.
   { name: 'bedroom', vnum: 2396, time: 'night', offsets: [[3.5, 0], [-3.5, 0], [0, 3.5], [0, -3.5], [0, 0], [-4.2, 0], [0, -4.2], [-5.35, 0], [0, -5.35]] },
@@ -110,6 +113,8 @@ const sweepPlace = async ({ place, headings, pitches, frame, limits }) => {
   if (vnum === undefined) vnum = d.places().find((p) => p.key === place.key)?.vnum;
   if (vnum === undefined || !d.built.rooms.get(vnum) || d.built.rooms.get(vnum).unbuilt) { res.skipped = `room ${vnum ?? place.key} is not built`; return res; }
   res.vnum = vnum;
+  // A place with a mobile that starts the fight (the dracolich) is held to the view: nobody walks at the camera.
+  if (place.calm) for (const sl of d.game.mobs) sl.proto.act &= ~32;
   d.applyTime(place.time || 'noon');
   d.view.set(true);
   d.goto(vnum, 0, -0.1);
