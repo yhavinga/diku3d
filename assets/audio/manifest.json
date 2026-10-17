@@ -24769,110 +24769,6 @@
    }
   },
   {
-   "id": "music_boss",
-   "file": "music_boss.ogg",
-   "kind": "music",
-   "api": "music",
-   "loop": true,
-   "prompt": "Boss fight: heavy frame drums and tabor, two shawms in harsh parallel fifths over a deep bowed drone, hurdy-gurdy ostinato, grim and loopable",
-   "settings": {
-    "composition_plan": {
-     "positive_global_styles": [
-      "medieval early music",
-      "heavy slow frame drums struck hard with tabor on the offbeat",
-      "deep bowed vielle drone, low open fifth",
-      "two loud harsh shawms in parallel fifths playing a short grim phrase",
-      "hurdy-gurdy ostinato with buzzing drone string",
-      "Phrygian-tinged Dorian mode, tempo around 92 bpm",
-      "menacing and relentless, the same weight throughout, loopable",
-      "recorded live in a stone hall, rough, historically informed, instrumental only, dense, no pauses"
-     ],
-     "negative_global_styles": [
-      "orchestra",
-      "orchestral strings",
-      "orchestra hits",
-      "brass fanfare",
-      "choir",
-      "vocals",
-      "singing",
-      "trailer",
-      "synthesizer",
-      "electronic",
-      "pads",
-      "drum kit",
-      "modern",
-      "pop",
-      "rock",
-      "metal",
-      "electric guitar",
-      "bass drop",
-      "Celtic",
-      "bodhran",
-      "tin whistle",
-      "Irish pub",
-      "jig",
-      "film score",
-      "epic cinematic"
-     ],
-     "sections": [
-      {
-       "section_name": "Drums and drone",
-       "positive_local_styles": [
-        "hard frame drums in a heavy pattern, low drone, hurdy-gurdy ostinato"
-       ],
-       "negative_local_styles": [
-        "synthesizer",
-        "orchestra",
-        "film score"
-       ],
-       "duration_ms": 28000,
-       "lines": []
-      },
-      {
-       "section_name": "Shawms",
-       "positive_local_styles": [
-        "two shawms enter with a grim phrase over the same heavy drums and ostinato"
-       ],
-       "negative_local_styles": [
-        "synthesizer",
-        "orchestra",
-        "film score"
-       ],
-       "duration_ms": 28000,
-       "lines": []
-      },
-      {
-       "section_name": "Return",
-       "positive_local_styles": [
-        "shawms drop out, drums, drone and hurdy-gurdy ostinato continue with the same weight"
-       ],
-       "negative_local_styles": [
-        "synthesizer",
-        "orchestra",
-        "film score"
-       ],
-       "duration_ms": 20000,
-       "lines": []
-      }
-     ]
-    }
-   },
-   "post": {
-    "lufs": -23,
-    "kbps": 64,
-    "crossfade": 3,
-    "cutTail": 9
-   },
-   "duration": 64.07,
-   "bytes": 525614,
-   "steps": null,
-   "loudness": {
-    "lufs": -23,
-    "peak": -9.7,
-    "lra": 3.5
-   }
-  },
-  {
    "id": "cr_minotaur",
    "file": "cr_minotaur.ogg",
    "kind": "sfx",
@@ -36479,6 +36375,258 @@
     "lufs": -23,
     "peak": -9.7,
     "lra": 0
+   }
+  },
+  {
+   "id": "music_boss_dragon",
+   "file": "music_boss_dragon.ogg",
+   "kind": "music",
+   "api": "music",
+   "loop": true,
+   "family": "dragon",
+   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a dragon. Vast and burning. Huge roaring contrabass trombones and tubas like a dragon's breath, the choir roaring in unison on long open vowels, rolling bass drum and timpani thunder, searing held high brass swells above the low ones, a feeling of enormous wings and fire in a cavern of gold. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "settings": {
+    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a dragon. Vast and burning. Huge roaring contrabass trombones and tubas like a dragon's breath, the choir roaring in unison on long open vowels, rolling bass drum and timpani thunder, searing held high brass swells above the low ones, a feeling of enormous wings and fire in a cavern of gold. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "music_length_ms": 120000
+   },
+   "post": {
+    "lufs": -23,
+    "kbps": 64,
+    "crossfade": 3,
+    "cutHead": 2.8,
+    "cutTail": 18.16
+   },
+   "duration": 96.07,
+   "bytes": 769294,
+   "steps": null,
+   "loudness": {
+    "lufs": -23,
+    "peak": -11.8,
+    "lra": 0.3
+   }
+  },
+  {
+   "id": "music_boss_undead",
+   "file": "music_boss_undead.ogg",
+   "kind": "music",
+   "api": "music",
+   "loop": true,
+   "family": "undead",
+   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: the restless dead. Sepulchral and cold. A hushed whispering male choir over a hollow low drone, slow deep funeral bell tolls, a faint slow heartbeat drum, tremolo low strings like grave wind, breath and rattling whispers, a crypt with no light. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "settings": {
+    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: the restless dead. Sepulchral and cold. A hushed whispering male choir over a hollow low drone, slow deep funeral bell tolls, a faint slow heartbeat drum, tremolo low strings like grave wind, breath and rattling whispers, a crypt with no light. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "music_length_ms": 120000
+   },
+   "post": {
+    "lufs": -23,
+    "kbps": 64,
+    "crossfade": 3,
+    "cutHead": 1.72,
+    "cutTail": 19.24
+   },
+   "duration": 96.07,
+   "bytes": 732107,
+   "steps": null,
+   "loudness": {
+    "lufs": -23,
+    "peak": -10.1,
+    "lra": 5.5
+   }
+  },
+  {
+   "id": "music_boss_giant",
+   "file": "music_boss_giant.ogg",
+   "kind": "music",
+   "api": "music",
+   "loop": true,
+   "family": "giant",
+   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a brute giant. Stomping, brutal and heavy. Massive thudding slow drums like footsteps shaking stone, growling low tubas and bass trombones, guttural grunting male chant in lockstep with the drums, anvil blows, crude and enormous rather than refined. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "settings": {
+    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a brute giant. Stomping, brutal and heavy. Massive thudding slow drums like footsteps shaking stone, growling low tubas and bass trombones, guttural grunting male chant in lockstep with the drums, anvil blows, crude and enormous rather than refined. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "music_length_ms": 120000
+   },
+   "post": {
+    "lufs": -23,
+    "kbps": 64,
+    "crossfade": 3,
+    "cutHead": 4.76,
+    "cutTail": 18.84
+   },
+   "duration": 93.43,
+   "bytes": 718893,
+   "steps": null,
+   "loudness": {
+    "lufs": -23,
+    "peak": -10,
+    "lra": 0.7
+   }
+  },
+  {
+   "id": "music_boss_beast",
+   "file": "music_boss_beast.ogg",
+   "kind": "music",
+   "api": "music",
+   "loop": true,
+   "family": "beast",
+   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a beast of the labyrinth. Primal and hunted. Tribal hand drums and big frame drums in a driving heartbeat pattern, low bellowing horns, hissing rattles and bone clatter, a low male chant in short barked phrases, a maze of stone corridors, the breath of something huge close behind. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "settings": {
+    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a beast of the labyrinth. Primal and hunted. Tribal hand drums and big frame drums in a driving heartbeat pattern, low bellowing horns, hissing rattles and bone clatter, a low male chant in short barked phrases, a maze of stone corridors, the breath of something huge close behind. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "music_length_ms": 120000
+   },
+   "post": {
+    "lufs": -23,
+    "kbps": 64,
+    "crossfade": 3,
+    "cutHead": 3.28,
+    "cutTail": 13.68
+   },
+   "duration": 100.07,
+   "bytes": 733583,
+   "steps": null,
+   "loudness": {
+    "lufs": -23,
+    "peak": -9.8,
+    "lra": 0.9
+   }
+  },
+  {
+   "id": "music_boss_demon",
+   "file": "music_boss_demon.ogg",
+   "kind": "music",
+   "api": "music",
+   "loop": true,
+   "family": "demon",
+   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: the abyss. Dissonant and infernal. The choir singing tight dissonant clusters and tritones, detuned low brass, struck iron, anvils and chains as percussion, scraping metal, slow pounding timpani, a descent into a pit of fire. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "settings": {
+    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: the abyss. Dissonant and infernal. The choir singing tight dissonant clusters and tritones, detuned low brass, struck iron, anvils and chains as percussion, scraping metal, slow pounding timpani, a descent into a pit of fire. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "music_length_ms": 120000
+   },
+   "post": {
+    "lufs": -23,
+    "kbps": 64,
+    "crossfade": 3,
+    "cutHead": 11.96,
+    "cutTail": 9.08
+   },
+   "duration": 96.1,
+   "bytes": 705809,
+   "steps": null,
+   "loudness": {
+    "lufs": -23,
+    "peak": -9.3,
+    "lra": 1
+   }
+  },
+  {
+   "id": "music_boss_elemental",
+   "file": "music_boss_elemental.ogg",
+   "kind": "music",
+   "api": "music",
+   "loop": true,
+   "family": "elemental",
+   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a raging elemental storm. Swirling low strings in surging tremolo, rolling thunder drums and timpani, wind howling through the choir that swells and falls like a storm front, crackling cymbal wash, relentless churning motion. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "settings": {
+    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a raging elemental storm. Swirling low strings in surging tremolo, rolling thunder drums and timpani, wind howling through the choir that swells and falls like a storm front, crackling cymbal wash, relentless churning motion. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "music_length_ms": 120000
+   },
+   "post": {
+    "lufs": -23,
+    "kbps": 64,
+    "crossfade": 3,
+    "cutHead": 7.08,
+    "cutTail": 13.88
+   },
+   "duration": 96.07,
+   "bytes": 730384,
+   "steps": null,
+   "loudness": {
+    "lufs": -23,
+    "peak": -10.6,
+    "lra": 2.7
+   }
+  },
+  {
+   "id": "music_boss_sorcerer",
+   "file": "music_boss_sorcerer.ogg",
+   "kind": "music",
+   "api": "music",
+   "loop": true,
+   "family": "sorcerer",
+   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a dark sorcerer. Eerie and arcane. A whispering male and boy choir in a strange invented tongue, bowed glass and glass harmonica shimmer, slow pulsing low strings and a muted pulsing bass drum, a cold spell being woven in a tower, uncanny rather than loud. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "settings": {
+    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a dark sorcerer. Eerie and arcane. A whispering male and boy choir in a strange invented tongue, bowed glass and glass harmonica shimmer, slow pulsing low strings and a muted pulsing bass drum, a cold spell being woven in a tower, uncanny rather than loud. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "music_length_ms": 120000
+   },
+   "post": {
+    "lufs": -23,
+    "kbps": 64,
+    "crossfade": 3,
+    "cutHead": 0.44,
+    "cutTail": 0.52
+   },
+   "duration": 116.07,
+   "bytes": 853019,
+   "steps": null,
+   "loudness": {
+    "lufs": -23,
+    "peak": -10,
+    "lra": 1.6
+   }
+  },
+  {
+   "id": "music_boss_titan",
+   "file": "music_boss_titan.ogg",
+   "kind": "music",
+   "api": "music",
+   "loop": true,
+   "family": "titan",
+   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a god-king on a throne of stone. Monumental and merciless. Slow huge brass chorales in unison, the deep choir intoning like a decree, giant bass drums and a deep gong struck in half-time, solemn, towering and absolute, the weight of a tyrant who cannot be moved. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "settings": {
+    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a god-king on a throne of stone. Monumental and merciless. Slow huge brass chorales in unison, the deep choir intoning like a decree, giant bass drums and a deep gong struck in half-time, solemn, towering and absolute, the weight of a tyrant who cannot be moved. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "music_length_ms": 120000
+   },
+   "post": {
+    "lufs": -23,
+    "kbps": 64,
+    "crossfade": 3,
+    "cutHead": 11,
+    "cutTail": 9.96
+   },
+   "duration": 96.07,
+   "bytes": 726900,
+   "steps": null,
+   "loudness": {
+    "lufs": -23,
+    "peak": -10.9,
+    "lra": 0.8
+   }
+  },
+  {
+   "id": "music_boss_endboss",
+   "file": "music_boss_endboss.ogg",
+   "kind": "music",
+   "api": "music",
+   "loop": true,
+   "family": "endboss",
+   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: an ancient evil awakening in the dark of a deep mine. A held low brass drone beneath the whole piece, a slow heartbeat drum, the choir growling in unison, thunderous timpani on the heavy beats, cavernous and relentless. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "settings": {
+    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: an ancient evil awakening in the dark of a deep mine. A held low brass drone beneath the whole piece, a slow heartbeat drum, the choir growling in unison, thunderous timpani on the heavy beats, cavernous and relentless. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "music_length_ms": 120000
+   },
+   "post": {
+    "lufs": -23,
+    "kbps": 64,
+    "crossfade": 3,
+    "cutHead": 9.12,
+    "cutTail": 11.8
+   },
+   "duration": 96.11,
+   "bytes": 714784,
+   "steps": null,
+   "loudness": {
+    "lufs": -23,
+    "peak": -10.5,
+    "lra": 1.7
    }
   }
  ]
