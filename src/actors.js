@@ -1959,9 +1959,9 @@ const BEASTS = [
   { test: /\b(sand ?worms?|purple worms?)\b|\bpurple\b.*\bworm\b/, asset: 'beast_sandworm', scale: 1.0, stands: 4.1, coat: 0x74428a, pale: 0xb892b0, points: 0x40224e, patch: 0x5a3270, cover: 0.3, footprint: [2.4, 2.4], sand: 0xc9ae84, box: [0.8, 9, 'quad', 0x5c2c68] },
   { test: /\bdustdiggers?\b/, asset: 'beast_dustdigger', scale: 1.0, coat: 0xc2a070, pale: 0x9a7c58, points: 0x7a5a3a, patch: 0xb08c5c, cover: 0.35, box: [0.3, 4, 'quad', 0xc2a070] },
   { test: /\bcamels?\b/, asset: 'beast_camel', scale: 1.0, coat: 0xb48c5c, pale: 0xd6be96, points: 0x8a6a44, box: [1.9, 3, 'quad', 0xb48c5c] },
-  // The dracolich lies as a heap of bones until it rises: its idle is the
-  // dragon's `lair`, curled on the floor.
-  { test: /\bdracolich\b/, asset: 'beast_dracolich', scale: 0.8, coat: 0xe0d2ae, pale: 0xf6f0dc, points: 0x6a5236, patch: 0xc4a468, cover: 0.3, glow: 0x70ff9a, lair: true, box: [1.7, 9, 'quad', 0xcfc2a2] },
+  // The dracolich lies as a heap of bones (`heap`) until it fights, and then
+  // rises (`rise`, createAwaken) into its stance.
+  { test: /\bdracolich\b/, asset: 'beast_dracolich', scale: 0.8, coat: 0xe0d2ae, pale: 0xf6f0dc, points: 0x6a5236, patch: 0xc4a468, cover: 0.3, glow: 0x70ff9a, awaken: true, box: [1.7, 9, 'quad', 0xcfc2a2] },
   { test: /\bwisps?\b|\bwill-o/, wisp: true, glow: 0xa8e0ff, box: [0.3, 0.3, 'bird', 0xa8e0ff] },
   // --- canines. Two ear sets are modelled; `hide` collapses the one a breed
   // does not have.
@@ -2342,6 +2342,230 @@ function sleekFur(library) {
   return m;
 }
 
+/**
+ * A dracolich lies as a heap of bones (`heap`, a loop) until it fights, and
+ * then gets up: `rise`, once, whose last frame is `idle`'s first. The state
+ * machine is here, the trigger and the weights in motion.js. What goes with
+ * the clip, keyed to its own time so that it follows the pose:
+ *   1.2 s  the heave -- dust and bone fragments thrown off, the ribs kindle
+ *   2.0-3.0 the skull lifts -- the eyes ignite
+ *   3.0 s  the roar (an event for audio.js, with the rattle at 0)
+ * and a low green mist that swirls round the heap from the first twitch and
+ * thins out after it stands. A few dozen points, no lights: the glow is the
+ * model's own `eye` and `glowcore` meshes, whose material each dracolich owns
+ * a clone of so it can be driven.
+ */
+const MIST = 26;
+const DUST = 18;
+const BONES = 14;
+let softDot = null;
+function dotTexture() {
+  if (softDot) return softDot;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.45, 'rgba(255,255,255,0.45)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  softDot = new THREE.CanvasTexture(c);
+  softDot.generateMipmaps = false;
+  softDot.minFilter = THREE.LinearFilter;
+  return softDot;
+}
+
+function makePoints(count, material) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3).fill(-50), 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
+  return points;
+}
+
+function riseFx(scale, rand) {
+  const additive = (size, map) => new THREE.PointsMaterial({
+    size, map, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+  });
+  const mist = makePoints(MIST, additive(0.95 * scale, dotTexture()));
+  const dust = makePoints(DUST, additive(0.7 * scale, dotTexture()));
+  const frag = makePoints(BONES, new THREE.PointsMaterial({ size: 0.075, color: 0xe6dcc2, sizeAttenuation: true }));
+  const root = new THREE.Group();
+  root.add(mist, dust, frag);
+  // Mist: each puff on its own orbit round the heap, low, drifting out.
+  const m = Array.from({ length: MIST }, () => ({
+    a: rand() * Math.PI * 2, r: (0.5 + rand() * 1.9) * scale, h: 0.08 + rand() * 0.4, w: (rand() < 0.5 ? -1 : 1) * (0.35 + rand() * 0.7),
+    s: 0.4 + rand() * 0.8, out: 0.15 + rand() * 0.35,
+  }));
+  // Dust and bone, thrown from the chest at the heave.
+  const d = Array.from({ length: DUST }, () => {
+    const a = rand() * Math.PI * 2;
+    const v = (0.7 + rand() * 1.8) * scale;
+    return { born: 1.15 + rand() * 0.8, life: 1.0 + rand() * 0.8, x: Math.cos(a) * 0.5 * scale, z: Math.sin(a) * 0.9 * scale,
+      vx: Math.cos(a) * v, vz: Math.sin(a) * v, vy: (0.6 + rand() * 1.3) * scale };
+  });
+  const b = Array.from({ length: BONES }, () => {
+    const a = rand() * Math.PI * 2;
+    const v = (1.4 + rand() * 2.4) * scale;
+    return { born: 1.2 + rand() * 0.5, life: 1.3 + rand() * 0.6, x: Math.cos(a) * 0.4 * scale, z: Math.sin(a) * 0.8 * scale,
+      vx: Math.cos(a) * v, vz: Math.sin(a) * v, vy: (2.2 + rand() * 2.4) * scale };
+  });
+  const sm = (a, c, x) => { const t = Math.min(1, Math.max(0, (x - a) / (c - a))); return t * t * (3 - 2 * t); };
+  return {
+    object: root,
+    /** `T` seconds into the rise (and on, as the mist thins). False once there is nothing left to draw. */
+    update(T) {
+      // The mist climbs with the first twitches, is full as it heaves, gone by 6 s.
+      const level = sm(0.0, 1.4, T) * (1 - sm(3.6, 6.0, T));
+      const mp = mist.geometry.attributes.position.array;
+      const mc = mist.geometry.attributes.color.array;
+      for (let i = 0; i < MIST; i++) {
+        const p = m[i];
+        const ang = p.a + T * p.w;
+        const r = p.r + p.out * Math.max(0, T - 1.5) * scale;
+        mp[i * 3] = Math.cos(ang) * r;
+        mp[i * 3 + 1] = p.h + 0.18 * Math.sin(T * p.s * 2 + i) + 0.12 * Math.max(0, T - 2);
+        mp[i * 3 + 2] = Math.sin(ang) * r * 0.55;
+        const k = level * 0.34 * (0.6 + 0.4 * Math.sin(T * 1.7 + i * 2.1));
+        mc[i * 3] = 0.25 * k; mc[i * 3 + 1] = 1.0 * k; mc[i * 3 + 2] = 0.45 * k;
+      }
+      mist.geometry.attributes.position.needsUpdate = true;
+      mist.geometry.attributes.color.needsUpdate = true;
+      const fly = (list, pts, colour, gravity, fade) => {
+        const pa = pts.geometry.attributes.position.array;
+        const ca = pts.geometry.attributes.color.array;
+        for (let i = 0; i < list.length; i++) {
+          const p = list[i];
+          const age = T - p.born;
+          if (age < 0 || age > p.life) { pa[i * 3 + 1] = -50; continue; }
+          pa[i * 3] = p.x + p.vx * age * (fade ? 0.7 : 1);
+          pa[i * 3 + 2] = p.z + p.vz * age * (fade ? 0.7 : 1);
+          pa[i * 3 + 1] = Math.max(0.03, 0.2 + p.vy * age - 0.5 * gravity * age * age);
+          const k = fade ? Math.sin(Math.PI * Math.min(1, age / p.life)) * 0.5 : 1;
+          ca[i * 3] = colour[0] * k; ca[i * 3 + 1] = colour[1] * k; ca[i * 3 + 2] = colour[2] * k;
+        }
+        pts.geometry.attributes.position.needsUpdate = true;
+        pts.geometry.attributes.color.needsUpdate = true;
+      };
+      fly(d, dust, [0.75, 0.66, 0.5], 0.8, true);
+      fly(b, frag, [1, 1, 1], 9.8, false);
+      return T < 6.2;
+    },
+    dispose() {
+      root.removeFromParent();
+      for (const o of [mist, dust, frag]) { o.geometry.dispose(); o.material.dispose(); }
+    },
+  };
+}
+
+function createAwaken({ group, actions, clips, embers, scale, rand, start }) {
+  const DUR = clips.rise;
+  const heap = actions.heap;
+  const rise = actions.rise;
+  heap.setLoop(THREE.LoopRepeat, Infinity);
+  heap.clampWhenFinished = false;
+  heap.time = start * clips.heap;
+  heap.play();
+  const sm = (a, c, x) => { const t = Math.min(1, Math.max(0, (x - a) / (c - a))); return t * t * (3 - 2 * t); };
+  let fx = null;
+  let roared = false;
+  let tail = 0;
+  const aw = {
+    state: 'heap',
+    /** Seconds into the rise: 0 as a heap, the clip's length once up. */
+    t: 0,
+    /** Things audio.js is to play at the figure: 'rattle' as it begins, 'roar' as the jaws open. */
+    events: [],
+    glow(eyes, core) {
+      for (const node of embers.eyes) { node.material.color.setScalar(2.6 * eyes); node.visible = eyes > 0.003; }
+      for (const node of embers.core) { node.material.color.setScalar(1.5 * core); node.visible = core > 0.003; }
+    },
+    /** Called at the fight's first frame; no-op once it is up. */
+    begin() {
+      if (aw.state !== 'heap') return;
+      aw.state = 'rising';
+      aw.t = 0;
+      roared = false;
+      rise.reset();
+      rise.timeScale = 1;
+      rise.setEffectiveWeight(0);
+      rise.play();
+      fx = riseFx(scale, rand);
+      group.add(fx.object);
+      aw.events.push('rattle');
+    },
+    /**
+     * Weights for this frame; true while the body is held (not walking, not
+     * fighting). Everything but the heap and the rise is silenced.
+     */
+    step(dt) {
+      if (aw.state === 'up') {
+        if (!fx) return false;
+        tail += dt;
+        aw.t = DUR + tail;
+        if (!fx.update(aw.t)) { fx.dispose(); fx = null; }
+        return false;
+      }
+      for (const name of Object.keys(actions)) {
+        const a = actions[name];
+        if (a !== heap && a !== rise && a.getEffectiveWeight() !== 0) a.setEffectiveWeight(0);
+      }
+      if (aw.state === 'heap') {
+        heap.setEffectiveWeight(1);
+        aw.glow(0, 0);
+        return true;
+      }
+      const T = Math.min(rise.time, DUR);
+      aw.t = T;
+      // The heap's pose is the rise's first frame: a short crossfade hides the
+      // moment between the loop's own twitches.
+      const w = Math.min(1, T / 0.15);
+      rise.setEffectiveWeight(w);
+      heap.setEffectiveWeight(1 - w);
+      aw.glow(sm(2.0, 3.0, T), sm(1.1, 2.6, T));
+      if (!roared && T >= 3.0) { roared = true; aw.events.push('roar'); }
+      fx.update(T);
+      if (T >= DUR - 0.03 || (!rise.isRunning() && rise.time >= DUR - 0.03)) {
+        // Over: idle's first frame is this one, and it takes the body from here.
+        aw.state = 'up';
+        tail = 0;
+        rise.setEffectiveWeight(0);
+        rise.stop();
+        heap.setEffectiveWeight(0);
+        if (actions.idle) { actions.idle.time = 0; actions.idle.setEffectiveWeight(1); }
+        aw.glow(1, 1);
+        return false;
+      }
+      return true;
+    },
+    /** Back to a heap: the reset table refilling, or the body set down anew. */
+    reset() {
+      if (fx) { fx.dispose(); fx = null; }
+      rise.setEffectiveWeight(0);
+      rise.stop();
+      heap.setEffectiveWeight(1);
+      if (actions.idle) actions.idle.setEffectiveWeight(0);
+      aw.state = 'heap';
+      aw.t = 0;
+      aw.glow(0, 0);
+    },
+    /** Dead, or otherwise taken out of it: no more rising. */
+    release() {
+      if (aw.state === 'up' && !fx) return;
+      if (fx) { fx.dispose(); fx = null; }
+      rise.setEffectiveWeight(0);
+      rise.stop();
+      heap.setEffectiveWeight(0);
+      aw.state = 'up';
+      aw.glow(1, 1);
+    },
+  };
+  aw.glow(0, 0);
+  return aw;
+}
+
 function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const info = prepareBeast(asset);
   const look = beastLook(spec, proto, options.seed || 0);
@@ -2350,6 +2574,8 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   // How far indoors it stands, eased by easeIndoor like a person's: the
   // figure fill of beastlight.js.
   const indoor = { value: 0 };
+  // What a dracolich can kindle: the fires of its sockets and of its ribs.
+  const embers = { eyes: [], core: [] };
   body.traverse((node) => {
     if (!node.isMesh) return;
     // Out of the shadow map like the people, for the same reason: a skinned
@@ -2367,6 +2593,10 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     if (options.buried) node.material = buriedTwin(node.material, { sunless: true });
     node.material = litBeast(node.material, indoor);
     node.geometry = paintedGeometry(asset, node, tag, look);
+    if (spec.awaken && (tag === 'glow' || tag === 'glowcore')) {
+      node.material = node.material.clone();
+      (tag === 'glow' ? embers.eyes : embers.core).push(node);
+    }
   });
   const scale = (spec.scale || 1) * (0.94 + strHash(proto.short, 3) * 0.12);
   const width = spec.width || 1;
@@ -2444,6 +2674,12 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
     clips.idle = clips.lair;
     delete actions.lair;
   }
+  // A dracolich is a heap until it fights: nothing but `heap` shows.
+  let awaken = null;
+  if (spec.awaken && actions.heap && actions.rise) {
+    actions.idle.setEffectiveWeight(0);
+    awaken = createAwaken({ group, actions, clips, embers, scale: spec.scale || 1, rand: mulberry(Math.floor(strHash(proto.short, 29) * 1e9)), start });
+  }
   mixer.update(0);
 
   const size = asset.size;
@@ -2463,7 +2699,7 @@ function buildModelledBeast(asset, spec, proto, library, options = {}) {
   const record = {
     group, headGroup: null, height, scale, mixer, actions, clips, stride,
     hitFrame: { ...(info.hitFrame || {}) }, weapon: null, archetype: info.archetype || null, legs: null,
-    afloat, indoor, temper: mergeTemper(spec.temper, temperOf(proto)),
+    afloat, indoor, temper: mergeTemper(spec.temper, temperOf(proto)), awaken,
   };
   // A bat under a roof hangs from it while it is idle: its `roost` clip,
   // moved up from the height it was authored at (`info.roost`, in the
@@ -5912,6 +6148,7 @@ function* peopleOf(world, layout, built, options = {}) {
       overlay: null, dead: null, gone: null, path: null, speed: 0, lunge: null, recoil: null, sway: null,
       pending: null, calls: [], order: null, fighting: false, stuck: 0, stage: null, fading: 0,
     });
+    if (fig.awaken) fig.awaken.reset();
     fig.order = null;
     fig.sink = 0;
     fig.lift = 0;

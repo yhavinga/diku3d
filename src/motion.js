@@ -152,7 +152,7 @@ const REST_LOOP = 1.8;
 /** people.js's word for a child, on the mobile's short description. */
 const CHILD = /\b(child|children|kids?|boys?|girls?|urchins?|lads?|lass(es)?|pupils?|youngsters?|orphans?|toddlers?)\b/i;
 const SIP = [2.35, 4.0];
-const ONE_SHOT = new Set(['attack', 'attack2', 'hit', 'block', 'death']);
+const ONE_SHOT = new Set(['attack', 'attack2', 'hit', 'block', 'death', 'rise']);
 
 /** A per-person generator, so one figure's choices do not depend on another's. */
 function mulberry(seed) {
@@ -621,7 +621,8 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
 
   for (const fig of figures) {
     prepareRig(fig);
-    fig.pastimes = fig.actions ? PASTIME_NAMES.filter((n) => fig.actions[n]) : [];
+    // A dracolich that has risen does not lie down again (`loaf`): that is the reset's.
+    fig.pastimes = fig.actions ? PASTIME_NAMES.filter((n) => fig.actions[n] && !(fig.awaken && n === 'loaf')) : [];
     fig.body = bodyOf(fig);
     fig.bones = fig.mixer && !fig.legs ? findBones(fig) : null;
     const seed = fig.seed || 1;
@@ -1351,8 +1352,36 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
    * Turn an order into a path and a pace. Called every frame; only does work
    * when there is a decision to make.
    */
+  /**
+   * A dracolich getting up (actors.js createAwaken): it lies in its heap until
+   * the game sets it on someone -- a fight, or a look: 'chase', 'face' or
+   * 'hold' -- then rises over the length of its clip, turning to its foe from
+   * the heave on. True while the body is held where it lies.
+   */
+  function awakening(fig, dt) {
+    const aw = fig.awaken;
+    const m = fig.m;
+    if (m.dead) { aw.release(); return false; }
+    if (aw.state === 'heap') {
+      const kind = orderOf(fig).kind;
+      if (kind === 'chase' || kind === 'face' || kind === 'hold') aw.begin();
+    }
+    const held = aw.step(dt);
+    if (held) {
+      m.want = 0; m.fighting = false; m.path = null; m.turnTo = null;
+      const o = orderOf(fig);
+      if (aw.state === 'rising' && aw.t > 1.2 && o.target) {
+        const want = Math.atan2(o.target.x - fig.at.x, o.target.z - fig.at.z);
+        const err = Math.atan2(Math.sin(want - fig.object.rotation.y), Math.cos(want - fig.object.rotation.y));
+        fig.object.rotation.y += err * Math.min(1, dt * 2.4);
+      }
+    }
+    return held;
+  }
+
   function think(fig, dt, player) {
     const m = fig.m;
+    if (fig.awaken && awakening(fig, dt)) return;
     const order = orderOf(fig);
     // Anything but a stroll -- Merc sending them on, a fight -- gets them up
     // off the bench first, and out of the conversation.
@@ -1884,6 +1913,12 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     const m = fig.m;
     const a = fig.actions;
     if (!fig.mixer || !a) return;
+    // Lying in its heap or getting up, a dracolich's weights are awakening()'s.
+    if (fig.awaken && m.dead) fig.awaken.release();
+    if (fig.awaken && fig.awaken.state !== 'up') {
+      if (m.overlay) { m.overlay.action.setEffectiveWeight(0); m.overlay.action.stop(); m.overlay = null; }
+      return;
+    }
     const speed = m.speed;
     const clips = fig.clips;
 

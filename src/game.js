@@ -1005,6 +1005,12 @@ export const MERC = {
 /** Metres, standing in for the mud's "same room?". */
 const MELEE = 3.2;      // you can reach each other
 const REACH = 4.6;      // how far `attack` will look for something to swing at
+// The dracolich lies as a heap of bones until it fights, and rises over the
+// length of its `rise` clip (tools/blender/beasts.py, 4.0 s); the body is the
+// page's, but whether it may swing is the rules', so a server and a page agree
+// on when the first blow can land. Keyed on the mobile's prototype.
+const RISES = new Set([5010]);
+const RISE_SECONDS = 4.0;
 const AGGRO = 9;        // an aggressive mobile notices you
 const BREAK = 14;       // out this far the fight is over -- this is do_flee
 const MOB_SPEED = 2.6;  // metres a second, closing
@@ -1478,7 +1484,19 @@ export function createGame({
       mob.inventory.push(obj);
     }
     slot.instance = mob;
+    slot.riseEnds = undefined;
     return mob;
+  }
+
+  /**
+   * Whether a mobile that has to get up before it fights is still doing so.
+   * The first call from a fight starts the clock; a body that has never
+   * risen (or is back from a reset: `wake`) starts it again.
+   */
+  function rising(slot) {
+    if (!RISES.has(slot.proto.vnum)) return false;
+    if (slot.riseEnds === undefined) slot.riseEnds = ctx.clock + RISE_SECONDS;
+    return ctx.clock < slot.riseEnds;
   }
 
   // -- the players ----------------------------------------------------------
@@ -2224,6 +2242,7 @@ export function createGame({
       const mob = slot.instance;
       if (!mob || slot.dead || !mob.fighting) continue;
       if (!isAwake(mob)) { ctx.stopFighting(mob, false); continue; }
+      if (rising(slot)) continue;
       // Whoever it is fighting: you, or -- a cityguard answering a scream -- another mobile.
       const victim = mob.fighting;
       const there = isNpc(victim) ? (victim.slot && !victim.slot.dead ? victim.slot.pos : null)
@@ -2300,7 +2319,8 @@ export function createGame({
       // used to land from across the street. Out of reach, the mobile only
       // picks the fight (set_fighting, both ways, as damage() would) and
       // comes at you; the violence pulse swings once it is there.
-      if (dist2(slot.pos, feet()) > MELEE * MELEE) {
+      const getting = rising(slot);
+      if (getting || dist2(slot.pos, feet()) > MELEE * MELEE) {
         ctx.setFighting(mob, state);
         if (!state.fighting) ctx.setFighting(state, mob);
         continue;
@@ -2472,6 +2492,8 @@ export function createGame({
       // "Examine call for special procedure": a spec_fun that acted ends this
       // mobile's turn, as in update.c. `game.mobileSpec` is where one plugs in.
       const spec = SPEC_FUNS[slot.record.special];
+      // Getting up out of its bones, it breathes on no one.
+      if (mob && mob.fighting && rising(slot)) continue;
       if (mob && ((spec && spec(slot, mob)) || (mobileSpec && mobileSpec(slot, mob)))) continue;
       // "That's all for sleeping / busy monster": fighting is busy.
       if (mob && mob.position !== POS.STANDING) continue;
@@ -2628,6 +2650,7 @@ export function createGame({
       }
 
       if (mob && mob.fighting) {
+        rising(slot);          // the clock starts on the frame the fight does
         const foe = mob.fighting;
         const target = isNpc(foe) ? foe.slot.pos : (pcOf(foe) ? pcOf(foe).feet : slot.pos);
         if ((mob.act & ACT_SENTINEL) && slot.record.shop) {

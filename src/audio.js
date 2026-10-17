@@ -642,7 +642,12 @@ export class Audio {
     // The boss that has noticed you picks its own piece, as one you are fighting does. `cause`
     // empties a few seconds before the threat eases out; the piece must not change meanwhile.
     if (threat && presence.cause) this.threatFamily = bossFamilyOf(presence.cause.who);
-    this.music.setFight(game && game.state.fighting && this.stopEvents ? fightPieceFor(game.state.fighting, game.state) : (threat && this.stopEvents ? `boss:${this.threatFamily || 'endboss'}` : null));
+    // A dracolich still in its heap, or rising, is not fought to music yet:
+    // the piece starts as its skull lifts (presence.js SKULL_LIFT, 2.4 s).
+    const foe = game && game.state.fighting;
+    const rise = foe && foe.slot && foe.slot.figure && foe.slot.figure.awaken;
+    const waking = !!rise && (rise.state === 'heap' || (rise.state === 'rising' && rise.t < 2.4));
+    this.music.setFight(foe && !waking && this.stopEvents ? fightPieceFor(foe, game.state) : (threat && this.stopEvents ? `boss:${this.threatFamily || 'endboss'}` : null));
     this.music.update();
     if (this.muted) return;
     if (this.places && window.diku && window.diku.built && window.diku.game) {

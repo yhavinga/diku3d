@@ -33,6 +33,18 @@ export const HIT_EVERY = 20;
 const STOREY = 4;
 const SCAN_EVERY = 0.12;
 
+/**
+ * A dracolich lying in its heap, or still getting up, is not yet a presence:
+ * it counts from the moment its skull lifts, 2.4 s into the `rise` clip
+ * (actors.js createAwaken: `awaken.t`), which is also when the boss piece
+ * should start. Anything else is as it was.
+ */
+export const SKULL_LIFT = 2.4;
+const waking = (slot) => {
+  const a = slot && slot.figure && slot.figure.awaken;
+  return !!a && (a.state === 'heap' || (a.state === 'rising' && a.t < SKULL_LIFT));
+};
+
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 /**
@@ -54,11 +66,11 @@ export function createPresence({ game, nav, onTurn = null }) {
   function scan(eye) {
     const me = game.state;
     const foe = me.fighting;
-    if (foe && fightMusicFor(foe, me) === 'boss') return { weight: 1, why: 'fighting', who: foe };
+    if (foe && fightMusicFor(foe, me) === 'boss' && !waking(foe.slot)) return { weight: 1, why: 'fighting', who: foe };
     const sight = nav();
     let best = { weight: 0, why: null, who: null };
     for (const slot of game.mobs) {
-      if (!slot.here || slot.dead || !slot.figure) continue;
+      if (!slot.here || slot.dead || !slot.figure || waking(slot)) continue;
       // A mobile nobody has met is not yet a character (game.js wake, which rolls the
       // dice): its prototype's level stands in, and waking it from here would not do.
       const mob = slot.instance || slot.proto;
