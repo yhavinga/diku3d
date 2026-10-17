@@ -472,6 +472,12 @@ class Batcher {
 const RELIEF_EDGE = 4;
 /** Ground that varies by less than this across a piece is not worth cutting. */
 const RELIEF_FLAT = 0.012;
+/**
+ * How far the drawn ground may stand off the hills' own height inside a tile
+ * (metres). A two-metre tile on a crest or in a hollow was up to 25 cm off the
+ * floor a body walks on (p99 3.6 cm), so such tiles are cut into four.
+ */
+const RELIEF_SAG = 0.02;
 
 /**
  * The ground the Shire's hills make, laid over the flat plane in tiles two
@@ -504,6 +510,71 @@ function buildReliefGround({ batcher, relief, y, holes }) {
     batcher.add(geo, 'grass', IDENTITY, { chunk: 'ground', flat: true, normals: true });
     geo.dispose();
   };
+  // A tile that is cut finer, and the coarse tiles round it, are laid as
+  // polygons from one list: every vertex is the hills' own height, and a
+  // coarse tile beside a fine one takes the fine one's edge vertex, so no
+  // crack opens along the join.
+  const loose = { pos: [], nor: [], idx: [] };
+  const vert = (x, z) => {
+    const [gx, gz] = relief.grad(x, z);
+    const l = Math.hypot(gx, 1, gz);
+    loose.pos.push(x, y + relief.at(x, z), z); loose.nor.push(-gx / l, 1 / l, -gz / l);
+    return loose.pos.length / 3 - 1;
+  };
+  const cutTiles = new Set();
+  for (const h of holes) {
+    for (let x = Math.floor(h.x0 / T) * T; x < h.x1; x += T) {
+      for (let z = Math.floor(h.z0 / T) * T; z < h.z1; z += T) if (h.x1 > x && h.x0 < x + T && h.z1 > z && h.z0 < z + T) cutTiles.add(`${x},${z}`);
+    }
+  }
+  const cutBy = (x, z) => cutTiles.has(`${x},${z}`);
+  const level = (x, z) => relief.range(x, x + T, z, z + T)[1] > 0.0005;
+  // Two triangles split along the diagonal grow() uses, against the hills.
+  const sag = (x0, z0) => {
+    const a = relief.at(x0, z0); const bb = relief.at(x0 + T, z0); const c = relief.at(x0, z0 + T); const dd = relief.at(x0 + T, z0 + T);
+    let worst = 0;
+    for (const [u, v] of [[0.5, 0.5], [0.25, 0.25], [0.75, 0.75], [0.25, 0.75], [0.75, 0.25], [0.5, 0.25], [0.25, 0.5], [0.5, 0.75], [0.75, 0.5]]) {
+      const h = u + v <= 1 ? a + (bb - a) * u + (c - a) * v : dd + (c - dd) * (1 - u) + (bb - dd) * (1 - v);
+      worst = Math.max(worst, Math.abs(h - relief.at(x0 + u * T, z0 + v * T)));
+    }
+    return worst;
+  };
+  const fineMemo = new Map();
+  // Never against a hole's tile: its pieces keep their own edges.
+  const isFine = (x, z) => {
+    const key = `${x},${z}`;
+    let f = fineMemo.get(key);
+    if (f === undefined) {
+      f = level(x, z) && !cutBy(x, z) && !cutBy(x - T, z) && !cutBy(x + T, z) && !cutBy(x, z - T) && !cutBy(x, z + T) && sag(x, z) > RELIEF_SAG;
+      fineMemo.set(key, f);
+    }
+    return f;
+  };
+  const laid = (x, z) => {
+    // Four quarter-tiles, nine vertices.
+    const h = T / 2; const v = [];
+    for (let j = 0; j <= 2; j++) for (let i = 0; i <= 2; i++) v.push(vert(x + i * h, z + j * h));
+    for (let j = 0; j < 2; j++) {
+      for (let i = 0; i < 2; i++) {
+        const a = v[j * 3 + i]; const bb = v[j * 3 + i + 1]; const c = v[(j + 1) * 3 + i]; const dd = v[(j + 1) * 3 + i + 1];
+        // Wound so the faces look up, as in grow().
+        loose.idx.push(a, c, bb, c, dd, bb);
+      }
+    }
+  };
+  const fanned = (x, z) => {
+    // A coarse tile with a fine neighbour: round the edge, from the middle.
+    const h = T / 2; const m = vert(x + h, z + h);
+    const ring = [vert(x, z + T)];
+    if (isFine(x, z + T)) ring.push(vert(x + h, z + T));
+    ring.push(vert(x + T, z + T));
+    if (isFine(x + T, z)) ring.push(vert(x + T, z + h));
+    ring.push(vert(x + T, z));
+    if (isFine(x, z - T)) ring.push(vert(x + h, z));
+    ring.push(vert(x, z));
+    if (isFine(x - T, z)) ring.push(vert(x, z + h));
+    for (let i = 0; i < ring.length; i++) loose.idx.push(m, ring[i], ring[(i + 1) % ring.length]);
+  };
   const gz0 = Math.floor(b.z0 / T) * T; const gx0 = Math.floor(b.x0 / T) * T;
   for (let z = gz0; z < b.z1; z += T) {
     let run = [];
@@ -517,21 +588,33 @@ function buildReliefGround({ batcher, relief, y, holes }) {
         for (const r of rectsAround({ x0: x, x1: x + T, z0: z, z1: z + T }, cut)) grow([r.x0, r.x1], r.z0, r.z1);
         continue;
       }
+      if (isFine(x, z)) { flush(); laid(x, z); continue; }
+      if (isFine(x - T, z) || isFine(x + T, z) || isFine(x, z - T) || isFine(x, z + T)) { flush(); fanned(x, z); continue; }
       if (!run.length) run.push(x);
       run.push(x + T);
     }
     flush();
   }
+  if (loose.idx.length) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(loose.pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(loose.nor, 3));
+    geo.setIndex(loose.idx);
+    batcher.add(geo, 'grass', IDENTITY, { chunk: 'ground', flat: true, normals: true });
+    geo.dispose();
+  }
 }
 
 /**
- * The Dump's ground: a mesh over the floor, 0.25 m a side, in the dirt, with
+ * The Dump's ground: a mesh over the floor, 0.125 m a side, in the dirt, with
  * the rubble where a heap is high and the peat where the ground is lowest;
  * and a platform whose height is the same function, so that a body walks on
  * what it sees. Over the floor and not in it: the flat floor stays under it.
  */
 function buildDumpGround({ batcher, lumps, y, chunk, platforms }) {
-  const S = 0.25;
+  // The heaps' own roughness has a wavelength of half a metre: at 0.25 m the
+  // mesh stood up to 8 cm off the floor a body walks on.
+  const S = 0.125;
   const nx = Math.round((lumps.x1 - lumps.x0) / S);
   const nz = Math.round((lumps.z1 - lumps.z0) / S);
   const vertex = (i, j) => {

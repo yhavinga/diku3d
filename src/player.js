@@ -352,15 +352,27 @@ export class Player {
     const items = this.platforms.near(x, z, this._scratch);
     let best = -Infinity;
     this._groundField = false;
+    this._groundSmooth = false;
     for (const p of items) {
       // A shut lid is floor; an open one is a hole.
       if (p.door && p.door.open) continue;
       if (x < p.x0 - RADIUS || x > p.x1 + RADIUS || z < p.z0 - RADIUS || z > p.z1 + RADIUS) continue;
       const top = topAt(p, x, z);
       if (top > feetY + STEP_UP) continue;
-      if (top > best) { best = top; this._groundField = !!p.field; }
+      if (top > best) { best = top; this._groundField = !!p.field; this._groundPlat = p; this._groundSmooth = !!(p.field || p.slope); }
     }
     return best;
+  }
+
+  /**
+   * How steeply the rolling ground under the feet rises at (x, z) going the
+   * way (ux, uz): its own height function RADIUS ahead against RADIUS behind,
+   * over the body's width. Only the function, not the platform's floor: a
+   * stair's treads on a hill ride on it too, and a tread is a step for
+   * STEP_UP, not a slope.
+   */
+  gradeAlong(p, x, z, ux, uz) {
+    return (p.field(x + ux * RADIUS, z + uz * RADIUS) - p.field(x - ux * RADIUS, z - uz * RADIUS)) / (2 * RADIUS);
   }
 
   /** Knock the view about: 0.2 is a scratch, 1 is a mauling. */
@@ -460,6 +472,7 @@ export class Player {
     const feetY = this.position.y - EYE;
     const fromX = this.position.x; const fromZ = this.position.z;
     const fromField = this._groundField && this.onGround;
+    const fromSmooth = this._groundSmooth && this.onGround;
 
     // horizontal move, then push out of anything we ended up inside
     const stepX = wishX * speed * dt;
@@ -473,10 +486,14 @@ export class Player {
     let ground = this.groundAt(this.position.x, this.position.z, feetY);
     // Rolling ground that is too steep is a wall: not an invisible one, the
     // slope itself. Only where both the feet were and are on such ground, so
-    // that a stair's tread (a step, not a slope) is left to STEP_UP.
+    // that a stair's tread (a step, not a slope) is left to STEP_UP. The grade
+    // is the hill's own, over the width of the body, along the way it is going:
+    // not this frame's rise over this frame's run, which on a wall's edge is a
+    // millimetre of run and a centimetre of seam (any slope, however gentle, was
+    // a wall there), and which counted the feet's own lag behind the ground.
     if (fromField && this._groundField && ground > -Infinity && this.onGround) {
       const run = Math.hypot(this.position.x - fromX, this.position.z - fromZ);
-      if (run > 1e-5 && (ground - feetY) / run > MAX_SLOPE) {
+      if (run > 1e-3 && this.gradeAlong(this._groundPlat, this.position.x, this.position.z, (this.position.x - fromX) / run, (this.position.z - fromZ) / run) > MAX_SLOPE) {
         this.position.x = fromX; this.position.z = fromZ;
         ground = this.groundAt(fromX, fromZ, feetY);
       }
@@ -495,7 +512,13 @@ export class Player {
       // standing on, or stepping up onto, a surface
       this.onGround = true;
       this.velocity.y = 0;
-      const smooth = targetFeet > feetY || stepDown ? Math.min(1, dt * 18) : 1;
+      // A tread is eased onto; a slope is not: the feet follow it exactly, or a
+      // climber sinks into the hill and a descender walks above it. What tells
+      // them apart is whether the ground under the feet last frame, read from
+      // the floor they now stand on, is where the feet were: on a slope it is,
+      // at a tread or a floor's edge it is a step away.
+      const follows = fromSmooth && this._groundSmooth && Math.abs(topAt(this._groundPlat, fromX, fromZ) - feetY) <= 0.03;
+      const smooth = (targetFeet > feetY || stepDown) && !follows ? Math.min(1, dt * 18) : 1;
       this.position.y += (targetFeet + EYE - this.position.y) * smooth;
       if (this.keys.has('Space')) { this.velocity.y = 7.4; this.onGround = false; }
     } else {

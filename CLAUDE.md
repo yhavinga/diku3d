@@ -500,6 +500,21 @@ choose.
   only a test of what it reaches: with the lids left out of the page it must
   refuse at the lids, and at 0.5 m it cannot follow a flight steeper than
   about 51° or narrower than 1.34 m between its sides.
+- **Slopes are judged on the hill's own grade, and the feet follow them exactly**
+  (player.js `gradeAlong`, `follows`). The first rule compared one frame's rise
+  with one frame's run, with the feet's own easing lag in the rise: at 60 Hz that
+  read any slope over ~14 degrees as a wall, a body sliding along a fence (a
+  millimetre of run, a centimetre of seam) as a wall at any slope, and the feet
+  stood 0.17 m in a hill going up and 0.25 m over it going down. Now the grade is
+  `field` ahead against behind over the body's width (not the platform's `rest`:
+  a stair's treads on a hill are field platforms, and a tread is STEP_UP's), and
+  the feet are eased only onto a tread, where the ground under last frame's feet
+  is not where they were. `topAt` reads a `field` at the true point, not clamped
+  to the rectangle (the clamp put a grade x radius step at every seam), and the
+  ground meshes must stay within ~2 cm of it (`buildReliefGround` cuts a tile
+  finer where two triangles sag more than `RELIEF_SAG`; the Dump's is 0.125 m).
+  `slopewalk.mjs` holds all of it, at 60 Hz stepping: the faults are a function
+  of the step, and a real-time headless frame (30 Hz) hid them.
 - **Midgaard's river is sunk** (shells.js `sunkRivers`, `RIVER_DROP`): the
   water rooms whose text says the banks are too steep to climb lie 3 m down
   in a channel, as a negative lift the judge and nav.js share; layout.js

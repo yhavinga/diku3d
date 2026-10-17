@@ -26,18 +26,22 @@ const HALF = CELL / 2;
 export const TERRACE_LIFT = 0.9;
 
 /**
- * The height of platform `p` at (x, z). A point off the rectangle is taken
- * at the nearest point on it, which is how player.js has always read a
- * platform within a body's radius.
+ * The height of platform `p` at (x, z). A point off a flat floor's or a
+ * ramp's rectangle is taken at the nearest point on it, which is how
+ * player.js has always read a platform within a body's radius; rolling
+ * ground reads its own function (below).
  */
 export function topAt(p, x, z) {
   const s = p.slope;
   const f = p.field;
   if (!s && !f) return p.top;
+  // `field`: ground that rolls (relief.js `at`) over a floor `rest` high on the flat.
+  // `at` is one function over the whole land, so a point beside the rectangle
+  // reads the land's own height there; clamped to the edge it read the edge's, and
+  // where two platforms meet on a hill that put a step of (grade x radius) in the floor.
+  if (f) return p.rest + f(x, z);
   const cx = x < p.x0 ? p.x0 : x > p.x1 ? p.x1 : x;
   const cz = z < p.z0 ? p.z0 : z > p.z1 ? p.z1 : z;
-  // `field`: ground that rolls (relief.js `at`) over a floor `rest` high on the flat.
-  if (f) return p.rest + f(cx, cz);
   return s.top0 + s.ax * (cx - p.x0) + s.az * (cz - p.z0);
 }
 
