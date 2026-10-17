@@ -36384,26 +36384,27 @@
    "api": "music",
    "loop": true,
    "family": "dragon",
-   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a dragon. Vast and burning. Huge roaring contrabass trombones and tubas like a dragon's breath, the choir roaring in unison on long open vowels, rolling bass drum and timpani thunder, searing held high brass swells above the low ones, a feeling of enormous wings and fire in a cavern of gold. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "prompt": "Dark, epic boss-battle music at a relentless battle tempo: a steady ritual pulse of big orchestral bass drums and toms with a deep gong marking the bar, propulsive ostinati, tension and danger rather than awe, a short memorable repeating riff that makes the loop recognisable. Tempo 140 bpm. A dragon. Roaring low brass riff, fiery fast string runs, pounding timpani and taiko with the bass drums on the beat, searing high brass stabs, wings and fire. Instrumental only, no choir, no voices, no vocals. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
    "settings": {
-    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a dragon. Vast and burning. Huge roaring contrabass trombones and tubas like a dragon's breath, the choir roaring in unison on long open vowels, rolling bass drum and timpani thunder, searing held high brass swells above the low ones, a feeling of enormous wings and fire in a cavern of gold. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "prompt": "Dark, epic boss-battle music at a relentless battle tempo: a steady ritual pulse of big orchestral bass drums and toms with a deep gong marking the bar, propulsive ostinati, tension and danger rather than awe, a short memorable repeating riff that makes the loop recognisable. Tempo 140 bpm. A dragon. Roaring low brass riff, fiery fast string runs, pounding timpani and taiko with the bass drums on the beat, searing high brass stabs, wings and fire. Instrumental only, no choir, no voices, no vocals. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
     "music_length_ms": 120000
    },
    "post": {
     "lufs": -23,
     "kbps": 64,
     "crossfade": 3,
-    "cutHead": 2.8,
-    "cutTail": 18.16
+    "cutHead": 11.24,
+    "cutTail": 6.28
    },
-   "duration": 96.07,
-   "bytes": 769294,
+   "duration": 99.51,
+   "bytes": 779491,
    "steps": null,
    "loudness": {
     "lufs": -23,
-    "peak": -11.8,
-    "lra": 0.3
-   }
+    "peak": -10.8,
+    "lra": 1.5
+   },
+   "target_bpm": 140
   },
   {
    "id": "music_boss_undead",
@@ -36440,26 +36441,27 @@
    "api": "music",
    "loop": true,
    "family": "giant",
-   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a brute giant. Stomping, brutal and heavy. Massive thudding slow drums like footsteps shaking stone, growling low tubas and bass trombones, guttural grunting male chant in lockstep with the drums, anvil blows, crude and enormous rather than refined. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "prompt": "Dark, epic boss-battle music at a relentless battle tempo: a steady ritual pulse of big orchestral bass drums and toms with a deep gong marking the bar, propulsive ostinati, tension and danger rather than awe, a short memorable repeating riff that makes the loop recognisable. Tempo 124 bpm. A brute giant. Brutal heavy stomping bass drums and pounding toms on every beat, deep gong, growling tuba and bass trombone riff, anvil blows, crude, enormous and merciless. Instrumental only, no choir, no voices, no vocals. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
    "settings": {
-    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a brute giant. Stomping, brutal and heavy. Massive thudding slow drums like footsteps shaking stone, growling low tubas and bass trombones, guttural grunting male chant in lockstep with the drums, anvil blows, crude and enormous rather than refined. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "prompt": "Dark, epic boss-battle music at a relentless battle tempo: a steady ritual pulse of big orchestral bass drums and toms with a deep gong marking the bar, propulsive ostinati, tension and danger rather than awe, a short memorable repeating riff that makes the loop recognisable. Tempo 124 bpm. A brute giant. Brutal heavy stomping bass drums and pounding toms on every beat, deep gong, growling tuba and bass trombone riff, anvil blows, crude, enormous and merciless. Instrumental only, no choir, no voices, no vocals. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
     "music_length_ms": 120000
    },
    "post": {
     "lufs": -23,
     "kbps": 64,
     "crossfade": 3,
-    "cutHead": 4.76,
-    "cutTail": 18.84
+    "cutHead": 0.4,
+    "cutTail": 4.56
    },
-   "duration": 93.43,
-   "bytes": 718893,
+   "duration": 112.07,
+   "bytes": 882226,
    "steps": null,
    "loudness": {
     "lufs": -23,
-    "peak": -10,
-    "lra": 0.7
-   }
+    "peak": -9.9,
+    "lra": 1.5
+   },
+   "target_bpm": 124
   },
   {
    "id": "music_boss_beast",
@@ -36468,26 +36470,27 @@
    "api": "music",
    "loop": true,
    "family": "beast",
-   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a beast of the labyrinth. Primal and hunted. Tribal hand drums and big frame drums in a driving heartbeat pattern, low bellowing horns, hissing rattles and bone clatter, a low male chant in short barked phrases, a maze of stone corridors, the breath of something huge close behind. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "prompt": "Dark, epic boss-battle music at 120 beats per minute in a heavy half-time pulse. A beast of the labyrinth, primal and hunted. Tribal hand drums and big frame drums in a driving heartbeat pattern, low bellowing horns playing a short barked riff, hissing rattles and bone clatter, a maze of stone corridors, the breath of something huge close behind, danger and tension. Instrumental only, no choir, no voices, no vocals, no chanting. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
    "settings": {
-    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a beast of the labyrinth. Primal and hunted. Tribal hand drums and big frame drums in a driving heartbeat pattern, low bellowing horns, hissing rattles and bone clatter, a low male chant in short barked phrases, a maze of stone corridors, the breath of something huge close behind. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "prompt": "Dark, epic boss-battle music at 120 beats per minute in a heavy half-time pulse. A beast of the labyrinth, primal and hunted. Tribal hand drums and big frame drums in a driving heartbeat pattern, low bellowing horns playing a short barked riff, hissing rattles and bone clatter, a maze of stone corridors, the breath of something huge close behind, danger and tension. Instrumental only, no choir, no voices, no vocals, no chanting. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
     "music_length_ms": 120000
    },
    "post": {
     "lufs": -23,
     "kbps": 64,
     "crossfade": 3,
-    "cutHead": 3.28,
-    "cutTail": 13.68
+    "cutHead": 8.44,
+    "cutTail": 4.52
    },
-   "duration": 100.07,
-   "bytes": 733583,
+   "duration": 104.07,
+   "bytes": 828823,
    "steps": null,
    "loudness": {
     "lufs": -23,
-    "peak": -9.8,
-    "lra": 0.9
-   }
+    "peak": -8.7,
+    "lra": 2.9
+   },
+   "target_bpm": 120
   },
   {
    "id": "music_boss_demon",
@@ -36496,26 +36499,27 @@
    "api": "music",
    "loop": true,
    "family": "demon",
-   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: the abyss. Dissonant and infernal. The choir singing tight dissonant clusters and tritones, detuned low brass, struck iron, anvils and chains as percussion, scraping metal, slow pounding timpani, a descent into a pit of fire. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "prompt": "Dark, epic boss-battle music at a relentless battle tempo: a steady ritual pulse of big orchestral bass drums and toms with a deep gong marking the bar, propulsive ostinati, tension and danger rather than awe, a short memorable repeating riff that makes the loop recognisable. Tempo 138 bpm. The abyss. Big bass drums and toms with struck iron, anvils and chains, deep gong, detuned snarling low brass riff, dissonant stabbing strings, tritones, relentless pounding. At most a few short dissonant shouted hits or whispers, no sustained choir. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
    "settings": {
-    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: the abyss. Dissonant and infernal. The choir singing tight dissonant clusters and tritones, detuned low brass, struck iron, anvils and chains as percussion, scraping metal, slow pounding timpani, a descent into a pit of fire. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "prompt": "Dark, epic boss-battle music at a relentless battle tempo: a steady ritual pulse of big orchestral bass drums and toms with a deep gong marking the bar, propulsive ostinati, tension and danger rather than awe, a short memorable repeating riff that makes the loop recognisable. Tempo 138 bpm. The abyss. Big bass drums and toms with struck iron, anvils and chains, deep gong, detuned snarling low brass riff, dissonant stabbing strings, tritones, relentless pounding. At most a few short dissonant shouted hits or whispers, no sustained choir. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
     "music_length_ms": 120000
    },
    "post": {
     "lufs": -23,
     "kbps": 64,
     "crossfade": 3,
-    "cutHead": 11.96,
-    "cutTail": 9.08
+    "cutHead": 0.28,
+    "cutTail": 21.04
    },
-   "duration": 96.1,
-   "bytes": 705809,
+   "duration": 95.71,
+   "bytes": 727685,
    "steps": null,
    "loudness": {
     "lufs": -23,
-    "peak": -9.3,
-    "lra": 1
-   }
+    "peak": -9.2,
+    "lra": 2.2
+   },
+   "target_bpm": 138
   },
   {
    "id": "music_boss_elemental",
@@ -36524,26 +36528,27 @@
    "api": "music",
    "loop": true,
    "family": "elemental",
-   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a raging elemental storm. Swirling low strings in surging tremolo, rolling thunder drums and timpani, wind howling through the choir that swells and falls like a storm front, crackling cymbal wash, relentless churning motion. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "prompt": "Dark, epic boss-battle music at a relentless battle tempo: a steady ritual pulse of big orchestral bass drums and toms with a deep gong marking the bar, propulsive ostinati, tension and danger rather than awe, a short memorable repeating riff that makes the loop recognisable. Tempo 148 bpm. A raging elemental storm. Surging fast tremolo and sixteenth-note storm strings, thunder drums, big bass drums and rolling timpani, deep gong, howling wind, crackling cymbal wash and lightning-like stabs, churning relentless motion. Instrumental only, no choir, no voices, no vocals. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
    "settings": {
-    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a raging elemental storm. Swirling low strings in surging tremolo, rolling thunder drums and timpani, wind howling through the choir that swells and falls like a storm front, crackling cymbal wash, relentless churning motion. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "prompt": "Dark, epic boss-battle music at a relentless battle tempo: a steady ritual pulse of big orchestral bass drums and toms with a deep gong marking the bar, propulsive ostinati, tension and danger rather than awe, a short memorable repeating riff that makes the loop recognisable. Tempo 148 bpm. A raging elemental storm. Surging fast tremolo and sixteenth-note storm strings, thunder drums, big bass drums and rolling timpani, deep gong, howling wind, crackling cymbal wash and lightning-like stabs, churning relentless motion. Instrumental only, no choir, no voices, no vocals. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
     "music_length_ms": 120000
    },
    "post": {
     "lufs": -23,
     "kbps": 64,
     "crossfade": 3,
-    "cutHead": 7.08,
-    "cutTail": 13.88
+    "cutHead": 28.88,
+    "cutTail": 0.08
    },
-   "duration": 96.07,
-   "bytes": 730384,
+   "duration": 88.07,
+   "bytes": 680810,
    "steps": null,
    "loudness": {
     "lufs": -23,
-    "peak": -10.6,
-    "lra": 2.7
-   }
+    "peak": -11,
+    "lra": 4.7
+   },
+   "target_bpm": 148
   },
   {
    "id": "music_boss_sorcerer",
@@ -36580,26 +36585,27 @@
    "api": "music",
    "loop": true,
    "family": "titan",
-   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a god-king on a throne of stone. Monumental and merciless. Slow huge brass chorales in unison, the deep choir intoning like a decree, giant bass drums and a deep gong struck in half-time, solemn, towering and absolute, the weight of a tyrant who cannot be moved. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "prompt": "Dark, epic boss-battle music at 120 beats per minute in a heavy half-time ritual pulse. A god-king on a throne of stone: monumental and merciless. Giant bass drums and a deep gong struck in half-time, toms filling between, towering unison brass, low strings and tolling bells carry the godlike weight, danger and tension rather than awe. Instrumental only, no choir, no voices, no vocals, no chanting. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
    "settings": {
-    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: a god-king on a throne of stone. Monumental and merciless. Slow huge brass chorales in unison, the deep choir intoning like a decree, giant bass drums and a deep gong struck in half-time, solemn, towering and absolute, the weight of a tyrant who cannot be moved. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "prompt": "Dark, epic boss-battle music at 120 beats per minute in a heavy half-time ritual pulse. A god-king on a throne of stone: monumental and merciless. Giant bass drums and a deep gong struck in half-time, toms filling between, towering unison brass, low strings and tolling bells carry the godlike weight, danger and tension rather than awe. Instrumental only, no choir, no voices, no vocals, no chanting. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
     "music_length_ms": 120000
    },
    "post": {
     "lufs": -23,
     "kbps": 64,
     "crossfade": 3,
-    "cutHead": 11,
-    "cutTail": 9.96
+    "cutHead": 7.52,
+    "cutTail": 15.92
    },
-   "duration": 96.07,
-   "bytes": 726900,
+   "duration": 93.59,
+   "bytes": 740408,
    "steps": null,
    "loudness": {
     "lufs": -23,
-    "peak": -10.9,
-    "lra": 0.8
-   }
+    "peak": -9.9,
+    "lra": 1.9
+   },
+   "target_bpm": 120
   },
   {
    "id": "music_boss_endboss",
@@ -36608,26 +36614,27 @@
    "api": "music",
    "loop": true,
    "family": "endboss",
-   "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: an ancient evil awakening in the dark of a deep mine. A held low brass drone beneath the whole piece, a slow heartbeat drum, the choir growling in unison, thunderous timpani on the heavy beats, cavernous and relentless. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+   "prompt": "Dark, epic boss-battle music at a relentless battle tempo: a steady ritual pulse of big orchestral bass drums and toms with a deep gong marking the bar, propulsive ostinati, tension and danger rather than awe, a short memorable repeating riff that makes the loop recognisable. Tempo 140 bpm. The final boss. Hybrid orchestral action: big bass drums and toms, a deep gong, fast ostinato strings, a repeating low brass riff, heavy snare and timpani hits, menacing high brass stabs, relentless and dark. Instrumental only, no choir, no voices, no vocals. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
    "settings": {
-    "prompt": "A deep male choir chanting low in an invented ancient language that is no real language, slow massive war drums and timpani, low brass and cellos, ominous and cavernous rather than heroic, no melody, only dread. Colour: an ancient evil awakening in the dark of a deep mine. A held low brass drone beneath the whole piece, a slow heartbeat drum, the choir growling in unison, thunderous timpani on the heavy beats, cavernous and relentless. Written as a seamless endless loop: the same crushing weight from the very first second to the last, steady half-time ritual rhythm, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
+    "prompt": "Dark, epic boss-battle music at a relentless battle tempo: a steady ritual pulse of big orchestral bass drums and toms with a deep gong marking the bar, propulsive ostinati, tension and danger rather than awe, a short memorable repeating riff that makes the loop recognisable. Tempo 140 bpm. The final boss. Hybrid orchestral action: big bass drums and toms, a deep gong, fast ostinato strings, a repeating low brass riff, heavy snare and timpani hits, menacing high brass stabs, relentless and dark. Instrumental only, no choir, no voices, no vocals. Written as a seamless endless loop: the same intensity from the very first second to the last, no intro, no build-up from silence, no outro, no final hit, no ending, no fade-out.",
     "music_length_ms": 120000
    },
    "post": {
     "lufs": -23,
     "kbps": 64,
     "crossfade": 3,
-    "cutHead": 9.12,
-    "cutTail": 11.8
+    "cutHead": 5.08,
+    "cutTail": 15.88
    },
-   "duration": 96.11,
-   "bytes": 714784,
+   "duration": 96.07,
+   "bytes": 759401,
    "steps": null,
    "loudness": {
     "lufs": -23,
-    "peak": -10.5,
-    "lra": 1.7
-   }
+    "peak": -10.3,
+    "lra": 1.3
+   },
+   "target_bpm": 140
   }
  ]
 }
