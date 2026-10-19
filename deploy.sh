@@ -6,6 +6,8 @@
 # Eenmalig ingericht, niet door dit script:
 # - Cloudflare: A-record van het domein naar de server en CNAME www, beide
 #   geproxied; SSL-modus "Full (strict)", Always Use HTTPS, minimaal TLS 1.2.
+#   Daarnaast A-record play naar de server, DNS-only: ssh (poort 2222) kan
+#   niet door de proxy, die alleen HTTP(S) doorgeeft.
 # - Server: Cloudflare Origin CA-certificaat in /etc/ssl/certs/diku3d.com.origin.pem,
 #   sleutel in /etc/ssl/private/diku3d.com.key (alleen root). Geen certbot:
 #   alleen Cloudflare hoeft dit certificaat te vertrouwen.
@@ -117,6 +119,31 @@ ssh "$SERVER" "set -e
   echo \"  server luistert na \$(awk -v a=\$start -v b=\$(date +%s.%N) 'BEGIN{printf \"%.1f\", b-a}') s (HTTP \$c)\"
   systemctl is-active --quiet diku3d-server || { sudo journalctl -u diku3d-server -n 30 --no-pager; exit 1; }"
 
+# --- 4c. De terminal-ingang (server/ssh.mjs, systemd diku3d-ssh, openbaar op
+# poort 2222). Hij speelt elke ssh-sessie als nog een client van de spelserver
+# hierboven en legt de wereld zelf uit, dus hij herstart na de spelserver: zo
+# draaien beide dezelfde code. De host-sleutel maakt hij bij de eerste start,
+# in $DATA/ssh; een nieuwe sleutel laat de ssh van elke terugkerende speler
+# weigeren, dus die staat buiten de gedeployde boom.
+echo "▸ terminal-ingang"
+ssh "$SERVER" "sudo tee /etc/systemd/system/diku3d-ssh.service.new >/dev/null" < "$ROOT/tools/deploy/diku3d-ssh.service"
+ssh "$SERVER" "set -e
+  sudo install -d -o diku3d -g diku3d -m 700 $DATA/ssh
+  cd /etc/systemd/system
+  if ! sudo cmp -s diku3d-ssh.service.new diku3d-ssh.service; then
+    sudo mv diku3d-ssh.service.new diku3d-ssh.service && sudo systemctl daemon-reload && echo '  unit vernieuwd'
+  else sudo rm diku3d-ssh.service.new; fi
+  sudo systemctl enable --quiet diku3d-ssh
+  sudo systemctl restart diku3d-ssh
+  # Hij laadt de wereld voor hij luistert; wacht tot poort 2222 zich als ssh meldt (hoogstens 30 s).
+  for i in \$(seq 30); do
+    b=\$(timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2222; head -c 7 <&3' 2>/dev/null || true)
+    [ \"\$b\" = SSH-2.0 ] && break
+    sleep 1
+  done
+  [ \"\$b\" = SSH-2.0 ] || { sudo journalctl -u diku3d-ssh -n 30 --no-pager; echo '✗  poort 2222 meldt zich niet als ssh' >&2; exit 1; }
+  echo '  ssh luistert op 2222'"
+
 # --- 5. Van buitenaf, door Cloudflare: de pagina, de eerste module, een
 # gebied en een model moeten er zijn, en het gebied moet als tekst komen.
 echo "▸ Controle"
@@ -134,5 +161,9 @@ WS="$(curl -s --http1.1 --max-time 5 -o /dev/null -w '%{http_code}' \
 [ "$WS" = "101" ] || { echo "✗  $DOMEIN/ws geeft $WS in plaats van 101" >&2; exit 1; }
 SRC="$(curl -s -o /dev/null -w '%{http_code}' "$DOMEIN/server/main.mjs")"
 [ "$SRC" = "404" ] || { echo "✗  $DOMEIN/server/main.mjs geeft $SRC in plaats van 404" >&2; exit 1; }
+# De terminal-ingang van buitenaf, langs Cloudflare heen (het DNS-only record).
+SSH_HOST="${DEPLOY_SSH_HOST:-play.diku3d.com}"
+BANNER="$(timeout 5 bash -c "exec 3<>/dev/tcp/$SSH_HOST/2222; head -c 7 <&3" 2>/dev/null || true)"
+[ "$BANNER" = "SSH-2.0" ] || { echo "✗  $SSH_HOST:2222 meldt zich niet als ssh ('$BANNER')" >&2; exit 1; }
 
-echo "✓ Online: $DOMEIN (revisie $SHA)"
+echo "✓ Online: $DOMEIN en ssh -p 2222 $SSH_HOST (revisie $SHA)"

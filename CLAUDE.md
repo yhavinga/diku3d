@@ -500,6 +500,13 @@ choose.
   only a test of what it reaches: with the lids left out of the page it must
   refuse at the lids, and at 0.5 m it cannot follow a flight steeper than
   about 51° or narrower than 1.34 m between its sides.
+- **A typed direction is never a move on the server** (`game.walk` is the
+  page's own, so the server answers "Alas, you cannot go that way."). The
+  SSH gateway (`server/ssh.mjs`) walks one the way a page does, in
+  `server/walker.mjs`, which repeats the judge's wall and doorway constants
+  from world.mjs. After changing the judge, a doorway or how a room is
+  walled, run `node tools/ssh-check.mjs` too: it counts the walking body's
+  refused positions, and there must be none.
 - **Slopes are judged on the hill's own grade, and the feet follow them exactly**
   (player.js `gradeAlong`, `follows`). The first rule compared one frame's rise
   with one frame's run, with the feet's own easing lag in the rise: at 60 Hz that

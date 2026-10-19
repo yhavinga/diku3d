@@ -1,0 +1,28 @@
+# The terminal gateway (server/ssh.mjs): diku3d over SSH, `ssh -p 2222 play.diku3d.com`.
+# Installed by deploy.sh to /etc/systemd/system/diku3d-ssh.service.
+# Public on port 2222; plays each session against the game server on loopback,
+# as one more client of its /ws. No shell behind it: the game asks the name and
+# password itself. The host key is made on the first start and lives in
+# /srv/diku3d-data/ssh, outside the deployed tree, so a deploy never changes it.
+[Unit]
+Description=diku3d terminal gateway (SSH)
+After=network.target diku3d-server.service
+
+[Service]
+Type=simple
+User=diku3d
+Group=diku3d
+WorkingDirectory=/srv/diku3d/server
+ExecStart=/usr/bin/node /srv/diku3d/server/ssh.mjs --port 2222 --host 0.0.0.0 --game ws://127.0.0.1:4000/ws --key /srv/diku3d-data/ssh/ssh_host_ed25519_key
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/diku3d-data/ssh
+
+[Install]
+WantedBy=multi-user.target
