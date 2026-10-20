@@ -12,7 +12,7 @@
   "bots": [
    "Kestrel",
    "Thorne",
-   "Wren",
+   "Linnet",
    "Mordecai"
   ]
  },
@@ -64,7 +64,7 @@
   },
   {
    "t": -2.8,
-   "bot": "Wren",
+   "bot": "Linnet",
    "near": "worm",
    "stand": [
     2.2,
@@ -123,7 +123,7 @@
   },
   {
    "t": -0.6,
-   "bot": "Wren",
+   "bot": "Linnet",
    "cmd": "kill worm"
   },
   {

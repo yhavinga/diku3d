@@ -41,7 +41,7 @@ Times are in the 60 s cut (promo_60s_16x9.mp4 / promo_60s_1x1.mp4).
 |---|---|---|
 | 0.0 | 7.6 | Terminal: `ATDT 555 0193`, `CONNECT 14400`, Merc's welcome, `recall`, the real Temple of Midgaard room text, `<20hp 100m 50mv> You are hungry.`, `south` (captured from merc21/src/merc) |
 | 13.9 | 16.4 | The mayor says 'I hereby declare the city of Midgaard open!' |
-| 25.0–26.2 | 28.3 | Thorne / Kestrel / Wren / Mordecai now follows you. |
+| 25.0–26.2 | 28.3 | Thorne / Kestrel / Linnet / Mordecai now follows you. |
 | 28.6 | 31.8 | Mordecai utters the words, 'yucandusbarr'. |
 | 29.1 | 31.8 | Mordecai's fireball *** ANNIHILATES *** the giant, purple sand worm! |
 | 31.9 | 33.55 | The giant, purple sand worm is DEAD!! |

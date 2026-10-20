@@ -2,7 +2,7 @@
 // directory (as tools/judge/headless/mp-seed.mjs does for the judges).
 //   node tools/promo/mp-seed.mjs <data dir> [room]
 // Beorn (warrior, the camera's player), Kestrel (cleric), Thorne (warrior),
-// Wren (thief), Mordecai (mage); all level 30, password "promo1993".
+// Linnet (thief), Mordecai (mage); all level 30, password "promo1993".
 import { createAccounts, hashPassword } from '../../server/accounts.mjs';
 import { serialize } from '../../src/save.js';
 import { createCharacter, advanceLevel, createObject, Rng, SKILLS } from '../../src/game.js';
@@ -41,5 +41,5 @@ async function make(name, cls, sex, level) {
 await make('Beorn', 'warrior', 1, 30);
 await make('Kestrel', 'cleric', 2, 30);
 await make('Thorne', 'warrior', 1, 30);
-await make('Wren', 'thief', 2, 30);
+await make('Linnet', 'thief', 2, 30);
 await make('Mordecai', 'mage', 1, 30);

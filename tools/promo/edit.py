@@ -59,7 +59,7 @@ FULL = dict(
         (13.9, 16.4, "The mayor says 'I hereby declare the city of Midgaard open!'"),
         (25.0, 28.3, 'Thorne now follows you.'),
         (25.4, 28.3, 'Kestrel now follows you.'),
-        (25.8, 28.3, 'Wren now follows you.'),
+        (25.8, 28.3, 'Linnet now follows you.'),
         (26.2, 28.3, 'Mordecai now follows you.'),
         (28.6, 31.8, "Mordecai utters the words, 'yucandusbarr'."),
         (29.1, 31.8, "Mordecai's fireball *** ANNIHILATES *** the giant, purple sand worm!"),

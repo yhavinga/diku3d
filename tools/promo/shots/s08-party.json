@@ -12,7 +12,7 @@
   "bots": [
    "Thorne",
    "Kestrel",
-   "Wren",
+   "Linnet",
    "Mordecai"
   ]
  },
@@ -74,7 +74,7 @@
   },
   {
    "t": -2.6,
-   "bot": "Wren",
+   "bot": "Linnet",
    "stand": [
     3.4,
     0,
@@ -110,7 +110,7 @@
   },
   {
    "t": -1.5,
-   "bot": "Wren",
+   "bot": "Linnet",
    "cmd": "follow beorn"
   },
   {
@@ -150,7 +150,7 @@
   },
   {
    "t": 0,
-   "bot": "Wren",
+   "bot": "Linnet",
    "stand": [
     3.4,
     0,
