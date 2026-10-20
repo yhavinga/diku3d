@@ -503,8 +503,9 @@ choose.
 - **A typed direction is never a move on the server** (`game.walk` is the
   page's own, so the server answers "Alas, you cannot go that way."). The
   SSH gateway (`server/ssh.mjs`) walks one the way a page does, in
-  `server/walker.mjs`, which repeats the judge's wall and doorway constants
-  from world.mjs. After changing the judge, a doorway or how a room is
+  `server/walker.mjs`, which takes the judge's wall line from world.mjs
+  (`createStride` is the walking, for any client that is not a page;
+  `createWalker` the terminal's around it). After changing the judge, a doorway or how a room is
   walled, run `node tools/ssh-check.mjs` too: it counts the walking body's
   refused positions, and there must be none.
 - **Slopes are judged on the hill's own grade, and the feet follow them exactly**

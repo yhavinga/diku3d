@@ -19,13 +19,19 @@
  * Where to stand comes from the gateway's own copy of the world (bootWorld),
  * the same layout every page draws: a room's centre, raised by the temple's
  * mound, eye high -- never the centre itself, which is where arrivals appear.
+ *
+ * `createStride` is what any client that is not a page needs in order to
+ * walk: where the body stands, what the server knows of it, the reports put
+ * to the judge, one exit walked. `createWalker` is the terminal's, around
+ * it: one walk at a time, follows and flees, Merc's words for a refusal.
  */
 
 import { EX_CLOSED, EX_LOCKED } from '../src/are.js';
+import { WALL_LINE } from './world.mjs';
 
 /** Eye height over the floor, as a page reports it (world.mjs). */
-const EYE = 1.72;
-const DIRS = ['north', 'east', 'south', 'west', 'up', 'down'];
+export const EYE = 1.72;
+export const DIRS = ['north', 'east', 'south', 'west', 'up', 'down'];
 /** player.js glidePath: 24 m/s, at least 0.55 s, at most 2.9 s unless 40 m/s takes longer; half a second for a half turn. */
 const GLIDE = { speed: 24, least: 0.55, most: 2.9, fastest: 40, halfTurn: 0.5 };
 /** Reports while walking, as often as a page sends them. */
@@ -38,11 +44,10 @@ const COUNTED_MS = 3000;
 /** A follow held back while the body was walking is dropped after this: the leader is long gone. */
 const STALE_FOLLOW_MS = 5000;
 /**
- * The judge's walls (world.mjs WALL_LINE, DOOR_HALF): a walled room's wall
- * is 5.35 m out from its middle, with a doorway in the middle of every side
- * the layout gave an exit. A step through one is taken 1.2 m either side.
+ * A walled room's wall is the judge's WALL_LINE out from its middle, with a
+ * doorway in the middle of every side the layout gave an exit (world.mjs
+ * DOOR_HALF). A step through one is taken 1.2 m either side.
  */
-const WALL_LINE = 5.35;
 const DOOR_STEP = 1.2;
 /** Sides as layout.js numbers them: north is -z. */
 const SIDE = [[0, -1], [1, 0], [0, 1], [-1, 0]];
@@ -75,14 +80,18 @@ function along(pts, cum, d) {
 }
 
 /**
- * `world` is server/world.mjs bootWorld's, shared by every session (doors
- * are the server's for everyone). `onArrived(room)` after every walk that
- * ended in the room it set out for, whoever asked for it.
+ * A body that stands and walks the way a page does. `world` is
+ * server/world.mjs bootWorld's. `step(dir)` resolves { ok: true, room } once
+ * the server counts the body in the room exit `dir` leads to, or
+ * { ok: false, stopped } for the caller to word: 'no-exit', 'locked' and
+ * 'shut' (with the door's `word`), 'unbuilt', 'no-way' (no way the server
+ * would believe), 'link', 'put-back' (the server's reason in `detail`),
+ * 'bumped' (the judge's in `detail`) or 'not-counted'.
  */
-export function createWalker({ link, world: w, log, onArrived = () => {} }) {
-  if (!link || typeof link.pos !== 'function') throw new Error('walker.mjs: createWalker needs a link (client.mjs)');
-  if (!w || !w.nav) throw new Error('walker.mjs: createWalker needs the booted world (world.mjs bootWorld)');
-  if (typeof log !== 'function') throw new Error('walker.mjs: createWalker needs a log function');
+export function createStride({ link, world: w, log, heartbeatMs = HEARTBEAT_MS }) {
+  if (!link || typeof link.pos !== 'function') throw new Error('walker.mjs: createStride needs a link');
+  if (!w || !w.nav) throw new Error('walker.mjs: createStride needs the booted world (world.mjs bootWorld)');
+  if (typeof log !== 'function') throw new Error('walker.mjs: createStride needs a log function');
 
   /** Where it stands: the room and the offset asked for, and the point reported. */
   let stand = null;
@@ -115,7 +124,7 @@ export function createWalker({ link, world: w, log, onArrived = () => {} }) {
     const x = p.x + zone.offset;
     return { x, y: p.y - w.liftAt(x, p.y - EYE, p.z), z: p.z };
   }
-  /** Where the server has just put the body (`at`, a jump): its next report is a first. */
+  /** Where the server has just put the body (`at`, a jump, a resumed link): its next report is a first. */
   function placed(p, { jumped = false } = {}) {
     server.s.posAt = null;
     if (jumped) server.s.navRoom = null;
@@ -146,13 +155,17 @@ export function createWalker({ link, world: w, log, onArrived = () => {} }) {
     if (stand && !moving) send(stand);
   }
 
-  /** Stand in the room the server has the player in, 2.5 m off its centre, and start reporting. */
+  /** Stand in the room the server has the player in, (dx, dz) off its centre, and start reporting. */
   function standAt(vnum, { dx = 2.5, dz = 0 } = {}) {
+    if (!Number.isInteger(vnum)) throw new Error(`walker.mjs: standAt needs a room number; got ${JSON.stringify(vnum)}`);
+    if (![dx, dz].every(Number.isFinite)) throw new Error(`walker.mjs: standAt(#${vnum}) needs finite dx, dz`);
+    if (Math.hypot(dx, dz) < CENTRE_CLEAR) throw new Error(`walker.mjs: standAt(#${vnum}) at ${dx}, ${dz} is the room's centre, where arriving players appear; stand at least ${CENTRE_CLEAR} m off it`);
+    // A body walks; the server refuses a jump to a room it is not in.
     if (vnum !== link.room) throw new Error(`walker.mjs: standAt(#${vnum}), but ${link.name} is in #${link.room}`);
     stand = { vnum, dx, dz, ...spotIn(vnum, dx, dz) };
     if (!server.pc.position) placed(stand, { jumped: true });
     report();
-    if (!heartbeat) heartbeat = setInterval(report, HEARTBEAT_MS);
+    if (!heartbeat) heartbeat = setInterval(report, heartbeatMs);
   }
 
   /** Set by an `at` during a walk: the walk stops where the server put the body. */
@@ -164,7 +177,9 @@ export function createWalker({ link, world: w, log, onArrived = () => {} }) {
     stand = { vnum: msg.room, dx: null, dz: null, zone: msg.zone, x: msg.x, y: msg.y + EYE, z: msg.z, yaw };
     placed(stand);
     putBack = msg.why;
-    log(`walker: the server refused ${link.name}'s position (${msg.why}); standing where it has them in #${msg.room}`);
+    const info = w.built.rooms.get(msg.room);
+    const off = info ? Math.hypot(msg.x - (info.center.x - w.zoneOfVnum(msg.room).offset), msg.z - info.center.z) : Infinity;
+    log(`walker: the server refused ${link.name}'s position (${msg.why}); standing where it has them in #${msg.room}${off < CENTRE_CLEAR ? ', at the centre, where arrivals appear' : ''}`);
     report();
   });
 
@@ -176,6 +191,16 @@ export function createWalker({ link, world: w, log, onArrived = () => {} }) {
     stand = { vnum: e.vnum, dx, dz, ...spotIn(e.vnum, dx, dz) };
     placed(stand, { jumped: true });
     putBack = e.kind;
+    log(`walker: ${link.name} was moved to #${e.vnum} (${e.kind})`);
+    report();
+  });
+
+  // A link that resumes (client.mjs never does): the server has the body in the room `enter` names.
+  link.on('reconnected', (enter) => {
+    if (stand && enter.room !== stand.vnum) {
+      stand = { vnum: enter.room, dx: stand.dx ?? 2.5, dz: stand.dz ?? 0, ...spotIn(enter.room, stand.dx ?? 2.5, stand.dz ?? 0) };
+    }
+    if (stand) placed(stand, { jumped: true });
     report();
   });
 
@@ -187,7 +212,19 @@ export function createWalker({ link, world: w, log, onArrived = () => {} }) {
     }
   });
 
-  link.on('closed', () => { if (heartbeat) clearInterval(heartbeat); heartbeat = null; });
+  /** No more heartbeat: the body is leaving. */
+  function stop() {
+    if (heartbeat) clearInterval(heartbeat);
+    heartbeat = null;
+  }
+  link.on('closed', stop);
+
+  /** Turn where it stands, and report it. */
+  function face(yaw) {
+    if (!stand) throw new Error('walker.mjs: face before standAt');
+    stand = { ...stand, yaw };
+    report();
+  }
 
   // ------------------------------------------------------------ walking --
 
@@ -304,16 +341,17 @@ export function createWalker({ link, world: w, log, onArrived = () => {} }) {
     return null;
   }
 
-  /** The samples, sent at their times. Null, or why it stopped. */
+  /** The samples, sent at their times. Null, or where and why it stopped. */
   async function perform(samples) {
     const t0 = Date.now();
     for (const x of samples) {
       const wait = t0 + x.ms - Date.now();
       if (wait > 0) await sleep(wait);
-      if (!link.up) return 'The link to the game is gone.';
-      if (putBack) return 'The game put you back.';
+      if (!link.up) return { stopped: 'link' };
+      if (putBack) return { stopped: 'put-back', detail: putBack };
       const r = reportAt(x.g, x.yaw);
-      if (send(r)) return 'You bump into something and stop.';
+      const why = send(r);
+      if (why) return { stopped: 'bumped', detail: why };
       stand = standing(link.room, r);
     }
     return null;
@@ -321,23 +359,25 @@ export function createWalker({ link, world: w, log, onArrived = () => {} }) {
 
   let moving = null;
 
-  /** Out of the room by exit `dir` (0..5), as main.js `step` does: { ok: true, room } once the server counts it there, or { ok: false, why }. */
-  async function walkNow(dir) {
-    if (!stand) throw new Error('walker.mjs: walk before standAt');
+  /** Out of the room by exit `dir` (0..5), as main.js `step` does. */
+  async function step(dir) {
+    if (!stand) throw new Error('walker.mjs: a step before standAt');
+    if (!Number.isInteger(dir) || dir < 0 || dir > 5) throw new Error(`walker.mjs: a step takes an exit 0..5; got ${JSON.stringify(dir)}`);
+    if (moving) throw new Error('walker.mjs: a step while the body is already walking');
     const from = link.room;
     const name = DIRS[dir];
     const exit = w.world.rooms.get(from)?.exits[dir];
-    if (!exit || exit.offMap) return { ok: false, why: 'Alas, you cannot go that way.' };
+    if (!exit || exit.offMap) return { ok: false, stopped: 'no-exit' };
     const word = (exit.keyword || 'door').split(/\s+/)[0] || 'door';
     if (exit.locks & EX_CLOSED) {
-      if (exit.locks & EX_LOCKED) return { ok: false, why: `The ${word} is locked.` };
+      if (exit.locks & EX_LOCKED) return { ok: false, stopped: 'locked', word };
       // The page opens a shut door it walks into; so does this.
       link.cmd(`open ${name}`);
-      if (!await waitFor(() => !(exit.locks & EX_CLOSED), 2000)) return { ok: false, why: `The ${word} is closed.` };
+      if (!await waitFor(() => !(exit.locks & EX_CLOSED), 2000)) return { ok: false, stopped: 'shut', word };
     }
     const to = exit.to;
     const target = w.built.rooms.get(to);
-    if (!target || target.unbuilt) return { ok: false, why: 'Alas, you cannot go that way.' };
+    if (!target || target.unbuilt) return { ok: false, stopped: 'unbuilt' };
     let samples = null;
     let refusal = null;
     for (let tries = 0; tries < PLANS && !samples; tries++) {
@@ -348,22 +388,62 @@ export function createWalker({ link, world: w, log, onArrived = () => {} }) {
     }
     if (!samples) {
       log(`walker: no way ${name} from #${from} the server would believe${refusal ? ` (${refusal})` : ''}`);
-      return { ok: false, why: 'Alas, you cannot go that way.' };
+      return { ok: false, stopped: 'no-way' };
     }
     moving = { dir, to };
     putBack = null;
     try {
-      const why = await perform(samples);
-      if (why) return { ok: false, why };
+      const stopped = await perform(samples);
+      if (stopped) return { ok: false, ...stopped };
       if (!await waitFor(() => link.room === to, COUNTED_MS)) {
         log(`walker: ${link.name} walked ${name} from #${from}, and the server still has them in #${link.room}`);
-        return { ok: false, why: 'You walk, and find yourself where you were.' };
+        return { ok: false, stopped: 'not-counted' };
       }
-      onArrived(to);
       return { ok: true, room: to };
     } finally {
       moving = null;
     }
+  }
+
+  return {
+    standAt, step, face, stop, asServer,
+    /** Where it stands now: { vnum, zone, x, y, z, yaw }, or null before standAt. */
+    get standing() { return stand && { ...stand }; },
+    get walking() { return !!moving; },
+  };
+}
+
+/** What a terminal player reads when a step stops short, by createStride's `stopped`. */
+const REFUSED = {
+  'no-exit': () => 'Alas, you cannot go that way.',
+  locked: (r) => `The ${r.word} is locked.`,
+  shut: (r) => `The ${r.word} is closed.`,
+  unbuilt: () => 'Alas, you cannot go that way.',
+  'no-way': () => 'Alas, you cannot go that way.',
+  link: () => 'The link to the game is gone.',
+  'put-back': () => 'The game put you back.',
+  bumped: () => 'You bump into something and stop.',
+  'not-counted': () => 'You walk, and find yourself where you were.',
+};
+
+/**
+ * `world` is server/world.mjs bootWorld's, shared by every session (doors
+ * are the server's for everyone). `onArrived(room)` after every walk that
+ * ended in the room it set out for, whoever asked for it.
+ */
+export function createWalker({ link, world: w, log, onArrived = () => {} }) {
+  const stride = createStride({ link, world: w, log });
+
+  /** Out of the room by exit `dir` (0..5): { ok: true, room } once the server counts it there, or { ok: false, why }. */
+  async function walkNow(dir) {
+    const r = await stride.step(dir);
+    if (!r.ok) {
+      const say = REFUSED[r.stopped];
+      if (!say) throw new Error(`walker.mjs: a step stopped for a reason with no words: ${JSON.stringify(r)}`);
+      return { ok: false, why: say(r) };
+    }
+    onArrived(r.room);
+    return r;
   }
 
   // One walk at a time, whoever asked: a typed direction, a follow, a flee.
@@ -397,7 +477,7 @@ export function createWalker({ link, world: w, log, onArrived = () => {} }) {
   });
 
   return {
-    standAt, walk,
-    get walking() { return !!moving; },
+    standAt: stride.standAt, walk,
+    get walking() { return stride.walking; },
   };
 }

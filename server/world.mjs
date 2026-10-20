@@ -65,7 +65,7 @@ const SPEED_SLACK = 3;
  * a hollow tree (`buildGreatTree`: hollow to 4.2-4.9 m, bark from 6.0 m).
  * A body is stopped 0.9 m short of the line, at 4.44 m from the middle.
  */
-const WALL_LINE = 5.35;
+export const WALL_LINE = 5.35;
 const TREE_LINE = 5.4;
 /** Half a doorway (build.js DOOR_W 3.2) and some: through a wall there is through its door. */
 const DOOR_HALF = 1.9;
