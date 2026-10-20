@@ -163,7 +163,10 @@ SRC="$(curl -s -o /dev/null -w '%{http_code}' "$DOMEIN/server/main.mjs")"
 [ "$SRC" = "404" ] || { echo "✗  $DOMEIN/server/main.mjs geeft $SRC in plaats van 404" >&2; exit 1; }
 # De terminal-ingang van buitenaf, langs Cloudflare heen (het DNS-only record).
 SSH_HOST="${DEPLOY_SSH_HOST:-play.diku3d.com}"
-BANNER="$(timeout 5 bash -c "exec 3<>/dev/tcp/$SSH_HOST/2222; head -c 7 <&3" 2>/dev/null || true)"
+# Fd 9, niet 3: op macOS houdt de resolver na het opzoeken van een hostnaam
+# fd 3 bezet, en bash die er een socket overheen zet wordt door de kernel
+# gedood (SIGKILL, lege banner). Met een IP-adres of fd 9 gebeurt dat niet.
+BANNER="$(timeout 5 bash -c "exec 9<>/dev/tcp/$SSH_HOST/2222; head -c 7 <&9" 2>/dev/null || true)"
 [ "$BANNER" = "SSH-2.0" ] || { echo "✗  $SSH_HOST:2222 meldt zich niet als ssh ('$BANNER')" >&2; exit 1; }
 
 echo "✓ Online: $DOMEIN en ssh -p 2222 $SSH_HOST (revisie $SHA)"
