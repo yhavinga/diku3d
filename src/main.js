@@ -23,7 +23,7 @@ import { Quality, LightPool, PRESETS, IDLE_SLEEP_MS } from './quality.js';
 import { createOptions } from './options.js';
 import { installScreenshot } from './screenshot.js';
 import { AssetLibrary, ASSET_NAMES } from './assets.js';
-import { createGame, SKY } from './game.js';
+import { createGame, schoolKit, SKY, ROOM_VNUM_SCHOOL } from './game.js';
 import { createGameUi } from './game-ui.js';
 import { createFx } from './fx.js';
 import { createSpellFx } from './spellfx.js';
@@ -588,7 +588,7 @@ async function boot() {
   // they name further down exists.
   createConnectUi({
     getGame: () => game,
-    onAlone: () => begin(false),
+    onAlone: () => begin(false, { alone: true }),
     onEnter(link, enter) {
       begin(false);
       connected = attachSocketLink(link, game, linkHost, enter);
@@ -909,7 +909,14 @@ async function boot() {
     if (r.ok) leaveToTitle();
     return r;
   };
-  game.walk = (dir) => step(dir, true);
+  // move_char ends in do_look "auto": a direction typed at the command line
+  // prints there the room it arrives in, once the game counts you in it (the
+  // frame, below). On a server the server looks (link.js).
+  game.walk = (dir) => {
+    const r = step(dir, true);
+    if (!connected && !(r && r.ok === false)) lookFrom = game.state.roomVnum;
+    return r;
+  };
   gameUi.onConsole = () => player.keys.clear();
   gameUi.setCamera(() => camera.position);
   const kick = createKick({ fx, camera, game, audio });
@@ -1422,6 +1429,7 @@ async function boot() {
   // One buffered press, so reading the map fast still works: a second arrow
   // during a glide queues and fires on arrival instead of being swallowed.
   let queuedStep = null;
+  let lookFrom = null;
 
   function step(dir, typed = false, from = null) {
     // Typed at the command line, a refusal is the mud's line in the console;
@@ -1780,7 +1788,7 @@ async function boot() {
         name: area.name,
         levels: levelsOf(area.credits),
         way: leaving && dir !== null ? `${DIR_NAME[dir]} · from ${leaving.name}`
-          : ({ recall: 'you pray for transportation', continue: 'where you left off' })[why] || '',
+          : ({ recall: 'you pray for transportation', continue: 'where you left off', new: 'welcome to merc diku mud' })[why] || '',
         room: arrive.name,
         prose: firstLine(arrive.description),
       });
@@ -2006,7 +2014,7 @@ async function boot() {
    * mouse alongside; without it the keys still walk, step and fight, and the
    * next click on the view asks again.
    */
-  const begin = (fromSave) => {
+  const begin = (fromSave, { alone = false } = {}) => {
     if (!begun) {
       begun = true;
       if (titleReel) titleReel.stop();
@@ -2017,6 +2025,12 @@ async function boot() {
       state.roomVnum = null;
       built.horizon?.settle(camera.position);
       if (fromSave) game.loadSave();
+      // comm.c nanny: a new character starts in the Mud School, in the kit its
+      // first sign is about. A `?room=` is a harness's, and starts there.
+      else if (alone && !params.get('room')) {
+        schoolKit(game.state, world);
+        crossTo(ROOM_VNUM_SCHOOL, { yaw: arrivalYaw(world, plan, ROOM_VNUM_SCHOOL, null), why: 'new' });
+      }
     }
     audio.start();
     dom.title.classList.add('hidden');
@@ -2024,7 +2038,7 @@ async function boot() {
     player.requestLock();
   };
   continueButton.addEventListener('click', () => begin(true));
-  dom.enter.addEventListener('click', () => begin(false));
+  dom.enter.addEventListener('click', () => begin(false, { alone: true }));
 
   // Or a server's world (src/link.js): this game becomes the server's copy,
   // and these are the hands it borrows from the page to move you about.
@@ -2040,8 +2054,12 @@ async function boot() {
     crossing: () => !!state.crossing,
     roomAt: (x, y, z) => built.rooms.get(actors.nav.roomAt(x, y, z)),
     /** Where the server put you: a jump in the drawn zone, a crossing to another. */
-    teleport(vnum) {
-      if (plan.zoneOf(vnum) && plan.zoneOf(vnum) !== zone) { crossTo(vnum, { yaw: player.body.heading(), why: 'recall' }); return; }
+    teleport(vnum, why = 'recall') {
+      if (plan.zoneOf(vnum) && plan.zoneOf(vnum) !== zone) {
+        // A recall keeps the way you face; coming into the game, you face into the room.
+        crossTo(vnum, { yaw: why === 'recall' ? player.body.heading() : arrivalYaw(world, plan, vnum, null), why });
+        return;
+      }
       const info = built.rooms.get(vnum);
       if (!info) throw new Error(`link: the server put you in #${vnum}, which this zone did not build`);
       player.spawn(info.center.x, info.center.y, info.center.z, player.body.heading());
@@ -2214,6 +2232,10 @@ async function boot() {
       audio.setOutdoor(info.outdoor);
       state.snowLevel = snowLevelOf(info.room);
       audio.setPlace(info, state.time);
+    }
+    if (lookFrom !== null && game.state.roomVnum !== lookFrom && !state.crossing) {
+      lookFrom = null;
+      game.look();
     }
 
     // The sun follows so its shadow map always covers where you are, but it is

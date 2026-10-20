@@ -120,6 +120,7 @@ check(directionOf('sa') === -1 && directionOf('l') === -1 && directionOf('') ===
 
 console.log('\nA NEW CHARACTER, AT A TERMINAL');
 const temple = 3001;
+const school = 3700;
 const exits = w.world.rooms.get(temple).exits;
 const north = exits[0].to;
 const up = exits[4].to;
@@ -141,10 +142,13 @@ a.type('m');
 await a.see(/Select a class \[Mag Cle Thi War\]: $/, 'then the class');
 a.type('war');
 await a.see(/Welcome to Merc Diku Mud/, 'the character is made and enters the game');
-await a.see(new RegExp(roomName(temple)), '...and sees the temple');
+await a.see(new RegExp(roomName(school)), '...and sees the Mud School, where nanny puts a new character');
 await a.see(/<\d+hp \d+m \d+mv> $/, 'the prompt shows the vitals');
 check(!a.raw.includes('secret1'), 'the password is never echoed');
 check(/\x1b\[1;36m/.test(a.raw), 'a pty gets colour: the room name is bold');
+const leftSchool = a.mark();
+a.type('down');
+await a.see(new RegExp(roomName(temple)), `"down" walks out of the school, into the next zone: the temple (#${temple})`, leftSchool, 8000);
 
 console.log('\nWALKING');
 const w1 = watcher();
@@ -195,7 +199,8 @@ console.log('\nA SCRIPT, WITH NO PTY');
 const b = await session({ pty: false });
 b.stream.write('Piper\nsecret2\ny\nsecret2\nf\nmag\nnorth\nlook\nquit\n');
 await b.see(/Did I get that right, Piper \(Y\/N\)\?\n/, 'each question comes on a line of its own');
-await b.see(new RegExp(`${roomName(north)}[\\s\\S]*${roomName(north)}`), '"north" then "look" looks at the room walked to', 0, 8000);
+const schoolNorth = w.world.rooms.get(school).exits[0].to;
+await b.see(new RegExp(`${roomName(schoolNorth)}[\\s\\S]*${roomName(schoolNorth)}`), '"north" then "look" looks at the room walked to', 0, 8000);
 check(await b.gone(6000), '"quit" ends the session');
 check(!/\x1b\[/.test(b.raw), 'no escape sequences at all without a pty');
 check(!b.raw.includes('secret2'), 'and no echo of the password');

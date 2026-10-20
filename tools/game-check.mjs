@@ -680,6 +680,10 @@ check(firstRoad && firstRoad.cost.level <= 15,
   firstRoad ? `${firstRoad.record.proto.short} at level ${firstRoad.cost.level}` : 'none');
 check(ladder.some((entry) => !entry.cost.level), 'and some gates stay shut even to a hero',
   `${ladder.filter((e) => !e.cost.level).length} of ${ladder.length}`);
+// In the mud the executioner is in the temple for killers and thieves
+// (spec_executioner); the stair beside him is the way to the Mud School.
+check(!preview.gates.some((gate) => gate.vnum === 3001 && gate.dir === 4), 'nobody holds the temple stair up to the Mud School',
+  preview.gates.filter((gate) => gate.vnum === 3001).map((gate) => `${gate.way}: ${gate.wardenName}`).join(', ') || 'no gate there');
 
 check(shell.ok, 'the game shell kills, drops a corpse and pays out');
 check(shell.game && shell.game.state.gold >= 0 && shell.game.state.exp > 1000, 'looting a corpse pays exp and gold');

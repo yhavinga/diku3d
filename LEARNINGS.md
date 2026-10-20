@@ -6,6 +6,45 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-20 — the first minutes: Mud School, as Merc starts you
+
+- **Play the first minute as a beginner, headless, before judging
+  onboarding.** A new character stood in #3001, 3.5 m from a level-50
+  executioner labelled "HOLDS THE WAY UP" with "click — attack" under him,
+  and one click killed it. The label was the gate rule from before every
+  area was loaded (game.js `gates`): the strongest mobile beside an exit
+  into another zone holds it, and nothing beside the temple stair is
+  stronger. In the mud the executioner is there for killers and thieves
+  (spec_executioner) and holds no way. Nanny puts a level-0 character in
+  #3700 in the school's banner, vest, shield and class weapon (comm.c
+  CON_READ_MOTD); both page and server do that now (`schoolKit`), and the
+  stair to the school has no warden.
+- **Mud School's lessons are in its signs.** Over all 45 areas the prose
+  and extra descriptions quote a command to type 60 times; 47 of them are
+  the school's. hud.js `keyFor` puts the key beside each ('EQUIPMENT' [I], go
+  'WEST' [←], 'SCORE' [Enter]); a quote that is no command ('zeus street',
+  'I'm …') gets none. Folded, the prose keeps the sentences that say what to
+  do: the temple's "(type 'up' to go to MUD SCHOOL.)" is its last sentence,
+  and it used to fold away at 30 s.
+- **Three school rooms were streets.** "A Room in Mud School", "Furey's
+  Training Room" and "Hatchet's Guild Room" are CITY without INDOORS, so
+  they were built open to the sky with half-timbered fronts, and clutter.js
+  hangs a sign only indoors: the school's first sign ("If you are a new
+  character, you should go 'WEST'") was missing. A CITY room named a room
+  is roofed now (shells.js `NAMED_ROOM`): of the 1,113 open-air rooms it
+  takes exactly those three. walkable.mjs over the school: 217,328 steps,
+  none refused, doors open or shut.
+- **The server counts your room in its frame, not on your report.** A
+  typed direction ends in do_look "auto" now. On a server the page sent
+  `look` right behind the position report that had it in the new room, and
+  the server answered with the room it had left: `position()` stores the
+  report, and `playerFrame` counts the room on the next tick. The page waits
+  for the room in the server's own `self` instead.
+- **A mobile is made the first time someone sees it.** server-check's
+  "a warden slain opens the gate" found its warden only because the
+  executioner stood in the temple with the players; with no warden there
+  the check stands a player beside one first.
+
 ## 2026-10-15 — wave 20: third person, and players who look like heroes
 
 ### A wash is a lamp before it is a shader

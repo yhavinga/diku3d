@@ -154,8 +154,9 @@ and south over the bridge off the Dump.
 | `?fps=30` | override the preset's frame cap; `0` uncaps it |
 | `?bake=fresh` | ignore the texture cache and bake every surface again (and store the new bake) |
 
-Try `?room=3700` to start in the Mud School, `?room=7000` for the sewer or
-`?room=6500` for the dwarven kingdom.
+A new character starts in the Mud School in the school's kit, as Merc's nanny
+starts one. Try `?room=3001` to start in the temple instead, `?room=7000` for
+the sewer or `?room=6500` for the dwarven kingdom.
 
 **A room drawn next to another on the minimap is not an exit.** The map is the
 layout grid, and the layout is a non-Euclidean graph forced flat, so cells end

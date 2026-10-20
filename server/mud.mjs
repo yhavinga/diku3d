@@ -17,7 +17,7 @@
 import { randomBytes, timingSafeEqual } from 'crypto';
 import { WebSocketServer } from 'ws';
 
-import { createGame, createCharacter, POS, CLASS_TABLE } from '../src/game.js';
+import { createGame, createCharacter, schoolKit, POS, CLASS_TABLE, ROOM_VNUM_SCHOOL } from '../src/game.js';
 import { serialize, restore } from '../src/save.js';
 import { titleFor, trustOf, PLR_MORE } from '../src/rules/actcomm.js';
 import { PLR, nested } from '../src/rules/handler.js';
@@ -516,10 +516,11 @@ export async function startMud({
     const ch = createCharacter(classIndex, { sex: sexIndex });
     ch.name = name;
     ch.displayName = name;
+    schoolKit(ch, w.world);
     const record = {
       version: 1, name, created: new Date().toISOString(),
       password: await hashPassword(String(password)),
-      char: { ...serialize(ch), room: ROOM_VNUM_TEMPLE, title: titleFor(ch), played: 0 },
+      char: { ...serialize(ch), room: ROOM_VNUM_SCHOOL, title: titleFor(ch), played: 0 },
     };
     accounts.store(record);
     log(`${name}@${s.host} new player.`);
@@ -593,12 +594,12 @@ export async function startMud({
     dash.record('conn', `${name}@${s.host} ${fresh ? 'entered the game as a new player' : 'logged in'} (L${ch.level} ${CLASS_TABLE[ch.class]?.who || '?'}) in #${vnum}`,
       { who: name, vnum, sub: fresh ? 'new' : 'login' });
     game.roomcast(vnum, { kind: 'room', text: `${name} has entered the game.` }, [ch]);
-    welcome(s, '\nWelcome to Merc Diku Mud.  May your visit here be ... Mercenary.');
+    welcome(s, '\nWelcome to Merc Diku Mud.  May your visit here be ... Mercenary.', fresh);
   }
 
   const sameToken = (a, b) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
-  function welcome(s, text) {
+  function welcome(s, text, fresh = false) {
     const pc = s.pc;
     s.token = randomBytes(24).toString('base64url');
     s.seq += 1;
@@ -607,7 +608,7 @@ export async function startMud({
     s.sent = { self: '', kit: '', mobs: new Map(), ground: new Map(), roster: new Map(), weather: '' };
     send(s, {
       t: 'enter', id: pc.id, name: pc.ch.name, room: pc.ch.roomVnum, seq: s.seq, now: Date.now() - started, token: s.token,
-      trust: trustOf(pc.ch),
+      trust: trustOf(pc.ch), ...(fresh ? { fresh: true } : null),
     });
     sendSelf(s);
     sendWeather(s);

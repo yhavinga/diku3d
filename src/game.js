@@ -50,6 +50,14 @@ const MAX_WEAR = 18;
 const TYPE_HIT = 1000;
 
 const ROOM_VNUM_TEMPLE = 3001;
+export const ROOM_VNUM_SCHOOL = 3700;
+/** merc.h: OBJ_VNUM_SCHOOL_*, what nanny gives a new character. */
+const OBJ_VNUM_SCHOOL_MACE = 3700;
+const OBJ_VNUM_SCHOOL_DAGGER = 3701;
+const OBJ_VNUM_SCHOOL_SWORD = 3702;
+const OBJ_VNUM_SCHOOL_VEST = 3703;
+const OBJ_VNUM_SCHOOL_SHIELD = 3704;
+const OBJ_VNUM_SCHOOL_BANNER = 3716;
 
 export const POS = {
   DEAD: 0, MORTAL: 1, INCAP: 2, STUNNED: 3,
@@ -94,10 +102,10 @@ const APPLY = {
 
 /** class_table. thac0 is interpolated between level 0 and level 32. */
 export const CLASS_TABLE = [
-  { name: 'mage', who: 'Mag', attrPrime: APPLY.INT, guild: 3018, skillAdept: 95, thac00: 18, thac032: 10, hpMin: 6, hpMax: 8, mana: true },
-  { name: 'cleric', who: 'Cle', attrPrime: APPLY.WIS, guild: 3003, skillAdept: 95, thac00: 18, thac032: 12, hpMin: 7, hpMax: 10, mana: true },
-  { name: 'thief', who: 'Thi', attrPrime: APPLY.DEX, guild: 3028, skillAdept: 85, thac00: 18, thac032: 8, hpMin: 8, hpMax: 13, mana: false },
-  { name: 'warrior', who: 'War', attrPrime: APPLY.STR, guild: 3022, skillAdept: 85, thac00: 18, thac032: 6, hpMin: 11, hpMax: 15, mana: false },
+  { name: 'mage', who: 'Mag', attrPrime: APPLY.INT, weapon: OBJ_VNUM_SCHOOL_DAGGER, guild: 3018, skillAdept: 95, thac00: 18, thac032: 10, hpMin: 6, hpMax: 8, mana: true },
+  { name: 'cleric', who: 'Cle', attrPrime: APPLY.WIS, weapon: OBJ_VNUM_SCHOOL_MACE, guild: 3003, skillAdept: 95, thac00: 18, thac032: 12, hpMin: 7, hpMax: 10, mana: true },
+  { name: 'thief', who: 'Thi', attrPrime: APPLY.DEX, weapon: OBJ_VNUM_SCHOOL_DAGGER, guild: 3028, skillAdept: 85, thac00: 18, thac032: 8, hpMin: 8, hpMax: 13, mana: false },
+  { name: 'warrior', who: 'War', attrPrime: APPLY.STR, weapon: OBJ_VNUM_SCHOOL_SWORD, guild: 3022, skillAdept: 85, thac00: 18, thac032: 6, hpMin: 11, hpMax: 15, mana: false },
 ];
 
 /** str_app: [tohit, todam, carry, wield]. */
@@ -366,6 +374,24 @@ export function createCharacter(classIndex, { level = 1, sex = 1, rng = new Rng(
   // second player in the room to drag you out.
   ch.wimpy = idiv(ch.maxHit, 5);
   return ch;
+}
+
+/**
+ * comm.c nanny at CON_READ_MOTD, for a character entering the game for the
+ * first time: the Mud School's banner, vest and shield and the class's
+ * weapon, each worn. Nanny then puts it in ROOM_VNUM_SCHOOL, and so do its
+ * callers -- the school's first sign is about this very kit.
+ */
+export function schoolKit(ch, world) {
+  const kit = [
+    [OBJ_VNUM_SCHOOL_BANNER, WEAR.LIGHT], [OBJ_VNUM_SCHOOL_VEST, WEAR.BODY],
+    [OBJ_VNUM_SCHOOL_SHIELD, WEAR.SHIELD], [CLASS_TABLE[ch.class].weapon, WEAR.WIELD],
+  ];
+  for (const [vnum, iWear] of kit) {
+    const proto = world.objProtos.get(vnum);
+    if (!proto) throw new Error(`game.js schoolKit: object #${vnum} is in no loaded area`);
+    equipChar(ch, createObject(proto, 0), iWear);
+  }
 }
 
 /** update.c: advance_level. Returns what the mud prints as "Your gain is". */
@@ -1641,14 +1667,18 @@ export function createGame({
    * The carrot. Every exit into an area that was never loaded is a sealed gate
    * on the map already. A gate is *held* by the strongest mobile standing in
    * the room it leaves, or failing that one step back into the city -- which in
-   * Midgaard puts the cityguards on the two city gates, the guildmasters on
-   * their guilds, and the executioner on the temple stair. Kill the warden and
-   * the gate is yours. Nobody has to be told this; the guard is standing in it.
+   * Midgaard puts the cityguards on the two city gates and the guildmasters on
+   * their guilds. Kill the warden and the gate is yours. Nobody has to be told
+   * this; the guard is standing in it.
    */
   const gates = [];
   for (const link of (layout.links || [])) {
     if (link.kind !== 'gate') continue;
     const fromVnum = link.from.vnum;
+    // Nobody holds the stair between the temple and the Mud School, where a
+    // new character starts: in the mud the executioner at its foot is there
+    // for killers and thieves (spec_executioner), and holds no way.
+    if (fromVnum === ROOM_VNUM_SCHOOL || link.exit.to === ROOM_VNUM_SCHOOL) continue;
     const room = world.rooms.get(fromVnum);
     if (!room) continue;
 

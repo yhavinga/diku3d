@@ -129,10 +129,13 @@ await a.waitFor((x) => x.messages.filter((m) => m.t === 'login').length >= 3);
 check(/Illegal name/.test(a.messages.filter((m) => m.t === 'login')[2].why), "nor is a mobile's name");
 a.send({ t: 'create', name: 'Arwen', password: 'elbereth', cls: 3, sex: 'f' });
 await a.waitFor((x) => x.id !== null, 5000, 'enter');
-check(a.room === 3001, 'a new character enters at the temple', a.room);
+check(a.room === 3700, 'a new character enters at the Mud School, as nanny puts one there', a.room);
 await a.waitFor((x) => x.self, 3000, 'self');
 check(a.self.name === 'Arwen' && a.self.className === 'warrior' && a.self.sex === 2, 'the character comes back whole', `${a.self.title}`);
-await a.at(3001, 1.5, 0);
+const kit = (a.self.equipment || []).filter(Boolean).map((o) => o.vnum).sort((x, y) => x - y);
+check(kit.join(' ') === '3702 3703 3704 3716', "...wearing nanny's kit: the school's sword for a warrior, its vest, shield and banner", kit.join(' '));
+// In the school, where the next new character will enter.
+await a.at(3700, 1.5, 0);
 
 const b = client('Boromir');
 await b.opened;
@@ -140,6 +143,7 @@ b.send({ t: 'create', name: 'Boromir', password: 'gondor1', cls: 3, sex: 'm' });
 await b.waitFor((x) => x.id !== null, 5000, 'enter');
 await b.at(3001, -1.5, 0);
 await expect(a, /^Boromir has entered the game\.$/, "the room is told: '$n has entered the game.'");
+await a.at(3001, 1.5, 0);
 
 const c3 = client('Intruder');
 await c3.opened;
@@ -289,9 +293,10 @@ await expect(a, /\*\*\* You are now a KILLER!! \*\*\*/, 'allowed where 2.1 allow
 await expect(b, /^You shout 'Help!  I am being attacked by Arwen!'\.$/, "the victim shouts for help (do_murder's do_shout)", mb);
 await expect(third, /^Boromir shouts 'Help!  I am being attacked by Arwen!'\.$/, '...and the whole world hears it', mg);
 const BLOW = 'miss|scratch|graze|hit|injure|wound|maul|devastate|maim|MUTILATE|DISEMBOWEL|EVISCERATE|MASSACRE';
-await expect(b, new RegExp(`^Arwen (${BLOW})e?s you[.!]$`), "the victim reads the blows as TO_VICT: 'Arwen hits you.'", mb);
-await expect(a, new RegExp(`^You (${BLOW}) Boromir[.!]$`), "the attacker reads them as TO_CHAR: 'You hit Boromir.'", m);
-await expect(third, new RegExp(`^(Arwen|Boromir) (${BLOW})e?s (Boromir|Arwen)[.!]$`), 'a bystander in the room sees the fight as TO_ROOM', mg, 6000);
+// New characters, so both wield the school's sword: dam_message's words for a weapon's blow.
+await expect(b, new RegExp(`^Arwen's slash (${BLOW})e?s you[.!]$`), "the victim reads the blows as TO_VICT: 'Arwen's slash grazes you.'", mb);
+await expect(a, new RegExp(`^Your slash (${BLOW})e?s Boromir[.!]$`), "the attacker reads them as TO_CHAR: 'Your slash grazes Boromir.'", m);
+await expect(third, new RegExp(`^(Arwen|Boromir)'s slash (${BLOW})e?s (Boromir|Arwen)[.!]$`), 'a bystander in the room sees the fight as TO_ROOM', mg, 6000);
 check(!!(pa.ch.act & PLR.KILLER), 'the KILLER flag is on Arwen');
 await b.waitFor((x) => x.self && x.self.fighting && x.self.fighting.p === a.id, 3000, 'fighting').catch(() => null);
 check(b.self.fighting && b.self.fighting.p === a.id, "Boromir's own view says he is fighting Arwen", JSON.stringify(b.self.fighting));
@@ -525,7 +530,13 @@ console.log('\nSHOPS AND GATES');
     return g && level === (wardenLevel(g) ?? g.wardenLevel);
   });
   check(levelsMatch, "...each with the level of the warden actually standing there", gates && gates.g.map(([v, d, o, l]) => `#${v}${'neswud'[d]}:${o ? 'open' : `L${l}`}`).join(' '));
-  // A warden slain by someone else opens the gate on everyone's map.
+  // A warden slain by someone else opens the gate on everyone's map. A
+  // mobile is made the first time someone sees it, and with nobody holding
+  // the temple stair no warden stands where the players have been: Arwen
+  // goes to one first.
+  const guarded = serverGates.find((g) => !g.open && game.mobs.some((slot) => slot.record === g.warden && !slot.dead));
+  await a.at(game.mobs.find((slot) => slot.record === guarded.warden && !slot.dead).roomVnum, 1, 0);
+  await a.waitFor(() => wardenLevel(guarded) !== undefined, 3000, 'the warden seen').catch(() => null);
   const gate = serverGates.find((g) => !g.open && wardenLevel(g) !== undefined);
   const wslot = game.mobs.find((slot) => slot.record === gate.warden && !slot.dead);
   const word = wslot.proto.keywords.split(' ')[0];

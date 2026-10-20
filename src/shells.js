@@ -587,7 +587,16 @@ export function classifyCanopy(world) {
  * a toy village, open air on purpose -- which the apostrophe keeps out.
  */
 const NAMED_BUILDING = /^(?:the |an? )?(?:\w+ ){0,2}(?:guard ?house|shack|barracks|hut|hovel|cottage|cabin|house|tavern|inn)\b/i;
-const roofedByName = (room) => room.sector === SECTOR.CITY && NAMED_BUILDING.test(room.name);
+/**
+ * A room by its own name. The Mud School's "A Room in Mud School", "Furey's
+ * Training Room" and "Hatchet's Guild Room" are CITY with no INDOORS flag,
+ * and were built as streets, though the first says "Pastels cover these
+ * walls" and hangs the school's first sign on one. Over all 45 areas CITY
+ * and open to the sky, the word takes those three and nothing else; the
+ * rooms of Arachnos that call themselves one are FIELD, and stay as they are.
+ */
+const NAMED_ROOM = /\broom\b/i;
+const roofedByName = (room) => room.sector === SECTOR.CITY && (NAMED_BUILDING.test(room.name) || NAMED_ROOM.test(room.name));
 export const isOpenAir = (room) => (isOutdoor(room) && !roofedByName(room)) || isCanopy(room)
   || (!!eastStyle(room) && eastStyle(room) !== 'cave') || hoodStyle(room) === 'court';
 /**

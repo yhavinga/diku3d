@@ -327,6 +327,57 @@ const MAP = 176;
 /** Reading speed for the prose, words a second, before it folds away. */
 const READ_WPS = 3.2;
 
+/**
+ * The mud tells you what to type -- the temple's 'up', Mud School's signs
+ * ('EQUIPMENT', 'GET item', go 'WEST'), the shops' 'list' -- and here most of
+ * it is a key or a sheet. Each quoted command the prose or a sign names gets
+ * that key beside it; what has no key of its own is typed at the command
+ * line, which Enter opens. The keys are help.js's, read off their handlers.
+ */
+const KEY_OF = {
+  equipment: 'I', inventory: 'I', wear: 'I', wield: 'I', hold: 'I', remove: 'I',
+  get: 'E', kill: 'click', rest: 'R', recall: 'Q', train: 'K', practice: 'K',
+  list: 'B', buy: 'B', sell: 'B',
+  north: '\u2191', east: '\u2192', south: '\u2193', west: '\u2190', up: 'PgUp', down: 'PgDn',
+};
+const AT_THE_PROMPT = new Set(['score', 'consider', 'flee', 'wimpy', 'sleep', 'sacrifice', 'save', 'exits',
+  'eat', 'drink', 'value', 'order', 'bug', 'idea', 'typo']);
+
+/** The key for a command the mud quotes, or null when the quote is not a command. */
+export function keyFor(command) {
+  const [word, ...rest] = command.toLowerCase().split(/\s+/);
+  if (word === 'look') return rest.length ? 'E' : 'Tab';
+  if (word === 'help') return rest.length ? 'Enter' : '?';
+  // The pet shop's sign: Merc's pets are not this game's, and B trades with a keeper.
+  if (word === 'buy' && rest.includes('<pet>')) return 'Enter';
+  return KEY_OF[word] ?? (AT_THE_PROMPT.has(word) ? 'Enter' : null);
+}
+
+/** `text` into `el`, a key after each command it quotes. True when there was one. */
+function writeWithKeys(el, text) {
+  el.textContent = '';
+  let last = 0;
+  for (const m of text.matchAll(/'([A-Za-z][A-Za-z <>]{0,28})'/g)) {
+    const key = keyFor(m[1].trim());
+    if (!key) continue;
+    const end = m.index + m[0].length;
+    const kbd = document.createElement('kbd');
+    kbd.className = 'mud-key';
+    kbd.textContent = key;
+    el.append(text.slice(last, end), kbd);
+    last = end;
+  }
+  el.append(text.slice(last));
+  return last > 0;
+}
+
+/** The sentences of `text` that tell you to do something, with their keys. */
+function instructions(text) {
+  return (text.match(/[^.!?]+(?:[.!?]+['")]*|$)/g) || [])
+    .map((s) => s.trim())
+    .filter((s) => [...s.matchAll(/'([A-Za-z][A-Za-z <>]{0,28})'/g)].some((m) => keyFor(m[1].trim())));
+}
+
 export class Hud {
   constructor(root, layout, crossings = []) {
     this.layout = layout;
@@ -335,6 +386,7 @@ export class Hud {
       title: root.querySelector('#room-title'),
       area: root.querySelector('#room-area'),
       desc: root.querySelector('#room-desc'),
+      todo: root.querySelector('#room-do'),
       look: root.querySelector('#look'),
       examine: root.querySelector('#examine'),
       examineTitle: root.querySelector('#examine-title'),
@@ -380,7 +432,11 @@ export class Hud {
     // growing under the log for a second and a half, and any still taken
     // before the typing caught up -- or with the loop halted -- showed prose
     // cut off mid-word: "...and you lo".
-    this.el.desc.textContent = room.description.replace(/\s*\n\s*/g, ' ').trim();
+    const prose = room.description.replace(/\s*\n\s*/g, ' ').trim();
+    writeWithKeys(this.el.desc, prose);
+    // Folded, the prose keeps its opening lines -- and what it tells you to
+    // do, which in the temple and Mud School is the end of it.
+    writeWithKeys(this.el.todo, instructions(prose).join(' '));
     this.el.desc.classList.remove('reveal');
     void this.el.desc.offsetWidth;
     this.el.desc.classList.add('reveal');
@@ -437,7 +493,7 @@ export class Hud {
 
   showExamine(target) {
     this.el.examineTitle.textContent = target.title;
-    this.el.examineBody.textContent = (target.body || '').replace(/\s*\n\s*/g, ' ').trim() || '(nothing more to see)';
+    writeWithKeys(this.el.examineBody, (target.body || '').replace(/\s*\n\s*/g, ' ').trim() || '(nothing more to see)');
     this.el.examine.classList.add('visible');
   }
 

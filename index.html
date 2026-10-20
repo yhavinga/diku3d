@@ -83,6 +83,13 @@
   #desc-block.brief #room-desc {
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
+  /* ...and keeps the sentences that say what to do (hud.js instructions). */
+  #room-do { display: none; font-size: 15.5px; line-height: 1.58; margin: 6px 0 0; color: #e7dcc4; }
+  #desc-block.brief #room-do:not(:empty) { display: block; }
+  /* The key that does what the mud says to type (hud.js keyFor). */
+  .mud-key { font-family: var(--mono); font-size: 0.68em; letter-spacing: 0.06em; color: var(--gold);
+    border: 1px solid rgba(224,189,119,0.55); border-radius: 3px; padding: 0 0.45em; margin-left: 0.35em;
+    vertical-align: 0.12em; white-space: nowrap; }
   #desc-block, #minimap-block { transition: opacity 400ms ease; }
   body.hud-moving #desc-block, body.hud-moving #minimap-block { opacity: 0.5; }
   #exits {
@@ -274,7 +281,7 @@
   #connect-status { margin: 0; min-height: 1.2em; text-transform: none; letter-spacing: 0.03em; font-size: 12px; line-height: 1.45; color: #f4e7cb; }
   #connect-status.bad { color: #ffb3a1; }
   /* Connecting, the page's own class row and saved game are not what is being chosen. */
-  /* The form has its own "play alone", which is the temple door, and its own
+  /* The form has its own "play alone", which is the title's own door, and its own
      way back: the link that opened it read as the form's heading, not as the
      button that closes it. */
   #title.connecting #keys, #title.connecting #class-pick, #title.connecting #continue, #title.connecting #enter,
@@ -434,6 +441,7 @@
 
   <div id="desc-block" class="panel">
     <p id="room-desc"></p>
+    <p id="room-do"></p>
     <div id="exits"></div>
   </div>
 
@@ -468,7 +476,7 @@
   <h1>DIKU3D</h1>
   <h2>Midgaard · Haon Dor · Moria · the Shire · and nearly forty more<span>DikuMUD · Merc 2.1 · in three dimensions</span></h2>
   <p id="desktop-only" hidden>For now Diku3D needs a keyboard and mouse, and more memory than a phone browser gives a page. Open diku3d.com on a computer to play.</p>
-  <button id="enter">enter the temple</button>
+  <button id="enter">enter the mud school</button>
   <div id="class-pick"><span>alone, as a</span><button data-class="3" class="on">warrior</button><button data-class="0">mage</button><button data-class="1">cleric</button><button data-class="2">thief</button></div>
   <button id="continue" hidden></button>
   <button id="connect-open" type="button">play with others · connect to a server<span id="online" hidden></span></button>

@@ -904,7 +904,7 @@ export function createGameUi(game, { built = null } = {}) {
         const can = skill.available && s2.practice > 0 && skill.learned < skill.adept;
         list.append(row(`${skill.name} — ${skill.learned}%`,
           skill.available ? (skill.learned >= skill.adept ? 'adept' : 'practice') : `level ${skill.level}`,
-          { cls: skill.available ? '' : 'dim', onClick: can ? () => game.practice(skill.key) : null }));
+          { cls: skill.available ? '' : 'dim', onClick: can ? () => answer(game.practice(skill.key)) : null }));
       }
       sheet.append(list);
       // act_move.c: do_train, at a trainer -- the sailor, in Midgaard.

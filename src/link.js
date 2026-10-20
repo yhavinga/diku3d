@@ -301,6 +301,10 @@ export function attachSocketLink(link, game, host, enter) {
   const slotIndex = new Map(mobs.map((slot, i) => [slot, i]));
   let seq = enter.seq;
   let id = enter.id;
+  /** The room a direction typed here set out from, until the look on arrival. */
+  let lookFrom = null;
+  /** The room the server counts you in, as its `self` says. */
+  let serverRoom = enter.room;
   const remotes = new Map();
   const offs = [];
 
@@ -408,6 +412,7 @@ export function attachSocketLink(link, game, host, enter) {
     if (dir >= 0 && text === word) {
       const r = host.walk(dir);
       if (r && r.text) game.inject({ kind: 'out', text: r.text });
+      else lookFrom = serverRoom;
       return DIRS[dir];
     }
     link.send({ t: 'cmd', line: text });
@@ -519,7 +524,10 @@ export function attachSocketLink(link, game, host, enter) {
   }
 
   offs.push(link.on('ev', (msg) => { for (const event of msg.e) receive(event); }));
-  offs.push(link.on('self', (msg) => mirror.self(msg.c, msg.k || null)));
+  offs.push(link.on('self', (msg) => {
+    if (msg.c.room !== undefined) serverRoom = msg.c.room;
+    mirror.self(msg.c, msg.k || null);
+  }));
   offs.push(link.on('mob', (msg) => { for (const [i, ...view] of msg.m) mirror.mob(i, view); }));
   offs.push(link.on('ground', (msg) => { if (msg.z === host.zoneId()) { mirror.ground(msg.o); layCorpses(); } }));
   /**
@@ -584,6 +592,7 @@ export function attachSocketLink(link, game, host, enter) {
   // A report the server would not believe: back to where it has you.
   offs.push(link.on('at', (msg) => {
     seq = Math.max(seq, msg.seq);
+    lookFrom = null;
     host.place(msg);
   }));
   offs.push(link.on('who', (msg) => {
@@ -655,7 +664,7 @@ export function attachSocketLink(link, game, host, enter) {
   }
 
   // -- the clock and the frame ------------------------------------------------
-  host.teleport(enter.room);
+  host.teleport(enter.room, enter.fresh ? 'new' : 'continue');
   link.release();
   link.ping();
   const pinger = setInterval(() => link.ping(), 2000);
@@ -685,6 +694,13 @@ export function attachSocketLink(link, game, host, enter) {
       if (sendIn < 0) sendIn = 0;
       const eye = host.eye();
       link.send({ t: 'pos', zone: host.zoneId(), x: round(eye.x), y: round(eye.y), z: round(eye.z), yaw: round(host.yaw()), seq });
+    }
+    // move_char's do_look "auto" for a direction typed here, once the server
+    // counts you in the room it leads to: it counts in its own frame, not on
+    // the report, and asked any sooner it looks at the room you left.
+    if (lookFrom !== null && serverRoom !== lookFrom) {
+      lookFrom = null;
+      link.send({ t: 'cmd', line: 'look' });
     }
     // Everyone else, a tenth of a second behind the server, between two reports.
     const at = link.serverNow() - BEHIND_MS;
