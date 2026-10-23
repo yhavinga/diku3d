@@ -55,11 +55,11 @@ export class Foley {
       for (const id of def.clips) this.clips.load(id);
       return false;
     }
-    return this.playClip(pick(ready), { pan, gain: gain * def.gain, rate, delay, dest, name });
+    return this.playClip(pick(ready), { pan, gain: gain * def.gain, rate, delay, dest, name, sprite: def.sprite ?? null });
   }
 
   /** One sprite out of one clip (a sheet's variants, or the whole of a single sound). */
-  playClip(id, { pan = 0, gain = 1, rate = 1, delay = 0, dest = null, name = id, spread = 0.05 } = {}) {
+  playClip(id, { pan = 0, gain = 1, rate = 1, delay = 0, dest = null, name = id, spread = 0.05, sprite = null } = {}) {
     const audio = this.audio;
     if (!audio.ctx || audio.muted) return true;
     const buffer = this.clips.buffers.get(id);
@@ -67,7 +67,10 @@ export class Foley {
     const entry = this.clips.entry(id);
     const sprites = entry && entry.steps && entry.steps.length ? entry.steps : [[0, buffer.duration]];
     let i;
-    do { i = Math.floor(Math.random() * sprites.length); } while (sprites.length > 1 && i === this.last.get(id));
+    if (sprite !== null) {
+      if (!sprites[sprite]) throw new Error(`foley: ${id} has no sprite ${sprite} (it has ${sprites.length})`);
+      i = sprite;
+    } else do { i = Math.floor(Math.random() * sprites.length); } while (sprites.length > 1 && i === this.last.get(id));
     this.last.set(id, i);
     const [offset, length] = sprites[i];
     const r = rate * rand(1 - spread, 1 + spread);

@@ -4256,58 +4256,6 @@
    }
   },
   {
-   "id": "sp_fire_roar_b",
-   "file": "sp_fire_roar_b.ogg",
-   "kind": "sfx",
-   "api": "sfx",
-   "group": "spell",
-   "loop": false,
-   "prompt": "A blazing fireball streaking past, a low roaring rush of burning air that grows louder and brighter as it travels, with sizzling crackle and flickering flame, outdoors. No voice, no creature, no music, no impact, no explosion, no engines, no electronic hum.",
-   "settings": {
-    "duration_seconds": 2,
-    "prompt_influence": 0.8
-   },
-   "post": {
-    "peakDb": -4,
-    "kbps": 40,
-    "mono": true
-   },
-   "duration": 1.64,
-   "bytes": 7939,
-   "steps": null,
-   "loudness": {
-    "lufs": -16.6,
-    "peak": -4,
-    "lra": 0
-   }
-  },
-  {
-   "id": "sp_fire_roar_c",
-   "file": "sp_fire_roar_c.ogg",
-   "kind": "sfx",
-   "api": "sfx",
-   "group": "spell",
-   "loop": false,
-   "prompt": "A big gust of flame rushing through the air, a heavy fiery whoosh with a rising roar and snapping crackle along the edges, outdoors, passing by. No voice, no growl, no animal, no music, no explosion at the end, no engines, no electronic hum.",
-   "settings": {
-    "duration_seconds": 2,
-    "prompt_influence": 0.8
-   },
-   "post": {
-    "peakDb": -4,
-    "kbps": 40,
-    "mono": true
-   },
-   "duration": 1.88,
-   "bytes": 8566,
-   "steps": null,
-   "loudness": {
-    "lufs": -15.5,
-    "peak": -4,
-    "lra": 0
-   }
-  },
-  {
    "id": "sp_lightning",
    "file": "sp_lightning.ogg",
    "kind": "sfx",

@@ -43,6 +43,7 @@ export const SURFACE = {
  * keeps its synthesised sound for each of these as what plays until the clip has
  * loaded. Gains are against a footstep clip, which plays at 0.55: every clip here
  * is peak-normalised, so the gain is also how loud the thing is meant to be.
+ * `sprite` holds a sheet to one of its variants where only that one is right.
  */
 export const SOUNDS = {
   hit_flesh: { clips: ['cmb_hit_flesh', 'cmb_hit_flesh_b'], gain: 1 },
@@ -97,9 +98,10 @@ export const SOUNDS = {
   spell_fizzle: { clips: ['sp_fizzle'], gain: 0.5 },
   spell_prism: { clips: ['sp_prism'], gain: 0.55 },
   spell_portal: { clips: ['sp_portal'], gain: 0.6 },
-  spell_roar: { clips: ['cr_dragon'], gain: 0.8 },
+  // A dragon's breath: the sheet's first, longer roar (the owner's pick of the two).
+  spell_roar: { clips: ['cr_dragon'], sprite: 0, gain: 0.8 },
   // A hurled fire's rush, with no throat in it: a fireball, a flamestrike or a mage's burning hands are not a dragon.
-  spell_fire_roar: { clips: ['sp_fire_roar_a', 'sp_fire_roar_b', 'sp_fire_roar_c'], gain: 0.8 },
+  spell_fire_roar: { clips: ['sp_fire_roar_a'], gain: 0.8 },
   // One drum hit, the moment a boss's attention falls on you (presence.js).
   threat: { clips: ['sting_threat'], gain: 1 },
 };
