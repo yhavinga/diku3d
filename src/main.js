@@ -2296,6 +2296,11 @@ async function boot() {
     }
 
     renderer.info.reset();
+    {
+      const room = built.rooms.get(state.roomVnum);
+      pipeline.smaaThreshold(!!room && (room.cell.level < 0 || !!(room.materials && room.materials.inRock)),
+        renderer.toneMappingExposure);
+    }
     quality.begin(now);
     composer.render();
     quality.end();

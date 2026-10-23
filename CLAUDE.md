@@ -446,6 +446,12 @@ choose.
   `onBeforeCompile` (reachable only via `renderer.properties.get(m).uniforms`)
   and the torch flicker in `quality.js` LightPool — 30–80% of pixels
   otherwise differ between two loads of the same code.
+  And the grass wind: `grass.still = true` on the LOD named `grass`, because
+  `GrassField.update` rewrites its time uniform on every render. (A diff of
+  a tree that only added a recipe once read 0.4 of mean level: that was the
+  AO denoise noise taking its place in the `Math.random` stream, fixed in
+  `ScaledGTAOPass._generateNoise`.) Underground, SMAA's HDR edge threshold
+  follows the exposure (`smaaThreshold`), or the hour shows in the outlines.
 - **A ring around the world is never "far".** The camera is always inside
   the horizon's bounding sphere, so every distance-based exclusion (cull.js
   `AO_REACH`, culling) misses it. Its strips face the camera with normals

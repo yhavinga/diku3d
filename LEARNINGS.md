@@ -6,6 +6,33 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-23 — render checks: two faults the frozen diff found
+
+- **The cave's noon-vs-night difference was SMAA, not a leaking material.**
+  `ScaledGTAO` and the rest were innocent: with SMAA off, #5011 and the sewer
+  (#7001) differ by one level of rounding between the hours (max 1, no pixel
+  over 2). SMAA's edge test is an absolute luma step of 0.1 in the linear HDR
+  buffer, *before* the hour's exposure, and a buried surface is lit `REF /
+  exposure` so that the exposure cancels: the same wall is 3.8x brighter in
+  the buffer at noon (0.165) than at night (0.62) and different edges got
+  smoothed -- bone and stalactite outlines in the cave, mortar lines in the
+  sewer. Cave 23,778 px differing (max 40) -> 16,865 (max 3, one px over 2);
+  sewer 83,579 (max 105) -> 21,735 (166 px over 2, sparse flips where an edge
+  sits on the threshold). `smaaThreshold` in render.js scales the test by
+  `0.62 / exposure` underground, so night is byte-identical to before and
+  outdoors is untouched. Breaking three buried materials on purpose moves
+  907,102 px, so the probe sees a real leak.
+- **A pixel diff between two builds needs the grass still and the GTAO noise
+  fixed.** `GrassField.update` runs on every render (it is an LOD) and
+  rewrites `uGrassTime` from `performance.now()`, so zeroing the uniform does
+  nothing: set `grass.still = true` on the LOD named `grass`. And the AO
+  denoise noise is a `SimplexNoise` shuffled with `Math.random` at pipeline
+  creation, so its place in the stream depended on how many uuids had been
+  drawn before it: a tree that only added one unused recipe differed from
+  its parent by 268,922 px (mean 0.38) at #3014 and 510,859 (mean 0.66) at
+  #3001, all in the shade, none with the AO pass off. `_generateNoise` runs
+  on a fixed stream now: the same two frames differ by 0 px.
+
 ## 2026-10-23 — wave 20, the rest: Mahn-Tor, ground that rolls, bosses
 
 ### Mahn-Tor, a frozen city
@@ -351,11 +378,14 @@ is an opinion.
 
 ### Open at the end of the round
 
-- Recorded, not re-run for this entry: `mp-two` times out at line 59 (on main
-  as well); `walkable.mjs --shut` crashes when it runs directly after another
-  walkable in the same shell and is green alone; the underground noon-vs-night
-  diff is not zero in the dracolich's cave (on main too); adding models or
-  recipes shifts Midgaard's frame faintly (mean about 0.4).
+- Settled after this entry: `mp-two` timed out at line 59 because the
+  connect form hides its own opener and a new character starts in the Mud
+  School, not the temple (the test clicks `#connect-back` and stands them in
+  their start room); the underground noon-vs-night difference and Midgaard's
+  faint shift are the render-checks entry above. `walkable.mjs --shut` after
+  another walkable did not crash again in four orders and 25 launch cycles;
+  it was seen with 89 Chrome processes running, so keep the whole crash
+  output if it comes back.
 - The Ice Worm wastes (#2351 to 2359) are level -1 and have a black sky and a
   stepped edge from above; the proposal, an open lower valley like the sunk
   river, has not been answered.

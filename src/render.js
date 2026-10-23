@@ -483,6 +483,22 @@ class ScaledGTAOPass extends GTAOPass {
   }
 
   /**
+   * The denoise's noise map is a SimplexNoise, which shuffles its table with
+   * `Math.random`. Where that sits in the page's stream depends on how many
+   * things drew from it before the pipeline was made -- every texture and
+   * object takes four draws for its uuid -- so a build that merely added a
+   * recipe or a model dressed the whole frame in another speckle: 0.4 of mean
+   * level over Midgaard, in the shade, and none with the pass off. A fixed
+   * stream makes the noise the same on every load.
+   */
+  _generateNoise(size) {
+    const random = Math.random;
+    let state = 0x9e3779b9;
+    Math.random = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    try { return super._generateNoise(size); } finally { Math.random = random; }
+  }
+
+  /**
    * The stock pass walks the whole scene every frame to find the points and
    * lines it must hide from the prepass -- eighteen thousand objects, ten
    * thousand of them bones, for eight that qualify: 2.2 ms of script a frame,
@@ -660,6 +676,9 @@ function addPresenceGrade(output) {
 
 // -------------------------------------------------------------- pipeline ----
 
+const SMAA_THRESHOLD = 0.1; // three's own default
+const NIGHT_EXPOSURE = 0.62; // main.js TIMES.night
+
 /**
  * The chain, in order. Everything after the render pass can be switched off
  * without disturbing what is left, which is what `quality.js` does with them.
@@ -724,6 +743,20 @@ export function createPipeline({ renderer, scene, camera, width, height }) {
   // SMAA works in linear-srgb, so it has to sit ahead of the output pass.
   const smaa = new SMAAPass();
   smaa.enabled = false;
+  // SMAA's edge test is an absolute luma step in this linear HDR buffer, which
+  // is scaled by nothing the viewer sees: the hour's exposure comes after it.
+  // Underground the lights are divided by that exposure (textures.js
+  // BURIED_REF_EXPOSURE), so the same wall is 3.8x brighter in the buffer at
+  // noon than at night and the same fixed threshold smoothed different edges
+  // -- the only thing left that told the hour in a cave (bone and stalactite
+  // outlines; with SMAA off the two hours differ by one level of rounding).
+  // The threshold is a uniform so `smaaThreshold` can follow it.
+  const edges = smaa._materialEdges;
+  const threshold = 'vec2 threshold = vec2( SMAA_THRESHOLD, SMAA_THRESHOLD );';
+  if (!edges.fragmentShader.includes(threshold)) throw new Error('render: SMAA edge shader moved; the threshold uniform missed');
+  edges.fragmentShader = `uniform float dikuSmaaThreshold;\n${edges.fragmentShader
+    .replace(threshold, 'vec2 threshold = vec2( dikuSmaaThreshold );')}`;
+  edges.uniforms.dikuSmaaThreshold = { value: SMAA_THRESHOLD };
 
   const output = new OutputPass();
   addPresenceGrade(output);
@@ -735,5 +768,12 @@ export function createPipeline({ renderer, scene, camera, width, height }) {
   composer.addPass(smaa);
   composer.addPass(output);
 
-  return { composer, render, gtao, shafts, bloom, smaa, output };
+  /** Underground the buffer is `1 / exposure` brighter than what is seen, so the
+   * test follows it; the value is the stock one at night's exposure, which the
+   * caves were judged at. Out of doors it is the stock value at every hour. */
+  const smaaThreshold = (buried, exposure) => {
+    edges.uniforms.dikuSmaaThreshold.value = buried ? SMAA_THRESHOLD * NIGHT_EXPOSURE / Math.max(0.01, exposure) : SMAA_THRESHOLD;
+  };
+
+  return { composer, render, gtao, shafts, bloom, smaa, smaaThreshold, output };
 }
