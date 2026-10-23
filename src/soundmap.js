@@ -121,6 +121,7 @@ export const PRELOAD = Object.keys(SOUNDS).filter((name) => name !== 'thunder');
  *          good part of its strength; `fightGain`/`fightRate` replace gain and
  *          rate for fight and roar (a minotaur's idle call is a cow pitched down,
  *          its bellow is not)
+ *   fightEvery  seconds between its fight calls, [lo, hi]; the default is [3, 7]
  *   hurt   clips when it loses hit points in a fight, on top of the blow itself
  *   breath the spell_ sound its breath weapon makes in place of a dragon's roar
  *   fall   false when its death clip already is the body hitting the ground
@@ -130,7 +131,7 @@ export const PRELOAD = Object.keys(SOUNDS).filter((name) => name !== 'thunder');
 export const CREATURES = [
   { id: 'baby dragon', re: /\b(hatchling|baby|young|pet|fairy)\b.*\bdragon\b|\bdragon\b.*\b(hatchling|baby|pet)\b/, idle: ['cr_cat'], rate: [1.5, 1.8], gain: 0.5, every: [14, 40], reach: 12, death: 'death_small' },
   // Bare bones held by necromancy: no lungs, so wind through ribs, jaws and breaking bone. A third of its fight calls are the hollow howl.
-  { id: 'dracolich', re: /\bdracolich\b/, idle: ['cr_dracolich_idle'], fight: ['cr_dracolich_snap', 'cr_dracolich_snap', 'cr_dracolich_call'], roar: ['cr_dracolich_call'], hurt: ['cr_dracolich_hurt'], breath: 'dracolich_breath', gain: 0.9, every: [12, 30], reach: 40, death: 'death_dracolich', fall: false },
+  { id: 'dracolich', re: /\bdracolich\b/, idle: ['cr_dracolich_idle'], fight: ['cr_dracolich_snap', 'cr_dracolich_snap', 'cr_dracolich_call'], roar: ['cr_dracolich_call'], hurt: ['cr_dracolich_hurt'], fightEvery: [2, 4], breath: 'dracolich_breath', gain: 0.9, every: [12, 30], reach: 40, death: 'death_dracolich', fall: false },
   // A plain skeleton: the same jaws and bones, smaller and higher, and a heap of bones for a death.
   { id: 'skeleton', re: /\b(skeletons?|skeletal)\b/, idle: [], fight: ['cr_dracolich_snap'], hurt: ['cr_dracolich_hurt'], fightRate: [1.25, 1.45], fightGain: 0.6, gain: 0.6, every: [60, 120], reach: 18, death: 'death_bones', fall: false },
   { id: 'dragon', re: /\b(dragon|wyrm|wyvern|hydra)\b/, idle: ['cr_dragon'], fight: ['cr_dragon'], roar: ['cr_dragon'], gain: 0.8, every: [30, 80], reach: 40, death: 'death_dragon' },

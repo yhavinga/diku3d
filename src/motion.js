@@ -162,7 +162,11 @@ const REST_LOOP = 1.8;
 /** people.js's word for a child, on the mobile's short description. */
 const CHILD = /\b(child|children|kids?|boys?|girls?|urchins?|lads?|lass(es)?|pupils?|youngsters?|orphans?|toddlers?)\b/i;
 const SIP = [2.35, 4.0];
-const ONE_SHOT = new Set(['attack', 'attack2', 'hit', 'stagger', 'block', 'death', 'rise']);
+/** A fight resumed after this many seconds out of one is a new foe's: the roar. */
+const FOE_BREAK = 4;
+/** Seconds a roar waits for a gap between blows before it is given up. */
+const ROAR_PATIENCE = 3;
+const ONE_SHOT = new Set(['attack', 'attack2', 'hit', 'stagger', 'block', 'death', 'rise', 'roar']);
 
 /** A per-person generator, so one figure's choices do not depend on another's. */
 function mulberry(seed) {
@@ -323,8 +327,11 @@ function bodyOf(fig) {
  * fore, so at the cap it swept its quarters into whatever stood beside it and
  * the separation slid both apart. Scaled down by the length of the body.
  */
-function turnRate(fig, rate) {
-  return Math.min(rate, TURN_CAP) / (1 + 1.4 * fig.body.h);
+function turnRate(fig, rate, fighting = false) {
+  // A fighter is keeping its jaws on its foe, and turns its length round for
+  // that: a six-metre dragon at the sitting rate was 1.8 rad off a foe
+  // circling it. turnsInto still keeps the swing out of any neighbour.
+  return Math.min(rate, TURN_CAP) / (1 + (fighting ? 0.5 : 1.4) * fig.body.h);
 }
 
 /**
@@ -692,6 +699,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       // Settling somewhere (a seat, a wall, a bar), talking to someone, and
       // the footwork of a fight between blows.
       settle: null, talk: null, sitW: 0, leanW: 0, barW: 0, step: null, nextFidget: 0.8, stance: 0, swingIn: 9,
+      foe: null, foeAway: 0, roarDue: 0,
       climb: null, drop: 0, lookAt: null,
     };
     fig.walking = false;
@@ -1424,6 +1432,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       }
     }
     m.fighting = false;
+    m.foeAway += dt;
     m.want = order.kind === 'stroll' && m.play ? fig.runPace * 0.8 : fig.pace;
     switch (order.kind) {
       case 'dead': case 'gone':
@@ -1449,6 +1458,12 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       }
       case 'chase': case 'face': {
         const target = order.target;
+        // Taking up a foe after the first (another body, or the same one come
+        // back after a break) is worth a roar, if the body has one to give.
+        if (fig.actions && fig.actions.roar) {
+          if (m.foe && (m.foe !== target || m.foeAway > FOE_BREAK)) m.roarDue = ROAR_PATIENCE;
+          m.foe = target; m.foeAway = 0;
+        }
         const dx = target.x - fig.at.x; const dz = target.z - fig.at.z;
         const d = Math.hypot(dx, dz);
         m.fighting = d < 4.5;
@@ -1458,7 +1473,11 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
         // half step back at a time, still facing you. Without it a guard
         // stayed wherever the fight found him: 1.1 m from your eye, measured,
         // with his shield filling the frame.
-        const stop = order.stop ?? CLOSE;
+        // Never stop inside the room `separate` keeps from the player: a six
+        // metre body is pushed back to 0.42 + r + h/2 (2.3 m for the
+        // dracolich) while the stop said 2.15, so it walked on the spot at
+        // its foe for the whole fight, jaws already in reach.
+        const stop = Math.max(order.stop ?? CLOSE, 0.42 + fig.body.r + fig.body.h * 0.5 + 0.12);
         if (m.fighting && order.kind === 'chase' && d < stop - 0.3 && !m.step && (fig.actions?.walk || fig.legs)) {
           m.path = null; m.want = 0;
           m.step = { t: 0, dur: 0.55, along: 0, side: 0, back: Math.min(0.55, stop - d), dx: -dx / d, dz: -dz / d };
@@ -1576,7 +1595,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
         // Still coming to a stop: the turn waits on the feet, or the body
         // swings round over a planted foot and drags it (0.3-0.9 m/s,
         // measured, on every guard that stopped to look at the player).
-        const rate = turnRate(fig, TURN_STANDING * (m.fighting ? 1.4 : 0.7)) * (m.speed > 0.05 && !m.fighting ? clamp(m.speed / 1.0, 0.25, 1) * 0.4 : 1);
+        const rate = turnRate(fig, TURN_STANDING * (m.fighting ? 1.4 : 0.7), m.fighting) * (m.speed > 0.05 && !m.fighting ? clamp(m.speed / 1.0, 0.25, 1) * 0.4 : 1);
         const want = turnStep(m, err, rate, dt);
         // A turn the wall will not allow is given up: kept wanted, the feet
         // shuffled on the spot for good (the alley cat against its wall,
@@ -1631,7 +1650,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       // Turn first, then walk: setting off while still swinging round reads
       // as sliding, which is the fault this whole file exists to remove.
       m.speed = Math.max(0, m.speed - DECEL * dt);
-      let step = turnStep(m, err, turnRate(fig, TURN_STANDING), dt);
+      let step = turnStep(m, err, turnRate(fig, TURN_STANDING, m.fighting), dt);
       if (turnsInto(fig, yaw + step)) step = 0;
       fig.object.rotation.y = yaw + step;
       m.turning = Math.sign(step);
@@ -1642,7 +1661,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     // shuffle a 2.6 rad/s turn swung the planted foot round the hips at
     // 0.3 m/s. Slow walking turns slowly; a turn wanted faster than that is
     // taken standing, on footwork.
-    const rate = turnRate(fig, TURN_WALKING) * (m.speed > fig.runFrom ? 0.75 : 1) * clamp(m.speed / 1.0, 0.25, 1);
+    const rate = turnRate(fig, TURN_WALKING, m.fighting) * (m.speed > fig.runFrom ? 0.75 : 1) * clamp(m.speed / 1.0, 0.25, 1);
     yaw += turnStep(m, err, rate, dt);
     fig.object.rotation.y = yaw;
 
@@ -2185,6 +2204,17 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       if (nav.sample(nx, nz, fig.level)) { fig.at.x = nx; fig.at.z = nz; }
     }
     if (m.overlay || m.pending || m.lunge || m.step || m.sway || m.recoil || m.speed > 0.05) return;
+    // The roar is presentation only: it waits for a gap the whole clip fits
+    // in before the next blow is due (fx.js sets swingIn), and gives up if
+    // none comes, so it can never push a blow off its frame.
+    if (m.roarDue > 0) {
+      m.roarDue -= dt;
+      if (m.swingIn > fig.clips.roar + 0.3 && playOnce(fig, 'roar')) {
+        m.roarDue = 0;
+        (fig.cries || (fig.cries = [])).push('roar');
+        return;
+      }
+    }
     m.nextFidget -= dt;
     if (m.nextFidget > 0) return;
     m.nextFidget = 0.3 + fig.rand() * 0.5;
@@ -2416,7 +2446,10 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
    * low driving blow, which reads as a fist or a claw.
    */
   function bareHanded(fig, name) {
-    if (name !== 'attack' || !fig.castPoint || !fig.actions || !fig.actions.attack2) return name;
+    if (name !== 'attack' || !fig.actions || !fig.actions.attack2) return name;
+    // A beast whose model says where its second blow lands (the dracolich's
+    // foreclaw) swings it now and then, so a fight is not one bite on a loop.
+    if (!fig.castPoint) return fig.hitFrame && fig.hitFrame.attack2 !== undefined && fig.rand() < 0.4 ? 'attack2' : name;
     return fig.weapon && fig.weapon.visible ? name : 'attack2';
   }
 

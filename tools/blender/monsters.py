@@ -111,7 +111,7 @@ def build_one(spec, export=True):
     arm["diku"] = json.dumps({
         "archetype": spec["archetype"],
         "stride": {k: round(v, 4) for k, v in report["stride"].items()},
-        "hitFrame": {"attack": report["hit"]},
+        "hitFrame": dict({"attack": report["hit"]}, **({"attack2": report["hit2"]} if "hit2" in report else {})),
         "clips": {k: round(v, 4) for k, v in report["clips"].items()},
         **spec.get("extras", {}),
     })
@@ -2868,8 +2868,9 @@ def dracolich():
                 patch=yellow, h=0.02, tris=7200, mat="bone")
     spec["bones"] = B.quad_bones(L)
     spec["clips"] = B.quad_clips
-    # The dracolich alone has a `heap` and a `rise` (beasts.dracolich_rise).
-    spec["gait"] = dict(D["gait"], rise=True)
+    # The dracolich alone has a `heap` and a `rise` (beasts.dracolich_rise),
+    # and a fight of its own (beasts.dracolich_menace).
+    spec["gait"] = dict(D["gait"], rise=True, menace=True)
     return spec
 
 

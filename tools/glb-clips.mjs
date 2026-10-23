@@ -1,4 +1,5 @@
 // node tools/glb-clips.mjs <refDir> <newDir> [clip,clip,...]: every clip of ref (or the listed ones) against new, max abs diff.
+// Over the four people rigs; MODELS=beast_dracolich,... names others (a .glb in each directory).
 import fs from 'fs';
 const [refDir, newDir, only] = process.argv.slice(2);
 const pick = only ? new Set(only.split(',')) : null;
@@ -7,7 +8,7 @@ const CT = { 5126: Float32Array, 5123: Uint16Array, 5125: Uint32Array, 5121: Uin
 const NC = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
 function acc({ j, bin }, i) { const a = j.accessors[i], bv = j.bufferViews[a.bufferView]; const n = a.count * NC[a.type]; const T = CT[a.componentType]; const bytes = bin.slice((bv.byteOffset || 0) + (a.byteOffset || 0)); const ab = new ArrayBuffer(n * T.BYTES_PER_ELEMENT); new Uint8Array(ab).set(bytes.slice(0, n * T.BYTES_PER_ELEMENT)); return new T(ab); }
 let fail = 0;
-for (const n of ['person_male', 'person_female', 'troll', 'minotaur']) {
+for (const n of process.env.MODELS ? process.env.MODELS.split(',') : ['person_male', 'person_female', 'troll', 'minotaur']) {
   const o = load(`${refDir}/${n}.glb`), w = load(`${newDir}/${n}.glb`);
   const key = (g, c) => g.j.nodes[c.target.node].name + '/' + c.target.path;
   let worst = 0; const bad = []; let count = 0;

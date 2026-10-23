@@ -114,6 +114,18 @@ export class Creatures {
    */
   awakenings(diku) {
     for (const slot of diku.game.mobs) {
+      // Its `roar` clip, played when it takes a new foe (motion.js fidget), is the
+      // rise's roar again, the frame the clip starts.
+      const cries = slot.figure && slot.figure.cries;
+      if (cries && cries.length && slot.pos) {
+        const heard = listen(diku, slot.pos, { near: 3, scale: 14 });
+        while (cries.length) {
+          cries.shift();
+          if (heard.distance > 90) continue;
+          for (const id of SOUNDS.dracolich_roar.clips) this.audio.clips.load(id);
+          this.audio.foley.play('dracolich_roar', { pan: heard.pan, gain: heard.gain, rate: 1 });
+        }
+      }
       const aw = slot.figure && slot.figure.awaken;
       if (!aw || !slot.pos) continue;
       const heard = listen(diku, slot.pos, { near: 3, scale: 14 });
@@ -176,7 +188,7 @@ export class Creatures {
         this.engaged.set(slot, mob.hit);
         if ((before === undefined || hurt) && now >= (this.roared.get(slot) ?? 0)) {
           this.roared.set(slot, now + 2.5);
-          this.growls.set(slot, now + rand(3, 7));
+          this.growls.set(slot, now + rand(...(rule.fightEvery || [3, 7])));
           this.say(rule, pick(rule.roar), heard, walls, true);
           continue;
         }
@@ -184,7 +196,7 @@ export class Creatures {
       if (!rule.fight) continue;
       const due = this.growls.get(slot) ?? 0;
       if (now < due) continue;
-      this.growls.set(slot, now + rand(3, 7));
+      this.growls.set(slot, now + rand(...(rule.fightEvery || [3, 7])));
       this.say(rule, pick(rule.fight), heard, walls, true);
     }
     if (now < this.next) return;

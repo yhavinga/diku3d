@@ -3537,7 +3537,9 @@ def quad_clips(arm, spec):
         ik = {leg: planted(rest, leg, meta=6 * lunge if rest[leg]["kind"] == "hind" else -4 * lunge)
               for leg in rest}
         return dict(fk=fk, loc=loc, ik=ik)
-    clip.run("attack", g.get("attack_frames", 21), attack)
+    # The dracolich has its own (dracolich_menace), a strike and not a snap.
+    if not g.get("menace"):
+        clip.run("attack", g.get("attack_frames", 21), attack)
     report["hit"] = HIT
 
     # -- hit: a flinch back and up, ears pinned, head jerked away.
@@ -3627,6 +3629,8 @@ def quad_clips(arm, spec):
 
     if g.get("rise"):
         dracolich_rise(clip, poser, rest, g, idle, necks, tails, bones, height, root_h)
+    if g.get("menace"):
+        dracolich_menace(clip, poser, rest, necks, tails, report)
 
     if g.get("pastimes"):
         quad_pastimes(clip, poser, rest, arm, g, report, necks, ears, tails, tail_pitch, height, bones)
@@ -3932,6 +3936,136 @@ def dracolich_rise(clip, poser, rest, g, idle, necks, tails, bones, height, root
             return dict(fk=base["fk"], loc=base["loc"], ik=ik0, off=None)
         return dict(fk=fk, loc=loc, rot=rot if (A["rot"] or B_["rot"]) else None, ik=ik, limp=limp, off=off)
     clip.run("rise", int(DUR * FPS), rise)
+
+
+def dracolich_menace(clip, poser, rest, necks, tails, report):
+    """`fight`, `attack`, `attack2` and `roar` for the dracolich alone. The
+    dragon's own idle stands tall with its neck straight up -- a horse -- and
+    its snap moves the head up. This is a predator about to strike: the chest
+    low, the forelegs wide, the neck drawn back in an S with the skull held low
+    and forward, the wings half raised and the tail lashing.
+
+    Every clip is a few waypoints of one parameter set, so each begins and ends
+    on the fight's own first pose and the viewer's crossfades have nothing to
+    hide. Forward is -Y, so a lunge is a negative `loc` y; positive pitch swings
+    an upright bone forward."""
+    legs = poser.legs
+    X, Zax = V((1, 0, 0)), V((0, 0, 1))
+    FIRST = dict(
+        n=(-24.0, 26.0, 12.0), ny=(0.0, 0.0, 0.0), head=-2.0, hy=0.0, jaw=-9.0,
+        chest=4.0, roll=0.0, loc=(0.0, 0.0, -0.45), rise=-5.0, turn=0.0,
+        wopen=0.5, wlift=0.5, wflap=0.0, tpitch=3.5, tlash=22.0,
+        foreL=(0.35, 0.0, 0.55), foreR=(0.35, 0.0, 0.55), limp=0.0,
+        arm=(0.0, 0.0, 0.0))
+
+    def mix(a, b, k):
+        if isinstance(a, tuple):
+            return tuple(mix(x, y, k) for x, y in zip(a, b))
+        return a + (b - a) * k
+
+    def blend(a, b, k):
+        return {key: mix(a[key], b[key], k) for key in a}
+
+    def with_(base, **kw):
+        out = dict(base)
+        out.update(kw)
+        return out
+
+    def snap(u):
+        return u * u * u
+
+    def settle(u):
+        return 1 - (1 - u) ** 3
+
+    def track(points, t):
+        """points: (time, params, easing) with times rising from 0 to 1."""
+        for (t0, a, _), (t1, b, ease_fn) in zip(points, points[1:]):
+            if t <= t1:
+                u = (t - t0) / (t1 - t0)
+                return blend(a, b, (ease_fn or ease)(max(0.0, min(1.0, u))))
+        return points[-1][1]
+
+    def pose(p, t, tlash_freq=2):
+        fk = {"pelvis": (0, 0, p["roll"]), "chest": (p["chest"], 0, 0)}
+        for i, n in enumerate(necks):
+            fk[n] = (p["n"][i], p["ny"][i], 0)
+        fk["head"] = (p["head"], p["hy"], 0)
+        fk["jaw"] = (p["jaw"], 0, 0)
+        fk.update(tail_wave(tails, t, p["tlash"], freq=tlash_freq, pitch=p["tpitch"]))
+        fk.update(wings(open_=p["wopen"], flap=p["wflap"], lift=p["wlift"]))
+        ik = {}
+        for leg in rest:
+            if rest[leg]["kind"] == "fore":
+                fwd, up, side = p["foreL"] if leg.endswith(".L") else p["foreR"]
+                ik[leg] = planted(rest, leg, fwd=fwd, up=up, side=side)
+            else:
+                ik[leg] = planted(rest, leg)
+        rot = mathutils.Quaternion(Zax, math.radians(p["turn"])) @ mathutils.Quaternion(X, math.radians(-p["rise"]))
+        out = dict(fk=fk, loc=V(p["loc"]), rot=rot, ik=ik)
+        if p["limp"] > 0:
+            out["limp"] = {leg: (p["limp"] if rest[leg]["kind"] == "fore" else 0.0) for leg in rest}
+        return out
+
+    # -- fight: a held crouch with a slow shift of weight from foot to foot,
+    # the tail whipping twice a loop, the jaw working a little on each breath.
+    def fight(t):
+        p = dict(FIRST)
+        p["loc"] = (0.14 * wave(t), 0.0, -0.45 + 0.012 * wave(2 * t))
+        p["roll"] = 2.0 * wave(t)
+        p["ny"] = (4 * wave(t, 0.1), 3 * wave(t, 0.2), 0.0)
+        p["hy"] = 7 * wave(t, 0.15)
+        p["jaw"] = -9 - 3 * (0.5 + 0.5 * wave(2 * t))
+        p["chest"] = 4 + 0.8 * wave(2 * t)
+        p["wflap"] = 4 * wave(2 * t, 0.1)
+        return pose(p, t)
+    clip.run("fight", 60, fight, step=2)
+
+    # -- attack: draw back, then a lunge forward and down that is all neck and
+    # a forefoot stepping into it, the jaw slamming shut on the hit frame.
+    HIT = 0.5
+    wind = with_(FIRST, n=(-48.0, 22.0, 6.0), head=-22.0, jaw=-42.0, chest=-2.0, loc=(0.0, 0.42, -0.58),
+                 rise=4.0, wopen=0.75, wlift=0.7, wflap=10.0, tpitch=5.0,
+                 foreL=(0.0, 0.0, 0.55), foreR=(0.55, 0.0, 0.5))
+    strike = with_(FIRST, n=(-22.0, 26.0, 14.0), head=0.0, jaw=-1.0, chest=8.0, loc=(0.0, -0.95, -0.55),
+                   rise=-10.0, wopen=0.8, wlift=0.5, wflap=-14.0, tpitch=1.5,
+                   foreL=(1.0, 0.0, 0.5), foreR=(0.55, 0.0, 0.5))
+    follow = with_(strike, jaw=-14.0, loc=(0.0, -0.8, -0.58), wflap=-6.0)
+
+    def attack(t):
+        p = track([(0.0, FIRST, None), (0.36, wind, None), (HIT, strike, snap),
+                   (0.62, follow, settle), (1.0, FIRST, None)], t)
+        return pose(p, t)
+    clip.run("attack", 27, attack)
+    report["hit"] = HIT
+
+    # -- attack2: the left foreclaw raked down across the foe, the body thrown
+    # onto the right foot, the head turned away and roaring over it.
+    raise_ = with_(FIRST, n=(-38.0, 38.0, 22.0), ny=(0.0, 6.0, 10.0), hy=-22.0, head=4.0, jaw=-32.0, chest=-4.0,
+                   loc=(-0.3, 0.2, -0.3), rise=14.0, roll=-4.0, wopen=0.85, wlift=0.6, wflap=8.0, tpitch=4.5,
+                   foreL=(0.55, 1.15, 0.7), foreR=(0.35, 0.0, 0.6))
+    rake = with_(FIRST, n=(-30.0, 46.0, 34.0), ny=(0.0, 8.0, 10.0), hy=-12.0, head=10.0, jaw=-18.0, chest=8.0,
+                 loc=(-0.2, -0.45, -0.5), rise=0.0, roll=-2.0, wopen=0.7, wlift=0.5, wflap=-10.0,
+                 foreL=(1.55, 0.0, -0.15), foreR=(0.35, 0.0, 0.6))
+
+    def attack2(t):
+        p = track([(0.0, FIRST, None), (0.34, raise_, None), (HIT, rake, snap),
+                   (0.64, with_(rake, jaw=-8.0, wflap=-4.0), settle), (1.0, FIRST, None)], t)
+        return pose(p, t)
+    clip.run("attack2", 27, attack2)
+    report["hit2"] = HIT
+
+    # -- roar: up on the hind legs with the wings thrown wide, the skull flung
+    # back and then down at the room, jaws wide; then down again.
+    up = with_(FIRST, n=(-34.0, 16.0, 6.0), head=-30.0, jaw=-12.0, chest=-10.0, loc=(0.0, 0.0, -0.1),
+               rise=34.0, wopen=1.0, wlift=0.2, wflap=22.0, tpitch=3.0, tlash=16.0,
+               foreL=(0.5, 0.35, 0.7), foreR=(0.5, 0.35, 0.7), limp=0.0)
+    bellow = with_(up, n=(-26.0, 30.0, 12.0), head=-6.0, jaw=-46.0, wflap=-14.0)
+
+    def roar(t):
+        p = track([(0.0, FIRST, None), (0.24, up, None), (0.4, bellow, None),
+                   (0.66, with_(bellow, jaw=-44.0, wflap=10.0), None), (1.0, FIRST, None)], t)
+        return pose(p, t, tlash_freq=3)
+    clip.run("roar", 45, roar)
 
 
 def sit_drop(poser, rest, pitch, front_back, hind_only=False):
