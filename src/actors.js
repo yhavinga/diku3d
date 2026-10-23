@@ -1769,6 +1769,10 @@ export function createPlayerFigure({
   function perform(clip, { contactIn = null, whole = false } = {}) {
     const action = actions && actions[clip];
     if (!action) return;
+    // Still reeling from a heavy blow, the next one is carried by the reel, as
+    // motion.js react() has it for a mobile.
+    const reel = actions.stagger;
+    if ((clip === 'stagger' || clip === 'hit') && reel && reel.isRunning() && reel.time < 0.6 * ((made.clips && made.clips.stagger) || 1)) return;
     action.reset();
     const length = made.clips && made.clips[clip];
     action.timeScale = contactIn !== null && HIT_FRAME[clip] && length

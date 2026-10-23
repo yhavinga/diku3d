@@ -2434,6 +2434,10 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       else fig.m.recoil = { t: 0, amount: kind === 'hit' ? clamp(0.35 + strength * 0.5, 0.35, 0.9) : 0.3 };
       return;
     }
+    // A body still reeling carries the next blow in the reel: restarting the
+    // clip would pull it up into its guard for a frame and throw it back again.
+    const o = fig.m.overlay;
+    if (kind === 'hit' && o && o.name === 'stagger' && o.t < o.duration * 0.6) return;
     if (kind === 'hit') {
       // A heavy blow is a stagger, where the rig has one: the step back is the
       // clip's own, so the offset only carries the body along it and eases home.
