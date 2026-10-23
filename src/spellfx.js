@@ -2044,7 +2044,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     } else if ((f === 'fireball') && fx.to) {
       lineOfFlight(fx, src);
       fx.data.ball = sphere();
-      S.roar(src, fx.flight + 0.2);
+      S.roar(src, fx.flight + 0.2, 'fire_roar');
       takeLight(PAL.fire.light, (t) => (fx.data.ballPos && !fx.landed ? { p: fx.data.ballPos, intensity: 24, distance: 13 } : null));
     } else if ((f === 'lightning' || f === 'breath-lightning') && fx.to) {
       S.crack(src, 1);
@@ -2080,7 +2080,8 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
       else if (f === 'breath-acid') S.hiss(src, 1.2);
       // A skeleton's breath is not a living dragon's roar (soundmap.js CREATURES `breath`).
       const voice = from.slot && creatureOf(`${from.slot.proto.keywords} ${from.slot.proto.short || ''}`);
-      S.roar(src, big ? 1.1 : 0.6, (voice && voice.breath) || 'roar');
+      // Only a real breath (fire, frost, acid) is a dragon's roar; burning hands is a hand's flame.
+      S.roar(src, big ? 1.1 : 0.6, (voice && voice.breath) || (big ? 'roar' : 'fire_roar'));
       // The stream outlives the landing: a breath pours on after it hits.
       fx.data.stream = fx.flight + (big ? 0.55 : 0.3);
       fx.data.tongues = Array.from({ length: big ? 6 : 4 }, () => ({ pts: P3(10), phase: rand(0, TAU), ang: rand(0, TAU), wob: rand(0.6, 1.2) }));
@@ -2091,7 +2092,7 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     } else if (f === 'drain' || f === 'curse' || f === 'harm' || f === 'weaken' || f === 'blind' || f === 'hex') {
       S.dark(fx.to ? fx.aim : src);
     } else if (f === 'flamestrike') {
-      S.roar(fx.aim, 0.6);
+      S.roar(fx.aim, 0.6, 'fire_roar');
     }
   }
 
