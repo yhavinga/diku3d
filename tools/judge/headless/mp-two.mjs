@@ -1,5 +1,5 @@
 // Two pages on one diku3d server: log both in through the title screen's
-// connect form, stand them apart in the temple, and shoot each one's view.
+// connect form, stand them apart in the room they start in, and shoot each one's view.
 //   node /tmp/pw/mp-two.mjs --port 8211 --mud localhost:4011 --out /tmp/mp
 import { chromium } from 'playwright';
 import fs from 'node:fs';
@@ -56,15 +56,16 @@ await a.click('#connect-go');
 await a.waitForFunction(() => /\S/.test(document.getElementById('connect-status').textContent) && !/Connecting/.test(document.getElementById('connect-status').textContent), null, { timeout: 15000 });
 await a.screenshot({ path: `${opt.out}/connect-failed.png` });
 console.log('failure text:', await a.textContent('#connect-status'));
-await a.click('#connect-open');
+// The form hides its opener while it is open (title.connecting), so the way back is its own button.
+await a.click('#connect-back');
 await login(a, opt.names[0], 'elbereth', { shoot: `${opt.out}/connect-new.png` });
 
 const b = await open('B');
 await login(b, opt.names[1], 'gondor1');
 
-// Stand them two metres apart in the temple, each turned to face the other.
+// Stand them two metres apart where a new character starts (the Mud School), each turned to face the other.
 const place = async (page, dx, yaw) => page.evaluate(([dx, yaw]) => {
-  const info = window.diku.built.rooms.get(3001);
+  const info = window.diku.built.rooms.get(window.diku.game.state.roomVnum);
   window.diku.state.paused = false;
   window.diku.look(info.center.x + dx, info.center.y + 1.72, info.center.z + 1.5, yaw, -0.05);
   return { x: info.center.x + dx, z: info.center.z };
