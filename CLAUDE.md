@@ -360,7 +360,13 @@ choose.
 - **Everything underground uses `buriedTwin()`**, not only the sewer's
   recipes, and anything that takes no shadow needs `sunless: true` or the
   noon sun reaches it through the rock. Check any new material with a
-  noon-vs-night diff of an underground room: it must be zero.
+  noon-vs-night diff of an underground room: it must be zero beyond
+  rounding. Below ground the lights are divided by the hour's exposure, so
+  half-float rounding leaves one level on part of the frame and SMAA a few
+  flips where an edge sits on its threshold (#5011 about 16,800 pixels, 7
+  over 2 levels; the sewer #7001 21,805, 115 over 2), while a real leak
+  moves hundreds of thousands (907,102 with `DIKU_BURIED` stripped from three
+  materials). Count the pixels more than 2 levels off, not the ones that differ.
 - **Cloning a material drops its `defines` and `onBeforeCompile`.** A
   clone of a buried surface loses `DIKU_BURIED` and reflects the sky
   underground. Copy defines, hooks and `defaultAttributeValues` explicitly.
