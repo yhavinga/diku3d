@@ -400,7 +400,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
       if (e.kind === 'hit') {
         // fx.js land's measure of a heavy blow, so the body reels when the screen does.
         const striker = e.from && (e.from.figure || (e.from.remote && e.from.remote.figure));
-        const clip = figure.has('stagger') && staggers(e.dam / Math.max(8, e.maxHp || 20) * 2.2, striker, figure) ? 'stagger' : 'hit';
+        const clip = figure && figure.has('stagger') && staggers(e.dam / Math.max(8, e.maxHp || 20) * 2.2, striker, figure) ? 'stagger' : 'hit';
         later(delay, () => figure && figure.perform(clip, { whole: true }));
       }
       else if (e.kind === 'parry' || e.kind === 'dodge') later(Math.max(0, delay - 0.15), () => figure && figure.perform('block', { whole: true }));
