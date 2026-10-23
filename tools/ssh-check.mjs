@@ -28,7 +28,7 @@ try { WebSocket = require('ws'); ({ Client } = require('ssh2')); } catch (error)
   throw new Error(`tools/ssh-check.mjs needs the server's dependencies: (cd server && npm ci) -- ${error.message}`);
 }
 const { startMud } = await import('../server/mud.mjs');
-const { startGateway } = await import('../server/gateway.mjs');
+const { startGateway, newHostKey } = await import('../server/gateway.mjs');
 const { directionOf } = await import('../server/term.mjs');
 
 const failures = [];
@@ -112,6 +112,15 @@ function watcher() {
 async function until(pred, ms = 6000) {
   for (const end = Date.now() + ms; Date.now() < end;) { if (pred()) return true; await pause(20); }
   return false;
+}
+
+console.log('\nTHE HOST KEY');
+// ssh2's own generator wrote 1 key in 256 unparseable (its public key starts with a zero byte), which crashed a start now and then.
+{
+  const { utils } = require('ssh2');
+  let unparsed = 0;
+  for (let i = 0; i < 3000; i++) { const key = utils.parseKey(newHostKey()); if (key instanceof Error || !key.isPrivateKey()) unparsed += 1; }
+  check(unparsed === 0, 'every new host key parses (3000 made)', `${unparsed} did not`);
 }
 
 console.log('\nREADING A DIRECTION');
@@ -228,6 +237,10 @@ const over = await session();
 await over.see(/There are already 3 connections from your address\./, 'a fourth connection from one address is refused in words (cap 3 here)');
 check(await over.gone(), '...and closed');
 for (const s of idle) s.conn.end();
+// conn.end() returns before the server has seen the close; opening the next
+// session at once races the per-address count (cap 3) and is refused in words.
+for (let until = Date.now() + 5000; gateway.openConnections() > 1 && Date.now() < until;) await pause(20);
+check(gateway.openConnections() === 1, 'the gateway has let go of every connection but the first terminal');
 const c = await session();
 await c.see(/By what name do you wish to be known\? $/);
 c.type('Tester');

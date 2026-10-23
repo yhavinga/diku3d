@@ -20,6 +20,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { generateKeyPairSync, randomBytes } from 'crypto';
 import { dirname, join } from 'path';
 import ssh2 from 'ssh2';
 
@@ -40,14 +41,40 @@ export const LIMITS = {
   handshakeMs: 20_000,
 };
 
+const sshString = (b) => Buffer.concat([Buffer.from([b.length >>> 24, b.length >>> 16, b.length >>> 8, b.length].map((x) => x & 255)), b]);
+
+/**
+ * A new ed25519 key as an unencrypted OpenSSH private key. ssh2's own
+ * generateKeyPairSync strips leading zero bytes from the public key (keygen.js,
+ * v1.17.0), so one key in 256 -- those whose public key starts with 0x00 -- is
+ * written with a length of 31 and fails its own parser ("Malformed OpenSSH
+ * private key"); node:crypto gives the raw bytes unstripped.
+ */
+export function newHostKey() {
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const jwk = privateKey.export({ format: 'jwk' });
+  const pub = Buffer.from(jwk.x, 'base64url');
+  const seed = Buffer.from(jwk.d, 'base64url');
+  const name = sshString(Buffer.from('ssh-ed25519'));
+  const pubBlob = Buffer.concat([name, sshString(pub)]);
+  const check = randomBytes(4);
+  let priv = Buffer.concat([check, check, name, sshString(pub), sshString(Buffer.concat([seed, pub])), sshString(Buffer.alloc(0))]);
+  const pad = (8 - (priv.length % 8)) % 8;
+  priv = Buffer.concat([priv, Buffer.from(Array.from({ length: pad }, (_, i) => i + 1))]);
+  const none = sshString(Buffer.from('none'));
+  const body = Buffer.concat([Buffer.from('openssh-key-v1\0'), none, none, sshString(Buffer.alloc(0)), Buffer.from([0, 0, 0, 1]), sshString(pubBlob), sshString(priv)]);
+  const b64 = body.toString('base64').replace(/(.{70})/g, '$1\n');
+  return `-----BEGIN OPENSSH PRIVATE KEY-----\n${b64}\n-----END OPENSSH PRIVATE KEY-----\n`;
+}
+
 /** The host key, made once and kept: a new one makes every returning player's ssh refuse to connect. */
 function hostKey(path, log) {
   if (existsSync(path)) return readFileSync(path);
-  const pair = utils.generateKeyPairSync('ed25519');
+  const pem = newHostKey();
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, pair.private, { mode: 0o600 });
+  writeFileSync(path, pem, { mode: 0o600 });
   log(`made a new host key in ${path}`);
-  return Buffer.from(pair.private);
+  return Buffer.from(pem);
 }
 
 /** help.are's GREETING: Merc's title and its credits (which the licence keeps), ending in the name prompt. */
@@ -155,6 +182,8 @@ export async function startGateway({ root, port, host = '0.0.0.0', game, keyPath
   log(`ssh on ${host}:${address.port}, playing against ${game}`);
   return {
     port: address.port, stats, world,
+    /** Connections the per-address count holds now: a client that has hung up is gone from it only once the server has seen the close. */
+    openConnections: () => [...open.values()].reduce((a, b) => a + b, 0),
     /** End every session with a word to its player, and stop listening. */
     close(why = 'The terminal gateway is restarting. Connect again in a moment.') {
       clearInterval(sweep);
