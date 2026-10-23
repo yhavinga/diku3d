@@ -187,6 +187,12 @@
    "stance": 0.26,
    "stride": 4.099790173782762
   },
+  "stagger": {
+   "duration": 0.9583333333333334,
+   "frames": 23,
+   "head_gap": 0.0489,
+   "plant_slip": 0.0
+  },
   "strafe_l": {
    "direction": [
     -1.0,
@@ -415,6 +421,12 @@
    "slip_baked": 0.0,
    "stance": 0.26,
    "stride": 3.8858102182868444
+  },
+  "stagger": {
+   "duration": 0.9583333333333334,
+   "frames": 23,
+   "head_gap": 0.0446,
+   "plant_slip": 0.0
   },
   "strafe_l": {
    "direction": [
@@ -645,6 +657,12 @@
    "stance": 0.26,
    "stride": 4.099790173782762
   },
+  "stagger": {
+   "duration": 0.9583333333333334,
+   "frames": 23,
+   "head_gap": 0.0514,
+   "plant_slip": 0.0
+  },
   "strafe_l": {
    "direction": [
     -1.0,
@@ -873,6 +891,12 @@
    "slip_baked": 0.0,
    "stance": 0.26,
    "stride": 3.5226721307972557
+  },
+  "stagger": {
+   "duration": 0.9583333333333334,
+   "frames": 23,
+   "head_gap": 0.1579,
+   "plant_slip": 0.0
   },
   "strafe_l": {
    "direction": [

@@ -42,7 +42,7 @@ export const LOOPS = new Set(['idle', 'idle2', 'idle_hero', 'walk', 'run', 'figh
   'strafe_r', 'back', 'rest_ground', 'sleep']);
 export const CLIPS = ['idle', 'idle2', 'walk', 'run', 'fight', 'attack', 'attack2', 'hit', 'block', 'death', 'cast',
   'sit', 'lean', 'talk', 'jump', 'land', 'kick', 'backstab', 'disarm', 'jog', 'sprint', 'strafe_l', 'strafe_r',
-  'back', 'turn_l', 'turn_r', 'cast_thrust', 'cast_overhead', 'cast_sweep', 'cast_pray', 'idle_hero', 'rest_ground', 'sleep'];
+  'back', 'turn_l', 'turn_r', 'cast_thrust', 'cast_overhead', 'cast_sweep', 'cast_pray', 'idle_hero', 'rest_ground', 'sleep', 'stagger'];
 
 /**
  * Which gesture a spell is cast with, by the family magic.js gives it (the

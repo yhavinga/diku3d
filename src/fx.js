@@ -1408,7 +1408,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
     switch (event.kind) {
       case 'hit': {
         const strength = clamp(event.dam / Math.max(8, event.maxHp || 20) * 2.2, 0.3, 1.4);
-        if (toFig) motion.react(toFig, 'hit', strength);
+        if (toFig) motion.react(toFig, 'hit', strength, fromFig);
         if (!event.from && toFig) {
           // Your blow connected: both of you stop for a few frames, then the
           // view kicks and they reel. A blow that takes a fifth of them is a
@@ -1418,7 +1418,7 @@ export function createFx({ scene, camera, composer, actors, game, audio, player,
           hold(toFig, stop);
           kickView(0.5 + strength * 0.5);
           const share = event.dam / Math.max(1, event.maxHp || 20);
-          if (share >= 0.2 && toFig.m && !toFig.m.dead) toFig.m.recoil = { t: 0, amount: 1.7 };
+          if (share >= 0.2 && toFig.m && !toFig.m.dead) toFig.m.recoil = { t: 0, amount: 1.7, dur: toFig.m.recoil && toFig.m.recoil.dur };
         }
         // A blow on you is felt -- the shake, the vignette -- not seen as
         // debris hanging in front of your eye.

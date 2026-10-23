@@ -58,6 +58,16 @@ const YOU = 0.9;
 /** How close an opponent closes for melee, centre to centre. */
 export const CLOSE = 1.55;
 
+/**
+ * Whether a blow that did damage staggers its victim rather than flinches it:
+ * it took about a quarter of their hit points (fx.js land's strength), or its
+ * striker stands half as tall again as they do, as a minotaur or a dragon over
+ * a person. Figures are anything with a `height`.
+ */
+export function staggers(strength, striker, victim) {
+  return strength >= 0.6 || !!(striker && victim && striker.height >= 1.5 * victim.height);
+}
+
 const LOOP = ['idle', 'idle2', 'walk', 'run', 'fight', 'talk'];
 /**
  * What an animal does with itself standing about, when its rig carries a
@@ -152,7 +162,7 @@ const REST_LOOP = 1.8;
 /** people.js's word for a child, on the mobile's short description. */
 const CHILD = /\b(child|children|kids?|boys?|girls?|urchins?|lads?|lass(es)?|pupils?|youngsters?|orphans?|toddlers?)\b/i;
 const SIP = [2.35, 4.0];
-const ONE_SHOT = new Set(['attack', 'attack2', 'hit', 'block', 'death', 'rise']);
+const ONE_SHOT = new Set(['attack', 'attack2', 'hit', 'stagger', 'block', 'death', 'rise']);
 
 /** A per-person generator, so one figure's choices do not depend on another's. */
 function mulberry(seed) {
@@ -2103,7 +2113,7 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     }
     if (m.recoil) {
       m.recoil.t += dt;
-      const u = m.recoil.t / 0.38;
+      const u = m.recoil.t / (m.recoil.dur || 0.38);
       if (u >= 1) m.recoil = null;
       else {
         const s = Math.sin(u * Math.PI) * (1 - u * 0.4) * m.recoil.amount;
@@ -2410,8 +2420,12 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
     return fig.weapon && fig.weapon.visible ? name : 'attack2';
   }
 
-  /** Taking a blow, catching one on the blade, or stepping out of its way. */
-  function react(fig, kind, strength = 0.5) {
+  /**
+   * Taking a blow, catching one on the blade, or stepping out of its way.
+   * `striker` is the figure that dealt a blow, where there is one: a blow from
+   * something half as tall again staggers whatever its strength.
+   */
+  function react(fig, kind, strength = 0.5, striker = null) {
     if (!fig || fig.m.dead) return;
     // Mid-swing, the swing wins: a flinch clip laid over it would cancel the
     // blow the game is about to land. The body still gives a little.
@@ -2421,7 +2435,10 @@ export function createMotion({ figures, nav, zones = null, spots = [] }) {
       return;
     }
     if (kind === 'hit') {
-      if (!playOnce(fig, 'hit', { gain: clamp(0.55 + strength, 0.6, 1) })) fig.m.recoil = { t: 0, amount: clamp(0.5 + strength, 0.5, 1.2) };
+      // A heavy blow is a stagger, where the rig has one: the step back is the
+      // clip's own, so the offset only carries the body along it and eases home.
+      if (staggers(strength, striker, fig) && playOnce(fig, 'stagger')) fig.m.recoil = { t: 0, amount: 1.7, dur: 0.9 };
+      else if (!playOnce(fig, 'hit', { gain: clamp(0.55 + strength, 0.6, 1) })) fig.m.recoil = { t: 0, amount: clamp(0.5 + strength, 0.5, 1.2) };
       else fig.m.recoil = { t: 0, amount: 0.35 };
     } else if (kind === 'block') {
       if (!playOnce(fig, 'block')) fig.m.recoil = { t: 0, amount: 0.45 };

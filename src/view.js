@@ -28,6 +28,7 @@ import { topAt } from './surface.js';
 import { POS } from './game.js';
 import { AFF } from './magic.js';
 import { castClipOf } from './people.js';
+import { staggers } from './motion.js';
 import { SKILL_CONTACT, DISARM_FLICK } from './fx.js';
 
 /**
@@ -396,7 +397,12 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
       facingUntil = clock + delay + 0.4;
       faceSlot = e.to;
     } else if (e.from && !e.to) {
-      if (e.kind === 'hit') later(delay, () => figure && figure.perform('hit', { whole: true }));
+      if (e.kind === 'hit') {
+        // fx.js land's measure of a heavy blow, so the body reels when the screen does.
+        const striker = e.from && (e.from.figure || (e.from.remote && e.from.remote.figure));
+        const clip = figure.has('stagger') && staggers(e.dam / Math.max(8, e.maxHp || 20) * 2.2, striker, figure) ? 'stagger' : 'hit';
+        later(delay, () => figure && figure.perform(clip, { whole: true }));
+      }
       else if (e.kind === 'parry' || e.kind === 'dodge') later(Math.max(0, delay - 0.15), () => figure && figure.perform('block', { whole: true }));
     }
   }

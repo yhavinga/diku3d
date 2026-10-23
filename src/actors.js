@@ -1776,9 +1776,10 @@ export function createPlayerFigure({
     // The idle under a clip stays at weight 1 and three averages by weight, so
     // a clip of weight 1 is half itself. A cast gesture is the whole body (the
     // weight shifts through the hips and feet), so it is weighted to be most of
-    // the pose: 5 against the idle's 1 is five parts in six. The ramp in keeps
+    // the pose: 5 against the idle's 1 is five parts in six. A stagger is the
+    // whole body too: at weight 1 it would be half an idle. The ramp in keeps
     // the first frame from snapping to it.
-    const gesture = clip.startsWith('cast_');
+    const gesture = clip.startsWith('cast_') || clip === 'stagger';
     action.setEffectiveWeight(gesture ? GESTURE_WEIGHT : 1);
     if (gesture) action.fadeIn(0.08);
     if (contactIn !== null || whole) {

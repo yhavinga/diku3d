@@ -800,6 +800,26 @@ def foot_slip(arm, frames, stride, stance, direction=None):
     return worst, sink
 
 
+def plant_slip(arm, tag, frames):
+    """Worst drift, in metres, of the heel and of the ball of foot `tag` over
+    `frames` of the current action, read off the deforming bones as
+    `foot_slip` does: a foot that bears weight over those frames should not
+    move at all, since the clips that use it stand in place."""
+    scene = bpy.context.scene
+    bone = arm.data.bones["foot." + tag]
+    heel_rest = V((bone.head_local.x, bone.head_local.y + 0.055, 0.0))
+    ball_rest = arm.data.bones["toe." + tag].head_local.copy()
+    ball_rest.z = 0.0
+    seen = {"heel": [], "ball": []}
+    for f in range(frames[0], frames[1] + 1):
+        scene.frame_set(f)
+        pb = arm.pose.bones["foot." + tag]
+        inv = bone.matrix_local.inverted()
+        seen["heel"].append(pb.matrix @ (inv @ heel_rest))
+        seen["ball"].append(pb.matrix @ (inv @ ball_rest))
+    return max((a - b).length for pts in seen.values() for a in pts for b in pts)
+
+
 def head_clearance(arm, P, frames, limbs=("forearm", "hand"), margin=0.045):
     """The least gap, in metres, between the arms and the head over a clip:
     points down each forearm and hand against the head's ellipsoid, carried
@@ -1061,6 +1081,62 @@ def anim_hit(arm):
         (11, GUARD, GUARD_HIPS, "guard"),
     ]
     return "hit", (1, _clip(arm, "hit", k))
+
+
+def anim_stagger(arm):
+    """A heavy blow, 0.96 s: the torso is thrown back and twisted away, the
+    arms fly out (the sword arm wide, the shield arm up), the hips drop and go
+    back with the knees giving, and the head snaps back last. The rear foot
+    steps back and plants to catch the weight, the body hangs low over it,
+    then gathers itself back into the guard and the foot comes home. In place:
+    it ends where `fight` begins, so the rules' position is the only one."""
+    s = _leg_scale(arm)
+    off, pitch, hy, roll = GUARD_HIPS
+    # Thrown back: spine and chest 28 degrees behind upright, 16 more twist
+    # than the guard's, the head still where the guard had it.
+    thrown = merge(GUARD, {"spine": (-10, 14, 0), "chest": (-18, 20, 0), "neck": (-4, 0, 0),
+                           "head": (-6, 10, 0),
+                           "upperarm.R": (-12, 0, 86), "forearm.R": (-34, 0, 0), "hand.R": (20, 0, 0),
+                           "upperarm.L": (-128, 14, -22), "forearm.L": (-26, 0, 0), "hand.L": (0, 0, 20)})
+    snapped = merge(thrown, {"neck": (-14, 0, 0), "head": (-26, 12, 0),
+                             "spine": (-9, 14, 0), "chest": (-16, 20, 0),
+                             "upperarm.R": (-8, 0, 92), "upperarm.L": (-136, 14, -28)})
+    caught = merge(GUARD, {"spine": (12, 8, 0), "chest": (10, 10, 0), "neck": (4, 0, 0), "head": (-2, 4, 0),
+                           "upperarm.R": (-26, 0, 52), "forearm.R": (-70, 0, 0), "hand.R": (40, 0, 0),
+                           "upperarm.L": (-44, 40, 14), "forearm.L": (-90, 0, 0)})
+    rising = blend(caught, GUARD, 0.55)
+    low = off[2] - 0.20 * s
+    # (frame, bones, hips, rear foot: (back, up, toe up)).  The step is made by
+    # frame 6 and nothing moves the foot again until 17, so it bears the weight.
+    rows = [
+        (1, GUARD, GUARD_HIPS, (0.0, 0.0, 0.0)),
+        (2, blend(GUARD, thrown, 0.3), ((0.0, 0.03 * s, off[2] - 0.03 * s), pitch - 3.0, hy - 6.0, 1.0),
+         (0.0, 0.0, 0.0)),
+        (3, blend(GUARD, thrown, 0.85), ((0.0, 0.10 * s, off[2] - 0.10 * s), -6.0, hy - 16.0, 3.0),
+         (0.16 * s, 0.10 * s, 25.0)),
+        (4, thrown, ((0.0, 0.15 * s, off[2] - 0.16 * s), -10.0, hy - 22.0, 4.0), (0.33 * s, 0.07 * s, 30.0)),
+        (5, snapped, ((0.0, 0.15 * s, low), -9.0, hy - 22.0, 4.0), (0.36 * s, 0.0, 5.0)),
+        (6, snapped, ((0.0, 0.14 * s, low), -4.0, hy - 20.0, 3.0), (0.36 * s, 0.0, 0.0)),
+        (9, blend(snapped, caught, 0.6), ((0.0, 0.12 * s, low), 5.0, hy - 12.0, 2.0), (0.36 * s, 0.0, 0.0)),
+        (12, caught, ((0.0, 0.11 * s, off[2] - 0.19 * s), 9.0, hy - 6.0, 1.0), (0.36 * s, 0.0, 0.0)),
+        (16, caught, ((0.0, 0.10 * s, off[2] - 0.17 * s), 8.0, hy - 6.0, 0.0), (0.36 * s, 0.0, 0.0)),
+        (17, caught, ((0.0, 0.09 * s, off[2] - 0.16 * s), 8.0, hy - 6.0, 0.0), (0.36 * s, 0.0, 0.0)),
+        (20, rising, ((0.0, 0.03 * s, off[2] - 0.08 * s), 7.0, hy - 2.0, 0.0), (0.10 * s, 0.045 * s, 10.0)),
+        (22, blend(rising, GUARD, 0.7), ((0.0, 0.0, off[2] - 0.02 * s), pitch + 1.0, hy, 0.0),
+         (0.0, 0.0, 0.0)),
+        (24, GUARD, GUARD_HIPS, (0.0, 0.0, 0.0)),
+    ]
+    new_action(arm, "stagger")
+    for (f, bones, hips, foot) in rows:
+        pose(arm, f, bones, hips, "guard", feet=False)
+        back, up, toe = foot
+        for t in "LR":
+            (dx, dy), yaw, fpitch = STANCES["guard"][t]
+            dz = 0.0
+            if t == "R":
+                dy, dz, fpitch = dy + back, up, toe
+            place(arm, "foot_ik." + t, f, foot_matrix(arm, t, rest_ankle(arm, t) + V((dx, dy, dz)), fpitch, yaw))
+    return "stagger", (1, 24)
 
 
 def anim_block(arm):
@@ -2453,7 +2529,8 @@ def measure_casts(arm, P, info):
 CLIPS = ("idle", "idle2", "walk", "run", "fight", "attack", "attack2", "hit", "block", "death",
          "cast", "sit", "lean", "talk", "jump", "land", "kick", "backstab", "disarm",
          "jog", "sprint", "strafe_l", "strafe_r", "back", "turn_l", "turn_r",
-         "cast_thrust", "cast_overhead", "cast_sweep", "cast_pray", "idle_hero", "rest_ground", "sleep")
+         "cast_thrust", "cast_overhead", "cast_sweep", "cast_pray", "idle_hero", "rest_ground", "sleep",
+         "stagger")
 
 
 def make_all(arm, measure=True, P=None, extra=(), ref=None):
@@ -2475,7 +2552,7 @@ def make_all(arm, measure=True, P=None, extra=(), ref=None):
            anim_hit, anim_block, anim_death, anim_cast, anim_sit, anim_lean, anim_talk,
            anim_jump, anim_land, anim_kick, anim_backstab, anim_disarm, anim_jog, anim_sprint,
            anim_strafe_l, anim_strafe_r, anim_back, anim_turn_l, anim_turn_r] + list(extra)
-    fns += CAST_ANIMS + [anim_idle_hero, anim_rest_ground, anim_sleep]
+    fns += CAST_ANIMS + [anim_idle_hero, anim_rest_ground, anim_sleep, anim_stagger]
     for fn in fns:
         r = fn(arm)
         name, frames = r[0], r[1]
@@ -2504,7 +2581,7 @@ def make_all(arm, measure=True, P=None, extra=(), ref=None):
     if measure and P is not None:
         for name in ("attack", "attack2", "cast", "block", "fight", "hit", "idle2", "lean", "talk", "jump", "land",
                      "kick", "backstab", "disarm", "jog", "sprint", "strafe_l", "strafe_r", "back", "turn_l",
-                     "turn_r", "idle_hero", "rest_ground", "sleep"):
+                     "turn_r", "idle_hero", "rest_ground", "sleep", "stagger"):
             arm.animation_data.action = bpy.data.actions[name]
             gap, f, limb = head_clearance(arm, P, (0, info[name]["frames"]))
             info[name]["head_gap"] = round(gap, 4)
@@ -2518,6 +2595,8 @@ def make_all(arm, measure=True, P=None, extra=(), ref=None):
                                                     info[name].get("direction"))
     if measure and P is not None:
         measure_casts(arm, P, info)
+        arm.animation_data.action = bpy.data.actions["stagger"]
+        info["stagger"]["plant_slip"] = round(plant_slip(arm, "R", (5, 16)), 4)
         for name in ("rest_ground", "sleep"):
             arm.animation_data.action = bpy.data.actions[name]
             gap, f, limb = torso_clearance(arm, P, (0, info[name]["frames"]))

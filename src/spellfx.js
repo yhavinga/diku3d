@@ -40,6 +40,7 @@ import { Pass, FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { OVERLAY_LAYER } from './render.js';
 import { AFF } from './magic.js';
 import { castClipOf } from './people.js';
+import { staggers } from './motion.js';
 import { creatureOf } from './soundmap.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -2422,7 +2423,11 @@ export function createSpellFx({ scene, camera, renderer, composer, game, actors,
     const scale = onYou ? 0.55 : 1;
     const hurtFigure = (w, strength) => {
       const fig = w && figureOf(w.slot);
-      if (fig && fig.remote) w.slot.remote.figure.perform('hit');
+      if (fig && fig.remote) {
+        const body = w.slot.remote.figure;
+        if (body.has('stagger') && staggers(strength)) body.perform('stagger', { whole: true });
+        else body.perform('hit');
+      }
       else if (fig && actors.motion && !w.player) actors.motion.react(fig, 'hit', strength);
     };
     const hitAny = fx.hits && fx.hits.some((h) => h.dam > 0);

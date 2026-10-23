@@ -22,6 +22,7 @@ import { heldPoseOf } from './view.js';
 import { DIR_NAME, ITEM } from './are.js';
 import { TAR } from './magic.js';
 import { castClipOf } from './people.js';
+import { staggers } from './motion.js';
 import { SKILL_CONTACT, DISARM_FLICK } from './fx.js';
 import { PLR } from './rules/handler.js';
 
@@ -487,7 +488,12 @@ export function attachSocketLink(link, game, host, enter) {
         attacker.figure?.perform(attacker.figure.has(clip) ? clip : 'cast', { contactIn: event.windup || 0.6 });
         if (!event.self) faceFor(attacker, event.to, (event.windup || 0.6) + CAST_FACE);
       }
-      if (victim && kind === 'hit') later(delay, () => victim.figure?.perform('hit'));
+      if (victim && kind === 'hit') {
+        // The same measure as view.js and fx.js: a heavy blow staggers a body the others see too.
+        const striker = attacker ? attacker.figure : event.from && event.from.figure;
+        const heavy = victim.figure?.has('stagger') && staggers(event.dam / Math.max(8, event.maxHp || 20) * 2.2, striker, victim.figure);
+        later(delay, () => victim.figure?.perform(heavy ? 'stagger' : 'hit', heavy ? { whole: true } : undefined));
+      }
       // fx.js draws the thud, the stab and the flying weapon off these copies.
       if (kind === 'backstab') { stabbedFrom = event.behind; game.inject({ kind: 'skillfx', skill: 'backstab', phase: 'start', from: event.from, to: event.to, behind: event.behind }); }
       else if (kind === 'disarm') game.inject({ kind: 'skillfx', skill: 'disarm', phase: 'disarm', from: event.from, to: event.to, item: event.item });
