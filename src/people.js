@@ -726,7 +726,6 @@ function youngPlayer(out, proto, isFemale) {
   // A name like "Crone" or "Lady" must not change the trade the player chose.
   if (out.arch !== PLAYER_ARCH[trade] && out.arch !== HERO_ARCH[trade]) {
     out.arch = PLAYER_ARCH[trade];
-    if (!out.weapon) out.weapon = { mage: 'weapon_staff', cleric: 'weapon_staff', thief: 'weapon_dagger', warrior: 'weapon_sword' }[trade];
   }
   const hs = strHash(`${proto.short}#style`, 41);
   const hc = strHash(`${proto.short}#colour`, 43);
@@ -767,6 +766,11 @@ function youngPlayer(out, proto, isFemale) {
       out.tint.leather = 0x4a3322;
   }
   if (trade === 'cleric') out.tint.leather = 0x4a3322;
+  // In the hand only what is wielded and on the arm only a shield worn
+  // (applyEquipment), as the first-person view draws them (fx.js): a new
+  // character's school sword and nothing once it is sold.
+  out.weapon = null;
+  out.shield = null;
   out.arch = HERO_ARCH[trade];
   out.player = true;
 }
@@ -776,10 +780,11 @@ function applyEquipment(out, proto, ITEM, seed) {
   out.shieldFromResets = false;
   for (const item of proto.equipment || []) {
     // Anyone holds a staff the resets give them -- the Hierophant's is in
-    // grove.are; other weapons only where the trade fights.
+    // grove.are; other weapons only where the trade fights, and a player
+    // whatever they wield, a mage's school dagger too.
     if (ITEM && item.proto.itemType === ITEM.WEAPON) {
       const w = weaponOf(item.proto);
-      if (w && (ARMED.has(out.arch) || w === 'weapon_staff')) { out.weapon = w; out.weaponFromResets = true; }
+      if (w && (proto.player || ARMED.has(out.arch) || w === 'weapon_staff')) { out.weapon = w; out.weaponFromResets = true; }
     }
     // A robe or gown the resets name in a colour is that colour.
     if (ITEM && item.proto.itemType === ITEM.ARMOR) {
