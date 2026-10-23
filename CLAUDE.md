@@ -21,6 +21,9 @@ There is no build step, no bundler, no test framework and no linter. So
     node tools/layout-check.mjs         # layout quality per area
     node tools/world-check.mjs          # structural faults across stages
     node tools/game-check.mjs; node tools/magic-check.mjs; node tools/rules-check.mjs
+    node tools/rise-check.mjs; node tools/sentinel-check.mjs   # the dracolich's first blow; a sentinel's reach
+    node tools/audio/boss-music-check.mjs; node tools/audio/voice-check.mjs
+    node tools/server-check.mjs; node tools/site-sockets-check.mjs   # need `cd server && npm ci`
 
 `layout-check` prints a walkable percentage per area. That number is the
 project's main quality metric — if a change drops it, the change is wrong.
@@ -42,6 +45,13 @@ room names, prose, sector and contents. Also `goto(vnum, yaw, pitch)`,
 `layout`, `built`, `world`, `game`, `quality`, `options`. Set
 `diku.state.benchmark = true` to halt the render loop when measuring, and
 `diku.state.paused = false` to move without grabbing the mouse.
+
+The headless browser checks live in `tools/judge/headless/` (copy one to
+`/tmp/pw`, serve a checkout, pass its port): `walkable`, `slopewalk` and `ramps`
+for the ground, `thirdperson` for the camera, `presence`, and `mp-onlook` for
+what a second page sees of a first. `slopewalk`, `ramps`, `boss-music-check`
+and `voice-check` carry a deliberate fault (`--fault`, `--break`,
+`--break-rule`) that must make them fail: run it when you change the check.
 
 `tools/judge/shots.md` is the judging protocol. The judge is an independent
 agent that drives the world through that API, looks up real references, and
@@ -523,6 +533,15 @@ choose.
   finer where two triangles sag more than `RELIEF_SAG`; the Dump's is 0.125 m).
   `slopewalk.mjs` holds all of it, at 60 Hz stepping: the faults are a function
   of the step, and a real-time headless frame (30 Hz) hid them.
+  **A floor's height has one reader**: surface.js `topAt`, for a `slope` plane
+  (Midgaard's ramps) and a `field` (relief.js, the Shire and the Dump) alike;
+  player.js, view.js, nav.js, the tools and the server's `mounds()`/`liftAt`
+  all ask it, and relief.js is pure (no three.js) so that the page and the
+  server draw the same hills. `walkable` and `thirdperson` read the platform,
+  not the picture, and could not tell a floating road: `ramps.mjs` casts a ray
+  down onto the built mesh (2 cm), also for the rolling ground, and must fail
+  for a float, a steep, a server fault, and a server that leaves the hills or
+  the heaps out.
 - **Midgaard's river is sunk** (shells.js `sunkRivers`, `RIVER_DROP`): the
   water rooms whose text says the banks are too steep to climb lie 3 m down
   in a channel, as a negative lift the judge and nav.js share; layout.js
@@ -637,6 +656,106 @@ choose.
   placed for the first-person eye washes your own figure white seen from
   behind (inverse square at 0.15 m). Effects that light their caster take
   `close(w)` into account.
+- **The server boots in under two seconds, and deploy waits for it to listen.**
+  The Shire's hills worked out at boot took the production host from about 2 s
+  to 18.2 s, and deploy.sh's checks fell into the 502 nginx gives until the
+  server listens. Anything heavy the server needs goes behind a lazy getter
+  (`z.relief`, `z.lumps` in world.mjs) and is touched in a `setImmediate`
+  after `listening` (mud.mjs); deploy.sh polls `:4000/ws` for up to 60 s. In
+  relief.js the terms that do not depend on `quiet` (which the fit changes
+  up to fourteen times) are worked out once. Time `bootWorld` before and after
+  adding a table to it.
+- **One town's feature in a shared builder reaches every town.** The kerb,
+  step and gutter were written in `buildHouseRow`, which every area uses, and
+  a Mahn-Tor street differed from main in 399,760 pixels (ident.mjs, with
+  `Math.random`, the time uniforms and the torch flicker frozen; control 0).
+  They ask `footedHere(cell)` now. Diff a street of another area, frozen,
+  before calling a Midgaard-only change Midgaard-only.
+- **Mahn-Tor is frozen by one predicate** (shells.js `isFrozen`: the area's
+  file and the words together, 19 rooms), asked by build.js, snow.js and the
+  frost climate in zones.js, which restores every value on leaving. A wall is
+  not a drift: rime on a vertical face is a trace, snow settles on tops
+  (noon snow-white at #2363 went 50% to 17%). An `ice` tag on a model needs
+  `TAG_OVERRIDES` in assets.js, or the baked rink ice of the same name wins
+  before any alias. A relief on a snow roof draws a chequerboard under a low
+  sun (`snowroof` normalScale 0.05). Night haze at the hour's own density, not
+  1.3x it (main.js FROST), or the far city is a flat grey wall.
+- **Presence is a threat, not a glance** (presence.js). `BOSS_GAP` is 6 levels,
+  so to a level-1 player every cityguard is a boss, and "turned to look at
+  you" made Main Street go cold. It rises only for a boss that is fighting you
+  or your group, or is aggressive and `canSee`s you; it is slew-limited, so
+  at 0 the frame is exactly the unmoved one; and the dracolich in its heap or
+  before its skull lifts (2.4 s into `rise`) is not one. That 2.4 is written
+  twice (`SKULL_LIFT`, and the `waking` test in audio.js): change both.
+  `presence.mjs` must keep (a) 0 in Midgaard with every boss facing the player.
+- **A boss's music is the family of the boss** (soundmap.js `bossFamilyOf`):
+  vnum, then vnum block, then an ordered word list, first match wins, so
+  "dracolich" is undead and "minotaur mage master" a minotaur. A word added
+  to a list can move a boss: `boss-music-check.mjs` holds all 122 surveyed
+  endbosses to a family and a clip that exists (`--break` must fail). The
+  threat state keeps the family it chose, since `presence.cause` empties
+  before the threat does.
+- **A sentinel fights out to `SENTRY` (`BREAK - MELEE`, 10.8 m) and no
+  further, never out of its room, and walks home.** With only a `face` order a
+  caster between `MELEE` and `BREAK` could not be touched and could not touch;
+  at the leash with the foe out of reach it must break the fight off, or the
+  rim is a safe band. `sentinel-check.mjs` has three checks that failed before.
+- **The dracolich rises, then strikes first** (game.js `RISES`, `RISE_SECONDS`
+  4, `rising()`). Nobody's melee lands on the heap, kick and backstab are
+  refused, and the frame the rise ends it makes its first round at once
+  (`mobRound`, not the next pulse): the group used to get in first.
+  `rise-check.mjs` over three seeds. Anything that reads "is it fighting" for
+  presence, music or a blow must ask `rising` too.
+- **A long body's chase stops where `separate()` stops it.** `separate()` keeps
+  `0.42 + r + h/2` from the player (2.3 m for the dracolich) and the chase
+  stopped at 2.15, so a six-metre dragon walked on the spot at its foe for 70%
+  of a fight; the stop is at least that room plus 0.12 now (a long body in the
+  same measurement went 53% to 4%). While fighting a body turns at
+  `1 + 0.5h`, not `1 + 1.4h`, or it is 1.8 rad off a foe circling it. A roar
+  waits for a gap the clip fits in before the next blow (`swingIn`): a
+  presentation clip may never push a blow off its frame.
+- **A one-shot reaction must not restart on the next blow.** Two blows in a
+  round land 0.62 s apart and a `stagger` lasts 0.96 s: the restart pulled the
+  body up into its guard for a frame and threw it back (0.30 s to 0.10 s into
+  the clip, your own head 35 cm). A body in the first 60% of its stagger
+  carries the next blow, in motion.js `react` (mobiles) and actors.js
+  `perform` (players), two paths with a guard each. `staggers()` is the one
+  measure (a quarter of the hit points, or a striker 1.5x as tall); view.js
+  and link.js call it with fx.js `land`'s strength; the view's figure is null before it is
+  built and after it is disposed.
+- **A clip for one model goes behind that model's own gait flag.**
+  beasts.py makes `heap` and `rise` only for `gait["rise"]` and `fight`,
+  `attack`, `attack2` and `roar` only for `gait["menace"]`, so the plain dragons'
+  .glb files stay byte-identical. Hold it with
+  `MODELS=beast_dracolich node tools/glb-clips.mjs <old> assets` (the variable
+  names models other than the four person rigs): every old clip at 0
+  difference but the one you meant to replace.
+- **On a server "you" is a per-reader fact.** A hit that carried `to: null,
+  player: true` was "you" on every watcher's page; hits name their victim
+  (`toCh`) and `encode` resolves it for each reader. Casts, swings and wards of
+  other players reach everyone in the caster's room or within 40 m
+  (`SEEN_SPELLS`, mud.mjs), and their bodies turn to the foe on the watcher's
+  page, since their facing is where their camera looks. `mp-onlook.mjs` fails if
+  any event carries `fromPlayer`/`toPlayer` on a watcher, and has the facing
+  check (0 degrees; 162 without the fix).
+- **A spell cast in a fight is cried, not recited.** magic.js puts `fighting`
+  on the cast event and voices.js picks the `cry` delivery (`nx`/`cx` clips)
+  for it. A new spell for a caster voice goes on `CRY_SPELLS`, with its clips,
+  and `voice-check.mjs --break-rule` must still fail.
+- **The per-address socket cap is an operator setting.** `LIMITS.socketsPerSite`
+  is 4; `LIMITS.siteSockets` (`{ site, n }`, first match, an address or a
+  prefix, every address under a prefix sharing one count) overrides it, read by
+  `capFor(host)` from `DIKU_SITE_SOCKETS` (`<prefix>/<len>=<n>`, comma
+  separated) which the unit file takes from an `EnvironmentFile` on the
+  server. Its value lives there and not in the repository; a bad entry throws
+  and names itself. `site-sockets-check.mjs`.
+- **#5011 is a cavern of 32.5 by 24.5 m** (shells.js `GREAT_CAVERN`, found from
+  its words), not the ten-metre box: game.js, nav and server/world.mjs count
+  a body in it by those walls, and build.js throws if another room is built
+  at its level in the six cells it opens into. Its green is a pool within
+  about 8 m of the dracolich; the pale lights that keep a player from being a
+  black silhouette sit at y + 3.2, and the rim light must stay under the
+  level where the bloom tells noon from night.
 - Figures are skinned meshes: one draw each, no instancing, and a second pass if
   they cast shadows. They are kept out of the shadow map and culled past 46 m.
 - Large soft sprites are the most expensive thing per pixel in the scene. The

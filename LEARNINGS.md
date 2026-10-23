@@ -6,6 +6,360 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-23 — wave 20, the rest: Mahn-Tor, ground that rolls, bosses
+
+### Mahn-Tor, a frozen city
+
+- **Say what is wintry once.** About sixty lines of mahntor.are speak of
+  snow, ice and cold. shells.js `isFrozen` takes the area and the words
+  together: 19 rooms, all of Mahn-Tor's city and wastes, none of the other
+  44 areas. build.js, snow.js and the frost climate in zones.js all ask it.
+  The climate restores every value exactly on leaving the zone, and Midgaard
+  rendered to the pixel as before.
+- **A wall is not a drift.** First pass, the walls wore snow like the
+  ground, and at noon 50% of the frame at #2363 was snow-white. The mud
+  says the buildings are made from the rock of the mountain, so rime is a
+  trace on a vertical face, the bank at a wall's foot 0.6 m (it was 1.9), and
+  snow settles on tops, ledges and roofs. Noon in the frost climate takes
+  sun 0.55 and exposure 0.72, with the bounce turned towards neutral white (a
+  blue one made every lit wall blue-white): 50% fell to 17%.
+- **Ice on a model is an override.** `assets.js` finds a baked surface of the
+  tag's own name before any alias, so the gates and icicles wore the opaque
+  rink ice. `TAG_OVERRIDES` makes `ice` take the translucent ice block.
+- **White at noon was the next fault, and a sampled map fixed it.** Snow on
+  the cliff and the plateau lay as a 5 m lattice and read as polka dots; the
+  ground was over 200 in 12.4% of a noon frame from the air. The cliff
+  is dark rock with snow where it settles (steep slopes above 33 degrees shed
+  it), and the patches come from world-space maps of 83 and 138 m, not from
+  the tile. From the air that share is 0.2%. A new recipe in textures.js
+  invalidates every bake and shifted a Midgaard frame faintly (mean 1.3,
+  max 119, 769 pixels over 8: accepted, but known).
+- **A tile relief on a snow roof is a chequerboard.** Low sun on `snowroof`
+  at normalScale 1.1 drew a black-and-white checker. It is 0.05 now, with
+  detail 0.
+- **The cliff.** Stacked filler boxes under the city were replaced by
+  masses of bedded, fractured rock (`tools/blender/mahntor_cliff.py`, six
+  .glb files) set into the slope by `buildHills`, with a brow roofing the
+  ledge and scree at the foot; walkability, colliders and the climb are
+  untouched. Cost, from the north, 818k to 1.185M triangles and the render
+  time 4.7 to 8.0 ms (from the city: 675k to 712k, 4.4 to 5.7 ms). Walkable over the zone
+  equals the base.
+- **A post must be clear of what is tall.** The minotaur stood through the
+  gate: a mobile's post is on a ring 2.1 to 3.6 m round the room's centre,
+  and the gatehouse's wall and towers lay on it. A post within 1.2 m of a
+  collider that is as tall as a person is turned round the room, 0.3 rad at
+  a time, to the first clear angle (home zone 18 posts to 4, Mahn-Tor 2 to
+  0). A guard at a grand gate stands with the gate behind him.
+- **Night fog was the hour's own, times 1.3.** From the air at night the far
+  city, keep and cliff vanished into a flat grey-blue wall (106,115,132)
+  where the moonlit snow is under 60. Frost haze 1.3 to 0.65 and the fog's
+  mix towards the cold colour 0.25 to 0.08 put the shapes back.
+- **The relief wave's kerbs served every town.** `buildHouseRow` is shared;
+  the rebased tree differed from main in 399,760 pixels of a Mahn-Tor street
+  (ident.mjs with Math.random, time uniforms and torch flicker frozen;
+  control 0). Rows ask `footedHere(cell)` now, true for Midgaard's rooms,
+  and the same street is identical to main's, 0 pixels.
+
+### A boss has presence (src/presence.js)
+
+- **Facing you is not a threat.** The first rule raised presence for any
+  boss-class mobile that turned to look at you. `BOSS_GAP` is 6 levels, so to
+  a level-1 player every cityguard is a boss, and Main Street would have
+  gone cold and dark. A boss counts when it is fighting you or your group, or
+  is aggressive and `canSee`s you (an unwoken mobile's prototype affects
+  stand in). `presence.mjs` holds it: (a) a level-1 player in Midgaard with
+  every boss turned to face them keeps presence at exactly 0 (5 rooms); (b)
+  Mahn-Tor's aggressive gate guard raises it to 0.68; (c) a non-aggressive
+  level-15 minotaur facing a level-1 player does not.
+- **Slew-limited, not smoothed.** The value climbs at 1/1.5 per second and
+  falls at 1/3, so it reaches exactly 0 in finite time and at 0 the grade,
+  fog and lens are the unmoved frame (0 pixels at #3014 and #2363). Full
+  weight within 15 m, none past 22, chest height through `sightBlocked`.
+  At 1 the lens closes 4 degrees and the arm drops 0.3 m; the grade is in
+  the output pass, an S-curve that keeps warm light warm and darkens sky
+  and corners, with a minimum of 9 to 10 at night and in the cave, so the grade never
+  makes RGB 0 (the first grade was flat and grey). One drum hit falls when the mood turns, at most every 20 s.
+- **A dracolich in its heap is not yet a presence.** It counts from the moment
+  its skull lifts, 2.4 s into the rise (`SKULL_LIFT`), which is also when its
+  piece starts.
+
+### Boss music, nine families
+
+- **A boss fights to its own piece.** `bossFamilyOf` (soundmap.js) reads a
+  boss by vnum, then by vnum block, then by an ordered word list, and the
+  first match wins: "dracolich" is undead, "minotaur mage master" a minotaur.
+  `fightPieceFor` returns `boss:<family>`. `tools/audio/boss-music-check.mjs`
+  holds 122 surveyed endbosses in 43 areas to a family and to a clip that
+  exists (beast 23, dragon 17, titan 17, sorcerer 15, endboss 14, undead 10,
+  giant 10, elemental 9, demon 7); `--break` points one family at a missing
+  clip and must fail.
+- **The piece follows presence before the first blow**, and `audio.js`
+  keeps the family it chose, because `presence.cause` empties a few seconds
+  before the threat does and the piece must not change meanwhile.
+- **Looping.** Nine pieces of 93 to 116 s at -23 LUFS. The loop points were
+  searched over the raw 120 s take for the best match of head and tail (rhythm,
+  eight-band spectrum, level), `post.cutHead` and `cutTail` in generate.mjs.
+  The 100 s generations were discarded for their loops. 27,225 credits for 19
+  generations. The first nine had a choir; seven were redone at battle
+  tempo, bass drums and a gong in a ritual pulse, and the undead and sorcerer
+  pieces were kept as they were.
+
+### A sentinel steps out
+
+- **A caster 9 m from a sentinel could not be touched, or touch.** Every
+  Mahn-Tor minotaur is ACT_SENTINEL. game.js gave a fighting sentinel a
+  `face` order only, with `MELEE` at 3.2 m and `BREAK` at 14 m, so anyone
+  between them cast for ever. It steps out now as far as `SENTRY`
+  (`BREAK - MELEE`, 10.8 m) from its post and never out of its room, and at
+  either limit with the foe still out of reach it breaks the fight off (else
+  the foe is safe at the rim, still inside BREAK) and walks home, turned
+  the way it was reset. `tools/sentinel-check.mjs`, 8 checks, 3 failing
+  before: a guard closes from 9 m and lands a blow at 2.9 s; a caster kiting
+  at range gets 7 casts and 6 break-offs, takes 0 damage, and pulls the
+  guard to 10.3 m. A keeper stays at his counter. Open: a caster at about
+  13.5 m, casting only while it walks home, can still kite it.
+
+### Ground that rolls
+
+- **A floor's height has one reader.** A platform may carry `slope` (a plane)
+  or `field` (relief.js's function of x, z over a floor `rest`), and `topAt`
+  in surface.js is the only thing that reads it: player.js `groundAt`,
+  view.js `blocked`, nav.js, the build-time tagging and the tools. The
+  server's `mounds()` and `liftAt` take the same terraces and inclines by
+  the same rule. `ramps.mjs` holds each ramp to the picture over it (ray down,
+  2 cm), the player, the mobiles' grid, the server and a grade; with a float,
+  a steep and a server fault it fails. Walkable and thirdperson had read
+  the platform, not the picture, so neither could have told.
+- **Midgaard's relief.** Houses stand on a rounded plinth, a worn step and a
+  gutter stone under 0.32 m, as height-field geometry, so no collider. The
+  river banks are earth, cosine profile, 45 degrees on average and 57 at
+  steepest ("too steep to climb" in the mud's words), turf above, stone in
+  tongues from two noises. The Temple Square is a tier up: `TERRACE_LIFT` 0.9
+  m, three ramps of 3.96 degrees, one plane to a cell. 1.0 m would leave the
+  marble steps one riser of 0.2 m. A cambered street was not done (a crown
+  must meet each neighbouring floor at a cell edge), nor worn hollows in the
+  cobble recipe (any edit to textures.js invalidates all 389 bakes).
+- **The Shire is a bowl of hills.** relief.js is pure and shared: build.js lifts
+  everything in the Shire's box by `at(x, z)` (a vertical shear, so walls stay
+  upright), and the server reads the same heights. Roads climb at most 7
+  degrees, lanes 9; a pad under every walled room is level over its footprint
+  and a few metres before each door; a smial is cut into its hillside with
+  the hill let rise behind it; another area's ground is not moved. The first
+  version barely rose (1.5 to 4 m) and read as a village on a plain; the bowl
+  closes round it at 15 to 30 m. The Dump's heaps are lumps a body climbs only
+  where they are under 40 degrees (`MAX_SLOPE`). `?hills=off` shows the flat
+  ground. Blades of grass had grown on the buried flat ground under the
+  hills, so the village was in tall reeds (build.js `keepOff`).
+- **A feature the page always draws costs the server its boot.** Booting the server
+  went from about 2 s to 18.2 s on the production host once the hills were
+  worked out there, and deploy.sh's checks fell in the gap (nginx answers 502
+  until the server listens). The hills are linear in `quiet`, which the fit
+  changes up to fourteen times, so the terms that do not depend on it (hill
+  field, pad pulls) are worked out once; the server takes `z.relief` and
+  `z.lumps` lazily and touches them in a `setImmediate` after it listens;
+  and deploy.sh polls `:4000/ws` up to 60 s before checking anything. Boot
+  is 1.7 s (18.2 s before), "server luistert na 4.2 s" in the deploy log.
+  Heights against the version before: 18 of 31,494 sample points differ, by
+  0.1 mm (float order).
+- **Walking it.** `slopewalk.mjs` walks the real player at 60 Hz with every
+  collider taken away over seeded points on the Shire, the Dump and the ramps
+  (320, 320 and 12 walks): 0 walks refused under 30 degrees, 0 airborne
+  frames, the feet within 2.6 cm of the mesh at worst on the Shire and 3.2 cm
+  on the Dump, the sole within 4.6 cm. Each of four faults (`sunk`, `float`,
+  `wall`, `lag`) makes it fail.
+- **The neighbour's rock stops a body.** Moria's gate vista had no colliders,
+  and a body could walk into it. The vista returns its bodies' colliders in
+  the zone's frame (`Player.addColliders`); 10 vistas, 312 boxes in the home
+  zone. The report that led there (walking through walls from #1116 north)
+  was not reproduced (the colliders were the same at two commits, 2,584 walks
+  clean); noclip, `N`, which is "north" in a MUD, was the likelier explanation,
+  never confirmed with the reporter. A NOCLIP marker stays at
+  the top of the screen now, and the server's judge overrules noclip.
+
+### Battle cries
+
+- **A cast in a fight is not an incantation.** The six casters' voices read a
+  spell slowly and evenly (`say`). magic.js records `fighting` on the cast
+  event, and voices.js plays the same words exclaimed (`cry`: stability 0.4,
+  style 0.65 to 0.8, speed 1.0 to 1.05) when the caster was fighting and the
+  spell has a cry (`CRY_SPELLS`: 31; the monster and witch voices cry every
+  spell they have). A mobile falls back to its own instance's `fighting`.
+  324 clips, the real name and the cipher (`nx`, `cx`), about 1,770 credits;
+  `voice-check.mjs --break-rule` proves the section can fail.
+
+### Players in sight of each other (server)
+
+- **Other players' casts were invisible, and a hit on someone else was a hit on
+  you.** On a server only the caster was sent the cast, so a watcher saw
+  nothing. `SEEN_SPELLS` (cast, spell, spell-fizzle) now go to everyone in the
+  caster's room or within 40 m, with the words blanked; room lines carry
+  `dam` and `maxHp` so the flinch and the thud are sized; the roster carries
+  `affectedBy` so a ward is drawn round the body. Then the second fault:
+  a hit named its victim by `to: null, player: true` meaning "you", which was
+  true only for the one it was for. A hit carries `toCh` and each reader's
+  encoder resolves it, and a victim the page does not know is not drawn.
+  `mp-onlook.mjs` has Anna cast at a mobile, at Bob (PvP) and be breathed on,
+  with Cleo's page watching: no event may carry `fromPlayer` or `toPlayer`,
+  no hit may land on "you" or on nobody, and none of the you-only effects
+  (shake, the hurt wash, the on-the-player sound) may fire. +0.4 kB per cast.
+- **Their facing is where their camera looks.** In a fight that is anywhere.
+  A remote body turns to its foe for as long as it fights or swings, within
+  14 m (`FACE_REACH`), unless it is running (3.5 m/s); a cast faces its
+  target for the wind-up plus 0.8 s. Swings, kicks and flinches start on the
+  blow's own `delay`, as the view's do. Against the foe it faces by 0 degrees,
+  and 162 degrees without the fix.
+
+### Server doors
+
+- **ws allowed 100 MiB a message, any number of sockets, and a JSON.parse of
+  each on the game's thread; a password cost 50 ms of scrypt a try.** Now a
+  message is 64 KiB at most (the largest a page sends is 73 bytes), an address
+  has 4 sockets (a household behind one IPv4), a socket 30 messages a second
+  with a burst of 60 (a sprint sends 14, fast typing 24), and five wrong
+  passwords for a name from an address in ten minutes pause that pair for a
+  minute, doubling to thirty, without running scrypt. A ping heartbeat frees
+  half-open sockets and an 'error' listener keeps an oversized message from
+  taking the server down.
+- **The cap can be raised by the operator.** `LIMITS.siteSockets` is a list of
+  `{ site, n }`, first match wins, `site` an address or a prefix. `capFor(host)`
+  answers, and every address under a listed prefix shares one count (privacy
+  addresses rotate the low 64 bits). `server/main.mjs` reads it from
+  `DIKU_SITE_SOCKETS`, `<prefix>/<len>=<n>` separated by commas, which the
+  unit file takes from an `EnvironmentFile` on the server and which is not in
+  the repository; a bad entry throws and names itself, and the start-up line
+  says how many are set. `tools/site-sockets-check.mjs`: the address
+  forms (IPv4, IPv6, IPv4-mapped), the malformed ones, and a real mud that
+  refuses the fifth socket from a listed /64.
+
+### The dracolich
+
+- **A boss that is a pile of bones until someone fights it.** A weathered
+  undead dragon (17.2k triangles, budget 18,000) with a `heap` clip and a
+  four-second `rise` clip; `RISES` ({5010}) and `RISE_SECONDS` in game.js.
+  Until it is up it cannot swing or breathe, the boss piece waits for the skull
+  to lift (2.4 s), and mist and green fire kindle. The clock starts on the
+  frame the fight does, and `rising()` is the game's answer, for the rules
+  and the page alike.
+- **Whoever wakes it strikes second.** The group attacked first, which a player
+  called unfair. Nobody's melee lands on the heap (`ctx.rising`, in
+  `damage`; kick and backstab say "has not risen yet"), and on the frame the
+  rise ends it makes its first round at once (`mobRound`, split out of the
+  pulse), instead of waiting for the next one. `tools/rise-check.mjs` over
+  three seeds: rise ends at 4.00 s, its first blow at 4.00 s, the warrior's
+  at 8.9, 17.9 and 5.9 s.
+- **A dragon's roar is a living thing's.** In a fight the dracolich was silent,
+  its death a man's `death_human`, its breath a living dragon's `cr_dragon`
+  and its fall a man in mail. It has seven clips of its own (whispers, jaw
+  snaps, hollow calls, cracking bones, a breath through the ribs, a collapse
+  into a heap; 792 credits), `fall: false`, and plain skeletons take the
+  bone sounds. It no longer whispers its idle sound while fighting. Not
+  fixed: every fireball, flamestrike, gas breath and burning hands plays
+  `spell_roar`, which is `cr_dragon` (soundmap.js:100).
+- **It walked on the spot for 70% of a fight.** An inspection with a sheet:
+  after the rise it was stuck 2.3 m from its foe, `think()`'s chase never
+  arrived, it stood upright like a horse, its bite moved the head 0.44 m, and
+  it lagged a circling foe by 1.78 rad. The rules were faithful; the
+  presentation was not. `separate()` keeps `0.42 + r + h/2` from the player
+  (2.3 m for the dracolich) while the chase stopped at 2.15, so it pushed
+  against that room all fight. The stop is now at least that plus 0.12. It
+  is every long body's: a second long-bodied mobile in the same
+  measurement (the run called it `brass`) walked 53% of its fight and walks 4%.
+  Then a fight stance of its own (`beasts.py dracolich_menace`: low chest,
+  forelegs wide, neck in an S, wings half raised, tail lashing), `attack`
+  with a wind-up and a lunge, `attack2` a foreclaw (`hitFrame.attack2`,
+  swung 40% of the time), a `roar` when it takes up a new foe (a fight resumed
+  after 4 s counts as a new one; it waits for a gap the clip fits in before the
+  next blow, up to 3 s, so it can never push a blow off its frame), turning
+  at 0.5 rather than 1.4 of its height while fighting (a six-metre body at the
+  sitting rate was 1.8 rad off), and a call every 2 to 4 s (`fightEvery`). Walking
+  70% to 5%, head travel 0.44 to 2.21 m, circling-foe error 1.78 to 0.31 rad,
+  attacks per 10 s 5.3 to 6.3, voice per 10 s 2.1 to 3.7. Scale stays 0.8:
+  at 1.0 its fight pose overruns `GREAT_ARENA` by 0.4 m and the lair would
+  have to move.
+- **The dragon is byte-identical.** The new clips are made only for a gait with
+  `menace`, as `rise` is, so the plain dragons' glb files did not change.
+  `beast_dracolich.glb` alone did, every old clip at 0 difference but
+  `attack`, which it replaces. `glb-clips.mjs` names other models with
+  `MODELS=beast_dracolich`.
+
+### The great cavern, #5011
+
+- **"The walls and ceiling seem miles away."** The dracolich's room was a
+  ten-metre box. shells.js `greatCavern` gives it 32.5 by 24.5 m of broken
+  rock under a dome, a roof that comes low where #5010 lies over the centre,
+  pillars, a stair railed to its open foot, and bones of earlier
+  adventurers strewn thick round the lair and sparse by the way in. game.js,
+  nav and `server/world.mjs` count a body in the room by these walls, not by
+  the box's. `build.js` checks that nothing is built at that level for six
+  cells west and north, and throws if a neighbour appears.
+- **Green belongs to the dracolich.** Round one lit the cavern evenly green.
+  The green is a pool within about 8 m of the heap now, the rest is grey-brown
+  rock lit cold, with pale lights at y + 3.2 along the way from the stair to
+  the heap. Eight of them at intensity 5 left the walls and corners black and a
+  player there a silhouette; twelve at 9 and then 12, and two more at 14 and
+  then 16 in the south-west corner (walls close, the pool's lights far), did
+  not. The pool's rim light went from 20 at y + 2.4 to 16 at y + 3.6, held
+  below the level where the bloom would tell noon from night in a cave.
+  Thirdperson over the cavern: 720 poses, 0 inside, 0 black.
+
+### The stagger
+
+- **A blow that reads.** `staggers(strength, striker, victim)`: a quarter of
+  the victim's hit points, or a striker half as tall again (a minotaur over a
+  person), throws the torso back and twists it, flings the arms out, drops the
+  hips and plants the rear foot a step back (no slip while it bears weight)
+  for 0.96 s (`rig.py anim_stagger`) on all four person rigs, played by
+  mobiles, your body and others'. Every old clip at 0 difference and the
+  meshes equal. The clip gets `GESTURE_WEIGHT`, like a cast: at weight 1 it
+  is half an idle.
+- **A one-shot restarted by the next blow is a fault of its own.** Two blows
+  in a round land 0.62 s apart and a stagger lasts 0.96 s. The restart pulled
+  the body up into its guard for a frame and threw it back: Mahn-Tor's clip
+  went from 0.30 s back to 0.10 s into the clip, and your own head jumped 35
+  cm. A body still in the first 60% of its stagger carries the next blow in
+  the reel (motion.js `react`, actors.js `perform`); `reel.mjs` has a control.
+- **Asked too early, it throws.** The view's figure is null before it is made
+  and after it is disposed, and a blow landing then asked it whether it could
+  stagger.
+
+### Smaller
+
+- **Rest sits on the ground, sleep lies on it.** Both played `sit`, written for
+  a bench 0.46 m high, so a resting player sat on nothing and a sleeper sat
+  upright. `rest_ground` and `sleep` (6 s each) have the pelvis within 2 cm
+  of the floor and the lowest point 0.1 to 0.4 cm off it, with head and trunk
+  clearances positive on all four rigs; the camera eases down 0.85 m for
+  rest and 1.25 m for sleep, and the weapon is laid beside the body.
+- **A spell or a blow turns the body to whom it is aimed at.** It held the camera's
+  yaw, so a fireball at a target behind the caster left the hand backwards:
+  3.12 rad off, 0 after, with a pinned camera too.
+- **Cloth is dyed.** Royal blue, jade and turquoise are synthetic. A
+  player's palette is woad blues, madder and kermes reds, weld yellow, lichen
+  plum, forest and olive green, walnut and undyed linen, with gold or silver
+  thread; clerics keep crimson, woad and forest green. `mobile-looks.mjs` was
+  byte-identical.
+- **Sanctuary and bless seen from outside** are lit from a lamp 1.5 m above
+  the head, not at the chest, which whited the frame out; indoors the mantle
+  eases to the same thin rim.
+- **A minotaur's head was near black** lit from behind by a fire: skin gets
+  an albedo floor of 0.07 (`TINT_FLOOR.skin`, dress.js).
+- **A wall torch's flame floated 0.3 m off its sconce**; a window surround
+  inside a walled room was lit as the street. Both follow the room now.
+- **A rich room reads from its words:** "a huge bed, piles of furs, rich
+  furnishings, candles everywhere" gets a four-post bed in furs, hides, a bull
+  banner, chests and candelabra (Mahn-Tor's master bedroom, #2396).
+
+### Open at the end of the round
+
+- Recorded, not re-run for this entry: `mp-two` times out at line 59 (on main
+  as well); `walkable.mjs --shut` crashes when it runs directly after another
+  walkable in the same shell and is green alone; the underground noon-vs-night
+  diff is not zero in the dracolich's cave (on main too); adding models or
+  recipes shifts Midgaard's frame faintly (mean about 0.4).
+- The Ice Worm wastes (#2351 to 2359) are level -1 and have a black sky and a
+  stepped edge from above; the proposal, an open lower valley like the sunk
+  river, has not been answered.
+
 ## 2026-10-20 — the first minutes: Mud School, as Merc starts you
 
 - **Play the first minute as a beginner, headless, before judging
