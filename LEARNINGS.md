@@ -6,6 +6,54 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-10-27 — what a player asked for in one afternoon
+
+One player's afternoon in the game, read back: eleven requests and faults,
+built in three tracks that touched no file in common, each change shown
+failing on the code before it.
+
+- **`areas` was one column of 45 lines in a console 520 px high.** Merc's
+  `do_areas` prints two names to a line, the first half down the left; 22
+  lines now, whole at 1080p, three lines short at 720p.
+- **Wearing over a worn object destroyed it.** Merc keeps worn gear in
+  `carrying`, so `remove_obj` has nothing to put back; here equipment is a
+  list of its own and the replaced object fell out of both (13 checks red:
+  "0 carried, 1 worn of 2").
+- **`config +autoloot` and `+autosac` were read by nothing.** The fix had
+  two traps of its own: the command line's "corpse" is the nearest one, so
+  `get all corpse` after a kill looted an older corpse lying closer; and a
+  sacrifice in the frame of the kill sent the body `gone` before its fall
+  began, so the figure faded out standing. Seen only in screenshots taken
+  0.45, 0.9 and 1.5 s after the blow.
+- **"Wimpy smurfs stay in the room" was a fault, not Merc's odds.** The
+  doors a flee may take match Merc's rule in all 20 village rooms with a
+  wimpy mobile (a one-exit home keeps it one time in three, (5/6)^6); but
+  while the body ran to the next room the mobile was still a target, the
+  next blow started a fight, and `moveMobs` cancelled the flight. Measured:
+  15, 6 and 10 flights a minute over three seeds, never off the road;
+  after, it leaves 9 to 19 s after fleeing (a smurf runs at 1.3 m/s).
+- **A headless deadline counts from the event it waits for.** `wimpy.mjs`
+  first gave the body 45 s from the start of the run; when the coin flips
+  came 35 s in, it failed on correct code. Now 45 s from the flight.
+- **The Talk tab could not be built from the console's input.** The console
+  was handed text and a class, and a player's say, a tell and the HUD's
+  every other line all arrived as `faint`. game-ui.js marks what is talk;
+  a mobile's event keeps its `slot` key even as null, so the test is
+  `=== undefined`. Your own tell and channel line come back as command
+  replies, so they need the mark at the source (`send(text, { talk: true })`).
+- **A key that looks free may be the skill bar's.** The command line's pin
+  took `L`, which `rules/skills.js` hands to the sixth skill on the bar (a
+  thief's pick), and the bar is read first. Only `U` and `Y` are free.
+- **One click was a fight.** A click while the mouse is held swung at
+  whatever you faced; it now asks first for a mobile not fighting you.
+  `diku.look` frames through your own eyes, so a check "over the shoulder"
+  has to set the view again after it -- the first run of the click check
+  was first person twice and said so only in its screenshots.
+- **Aliases are expanded where the commands run**, so they work in a page,
+  on a server and over ssh alike, and the server logs the commands they
+  stand for. A direction inside one does not move you on a server: the
+  page and the ssh walker walk bare directions before the server sees them.
+
 ## 2026-10-23 — render checks: two faults the frozen diff found
 
 - **The cave's noon-vs-night difference was SMAA, not a leaking material.**

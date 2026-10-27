@@ -55,7 +55,8 @@ const GROUPS = [
   [ // column 3
     { title: 'Command line', rows: [
       [['Enter'], "the mud's own prompt: Merc's commands, abbreviations and socials"],
-      [['Tab'], 'in the prompt: complete a command'],
+      [['Tab'], 'in the prompt: complete a command; on an empty line, turn between the Log and Talk tabs'],
+      [['PgUp', 'PgDn'], 'in the prompt: read back'],
       [['Esc', '~or', 'Ctrl-C'], 'close it (or Enter on an empty line)'],
       [['quit'], 'typed there: save and go back to the title'],
       [['scan'], 'typed there: who stands one and two rooms away'],

@@ -48,8 +48,9 @@ room names, prose, sector and contents. Also `goto(vnum, yaw, pitch)`,
 
 The headless browser checks live in `tools/judge/headless/` (copy one to
 `/tmp/pw`, serve a checkout, pass its port): `walkable`, `slopewalk` and `ramps`
-for the ground, `thirdperson` for the camera, `presence`, and `mp-onlook` for
-what a second page sees of a first. `slopewalk`, `ramps`, `boss-music-check`
+for the ground, `thirdperson` for the camera, `views` for the two views' arrow
+keys and the view a browser keeps, `wimpy` for a mobile that flees, `presence`,
+and `mp-onlook` for what a second page sees of a first. `slopewalk`, `ramps`, `boss-music-check`
 and `voice-check` carry a deliberate fault (`--fault`, `--break`,
 `--break-rule`) that must make them fail: run it when you change the check.
 
@@ -772,6 +773,29 @@ choose.
   they cast shadows. They are kept out of the shadow map and culled past 46 m.
 - Large soft sprites are the most expensive thing per pixel in the scene. The
   chimney smoke was 910 particles 3.2 m across; nothing else came close.
+- **A mobile that has fled is out of the fight until its body has arrived**
+  (game.js `fled`). do_flee puts it in the next room at once; here its body
+  runs there, and while it ran the next blow started a fight and `moveMobs`
+  cancelled the flight ("caught on the way"): a wimpy smurf "fled" 15 times a
+  minute and never left the road. `facingTarget` and `attackSlot` skip a
+  fleeing mobile; `wimpy.mjs` holds it.
+- **The command line's "corpse" is the nearest, Merc's the newest.**
+  Autoloot and autosac work on the corpse `mobDied` just made, through
+  `getFrom` and `sacrifice`; `interpret('get all corpse')` looted an older one
+  lying closer. A body sent `gone` before its fall has begun fades out
+  standing, so `removeBody` waits for the fall.
+- **The skill bar takes `Z X C H J L N` in order, and game-ui.js reads it
+  before its own `KEYS`**: a key bound on one of those letters never fires for
+  a class whose bar reaches it (a thief's `L` is pick). Check
+  `rules/skills.js` `KEYS` before taking a letter.
+- **A mobile's event keeps its `slot` key even when it is null** (link.js
+  `local()` turns a mobile this page does not know into null), so "a player's
+  line" is `event.slot === undefined`, not a falsy slot; the command line's
+  Talk tab rests on it. Your own side of a conversation comes as a command
+  reply (`send(text, { talk: true })`), which the server passes on.
+- **Who hears what can only be tested on a server's game**: a standalone
+  game's `roomcast` returns at once (`!multi`). Make it with `server: {}` and
+  `addPlayer`, as rules-check's socials and scan cases do.
 
 ## merc21
 

@@ -131,12 +131,12 @@ and south over the bridge off the Dump.
 | `N` | noclip |
 | `M` | sound |
 | `G` | force every lock in the world |
-| left mouse | attack what you are facing |
+| left mouse | attack what you are facing; a first blow at a mobile that is not fighting you asks, and a second click within two seconds strikes |
 | `I` `B` `K` `R` `T` `Q` | inventory, trade, skills, rest, take, recall |
 | `Z` `X` / wheel, `C` / right mouse | mage and cleric: choose a spell, cast it |
 | `Z` `X` `C` `H` `J` `L` `N` | warrior and thief: the skill bar — kick, backstab, disarm, sneak, hide, steal, pick |
 | `tab` | show the room's full description again, or fold it (it folds by itself once there has been time to read it) |
-| `enter` | the mud's own command line: Merc's command table, abbreviations and all 90 socials; `esc`, `ctrl-c` or `enter` on an empty line closes it |
+| `enter` | the mud's own command line: Merc's command table, abbreviations and all 90 of its socials, with `scan`, `alias` / `unalias` (kept with the character) and a `rofl` of our own; `esc`, `ctrl-c` or `enter` on an empty line closes it. It has a Log and a Talk tab (`tab` on an empty line turns between them; Talk holds only what players said and did to one another), `page up` / `page down` read back, its top right corner resizes it, *Pin* keeps it up while you play and *Pop out* puts it in a window of its own, for a second screen |
 | `?` / `F1` | every control on one screen, with your own class's rows lit and its skill bar read off the class; the same key closes it |
 | `O` | options; `O` again closes them and takes the mouse back |
 | `esc` | release the mouse; click the view to take it again. The game starts without it, so the title's *Enter* works even where pointer lock is refused |
@@ -246,7 +246,9 @@ Set `diku.state.benchmark = true` to halt the render loop before measuring.
 then choose "connect to a server" on the title screen and give
 `localhost:4011`. The same Merc 2.1 rules run for everyone: say, tell, the
 channels, shout, follow and group, socials, and Merc's player-killing rules
-with KILLER and THIEF flags. The owner becomes implementor with
+with KILLER and THIEF flags. `bug`, `idea` and `typo` are kept, as Merc's
+append_file kept them, as JSON lines in `reports.jsonl` in the server's data
+directory. The owner becomes implementor with
 `node server/main.mjs --make-implementor <name>`, which asks for the password
 on the terminal. Playing alone stays the default and needs no server.
 `node tools/server-check.mjs` logs four players in over real sockets.
