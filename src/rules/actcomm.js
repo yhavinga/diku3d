@@ -105,7 +105,8 @@ export function installComm(k) {
   function doPose() {
     const level = Math.min(state.level, POSES.length - 1);
     const pose = k.rng.range(0, level);
-    send(act(POSES[pose][2 * state.class], state));
+    // `talk`: your own side of a conversation, which the command line's Talk tab holds (game-ui.js).
+    send(act(POSES[pose][2 * state.class], state), { talk: true });
     toRoom(act(POSES[pose][2 * state.class + 1], state), [state], { kind: 'emote' });
   }
 
@@ -129,7 +130,7 @@ export function installComm(k) {
 
   function tellTo(victim, text) {
     if (!isImmortal(state) && !isAwake(victim)) return send(act("$E can't hear you.", state, victim));
-    send(`You tell ${victim.name} '${text}'.`);
+    send(`You tell ${victim.name} '${text}'.`, { talk: true });
     if (victim.npc) return;
     k.tell(victim, { kind: 'tell', from: null, speaker: state.name, said: text, text: `${Name(state)} tells you '${text}'.` });
     victim.reply = state;
@@ -148,7 +149,7 @@ export function installComm(k) {
     if (state.act & PLR_MORE.SILENCE) return send(`You can't ${verb}.`);
     state.deaf = (state.deaf || 0) & ~bit;
     const line = bit === CHANNEL.IMMTALK ? `${Name(state)}: ${arg}.` : `${Name(state)} ${verb}s '${arg}'.`;
-    send(bit === CHANNEL.IMMTALK ? line : `You ${verb} '${arg}'.`);
+    send(bit === CHANNEL.IMMTALK ? line : `You ${verb} '${arg}'.`, { talk: true });
     for (const pc of k.players) {
       const vch = pc.ch;
       if (vch === state || ((vch.deaf || 0) & bit)) continue;

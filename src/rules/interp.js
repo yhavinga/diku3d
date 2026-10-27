@@ -758,12 +758,14 @@ export function installInterp(k) {
     const [target] = oneArgument(arg);
     // The room sees it too, once there is anyone else in it to see.
     const others = (text, except = [state]) => { if (text) k.roomcast(state.roomVnum, { kind: 'emote', text }, except); };
-    if (!target) { if (charNoArg) send(act(charNoArg, state)); others(entry[2] && act(entry[2], state)); return true; }
+    // Your own line is your side of the talk, for the command line's Talk tab (game-ui.js).
+    const mine = (text) => send(text, { talk: true });
+    if (!target) { if (charNoArg) mine(act(charNoArg, state)); others(entry[2] && act(entry[2], state)); return true; }
     const slot = getCharRoom(target);
     if (!slot) { send("They aren't here."); return true; }
-    if (slot === 'self') { if (charAuto) send(act(charAuto, state)); others(entry[7] && act(entry[7], state)); return true; }
+    if (slot === 'self') { if (charAuto) mine(act(charAuto, state)); others(entry[7] && act(entry[7], state)); return true; }
     const victim = isPc(slot) ? slot.ch : k.wake(slot);
-    if (charFound) send(act(charFound, state, victim));
+    if (charFound) mine(act(charFound, state, victim));
     others(entry[4] && act(entry[4], state, victim), [state, victim]);
     if (isPc(slot)) {
       if (entry[5]) k.tell(victim, { kind: 'emote', text: act(entry[5], state, victim) });

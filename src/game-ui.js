@@ -1171,8 +1171,8 @@ export function createGameUi(game, { built = null } = {}) {
           say(event.text, 'gate');
           break;
         case 'out':
-          // A command's own reply belongs to the command line that asked.
-          console_.print(event.text, '');
+          // A command's own reply belongs to the command line that asked; your own tell, channel or social is talk too.
+          console_.print(event.text, '', !!event.talk);
           break;
         case 'mobsay': case 'emote':
           // A mobile's gesture carries its slot (specials.js, interp.js); another player's, and a social aimed at you, do not.
