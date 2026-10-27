@@ -16,6 +16,7 @@ import {
   doorName, hasAff, canSee,
 } from './handler.js';
 import { SOCIALS } from './socials.js';
+import { EXTRA_SOCIALS } from './socials-extra.js';
 
 /**
  * The credits, as license.doc requires them: the five creators of DikuMud,
@@ -782,7 +783,10 @@ export function installInterp(k) {
     ['help', doHelp, P.DEAD], ['idea', notHere('Ok.  Thanks.'), P.DEAD],
     ['report', () => send(`You report: ${state.hit}/${state.maxHit} hp ${state.mana}/${state.maxMana} mana ${state.move}/${state.maxMove} mv ${state.exp} xp.`), P.DEAD],
     ['score', doScore, P.DEAD],
-    ['socials', () => { for (let i = 0; i < SOCIALS.length; i += 6) send(SOCIALS.slice(i, i + 6).map((s) => s[0].padEnd(12)).join('')); }, P.DEAD],
+    ['socials', () => {
+      const all = [...SOCIALS, ...EXTRA_SOCIALS.filter((s) => !SOCIALS.some((m) => m[0] === s[0]))];
+      for (let i = 0; i < all.length; i += 6) send(all.slice(i, i + 6).map((s) => s[0].padEnd(12)).join(''));
+    }, P.DEAD],
     ['time', doTime, P.DEAD], ['typo', notHere('Ok.  Thanks.'), P.DEAD], ['weather', doWeather, P.RESTING],
     ['who', doWho, P.DEAD], ['channels', notHere(alone), P.DEAD],
     ['config', () => {
@@ -904,7 +908,9 @@ export function installInterp(k) {
       const entry = [...extra, ...commands].find(([name, , , level]) => command[0] === name[0] && isPrefix(command, name)
         && (level === undefined || level <= trust));
       if (!entry) {
-        const soc = SOCIALS.find((s) => command[0] === s[0][0] && isPrefix(command, s[0]));
+        // Merc's table first: on a clash of names, or of abbreviations, its row is the one found.
+        const named = (s) => command[0] === s[0][0] && isPrefix(command, s[0]);
+        const soc = SOCIALS.find(named) || EXTRA_SOCIALS.find(named);
         if (!soc || !social(soc, arg)) send('Huh?');
         return command;
       }

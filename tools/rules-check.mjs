@@ -15,9 +15,10 @@ import { dirname, join } from 'path';
 
 import { parseArea, buildWorld, SECTOR, ROOM_INDOORS, ITEM, EX_CLOSED, EX_LOCKED } from '../src/are.js';
 import { layoutWorld } from '../src/layout.js';
-import { createGame, POS, WEAR } from '../src/game.js';
+import { createGame, createCharacter, POS, WEAR } from '../src/game.js';
 import { createNav } from '../src/nav.js';
 import { installSave, serialize } from '../src/save.js';
+import { EXTRA_SOCIALS } from '../src/rules/socials-extra.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FILES = ['midgaard', 'haon', 'shire', 'marsh', 'trollden', 'grave'];
@@ -74,6 +75,62 @@ console.log('\nTHE COMMAND LINE');
   check(t.say('look') === 'In your dreams, or what?', 'position gates a command the way interp.c does');
   check(t.say('score').startsWith('You are'), '...and lets through one that needs no position');
   t.game.state.position = POS.STANDING;
+}
+
+// ---------------------------------------------------------- socials -----
+console.log('\nA SOCIAL OF OUR OWN');
+{
+  // A server's game with three players in the Temple, and what each of them
+  // is sent: a line is for one player (`pc`) or for the room but for some
+  // (`room`, `except`), as act()'s TO_CHAR, TO_VICT and TO_NOTVICT are.
+  const game = createGame({ world, layout, built, seed: 7, server: {} });
+  const players = [['Arwen', 2], ['Boromir', 1], ['Celeborn', 1]].map(([name, sex], i) => {
+    const ch = createCharacter(3, { sex });
+    ch.name = name; ch.displayName = name;
+    const pc = game.addPlayer(ch, { id: i + 1 });
+    game.placePlayer(pc, 3001, { quiet: true });
+    return pc;
+  });
+  const heard = new Map(players.map((pc) => [pc.id, []]));
+  game.listen((e) => {
+    if (!e.text) return;
+    for (const pc of players) {
+      const mine = e.pc !== undefined ? e.pc === pc.id : e.room === pc.ch.roomVnum && !(e.except || []).includes(pc.id);
+      if (mine) heard.get(pc.id).push(e.text);
+    }
+  });
+  /** What `line` typed by `who` sent to each player, by name. */
+  const typed = (who, line) => {
+    for (const lines of heard.values()) lines.length = 0;
+    game.withPlayer(players[who], () => game.interpret(line));
+    return Object.fromEntries(players.map((pc) => [pc.ch.name, heard.get(pc.id).join(' | ')]));
+  };
+  const same = (got, want) => JSON.stringify(got) === JSON.stringify(want);
+
+  let r = typed(0, 'rofl');
+  check(same(r, { Arwen: 'You roll on the floor laughing.', Boromir: 'Arwen rolls on the floor laughing.', Celeborn: 'Arwen rolls on the floor laughing.' }),
+    'rofl: the player and the room each get their line', JSON.stringify(r));
+  r = typed(0, 'rofl boromir');
+  check(same(r, { Arwen: 'You roll on the floor laughing at Boromir.', Boromir: 'Arwen rolls on the floor laughing at you.', Celeborn: 'Arwen rolls on the floor laughing at Boromir.' }),
+    'rofl at a player: the player, the one laughed at and the rest of the room each get theirs', JSON.stringify(r));
+  r = typed(0, 'rofl self');
+  check(same(r, { Arwen: 'You roll on the floor laughing at yourself.', Boromir: 'Arwen rolls on the floor laughing at herself.', Celeborn: 'Arwen rolls on the floor laughing at herself.' }),
+    'rofl at yourself: the player and the room each get theirs', JSON.stringify(r));
+  r = typed(1, 'rof arwen');
+  check(r.Arwen === 'Boromir rolls on the floor laughing at you.', 'an abbreviation finds it', r.Arwen);
+  const t = fresh();
+  t.stand(3001);
+  check(t.say('rofl') === 'You roll on the floor laughing.', 'and in the page, alone: the player gets the first line', t.say('rofl'));
+
+  check(EXTRA_SOCIALS.every((row) => row.length === 8 && row.every((x, i) => (i === 0 ? /^[a-z]+$/.test(x) : x === null || typeof x === 'string'))),
+    "every row has Merc's shape: a name and seven texts");
+  // A row of ours named like one of Merc's loses to it, in the table and in the list.
+  EXTRA_SOCIALS.push(['smile', 'NOT MERC', null, null, null, null, null, null]);
+  try {
+    check(/You smile/.test(t.say('smile')) && !/NOT MERC/.test(t.say('smile')), "on a clash of names Merc's row wins", t.say('smile'));
+    const listed = t.say('socials').split(/[ |]+/).filter((w) => w === 'smile' || w === 'rofl');
+    check(listed.join(' ') === 'smile rofl', 'and the list names each social once, ours after Merc\'s', listed.join(' '));
+  } finally { EXTRA_SOCIALS.pop(); }
 }
 
 // ------------------------------------------------------------ db.c ------
