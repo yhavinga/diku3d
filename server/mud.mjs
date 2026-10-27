@@ -23,7 +23,7 @@ import { titleFor, trustOf, PLR_MORE } from '../src/rules/actcomm.js';
 import { PLR, nested } from '../src/rules/handler.js';
 import { bootWorld } from './world.mjs';
 import { EX_ISDOOR, EX_CLOSED, EX_LOCKED } from '../src/are.js';
-import { createNotes, createSite } from './store.mjs';
+import { createNotes, createReports, createSite } from './store.mjs';
 import { createDash } from './dash.mjs';
 import {
   createAccounts, hashPassword, checkPassword, checkParseName, properName, EXTRA, createLoginGuard, inMinutes,
@@ -191,6 +191,7 @@ export async function startMud({
   const w = bootWorld(root, { log });
   const accounts = createAccounts(dataDir);
   const notes = createNotes(dataDir);
+  const reports = createReports(dataDir);
   // The ban list and the wizlock, kept across reboots; `wizlock` is only the first boot's.
   const site = createSite(dataDir, { wizlock });
   const sessions = new Set();
@@ -216,6 +217,7 @@ export async function startMud({
     allow: (ch, arg) => allow(ch, arg),
     snoop: (ch, name) => snoop(ch, name),
     notes,
+    report: (ch, kind, text) => reports.add({ kind, who: ch.name, room: ch.roomVnum, date: new Date().toISOString(), text }),
     log: (ch, name) => toggleLog(ch, name),
     // The page opens the dashboard on this; what it shows is asked for apart (dash.mjs).
     dashboard: (ch) => game.tell(ch, { kind: 'dashboard' }),

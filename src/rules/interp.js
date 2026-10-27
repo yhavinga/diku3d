@@ -782,6 +782,16 @@ export function installInterp(k) {
     if (r && r.text) send(r.text);
   };
   const notHere = (text) => () => send(text);
+  /**
+   * act_comm.c: do_bug, do_idea and do_typo -- append_file keeps the line, with
+   * the room and who wrote it, unless it is empty; the answer is the same
+   * either way. A server keeps it (`k.server.report`); a page on its own has
+   * nowhere to, and answers as it always did.
+   */
+  const filed = (kind) => (arg) => {
+    if (arg && k.server) k.server.report(state, kind, arg);
+    send('Ok.  Thanks.');
+  };
   const alone = 'There is nobody else in this world to hear you.';
 
   /** cmd_table, in interp.c's order: name, function, minimum position. */
@@ -795,7 +805,7 @@ export function installInterp(k) {
     ['rest', () => reply(game.sit()), P.RESTING], ['stand', () => reply(game.stand()), P.SLEEPING],
     ['tell', notHere(alone), P.RESTING], ['wield', doWear, P.RESTING],
     ['areas', doAreas, P.DEAD],
-    ['bug', notHere('Ok.  Thanks.'), P.DEAD],
+    ['bug', filed('bug'), P.DEAD],
     ['commands', () => { for (let i = 0; i < commands.length; i += 6) send(commands.slice(i, i + 6).map((c) => c[0].padEnd(12)).join('')); }, P.DEAD],
     ['compare', doCompare, P.RESTING], ['consider', doConsider, P.RESTING],
     // license.doc: "the credits command shall always contain our name,
@@ -811,14 +821,14 @@ export function installInterp(k) {
         doLook(`in ${arg1}`);
       }
     }, P.RESTING],
-    ['help', doHelp, P.DEAD], ['idea', notHere('Ok.  Thanks.'), P.DEAD],
+    ['help', doHelp, P.DEAD], ['idea', filed('idea'), P.DEAD],
     ['report', () => send(`You report: ${state.hit}/${state.maxHit} hp ${state.mana}/${state.maxMana} mana ${state.move}/${state.maxMove} mv ${state.exp} xp.`), P.DEAD],
     ['score', doScore, P.DEAD],
     ['socials', () => {
       const all = [...SOCIALS, ...EXTRA_SOCIALS.filter((s) => !SOCIALS.some((m) => m[0] === s[0]))];
       for (let i = 0; i < all.length; i += 6) send(all.slice(i, i + 6).map((s) => s[0].padEnd(12)).join(''));
     }, P.DEAD],
-    ['time', doTime, P.DEAD], ['typo', notHere('Ok.  Thanks.'), P.DEAD], ['weather', doWeather, P.RESTING],
+    ['time', doTime, P.DEAD], ['typo', filed('typo'), P.DEAD], ['weather', doWeather, P.RESTING],
     ['who', doWho, P.DEAD], ['channels', notHere(alone), P.DEAD],
     ['config', () => {
       send(`[ ${state.act & PLR.AUTOEXIT ? '+AUTOEXIT' : '-autoexit'} ]  config autoexit toggles the exits line on look.`);

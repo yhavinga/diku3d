@@ -3,10 +3,11 @@
  * directory: the note board (Merc's notes.txt) and the site's own settings
  * -- the ban list and the wizlock, which 2.1 held in memory and lost at
  * every reboot. Each is one JSON file, written whole and renamed into
- * place, as accounts.mjs writes a player.
+ * place, as accounts.mjs writes a player; the players' bug, idea and typo
+ * reports are a file of JSON lines that is only ever added to.
  */
 
-import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, appendFileSync } from 'fs';
 import { join } from 'path';
 
 function jsonFile(path, empty) {
@@ -40,6 +41,21 @@ export function createNotes(dataDir) {
       data.notes.splice(i, 1);
       save();
     },
+  };
+}
+
+/**
+ * db.c: append_file for do_bug, do_idea and do_typo, which kept three text
+ * files (bugs.txt, ideas.txt, typos.txt); here one, reports.jsonl, a JSON line
+ * to a report -- { kind, who, room, date, text } -- oldest first. A write that
+ * fails throws, and the command that asked reports it.
+ */
+export function createReports(dataDir) {
+  mkdirSync(dataDir, { recursive: true });
+  const path = join(dataDir, 'reports.jsonl');
+  return {
+    path,
+    add(report) { appendFileSync(path, `${JSON.stringify(report)}\n`, { mode: 0o600 }); },
   };
 }
 

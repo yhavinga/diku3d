@@ -12,7 +12,7 @@
  * Exits non-zero if any assertion fails.
  */
 
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -374,6 +374,38 @@ a.say('goto 3001');
 await expect(a, /^Huh\?$/, 'a mortal has no goto', m);
 
 // ------------------------------------------------- the board and the site --
+console.log('\nBUGS, IDEAS AND TYPOS');
+{
+  // db.c: do_bug, do_idea and do_typo append "[room] name: text" to a file of
+  // their own and answer "Ok.  Thanks."; here one file, a JSON line to a report.
+  const file = join(data, 'reports.jsonl');
+  const filed = () => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : []);
+  const roomOf = (c) => game.players.find((p) => p.id === c.id).ch.roomVnum;
+  const before = Date.now();
+  m = a.mark();
+  a.say('bug the axe vanished');
+  await expect(a, /^Ok\.  Thanks\.$/, 'bug answers as Merc does', m);
+  const [report] = filed();
+  check(filed().length === 1 && report.kind === 'bug' && report.who === 'Arwen' && report.room === roomOf(a) && report.text === 'the axe vanished',
+    'and the report is kept with who, which room and the text', JSON.stringify(report));
+  check(report && new Date(report.date).getTime() >= before - 1000 && new Date(report.date).getTime() <= Date.now() + 1000, '...and when', report && report.date);
+  m = b.mark();
+  b.say('typo the sign says Midgard');
+  await expect(b, /^Ok\.  Thanks\.$/, 'typo answers the same', m);
+  m = a.mark();
+  a.say('idea a rope ladder in the school');
+  await expect(a, /^Ok\.  Thanks\.$/, 'and so does idea', m);
+  const all = filed();
+  check(all.length === 3 && all[1].kind === 'typo' && all[1].who === 'Boromir' && all[1].room === roomOf(b) && all[1].text === 'the sign says Midgard'
+    && all[2].kind === 'idea' && all[2].who === 'Arwen' && all[2].text === 'a rope ladder in the school',
+    "each kind is kept with its own player's name, oldest first", JSON.stringify(all.map((r) => [r.kind, r.who])));
+  const kept = filed().length;
+  m = a.mark();
+  a.say('bug');
+  await expect(a, /^Ok\.  Thanks\.$/, 'an empty report gets the same answer', m);
+  check(filed().length === kept, '...and keeps nothing, as append_file returns on an empty string', `${kept} before, ${filed().length} after`);
+}
+
 console.log('\nNOTES, SNOOPING, SETTING, BANNING');
 {
   m = a.mark();
