@@ -18,7 +18,7 @@ import { layoutWorld } from '../src/layout.js';
 import { createGame, createCharacter, POS, WEAR } from '../src/game.js';
 import { createNav } from '../src/nav.js';
 import { AFF } from '../src/rules/handler.js';
-import { installSave, serialize } from '../src/save.js';
+import { installSave, serialize, restore } from '../src/save.js';
 import { EXTRA_SOCIALS } from '../src/rules/socials-extra.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -132,6 +132,50 @@ console.log('\nA SOCIAL OF OUR OWN');
     const listed = t.say('socials').split(/[ |]+/).filter((w) => w === 'smile' || w === 'rofl');
     check(listed.join(' ') === 'smile rofl', 'and the list names each social once, ours after Merc\'s', listed.join(' '));
   } finally { EXTRA_SOCIALS.pop(); }
+}
+
+// ----------------------------------------------------------- aliases -----
+console.log('\nALIASES');
+{
+  const t = fresh();
+  t.stand(3001);
+  /** What a command printed, line by line. */
+  const lines = (line) => { t.say(line); return t.said.slice(); };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  check(t.say('alias') === 'You have no aliases defined.', 'a new character has no aliases', t.say('alias'));
+  check(t.say('alias lx look;exits') === "lx is now aliased to 'look;exits'.", 'alias <word> <commands> defines one', t.say('alias lx look;exits'));
+  check(same(lines('lx'), [...lines('look'), ...lines('exits')]) && lines('lx').length > 2, 'the alias runs each of its commands, as typed one after another');
+  t.say('alias cx consider');
+  check(same(lines('cx executioner'), lines('consider executioner')) && lines('cx executioner').length === 1, 'what is typed after the alias goes on the end of its last command');
+  check(same(lines('alias'), ['Your aliases:', `${'cx'.padEnd(12)} consider`, `${'lx'.padEnd(12)} look;exits`]), 'alias alone lists them', lines('alias').join(' | '));
+  check(t.say('alias lx') === "lx is aliased to 'look;exits'." && t.say('alias nope') === 'That alias is not defined.', 'alias <word> shows one', t.say('alias lx'));
+  t.say('alias lx look');
+  check(same(lines('lx'), lines('look')), 'defining it again replaces it');
+  check(t.say('unalias lx') === "The alias 'lx' is gone." && t.say('lx') === 'Huh?', 'unalias <word> removes it, and the word means nothing again', t.say('lx'));
+  check(t.say('unalias lx') === 'That alias is not defined.' && t.say('unalias') === 'Unalias which alias?', '...and says so when there is none, or no word');
+
+  // An alias may use another; none may come round to itself, however far round.
+  t.say('alias n1 look');
+  t.say('alias n2 n1;exits');
+  check(same(lines('n2'), [...lines('look'), ...lines('exits')]), 'an alias may use another alias');
+  t.say('alias zz zz');
+  check(t.say('zz') === 'Alias loop: zz -> zz.', 'an alias that calls itself is stopped, and says so', t.say('zz'));
+  t.say('alias a1 look;a2');
+  t.say('alias a2 a3');
+  t.say('alias a3 a1');
+  check(t.say('a1') === 'Alias loop: a1 -> a2 -> a3 -> a1.', '...as is a ring of three, before any of it runs', t.say('a1'));
+  t.say('alias b1 look;look;look;look;look');
+  t.say('alias b2 b1;b1;b1;b1;b1');
+  check(t.say('b2') === 'That runs more than 20 commands; none was run.', 'an alias that fans out past 20 commands runs none', t.say('b2'));
+  check(t.say('alias alias look') === 'Sorry, that word is reserved.' && t.say('alias unalias look') === 'Sorry, that word is reserved.', 'alias and unalias cannot themselves be aliased');
+  check(/one word/.test(t.say('alias "two words" look')) && /one word/.test(t.say("alias n'o look")), 'the word is one word, of letters and digits', t.say('alias "two words" look'));
+  check(t.say('alias x1') === 'That alias is not defined.' && t.say('alias x1 ;') === 'An alias needs a command to run.', 'a word alone shows the alias, and commands that are nothing define none');
+  for (const name of ['cx', 'n1', 'n2', 'zz', 'a1', 'a2', 'a3', 'b1', 'b2']) t.say(`unalias ${name}`);
+  check(t.say('alias') === 'You have no aliases defined.', 'with the last gone the list is empty again', t.say('alias'));
+  for (let i = 1; i <= 32; i++) t.say(`alias q${i} look`);
+  check(/at most 32/.test(t.say('alias q33 look')), 'a character may have 32', t.say('alias q33 look'));
+  check(t.say('alias q1 exits') === "q1 is now aliased to 'exits'.", '...of which any can still be changed');
 }
 
 // ------------------------------------------------------------- scan ------
@@ -575,6 +619,41 @@ console.log('\nSAVE AND LOAD');
   check(landed === 3014, 'and puts you back in the room you saved in', landed);
   check(b.game.state.equipment[WEAR.WIELD]?.vnum === 3020 && b.game.state.inventory[0].contains.length === 1,
     'wielded dagger and the pie in the bag both come back');
+}
+
+// ---------------------------------------------- aliases and the player file --
+console.log('\nALIASES, KEPT WITH THE CHARACTER');
+{
+  const store = new Map();
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) };
+  const a = fresh(2, 21);
+  installSave(a.game, { world, storage });
+  a.stand(3014);
+  check(!('aliases' in serialize(a.game.state)), 'a character with no aliases writes none, so its file is what it was');
+  a.say('alias lx look;exits');
+  a.say('alias go north;north');
+  const file = serialize(a.game.state);
+  check(JSON.stringify(file.aliases) === JSON.stringify({ lx: 'look;exits', go: 'north;north' }), 'the aliases are in the player file', JSON.stringify(file.aliases));
+  a.say('save');
+  const b = fresh(3, 99);
+  installSave(b.game, { world, storage });
+  b.stand(3001);
+  b.say('alias old exits');
+  check(b.game.loadSave(), 'a saved character loads');
+  check(b.say('alias').split(' | ').slice(1).map((l) => l.split(/\s+/)[0]).join(' ') === 'go lx', 'and has the aliases it was saved with, not those it had', b.say('alias'));
+  const lines = (line) => { b.say(line); return b.said.slice(); };
+  check(JSON.stringify(lines('lx')) === JSON.stringify([...lines('look'), ...lines('exits')]) && lines('lx').length > 2, 'and they run');
+  // A file whose aliases are not words with commands is refused, saying so, not half read.
+  for (const bad of ['lx', ['look'], { lx: 7 }, null]) {
+    let message = '';
+    try { restore(b.game.state, { ...file, aliases: bad }, world, POS); } catch (error) { message = error.message; }
+    check(/save\.js: aliases must map each word to its commands/.test(message), `aliases ${JSON.stringify(bad)} in a file are refused`, message);
+  }
+  // A file that names none leaves none.
+  const { aliases, ...plain } = file;
+  void aliases;
+  restore(b.game.state, plain, world, POS);
+  check(Object.keys(b.game.state.aliases).length === 0, 'a file with no aliases clears them');
 }
 
 console.log(failures.length ? `\n${failures.length} check(s) failed:\n  ${failures.join('\n  ')}` : '\nall checks passed');

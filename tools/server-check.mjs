@@ -878,6 +878,48 @@ console.log('\nTHE DASHBOARD');
   check(!quiet.some((line) => /error handling/.test(line)), 'nothing on the dashboard threw', quiet.filter((line) => /error handling/.test(line))[0]);
 }
 
+// --------------------------------------------------------------- aliases --
+console.log('\nALIASES');
+{
+  // Kept with the character: in the account file, so a new login has them.
+  const e1 = client('Elanor');
+  await e1.opened;
+  e1.send({ t: 'create', name: 'Elanor', password: 'mallorn', cls: 3, sex: 'f' });
+  await e1.waitFor((x) => x.id !== null, 5000, 'enter');
+  m = e1.mark();
+  e1.say('alias lx look;exits');
+  await expect(e1, /^lx is now aliased to 'look;exits'\.$/, 'a player defines an alias', m);
+  m = e1.mark();
+  e1.say('lx');
+  await expect(e1, /^Obvious exits:$|^\[Exits:/, '...and it runs on the server', m);
+  e1.say('quit');
+  await e1.waitFor((x) => x.messages.find((mm) => mm.t === 'bye'), 3000, 'bye');
+  check(JSON.stringify(createAccounts(data).load('Elanor').char.aliases) === JSON.stringify({ lx: 'look;exits' }), 'quitting saves it in the account file', JSON.stringify(createAccounts(data).load('Elanor').char.aliases));
+  const e2 = client('Elanor again');
+  await e2.opened;
+  e2.send({ t: 'login', name: 'Elanor', password: 'mallorn' });
+  await e2.waitFor((x) => x.id !== null, 5000, 'enter');
+  m = e2.mark();
+  e2.say('alias');
+  await expect(e2, /^lx +look;exits$/, 'a new login has it still', m);
+  e2.say('quit');
+  await e2.waitFor((x) => x.messages.find((mm) => mm.t === 'bye'), 3000, 'bye');
+
+  // A LOG on a player (act_wiz.c's do_log) records what ran, not the word that stood for it.
+  m = y.mark();
+  y.say('log arwen');
+  await expect(y, /^LOG set\.$/, 'the implementor logs Arwen', m);
+  m = a.mark();
+  a.say('alias lk look;exits');
+  a.say('lk');
+  await expect(a, /^Obvious exits:$|^\[Exits:/, 'she aliases and uses lk', m);
+  check(quiet.includes('Log Arwen: look') && quiet.includes('Log Arwen: exits'), "the log names the commands an alias ran, one by one", quiet.filter((l) => /^Log Arwen/.test(l)).join(' | '));
+  a.say('unalias lk');
+  m = y.mark();
+  y.say('log arwen');
+  await expect(y, /^LOG removed\.$/, '...and takes it off again', m);
+}
+
 // ---------------------------------------------------- quitting and links --
 console.log('\nLEAVING');
 m = y.mark();

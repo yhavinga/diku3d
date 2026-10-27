@@ -59,6 +59,7 @@ const GROUPS = [
       [['Esc', '~or', 'Ctrl-C'], 'close it (or Enter on an empty line)'],
       [['quit'], 'typed there: save and go back to the title'],
       [['scan'], 'typed there: who stands one and two rooms away'],
+      [['alias'], 'typed there: your own word for some commands, as alias lx look;exits — alias alone lists them, unalias lx removes one'],
       [['`', '~or', 'dashboard'], "the implementor's dashboard, on a server at trust 40 — the same key closes it"],
     ] },
     { title: 'The world', rows: [

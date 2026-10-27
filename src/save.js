@@ -49,10 +49,20 @@ function readObj(data, world) {
   };
 }
 
+/** A character's aliases (rules/aliases.js): word to commands. A file with none says nothing of them. */
+function readAliases(value) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.values(value).some((body) => typeof body !== 'string')) {
+    throw new Error(`save.js: aliases must map each word to its commands, not ${JSON.stringify(value)}`);
+  }
+  return { ...value };
+}
+
 export function serialize(state) {
   const out = { version: 1, savedAt: Date.now() };
   for (const field of FIELDS) out[field] = state[field];
   out.room = state.roomVnum;
+  if (state.aliases && Object.keys(state.aliases).length) out.aliases = { ...state.aliases };
   out.learned = { ...state.learned };
   out.condition = state.condition.slice();
   out.affected = (state.affected || []).map((af) => ({ ...af }));
@@ -68,8 +78,10 @@ export function serialize(state) {
  */
 export function restore(state, data, world, POS) {
   if (!data || data.version !== 1) throw new Error('save.js: not a version 1 player file');
+  const aliases = readAliases(data.aliases);
   for (const field of FIELDS) if (data[field] !== undefined) state[field] = data[field];
   state.learned = { ...state.learned, ...data.learned };
+  state.aliases = aliases;
   state.condition = data.condition.slice();
   state.affected = data.affected.map((af) => ({ ...af }));
   state.inventory = data.inventory.map((obj) => readObj(obj, world));

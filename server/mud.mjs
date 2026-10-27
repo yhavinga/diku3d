@@ -673,9 +673,12 @@ export async function startMud({
   function command(s, line) {
     const pc = s.pc;
     s.lastInput = Date.now();
-    if (pc.ch.act & PLR_MORE.LOG || s.logged) log(`Log ${pc.ch.name}: ${line}`);
-    const name = game.withPlayer(pc, () => game.interpret(line));
-    dash.command(s, line, name);
+    // An alias is read first, so that the log and the dashboard see the commands it ran and not the word that stood for them.
+    for (const one of game.withPlayer(pc, () => game.aliasLines(line))) {
+      if (pc.ch.act & PLR_MORE.LOG || s.logged) log(`Log ${pc.ch.name}: ${one}`);
+      const name = game.withPlayer(pc, () => game.interpret(one));
+      dash.command(s, one, name);
+    }
   }
 
   /** A line run as `s`'s own command, and what it told them: the dashboard's actions. */

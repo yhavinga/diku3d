@@ -17,6 +17,7 @@ import {
 } from './handler.js';
 import { SOCIALS } from './socials.js';
 import { EXTRA_SOCIALS } from './socials-extra.js';
+import { expandAliases, aliasCommand, unaliasCommand } from './aliases.js';
 
 /**
  * The credits, as license.doc requires them: the five creators of DikuMud,
@@ -428,6 +429,15 @@ export function installInterp(k) {
     for (let i = 0; i < half; i++) {
       send(`${game.areas[i].name.padEnd(39)}${(game.areas[i + half]?.name ?? '').padEnd(39)}`);
     }
+  }
+
+  /** Not in Merc 2.1: see aliases.js. The character's table is made when first needed. */
+  function doAlias(arg) {
+    const [word, body] = oneArgument(arg);
+    for (const text of aliasCommand(state.aliases ||= {}, word, body)) send(text);
+  }
+  function doUnalias(arg) {
+    send(unaliasCommand(state.aliases ||= {}, oneArgument(arg)[0]));
   }
 
   function doWimpy(arg) {
@@ -882,6 +892,7 @@ export function installInterp(k) {
     ['where', (a) => doWhere(oneArgument(a)[0]), P.RESTING],
     // After `score`, so that `sc` stays score; it is no Merc 2.1 command.
     ['scan', doScan, P.RESTING],
+    ['alias', doAlias, P.DEAD], ['unalias', doUnalias, P.DEAD],
   ];
 
   /** quaff, recite, zap, brandish: magic.js's, through the item verbs it adds. */
@@ -926,13 +937,30 @@ export function installInterp(k) {
     send('Shops: list, buy, sell, value.  Guilds: practice, train.');
     send('Fighting: kill, flee, kick, backstab, disarm, rescue, wimpy.  Thieving: sneak, hide, visible, steal.');
     send('Resting: rest, sleep, stand, wake.  Talking: say, emote, and the socials.  Keeping: save, quit.');
+    send('Words of your own: alias, unalias.');
   }
 
   /**
-   * interp.c: interpret. Any command brings you out of hiding. Returns the
-   * command it ran, for the console's history.
+   * What a typed line comes to once the aliases of whoever's turn it is are
+   * read (aliases.js): the commands to run, none after telling the player why
+   * the line cannot be. A server asks first, so that its log and dashboard
+   * see the commands and not the word that stood for them.
    */
+  function aliasLines(line) {
+    const r = expandAliases(state.aliases, line);
+    if (r.error) { send(r.error); return []; }
+    return r.lines;
+  }
+
+  /** interp.c: interpret. Returns the command it ran, for the console's history (the last, of an alias's). */
   function interpret(line) {
+    let name = null;
+    for (const one of aliasLines(line)) name = interpretLine(one);
+    return name;
+  }
+
+  /** One command, as interp.c's interpret runs it. Any command brings you out of hiding. */
+  function interpretLine(line) {
     let text = line.trim();
     if (!text) return null;
     state.affectedBy &= ~AFF.HIDE;
@@ -1000,6 +1028,7 @@ export function installInterp(k) {
 
   Object.assign(game, {
     interpret,
+    aliasLines,
     addCommand(name, fn, position = POS.RESTING) { extra.push([name, fn, position]); },
     commandNames: () => [...extra, ...commands].filter((c) => c[3] === undefined || c[3] <= (state.trust || state.level))
       .map((c) => c[0]).filter((n) => /^[a-z]/.test(n)),
