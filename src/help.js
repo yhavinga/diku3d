@@ -32,7 +32,7 @@ const GROUPS = [
       [['Tab'], "the room's full description again, or fold it"],
     ] },
     { title: 'Fighting', rows: [
-      [['left mouse'], 'attack what you are facing'],
+      [['left mouse'], 'attack what you are facing — a first blow at one not fighting you asks, and a second click within two seconds strikes'],
     ] },
   ],
   [ // column 2

@@ -2138,6 +2138,29 @@ async function boot() {
     }
   });
   dom.hint.addEventListener('click', () => player.requestLock());
+  // A first blow by click at a mobile that is not fighting you asks, and a
+  // second click on it within CONFIRM_MS strikes: a player clicking to look
+  // about started a fight with the executioner. A mobile fighting you, or your
+  // own follower, takes the click at once; on a server the page does not know
+  // your group, so a group mate's foe asks too. Typed kill asks nothing, as in Merc.
+  const CONFIRM_MS = 2000;
+  let asked = null;
+  function strike() {
+    const me = game.state;
+    const slot = me.fighting ? null : game.facingSlot();
+    const mob = slot && !slot.dead ? slot.instance : null;
+    const foe = mob && mob.fighting;
+    if (mob && !(foe && (foe === me || foe.master === me))) {
+      const now = performance.now();
+      if (!asked || asked.slot !== slot || now - asked.at > CONFIRM_MS) {
+        asked = { slot, at: now };
+        hud.toast(`Attack ${mob.name}? Click again.`);
+        return;
+      }
+    }
+    asked = null;
+    game.attack();
+  }
   renderer.domElement.addEventListener('mousedown', (event) => {
     if (event.button !== 0 || state.paused || state.crossing) return;
     // A click that is only taking the mouse back is not a swing -- unless
@@ -2147,7 +2170,7 @@ async function boot() {
       player.requestLock();
       if (!refused) return;
     }
-    game.attack();
+    strike();
   });
 
   // ----------------------------------------------------------- frame loop --
