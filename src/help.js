@@ -6,7 +6,7 @@
  * was read off the handler that owns the key: main.js (E, Tab, 1-4, O, F, P, V,
  * M, G, F2 (screenshot.js), arrows, PgUp/PgDn, left mouse), game-ui.js (Z X C, I B K R T Q, Enter,
  * wheel, right mouse), dashboard.js (`), rules/skills.js (the Z X C H J L N skill bar) and
- * player.js (WASD, shift, space).
+ * player.js (WASD and, over the shoulder, the arrows; shift, space).
  *
  * It is a module of its own that reaches the game only through `window.diku`,
  * and it behaves like the options screen: opening gives the mouse back and
@@ -20,7 +20,8 @@ const GROUPS = [
       [['W', 'A', 'S', 'D'], 'walk'],
       [['Shift'], 'run'],
       [['Space'], 'jump'],
-      [['←', '↑', '→', '↓'], "take the exit west, north, east or south — the mud's own compass, so north is north however you face"],
+      [['↑', '↓', '←', '→'], 'over the shoulder: walk forward, back and sideways, as W S A D do — the mouse turns', null, 'third'],
+      [['←', '↑', '→', '↓'], "through your own eyes: take the exit west, north, east or south — the mud's own compass, so north is north however you face", null, 'first'],
       [['PgUp', 'PgDn'], 'take the exit up or down'],
       [['N'], 'noclip: walk through walls'],
     ] },
@@ -103,8 +104,8 @@ function build() {
   const cols = GROUPS.map((groups) => `<div class="hp-col">${groups.map((g) => `
     <section class="hp-group"${g.who ? ` data-who="${g.who}"` : ''}>
       <h3>${g.title}${g.tag ? `<small>${g.tag}</small>` : ''}</h3>
-      ${g.rows.map(([keys, text, mode]) => `
-      <div class="hp-row${mode ? ` ${mode}` : ''}${text ? '' : ' note'}">
+      ${g.rows.map(([keys, text, mode, view]) => `
+      <div class="hp-row${mode ? ` ${mode}` : ''}${text ? '' : ' note'}"${view ? ` data-view="${view}"` : ''}>
         <div class="hp-keys">${keys.map(keyHtml).join('')}</div>${text ? `<div class="hp-text">${text}</div>` : ''}
       </div>`).join('')}
     </section>`).join('')}</div>`).join('');
@@ -146,6 +147,9 @@ export function createHelp() {
     const who = CASTERS.has(cls) ? 'caster' : 'fighter';
     root.dataset.who = cls ? who : '';
     root.querySelector('#help-class').textContent = cls ? `playing ${PRETTY[cls] || cls}` : '';
+    // The arrows' row for the view you are in is lit and the other's dimmed, as the class rows are.
+    const view = d.view.third ? 'third' : 'first';
+    root.querySelectorAll('[data-view]').forEach((r) => { r.style.opacity = r.dataset.view === view ? '' : '0.38'; });
     const rows = who === 'fighter' ? skillRows(d.game) : '';
     if (rows) {
       const group = root.querySelector('.hp-group[data-who="fighter"]');

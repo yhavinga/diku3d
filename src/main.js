@@ -430,11 +430,35 @@ const CLIMATE = {
  * arrow keys, with the two vertical ones where a keyboard already puts "further
  * up" and "further down". WASD is taken by the body and every letter that would
  * read as a compass point is spoken for: E examines, W walks, S walks back.
+ * Over the shoulder the four arrows walk as WASD does (player.js `walking`),
+ * the way they do in most games, and only PgUp and PgDn are the mud's.
  */
 const ARROW_DIR = {
   ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3,
   PageUp: 4, PageDown: 5,
 };
+
+/**
+ * The view (V) is kept in the browser as the options are (options.js), under
+ * a key of its own: a new player starts over the shoulder, and one who chose
+ * first person comes back in it.
+ */
+const VIEW_STORE = 'diku3d.view';
+function keptView() {
+  try {
+    return window.localStorage.getItem(VIEW_STORE) !== 'first';
+  } catch (error) {
+    console.warn('main.js: no view kept in this browser, starting over the shoulder', error);
+    return true;
+  }
+}
+function keepView(third) {
+  try {
+    window.localStorage.setItem(VIEW_STORE, third ? 'third' : 'first');
+  } catch (error) {
+    console.warn('main.js: the view cannot be kept in this browser', error);
+  }
+}
 
 /**
  * Which way to be facing after stepping north, east, south or west. The camera
@@ -1402,7 +1426,11 @@ async function boot() {
       hud.toast(`${next} · ${quality.preset.fps || 'uncapped'} fps`);
     }
     if (event.code === 'KeyN') { player.noclip = !player.noclip; hud.setNoclip(player.noclip); hud.toast(player.noclip ? 'noclip on' : 'noclip off'); }
-    if (event.code === 'KeyV') hud.toast(view.toggle() ? 'over the shoulder' : 'first person');
+    if (event.code === 'KeyV') {
+      const third = view.toggle();
+      keepView(third);
+      hud.toast(third ? 'over the shoulder' : 'first person');
+    }
     if (event.code === 'KeyM') hud.toast(audio.toggleMute() ? 'sound off' : 'sound on');
     if (event.code === 'KeyG') {
       game.forceLocks();
@@ -1411,15 +1439,16 @@ async function boot() {
     const dir = ARROW_DIR[event.code];
     if (dir !== undefined && !options.open) {
       event.preventDefault();
-      step(dir);
+      if (dir >= 4 || !view.third) step(dir);
     }
   });
 
   /**
    * Walk an exit the way you would in the mud: north is north, not whichever
    * way you happen to be facing. WASD is the body and this is the map -- the
-   * arrows take the exit itself, so a stair, an archway and a routed street all
-   * behave the same, and you can cross the town as fast as you can read.
+   * arrows (through your own eyes) and PgUp and PgDn take the exit itself, so
+   * a stair, an archway and a routed street all behave the same, and you can
+   * cross the town as fast as you can read.
    *
    * The refusals are the mud's own, because they carry information the geometry
    * does not: an exit that leads off the loaded set is a real exit in Midgaard
@@ -1856,7 +1885,7 @@ async function boot() {
   let pressing = 0;
   function walkIntoCrossing(dt) {
     if (pressing < 0) { pressing = Math.min(0, pressing + dt); return; }
-    if (!player.keys.has('KeyW')) { pressing = 0; return; }
+    if (!player.walking('forward')) { pressing = 0; return; }
     const gate = crossingAt(player.position.x, player.position.y - 1.72, player.position.z, player.body.heading());
     if (gate) {
       pressing += dt;
@@ -2022,6 +2051,8 @@ async function boot() {
       // Unless something has crossed into another zone already (a harness's
       // goto): then where the start room stood is somewhere else's floor.
       if (zone === startZone) player.spawn(startInfo.center.x, startInfo.center.y, startInfo.center.z, yaw);
+      // Over the shoulder, unless this browser chose first person (V).
+      view.set(keptView());
       state.roomVnum = null;
       built.horizon?.settle(camera.position);
       if (fromSave) game.loadSave();
@@ -2286,6 +2317,7 @@ async function boot() {
     if (fadeTimer > 0) fadeTimer -= dt;
 
     options.update(dt);
+    hud.setArrowsWalk(view.third);
     hud.update(dt, camera, state.roomVnum, player.body.eye(bodyEye));
     if (state.showStats) {
       const info = renderer.info.render;
@@ -2727,6 +2759,9 @@ async function boot() {
     },
 
     look(x, y, z, yaw = 0, pitch = 0) {
+      // The eye goes where it is asked: every frame a judge or a harness takes
+      // this way (shoot, goto, the scripts) is framed through your own eyes.
+      if (view.third) view.set(false);
       player.spawn(x, y, z, yaw);
       camera.rotation.set(pitch, yaw, 0);
       state.roomVnum = null;
@@ -2740,6 +2775,8 @@ async function boot() {
     goto(vnum, yaw = 0, pitch = 0) {
       const target = plan.zoneOf(vnum);
       if (!target) return `room ${vnum} is not in the world`;
+      // Through your own eyes, as look() is, the crossing included.
+      if (view.third) view.set(false);
       if (target !== zone) {
         return crossTo(vnum, { yaw }).then(() => {
           camera.rotation.set(pitch, yaw, 0);

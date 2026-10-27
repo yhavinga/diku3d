@@ -236,6 +236,9 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
     eye: (out) => out.copy(player.position),
     heading: () => heading,
     forward: (out) => camera.getWorldDirection(out),
+    // A spawn (player.js): the body arrives facing `yaw`, and the jump is not
+    // a walk for the legs or the facing to follow.
+    face: (yaw) => { heading = yaw; lastValid = false; },
   };
 
   /** The figure for the character as it is now, built again when its looks change. */
@@ -664,6 +667,7 @@ export function createView({ camera, player, scene, getBuilt, library, world, ga
 
   function set(on) {
     third = !!on;
+    player.arrowsWalk = third;
     if (third) {
       heading = camera.rotation.y;
       arm = 0;

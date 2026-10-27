@@ -120,13 +120,15 @@ and south over the bridge off the Dump.
 | | |
 |---|---|
 | `W A S D` | walk, `shift` to run, `space` to jump |
-| arrow keys | take the exit north, east, south or west, and turn to face that way — the mud's own navigation, so north is north whichever way you were looking. Your pace carries over: step east while walking and you keep the same speed, now heading east |
+| arrow keys | over the shoulder: walk forward, back and sideways, as `W S A D` do; the mouse turns |
+| arrow keys | through your own eyes: take the exit north, east, south or west, and turn to face that way — the mud's own navigation, so north is north whichever way you were looking. Your pace carries over: step east while walking and you keep the same speed, now heading east |
 | `page up` / `page down` | take the exit up or down, leaving you looking where you were |
 | mouse | look, `E` to examine, open, unlock (with the key you carry), drink, search a body or pick up; `E` again closes it |
 | `1` – `4` | dawn, noon, dusk, night |
 | `P` | cycle quality: low, medium, high, max (also grass density and reach) |
 | `F` | frame rate, draw calls, triangles, GPU milliseconds, and the room's vnum, sector and build statistics |
-| `V` | noclip |
+| `V` | view: over the shoulder of your figure (where a new player starts) or through your own eyes; the browser keeps the choice |
+| `N` | noclip |
 | `M` | sound |
 | `G` | force every lock in the world |
 | left mouse | attack what you are facing |

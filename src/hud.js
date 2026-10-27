@@ -342,23 +342,26 @@ const KEY_OF = {
 };
 const AT_THE_PROMPT = new Set(['score', 'consider', 'flee', 'wimpy', 'sleep', 'sacrifice', 'save', 'exits',
   'eat', 'drink', 'value', 'order', 'bug', 'idea', 'typo']);
+/** Over the shoulder the arrows walk (main.js), and a compass point has no key of its own. */
+const COMPASS = new Set(['north', 'east', 'south', 'west']);
 
 /** The key for a command the mud quotes, or null when the quote is not a command. */
-export function keyFor(command) {
+export function keyFor(command, arrowsWalk = false) {
   const [word, ...rest] = command.toLowerCase().split(/\s+/);
   if (word === 'look') return rest.length ? 'E' : 'Tab';
   if (word === 'help') return rest.length ? 'Enter' : '?';
+  if (arrowsWalk && COMPASS.has(word)) return 'Enter';
   // The pet shop's sign: Merc's pets are not this game's, and B trades with a keeper.
   if (word === 'buy' && rest.includes('<pet>')) return 'Enter';
   return KEY_OF[word] ?? (AT_THE_PROMPT.has(word) ? 'Enter' : null);
 }
 
 /** `text` into `el`, a key after each command it quotes. True when there was one. */
-function writeWithKeys(el, text) {
+function writeWithKeys(el, text, arrowsWalk) {
   el.textContent = '';
   let last = 0;
   for (const m of text.matchAll(/'([A-Za-z][A-Za-z <>]{0,28})'/g)) {
-    const key = keyFor(m[1].trim());
+    const key = keyFor(m[1].trim(), arrowsWalk);
     if (!key) continue;
     const end = m.index + m[0].length;
     const kbd = document.createElement('kbd');
@@ -411,6 +414,23 @@ export class Hud {
     this.compass = new CompassRose(root.querySelector('#compass'), this.dpr);
     this.currentVnum = null;
     this.toastTimer = 0;
+    this.arrowsWalk = false;
+  }
+
+  /** Over the shoulder or not (main.js, every frame): the keys beside the prose follow the view. */
+  setArrowsWalk(on) {
+    if (this.arrowsWalk === on) return;
+    this.arrowsWalk = on;
+    if (this.room) this.writeProse();
+  }
+
+  /** The room's prose and what it tells you to do, each quoted command with its key. */
+  writeProse() {
+    const prose = this.room.description.replace(/\s*\n\s*/g, ' ').trim();
+    writeWithKeys(this.el.desc, prose, this.arrowsWalk);
+    // Folded, the prose keeps its opening lines -- and what it tells you to
+    // do, which in the temple and Mud School is the end of it.
+    writeWithKeys(this.el.todo, instructions(prose).join(' '), this.arrowsWalk);
   }
 
   /** Another zone's grid for the map, and its gates out (main.js crossTo). */
@@ -432,11 +452,7 @@ export class Hud {
     // growing under the log for a second and a half, and any still taken
     // before the typing caught up -- or with the loop halted -- showed prose
     // cut off mid-word: "...and you lo".
-    const prose = room.description.replace(/\s*\n\s*/g, ' ').trim();
-    writeWithKeys(this.el.desc, prose);
-    // Folded, the prose keeps its opening lines -- and what it tells you to
-    // do, which in the temple and Mud School is the end of it.
-    writeWithKeys(this.el.todo, instructions(prose).join(' '));
+    this.writeProse();
     this.el.desc.classList.remove('reveal');
     void this.el.desc.offsetWidth;
     this.el.desc.classList.add('reveal');
@@ -493,7 +509,7 @@ export class Hud {
 
   showExamine(target) {
     this.el.examineTitle.textContent = target.title;
-    writeWithKeys(this.el.examineBody, (target.body || '').replace(/\s*\n\s*/g, ' ').trim() || '(nothing more to see)');
+    writeWithKeys(this.el.examineBody, (target.body || '').replace(/\s*\n\s*/g, ' ').trim() || '(nothing more to see)', this.arrowsWalk);
     this.el.examine.classList.add('visible');
   }
 

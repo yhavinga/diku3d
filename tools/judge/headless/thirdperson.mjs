@@ -116,8 +116,9 @@ const sweepPlace = async ({ place, headings, pitches, frame, limits }) => {
   // A place with a mobile that starts the fight (the dracolich) is held to the view: nobody walks at the camera.
   if (place.calm) for (const sl of d.game.mobs) sl.proto.act &= ~32;
   d.applyTime(place.time || 'noon');
-  d.view.set(true);
+  // goto is through your own eyes (main.js `look`): over the shoulder after it.
   d.goto(vnum, 0, -0.1);
+  d.view.set(true);
   await wait(900);
   const c = d.built.rooms.get(vnum).center;
   const EYE = 1.72;

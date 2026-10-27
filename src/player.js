@@ -80,6 +80,11 @@ const passable = (c) => (c.whenOpen ? !c.door.open : c.door.open);
 // of the NEGATED offset -- the sign that has shipped wrong twice before.
 const yawAlong = (a, b) => Math.atan2(-(b.x - a.x), -(b.z - a.z));
 
+/** The letter and the arrow for each way of walking; the arrow counts only with `arrowsWalk`. */
+const WALK_KEYS = {
+  forward: ['KeyW', 'ArrowUp'], back: ['KeyS', 'ArrowDown'], left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'],
+};
+
 export class Player {
   constructor(camera, domElement, world) {
     this.camera = camera;
@@ -102,6 +107,9 @@ export class Player {
     this.onGround = false;
     this.noclip = false;
     this.keys = new Set();
+    // Over the shoulder the arrows walk as WASD does (view.js sets this);
+    // through your own eyes they are the mud's compass in main.js.
+    this.arrowsWalk = false;
     this.bob = 0;
     this.bobPhase = 0;
     this.onFootstep = null;
@@ -164,12 +172,20 @@ export class Player {
     if (pending && pending.catch) pending.catch(() => {});
   }
 
+  /** Is a key held that walks this way ('forward', 'back', 'left', 'right')? */
+  walking(way) {
+    const [key, arrow] = WALK_KEYS[way];
+    return this.keys.has(key) || (this.arrowsWalk && this.keys.has(arrow));
+  }
+
   spawn(x, y, z, yaw = 0) {
     this._glide = null;
     this.position.set(x, y + EYE, z);
     this.velocity.set(0, 0, 0);
     this.camera.position.copy(this.position);
     this.camera.rotation.set(0, yaw, 0);
+    // Over the shoulder the body has a heading of its own, and arrives facing the same way.
+    this.body.face?.(yaw);
     this._shakeRoll = 0; // the tilt that was on is gone with the old rotation
     this.camera.updateMatrixWorld(true);
   }
@@ -439,15 +455,15 @@ export class Player {
     const sprint = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
     const speed = sprint ? SPRINT : WALK;
 
-    // WASD only. The arrows used to be aliases for these, and they are now the
-    // mud's compass navigation in main.js -- so leaving them here meant one
-    // press both stepped you into the next room *and* shoved you walking, which
-    // is a change in velocity you never asked for.
+    // WASD, and the arrows only over the shoulder. Through your own eyes the
+    // arrows are the mud's compass navigation in main.js -- so walking on them
+    // too meant one press both stepped you into the next room *and* shoved you
+    // walking, which is a change in velocity you never asked for.
     let inputX = 0; let inputZ = 0;
-    if (this.keys.has('KeyW')) inputZ += 1;
-    if (this.keys.has('KeyS')) inputZ -= 1;
-    if (this.keys.has('KeyD')) inputX += 1;
-    if (this.keys.has('KeyA')) inputX -= 1;
+    if (this.walking('forward')) inputZ += 1;
+    if (this.walking('back')) inputZ -= 1;
+    if (this.walking('right')) inputX += 1;
+    if (this.walking('left')) inputX -= 1;
     const length = Math.hypot(inputX, inputZ) || 1;
     inputX /= length; inputZ /= length;
 
