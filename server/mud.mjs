@@ -192,6 +192,25 @@ export async function startMud({
   const accounts = createAccounts(dataDir);
   const notes = createNotes(dataDir);
   const reports = createReports(dataDir);
+  /**
+   * bug, idea and typo write to disk, and an alias repeats a command up to
+   * twenty times a line: ten reports an hour per player are kept. False when
+   * the report was over that and not kept.
+   */
+  const REPORTS_PER_HOUR = 10;
+  const reported = new Map();
+  function report(ch, kind, text) {
+    const now = Date.now();
+    const recent = (reported.get(ch.name) || []).filter((t) => now - t < 3600e3);
+    reported.set(ch.name, recent);
+    if (recent.length >= REPORTS_PER_HOUR) {
+      log(`${ch.name}: over ${REPORTS_PER_HOUR} reports an hour, ${kind} not kept`);
+      return false;
+    }
+    recent.push(now);
+    reports.add({ kind, who: ch.name, room: ch.roomVnum, date: new Date(now).toISOString(), text });
+    return true;
+  }
   // The ban list and the wizlock, kept across reboots; `wizlock` is only the first boot's.
   const site = createSite(dataDir, { wizlock });
   const sessions = new Set();
@@ -217,7 +236,7 @@ export async function startMud({
     allow: (ch, arg) => allow(ch, arg),
     snoop: (ch, name) => snoop(ch, name),
     notes,
-    report: (ch, kind, text) => reports.add({ kind, who: ch.name, room: ch.roomVnum, date: new Date().toISOString(), text }),
+    report,
     log: (ch, name) => toggleLog(ch, name),
     // The page opens the dashboard on this; what it shows is asked for apart (dash.mjs).
     dashboard: (ch) => game.tell(ch, { kind: 'dashboard' }),

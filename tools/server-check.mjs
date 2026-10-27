@@ -404,6 +404,21 @@ console.log('\nBUGS, IDEAS AND TYPOS');
   a.say('bug');
   await expect(a, /^Ok\.  Thanks\.$/, 'an empty report gets the same answer', m);
   check(filed().length === kept, '...and keeps nothing, as append_file returns on an empty string', `${kept} before, ${filed().length} after`);
+
+  // Every report goes to disk, and an alias repeats a command up to twenty
+  // times a line: ten an hour per player are kept, and the eleventh is told so.
+  const fromArwen = () => filed().filter((r) => r.who === 'Arwen').length;
+  for (let i = fromArwen(); i < 10; i++) a.say(`bug number ${i}`);
+  await pause(600);
+  check(fromArwen() === 10, 'ten reports in an hour from one player are kept', `${fromArwen()} from Arwen`);
+  m = a.mark();
+  a.say('bug one too many');
+  await expect(a, /^You have sent enough reports for now; try again in a while\.$/, 'the eleventh in the hour is refused, and the player is told', m);
+  check(fromArwen() === 10 && !filed().some((r) => r.text === 'one too many'), '...and not kept', `${fromArwen()} from Arwen`);
+  m = b.mark();
+  b.say('bug another player');
+  await expect(b, /^Ok\.  Thanks\.$/, "another player's reports are still taken", m);
+  check(filed().some((r) => r.who === 'Boromir' && r.text === 'another player'), '...and kept');
 }
 
 console.log('\nNOTES, SNOOPING, SETTING, BANNING');

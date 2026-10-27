@@ -801,7 +801,8 @@ export function installInterp(k) {
    * nowhere to, and answers as it always did.
    */
   const filed = (kind) => (arg) => {
-    if (arg && k.server) k.server.report(state, kind, arg);
+    // A server keeps only so many a player an hour (mud.mjs), and says so rather than drop one quietly.
+    if (arg && k.server && !k.server.report(state, kind, arg)) return send('You have sent enough reports for now; try again in a while.');
     send('Ok.  Thanks.');
   };
   const alone = 'There is nobody else in this world to hear you.';

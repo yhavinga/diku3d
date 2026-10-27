@@ -248,7 +248,7 @@ then choose "connect to a server" on the title screen and give
 channels, shout, follow and group, socials, and Merc's player-killing rules
 with KILLER and THIEF flags. `bug`, `idea` and `typo` are kept, as Merc's
 append_file kept them, as JSON lines in `reports.jsonl` in the server's data
-directory. The owner becomes implementor with
+directory, ten an hour from any one player. The owner becomes implementor with
 `node server/main.mjs --make-implementor <name>`, which asks for the password
 on the terminal. Playing alone stays the default and needs no server.
 `node tools/server-check.mjs` logs four players in over real sockets.
