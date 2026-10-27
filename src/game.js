@@ -30,7 +30,7 @@ import { createNav } from './nav.js';
 import { openAirIn, shellAttrs, shaftsOf, shaftAt, sunkRivers, RIVER_DROP, greatCavern } from './shells.js';
 import { BESIDE } from './layout.js';
 import {
-  COND, OBJ_VNUM, ITEM_TAKE, LEVEL_IMMORTAL, createMoney, makeObject, hasAff, canSee,
+  COND, OBJ_VNUM, ITEM_TAKE, LEVEL_IMMORTAL, PLR, createMoney, makeObject, hasAff, canSee,
   objWeight, objNumber,
 } from './rules/handler.js';
 import { installRules } from './rules/index.js';
@@ -1985,6 +1985,7 @@ export function createGame({
       // raw_kill's count, after everyone's share was worked out on the old one.
       info.killed += 1;
       killTable[clamp(mob.level, 0, MAX_LEVEL - 1)].killed += 1;
+      withPlayer(pcOf(killer), () => autoLoot(corpse));
     }
 
     let firstRoad = false;
@@ -2007,6 +2008,31 @@ export function createGame({
     // sells cannot beat the guildmasters or the executioner, so the rest of
     // that list is the horizon rather than the goal.
     if (firstRoad) emit({ kind: 'ending', text: 'The road out of Midgaard is open.', ...(multi ? { pc: null, all: true } : null) });
+  }
+
+  /**
+   * fight.c, after raw_kill in damage(): `get all corpse`, then `sacrifice
+   * corpse`, for a player who asked for either with `config`. Done on the
+   * corpse just made, through get's and sacrifice's own paths (limits,
+   * replies), not through the command line: its "corpse" is the nearest one,
+   * and Merc's was the newest, which is the only one that cannot be wrong
+   * when an earlier kill's corpse still lies closer to you.
+   */
+  function autoLoot(corpse) {
+    if (!(state.act & (PLR.AUTOLOOT | PLR.AUTOSAC))) return;
+    // What `get` reaches from where you stand (interp.js roomObjects).
+    if (corpse.inRoom !== state.roomVnum && Math.hypot(corpse.at.x - position.x, corpse.at.z - position.z) >= 5) return;
+    if (state.act & PLR.AUTOLOOT) {
+      if (!corpse.contains.length) emit({ kind: 'out', text: 'I see nothing in the corpse.' });
+      for (const obj of corpse.contains.slice()) {
+        const r = game.getFrom(obj, corpse);
+        if (!r.ok) emit({ kind: 'out', text: r.text });
+      }
+    }
+    if (state.act & PLR.AUTOSAC) {
+      const r = game.sacrifice(corpse);
+      if (!r.ok) emit({ kind: 'out', text: r.text });
+    }
   }
 
   /** Merc's death penalty: half the way back to the level you were. */
@@ -2054,8 +2080,21 @@ export function createGame({
     order(slot, { kind: 'dead', delay: (ctx.now ?? 0) + 0.08 });
   }
 
-  /** The corpse crumbling to dust: the body sinks and goes. */
+  /** Bodies whose fall has not begun yet but whose corpse is already taken away: [{ slot, until, dying }]. */
+  const vanishing = [];
+  /**
+   * The corpse crumbling to dust: the body sinks and goes. One whose death has
+   * not started (the blow that killed it is still landing, or the page was told
+   * of the death and of its sacrifice together) would sink and fade standing
+   * up, its death clip never played; it goes after the fall has begun.
+   */
   function removeBody(slot) {
+    const dying = slot.order;
+    if (dying && dying.kind === 'dead' && dying.delay > 0) {
+      // The page is told again every tick that the body is to go.
+      if (!vanishing.some((v) => v.slot === slot)) vanishing.push({ slot, dying, until: ctx.clock + dying.delay + 0.25 });
+      return;
+    }
     order(slot, { kind: 'gone' });
   }
 
@@ -2661,6 +2700,13 @@ export function createGame({
   function moveMobs(dt) {
     // Every player as a target: feet on the ground, not the eye.
     for (const pc of players) pcFeet(pc);
+    for (let i = vanishing.length - 1; i >= 0; i--) {
+      const { slot, dying, until } = vanishing[i];
+      if (ctx.clock < until) continue;
+      vanishing.splice(i, 1);
+      // Not if it has been put on its feet again (an area reset) in the meantime.
+      if (slot.order === dying) order(slot, { kind: 'gone' });
+    }
     for (const slot of mobs) {
       if (slot.dead) continue;
       if (!slot.here) {

@@ -19,9 +19,10 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-import { parseArea, buildWorld, SECTOR, ROOM_INDOORS } from '../src/are.js';
+import { parseArea, buildWorld, SECTOR, ROOM_INDOORS, ITEM } from '../src/are.js';
 import { layoutWorld } from '../src/layout.js';
 import { createGame, MERC, POS, WEAR } from '../src/game.js';
+import { makeObject } from '../src/rules/handler.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SAMPLES = Number(process.argv[2] || 200);
@@ -759,6 +760,135 @@ console.log('\nREPLACING WHAT YOU WEAR');
   check(toRoom.length === 1 && toRoom[0].text === `Zin stops using ${dagger.name}.` && toRoom[0].except.includes(wearer.id),
     'the room is told "$n stops using $p." and the wearer is left out of it',
     toRoom.map((e) => e.text).join(' | ') || 'nothing said to the room');
+}
+
+// fight.c, at the end of damage(): a player who killed an NPC does `get all
+// corpse` for PLR_AUTOLOOT and then `sacrifice corpse` for PLR_AUTOSAC.
+console.log('\nAUTOLOOT AND AUTOSAC');
+{
+  const PLR = { AUTOLOOT: 16, AUTOSAC: 32 };
+  const DAGGER = 3020;
+  const GOLD = 7;
+  /**
+   * Kill the softest mobile in the world, which carries a dagger and gold,
+   * with `act` set on the killer. `full`: nothing more fits in the killer's
+   * pack. `old`: a corpse already lies nearer to the killer than the mobile's
+   * will, which is where the command line's "corpse" would look first.
+   */
+  function kill({ act = 0, full = false, old = false } = {}) {
+    const game = createGame({ world, layout, built, seed: 1234, classIndex: 3 });
+    const prey = game.mobs
+      .filter((slot) => slot.proto.level >= 1 && slot.proto.level <= 2)
+      .sort((a, b) => a.proto.level - b.proto.level)[0];
+    const at = { x: prey.pos.x + 2, y: prey.pos.y, z: prey.pos.z };
+    const look = { x: prey.pos.x - at.x, y: 0, z: prey.pos.z - at.z };
+    game.grace(0);
+    game.update(0.016, at, look);
+    game.state.level = 30;          // so that the first round is enough
+    game.state.act |= act;
+    const dagger = () => MERC.createObject(world.objProtos.get(DAGGER), 0);
+    const loot = dagger();
+    prey.instance.inventory.push(loot);
+    prey.instance.gold = GOLD;
+    if (full) while (game.state.inventory.length < MERC.canCarryN(game.state)) game.state.inventory.push(dagger());
+    let decoy = null;
+    if (old) {
+      decoy = makeObject({
+        vnum: 10, name: 'corpse of an old rat', keywords: 'corpse', itemType: ITEM.CORPSE_NPC, wearFlags: 1,
+        values: [0, 0, 0, 1], weight: 100, timer: 3, inRoom: game.state.roomVnum,
+        at: { x: at.x - 0.3, y: at.y - 1.72, z: at.z },
+      });
+      game.ground.push(decoy);
+    }
+    const heard = [];
+    game.listen((e) => heard.push(e));
+    const gold = game.state.gold;
+    game.attack();
+    for (let t = 0; !prey.dead && t < 60; t += 0.05) game.update(0.05, at, look);
+    const corpse = prey.corpse;
+    const orderAtDeath = prey.order && prey.order.kind;
+    for (let t = 0; t < 1; t += 0.05) game.update(0.05, at, look);
+    return {
+      game, prey, loot, corpse, heard, goldGained: game.state.gold - gold, orderAtDeath, orderLater: prey.order && prey.order.kind,
+
+      carries: game.state.inventory.includes(loot),
+      onGround: game.ground.includes(corpse),
+      says: (re) => heard.filter((e) => e.text && re.test(e.text)).map((e) => e.text),
+    };
+  }
+  const SACRIFICE = /^God gives you one gold coin for your sacrifice\.$/;
+  const GET = /^You get a dagger from corpse of /;
+
+  const neither = kill();
+  check(neither.prey.dead && neither.corpse, 'the mobile dies and leaves a corpse (the setup)');
+  check(!neither.carries && neither.onGround && neither.corpse.contains.includes(neither.loot) && neither.goldGained === 0
+    && !neither.says(SACRIFICE).length && !neither.says(GET).length,
+  'with neither flag the corpse is left as it was, loot inside', `${neither.corpse.contains.length} in it`);
+
+  const loot = kill({ act: PLR.AUTOLOOT });
+  check(loot.carries && loot.goldGained === GOLD && loot.corpse.contains.length === 0 && loot.onGround,
+    'autoloot: everything in the corpse is in the killer\'s hands and the corpse stays',
+    `carries ${loot.carries}, +${loot.goldGained} gold, ${loot.corpse.contains.length} left inside`);
+  check(loot.says(GET).length === 1, 'autoloot: get\'s own reply is sent', loot.says(GET).join(' | '));
+  check(!loot.says(SACRIFICE).length, 'autoloot alone sacrifices nothing');
+
+  const sac = kill({ act: PLR.AUTOSAC });
+  check(!sac.onGround && sac.says(SACRIFICE).length === 1 && sac.goldGained === 1 && !sac.carries,
+    'autosac: the corpse is gone, and the sacrifice reply and its coin came', 
+    `on the ground ${sac.onGround}, said ${sac.says(SACRIFICE).length}x, +${sac.goldGained} gold`);
+
+  // The body falls before it sinks: a sacrifice in the frame of the kill must not
+  // cut the fall off (the body would fade standing, its death clip never started).
+  check(sac.orderAtDeath === 'dead' && sac.orderLater === 'gone',
+    'autosac: the body is still to fall when the corpse is sacrificed, and goes after',
+    `${sac.orderAtDeath} at the kill, ${sac.orderLater} a second on`);
+
+  const both = kill({ act: PLR.AUTOLOOT | PLR.AUTOSAC });
+  check(both.carries && both.goldGained === GOLD + 1 && !both.onGround && both.says(SACRIFICE).length === 1,
+    'both: looted first, then the empty corpse is sacrificed',
+    `carries ${both.carries}, +${both.goldGained} gold, on the ground ${both.onGround}`);
+  const order = both.heard.filter((e) => e.text && (GET.test(e.text) || SACRIFICE.test(e.text))).map((e) => (GET.test(e.text) ? 'get' : 'sacrifice'));
+  check(order.join() === 'get,sacrifice', 'both: in that order', order.join());
+
+  const full = kill({ act: PLR.AUTOLOOT, full: true });
+  check(!full.carries && full.corpse.contains.includes(full.loot) && full.goldGained === GOLD
+    && full.says(/can't carry that many items/).length >= 1,
+  'autoloot: a full pack gets get\'s own refusal, and the coins still come',
+  full.says(/can't carry/).join(' | ') || 'no refusal said');
+
+  const old = kill({ act: PLR.AUTOLOOT, old: true });
+  check(old.carries && old.corpse.contains.length === 0,
+    'autoloot takes from the corpse just made, not from an older one lying nearer', `carries ${old.carries}`);
+
+  // The server runs the same death path, a player at a time: the killer's flags
+  // decide, and it is the killer's screen the replies go to.
+  const mud = createGame({ world, layout, built, seed: 1234, classIndex: 3, server: {} });
+  const player = (name, id) => {
+    const ch = MERC.createCharacter(3, { level: 30, rng: new MERC.Rng(id) });
+    ch.name = name;
+    return mud.addPlayer(ch, { id });
+  };
+  const killer = player('Zin', 1);
+  const bystander = player('Ark', 2);
+  const target = mud.mobs
+    .filter((slot) => slot.proto.level >= 1 && slot.proto.level <= 2)
+    .sort((a, b) => a.proto.level - b.proto.level)[0];
+  for (const pc of [killer, bystander]) mud.placePlayer(pc, target.roomVnum, { quiet: true });
+  killer.position.x = target.pos.x + 2; killer.position.y = target.pos.y + 1.72; killer.position.z = target.pos.z;
+  killer.facing.x = -1; killer.facing.z = 0;
+  const sent = [];
+  mud.listen((e) => sent.push(e));
+  for (let i = 0; i < 3; i++) mud.tick(0.05);
+  killer.ch.act |= PLR.AUTOLOOT | PLR.AUTOSAC;
+  target.instance.gold = GOLD;
+  mud.withPlayer(killer, () => mud.attack());
+  for (let t = 0; !target.dead && t < 60; t += 0.05) mud.tick(0.05);
+  const got = sent.filter((e) => e.kind === 'gold' || e.kind === 'sacrifice');
+  check(target.dead && killer.ch.gold >= GOLD + 1 && !mud.ground.includes(target.corpse) && bystander.ch.gold === 0,
+    'on a server the killer\'s flags loot and sacrifice, and nobody else\'s purse moves',
+    `killer ${killer.ch.gold} gold, bystander ${bystander.ch.gold}`);
+  check(got.length === 2 && got.every((e) => e.pc === killer.id),
+    'and the replies are addressed to the killer alone', got.map((e) => `${e.kind} -> pc ${e.pc}`).join(', '));
 }
 
 // A duel that must not be winnable, run against the shell's own rules bundle.
