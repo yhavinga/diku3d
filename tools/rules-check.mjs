@@ -76,6 +76,29 @@ console.log('\nTHE COMMAND LINE');
   t.game.state.position = POS.STANDING;
 }
 
+// ------------------------------------------------------------ db.c ------
+console.log('\nAREAS, IN TWO COLUMNS');
+{
+  // do_areas: iAreaHalf = (top_area + 1) / 2, the first half down the left and
+  // the rest down the right, each name `%-39s`; with an odd count the last
+  // right-hand cell is NULL and prints as "".
+  const columns = (names) => {
+    const half = Math.ceil(names.length / 2);
+    return Array.from({ length: half }, (_, i) => `${names[i].padEnd(39)}${(names[i + half] || '').padEnd(39)}`);
+  };
+  for (const drop of [0, 1]) {
+    const t = fresh();
+    t.stand(3001);
+    for (let i = 0; i < drop; i++) t.game.areas.pop();
+    const names = t.game.areas.map((a) => a.name);
+    t.say('areas');
+    const want = columns(names);
+    check(t.said.length === Math.ceil(names.length / 2), `areas sends ceil(n / 2) lines, for n = ${names.length}`, `${t.said.length} lines`);
+    check(JSON.stringify(t.said) === JSON.stringify(want), '...each two names padded to 39, the first half on the left',
+      t.said.find((line, i) => line !== want[i]) ?? 'all match');
+  }
+}
+
 // ------------------------------------------------------------ doors ------
 console.log('\nDOORS AND KEYS');
 {

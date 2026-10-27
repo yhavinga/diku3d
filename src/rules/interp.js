@@ -386,6 +386,18 @@ export function installInterp(k) {
     reply(game.practice(skill ? skill.key : '-'));
   }
 
+  /**
+   * db.c: do_areas -- no header, two names to a line (`%-39s%-39s`): the first
+   * half of the list down the left, the rest down the right. With an odd count
+   * the last right-hand cell is NULL in C and prints as an empty string.
+   */
+  function doAreas() {
+    const half = Math.ceil(game.areas.length / 2);
+    for (let i = 0; i < half; i++) {
+      send(`${game.areas[i].name.padEnd(39)}${(game.areas[i + half]?.name ?? '').padEnd(39)}`);
+    }
+  }
+
   function doWimpy(arg) {
     const wimpy = arg ? Number.parseInt(arg, 10) : MERC.idiv(state.maxHit, 5);
     if (!Number.isFinite(wimpy) || wimpy < 0) return send('Your courage exceeds your wisdom.');
@@ -750,7 +762,7 @@ export function installInterp(k) {
     ['order', notHere('You have no followers here.'), P.RESTING],
     ['rest', () => reply(game.sit()), P.RESTING], ['stand', () => reply(game.stand()), P.SLEEPING],
     ['tell', notHere(alone), P.RESTING], ['wield', doWear, P.RESTING],
-    ['areas', () => { send('Loaded areas:'); for (const a of game.areas) send(`  ${a.name}`); }, P.DEAD],
+    ['areas', doAreas, P.DEAD],
     ['bug', notHere('Ok.  Thanks.'), P.DEAD],
     ['commands', () => { for (let i = 0; i < commands.length; i += 6) send(commands.slice(i, i + 6).map((c) => c[0].padEnd(12)).join('')); }, P.DEAD],
     ['compare', doCompare, P.RESTING], ['consider', doConsider, P.RESTING],
