@@ -17,6 +17,7 @@ import { parseArea, buildWorld, SECTOR, ROOM_INDOORS, ITEM, EX_CLOSED, EX_LOCKED
 import { layoutWorld } from '../src/layout.js';
 import { createGame, createCharacter, POS, WEAR } from '../src/game.js';
 import { createNav } from '../src/nav.js';
+import { AFF } from '../src/rules/handler.js';
 import { installSave, serialize } from '../src/save.js';
 import { EXTRA_SOCIALS } from '../src/rules/socials-extra.js';
 
@@ -131,6 +132,94 @@ console.log('\nA SOCIAL OF OUR OWN');
     const listed = t.say('socials').split(/[ |]+/).filter((w) => w === 'smile' || w === 'rofl');
     check(listed.join(' ') === 'smile rofl', 'and the list names each social once, ours after Merc\'s', listed.join(' '));
   } finally { EXTRA_SOCIALS.pop(); }
+}
+
+// ------------------------------------------------------------- scan ------
+console.log('\nSCAN');
+{
+  const t = fresh();
+  t.stand(3005);                                  // the Temple Square
+  // One mobile of each of the first dozen kinds, and then nobody anywhere: the
+  // rest are sent to a room that is on no line from here, so each case puts
+  // exactly the ones it means. Nothing runs between that and the commands.
+  const kinds = [];
+  for (const slot of t.game.mobs) if (!kinds.some((k) => k.proto.vnum === slot.proto.vnum)) kinds.push(slot);
+  const spare = kinds.slice(0, 12);
+  for (const slot of t.game.mobs) slot.roomVnum = 0;
+  const put = (i, vnum) => { spare[i].roomVnum = vnum; return spare[i].proto.short; };
+  const names = (list) => list.join(' | ');
+
+  const north1 = put(0, 3001), north2 = put(1, 3054);   // north: the Temple, the Altar behind it
+  const east1 = put(2, 3006);                           // east: the Inn's entrance
+  const south1 = put(3, 3014), south2 = put(4, 3025);   // south: Market Square, the Common Square
+  put(5, 3030);                                         // three rooms south: out of reach
+  put(6, 3013);                                         // Market Square's west: not in a line from here
+  put(7, 3005);                                         // here: not scan's business
+  let got = t.say('scan');
+  check(got === names([`North (1): ${north1}`, `North (2): ${north2}`, `East (1): ${east1}`, `South (1): ${south1}`, `South (2): ${south2}`]),
+    'scan lists who is one and two rooms away, under the direction and the distance', got);
+  put(0, 0); put(1, 0); put(2, 0); put(3, 0); put(4, 0);
+  check(t.say('scan') === 'You see no one nearby.', 'and with no one in reach says so');
+  const south1b = put(3, 3014);
+  const unseen = spare[8].proto.short;
+  put(8, 3014); put(9, 3014);
+  t.say('scan');                                  // a mobile is made when first looked at
+  spare[8].instance.affectedBy |= AFF.INVISIBLE;
+  spare[9].instance.affectedBy |= AFF.HIDE;
+  check(t.say('scan') === `South (1): ${south1b}`, 'an invisible and a hidden mobile are not seen', t.say('scan'));
+  t.game.state.affectedBy |= AFF.DETECT_INVIS;
+  check(t.say('scan').includes(unseen), '...until you can detect invisible', t.say('scan'));
+  t.game.state.affectedBy &= ~AFF.DETECT_INVIS;
+  t.game.state.affectedBy |= AFF.BLIND;
+  check(t.say('scan') === "You can't see a thing!", 'a blind player sees nothing, and is told', t.say('scan'));
+  t.game.state.affectedBy &= ~AFF.BLIND;
+  t.game.state.position = POS.SLEEPING;
+  check(t.say('scan') === 'In your dreams, or what?', 'and a sleeper is refused by the position gate, as look is');
+  t.game.state.position = POS.STANDING;
+  check(t.say('sca') === t.say('scan') && /^Score|^You are/.test(t.say('sc')), "'sca' is scan and 'sc' is still score", t.say('sc').slice(0, 30));
+
+  // A closed door hides the room behind it; opening it shows it.
+  const jail = fresh();
+  jail.stand(3142);                               // the captain's office, the jail's door to the south
+  for (const slot of jail.game.mobs) slot.roomVnum = 0;
+  const prisoner = jail.game.mobs[0];
+  prisoner.roomVnum = 3143;
+  check(jail.say('scan') === 'You see no one nearby.', 'a closed door hides what is behind it', jail.say('scan'));
+  jail.game.state.inventory.push(jail.obj(3137));
+  jail.say('unlock s'); jail.say('open s');
+  check(jail.say('scan') === `South (1): ${prisoner.proto.short}`, '...and an open one does not', jail.say('scan'));
+  jail.say('close s');
+  check(jail.say('scan') === 'You see no one nearby.', '...and shutting it hides them again');
+
+  // The second room's door is checked too: 3126 south to 3129, whose way south (3600) is a closed grate.
+  const grate = fresh();
+  grate.stand(3126);
+  for (const slot of grate.game.mobs) slot.roomVnum = 0;
+  const near = grate.game.mobs[0], far = grate.game.mobs[1];
+  near.roomVnum = 3129; far.roomVnum = 3600;
+  const lid = world.rooms.get(3129).exits[2];
+  check(!!(lid.locks & EX_CLOSED) && lid.to === 3600, 'the grate under #3129 is shut');
+  check(grate.say('scan') === `South (1): ${near.proto.short}`, 'a closed door in the second step hides the room beyond it', grate.say('scan'));
+  lid.locks &= ~EX_CLOSED;
+  check(grate.say('scan') === `South (1): ${near.proto.short} | South (2): ${far.proto.short}`, '...and not when it is open', grate.say('scan'));
+  lid.locks |= EX_CLOSED;
+
+  // On a server, the other players are in it too: Boromir a room south, Celeborn two.
+  const multi = createGame({ world, layout, built, seed: 7, server: {} });
+  for (const slot of multi.mobs) slot.roomVnum = 0;
+  const [arwen, boromir, celeborn] = [['Arwen', 3005], ['Boromir', 3014], ['Celeborn', 3025]].map(([name, vnum], i) => {
+    const ch = createCharacter(3);
+    ch.name = name; ch.displayName = name;
+    const pc = multi.addPlayer(ch, { id: i + 1 });
+    multi.placePlayer(pc, vnum, { quiet: true });
+    return pc;
+  });
+  const lines = [];
+  multi.listen((e) => { if (e.text && e.pc === arwen.id) lines.push(e.text); });
+  const scanned = () => { lines.length = 0; multi.withPlayer(arwen, () => multi.interpret('scan')); return lines.join(' | '); };
+  check(scanned() === 'South (1): Boromir | South (2): Celeborn', 'another player is listed as a mobile is', scanned());
+  boromir.ch.affectedBy |= AFF.INVISIBLE;
+  check(scanned() === 'South (2): Celeborn', '...unless you cannot see them', scanned());
 }
 
 // ------------------------------------------------------------ db.c ------

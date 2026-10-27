@@ -281,6 +281,37 @@ export function installInterp(k) {
     }
   }
 
+  /** How many rooms along an open way scan looks. */
+  const SCAN_REACH = 2;
+
+  /**
+   * Not in Merc 2.1 -- the scan of its descendants: who stands in the next room
+   * and the one after it, along each way that is open. A closed door ends the
+   * line, whichever step it is in. Sight is canSee's, as for who look shows
+   * (handler.js: this port has no dark rooms), and a blind player is told so
+   * rather than that nobody is there.
+   */
+  function doScan() {
+    if (hasAff(state, AFF.BLIND)) return send("You can't see a thing!");
+    const lines = [];
+    for (let dir = 0; dir < 6; dir++) {
+      let room = world.rooms.get(state.roomVnum);
+      for (let step = 1; step <= SCAN_REACH; step++) {
+        const exit = room && room.exits[dir];
+        if (!exit || (exit.locks & EX_CLOSED)) break;
+        room = world.rooms.get(exit.to);
+        if (!room) break;                              // the way leads out of what is loaded
+        const seen = [
+          ...(k.multi ? k.players.filter((pc) => pc.ch !== state && pc.ch.roomVnum === room.vnum && canSee(state, pc.ch)).map((pc) => pc.ch.name) : []),
+          ...mobs.filter((s) => !s.dead && s.roomVnum === room.vnum && canSee(state, k.wake(s, k.wanderRng))).map((s) => s.proto.short),
+        ];
+        for (const who of seen) lines.push(`${capitalise(DIR_NAME[dir])} (${step}): ${who}`);
+      }
+    }
+    if (!lines.length) return send('You see no one nearby.');
+    lines.forEach((line) => send(line));
+  }
+
   // -------------------------------------------------------------- score --
 
   function doScore() {
@@ -839,6 +870,8 @@ export function installInterp(k) {
     ['visible', () => reply(game.visible()), P.SLEEPING],
     ['wake', (a) => { const [t] = oneArgument(a); if (!t) return reply(game.stand()); send('They are already awake.'); }, P.SLEEPING],
     ['where', (a) => doWhere(oneArgument(a)[0]), P.RESTING],
+    // After `score`, so that `sc` stays score; it is no Merc 2.1 command.
+    ['scan', doScan, P.RESTING],
   ];
 
   /** quaff, recite, zap, brandish: magic.js's, through the item verbs it adds. */
@@ -877,7 +910,7 @@ export function installInterp(k) {
       return;
     }
     send('Moving: north east south west up down (n e s w u d), recall.');
-    send('Looking: look, examine, exits, score, inventory, equipment, time, weather, where, who, consider.');
+    send('Looking: look, examine, exits, scan, score, inventory, equipment, time, weather, where, who, consider.');
     send('Things: get, put, drop, give, wear, wield, hold, remove, eat, drink, fill, sacrifice, compare.');
     send('Doors and locks: open, close, lock, unlock, pick.');
     send('Shops: list, buy, sell, value.  Guilds: practice, train.');
