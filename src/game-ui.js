@@ -445,15 +445,15 @@ export function createGameUi(game, { built = null } = {}) {
       if (descBlock) descBlock.style.visibility = 'hidden';
       log.style.visibility = 'hidden';
       lift(true);
-      if (hooks.onConsole) hooks.onConsole(true);
     },
     onClose: () => {
       root.classList.remove('typing');
       if (descBlock) descBlock.style.visibility = '';
       log.style.visibility = '';
       if (!sheetMode) lift(false);
-      if (hooks.onConsole) hooks.onConsole(false);
     },
+    // The caret going in or out, which a pinned panel does without opening or closing.
+    onType: (typing) => { if (hooks.onConsole) hooks.onConsole(typing); },
   });
 
   // -- log ------------------------------------------------------------------
@@ -481,9 +481,10 @@ export function createGameUi(game, { built = null } = {}) {
       if (at >= 0) lines.splice(at, 1);
     }, 950);
   }
-  function say(text, cls = '', here = false) {
+  /** `talk`: people speaking to one another, which the command line's Talk tab also holds. */
+  function say(text, cls = '', here = false, talk = false) {
     if (!text) return;
-    console_.print(text, cls);
+    console_.print(text, cls, talk);
     const line = el('p', cls);
     line.textContent = text.replace(/\s*\n\s*/g, ' ');
     log.appendChild(line);
@@ -702,7 +703,8 @@ export function createGameUi(game, { built = null } = {}) {
   // The overlay normally sits under index.html's click-to-lock catcher, which
   // is at z-index 20. An open sheet has to go over it: you release the mouse to
   // click the sheet, and releasing the mouse is what puts the catcher up.
-  const lift = (up) => { root.style.zIndex = up ? '21' : '12'; };
+  // A pinned command line is up with no sheet or caret, and keeps the place the mouse can reach it.
+  const lift = (up) => { root.style.zIndex = up || console_.visible ? '21' : '12'; };
 
   /** A scroll of identify waiting for something to be read at. */
   let reading = null;
@@ -1105,6 +1107,9 @@ export function createGameUi(game, { built = null } = {}) {
     return project(fig.at.x, fig.at.y + (fig.height || 1.7) + lift - ((fig.m && fig.m.drop) || 0), fig.at.z);
   }
 
+  /** What reaches `show`'s default and is people talking: your own say, a tell, a channel, the group. */
+  const TALK = new Set(['say-self', 'tell', 'channel', 'gtell']);
+
   function show(event) {
     {
       switch (event.kind) {
@@ -1155,7 +1160,9 @@ export function createGameUi(game, { built = null } = {}) {
           if (sheetMode) drawSheet();
           break;
         case 'say':
-          say(event.text, 'faint');
+          // A player's words carry what was said and no slot. A shopkeeper's reply has a slot (game.js `tell`), and
+          // its other line has neither slot nor words: not talk between people.
+          say(event.text, 'faint', false, event.slot === undefined && event.said !== undefined);
           break;
         case 'magic':
           say(event.text, event.tone || 'faint');
@@ -1168,7 +1175,8 @@ export function createGameUi(game, { built = null } = {}) {
           console_.print(event.text, '');
           break;
         case 'mobsay': case 'emote':
-          if (event.heard) say(event.text, 'speech', true);
+          // A mobile's gesture carries its slot (specials.js, interp.js); another player's, and a social aimed at you, do not.
+          if (event.heard) say(event.text, 'speech', true, event.kind === 'emote' && event.slot === undefined);
           if (event.slot) bubble(event.slot, event.said ? `\u2018${event.said}\u2019` : event.text, event);
           break;
         case 'locked':
@@ -1193,7 +1201,7 @@ export function createGameUi(game, { built = null } = {}) {
           if (event.text) say(event.text, 'faint', event.kind === 'door-sound');
           break;
         default:
-          say(event.text, 'faint');
+          say(event.text, 'faint', false, TALK.has(event.kind));
           break;
       }
     }
@@ -1443,6 +1451,7 @@ export function createGameUi(game, { built = null } = {}) {
     KeyR: () => note(game.rest()),
     KeyQ: () => game.recall(),
     KeyT: () => takeEverything(),
+    KeyL: () => console_.togglePin(),
     Enter: () => console_.show(),
   };
   /** A refusal said out loud, when a key did nothing: the mud never stays silent. */
