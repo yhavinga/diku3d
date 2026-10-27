@@ -703,6 +703,64 @@ check(wander.strays === 0 && wander.offGround === 0, 'a mobile is always in the 
   `${wander.strays} stray, ${wander.offGround} off the ground`);
 check(wander.sealedCrossings === 0, 'every change of room is along an exit', `${wander.sealedCrossings}`);
 
+// act_obj.c: wear_obj takes the old object off with remove_obj, which in Merc
+// leaves it in `carrying`. Here worn gear is a list of its own, so the old one
+// has to be put back by hand or it is in neither list and gone.
+console.log('\nREPLACING WHAT YOU WEAR');
+{
+  const proto = (vnum) => world.objProtos.get(vnum);
+  // [what, the slot's objects in the order they are put on, how many fit]
+  const cases = [
+    ['a wielded weapon', [3020, 3021], 1],
+    ['the two neck slots', [3355, 3355, 3355], 2],
+    ['the two finger slots', [3364, 3371, 3372], 2],
+    ['the two wrist slots', [3105, 3106, 3363], 2],
+  ];
+  for (const [what, vnums, fit] of cases) {
+    const game = createGame({ world, layout, built, seed: 5, classIndex: 3 });
+    game.state.level = 50;
+    const heard = [];
+    game.listen((e) => heard.push(e));
+    const objs = vnums.map((v) => MERC.createObject(proto(v), 0));
+    game.state.inventory.push(...objs);
+    const replies = objs.map((o) => game.wear(o));
+    const stopped = objs[0];            // the pair's first slot, or the only one
+    const worn = game.state.equipment.filter(Boolean);
+    const inInventory = game.state.inventory;
+    check(replies.every((r) => r.ok), `${what}: every wear is accepted`, replies.filter((r) => !r.ok).map((r) => r.text).join(' '));
+    check(inInventory.length === 1 && inInventory[0] === stopped && worn.length === fit,
+      `${what}: the object replaced is back in the inventory`,
+      `${inInventory.length} carried, ${worn.length} worn of ${objs.length}`);
+    check(replies[fit].text.startsWith(`You stop using ${stopped.name}.`),
+      `${what}: the wearer is told "You stop using ..." first`, replies[fit].text);
+    check(heard.filter((e) => e.kind === 'remove' && e.text === `You stop using ${stopped.name}.`).length === 1,
+      `${what}: and the queue carries that as a 'remove' event`);
+    check(replies.slice(0, fit).every((r) => !/stop using/.test(r.text)),
+      `${what}: a free slot replaces nothing`);
+  }
+
+  // $n stops using $p goes to the room, which only a game with other players has.
+  const game = createGame({ world, layout, built, seed: 5, classIndex: 3, server: {} });
+  const mk = (name) => {
+    const ch = MERC.createCharacter(3, { level: 50, rng: new MERC.Rng(9) });
+    ch.name = name;
+    return game.addPlayer(ch, { id: name === 'Zin' ? 1 : 2 });
+  };
+  const wearer = mk('Zin');
+  const onlooker = mk('Ark');
+  const heard = [];
+  game.listen((e) => heard.push(e));
+  const dagger = MERC.createObject(proto(3020), 0);
+  const sword = MERC.createObject(proto(3021), 0);
+  wearer.ch.inventory.push(dagger, sword);
+  wearer.ch.roomVnum = onlooker.ch.roomVnum = 3001;
+  game.withPlayer(wearer, () => { game.wield(dagger); game.wield(sword); });
+  const toRoom = heard.filter((e) => e.kind === 'room' && e.room === 3001 && /stops using/.test(e.text));
+  check(toRoom.length === 1 && toRoom[0].text === `Zin stops using ${dagger.name}.` && toRoom[0].except.includes(wearer.id),
+    'the room is told "$n stops using $p." and the wearer is left out of it',
+    toRoom.map((e) => e.text).join(' | ') || 'nothing said to the room');
+}
+
 // A duel that must not be winnable, run against the shell's own rules bundle.
 const executioner = roster.find((r) => r.proto.level >= 40);
 if (executioner) {

@@ -603,11 +603,13 @@ function wearObj(ch, obj, replace = true) {
       if (!replace) return null;
       if (worn.extraFlags & X.NOREMOVE) return { ok: false, text: `You can't remove ${worn.name}.` };
       unequipChar(ch, worn);
+      // Merc's worn gear stays in `carrying`; here it is a list of its own.
+      ch.inventory.push(worn);
     }
     equipChar(ch, obj, iWear);
     const index = ch.inventory.indexOf(obj);
     if (index >= 0) ch.inventory.splice(index, 1);
-    return { ok: true, text: message };
+    return { ok: true, text: message, stopped: worn || null };
   };
   const pair = (a, b, message) => {
     if (!ch.equipment[a]) return slot(a, message);
@@ -3572,8 +3574,16 @@ export function createGame({
     wear(obj) {
       if (state.inventory.indexOf(obj) < 0) return { ok: false, text: 'You do not have that item.' };
       const result = wearObj(state, obj, true);
-      if (result && result.ok) emit({ kind: 'wear', text: result.text, item: obj.name });
-      return result || { ok: false, text: "You can't wear that." };
+      if (!result) return { ok: false, text: "You can't wear that." };
+      if (!result.ok) return result;
+      const { stopped } = result;
+      if (stopped) {
+        // remove_obj's two lines come before the wear_obj one.
+        roomcast(state.roomVnum, { kind: 'room', text: `${capitalise(state.name)} stops using ${stopped.name}.` }, [state]);
+        emit({ kind: 'remove', text: `You stop using ${stopped.name}.`, item: stopped.name });
+      }
+      emit({ kind: 'wear', text: result.text, item: obj.name });
+      return stopped ? { ...result, text: `You stop using ${stopped.name}. ${result.text}` } : result;
     },
     wield(obj) { return game.wear(obj); },
 
