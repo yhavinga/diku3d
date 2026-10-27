@@ -891,6 +891,86 @@ console.log('\nAUTOLOOT AND AUTOSAC');
     'and the replies are addressed to the killer alone', got.map((e) => `${e.kind} -> pc ${e.pc}`).join(', '));
 }
 
+// fight.c: do_flee. In the mud a wimpy mobile that has fled is in the next room
+// at once and out of the fight; here its body has to run there.
+console.log('\nA WIMPY MOBILE THAT HAS FLED');
+{
+  const village = buildWorld([parseArea(readFileSync(join(root, 'merc21/area/smurf.are'), 'utf8'), 'smurf.are')]);
+  const villageLayout = layoutWorld(village, { startVnum: [...village.rooms.keys()][0], maxRooms: 400 });
+  const villageBuilt = { rooms: new Map(), colliders: [], portals: [] };
+  for (const [vnum, cell] of villageLayout.cells) {
+    const room = village.rooms.get(vnum);
+    villageBuilt.rooms.set(vnum, {
+      room, cell, center: { x: cell.x * CELL, y: cell.level * LEVEL_H, z: cell.z * CELL },
+      outdoor: OUTDOOR.has(room.sector) && !(room.flags & ROOM_INDOORS), materials: {},
+    });
+  }
+  const WIMPY = 128;
+  const ROAD = 105;                // Smurfy Road: four ways out
+  /**
+   * A player who swings at the smurf on the road whenever he can, from the
+   * moment it is below half health. A blow that does damage makes it flee on
+   * a coin flip, so it runs; the question is what a player who keeps swinging
+   * finds while it does, up to the moment it is out of the road.
+   */
+  function chase(seed) {
+    const game = createGame({ world: village, layout: villageLayout, built: villageBuilt, seed, classIndex: 3 });
+    const slot = game.mobs.find((m) => (m.proto.act & WIMPY) && m.roomVnum === ROAD && m.proto.level <= 3);
+    const at = { x: slot.pos.x + 2, y: slot.pos.y + 1.72, z: slot.pos.z };
+    const look = { x: -1, y: 0, z: 0 };
+    game.grace(1e6);
+    game.update(0.016, at, look);
+    const mob = slot.instance;
+    mob.maxHit = 5000;
+    mob.hit = 2400;
+    let flees = 0;
+    game.listen((e) => { if (e.kind === 'flee') flees += 1; });
+    let refought = 0;               // frames it was in a fight again while running
+    let struck = 0;                 // frames in which a swing at it was accepted while it ran
+    let left = null;                // when it was no longer counted in the road
+    for (let t = 0; t < 60 && left === null; t += 0.05) {
+      game.update(0.05, at, look);
+      const running = flees > 0 && slot.roomVnum === ROAD;
+      if (running && mob.fighting) refought += 1;
+      if (!game.state.fighting && game.attack().ok && running) struck += 1;
+      if (flees > 0 && slot.roomVnum !== ROAD) left = t;
+    }
+    return { flees, refought, struck, left, dead: slot.dead };
+  }
+  // Whatever else starts a fight with it on the way (a spell, a friend's call)
+  // is ended as it runs, not the flight.
+  {
+    const game = createGame({ world: village, layout: villageLayout, built: villageBuilt, seed: 1, classIndex: 3 });
+    const slot = game.mobs.find((m) => (m.proto.act & WIMPY) && m.roomVnum === ROAD && m.proto.level <= 3);
+    const at = { x: slot.pos.x + 2, y: slot.pos.y + 1.72, z: slot.pos.z };
+    const look = { x: -1, y: 0, z: 0 };
+    game.grace(1e6);
+    game.update(0.016, at, look);
+    const mob = slot.instance;
+    mob.maxHit = 5000;
+    mob.hit = 2400;
+    let fled = false;
+    game.listen((e) => { if (e.kind === 'flee') fled = true; });
+    for (let t = 0; t < 60 && !fled; t += 0.05) {
+      game.update(0.05, at, look);
+      if (!game.state.fighting) game.attack();
+    }
+    mob.fighting = game.state;
+    mob.position = POS.FIGHTING;
+    game.update(0.05, at, look);
+    check(fled && !!slot.travel && !mob.fighting,
+      'a fight started with a mobile that has fled is ended, and it runs on',
+      `fled ${fled}, ${slot.travel ? 'still running' : 'flight over'}, ${mob.fighting ? 'fighting' : 'not fighting'}`);
+  }
+  for (const seed of [1, 2, 3]) {
+    const r = chase(seed);
+    check(r.flees === 1 && r.refought === 0 && r.struck === 0 && r.left !== null && !r.dead,
+      `seed ${seed}: a wimpy smurf that has fled runs off, and the next blow is not at it`,
+      `fled ${r.flees}x, fought again in ${r.refought} frames, swung at in ${r.struck}, `
+      + `${r.left === null ? 'still on the road after a minute' : `out of the road after ${r.left.toFixed(0)} s`}`);
+  }
+}
+
 // A duel that must not be winnable, run against the shell's own rules bundle.
 const executioner = roster.find((r) => r.proto.level >= 40);
 if (executioner) {

@@ -1731,6 +1731,13 @@ export function createGame({
 
   // -- the combat context ---------------------------------------------------
   let deathHandler = null;
+  /**
+   * A mobile running from a fight. In the mud do_flee has it in the next room
+   * at once; here the body has to run there, and until it has it is out of the
+   * fight and not there to be struck, or the player's next blow stood it
+   * still again ("caught on the way") after the log had said it fled.
+   */
+  const fled = (slot) => !!(slot.travel && slot.travel.fled);
   const ctx = {
     rng,
     emit,
@@ -1789,7 +1796,7 @@ export function createGame({
     flee(ch) {
       if (isNpc(ch)) {
         const slot = ch.slot;
-        if (!slot) return;
+        if (!slot || fled(slot)) return;
         const room = world.rooms.get(slot.roomVnum);
         for (let attempt = 0; attempt < 6; attempt++) {
           const door = rng.range(0, 5);
@@ -1797,6 +1804,7 @@ export function createGame({
           const to = exit && !exit.offMap ? world.rooms.get(exit.to) : null;
           if (!to || (to.flags & ROOM_NO_MOB)) continue;
           if (!moveMobile(slot, door, true, (ctx.now ?? 0) + 0.35)) continue;
+          if (slot.travel) slot.travel.fled = true;
           ctx.stopFighting(ch);
           emit({ kind: 'flee', text: `${capitalise(ch.name)} has fled!`, from: slot });
           return;
@@ -2730,9 +2738,11 @@ export function createGame({
         if (o && (o.done || o.failed)) {
           slot.travel = null;
           slot.anchor = { ...slot.pos };
-        } else if (mob && mob.fighting) {
+        } else if (mob && mob.fighting && !fled(slot)) {
           slot.travel = null;          // caught on the way: stand and fight
         } else {
+          // A fight something else started with it (a spell, a friend's) ends: it is running.
+          if (mob && mob.fighting) ctx.stopFighting(mob);
           if (!figure) stepHeadless(slot, dt);
           // On the way, the room is whichever end of the journey is nearer --
           // not whatever `roomAt` says of the street underfoot, because
@@ -2942,12 +2952,12 @@ export function createGame({
    */
   function facingTarget(reach = REACH, cone = 0.45) {
     const focusSlot = current.focusSlot;
-    if (focusSlot && focusSlot.instance && !focusSlot.dead
+    if (focusSlot && focusSlot.instance && !focusSlot.dead && !fled(focusSlot)
       && dist2(focusSlot.pos, position) <= (reach + 1.8) * (reach + 1.8)) return focusSlot;
     let best = null;
     let bestScore = -Infinity;
     for (const slot of mobsNear(position, reach)) {
-      if (!slot.instance) continue;
+      if (!slot.instance || fled(slot)) continue;
       const dx = slot.pos.x - position.x;
       const dz = slot.pos.z - position.z;
       const d = Math.hypot(dx, dz);
@@ -2981,7 +2991,7 @@ export function createGame({
   function attackSlot(slot) {
     if (state.position === POS.DEAD) return { ok: false, text: 'You are dead.' };
     if (state.position < POS.RESTING) return { ok: false, text: "You can't do that right now." };
-    if (!slot || slot.dead) return { ok: false, text: 'They aren\'t here.' };
+    if (!slot || slot.dead || fled(slot)) return { ok: false, text: 'They aren\'t here.' };
     const mob = wake(slot);
     if (dist2(slot.pos, feet()) > MELEE * MELEE && state.fighting !== mob) {
       ctx.setFighting(state, mob);
