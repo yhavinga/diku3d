@@ -14,7 +14,7 @@
  *
  * Two tabs: the whole log, and Talk, which holds only what people said to
  * each other (game-ui.js marks those lines; a mobile's words are not among
- * them). The panel can be pinned, with L or its button, so that it stays up
+ * them). The panel can be pinned, with U or its button, so that it stays up
  * while the caret is out (Enter types again), and dragged larger by its top
  * right corner. A second window (the Pop out button) takes the same two
  * views, kept in step, for another screen. Size and tab are kept in this
@@ -197,7 +197,7 @@ export function createConsole({ root, game, onOpen = () => {}, onClose = () => {
   pin.tabIndex = -1;
   pin.className = 'pin';
   pin.textContent = 'Pin';
-  pin.title = 'Keep it open while you play (L)';
+  pin.title = 'Keep it open while you play (U)';
   const pop = document.createElement('button');
   pop.type = 'button';
   pop.tabIndex = -1;
@@ -281,7 +281,7 @@ export function createConsole({ root, game, onOpen = () => {}, onClose = () => {
   const HINTS = {
     typing: 'tab switches \u00b7 enter closes',
     pinnedTyping: 'tab switches \u00b7 enter stops typing',
-    pinned: 'l closes',
+    pinned: 'u closes',
   };
   /** What the panel shows follows from two things: is the caret in, and is it pinned. */
   function settle() {

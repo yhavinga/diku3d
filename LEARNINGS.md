@@ -43,7 +43,8 @@ failing on the code before it.
   replies, so they need the mark at the source (`send(text, { talk: true })`).
 - **A key that looks free may be the skill bar's.** The command line's pin
   took `L`, which `rules/skills.js` hands to the sixth skill on the bar (a
-  thief's pick), and the bar is read first. Only `U` and `Y` are free.
+  thief's pick), and the bar is read first; it is `U` now, one of the two
+  letters (`U`, `Y`) nothing else had taken.
 - **One click was a fight.** A click while the mouse is held swung at
   whatever you faced; it now asks first for a mobile not fighting you.
   `diku.look` frames through your own eyes, so a check "over the shoulder"

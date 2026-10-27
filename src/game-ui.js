@@ -1451,7 +1451,8 @@ export function createGameUi(game, { built = null } = {}) {
     KeyR: () => note(game.rest()),
     KeyQ: () => game.recall(),
     KeyT: () => takeEverything(),
-    KeyL: () => console_.togglePin(),
+    // U, because the skill bar is read first and hands out Z X C H J L N (rules/skills.js): a thief's L is pick.
+    KeyU: () => console_.togglePin(),
     Enter: () => console_.show(),
   };
   /** A refusal said out loud, when a key did nothing: the mud never stays silent. */

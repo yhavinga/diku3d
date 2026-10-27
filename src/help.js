@@ -4,7 +4,7 @@
  * Every control in one place, grouped, with the rows for your own class lit
  * and the other class's dimmed. The rows are written out by hand, but each
  * was read off the handler that owns the key: main.js (E, Tab, 1-4, O, F, P, V,
- * M, G, F2 (screenshot.js), arrows, PgUp/PgDn, left mouse), game-ui.js (Z X C, I B K R T Q, Enter,
+ * M, G, F2 (screenshot.js), arrows, PgUp/PgDn, left mouse), game-ui.js (Z X C, I B K R T Q U, Enter,
  * wheel, right mouse), dashboard.js (`), rules/skills.js (the Z X C H J L N skill bar) and
  * player.js (WASD and, over the shoulder, the arrows; shift, space).
  *
@@ -57,6 +57,7 @@ const GROUPS = [
       [['Enter'], "the mud's own prompt: Merc's commands, abbreviations and socials"],
       [['Tab'], 'in the prompt: complete a command; on an empty line, turn between the Log and Talk tabs'],
       [['PgUp', 'PgDn'], 'in the prompt: read back'],
+      [['U'], 'keep the command line up while you play (its Pin button too) — U again lets it go'],
       [['Esc', '~or', 'Ctrl-C'], 'close it (or Enter on an empty line)'],
       [['quit'], 'typed there: save and go back to the title'],
       [['scan'], 'typed there: who stands one and two rooms away'],
