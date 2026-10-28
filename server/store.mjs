@@ -33,7 +33,7 @@ export function createNotes(dataDir) {
   const save = () => file.write(data);
   return {
     list: () => data.notes,
-    post(note) { data.notes.push({ sender: note.sender, date: note.date, to: note.to, subject: note.subject, text: note.text }); save(); },
+    post(note) { data.notes.push({ sender: note.sender, date: note.date, stamp: note.stamp, to: note.to, subject: note.subject, text: note.text }); save(); },
     update(note, change) { Object.assign(note, change); save(); },
     remove(note) {
       const i = data.notes.indexOf(note);

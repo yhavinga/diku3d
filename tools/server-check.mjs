@@ -457,6 +457,9 @@ console.log('\nNOTES, SNOOPING, SETTING, BANNING');
   m = a.mark();
   a.say('note');
   await expect(a, /^Huh\?  Type 'help note' for usage\.$/, 'note alone is usage', m);
+  m = a.mark();
+  a.say('help');
+  await expect(a, /^Notes: note list, note read <number>; 'help note' says how to write one\.$/, "on a server help's summary names the board", m);
 
   // snoop
   m = y.mark();
@@ -933,6 +936,72 @@ console.log('\nALIASES');
   m = y.mark();
   y.say('log arwen');
   await expect(y, /^LOG removed\.$/, '...and takes it off again', m);
+}
+
+// ------------------------------------------------------- notes at login --
+console.log('\nNOTES AT LOGIN');
+{
+  const { createNotes } = await import('../server/store.mjs');
+  const login = async (label) => {
+    const e = client(label);
+    await e.opened;
+    e.send({ t: 'login', name: 'Elanor', password: 'mallorn' });
+    await e.waitFor((x) => x.id !== null, 5000, 'enter');
+    return e;
+  };
+  const leave = async (e) => {
+    e.say('quit');
+    await e.waitFor((x) => x.messages.find((mm) => mm.t === 'bye'), 3000, 'bye');
+  };
+  // The board is empty here: the notes above were all removed.
+  const e3 = await login('Elanor, writing');
+  e3.say('score');
+  await expect(e3, /^You are Elanor/, 'Elanor logs in with an empty board', 0);
+  check(!e3.line(/^You have \d+ new notes?:$/), '...and is told of no notes');
+  e3.say('note to all');
+  e3.say('note subject Mine');
+  e3.say('note + My own.');
+  e3.say('note post');
+  await leave(e3);
+  a.say('note to elanor');
+  a.say('note subject The ford');
+  a.say('note + Cross at dawn.');
+  a.say('note post');
+  a.say('note to all');
+  a.say('note subject Feast tonight');
+  a.say('note + In the hall.');
+  a.say('note post');
+  await pause(200);
+  check(createNotes(data).list().map((n) => n.subject).join(' | ') === 'Mine | The ford | Feast tonight', 'she posts one to all and leaves; Arwen posts one to her and one to all',
+    createNotes(data).list().map((n) => n.subject).join(' | '));
+
+  const e4 = await login('Elanor, reading');
+  await expect(e4, /^You have 2 new notes:$/, 'at login she is told of the two from Arwen, not of her own', 0);
+  await expect(e4, /^\[  1\] Arwen: The ford$/, '...each under its number in her note list', 0);
+  await expect(e4, /^\[  2\] Arwen: Feast tonight$/, '...the one to all as well', 0);
+  await expect(e4, /^Type 'note read <number>' to read one\.$/, '...and how to read one', 0);
+  check(!e4.line(/^\[  0\] Elanor: Mine$/), '...her own is not among them');
+  m = e4.mark();
+  e4.say('note read 1');
+  await expect(e4, /^\[  1\] Arwen: The ford\n/, 'she reads the first', m);
+  await leave(e4);
+  const ford = createNotes(data).list()[1];
+  check(Number.isFinite(ford.stamp) && createAccounts(data).load('Elanor').char.lastNote === ford.stamp, 'quitting keeps the newest note she has read', createAccounts(data).load('Elanor').char.lastNote);
+
+  const e5 = await login('Elanor, again');
+  await expect(e5, /^You have 1 new note:$/, 'at the next login only the one she has not read is new', 0);
+  await expect(e5, /^\[  2\] Arwen: Feast tonight$/, '...under its number', 0);
+  check(!e5.line(/^\[  1\] Arwen: The ford$/), '...and the one she read is not');
+  m = e5.mark();
+  e5.say('note read 2');
+  await expect(e5, /^\[  2\] Arwen: Feast tonight\n/, 'she reads it', m);
+  await leave(e5);
+
+  const e6 = await login('Elanor, read up');
+  e6.say('score');
+  await expect(e6, /^You are Elanor/, 'she logs in once more', 0);
+  check(!e6.line(/^You have \d+ new notes?:$/), '...and with everything read nothing is announced');
+  await leave(e6);
 }
 
 // ---------------------------------------------------- quitting and links --

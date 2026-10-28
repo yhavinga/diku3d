@@ -616,6 +616,7 @@ export async function startMud({
       { who: name, vnum, sub: fresh ? 'new' : 'login' });
     game.roomcast(vnum, { kind: 'room', text: `${name} has entered the game.` }, [ch]);
     welcome(s, '\nWelcome to Merc Diku Mud.  May your visit here be ... Mercenary.', fresh);
+    game.withPlayer(pc, () => game.noteNews());
   }
 
   const sameToken = (a, b) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));

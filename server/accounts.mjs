@@ -22,7 +22,7 @@ const KDF = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const KEYLEN = 64;
 
 /** The fields a mud with other players keeps beside save.js's character. */
-export const EXTRA = ['title', 'description', 'deaf', 'played', 'trust', 'bamfin', 'bamfout'];
+export const EXTRA = ['title', 'description', 'deaf', 'played', 'trust', 'bamfin', 'bamfout', 'lastNote'];
 
 /** scrypt of `password` under a fresh salt. */
 export async function hashPassword(password) {
