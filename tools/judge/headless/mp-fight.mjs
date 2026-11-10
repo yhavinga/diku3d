@@ -40,7 +40,9 @@ await page.waitForTimeout(2000);
  */
 const walkTo = (page, to) => page.evaluate(async (to) => {
   const { game, world, built } = window.diku;
-  const open = (e) => e && !e.offMap && built.rooms.has(e.to) && !built.rooms.get(e.to).unbuilt && !(e.locks & 2);
+  // A shut door is a way, opened as a player would on reaching it (a new character starts in Mud
+  // School, behind doors); a locked one is not.
+  const open = (e) => e && !e.offMap && built.rooms.has(e.to) && !built.rooms.get(e.to).unbuilt && !(e.locks & 4);
   for (let guard = 0; guard < 60 && game.state.roomVnum !== to; guard++) {
     const from = game.state.roomVnum;
     const back = new Map([[from, null]]);
@@ -53,7 +55,15 @@ const walkTo = (page, to) => page.evaluate(async (to) => {
     let v = to;
     while (back.get(v)[0] !== from) v = back.get(v)[0];
     const dir = back.get(v)[1];
-    game.interpret(['north', 'east', 'south', 'west', 'up', 'down'][dir]);
+    const word = ['north', 'east', 'south', 'west', 'up', 'down'][dir];
+    const exit = world.rooms.get(from).exits[dir];
+    if (exit.locks & 2) {
+      game.interpret(`open ${word}`);
+      const opened = performance.now() + 4000;
+      while ((exit.locks & 2) && performance.now() < opened) await new Promise((r) => setTimeout(r, 100));
+      if (exit.locks & 2) throw new Error(`walkTo: the door ${word} of #${from} did not open`);
+    }
+    game.interpret(word);
     const until = performance.now() + 8000;
     while (game.state.roomVnum === from && performance.now() < until) await new Promise((r) => setTimeout(r, 100));
     await new Promise((r) => setTimeout(r, 300));
@@ -105,3 +115,5 @@ if (result.corpse) {
 }
 if (logs.length) console.log(logs.slice(0, 30).join('\n'));
 await browser.close();
+// The fight is what this is for: an attack the server refused leaves the mobile standing.
+if (!result.dead || !result.corpse) { console.error(`FAIL  ${target.name} ${result.dead ? 'died and left no corpse' : 'is still alive'}`); process.exit(1); }
