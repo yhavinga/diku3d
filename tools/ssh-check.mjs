@@ -8,6 +8,11 @@
  * refuses, into another zone and back), that the watcher sees the terminal
  * player arrive and stand somewhere, that a pipe gets no colour and no
  * echo, and that exec and one connection too many are refused in words.
+ * And what a port open to anyone needs: no control character from the game
+ * or the ssh line reaches a terminal, a line or a queue of lines is held only
+ * so far (a long script still runs whole, in order), a client that ignores its
+ * window or stays after being refused is cut, and connections held are bounded
+ * per address and in all (a second gateway with tight limits).
  *
  *     (cd server && npm ci) && node tools/ssh-check.mjs
  *
@@ -15,6 +20,7 @@
  */
 
 import { mkdtempSync, rmSync } from 'fs';
+import net from 'net';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -28,8 +34,11 @@ try { WebSocket = require('ws'); ({ Client } = require('ssh2')); } catch (error)
   throw new Error(`tools/ssh-check.mjs needs the server's dependencies: (cd server && npm ci) -- ${error.message}`);
 }
 const { startMud } = await import('../server/mud.mjs');
-const { startGateway, newHostKey } = await import('../server/gateway.mjs');
-const { directionOf } = await import('../server/term.mjs');
+const { startGateway, newHostKey, LIMITS } = await import('../server/gateway.mjs');
+// As a namespace, so a term.mjs without INBOX_MAX fails its checks rather than this import.
+const termModule = await import('../server/term.mjs');
+const { directionOf } = termModule;
+const { LINE_MAX } = await import('../server/client.mjs');
 
 const failures = [];
 const check = (ok, label, detail) => {
@@ -54,18 +63,25 @@ function spot(vnum, dx = 0, dz = 0) {
   return { zone: z.zone.id, x: info.center.x - z.offset + dx, y: info.center.y + (w.lifts.get(vnum) || 0) + 1.72, z: info.center.z + dz };
 }
 
-/** An SSH connection's one session: what it printed, and a way to wait for something in it. */
-async function session({ pty = true } = {}) {
+/**
+ * An SSH connection's one session: what it printed, and a way to wait for something in it.
+ * With `stay` the client does not hang up when the session's channel closes, as OpenSSH does.
+ */
+async function session({ pty = true, stay = false } = {}) {
   const conn = new Client();
   await new Promise((resolve, reject) => {
     conn.on('ready', resolve).on('error', reject).connect({ host: '127.0.0.1', port: gateway.port, username: 'anyone', readyTimeout: 5000 });
   });
+  let connClosed = false;
+  conn.on('close', () => { connClosed = true; });
   const stream = await new Promise((resolve, reject) => {
     const done = (error, s) => (error ? reject(error) : resolve(s));
     if (pty) conn.shell({ term: 'xterm-256color', cols: 100, rows: 30 }, done); else conn.shell(false, done);
   });
   const s = {
     conn, stream, raw: '', closed: false,
+    /** The connection, not the session: closed by the server when the client does not hang up itself. */
+    get connClosed() { return connClosed; },
     get text() { return plain(s.raw); },
     mark: () => s.text.length,
     type: (line) => stream.write(pty ? `${line}\r` : `${line}\n`),
@@ -85,8 +101,28 @@ async function session({ pty = true } = {}) {
   };
   stream.on('data', (chunk) => { s.raw += chunk.toString(); });
   stream.stderr.on('data', (chunk) => { s.raw += chunk.toString(); });
-  stream.on('close', () => { s.closed = true; conn.end(); });
+  stream.on('close', () => { s.closed = true; if (!stay) conn.end(); });
   return s;
+}
+
+/**
+ * A bare TCP connection that says `ident` (or nothing) and never hangs up of its own accord: a
+ * FIN from the server leaves it open (allowHalfOpen). What it read, and whether the server ended
+ * it, with a FIN or with a reset (a socket destroyed with unread data in it).
+ */
+function bare(port, ident = null) {
+  const r = { got: '', ended: false };
+  r.sock = net.connect({ port, host: '127.0.0.1', allowHalfOpen: true }, () => { if (ident) r.sock.write(ident); });
+  r.sock.on('data', (d) => { r.got += d.toString('latin1'); });
+  r.sock.on('end', () => { r.ended = true; });
+  r.sock.on('error', () => { r.ended = true; });
+  return r;
+}
+/** Bare connections, once each has had the server's banner or its end. */
+async function settled(list, ms = 3000) {
+  for (const until = Date.now() + ms; Date.now() < until && !list.every((r) => r.ended || r.got.startsWith('SSH-2.0-diku3d')); ) await pause(20);
+  await pause(200);
+  return { held: list.filter((r) => r.got.startsWith('SSH-2.0-diku3d') && !r.ended).length, cut: list.filter((r) => r.ended && !r.got).length };
 }
 
 /** A player on a WebSocket, as a page is: what arrived. */
@@ -204,6 +240,21 @@ await a.see(new RegExp(`${roomName(temple)}[\\s\\S]*${roomName(temple)}`), 'a li
 check(!a.text.slice(from).includes(roomName(up)), '...not at the room the walk set out from');
 check(mud.stats.refused === refusedBefore, 'the server refused none of the walking body\'s positions', `${mud.stats.refused - refusedBefore} refused`);
 
+console.log('\nTEXT FROM THE GAME, AT A TERMINAL');
+/** What the game could be made to say (a title, a note, a say): a title-setting OSC, a clear screen, a bell, an 8-bit CSI, DEL, NUL, the Unicode separators and a tab. */
+const hostile = 'Glyph \x1b]0;owned\x07title, \x1b[2Jclear, bell\x07, csi\x9b31m, del\x7f, nul\x00, line\u2028para\u2029end, tab\there.';
+/** ...and what may reach a terminal of it: no control left, every printable character kept, the tab a space. */
+const safe = 'Glyph ]0;ownedtitle, [2Jclear, bell, csi31m, del, nul, lineparaend, tab here.';
+/** The line as the terminal got it, escape sequences and all. */
+async function heard(s, from) {
+  if (!await until(() => s.raw.indexOf('here.', from) >= 0)) return null;
+  return s.raw.slice(s.raw.indexOf('Glyph ', from), s.raw.indexOf('here.', from) + 5);
+}
+let rawFrom = a.raw.length;
+mud.game.tell(mud.sessionNamed('Tester').pc.ch, { kind: 'out', text: hostile });
+let line = await heard(a, rawFrom);
+check(line === safe, 'a pty is sent what the game says without ESC, BEL, a C1 control, DEL, NUL or U+2028/2029, its printable text intact', JSON.stringify(line));
+
 console.log('\nA SCRIPT, WITH NO PTY');
 const b = await session({ pty: false });
 b.stream.write('Piper\nsecret2\ny\nsecret2\nf\nmag\nnorth\nlook\nquit\n');
@@ -214,33 +265,141 @@ check(await b.gone(6000), '"quit" ends the session');
 check(!/\x1b\[/.test(b.raw), 'no escape sequences at all without a pty');
 check(!b.raw.includes('secret2'), 'and no echo of the password');
 
+console.log('\nA LONG LINE AND A LONG SCRIPT, WITH NO PTY');
+const p = await session({ pty: false });
+p.stream.write('Penna\nsecret4\ny\nsecret4\nf\ncle\n');
+await p.see(new RegExp(roomName(school)), 'a second script logs in, in the Mud School', 0, 8000);
+rawFrom = p.raw.length;
+mud.game.tell(mud.sessionNamed('Penna').pc.ch, { kind: 'out', text: hostile });
+line = await heard(p, rawFrom);
+check(line === safe, 'a pipe is sent the same text without them too, its printable text intact', JSON.stringify(line));
+
+/** The most each session held of its input since the last call, read every 5 ms. */
+const peak = { lines: 0, chars: 0, bytes: 0 };
+const sampler = setInterval(() => {
+  for (const h of gateway.inputHeld?.() || []) for (const k of Object.keys(peak)) peak[k] = Math.max(peak[k], h[k]);
+}, 5);
+const peaked = () => { const was = { ...peak }; for (const k of Object.keys(peak)) peak[k] = 0; return was; };
+
+// Four megabytes with no newline, as a pipe can send: the gateway used to keep every byte of it.
+from = p.mark();
+peaked();
+const block = 'x'.repeat(64 * 1024);
+for (let i = 0; i < 64; i++) p.stream.write(block);
+p.stream.write('\n');
+await p.see(/Line too long\./, `four megabytes with no newline are "Line too long.", as comm.c says it (LINE_MAX ${LINE_MAX})`, from, 15000);
+let most = peaked();
+check(most.chars <= LINE_MAX + 1, '...and of them the gateway held no more than one past LINE_MAX characters at any time', `${most.chars} at most`);
+p.type('say still here');
+await p.see(/You say 'still here'/, '...and the session goes on', from, 8000);
+check(!/went wrong in the gateway/.test(p.text.slice(from)), '...without the gateway failing on the line');
+
+// A script as `ssh host < script` sends it, one line a packet, with directions among the lines: the game takes
+// lines more slowly than they come (a walk holds them), so they queue, and the queue holds back the channel.
+const LINES = 300;
+check(w.world.rooms.get(schoolNorth).exits[2]?.to === school, `south of #${schoolNorth} is the school's entrance again (#${school}), so the script walks to and fro`);
+// North first, then south, north and south again between the says: N L1..L75 S L76..L150 N ...
+const script = ['north'];
+const expected = ['N'];
+for (let i = 1; i <= LINES; i++) {
+  script.push(`say line ${i}`);
+  expected.push(`L${i}`);
+  if (i % 75 === 0 && i < LINES) {
+    const back = (i / 75) % 2 === 1;
+    script.push(back ? 'south' : 'north');
+    expected.push(back ? 'S' : 'N');
+  }
+}
+const quote = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const schoolNorthName = roomName(schoolNorth);
+from = p.mark();
+peaked();
+const started = Date.now();
+for (const l of script) p.stream.write(`${l}\n`);
+p.stream.end();
+check(await p.gone(90000), `a script of ${LINES} lines with ${script.length - LINES} directions among them runs to its end`, `${((Date.now() - started) / 1000).toFixed(1)} s`);
+most = peaked();
+const said = [...p.text.slice(from).matchAll(new RegExp(`You say 'line (\\d+)'|^(${quote(schoolNorthName)}|${quote(roomName(school))})$`, 'gm'))]
+  .map((m) => (m[1] ? `L${m[1]}` : m[2] === schoolNorthName ? 'N' : 'S'));
+check(said.length === expected.length && said.every((t, i) => t === expected[i]), '...and every line is answered, the directions walked, all in the order sent',
+  `${said.filter((t) => t[0] === 'L').length} of ${LINES} said; first difference at ${said.findIndex((t, i) => t !== expected[i])}`);
+check(most.lines > 0 && most.lines <= termModule.INBOX_MAX, `...while the lines held never went past INBOX_MAX (${termModule.INBOX_MAX}): the rest waited in the channel`, `${most.lines} at most`);
+check(!quiet.some((l) => /Penna.*too fast/.test(l)), '...and the game dropped none of them for coming too fast');
+
+console.log('\nINPUT THAT IGNORES ITS WINDOW');
+const f = await session({ pty: false });
+f.stream.write('Deluge\nsecret5\ny\nsecret5\nm\nthi\n');
+await f.see(new RegExp(roomName(school)), 'a third script logs in', 0, 8000);
+// Enough lines that the queue is full and the channel held back...
+for (let i = 0; i < 100; i++) f.stream.write(`say hold ${i}\n`);
+await pause(500);
+peaked();
+// ...then a client that sends past its window: ssh2's client keeps the window it may still send in
+// outgoing.window, and with that past any window the server gave, it sends whatever it is given.
+f.stream.outgoing.window = 2 ** 50;
+const flood = Buffer.from('say flood\n'.repeat(6554));
+for (let i = 0; i < 128; i++) f.stream.write(flood);
+check(await until(() => f.connClosed, 8000), 'a client that sends past its window while its input is held back is cut');
+most = peaked();
+const cutAt = quiet.map((l) => /(\d+) bytes of input unread, over \d+; cut/.exec(l)).find(Boolean);
+check(!!cutAt, '...and the gateway logs why', cutAt?.[0]);
+// The cut is seen at the socket's next read (64 KB at most) after the channel passed heldInput.
+check(!!cutAt && +cutAt[1] <= LIMITS.heldInput + 128 * 1024 && most.bytes <= LIMITS.heldInput + 128 * 1024,
+  `...having held no more than heldInput (${LIMITS.heldInput}) and a read or two of it`, `${cutAt?.[1]} bytes when cut; ${most.bytes} at most between reads`);
+clearInterval(sampler);
+f.conn.end();
+
 console.log('\nREFUSALS');
-const e = new Client();
-await new Promise((resolve, reject) => e.on('ready', resolve).on('error', reject).connect({ host: '127.0.0.1', port: gateway.port, username: 'x', readyTimeout: 5000 }));
-const exec = await new Promise((resolve, reject) => {
-  e.exec('ls -la', (error, stream) => {
-    if (error) return reject(error);
-    let out = '';
-    stream.stderr.on('data', (d) => { out += d; });
-    stream.on('data', (d) => { out += d; });
-    let code = null;
-    // ssh2's client tells the exit status before the stderr that came ahead of it.
-    stream.on('exit', (status) => { code = status; });
-    stream.on('close', () => resolve({ code, out }));
-    return undefined;
+/** A command on the ssh line, on a connection of its own: its exit status and everything it printed. */
+async function execOnce(command) {
+  const e = new Client();
+  await new Promise((resolve, reject) => e.on('ready', resolve).on('error', reject).connect({ host: '127.0.0.1', port: gateway.port, username: 'x', readyTimeout: 5000 }));
+  const result = await new Promise((resolve, reject) => {
+    e.exec(command, (error, stream) => {
+      if (error) return reject(error);
+      let out = '';
+      stream.stderr.on('data', (d) => { out += d; });
+      stream.on('data', (d) => { out += d; });
+      let code = null;
+      // ssh2's client tells the exit status before the stderr that came ahead of it.
+      stream.on('exit', (status) => { code = status; });
+      stream.on('close', () => resolve({ code, out }));
+      return undefined;
+    });
   });
-});
-e.end();
+  e.end();
+  return result;
+}
+const exec = await execOnce('ls -la');
 check(exec.code === 1 && /takes no command/.test(exec.out), 'a command on the ssh line is refused, in words, with exit status 1', exec.out.trim().slice(0, 60));
+const shown = (await execOnce('\x1b]0;owned\x07ls\x9b2J\x7f')).out;
+check(/\("\]0;ownedls2J"\)/.test(shown) && !/[\x00-\x09\x0b-\x1f\x7f-\x9f]/.test(shown.replace(/\n$/, '')), '...and the command it quotes back has no control character in it', JSON.stringify(shown.slice(0, 60)));
+// The scripts' connections above are let go of once the server has seen them close.
+for (let until = Date.now() + 5000; gateway.openConnections() > 1 && Date.now() < until;) await pause(20);
 const idle = [await session(), await session()];
 const over = await session();
 await over.see(/There are already 3 connections from your address\./, 'a fourth connection from one address is refused in words (cap 3 here)');
 check(await over.gone(), '...and closed');
+const stay = await session({ stay: true });
+await stay.see(/There are already 3 connections from your address\./, 'a fifth, whose client stays connected after the words, is refused in words too');
+check(await until(() => stay.connClosed, 8000), '...and the server hangs up on it a few seconds later');
+// Whatever the server did, so that the gateway's close below has nothing of ours to wait for.
+stay.conn.end();
 for (const s of idle) s.conn.end();
 // conn.end() returns before the server has seen the close; opening the next
 // session at once races the per-address count (cap 3) and is refused in words.
 for (let until = Date.now() + 5000; gateway.openConnections() > 1 && Date.now() < until;) await pause(20);
 check(gateway.openConnections() === 1, 'the gateway has let go of every connection but the first terminal');
+// Connections held from one address are bounded as they are accepted, before a word of SSH:
+// bare connections that never say anything, on top of the terminal still playing.
+for (let until = Date.now() + 5000; gateway.heldConnections?.() !== 1 && Date.now() < until;) await pause(20);
+const bares = Array.from({ length: LIMITS.perSiteHeld + 2 }, () => bare(gateway.port));
+const room = LIMITS.perSiteHeld - 1;
+const counted = await settled(bares);
+check(counted.held === room && counted.cut === bares.length - room, `of ${bares.length} more connections from the address of a terminal already playing, ${room} are held (perSiteHeld ${LIMITS.perSiteHeld}) and the rest cut before the server's banner`,
+  `${counted.held} held, ${counted.cut} cut, gateway holds ${gateway.heldConnections?.()}`);
+for (const r of bares) r.sock.destroy();
+for (let until = Date.now() + 5000; gateway.heldConnections?.() !== 1 && Date.now() < until;) await pause(20);
 const c = await session();
 await c.see(/By what name do you wish to be known\? $/);
 c.type('Tester');
@@ -252,6 +411,33 @@ for (let i = 0; i < 3; i++) {
 await c.see(/Wrong password\.[\s\S]*Wrong password\.[\s\S]*Wrong password\./, 'three wrong passwords are each told');
 check(await c.gone(), '...and the third closes the connection');
 check(!!mud.sessionNamed('Tester'), 'Tester, playing at the other terminal, is still in the game');
+
+console.log('\nA GATEWAY WITH TIGHT LIMITS');
+const tightLog = [];
+const tight = await startGateway({
+  root, port: 0, host: '127.0.0.1', game: url, keyPath: join(data, 'ssh_host_ed25519_key'), log: (text) => tightLog.push(text),
+  limits: { totalHeld: 3, perSiteHeld: 100, perMinute: 2, handshakeMs: 800, letGoMs: 300 },
+});
+const silent = Array.from({ length: 5 }, () => bare(tight.port));
+const inAll = await settled(silent);
+check(inAll.held === 3 && inAll.cut === 2, 'of five connections, three are held (totalHeld 3) and two cut before the server\'s banner', `${inAll.held} held, ${inAll.cut} cut, gateway holds ${tight.heldConnections?.()}`);
+// None of the three ever sends its ident line: the handshake's time runs from the TCP connection.
+check(await until(() => silent.filter((r) => r.got).every((r) => r.ended), 3000), 'a connection that never says a word is hung up on when handshakeMs (0.8 s here) runs out');
+check(await until(() => tight.heldConnections?.() === 0, 3000), '...and, as it does not hang up itself, its socket is destroyed letGoMs later', `gateway holds ${tight.heldConnections?.()}`);
+for (const r of silent) r.sock.destroy();
+// A reset on a connection cut for coming too often (perMinute 2 here) reached ssh2's
+// connection object before any 'error' listener did, and took the gateway down.
+const crashes = [];
+const crashed = (error) => crashes.push(error.message);
+process.on('uncaughtException', crashed);
+const often = [];
+for (let i = 0; i < 3; i++) { often.push(bare(tight.port, 'SSH-2.0-check\r\n')); await pause(150); }
+check(await until(() => often[2].ended), 'a third connection in a minute is cut (perMinute 2 here)');
+for (const r of often) r.sock.resetAndDestroy();
+await pause(500);
+process.off('uncaughtException', crashed);
+check(!crashes.length, '...and its reset after the cut does not take the gateway down', crashes.join('; ') || 'nothing uncaught');
+await tight.close();
 
 console.log('\nQUITTING');
 from = a.mark();

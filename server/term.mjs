@@ -35,6 +35,26 @@ const NANNY_MS = 3 * 60 * 1000;
 const WRONG_MAX = 3;
 /** After a pipe's input ends: how long its last command's answer has to arrive. */
 const DRAIN_MS = 1500;
+/**
+ * Lines typed and not yet taken, past which the channel is paused: what comes after waits in
+ * ssh2's channel, and the client's window holds it back, until the game has taken half of them.
+ * A chunk already read is split whole, so one packet's lines (32 KB) can go past it once.
+ */
+export const INBOX_MAX = 64;
+/**
+ * The least time between two lines sent to the game, 15 a second: mud.mjs drops what a socket
+ * sends past 30 a second (a burst of 60), a script's lines are all there at once, and the
+ * walker's reports, 10 a second while it follows a leader, share the socket.
+ */
+const LINE_MS = 1000 / 15;
+
+/**
+ * A text that did not come from this file, made safe to paint: no C0 control but the line break
+ * (a tab becomes a space, which is what it meant in the area files that have one), no DEL, no
+ * C1 control (an 8-bit CSI starts an escape sequence on a terminal that reads them), and no
+ * Unicode line or paragraph separator.
+ */
+export const clean = (text) => String(text).replace(/\t/g, ' ').replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f\u2028\u2029]/g, '');
 
 /** SGR colours, for a pty only. What is coloured follows the page's console (game-ui.js `show`). */
 const TONE = { room: '1;36', hurt: '31', dead: '1;31', gain: '33', speech: '36' };
@@ -91,14 +111,14 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
   /** Lines of output above the prompt. Each is [text, sgr]. */
   function print(lines) {
     if (!lines.length) return;
-    const out = lines.flatMap(([text, sgr]) => String(text).replace(/\r/g, '').split('\n').map((l) => paint(l, sgr) + NL)).join('');
+    const out = lines.flatMap(([text, sgr]) => clean(text).split('\n').map((l) => paint(l, sgr) + NL)).join('');
     if (tty) { write(`\r\x1b[K${out}`); redraw(); } else write(out);
   }
   const say = (...texts) => print(texts.map((t) => [t, null]));
 
   function vitals() {
     const c = link?.self;
-    return c ? `<${c.hit}hp ${c.mana}m ${c.move}mv> ` : '> ';
+    return c ? clean(`<${c.hit}hp ${c.mana}m ${c.move}mv> `) : '> ';
   }
 
   // -------------------------------------------------------------- input --
@@ -106,16 +126,24 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
   /** Lines typed and not yet taken, and whoever waits for the next. null is the end of input. */
   const inbox = [];
   let waiter = null;
+  let heldBack = false;
   function submit(line) {
-    if (waiter) { const w = waiter; waiter = null; w(line); } else inbox.push(line);
+    if (waiter) { const w = waiter; waiter = null; w(line); return; }
+    inbox.push(line);
+    if (inbox.length >= INBOX_MAX && !heldBack) { heldBack = true; stream.pause(); }
   }
-  const nextLine = () => (inbox.length ? Promise.resolve(inbox.shift()) : new Promise((resolve) => { waiter = resolve; }));
+  function nextLine() {
+    if (!inbox.length) return new Promise((resolve) => { waiter = resolve; });
+    const line = inbox.shift();
+    if (heldBack && inbox.length <= INBOX_MAX / 2) { heldBack = false; stream.resume(); }
+    return Promise.resolve(line);
+  }
 
   /** A question, and the next line typed. A pipe sees the question on a line of its own. */
   function ask(question, { secret = false } = {}) {
-    prompt = question;
+    prompt = clean(question);
     hidden = secret;
-    if (tty) redraw(); else write(question.trimEnd() + NL);
+    if (tty) redraw(); else write(prompt.trimEnd() + NL);
     return nextLine();
   }
 
@@ -204,18 +232,31 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
   }
 
   const decoder = new StringDecoder('utf8');
+  /** A pipe's line so far: no more than one past LINE_MAX (the \r of a \r\n), and whether more was dropped. */
   let partial = '';
+  let dropped = false;
+  /** comm.c's way with a line too long: it says so and takes the first LINE_MAX characters. */
+  function pipeLine() {
+    let line = partial.replace(/\r$/, '');
+    if (dropped || line.length > LINE_MAX) { say('Line too long.'); line = line.slice(0, LINE_MAX); }
+    partial = '';
+    dropped = false;
+    submit(line);
+  }
   stream.on('data', (chunk) => {
     const text = decoder.write(chunk);
     if (tty) return typed(text);
-    partial += text;
-    const lines = partial.split('\n');
-    partial = lines.pop();
-    for (const l of lines) submit(l.replace(/\r$/, ''));
+    const pieces = text.split('\n');
+    pieces.forEach((piece, i) => {
+      if (i > 0) pipeLine();
+      if (dropped) return;
+      partial += piece;
+      if (partial.length > LINE_MAX + 1) { partial = partial.slice(0, LINE_MAX + 1); dropped = true; }
+    });
     return undefined;
   });
   stream.on('end', () => {
-    if (!tty && partial) submit(partial);
+    if (!tty && partial) pipeLine();
     submit(null);
   });
   stream.on('close', () => end(null));
@@ -227,7 +268,7 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
     if (ended) return;
     // The prompt is not left standing under the last line.
     if (tty) write('\r\x1b[K');
-    if (why) write(why + NL);
+    if (why) write(clean(why) + NL);
     ended = true;
     clearTimeout(nannyTimer);
     try { stream.exit(0); stream.end(); } catch { /* the channel is already gone */ }
@@ -317,12 +358,19 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
     redraw();
   }
 
+  let sentAt = 0;
   /** One line in the game: a direction is walked, anything else goes to the mud as it was typed. */
   async function command(line) {
     const text = line.trim();
     if (!text) return;
     const dir = directionOf(text.split(/\s+/)[0]);
-    if (dir < 0) { link.cmd(text); return; }
+    if (dir < 0) {
+      const wait = sentAt + LINE_MS - Date.now();
+      if (wait > 0) await new Promise((resolve) => { setTimeout(resolve, wait); });
+      sentAt = Date.now();
+      link.cmd(text);
+      return;
+    }
     const me = link.self || {};
     // interp.c's position check, for the commands the game no longer runs itself.
     if (me.position === POS.DEAD) return say('Lie still; you are DEAD.');
@@ -383,5 +431,9 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
 
   run().catch((error) => { log(`${ip}: session failed: ${error.stack}`); end('The terminal gateway failed; this connection is closed.'); });
 
-  return { end };
+  return {
+    end,
+    /** What this session holds of the player's input: lines not yet taken, the characters of a pipe's unfinished line, and the bytes waiting unread in the channel. */
+    held: () => ({ lines: inbox.length, chars: partial.length, bytes: stream.readableLength }),
+  };
 }

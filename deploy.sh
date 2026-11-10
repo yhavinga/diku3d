@@ -101,7 +101,9 @@ ssh "$SERVER" "set -e
   id diku3d >/dev/null 2>&1 || sudo useradd --system --no-create-home --shell /usr/sbin/nologin diku3d
   sudo install -d -o diku3d -g diku3d -m 750 $DATA
   sudo test -f $DATA/site.json || echo '{ \"version\": 1, \"wizlock\": true, \"bans\": [] }' | sudo -u diku3d tee $DATA/site.json >/dev/null
-  cd $DOCMAP/server && sudo npm ci --omit=dev --no-audit --no-fund --silent
+  # --ignore-scripts: geen installscript van een afhankelijkheid draait als root. ssh2 bouwt anders een
+  # eigen crypto-binding en cpu-features; zonder vallen alle ciphers terug op node:crypto (poly1305 in wasm).
+  cd $DOCMAP/server && sudo npm ci --omit=dev --ignore-scripts --no-audit --no-fund --silent
   cd /etc/systemd/system
   if ! sudo cmp -s diku3d-server.service.new diku3d-server.service; then
     sudo mv diku3d-server.service.new diku3d-server.service && sudo systemctl daemon-reload && echo '  unit vernieuwd'
