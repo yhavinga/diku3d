@@ -60,6 +60,16 @@ fixed, and every fix has a check that fails on 7231b89.
   connection with over 256 KB unread. A 300-line script got 57 lines answered
   before (mud.mjs drops past 30 messages a second) and all 300 now, in about
   28 s. `ssh-check`: 16 of its 25 new checks fail on the old gateway.
+- **The gateway, a second pass.** An exec refusal held its connection for
+  the handshake's 20 s (3.0 s now). A client's DISCONNECT reason becomes
+  ssh2's error message and went into the log whole: 8,079 characters, 211
+  now, and 2 of 17 log lines of a hostile session carried control characters.
+  A second shell or exec request on a session threw in the handler (ssh2's
+  `ok()` returns undefined then), which ended the connection's input watch.
+  Output for a client that stopped reading was kept without limit (1 MB
+  now). Its per-address counts go by `limitKey`, checked end to end over
+  `::1` from two addresses of one /64. `ssh-check`: 20 of the 94 fail on the
+  first pass's code.
 - **`npm ci` ran install scripts as root** on the server; with
   `--ignore-scripts` ssh2 has no native binding, every cipher falls back to
   `node:crypto`, and a real OpenSSH 9.9 played with chacha20-poly1305 and

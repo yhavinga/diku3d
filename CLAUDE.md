@@ -823,12 +823,17 @@ choose.
   DEL, C1, U+2028/2029, the bidi overrides), and what a terminal is sent is
   cleaned again where it is written (term.mjs `clean`; a tab becomes a space,
   the area files have them between words). Any text term.mjs writes that it
-  did not compose goes through `clean()`. A literal U+2028 in a JS regex
-  literal is a syntax error, and an editor turned the escape into the
-  character three times: build such a pattern from character codes.
-- **Limits by address count by `limitKey`** (an IPv6 address by its /64: one
-  /64 is 2^64 addresses); logs, `users`, the dashboard and bans keep the full
-  address. A name has a count of its own across addresses (20 wrong passwords
+  did not compose goes through `clean()`; what is typed at a terminal passes
+  `typable()` first, and a log line quotes outside text through `quoted()`
+  (a client's DISCONNECT reason arrives as an ssh2 error message: one was
+  logged at 8,079 characters). A literal U+2028 in a JS regex literal is a
+  syntax error, and in a string it is silently a bidi override in the source:
+  an editor turned the escape into the character in two rounds running. Build
+  such a pattern from character codes, and afterwards scan the files for raw
+  U+2028-202E and U+2066-2069.
+- **Limits by address count by `limitKey`** (store.mjs; an IPv6 address by its
+  /64: one /64 is 2^64 addresses), in the mud and in the terminal gateway
+  alike; logs, `users`, the dashboard and bans keep the full address. A name has a count of its own across addresses (20 wrong passwords
   in ten minutes pause its password logins; a reconnect by token still works).
   A ban is an address or a prefix, matched by bits: as a suffix of the string,
   `1.2.3.4` also banned `11.2.3.4`.
@@ -851,7 +856,10 @@ choose.
   socket, not by the window. `client.on('error')` is attached before any early
   return, or a reset after a cut takes the gateway down. term.mjs sends lines
   to the game at 15 a second, because mud.mjs drops what a socket sends past
-  30: a 300-line script got 57 lines answered.
+  30: a 300-line script got 57 lines answered. `heldOutput` bounds what is
+  kept for a client that stops reading, as `heldInput` does what it sends.
+  ssh2's `ok()` returns undefined once a session has its channel: a second
+  shell or exec request is ignored, where it threw in the handler.
 
 ## merc21
 
