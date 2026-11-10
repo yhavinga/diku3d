@@ -252,6 +252,8 @@ directory, ten an hour from any one player. The owner becomes implementor with
 `node server/main.mjs --make-implementor <name>`, which asks for the password
 on the terminal. Playing alone stays the default and needs no server.
 `node tools/server-check.mjs` logs four players in over real sockets.
+`node tools/hostile-check.mjs` is a client that does not play by the page's
+rules: made-up objects, two logins at once, floods, a page on another site.
 
 On diku3d.com the server runs beside the site: `deploy.sh` syncs `server/`,
 installs the systemd unit in `tools/deploy/` (loopback port 4000, player

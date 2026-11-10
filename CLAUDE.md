@@ -24,6 +24,8 @@ There is no build step, no bundler, no test framework and no linter. So
     node tools/rise-check.mjs; node tools/sentinel-check.mjs   # the dracolich's first blow; a sentinel's reach
     node tools/audio/boss-music-check.mjs; node tools/audio/voice-check.mjs
     node tools/server-check.mjs; node tools/site-sockets-check.mjs   # need `cd server && npm ci`
+    node tools/hostile-check.mjs; node tools/ssh-check.mjs           # a client that breaks the rules; the terminal gateway
+    node tools/csp-check.mjs            # index.html's inline scripts against the policy nginx and serve.py send
 
 `layout-check` prints a walkable percentage per area. That number is the
 project's main quality metric — if a change drops it, the change is wrong.
@@ -50,7 +52,8 @@ The headless browser checks live in `tools/judge/headless/` (copy one to
 `/tmp/pw`, serve a checkout, pass its port): `walkable`, `slopewalk` and `ramps`
 for the ground, `thirdperson` for the camera, `views` for the two views' arrow
 keys and the view a browser keeps, `wimpy` for a mobile that flees, `presence`,
-and `mp-onlook` for what a second page sees of a first. `slopewalk`, `ramps`, `boss-music-check`
+`mp-onlook` for what a second page sees of a first, and `xss` for markup and
+script a link or a name could carry into the page. `slopewalk`, `ramps`, `boss-music-check`
 and `voice-check` carry a deliberate fault (`--fault`, `--break`,
 `--break-rule`) that must make them fail: run it when you change the check.
 
@@ -796,6 +799,59 @@ choose.
 - **Who hears what can only be tested on a server's game**: a standalone
   game's `roomcast` returns at once (`!multi`). Make it with `server: {}` and
   `addPlayer`, as rules-check's socials and scan cases do.
+- **Nothing a client sends is the game's own object.** A page's click is an
+  `op` with references (`{o}`, `{m}`, `{p}`); mud.mjs `decode` used to pass any
+  other JSON object on as an "options object", and one message made a million
+  gold, a 500d500 sword, or an object without `values` that threw in the tick
+  and ended the process. Every op now has its argument shape in mud.mjs `OPS`:
+  a new op, or a new argument to one, needs its shape there, or the page's own
+  call is refused and logged. A verb that acts on a thing a client names checks
+  where the thing is (`k.atHand`, `ground.includes`) and does not trust its
+  caller. `hostile-check.mjs` is that client; run it after touching mud.mjs,
+  accounts.mjs, store.mjs or a verb in `OPS`.
+- **Nothing in the tick or in a socket's event may throw.** A throw in the
+  `setInterval` or in a `ws` handler ends the mud for everyone. Per-session
+  work goes through mud.mjs `endSession` (stack logged, on the dashboard, the
+  body taken out unsaved, the socket closed) or sets `s.failed` inside
+  `game.tick`; `game.tick` itself is not wrapped.
+- **A check before an `await` is not a check after it.** `login` and `create`
+  tested `s.pc` and `accounts.exists` and then waited 50 ms for scrypt: two
+  logins on one socket left a second body in the world, two creates of one
+  name overwrote a password. One at a time per socket (`oneAtATime`), the name
+  reserved (`beingCreated`), and everything asked again after the wait.
+- **Typed lines are cleaned once, where they come in** (mud.mjs `command`: C0,
+  DEL, C1, U+2028/2029, the bidi overrides), and what a terminal is sent is
+  cleaned again where it is written (term.mjs `clean`; a tab becomes a space,
+  the area files have them between words). Any text term.mjs writes that it
+  did not compose goes through `clean()`. A literal U+2028 in a JS regex
+  literal is a syntax error, and an editor turned the escape into the
+  character three times: build such a pattern from character codes.
+- **Limits by address count by `limitKey`** (an IPv6 address by its /64: one
+  /64 is 2^64 addresses); logs, `users`, the dashboard and bans keep the full
+  address. A name has a count of its own across addresses (20 wrong passwords
+  in ten minutes pause its password logins; a reconnect by token still works).
+  A ban is an address or a prefix, matched by bits: as a suffix of the string,
+  `1.2.3.4` also banned `11.2.3.4`.
+- **The page runs under a Content-Security-Policy**, the same text from
+  nginx-diku3d.conf and serve.py, so every local and headless run is under
+  production's. An inline `<script>` in index.html needs its hash in both
+  (`csp-check.mjs` says which); `on*=` attributes and `eval` do not run. A
+  worker is under the policy of its own script's response, which is why
+  script-src has `blob:`. In nginx a `location` with an `add_header` of its own
+  inherits none of the server's: the `.glb` one repeats all three.
+- **`el()` in game-ui.js takes text, not markup**, and the boot's error is
+  shown as text: names of objects, shops and wardens come from area files or
+  from whatever server a player typed in, and `?areaDir=` (the page's own
+  origin only) and `?areas=` (file names only) from a link. `xss.mjs` holds it.
+- **The terminal gateway owns its sockets** (gateway.mjs: `net.createServer`
+  and ssh2's `injectSocket`). ssh2's `end()` only half-closes, so a client that
+  stayed was held and counted for good; `hangUp` destroys the socket after
+  `letGoMs`. ssh2 1.17.0 drops a client's data only when the channel's window
+  is exactly 0, so a paused channel is bounded by the `heldInput` watch on the
+  socket, not by the window. `client.on('error')` is attached before any early
+  return, or a reset after a cut takes the gateway down. term.mjs sends lines
+  to the game at 15 a second, because mud.mjs drops what a socket sends past
+  30: a 300-line script got 57 lines answered.
 
 ## merc21
 

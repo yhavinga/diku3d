@@ -43,7 +43,8 @@ echo "▸ Rooktest"
 # b.js als argument mee.
 (cd "$ROOT" && for f in src/*.js src/rules/*.js server/*.mjs; do node --check "$f" || exit 1; done \
   && node tools/import-check.mjs >/dev/null \
-  && node tools/parse-check.mjs >/dev/null)
+  && node tools/parse-check.mjs >/dev/null \
+  && node tools/csp-check.mjs >/dev/null)
 [ -f "$ROOT/merc21/area/midgaard.are" ] || { echo "✗  merc21/ is niet uitgecheckt (git submodule update --init)" >&2; exit 1; }
 
 # --- 2. nginx-config uit de repo; alleen herladen als hij veranderd is, en
@@ -152,6 +153,11 @@ echo "▸ Controle"
 for pad in / /src/main.js /vendor/three/build/three.module.js /merc21/area/midgaard.are /assets/person_male.glb; do
   CODE="$(curl -s -o /dev/null -w '%{http_code}' "$DOMEIN$pad")"
   [ "$CODE" = "200" ] || { echo "✗  $DOMEIN$pad antwoordt met HTTP $CODE" >&2; exit 1; }
+done
+# De pagina en een model (een location met eigen add_header) moeten het beleid
+# dragen dat nginx-diku3d.conf zet: nginx erft add_header niet in zo'n location.
+for pad in / /assets/person_male.glb; do
+  curl -sI "$DOMEIN$pad" | grep -qi '^content-security-policy:' || { echo "✗  $DOMEIN$pad komt zonder Content-Security-Policy" >&2; exit 1; }
 done
 TYPE="$(curl -sI "$DOMEIN/merc21/area/midgaard.are" | tr -d '\r' | awk -F': ' 'tolower($1)=="content-type"{print $2}')"
 case "$TYPE" in text/plain*) ;; *) echo "✗  .are komt als '$TYPE'" >&2; exit 1 ;; esac

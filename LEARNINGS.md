@@ -6,6 +6,68 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-11-10 — a security review, and what a hostile client could do
+
+The repository is public and the server takes anyone. A read of `server/`,
+the deploy files and whatever in `src/` handles a socket's or a link's input
+found the following; the first two were reproduced before anything was
+fixed, and every fix has a check that fails on 7231b89.
+
+- **A click-action carried whatever a client made up.** mud.mjs `decode`
+  turned `{o}`, `{m}`, `{p}` into server objects and passed any other object
+  through. Against a throwaway server: `take` with a made-up money object
+  took a new character from 0 to 1,000,000 gold; a made-up 500d500 weapon was
+  taken and wielded; `take` with an object that had no `values` threw in
+  save.js `writeObj` inside the tick's `setInterval`, and the process exited.
+  Every op now names its argument shape (`OPS`), the verbs check where a thing
+  is, and a session whose work throws is ended alone. `hostile-check.mjs`:
+  49 of its 59 checks fail on 7231b89 (41 errors reach the process), all pass.
+- **A link could run script on the page.** `fetchText` throws `cannot read
+  <url>: HTTP 404`, the url came from `?areaDir=`, and the boot's error went
+  into `innerHTML`: `/?areaDir=<img src=x onerror=...>` ran. Script on the
+  origin can rewrite the remembered server address, after which the connect
+  form sends a name and a password elsewhere. The error is text, `areaDir`
+  is the page's own origin only, `el()` in game-ui.js takes text, and the
+  page has a Content-Security-Policy. `xss.mjs`: 14 of 20 fail on 7231b89.
+  With the policy alone on the old code no script ran but 11 still fail (the
+  markup is still made), so the fix and the policy each hold without the
+  other.
+- **The policy was found by running under it.** Starting from `'self'`, each
+  source was added for a measured violation: `blob:` for the texture workers
+  (a worker takes its policy from its own response, and a worker's violation
+  never reaches the page's listener: it shows as a failed bake), `data:` for
+  the favicon and SMAA's lookup textures, `ws: wss:` for the connect form.
+  Cloudflare injects nothing into the page (Rocket Loader off, no beacon in
+  the HTML it serves), and the inline scripts' hashes as it serves them are
+  the ones in the policy.
+- **Two logins at once on one socket left two bodies**, the first with no
+  session until a restart; two creates of one name overwrote a password.
+- **A typed line went to other players as sent**: ESC, BEL and a newline in
+  a `say` arrived whole, a spoofed line in the page's console and an escape
+  sequence in a terminal.
+- **Floods the reports limit did not cover**: `note post` rewrote
+  notes.json whole at up to 600 posts a second (an alias of twenty at thirty
+  lines a second), and `password` queued a scrypt a call. Ten notes an hour,
+  a board of 2000, one password change at a time and counted by the guard.
+- **Per-address limits were per IPv6 address.** Now per /64, with a count per
+  name across addresses and 500 sockets in all.
+- **The gateway never let go.** A refused session's connection stayed for as
+  long as its client did; a connection that sent no byte had no timer at all;
+  a reset after the per-minute cut was an uncaught `ECONNRESET` that ended the
+  gateway; four megabytes with no newline were all kept; a client that
+  ignored its window put 33.6 MB into a paused channel. It holds 8 from an
+  address and 250 in all, destroys what does not hang up, and cuts a
+  connection with over 256 KB unread. A 300-line script got 57 lines answered
+  before (mud.mjs drops past 30 messages a second) and all 300 now, in about
+  28 s. `ssh-check`: 16 of its 25 new checks fail on the old gateway.
+- **`npm ci` ran install scripts as root** on the server; with
+  `--ignore-scripts` ssh2 has no native binding, every cipher falls back to
+  `node:crypto`, and a real OpenSSH 9.9 played with chacha20-poly1305 and
+  AES-GCM/CTR.
+- **Read the escape one level up before calling a sink open.** The review
+  reported the dashboard's ban list as unescaped; `tile()` escapes its third
+  argument, and escaping at the call would have doubled it.
+
 ## 2026-10-27 — what a player asked for in one afternoon
 
 One player's afternoon in the game, read back: eleven requests and faults,
