@@ -49,6 +49,8 @@ export function installObjects(k) {
 
   /** do_put. */
   function put(obj, container) {
+    // get_obj_here: a container at hand, never one inside another -- a bag put into a bag it holds is a loop no save ends.
+    if (!k.atHand(container)) return out(false, `I see no ${word(container)} here.`);
     if (container.itemType !== ITEM.CONTAINER) return out(false, "That's not a container.");
     if (closed(container)) return out(false, `The ${word(container)} is closed.`);
     if (!carried().includes(obj)) return out(false, 'You do not have that item.');
@@ -136,6 +138,7 @@ export function installObjects(k) {
   function drink(obj = null) {
     if (!obj) obj = fountainHere();
     if (!obj) return out(false, 'Drink what?');
+    if (!k.atHand(obj)) return out(false, "You can't find it.");
     if (state.condition[COND.DRUNK] > 10) return out(false, 'You fail to reach your mouth.  *Hic*');
     if (obj.itemType === ITEM.FOUNTAIN) {
       state.condition[COND.THIRST] = 48;
@@ -190,6 +193,8 @@ export function installObjects(k) {
     if (!obj) {
       return out(true, 'God appreciates your offer and may accept it later.');
     }
+    // get_obj_list on the room's contents: only what lies here. Something carried would pay its coin and stay.
+    if (!ground.includes(obj)) return out(false, "You can't find it.");
     if (!(obj.wearFlags & ITEM_TAKE)) return out(false, `${capitalise(obj.name)} is not an acceptable sacrifice.`);
     state.gold += 1;
     const at = obj.at;
@@ -203,6 +208,8 @@ export function installObjects(k) {
 
   /** act_info.c: do_compare -- armour by value[0], weapons by their dice. */
   function compare(a, b = null) {
+    // do_compare's get_obj_carry, for both.
+    if (!carried().includes(a) || (b && !carried().includes(b))) return out(false, 'You do not have that item.');
     if (!b) {
       b = state.equipment.find((o) => o && o.itemType === a.itemType && (a.wearFlags & o.wearFlags & ~ITEM_TAKE));
       if (!b) return out(false, "You aren't wearing anything comparable.");

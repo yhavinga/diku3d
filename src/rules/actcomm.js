@@ -516,8 +516,11 @@ export function installComm(k) {
       // After the last one, so that reading it does not count one posted in the same millisecond as read.
       const last = board.list().at(-1);
       note.stamp = Math.max(Date.now(), last ? stampOf(last) + 1 : 0);
+      // A server keeps only so many a player an hour, and so many in all (mud.mjs): it
+      // says why in words, and the note stays in progress to be posted later.
+      const refused = board.post(note);
+      if (refused) return send(refused);
       state.pnote = null;
-      board.post(note);
       return send('Ok.');
     }
     if (arg === 'remove') {

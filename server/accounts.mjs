@@ -93,6 +93,14 @@ export const LOGIN_LIMITS = {
   wrongMax: 5,
   wrongWindowMs: 10 * 60 * 1000,
   /**
+   * Wrong passwords for one name from all addresses together: a guesser with
+   * many addresses never trips the per-address count. Past this, password
+   * logins for that name pause (a reconnect by token does not), which lets
+   * anyone lock a name out for a while -- the price of not being guessed.
+   */
+  nameWrongMax: 20,
+  nameWrongWindowMs: 10 * 60 * 1000,
+  /**
    * Password logins and creates from one address in a window, whichever name:
    * spraying one guess at many names never trips the per-name count. Thirty in
    * ten minutes is far above a household (a login or two each) and ~1.5 s of
@@ -169,21 +177,24 @@ export const inMinutes = (ms) => {
 /**
  * The nanny's guard against guessing, asked before any scrypt runs:
  * `refusal(site, name)` is the words to send, or null when the attempt may go
- * ahead. `attempt` counts one; `wrong` counts a wrong password (and returns
- * the pause it brought, in ms); `right` forgets that name's wrong passwords
- * from that address -- not the address's attempts: an attacker with one
- * account of his own would clear those for free; `created` counts a new
- * character.
+ * ahead. `attempt` counts one; `wrong` counts a wrong password, for the
+ * address and for the name (and returns the pause it brought, in ms); `right`
+ * forgets that name's wrong passwords from that address -- not the address's
+ * attempts: an attacker with one account of his own would clear those for
+ * free; nor the name's, which the owner logging in does not end; `created`
+ * counts a new character. `site` is what the address is counted by (mud.mjs
+ * `limitKey`), not necessarily the address itself.
  */
 export function createLoginGuard(overrides = {}, now = Date.now) {
   const L = { ...LOGIN_LIMITS, ...overrides };
   const pause = { pauseMs: L.pauseMs, pauseCapMs: L.pauseCapMs, tracked: L.tracked };
   const wrongs = createLimiter({ max: L.wrongMax, windowMs: L.wrongWindowMs, ...pause }, now);
+  const names = createLimiter({ max: L.nameWrongMax, windowMs: L.nameWrongWindowMs, ...pause }, now);
   const attempts = createLimiter({ max: L.attemptsMax, windowMs: L.attemptsWindowMs, ...pause }, now);
   const creates = createLimiter({ max: L.createsMax, windowMs: L.createsWindowMs, ...pause }, now);
   const key = (site, name) => `${site}|${name.toLowerCase()}`;
   return {
-    tables: { wrongs, attempts, creates },
+    tables: { wrongs, names, attempts, creates },
     refusal(site, name, { creating = false } = {}) {
       let ms = attempts.wait(site);
       if (ms) return { ms, why: `Too many login attempts from your address. Try again in ${inMinutes(ms)}.` };
@@ -192,10 +203,12 @@ export function createLoginGuard(overrides = {}, now = Date.now) {
       if (ms && creating) return { ms, why: `Too many new characters from your address. Try again in ${inMinutes(ms)}.` };
       ms = wrongs.wait(key(site, name));
       if (ms) return { ms, why: `Too many wrong passwords. Try again in ${inMinutes(ms)}.` };
+      ms = names.wait(name.toLowerCase());
+      if (ms && !creating) return { ms, why: `Too many wrong passwords for ${name}. Try again in ${inMinutes(ms)}.` };
       return null;
     },
     attempt: (site) => attempts.hit(site),
-    wrong: (site, name) => wrongs.hit(key(site, name)),
+    wrong: (site, name) => Math.max(wrongs.hit(key(site, name)), names.hit(name.toLowerCase())),
     right: (site, name) => wrongs.clear(key(site, name)),
     created: (site) => creates.hit(site),
   };

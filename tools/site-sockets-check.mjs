@@ -93,6 +93,13 @@ const fifth = await try1('2001:db8:1:2::c');
 check(fifth === 1013, 'the fifth from the /64 is refused with 1013', fifth);
 const other = [await try1('2001:db8:9::1'), await try1('2001:db8:9::1'), await try1('2001:db8:9::1')];
 check(other[0] === 'open' && other[1] === 'open' && other[2] === 1013, 'from outside the list the third is refused', other.join(','));
+// Unlisted, IPv6 still counts by its /64: a privacy address is a fresh one for every page.
+const sameLine = await try1('2001:db8:9::2');
+check(sameLine === 1013, 'another address in that unlisted /64 shares its count, and is refused', sameLine);
+const nextLine = await try1('2001:db8:9:1::1');
+check(nextLine === 'open', '...and one in the next /64 is not', nextLine);
+const v4 = [await try1('198.51.100.1'), await try1('198.51.100.1'), await try1('198.51.100.2')];
+check(v4.every((r) => r === 'open'), 'IPv4 counts each address apart', v4.join(','));
 
 for (const ws of held) ws.terminate();
 mud.close();

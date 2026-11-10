@@ -3036,6 +3036,16 @@ export function createGame({
    * carry limits from str_app and dex, and money going straight into the purse.
    */
   function take(obj, container) {
+    // Only a thing lying here, or inside a container at hand and shut to no one. Every
+    // caller here has looked; a server's client names both, and could otherwise take
+    // what it carries already (twice over) or whatever it says a container holds.
+    if (!container && !ground.includes(obj)) return { ok: false, text: "You don't see that here." };
+    if (container && (!atHand(container) || !container.contains.includes(obj))) {
+      return { ok: false, text: `I see nothing like that in the ${container.keywords.split(' ')[0]}.` };
+    }
+    if (container && container.itemType === ITEM.CONTAINER && (container.values[1] & 4)) {
+      return { ok: false, text: `The ${container.keywords.split(' ')[0]} is closed.` };
+    }
     if (container && container.itemType === ITEM.CORPSE_PC && rules.mayLoot && !rules.mayLoot(container)) {
       return { ok: false, text: "You can't do that." };
     }
@@ -3064,6 +3074,9 @@ export function createGame({
     emit({ kind: 'pickup', text: `You get ${obj.name}${from}.`, item: obj.name, obj });
     return { ok: true, text: `You get ${obj.name}${from}.` };
   }
+
+  /** handler.c get_obj_here's three lists: lying on the ground, carried, or worn -- not inside something. */
+  const atHand = (obj) => ground.includes(obj) || state.inventory.includes(obj) || state.equipment.includes(obj);
 
   /**
    * What lies within reach, nearest first -- the mud's `ch->in_room->contents`
@@ -3622,6 +3635,7 @@ export function createGame({
     takeAll(obj) {
       const holds = obj.itemType === ITEM.CONTAINER || obj.itemType === ITEM.CORPSE_NPC || obj.itemType === ITEM.CORPSE_PC;
       if (!holds) return [take(obj, null)];
+      if (!atHand(obj)) return [{ ok: false, text: "You don't see that here." }];
       if (obj.values[1] & 4) return [{ ok: false, text: `The ${obj.keywords.split(' ')[0]} is closed.` }];
       if (obj.itemType === ITEM.CORPSE_PC && rules.mayLoot && !rules.mayLoot(obj)) return [{ ok: false, text: "You can't do that." }];
       return obj.contains.slice().map((inner) => take(inner, obj));
@@ -3644,7 +3658,8 @@ export function createGame({
     wield(obj) { return game.wear(obj); },
 
     remove(iWear) {
-      const obj = state.equipment[iWear];
+      // A wear location is a number: equipment['length'] is not something worn.
+      const obj = Number.isInteger(iWear) ? state.equipment[iWear] : null;
       if (!obj) return { ok: false, text: 'You do not have that item.' };
       if (obj.extraFlags & X.NOREMOVE) return { ok: false, text: `You can't remove ${obj.name}.` };
       unequipChar(state, obj);
@@ -3667,7 +3682,9 @@ export function createGame({
 
     /** Where the sky is: shops keep the mud's opening hours. */
     setTimeOfDay(name) {
-      state.hour = { dawn: 6, noon: 12, dusk: 19, night: 1 }[name] ?? 12;
+      const hours = { dawn: 6, noon: 12, dusk: 19, night: 1 };
+      // Own keys only: '__proto__' would make the hour an object.
+      state.hour = Object.hasOwn(hours, name) ? hours[name] : 12;
     },
 
     /**
@@ -3792,7 +3809,7 @@ export function createGame({
     get ways() { return ways; },
     zoneHooks, sameZone, embody, disembody, ringSpot, FAR,
     mobs, ground, gates, protoInfo, emit, ctx, game, SPEC_FUNS, rules,
-    wake, order, moveMobile, mobsNear, objToRoom, objFromRoom, dropSpot, removeBody,
+    wake, order, moveMobile, mobsNear, objToRoom, objFromRoom, dropSpot, removeBody, atHand,
     toRoom, recall, breakOff, facingAway, weather: () => weather, dist2, updatePos,
     damage: (ch, victim, dam, dt) => damage(ch, victim, dam, dt, ctx),
     multiHit: (ch, victim, dt) => multiHit(ch, victim, dt, ctx),

@@ -160,6 +160,8 @@ export function installMove(k) {
   // --------------------------------------------------------- containers --
 
   function containerCheck(obj) {
+    // get_obj_here: a chest in reach or a bag you hold, not one shut inside another.
+    if (!k.atHand(obj)) return "You don't see that here.";
     if (obj.itemType !== ITEM.CONTAINER) return "That's not a container.";
     return null;
   }
@@ -366,7 +368,8 @@ export function installMove(k) {
 
   function train(stat) {
     if (!trainerHere()) return out(false, "You can't do that here.");
-    const entry = STATS[stat];
+    // Own keys only: STATS['__proto__'] is an object and not a stat.
+    const entry = Object.hasOwn(STATS, stat) ? STATS[stat] : null;
     if (!entry) {
       const can = Object.keys(STATS).filter((s) => state[STATS[s][0]] < 18);
       return out(false, can.length ? `You have ${state.practice} practice sessions. You can train: ${can.join(' ')}.`

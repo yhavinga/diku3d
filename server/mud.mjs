@@ -23,7 +23,9 @@ import { titleFor, trustOf, PLR_MORE } from '../src/rules/actcomm.js';
 import { PLR, nested } from '../src/rules/handler.js';
 import { bootWorld } from './world.mjs';
 import { EX_ISDOOR, EX_CLOSED, EX_LOCKED } from '../src/are.js';
-import { createNotes, createReports, createSite } from './store.mjs';
+import {
+  createNotes, createReports, createSite, addrBits, parseSite, underSite,
+} from './store.mjs';
 import { createDash } from './dash.mjs';
 import {
   createAccounts, hashPassword, checkPassword, checkParseName, properName, EXTRA, createLoginGuard, inMinutes,
@@ -39,6 +41,16 @@ export const PROTOCOL = 2;
 const ROOM_VNUM_TEMPLE = 3001;
 /** The spell events other players see as well as the caster (magic.js invoke, run, and its fizzles). */
 const SEEN_SPELLS = new Set(['cast', 'spell', 'spell-fizzle']);
+/**
+ * What a typed line may not carry: C0 and C1 controls, DEL, the line and
+ * paragraph separators and the bidi overrides. Each is something another
+ * player's screen acts on -- a newline that starts a forged line of its own,
+ * an escape sequence on a terminal at the SSH gateway, text that reads
+ * backwards -- and none is something a person types.
+ */
+const CONTROLS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+/** Where an error was thrown, one line, for the log and the dashboard -- never for a client: it names the server's paths. */
+const frameOf = (error) => (error && error.stack ? error.stack.split('\n')[1]?.trim() : null) || 'no stack';
 /** How far another player is seen from: the far end of a street, not the zone. */
 const SIGHT = 160;
 /** Seconds a player whose link dropped stays standing in the world. */
@@ -77,6 +89,12 @@ export const LIMITS = {
    */
   siteSockets: [],
   /**
+   * Sockets from everywhere together, loopback included: past the per-address
+   * caps, enough addresses can still open sockets until the one thread that
+   * runs the game spends its time on them.
+   */
+  socketsTotal: 500,
+  /**
    * Messages a socket may send: a page sends 10 position reports a second and
    * a ping every 2 s; measured peaks in any one second with a real page: 14
    * sprinting, 24 typing commands at 12 a second, 32 at an absurd 25 a second.
@@ -97,56 +115,6 @@ export const LIMITS = {
   heartbeatMs: 30 * 1000,
 };
 
-/**
- * An IPv4 or IPv6 address as one 128-bit number. IPv4 and IPv4-mapped IPv6
- * (::ffff:a.b.c.d) are the same address, so both land in ::ffff:0:0/96.
- * Returns null for anything else.
- */
-function addrBits(text) {
-  let t = String(text).trim().toLowerCase();
-  const v4 = (a) => {
-    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(a);
-    if (!m || m.slice(1).some((o) => +o > 255)) return null;
-    return m.slice(1).reduce((n, o) => (n << 8n) | BigInt(o), 0n);
-  };
-  const plain = v4(t);
-  if (plain !== null) return (0xffffn << 32n) | plain;
-  let tail = [];
-  const dot = t.lastIndexOf(':');
-  if (t.includes('.')) {
-    const n = v4(t.slice(dot + 1));
-    if (n === null) return null;
-    tail = [(n >> 16n).toString(16), (n & 0xffffn).toString(16)];
-    t = t.slice(0, dot + 1) + '0:0';
-  }
-  const halves = t.split('::');
-  if (halves.length > 2) return null;
-  const part = (h) => (h === '' ? [] : h.split(':'));
-  const head = part(halves[0]);
-  const rest = halves.length === 2 ? part(halves[1]) : [];
-  let groups;
-  if (halves.length === 2) {
-    const fill = 8 - head.length - rest.length;
-    if (fill < 1) return null;
-    groups = [...head, ...Array(fill).fill('0'), ...rest];
-  } else groups = head;
-  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
-  if (tail.length) { groups[6] = tail[0]; groups[7] = tail[1]; }
-  return groups.reduce((n, g) => (n << 16n) | BigInt(`0x${g}`), 0n);
-}
-
-/** `site` (an address or addr/len) as { bits, len } over 128 bits, or null when it is neither. */
-export function parseSite(site) {
-  const [addr, lenText, extra] = String(site).split('/');
-  if (extra !== undefined) return null;
-  const bits = addrBits(addr);
-  if (bits === null) return null;
-  const v4 = !addr.includes(':');
-  if (lenText === undefined) return { bits, len: 128 };
-  if (!/^\d{1,3}$/.test(lenText) || +lenText > (v4 ? 32 : 128)) return null;
-  return { bits, len: v4 ? 96 + +lenText : +lenText };
-}
-
 /** The first `siteSockets` entry whose address or prefix holds `host`, or null. */
 export function siteEntry(host, lim = LIMITS) {
   const bits = addrBits(host);
@@ -154,10 +122,24 @@ export function siteEntry(host, lim = LIMITS) {
   for (const entry of lim.siteSockets || []) {
     const p = parseSite(entry.site);
     if (!p) throw new Error(`siteSockets: cannot read ${JSON.stringify(entry.site)}`);
-    const shift = BigInt(128 - p.len);
-    if ((bits >> shift) === (p.bits >> shift)) return entry;
+    if (underSite(bits, p)) return entry;
   }
   return null;
+}
+
+/**
+ * What the per-address limits count by -- the socket cap, the login guard,
+ * new characters: an IPv4 address as it is, an IPv6 address by its /64. One
+ * line is given a /64 and privacy addresses rotate the low 64 bits, so
+ * counting whole IPv6 addresses gave one household 2^64 tries. Logs, `users`,
+ * the dashboard and bans still name the whole address. Anything unreadable
+ * counts as its own text.
+ */
+export function limitKey(host) {
+  const bits = addrBits(host);
+  if (bits === null) return String(host);
+  if ((bits >> 32n) === 0xffffn) return [24n, 16n, 8n, 0n].map((s) => (bits >> s) & 255n).join('.');
+  return `${[112n, 96n, 80n, 64n].map((s) => ((bits >> s) & 0xffffn).toString(16)).join(':')}::/64`;
 }
 
 /** How many open sockets `host` may hold: the first matching `siteSockets` entry, else `socketsPerSite`. */
@@ -211,8 +193,41 @@ export async function startMud({
     reports.add({ kind, who: ch.name, room: ch.roomVnum, date: new Date(now).toISOString(), text });
     return true;
   }
+  /**
+   * The board as the rules see it (actcomm.js do_note). Every post rewrites
+   * notes.json whole and a note to all is listed to everyone at login, so
+   * one player posts ten an hour -- tried, not only kept, or a full board
+   * would hear from a flooder at every line -- and the board holds
+   * BOARD_MAX. `post` is null when the note went up, else the words the
+   * player is told; nothing is kept then.
+   */
+  const NOTES_PER_HOUR = 10;
+  const BOARD_MAX = 2000;
+  const posted = new Map();
+  const board = {
+    list: notes.list,
+    update: notes.update,
+    remove: notes.remove,
+    post(note) {
+      const now = Date.now();
+      const recent = (posted.get(note.sender) || []).filter((t) => now - t < 3600e3);
+      posted.set(note.sender, recent);
+      if (recent.length >= NOTES_PER_HOUR) {
+        log(`${note.sender}: over ${NOTES_PER_HOUR} notes an hour, not posted`);
+        return 'You have posted enough notes for now; try again in a while.';
+      }
+      recent.push(now);
+      if (notes.list().length >= BOARD_MAX) {
+        log(`${note.sender}: the board is full (${BOARD_MAX} notes), not posted`);
+        dash.record('server', `${note.sender} could not post "${note.subject}": the board is full (${BOARD_MAX} notes); remove some`, { who: note.sender, lvl: 'warn' });
+        return 'The board is full; the implementor has been told.';
+      }
+      notes.post(note);
+      return null;
+    },
+  };
   // The ban list and the wizlock, kept across reboots; `wizlock` is only the first boot's.
-  const site = createSite(dataDir, { wizlock });
+  const site = createSite(dataDir, { wizlock, log });
   const sessions = new Set();
   const byPc = new Map();
   let nextPcId = 1;
@@ -222,7 +237,12 @@ export async function startMud({
   const hooks = {
     save: (ch) => { const s = sessionOf(ch); if (s) saveSession(s); },
     quit: (ch) => quit(sessionOf(ch)),
-    password: (ch, arg) => changePassword(sessionOf(ch), arg),
+    // do_password returns before the scrypt is done: a failure there is logged and told, never left to end the process.
+    password: (ch, arg) => changePassword(sessionOf(ch), arg).catch((error) => {
+      log(`${ch.name}: password failed: ${error.stack}`);
+      dash.record('server', `${ch.name}: password failed: ${error.message} (${frameOf(error)})`, { who: ch.name, lvl: 'error' });
+      say(ch, `The mud stumbles: ${error.message}`);
+    }),
     users: (ch) => users(ch),
     shutdown: (ch, text) => shutdown(text),
     disconnect: (ch, name) => disconnect(ch, name),
@@ -235,7 +255,7 @@ export async function startMud({
     ban: (ch, arg) => ban(ch, arg),
     allow: (ch, arg) => allow(ch, arg),
     snoop: (ch, name) => snoop(ch, name),
-    notes,
+    notes: board,
     report,
     log: (ch, name) => toggleLog(ch, name),
     // The page opens the dashboard on this; what it shows is asked for apart (dash.mjs).
@@ -265,8 +285,12 @@ export async function startMud({
   game.listen(route);
   const dash = createDash({ game, w, byPc, stats, site, send, started, run: runFor });
   game.listen((event) => {
-    // advance_level saves the character (save.c); so does a level here.
-    if (event.kind === 'level' && event.pc != null) { const s = byPc.get(event.pc); if (s) saveSession(s); }
+    // advance_level saves the character (save.c); so does a level here. This
+    // runs inside game.tick, so a save that fails ends the session after it.
+    if (event.kind === 'level' && event.pc != null) {
+      const s = byPc.get(event.pc);
+      if (s) try { saveSession(s); } catch (error) { s.failed = { where: 'the save at a new level', error }; }
+    }
   });
 
   /** A world fingerprint the client checks: same files, same mobiles, same order. */
@@ -285,17 +309,24 @@ export async function startMud({
     last = t0;
     game.tick(dt);
     stats.ticks += 1;
+    // One session's failure here ends that session (endSession), never the
+    // loop: an exception out of this callback would end the process.
     for (const s of sessions) {
+      if (s.failed) { endSession(s, s.failed.where, s.failed.error); continue; }
       if (s.pc) s.played += dt;
-      if (s.pc && s.linkdead !== null && (s.linkdead -= dt) <= 0) extract(s, `${s.pc.ch.name} has left the game.`);
+      if (s.pc && s.linkdead !== null && (s.linkdead -= dt) <= 0) {
+        try { extract(s, `${s.pc.ch.name} has left the game.`); } catch (error) { endSession(s, 'leaving with its link dead', error); }
+      }
     }
     reap();
     const fast = stats.ticks % Math.max(1, Math.round(100 / tickMs)) === 0;
     for (const s of sessions) {
       if (!s.pc || !s.open) continue;
-      if (fast) { sendSelf(s); sendMobs(s); sendGround(s); sendPlayers(s); sendShop(s); sendGates(s); sendDoors(s); }
-      flush(s);
-      if ((s.saveIn -= dt) <= 0) { s.saveIn = AUTOSAVE_SECONDS; saveSession(s); }
+      try {
+        if (fast) { sendSelf(s); sendMobs(s); sendGround(s); sendPlayers(s); sendShop(s); sendGates(s); sendDoors(s); }
+        flush(s);
+        if ((s.saveIn -= dt) <= 0) { s.saveIn = AUTOSAVE_SECONDS; saveSession(s); }
+      } catch (error) { endSession(s, 'the tick (what it is sent, or its autosave)', error); }
     }
     if (fast) sendWeather();
     const ms = performance.now() - t0;
@@ -313,8 +344,31 @@ export async function startMud({
     .filter((o) => o.pc && o.linkdead === null && !(o.pc.ch.act & PLR_MORE.WIZINVIS)).length;
 
   // ------------------------------------------------------------- sockets --
-  const wss = server ? new WebSocketServer({ server, maxPayload: lim.maxPayload })
-    : new WebSocketServer({ port, host, maxPayload: lim.maxPayload });
+  /**
+   * A browser names the page that opens a socket in Origin, and any website
+   * can open one to here from its visitors' browsers -- and try logins from
+   * their addresses. A page of the mud's own host may, and a page on this
+   * machine (python3 serve.py beside a local server); a client that is no
+   * browser (the SSH gateway, the tools) sends no Origin and is not asked.
+   */
+  let originRefused = 0;
+  function verifyClient({ req }, done) {
+    const origin = req.headers.origin;
+    if (origin === undefined) return done(true);
+    let name = null;
+    try { name = new URL(origin).hostname.toLowerCase(); } catch { /* not a URL: refused below, by name */ }
+    const host = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
+    if (name && (['localhost', '127.0.0.1', '[::1]'].includes(name) || name === host)) return done(true);
+    originRefused += 1;
+    if (originRefused <= 3 || originRefused % 50 === 0) {
+      const from = siteOf(req);
+      log(`${from}: socket from a page at ${JSON.stringify(origin)} refused (host ${JSON.stringify(req.headers.host || '')}), ${originRefused} so far`);
+      dash.record('site', `${from}: a socket opened by a page at ${String(origin).slice(0, 80)} was refused, ${originRefused} so far`, { lvl: 'warn' });
+    }
+    return done(false, 403, 'Forbidden: this page may not open the mud');
+  }
+  const wss = server ? new WebSocketServer({ server, maxPayload: lim.maxPayload, verifyClient })
+    : new WebSocketServer({ port, host, maxPayload: lim.maxPayload, verifyClient });
   await new Promise((resolve) => (server ? resolve() : wss.once('listening', resolve)));
   const address = wss.address();
   log(`listening on ws://${host}:${address.port}/ws`);
@@ -332,8 +386,9 @@ export async function startMud({
   };
 
   wss.on('connection', (ws, request) => {
+    const host = siteOf(request);
     const s = {
-      ws, open: true, host: siteOf(request), state: 'name', pc: null, record: null,
+      ws, open: true, host, siteKey: limitKey(host), state: 'name', pc: null, record: null,
       out: [], zone: null, seq: 0, posAt: null, played: 0, saveIn: AUTOSAVE_SECONDS, linkdead: null, logged: false,
       sent: { self: '', mobs: new Map(), ground: new Map(), roster: new Map(), weather: '' }, pending: null,
     };
@@ -347,10 +402,20 @@ export async function startMud({
       return;
     }
     // Counted by open sockets: a linkdead body holds no socket, so its owner can always come back.
+    if ([...sessions].filter((o) => o.open).length >= lim.socketsTotal) {
+      const why = `The mud has as many connections as it takes (${lim.socketsTotal}). Try again in a while.`;
+      log(`${s.host}: connection refused, ${lim.socketsTotal} sockets open in all`);
+      dash.record('site', `${s.host}: connection refused, ${lim.socketsTotal} sockets open in all`, { lvl: 'error' });
+      s.open = false;
+      ws.on('error', (error) => log(`${s.host}: socket error: ${error.message}`));
+      ws.close(1013, why);
+      return;
+    }
     const cap = capFor(s.host, lim);
-    // Under a listed prefix every address in it shares the one count: privacy addresses rotate within a /64.
+    // Under a listed prefix every address in it shares the one count; otherwise
+    // the address's limitKey does (an IPv6 /64): privacy addresses rotate within it.
     const entry = siteEntry(s.host, lim);
-    const sameSite = (o) => (entry ? siteEntry(o.host, lim) === entry : o.host === s.host);
+    const sameSite = (o) => (entry ? siteEntry(o.host, lim) === entry : o.siteKey === s.siteKey);
     if (!directLoopback(request) && [...sessions].filter((o) => o.open && sameSite(o)).length >= cap) {
       const why = `Too many connections from your address (${cap} at most). Close another page and try again.`;
       log(`${s.host}: connection refused, ${cap} sockets open already`);
@@ -384,12 +449,13 @@ export async function startMud({
       if (!admit(s)) return;
       let msg;
       try { msg = JSON.parse(data.toString()); } catch (error) { return sendError(s, `bad message: ${error.message}`); }
-      // Not swallowed: a command that throws is logged with its stack and the
-      // player is told where, and the mud goes on for everyone else.
+      // Not swallowed: a command that throws is logged with its stack, the
+      // player is told what failed (where -- the frame, the server's own paths --
+      // is for the log and the dashboard), and the mud goes on for everyone else.
       onMessage(s, msg).catch((error) => {
         log(`error handling ${msg && msg.t} from ${s.pc ? s.pc.ch.name : s.host}: ${error.stack}`);
-        dash.record('server', `error handling ${msg && msg.t} from ${s.pc ? s.pc.ch.name : s.host}: ${error.message} (${(error.stack || '').split('\n')[1]?.trim() || 'no stack'})`, { lvl: 'error' });
-        sendError(s, `The mud stumbles: ${error.message} (${(error.stack || '').split('\n')[1]?.trim() || 'no stack'})`);
+        dash.record('server', `error handling ${msg && msg.t} from ${s.pc ? s.pc.ch.name : s.host}: ${error.message} (${frameOf(error)})`, { lvl: 'error' });
+        sendError(s, `The mud stumbles: ${error.message}`);
       }).finally(reap);
     });
     ws.on('close', () => {
@@ -399,7 +465,8 @@ export async function startMud({
         const ch = s.pc.ch;
         game.roomcast(ch.roomVnum, { kind: 'room', text: `${ch.name} has lost ${['its', 'his', 'her'][ch.sex] || 'its'} link.` }, [ch]);
         s.linkdead = LINKDEAD_SECONDS;
-        saveSession(s);
+        // An exception out of a socket's event would end the process: a save that fails ends this session instead.
+        try { saveSession(s); } catch (error) { endSession(s, 'the save when its link was lost', error); return; }
         log(`${ch.name}@${s.host}: link lost`);
         dash.record('conn', `${ch.name}@${s.host} lost the link`, { who: ch.name, sub: 'linkdead' });
       } else if (!s.pc) sessions.delete(s);
@@ -479,8 +546,8 @@ export async function startMud({
   async function onMessage(s, msg) {
     switch (msg.t) {
       case 'ping': return send(s, { t: 'pong', at: msg.at, now: Date.now() - started });
-      case 'login': return login(s, msg);
-      case 'create': return create(s, msg);
+      case 'login': return oneAtATime(s, 'login', () => login(s, msg));
+      case 'create': return oneAtATime(s, 'create', () => create(s, msg));
       default: break;
     }
     if (!s.pc || s.linkdead !== null) return sendError(s, 'Not playing: log in first.');
@@ -493,8 +560,22 @@ export async function startMud({
     }
   }
 
-  async function login(s, { name: raw = '', password = '', token = null }) {
+  /**
+   * One login or create at a time on a socket: each awaits a scrypt, and a
+   * second sent behind the first would pass every check the first had not
+   * yet acted on -- two bodies for one socket, one of them nobody's.
+   */
+  async function oneAtATime(s, kind, fn) {
     if (s.pc) return;
+    if (s.nanny) {
+      log(`${s.host}: ${kind} while a ${s.nanny} is under way, ignored`);
+      return;
+    }
+    s.nanny = kind;
+    try { await fn(); } finally { s.nanny = null; }
+  }
+
+  async function login(s, { name: raw = '', password = '', token = null }) {
     const name = properName(String(raw).trim());
     // A page whose link dropped asks for its body back with the token it was
     // given on entering, not the password, which it never kept. Only while
@@ -510,37 +591,49 @@ export async function startMud({
     const record = accounts.load(name);
     if (!record) return send(s, { t: 'login', ok: false, new: true, name, why: `Did I get that right, ${name} (Y/N)?` });
     if (record.char.act & PLR_MORE.DENY) return send(s, { t: 'login', ok: false, why: 'You are denied access.' });
-    if (!(await checkPassword(String(password), record.password))) {
-      const paused = guard.wrong(s.host, name);
+    const right = await checkPassword(String(password), record.password);
+    if (!right) {
+      const paused = guard.wrong(s.siteKey, name);
       log(`${name}@${s.host}: wrong password${paused ? `, paused for ${Math.round(paused / 1000)} s` : ''}`);
       dash.record('conn', `${name}@${s.host}: wrong password${paused ? `, paused for ${inMinutes(paused)}` : ''}`, { who: name, lvl: paused ? 'error' : 'warn', sub: 'refused' });
       return send(s, { t: 'login', ok: false, why: paused ? `Wrong password. Too many wrong passwords. Try again in ${inMinutes(paused)}.` : 'Wrong password.' });
     }
-    guard.right(s.host, name);
+    guard.right(s.siteKey, name);
+    // The scrypt took a while: the socket may have gone, and the file may have changed (a deny).
+    if (!s.open) return undefined;
+    const fresh = accounts.load(name);
+    if (fresh.char.act & PLR_MORE.DENY) return send(s, { t: 'login', ok: false, why: 'You are denied access.' });
     // IS_HERO: by trust, which is what lets an immortal past a wizlock.
-    if (site.wizlock && (record.char.trust || record.char.level) < 36) return send(s, { t: 'login', ok: false, why: 'The game is wizlocked.' });
-    enter(s, record, false);
+    if (site.wizlock && (fresh.char.trust || fresh.char.level) < 36) return send(s, { t: 'login', ok: false, why: 'The game is wizlocked.' });
+    enter(s, fresh, false);
   }
 
+  /** Names being created now: two sockets asking for one name both found it free while the first hashed. */
+  const beingCreated = new Set();
   async function create(s, { name: raw = '', password = '', cls, sex }) {
-    if (s.pc) return;
     const name = properName(String(raw).trim());
     if (!refuseGuess(s, name, true)) return undefined;
     if (!checkParseName(name, w.world)) return send(s, { t: 'login', ok: false, why: 'Illegal name, try another.' });
-    if (accounts.exists(name)) return send(s, { t: 'login', ok: false, why: 'That name is taken.' });
+    if (accounts.exists(name) || beingCreated.has(name)) return send(s, { t: 'login', ok: false, why: 'That name is taken.' });
     if (String(password).length < 5) return send(s, { t: 'login', ok: false, new: true, name, why: 'Password must be at least five characters long.' });
     if (site.wizlock) return send(s, { t: 'login', ok: false, why: 'The game is wizlocked.' });
     const classIndex = Number(cls);
     if (!(classIndex >= 0 && classIndex < CLASS_TABLE.length)) return send(s, { t: 'login', ok: false, new: true, name, why: "That's not a class." });
     const sexIndex = { m: 1, f: 2, n: 0 }[String(sex || 'm').toLowerCase()[0]] ?? 1;
-    guard.created(s.host);
+    guard.created(s.siteKey);
     const ch = createCharacter(classIndex, { sex: sexIndex });
     ch.name = name;
     ch.displayName = name;
     schoolKit(ch, w.world);
+    beingCreated.add(name);
+    let hashed;
+    try { hashed = await hashPassword(String(password)); } finally { beingCreated.delete(name); }
+    // Nothing is made for a socket that went while the password was hashed, nor over a file written meanwhile.
+    if (!s.open) return undefined;
+    if (accounts.exists(name)) return send(s, { t: 'login', ok: false, why: 'That name is taken.' });
     const record = {
       version: 1, name, created: new Date().toISOString(),
-      password: await hashPassword(String(password)),
+      password: hashed,
       char: { ...serialize(ch), room: ROOM_VNUM_SCHOOL, title: titleFor(ch), played: 0 },
     };
     accounts.store(record);
@@ -553,14 +646,14 @@ export async function startMud({
    * this name or address is paused; otherwise the attempt is counted and true.
    */
   function refuseGuess(s, name, creating) {
-    const no = guard.refusal(s.host, name, { creating });
+    const no = guard.refusal(s.siteKey, name, { creating });
     if (no) {
       log(`${name}@${s.host}: attempt refused, paused for ${Math.round(no.ms / 1000)} s`);
       dash.record('conn', `${name}@${s.host}: attempt refused while paused (${inMinutes(no.ms)} left)`, { who: name, lvl: 'warn', sub: 'refused' });
       send(s, { t: 'login', ok: false, why: no.why, wait: Math.ceil(no.ms / 1000) });
       return false;
     }
-    const paused = guard.attempt(s.host);
+    const paused = guard.attempt(s.siteKey);
     if (paused) {
       log(`${s.host}: too many login attempts, paused for ${Math.round(paused / 1000)} s`);
       dash.record('site', `${s.host}: too many login attempts, paused for ${inMinutes(paused)}`, { lvl: 'error' });
@@ -619,7 +712,12 @@ export async function startMud({
     game.withPlayer(pc, () => game.noteNews());
   }
 
-  const sameToken = (a, b) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  /** By bytes: a token of as many characters, some of them multibyte, is longer in bytes, and timingSafeEqual throws on that. */
+  const sameToken = (a, b) => {
+    const x = Buffer.from(a);
+    const y = Buffer.from(b);
+    return x.length === y.length && timingSafeEqual(x, y);
+  };
 
   function welcome(s, text, fresh = false) {
     const pc = s.pc;
@@ -690,13 +788,18 @@ export async function startMud({
     });
   }
 
-  function command(s, line) {
+  function command(s, raw) {
     const pc = s.pc;
     s.lastInput = Date.now();
+    // Every typed line comes in here (a page's, the SSH gateway's, the dashboard's), and
+    // titles, descriptions, notes and aliases are typed lines: none of them keeps a control.
+    const line = raw.replace(CONTROLS, '');
     // An alias is read first, so that the log and the dashboard see the commands it ran and not the word that stood for them.
     for (const one of game.withPlayer(pc, () => game.aliasLines(line))) {
-      if (pc.ch.act & PLR_MORE.LOG || s.logged) log(`Log ${pc.ch.name}: ${one}`);
       const name = game.withPlayer(pc, () => game.interpret(one));
+      // interp.c's LOG_NEVER: password is logged without what was typed after it. Known
+      // only once interpret has found the command, so the line is logged after it ran.
+      if (pc.ch.act & PLR_MORE.LOG || s.logged) log(`Log ${pc.ch.name}: ${name === 'password' ? name : one}`);
       dash.command(s, one, name);
     }
   }
@@ -710,30 +813,83 @@ export async function startMud({
   }
 
   /**
-   * The page's own verbs (game-ui.js): a click, E on a thing, a panel's
-   * button. Each is a game.js method run as this player's turn, its
+   * The page's own verbs (game-ui.js, main.js): a click, E on a thing, a
+   * panel's button. Each is a game.js method run as this player's turn, its
    * arguments by reference ({ o }, { m }, { p }) and its refusal sent back.
+   *
+   * Beside each, what it takes, from what the page sends (src/link.js `ref`
+   * and its callers): 'obj' an object at hand -- carried, worn, or lying in
+   * reach; 'inner' one at hand or inside one that is (`get` out of a
+   * corpse); 'mob' a mobile in reach; 'char' a mobile or a player in reach;
+   * 'int' a whole number; 'str' a short word. A '?' may be left out or null.
+   * An object is an options object, which may be left out, with those keys
+   * and a reference for each. Anything else is refused before game.js sees
+   * it, and logged: no page sends it.
    */
-  const OPS = new Set([
-    'attackSlot', 'take', 'takeAll', 'wear', 'wield', 'remove', 'drop', 'put', 'getFrom', 'useItem', 'cast',
-    'buy', 'sell', 'practice', 'train', 'openObj', 'closeObj', 'lockObj', 'unlockObj', 'pickObj',
-    'openDoor', 'closeDoor', 'lockDoor', 'unlockDoor', 'pickDoor', 'useDoor', 'rest', 'sit', 'sleep', 'stand',
-    'sneak', 'hide', 'visible', 'recall', 'breakOff', 'useAction', 'kick', 'backstab', 'disarm', 'steal',
-    'rescue', 'drink', 'eat', 'fill', 'sacrifice', 'dropGold', 'dropAll', 'wearAll', 'value', 'compare',
-    'setTimeOfDay', 'focus',
-  ]);
+  const DOOR = ['int', 'int'];
+  const OPS = {
+    attackSlot: ['mob'],
+    take: ['inner', 'obj?'], takeAll: ['obj'], getFrom: ['inner', 'obj'],
+    wear: ['obj'], wield: ['obj'], remove: ['int'], drop: ['obj'], put: ['obj', 'obj'],
+    useItem: ['obj', { targetObj: 'obj', target: 'char' }],
+    cast: ['str', { target: 'char', obj: 'obj' }],
+    buy: ['int', 'int'], sell: ['int', 'obj'], practice: ['str'], train: ['str'],
+    openObj: ['obj'], closeObj: ['obj'], lockObj: ['obj'], unlockObj: ['obj'], pickObj: ['obj'],
+    openDoor: DOOR, closeDoor: DOOR, lockDoor: DOOR, unlockDoor: DOOR, pickDoor: DOOR, useDoor: DOOR,
+    rest: [], sit: [], sleep: [], stand: [], sneak: [], hide: [], visible: [], recall: [], breakOff: [],
+    useAction: ['str'],
+    // The bar runs these with no arguments (useAction); a slot or a thing to steal is the server's to find.
+    kick: [], backstab: [], disarm: [], steal: [], rescue: [],
+    drink: ['obj?'], eat: ['obj'], fill: ['obj'], sacrifice: ['obj'], dropGold: ['int'], dropAll: ['str?'],
+    wearAll: [], value: ['obj'], compare: ['obj', 'obj?'],
+    setTimeOfDay: ['str'], focus: ['mob?'],
+  };
   function operation(s, { op, a = [] }) {
-    if (!OPS.has(op) || typeof game[op] !== 'function') return sendError(s, `no such action ${JSON.stringify(op)}`);
+    if (typeof op !== 'string' || !Object.hasOwn(OPS, op) || typeof game[op] !== 'function') return sendError(s, `no such action ${JSON.stringify(op)}`);
     const pc = s.pc;
     if (op !== 'focus') s.lastInput = Date.now();
     if (pc.ch.act & PLR_MORE.FREEZE) return game.tell(pc.ch, { kind: 'note', text: "You're totally frozen!" });
+    let args;
+    try { args = decodeArgs(pc, OPS[op], a); } catch (error) {
+      if (!(error instanceof Malformed)) throw error;
+      s.malformed = (s.malformed || 0) + 1;
+      if (s.malformed <= 3 || s.malformed % 50 === 0) {
+        log(`${pc.ch.name}@${s.host}: ${op} refused, ${error.message}: ${JSON.stringify(a).slice(0, 200)}; ${s.malformed} so far`);
+        dash.record('server', `${pc.ch.name}: ${op} refused, ${error.message}; ${s.malformed} so far`, { who: pc.ch.name, lvl: 'warn' });
+      }
+      return sendError(s, `${op}: ${error.message}`);
+    }
+    // A door is opened from beside it, as E on its leaf does: not one across the world.
+    if (OPS[op] === DOOR && !doorInReach(pc, args[0], args[1])) args = [MISSING];
     game.withPlayer(pc, () => {
-      if (op === 'focus') { pc.focusSlot = a[0] && a[0].m !== undefined ? game.mobs[a[0].m] || null : null; return; }
-      const args = a.map((arg) => decode(pc, arg));
-      if (args.some((arg) => arg === MISSING)) return game.tell(pc.ch, { kind: 'note', text: "You don't see that here." });
-      const result = op === 'cast' ? game.cast(args[0], args[1] || {}) : game[op](...args);
+      if (op === 'focus') { pc.focusSlot = args[0] === MISSING ? null : args[0]; return; }
+      const options = (i) => typeof OPS[op][i] === 'object';
+      if (args.some((arg, i) => arg === MISSING || (options(i) && Object.values(arg).includes(MISSING)))) {
+        return game.tell(pc.ch, { kind: 'note', text: "You don't see that here." });
+      }
+      const result = op === 'cast' ? game.cast(args[0], args[1]) : game[op](...args);
       const results = Array.isArray(result) ? result : [result];
       for (const r of results) if (r && !r.ok && r.text && op !== 'cast' && op !== 'useItem') game.tell(pc.ch, { kind: 'note', text: r.text });
+    });
+  }
+
+  /**
+   * A door a client names by room and direction must be one it could be
+   * facing: its leaf stands in the wall of the room it belongs to or of the
+   * room it leads to, so the player is within DOOR_REACH of one of their
+   * middles, on that floor.
+   */
+  const DOOR_REACH = 20;
+  function doorInReach(pc, vnum, dir) {
+    const exit = w.world.rooms.get(vnum)?.exits[dir];
+    if (!exit || !(exit.locks & EX_ISDOOR)) return false;
+    const p = pc.position;
+    return [vnum, exit.to].some((v) => {
+      const room = w.built.rooms.get(v);
+      if (!room || room.unbuilt) return false;
+      const c = room.center;
+      // The server's feet are on the grid's floor, without build.js's lifts (position()).
+      return Math.abs(c.x - p.x) < DOOR_REACH && Math.abs(c.z - p.z) < DOOR_REACH && Math.abs(c.y - (p.y - 1.72)) < 6;
     });
   }
 
@@ -741,26 +897,84 @@ export async function startMud({
   const objIds = new WeakMap();
   let nextObj = 1;
   const idOf = (obj) => { let id = objIds.get(obj); if (!id) { id = nextObj++; objIds.set(obj, id); } return id; };
+  /** A reference that is well formed but names nothing this player can reach now: "You don't see that here." */
   const MISSING = Symbol('missing');
-  /** A reference from a client, back into the world -- only what this player could touch. */
-  function decode(pc, arg) {
-    if (arg === null || typeof arg !== 'object' || Array.isArray(arg)) return arg;
-    if (arg.o !== undefined) {
-      const lists = [pc.ch.inventory, pc.ch.equipment.filter(Boolean), game.ground.filter((o) => o.inRoom === pc.ch.roomVnum || near(o.at, pc.position, 8))];
-      for (const list of lists) for (const obj of nested(list)) if (objIds.get(obj) === arg.o) return obj;
-      return MISSING;
+  /** An argument no page sends: the op is refused and logged. */
+  class Malformed extends Error {}
+  /** How far a mobile or a player may be and still be named: a room, or a long look across one (cast reaches 13 m on the page's own figures). */
+  const CHAR_REACH = 26;
+
+  /** `a`, a client's arguments, against `shape` (OPS): the values game.js is called with. Throws Malformed. */
+  function decodeArgs(pc, shape, a) {
+    if (!Array.isArray(a)) throw new Malformed('its arguments are not a list');
+    if (a.length > shape.length) throw new Malformed(`${a.length} arguments where it takes ${shape.length}`);
+    return shape.map((kind, i) => decodeArg(pc, kind, a[i], `argument ${i + 1}`));
+  }
+
+  function decodeArg(pc, kind, value, what) {
+    if (typeof kind === 'object') {
+      if (value === undefined) return {};
+      if (!isPlainObject(value)) throw new Malformed(`${what} is not an options object`);
+      const out = {};
+      for (const [key, v] of Object.entries(value)) {
+        if (!Object.hasOwn(kind, key)) throw new Malformed(`${what} has an option ${JSON.stringify(key).slice(0, 40)} it does not take`);
+        out[key] = decodeArg(pc, kind[key], v, `${what}'s ${key}`);
+      }
+      return out;
     }
-    if (arg.m !== undefined) return game.mobs[arg.m] || MISSING;
-    if (arg.p !== undefined) return byPc.get(arg.p)?.pc.ch || MISSING;
-    // A plain options object (cast's { target }, useItem's { targetObj }).
-    const out = {};
-    for (const [key, value] of Object.entries(arg)) {
-      const v = decode(pc, value);
-      if (v === MISSING) return MISSING;
-      // cast wants the mobile itself, not its slot.
-      out[key] = v && v.record && v.proto ? (key === 'target' ? game.wakeSlot(v) : v) : v;
+    const optional = kind.endsWith('?');
+    const base = optional ? kind.slice(0, -1) : kind;
+    if (value === undefined || value === null) {
+      if (optional) return null;
+      throw new Malformed(`${what} is missing`);
     }
-    return out;
+    switch (base) {
+      case 'int':
+        if (!Number.isSafeInteger(value)) throw new Malformed(`${what} is not a whole number`);
+        return value;
+      case 'str':
+        if (typeof value !== 'string' || value.length > 40 || value.replace(CONTROLS, '') !== value) throw new Malformed(`${what} is not a word`);
+        return value;
+      case 'obj': case 'inner': return objectAt(pc, refOf(value, ['o'], what).id, base === 'inner');
+      case 'mob': return mobileAt(pc, refOf(value, ['m'], what).id);
+      case 'char': {
+        const r = refOf(value, ['m', 'p'], what);
+        if (r.key === 'p') return playerAt(pc, r.id);
+        const slot = mobileAt(pc, r.id);
+        // cast and a wand want the mobile itself, not its slot.
+        return slot === MISSING || slot.dead ? MISSING : game.wakeSlot(slot);
+      }
+      default: throw new Error(`mud.mjs: OPS names an argument kind ${JSON.stringify(kind)} decodeArg does not know`);
+    }
+  }
+
+  const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  /** A reference: an object of one key out of `keys`, whose value is an index or an id. */
+  function refOf(value, keys, what) {
+    const entries = isPlainObject(value) ? Object.entries(value) : [];
+    if (entries.length !== 1 || !keys.includes(entries[0][0]) || !Number.isSafeInteger(entries[0][1]) || entries[0][1] < 0) {
+      throw new Malformed(`${what} is not a reference ({ ${keys.join(' } or { ')} } and a number)`);
+    }
+    return { key: entries[0][0], id: entries[0][1] };
+  }
+
+  /** An object by id: carried, worn, or lying in the room or within reach -- and with `inner`, inside one of those. */
+  function objectAt(pc, id, inner) {
+    const lists = [pc.ch.inventory, pc.ch.equipment.filter(Boolean), game.ground.filter((o) => o.inRoom === pc.ch.roomVnum || near(o.at, pc.position, 8))];
+    for (const list of lists) for (const obj of (inner ? nested(list) : list)) if (objIds.get(obj) === id) return obj;
+    return MISSING;
+  }
+  /** A mobile by its index, if it stands in your room or within CHAR_REACH. */
+  function mobileAt(pc, index) {
+    const slot = index < game.mobs.length ? game.mobs[index] : null;
+    if (!slot || !(slot.roomVnum === pc.ch.roomVnum || near(slot.pos, pc.position, CHAR_REACH))) return MISSING;
+    return slot;
+  }
+  /** Another player by id, likewise. */
+  function playerAt(pc, id) {
+    const o = byPc.get(id);
+    if (!o || !o.pc || !(o.pc.ch.roomVnum === pc.ch.roomVnum || near(o.pc.position, pc.position, CHAR_REACH))) return MISSING;
+    return o.pc.ch;
   }
   const near = (a, b, r) => !!(a && b && Math.abs(a.x - b.x) < r && Math.abs(a.z - b.z) < r);
 
@@ -1134,9 +1348,42 @@ export async function startMud({
       if (!s.leaving || !s.pc) continue;
       const why = s.leaving;
       s.leaving = null;
-      flush(s);
-      extract(s, `${s.pc.ch.name} has left the game.`);
+      try {
+        flush(s);
+        extract(s, `${s.pc.ch.name} has left the game.`);
+      } catch (error) { endSession(s, `leaving (${why})`, error); continue; }
       send(s, { t: 'bye', why });
+      s.open = false;
+      s.ws.close();
+    }
+  }
+
+  /**
+   * One session's own failure -- what it is sent, its save -- ends that
+   * session and leaves everyone else playing: the stack logged and recorded
+   * on the dashboard, the body out of the world unsaved (a save may be what
+   * failed, and its file keeps the last good one), the socket closed.
+   */
+  function endSession(s, where, error) {
+    const pc = s.pc;
+    const who = pc ? pc.ch.name : '?';
+    log(`${who}@${s.host}: ${where} failed, session ended: ${error.stack || error}`);
+    dash.record('server', `${who}@${s.host}: ${where} failed, session ended: ${error.message} (${frameOf(error)})`, { who: pc ? who : undefined, lvl: 'error' });
+    s.failed = null;
+    s.pc = null;
+    if (pc) {
+      if (s.snoopBy && s.snoopBy.pc) game.tell(s.snoopBy.pc.ch, { kind: 'out', text: 'Your victim has left the game.' });
+      game.roomcast(pc.ch.roomVnum, { kind: 'room', text: `${pc.ch.name} has left the game.` }, [pc.ch]);
+      game.magic.forget(pc.ch);
+      game.removePlayer(pc);
+      byPc.delete(pc.id);
+    }
+    s.snoopBy = null;
+    for (const o of sessions) if (o.snoopBy === s) o.snoopBy = null;
+    sessions.delete(s);
+    dash.forget(s);
+    if (s.open) {
+      send(s, { t: 'bye', why: 'The mud failed on your character and closed your link; the implementor can see why. Your last save is kept.' });
       s.open = false;
       s.ws.close();
     }
@@ -1162,19 +1409,36 @@ export async function startMud({
     log(`${roomText}`);
   }
 
+  /**
+   * act_comm.c: do_password. Each one runs a scrypt or two on the thread
+   * every login waits behind, so a session has one under way at a time, a
+   * paused address or name is told so before any runs, and a wrong old
+   * password counts with the login guard as a wrong login does.
+   */
   async function changePassword(s, argument) {
     if (!s) return;
     const ch = s.pc.ch;
     const words = String(argument || '').trim().split(/\s+/);
     if (words.length < 2 || !words[0] || !words[1]) return say(ch, 'Syntax: password <old> <new>.');
-    if (!(await checkPassword(words[0], s.record.password))) {
-      ch.wait = Math.max(ch.wait, 40);
-      return say(ch, 'Wrong password.  Wait 10 seconds.');
-    }
-    if (words[1].length < 5) return say(ch, 'New password must be at least five characters long.');
-    s.record.password = await hashPassword(words[1]);
-    saveSession(s);
-    say(ch, 'Ok.');
+    if (s.changingPassword) return say(ch, 'You are changing your password already; wait for the answer.');
+    const no = guard.refusal(s.siteKey, ch.name);
+    if (no) return say(ch, no.why);
+    s.changingPassword = true;
+    try {
+      if (!(await checkPassword(words[0], s.record.password))) {
+        const paused = guard.wrong(s.siteKey, ch.name);
+        log(`${ch.name}@${s.host}: wrong old password${paused ? `, paused for ${Math.round(paused / 1000)} s` : ''}`);
+        dash.record('conn', `${ch.name}@${s.host}: wrong old password to password${paused ? `, paused for ${inMinutes(paused)}` : ''}`, { who: ch.name, lvl: paused ? 'error' : 'warn', sub: 'refused' });
+        ch.wait = Math.max(ch.wait, 40);
+        return say(ch, paused ? `Wrong password.  Too many wrong passwords. Try again in ${inMinutes(paused)}.` : 'Wrong password.  Wait 10 seconds.');
+      }
+      guard.right(s.siteKey, ch.name);
+      if (words[1].length < 5) return say(ch, 'New password must be at least five characters long.');
+      s.record.password = await hashPassword(words[1]);
+      // Quit or taken over while it hashed: the record is the one the body's file is written from either way.
+      if (s.pc) saveSession(s); else accounts.store(s.record);
+      return say(ch, 'Ok.');
+    } finally { s.changingPassword = false; }
   }
 
   function users(ch) {
@@ -1221,7 +1485,13 @@ export async function startMud({
       say(ch, ['Banned sites:', ...site.bans()].join('\n'));
       return;
     }
-    if (site.bans().some((b) => b.toLowerCase() === arg.toLowerCase())) { say(ch, 'That site is already banned!'); return; }
+    // A ban matches by address bits (store.mjs banned), so it has to be an address or a prefix.
+    const p = parseSite(arg);
+    if (!p) { say(ch, 'Ban an address or a prefix: 1.2.3.4, 1.2.3.0/24, 2001:db8::/48.'); return; }
+    if (site.bans().some((b) => { const q = parseSite(b); return q ? q.bits === p.bits && q.len === p.len : b.toLowerCase() === arg.toLowerCase(); })) {
+      say(ch, 'That site is already banned!');
+      return;
+    }
     site.ban(arg);
     dash.record('site', `${ch.name} banned ${arg}`, { who: ch.name, lvl: 'warn' });
     say(ch, 'Ok.');
@@ -1272,7 +1542,8 @@ export async function startMud({
   async function close() {
     clearInterval(timer);
     clearInterval(heartbeat);
-    for (const s of [...byPc.values()]) saveSession(s);
+    // One save that fails must not keep the rest from being written.
+    for (const s of [...byPc.values()]) try { saveSession(s); } catch (error) { endSession(s, 'the save at shutdown', error); }
     for (const s of sessions) { s.open = false; try { s.ws.close(); } catch { /* already gone */ } }
     await new Promise((resolve) => wss.close(resolve));
     if (onClose) onClose();

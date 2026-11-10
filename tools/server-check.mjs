@@ -506,21 +506,27 @@ console.log('\nNOTES, SNOOPING, SETTING, BANNING');
   check(w.world.rooms.get(QUIET).sector === 2, 'rset sector', w.world.rooms.get(QUIET).sector);
   y.say(`rset ${QUIET} sector 1`);
 
-  // ban and allow, and the wizlock, kept in the data directory
+  // ban and allow, and the wizlock, kept in the data directory. A ban is an
+  // address or a prefix, matched by its bits: Merc's suffix of the host string
+  // banned 11.2.3.4 along with 1.2.3.4.
   m = y.mark();
   y.say('ban 0.0.1');
-  y.say('ban 0.0.1');
+  await expect(y, /^Ban an address or a prefix: 1\.2\.3\.4, 1\.2\.3\.0\/24, 2001:db8::\/48\.$/, 'a ban that is no address or prefix is refused, in words', m);
+  check(!createSite(data).bans().length, '...and nothing is kept');
+  m = y.mark();
+  y.say('ban 127.0.0.1');
+  y.say('ban 127.0.0.1');
   await expect(y, /^That site is already banned!$/, 'ban, twice', m);
   m = y.mark();
   y.say('ban');
-  await expect(y, /^Banned sites:\n0\.0\.1$/, 'ban alone lists the sites', m);
-  check(createSite(data).bans().includes('0.0.1'), '...kept in the data directory');
+  await expect(y, /^Banned sites:\n127\.0\.0\.1$/, 'ban alone lists the sites', m);
+  check(createSite(data).bans().includes('127.0.0.1'), '...kept in the data directory');
   const banned = client('Banned');
   const bye = await banned.waitFor((x) => x.messages.find((mm) => mm.t === 'bye'), 3000, 'bye').catch(() => null);
-  check(bye && bye.why === 'Your site has been banned from this Mud.', 'a connection from a banned site (a suffix of 127.0.0.1) is refused', bye && bye.why);
+  check(bye && bye.why === 'Your site has been banned from this Mud.', 'a connection from a banned address (127.0.0.1) is refused', bye && bye.why);
   m = y.mark();
-  y.say('allow 0.0.1');
-  y.say('allow 0.0.1');
+  y.say('allow 127.0.0.1');
+  y.say('allow 127.0.0.1');
   await expect(y, /^Site is not banned\.$/, 'allow, twice', m);
   check(!createSite(data).bans().length, '...and the file forgets it');
   m = y.mark();
