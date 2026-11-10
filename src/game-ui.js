@@ -308,10 +308,12 @@ const CSS = `
 #g-sheet .reply { margin-top: 12px; min-height: 1.4em; font-style: italic; color: var(--dim); font-size: 14px; }
 `;
 
-const el = (tag, className, html) => {
+// Text, never markup: names of objects, shops, wardens and areas come from the
+// area files or from whichever server the player connected to.
+const el = (tag, className, text) => {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (html !== undefined) node.innerHTML = html;
+  if (text !== undefined) node.textContent = text;
   return node;
 };
 
@@ -427,7 +429,9 @@ export function createGameUi(game, { built = null } = {}) {
   // -- spells ---------------------------------------------------------------
   const spellBar = el('div', 'panel');
   spellBar.id = 'g-spells';
-  spellBar.append(el('div', 'keys', '<span>z · x — choose</span><span>c · right-click — cast</span>'));
+  const spellKeys = el('div', 'keys');
+  spellKeys.append(el('span', null, 'z · x — choose'), el('span', null, 'c · right-click — cast'));
+  spellBar.append(spellKeys);
   const spellSlots = el('div', 'slots');
   spellBar.appendChild(spellSlots);
   root.appendChild(spellBar);
@@ -743,7 +747,11 @@ export function createGameUi(game, { built = null } = {}) {
         ['str', MERC.currStr(s)], ['int', MERC.currInt(s)], ['wis', MERC.currWis(s)],
         ['dex', MERC.currDex(s)], ['con', MERC.currCon(s)], ['armor', s.ac],
         ['hitroll', MERC.getHitroll(s)], ['damroll', MERC.getDamroll(s)],
-      ]) stats.append(el('div', null, `${k} <b>${v}</b>`));
+      ]) {
+        const stat = el('div', null, `${k} `);
+        stat.append(el('b', null, String(v)));
+        stats.append(stat);
+      }
       sheet.append(stats);
       sheet.append(el('div', 'lede', `you are ${armourWord(s)}`));
 
@@ -1356,7 +1364,9 @@ export function createGameUi(game, { built = null } = {}) {
       const node = el('div', `s${i === spellSel ? ' sel' : ''}`);
       node.style.setProperty('--fam', FAMILY_COLOUR[sp.family] || '#e0bd77');
       const cd = el('i', 'cd');
-      node.append(el('div', 'n', sp.name), el('div', 'm', `<span>${sp.mana} m</span><span>${sp.learned}%</span>`), cd);
+      const cost = el('div', 'm');
+      cost.append(el('span', null, `${sp.mana} m`), el('span', null, `${sp.learned}%`));
+      node.append(el('div', 'n', sp.name), cost, cd);
       spellSlots.appendChild(node);
       slotNodes.push({ node, cd, sp });
     }
@@ -1599,7 +1609,7 @@ export function createGameUi(game, { built = null } = {}) {
     putWidth(manaFill, width(s.mana, s.maxMana));
     putWidth(moveFill, width(s.move, s.maxMove));
     putText(promptLeft, `${Math.max(0, hitShown)}hp ${s.mana}m ${s.move}mv`);
-    if (promptRight.__gold !== s.gold) { promptRight.__gold = s.gold; promptRight.innerHTML = `<b>${s.gold} gold</b>`; }
+    if (promptRight.__gold !== s.gold) { promptRight.__gold = s.gold; promptRight.replaceChildren(el('b', null, `${s.gold} gold`)); }
     const span = 1000;
     putWidth(xpFill, width(span - Math.min(span, s.expToLevel), span));
     if (s.level !== lastLevel) { lastLevel = s.level; drawGates(); }

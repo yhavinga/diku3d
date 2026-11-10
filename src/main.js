@@ -84,7 +84,25 @@ const START_VNUM = Number(params.get('room') || 3001);
 // The home zone is 579 rooms; anything bigger must raise ?max= with it.
 // tools/world-check.mjs guards this number for the shipping set.
 const MAX_ROOMS = Number(params.get('max') || HOME_MAX_ROOMS);
-const AREA_URL = params.get('areaDir') || 'merc21/area';
+const AREA_FILE = /^[A-Za-z0-9_.-]+\.are$/;
+/**
+ * Where the area files are read from. `?areaDir=` and `?areas=` are whatever
+ * a link says, so the directory must be on this page's own origin and the
+ * names must be file names: a link could otherwise point the world at
+ * another site's files, or put markup into the URL a failed read reports.
+ * Thrown inside boot(), so the refusal is shown on the loading screen.
+ */
+function areaDirectory() {
+  const url = new URL(params.get('areaDir') || 'merc21/area', location.href);
+  if (url.origin !== location.origin) {
+    throw new Error(`?areaDir= must be a path on this site (${location.origin}), not on ${url.origin}.`);
+  }
+  const bad = HOME_FILES.find((f) => !AREA_FILE.test(f));
+  if (bad !== undefined) {
+    throw new Error(`?areas= names area files (letters, digits, _ . and -, ending .are); ${JSON.stringify(bad)} is not one.`);
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+}
 
 /**
  * The sky is no longer only scenery: it is baked into an environment cube and
@@ -595,6 +613,7 @@ async function boot() {
     dom.loading.classList.add('hidden');
     return;
   }
+  const areaUrl = areaDirectory();
   // The title is up from the first paint (index.html) and the world is built
   // behind it; a way in taken before it is finished waits for it (title.js).
   const titleHold = holdTitle({ loading: dom.loading });
@@ -638,9 +657,9 @@ async function boot() {
   await progress(0, 'reading the area files');
   // The mud boots off area.lst, so does this: every area it lists, plus any
   // the home zone names that it does not.
-  const listed = (await fetchText(`${AREA_URL}/area.lst`)).split(/\s+/).filter((f) => f.endsWith('.are'));
+  const listed = (await fetchText(`${areaUrl}/area.lst`)).split(/\s+/).filter((f) => f.endsWith('.are'));
   const files = [...listed, ...HOME_FILES.filter((f) => !listed.includes(f))];
-  const texts = await Promise.all(files.map((file) => fetchText(`${AREA_URL}/${file}`)));
+  const texts = await Promise.all(files.map((file) => fetchText(`${areaUrl}/${file}`)));
   const areas = [];
   for (let i = 0; i < files.length; i++) {
     areas.push(parseArea(texts[i], files[i]));
@@ -2909,7 +2928,10 @@ function makeStars() {
 boot().catch((error) => {
   dom.title.classList.add('hidden');
   dom.loading.classList.remove('hidden', 'on-title');
-  dom.loadingText.innerHTML = `<strong>failed to start</strong><br>${String(error.message || error)}`;
+  // As text: the message can carry a URL from the query string.
+  const head = document.createElement('strong');
+  head.textContent = 'failed to start';
+  dom.loadingText.replaceChildren(head, document.createElement('br'), String(error.message || error));
   dom.loadingBar.style.background = '#a33';
   console.error(error);
 });
