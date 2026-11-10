@@ -24,7 +24,7 @@ import { PLR, nested } from '../src/rules/handler.js';
 import { bootWorld } from './world.mjs';
 import { EX_ISDOOR, EX_CLOSED, EX_LOCKED } from '../src/are.js';
 import {
-  createNotes, createReports, createSite, addrBits, parseSite, underSite,
+  createNotes, createReports, createSite, addrBits, parseSite, underSite, limitKey,
 } from './store.mjs';
 import { createDash } from './dash.mjs';
 import {
@@ -127,20 +127,8 @@ export function siteEntry(host, lim = LIMITS) {
   return null;
 }
 
-/**
- * What the per-address limits count by -- the socket cap, the login guard,
- * new characters: an IPv4 address as it is, an IPv6 address by its /64. One
- * line is given a /64 and privacy addresses rotate the low 64 bits, so
- * counting whole IPv6 addresses gave one household 2^64 tries. Logs, `users`,
- * the dashboard and bans still name the whole address. Anything unreadable
- * counts as its own text.
- */
-export function limitKey(host) {
-  const bits = addrBits(host);
-  if (bits === null) return String(host);
-  if ((bits >> 32n) === 0xffffn) return [24n, 16n, 8n, 0n].map((s) => (bits >> s) & 255n).join('.');
-  return `${[112n, 96n, 80n, 64n].map((s) => ((bits >> s) & 0xffffn).toString(16)).join(':')}::/64`;
-}
+/** In store.mjs beside addrBits, so the terminal gateway counts by it without importing the mud; still exported from here. */
+export { limitKey };
 
 /** How many open sockets `host` may hold: the first matching `siteSockets` entry, else `socketsPerSite`. */
 export function capFor(host, lim = LIMITS) {

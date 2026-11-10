@@ -48,13 +48,37 @@ export const INBOX_MAX = 64;
  */
 const LINE_MS = 1000 / 15;
 
+const hex = (code) => code.toString(16).padStart(4, '0');
+/**
+ * A character class from code-point spans, written as escapes: a literal U+2028 in a regex
+ * literal is a syntax error, and an editor has turned the escape into the character before.
+ */
+const charClass = (spans, flags) => new RegExp(`[${spans.map(([a, b]) => `\\u${hex(a)}-\\u${hex(b)}`).join('')}]`, flags);
+/**
+ * Besides C0: DEL, the C1 controls (an 8-bit CSI starts an escape sequence on a terminal that
+ * reads them), the Unicode line and paragraph separators, and the bidi embeddings, overrides and
+ * isolates, which reorder a line on screen. mud.mjs `command` takes the same out of a typed line.
+ */
+const UNSAFE = [[0x7f, 0x9f], [0x2028, 0x2029], [0x202a, 0x202e], [0x2066, 0x2069]];
+const UNPAINTED = charClass([[0x00, 0x09], [0x0b, 0x1f], ...UNSAFE], 'g');
+const UNTYPED = charClass([[0x00, 0x1f], ...UNSAFE], 'g');
+
 /**
  * A text that did not come from this file, made safe to paint: no C0 control but the line break
- * (a tab becomes a space, which is what it meant in the area files that have one), no DEL, no
- * C1 control (an 8-bit CSI starts an escape sequence on a terminal that reads them), and no
- * Unicode line or paragraph separator.
+ * (a tab becomes a space, which is what it meant in the area files that have one), and none of
+ * UNSAFE.
  */
-export const clean = (text) => String(text).replace(/\t/g, ' ').replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f\u2028\u2029]/g, '');
+export const clean = (text) => String(text).replace(/\t/g, ' ').replace(UNPAINTED, '');
+
+/** What was typed, on a pty or through a pipe, without what no person types: so the game is sent it clean whichever way it came, and a pty does not echo it. */
+export const typable = (text) => String(text).replace(UNTYPED, '');
+
+/**
+ * Text this code did not compose -- typed, chosen by a client, said by ssh2 or by the game -- as a
+ * log line quotes it: clean, on one line and at most `max` long, so neither the journal nor a
+ * terminal that reads it later gets a control character or a line of someone else's making.
+ */
+export const quoted = (text, max = 200) => clean(text).replace(/\n/g, ' ').slice(0, max);
 
 /** SGR colours, for a pty only. What is coloured follows the page's console (game-ui.js `show`). */
 const TONE = { room: '1;36', hurt: '31', dead: '1;31', gain: '33', speech: '36' };
@@ -77,10 +101,13 @@ export function directionOf(word) {
 
 /**
  * `stream` is the SSH session's channel, `pty` what its pty request said
- * (null for none), `ip` the address the connection came from. `onEnd` once
- * the session is over, either way.
+ * (null for none), `ip` the address the connection came from, `socket` its
+ * TCP socket, and `heldOutput` the bytes of output the two may hold unsent
+ * before the session is ended (gateway.mjs LIMITS). `onEnd` once the session
+ * is over, either way.
  */
-export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd = () => {} }) {
+export function createTerm({ stream, pty, ip, world, game, greeting, log, socket, heldOutput, onEnd = () => {} }) {
+  if (!socket || !Number.isFinite(heldOutput)) throw new Error('term.mjs: createTerm needs the connection\'s socket and a finite heldOutput');
   const tty = !!pty;
   const colour = tty && pty.term !== 'dumb';
   const NL = tty ? '\r\n' : '\n';
@@ -97,7 +124,18 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
   let buf = [];
   let cur = 0;
 
-  const write = (text) => { if (!ended) stream.write(text); };
+  let overflowed = false;
+  function write(text) {
+    if (ended || overflowed) return;
+    stream.write(text);
+    // The channel keeps what its client's window has no room for, the socket what its client has
+    // not read, and neither has a limit of its own.
+    const unsent = stream.writableLength + socket.writableLength;
+    if (unsent <= heldOutput) return;
+    overflowed = true;
+    log(`${ip}: ${unsent} bytes of output unsent, over ${heldOutput}; cut`);
+    end(null);
+  }
   const paint = (text, sgr) => (colour && sgr ? `\x1b[${sgr}m${text}\x1b[0m` : text);
 
   /** The prompt and what is typed after it, redrawn on the bottom line. */
@@ -222,7 +260,7 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
         continue;
       }
       if (ch === '\x01' || ch === '\x05') { key(ch); continue; }
-      if (ch < ' ') continue;
+      if (!typable(ch)) continue;
       if (buf.length >= LINE_MAX) continue;
       buf.splice(cur, 0, ch);
       cur += 1;
@@ -237,7 +275,8 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
   let dropped = false;
   /** comm.c's way with a line too long: it says so and takes the first LINE_MAX characters. */
   function pipeLine() {
-    let line = partial.replace(/\r$/, '');
+    // The \r of a \r\n goes with the rest of what is not typable.
+    let line = typable(partial);
     if (dropped || line.length > LINE_MAX) { say('Line too long.'); line = line.slice(0, LINE_MAX); }
     partial = '';
     dropped = false;
@@ -260,7 +299,7 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
     submit(null);
   });
   stream.on('close', () => end(null));
-  stream.on('error', (error) => { log(`${ip}: channel error: ${error.message}`); end(null); });
+  stream.on('error', (error) => { log(`${ip}: channel error: ${quoted(error.message)}`); end(null); });
 
   // ------------------------------------------------------------ the end --
 
@@ -269,6 +308,8 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
     // The prompt is not left standing under the last line.
     if (tty) write('\r\x1b[K');
     if (why) write(clean(why) + NL);
+    // One of those writes went past heldOutput, and that has ended the session already.
+    if (ended) return;
     ended = true;
     clearTimeout(nannyTimer);
     try { stream.exit(0); stream.end(); } catch { /* the channel is already gone */ }
@@ -384,16 +425,17 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
 
   async function run() {
     try {
-      link = await openLink({ url: game, ip, log: (text) => log(`${ip}: ${text}`) });
+      // client.mjs and walker.mjs log what the game says (names, reasons) inside lines of their own.
+      link = await openLink({ url: game, ip, log: (text) => log(`${ip}: ${clean(text)}`) });
     } catch (error) {
-      log(`${ip}: ${error.message}`);
+      log(`${ip}: ${quoted(error.message)}`);
       return end('The game is not answering just now. Try again in a minute.');
     }
     if (ended) return link.close('the terminal closed while connecting');
     // mud.mjs says `quit` for a quit, whose verse has been printed already; any other reason is for the player.
     link.on('closed', ({ why }) => end(why === 'quit' ? null : why));
     // Before the login, so nothing the server sends on entering (the doors, the first look) goes unheard.
-    walker = createWalker({ link, world, log: (text) => log(`${ip}: ${text}`), onArrived: () => link.cmd('look') });
+    walker = createWalker({ link, world, log: (text) => log(`${ip}: ${clean(text)}`), onArrived: () => link.cmd('look') });
     link.on('ev', onEv);
     link.on('self', onSelf);
     print(greeting.lines.map((l) => [l, null]));
@@ -401,13 +443,13 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
     try {
       entered = await nanny();
     } catch (error) {
-      log(`${ip}: ${error.message}`);
+      log(`${ip}: ${quoted(error.message)}`);
       return end(error.message);
     }
     if (ended) return undefined;
     if (!entered) return end(null);
     clearTimeout(nannyTimer);
-    log(`${ip}: ${entered.name} entered over ssh${tty ? '' : ' (no pty)'}`);
+    log(`${ip}: ${quoted(entered.name)} entered over ssh${tty ? '' : ' (no pty)'}`);
     walker.standAt(link.room);
     prompt = vitals();
     hidden = false;
@@ -423,13 +465,13 @@ export function createTerm({ stream, pty, ip, world, game, greeting, log, onEnd 
       try {
         await command(line);
       } catch (error) {
-        log(`${ip}: ${link.name}: "${line.slice(0, 60)}" failed: ${error.stack}`);
+        log(`${ip}: ${quoted(link.name)}: "${quoted(line, 60)}" failed: ${clean(error.stack)}`);
         say(`That went wrong in the gateway: ${error.message}`);
       }
     }
   }
 
-  run().catch((error) => { log(`${ip}: session failed: ${error.stack}`); end('The terminal gateway failed; this connection is closed.'); });
+  run().catch((error) => { log(`${ip}: session failed: ${clean(error.stack)}`); end('The terminal gateway failed; this connection is closed.'); });
 
   return {
     end,

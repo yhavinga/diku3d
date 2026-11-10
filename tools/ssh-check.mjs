@@ -8,11 +8,15 @@
  * refuses, into another zone and back), that the watcher sees the terminal
  * player arrive and stand somewhere, that a pipe gets no colour and no
  * echo, and that exec and one connection too many are refused in words.
- * And what a port open to anyone needs: no control character from the game
- * or the ssh line reaches a terminal, a line or a queue of lines is held only
- * so far (a long script still runs whole, in order), a client that ignores its
- * window or stays after being refused is cut, and connections held are bounded
- * per address and in all (a second gateway with tight limits).
+ * And what a port open to anyone needs: no control character or bidi override
+ * from the game or the ssh line reaches a terminal, none typed reaches the
+ * game or is echoed, and none a client chose reaches the gateway's log; a line
+ * or a queue of lines is held only so far (a long script still runs whole, in
+ * order), a client that ignores its window, reads nothing, asks for a second
+ * shell or stays after being refused is cut or ignored, and connections held
+ * are bounded per address -- an IPv6 /64 counted as one, from two of this
+ * machine's own addresses when it has them -- and in all (gateways with tight
+ * limits).
  *
  *     (cd server && npm ci) && node tools/ssh-check.mjs
  *
@@ -21,7 +25,7 @@
 
 import { mkdtempSync, rmSync } from 'fs';
 import net from 'net';
-import { tmpdir } from 'os';
+import { networkInterfaces, tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -33,12 +37,17 @@ let Client;
 try { WebSocket = require('ws'); ({ Client } = require('ssh2')); } catch (error) {
   throw new Error(`tools/ssh-check.mjs needs the server's dependencies: (cd server && npm ci) -- ${error.message}`);
 }
-const { startMud } = await import('../server/mud.mjs');
+const mudModule = await import('../server/mud.mjs');
+const { startMud } = mudModule;
 const { startGateway, newHostKey, LIMITS } = await import('../server/gateway.mjs');
 // As a namespace, so a term.mjs without INBOX_MAX fails its checks rather than this import.
 const termModule = await import('../server/term.mjs');
 const { directionOf } = termModule;
+// The same, for a store.mjs without limitKey.
+const storeModule = await import('../server/store.mjs');
 const { LINE_MAX } = await import('../server/client.mjs');
+// For a DISCONNECT with a reason of the client's own making, which ssh2's client never sends.
+const { sendPacket } = require('ssh2/lib/protocol/utils.js');
 
 const failures = [];
 const check = (ok, label, detail) => {
@@ -47,12 +56,40 @@ const check = (ok, label, detail) => {
 };
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const plain = (text) => text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+/** ESC (a title-setting OSC), BEL, an 8-bit CSI and a bidi override: what a client may put in a name, a line or a command. */
+const MARKS = '\x1b]0;owned\x07 \x9b2J \u202eevil';
+/** What no log line may carry: those, or any other control but the line break (a stack has line breaks), or a separator. */
+const UNLOGGABLE = /[\x00-\x09\x0b-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+/** The lines a player's socket sent the game as `cmd`, as they arrived, before mud.mjs cleans them. */
+function sentBy(name) {
+  const lines = [];
+  // No player of that name is a failure its own check reports; nothing is heard then.
+  mud.sessionNamed(name)?.ws.on('message', (raw) => { const msg = JSON.parse(raw.toString()); if (msg.t === 'cmd') lines.push(msg.line); });
+  return lines;
+}
+/** A DISCONNECT whose reason is `text`, as any client may send one (RFC 4253 11.1); ssh2's own client gives none. */
+function disconnectSaying(conn, text) {
+  const proto = conn._protocol;
+  const reason = Buffer.from(text);
+  const p = proto._packetRW.write.allocStartKEX;
+  const packet = proto._packetRW.write.alloc(1 + 4 + 4 + reason.length + 4, true);
+  packet[p] = 1; // SSH_MSG_DISCONNECT
+  packet.writeUInt32BE(2, p + 1); // a protocol error: any reason but "by application" reaches the gateway's 'error' listener
+  packet.writeUInt32BE(reason.length, p + 5);
+  reason.copy(packet, p + 9);
+  packet.writeUInt32BE(0, p + 9 + reason.length); // no language tag
+  sendPacket(proto, proto._packetRW.write.finalize(packet, true), true);
+}
 
 const data = mkdtempSync(join(tmpdir(), 'diku3d-ssh-check-'));
 const quiet = [];
+/** Every line the gateway logged: none may carry a control character or a bidi override. */
+const gatewayLog = [];
 const mud = await startMud({ root, dataDir: data, port: 0, seed: 4011, log: (text) => quiet.push(text) });
 const url = `ws://127.0.0.1:${mud.port}/ws`;
-const gateway = await startGateway({ root, port: 0, host: '127.0.0.1', game: url, keyPath: join(data, 'ssh_host_ed25519_key'), log: (text) => quiet.push(text), limits: { perSite: 3 } });
+const gateway = await startGateway({
+  root, port: 0, host: '127.0.0.1', game: url, keyPath: join(data, 'ssh_host_ed25519_key'), log: (text) => { quiet.push(text); gatewayLog.push(text); }, limits: { perSite: 3 },
+});
 const w = gateway.world;
 const roomName = (vnum) => w.world.rooms.get(vnum).name;
 
@@ -67,10 +104,10 @@ function spot(vnum, dx = 0, dz = 0) {
  * An SSH connection's one session: what it printed, and a way to wait for something in it.
  * With `stay` the client does not hang up when the session's channel closes, as OpenSSH does.
  */
-async function session({ pty = true, stay = false } = {}) {
+async function session({ pty = true, stay = false, username = 'anyone', host = '127.0.0.1', port = gateway.port, localAddress } = {}) {
   const conn = new Client();
   await new Promise((resolve, reject) => {
-    conn.on('ready', resolve).on('error', reject).connect({ host: '127.0.0.1', port: gateway.port, username: 'anyone', readyTimeout: 5000 });
+    conn.on('ready', resolve).on('error', reject).connect({ host, port, localAddress, username, readyTimeout: 5000 });
   });
   let connClosed = false;
   conn.on('close', () => { connClosed = true; });
@@ -110,9 +147,9 @@ async function session({ pty = true, stay = false } = {}) {
  * FIN from the server leaves it open (allowHalfOpen). What it read, and whether the server ended
  * it, with a FIN or with a reset (a socket destroyed with unread data in it).
  */
-function bare(port, ident = null) {
+function bare(port, ident = null, { host = '127.0.0.1', localAddress } = {}) {
   const r = { got: '', ended: false };
-  r.sock = net.connect({ port, host: '127.0.0.1', allowHalfOpen: true }, () => { if (ident) r.sock.write(ident); });
+  r.sock = net.connect({ port, host, localAddress, allowHalfOpen: true }, () => { if (ident) r.sock.write(ident); });
   r.sock.on('data', (d) => { r.got += d.toString('latin1'); });
   r.sock.on('end', () => { r.ended = true; });
   r.sock.on('error', () => { r.ended = true; });
@@ -241,10 +278,14 @@ check(!a.text.slice(from).includes(roomName(up)), '...not at the room the walk s
 check(mud.stats.refused === refusedBefore, 'the server refused none of the walking body\'s positions', `${mud.stats.refused - refusedBefore} refused`);
 
 console.log('\nTEXT FROM THE GAME, AT A TERMINAL');
-/** What the game could be made to say (a title, a note, a say): a title-setting OSC, a clear screen, a bell, an 8-bit CSI, DEL, NUL, the Unicode separators and a tab. */
-const hostile = 'Glyph \x1b]0;owned\x07title, \x1b[2Jclear, bell\x07, csi\x9b31m, del\x7f, nul\x00, line\u2028para\u2029end, tab\there.';
+/**
+ * What the game could be made to say (a title, a note, a say, a name in an old save): a title-setting
+ * OSC, a clear screen, a bell, an 8-bit CSI, DEL, NUL, the Unicode separators, a bidi override, an
+ * embedding and an isolate (which reorder the line on screen), and a tab.
+ */
+const hostile = 'Glyph \x1b]0;owned\x07title, \x1b[2Jclear, bell\x07, csi\x9b31m, del\x7f, nul\x00, line\u2028para\u2029end, rlo\u202eeman\u202c, emb\u202aed\u202c, iso\u2067late\u2069, tab\there.';
 /** ...and what may reach a terminal of it: no control left, every printable character kept, the tab a space. */
-const safe = 'Glyph ]0;ownedtitle, [2Jclear, bell, csi31m, del, nul, lineparaend, tab here.';
+const safe = 'Glyph ]0;ownedtitle, [2Jclear, bell, csi31m, del, nul, lineparaend, rloeman, embed, isolate, tab here.';
 /** The line as the terminal got it, escape sequences and all. */
 async function heard(s, from) {
   if (!await until(() => s.raw.indexOf('here.', from) >= 0)) return null;
@@ -253,7 +294,17 @@ async function heard(s, from) {
 let rawFrom = a.raw.length;
 mud.game.tell(mud.sessionNamed('Tester').pc.ch, { kind: 'out', text: hostile });
 let line = await heard(a, rawFrom);
-check(line === safe, 'a pty is sent what the game says without ESC, BEL, a C1 control, DEL, NUL or U+2028/2029, its printable text intact', JSON.stringify(line));
+check(line === safe, 'a pty is sent what the game says without ESC, BEL, a C1 control, DEL, NUL, U+2028/2029 or a bidi override, embedding or isolate, its printable text intact', JSON.stringify(line));
+
+console.log('\nWHAT IS TYPED AT A TERMINAL');
+const testerSent = sentBy('Tester');
+rawFrom = a.raw.length;
+from = a.mark();
+// A C1 control and a bidi override typed, and DEL -- what a pty's Backspace sends -- after a '!'.
+a.stream.write('say c1\x9b bidi\u202e del!\x7f.\r');
+await a.see(/You say 'c1 bidi del\.'/, null, from);
+check(testerSent.at(-1) === 'say c1 bidi del.', 'a C1 control and a bidi override typed on a pty are not sent to the game, and DEL is a Backspace', JSON.stringify(testerSent.at(-1)));
+check(!/[\x7f-\x9f\u202a-\u202e\u2066-\u2069]/.test(a.raw.slice(rawFrom)), '...and neither is echoed', JSON.stringify(a.raw.slice(rawFrom, rawFrom + 30)));
 
 console.log('\nA SCRIPT, WITH NO PTY');
 const b = await session({ pty: false });
@@ -374,6 +425,24 @@ const exec = await execOnce('ls -la');
 check(exec.code === 1 && /takes no command/.test(exec.out), 'a command on the ssh line is refused, in words, with exit status 1', exec.out.trim().slice(0, 60));
 const shown = (await execOnce('\x1b]0;owned\x07ls\x9b2J\x7f')).out;
 check(/\("\]0;ownedls2J"\)/.test(shown) && !/[\x00-\x09\x0b-\x1f\x7f-\x9f]/.test(shown.replace(/\n$/, '')), '...and the command it quotes back has no control character in it', JSON.stringify(shown.slice(0, 60)));
+// A client that stays after its command is refused, as `stay` does after a refused shell; its command
+// carries what a log line must not (see WHAT THE GATEWAY LOGS).
+{
+  const e = new Client();
+  await new Promise((resolve, reject) => e.on('ready', resolve).on('error', reject).connect({ host: '127.0.0.1', port: gateway.port, username: 'x', readyTimeout: 5000 }));
+  let gone = false;
+  e.on('close', () => { gone = true; });
+  await new Promise((resolve, reject) => e.exec(`ls ${MARKS}`, (error, stream) => {
+    if (error) return reject(error);
+    stream.stderr.resume();
+    stream.on('close', resolve);
+    return stream.resume();
+  }));
+  const t = Date.now();
+  check(await until(() => gone, 8000), '...and a client that stays connected after it is hung up on a few seconds later, as after a refused shell, not when the handshake\'s 20 s run out',
+    gone ? `${((Date.now() - t) / 1000).toFixed(1)} s after the refusal` : 'still connected after 8 s');
+  e.end();
+}
 // The scripts' connections above are let go of once the server has seen them close.
 for (let until = Date.now() + 5000; gateway.openConnections() > 1 && Date.now() < until;) await pause(20);
 const idle = [await session(), await session()];
@@ -412,6 +481,84 @@ await c.see(/Wrong password\.[\s\S]*Wrong password\.[\s\S]*Wrong password\./, 't
 check(await c.gone(), '...and the third closes the connection');
 check(!!mud.sessionNamed('Tester'), 'Tester, playing at the other terminal, is still in the game');
 
+console.log('\nWHAT IS TYPED THROUGH A PIPE, AND WHAT THE GATEWAY LOGS');
+for (let until = Date.now() + 5000; gateway.openConnections() > 1 && Date.now() < until;) await pause(20);
+const lg = await session({ pty: false, username: `user${MARKS}` });
+await lg.see(/By what name do you wish to be known\?\n/);
+from = lg.mark();
+lg.type('P\x1bi\x9bp\u202eer\x07');
+// The nanny asks the password before the game has judged the name (term.mjs).
+await lg.see(/Password:\n/, null, from);
+from = lg.mark();
+lg.type('secret2');
+await until(() => mud.sessionNamed('Piper') || /Illegal name/.test(lg.text.slice(from)));
+check(!!mud.sessionNamed('Piper'), 'a name typed through a pipe with ESC, a C1 control, a bidi override and BEL in it reaches the game without them: Piper, under an ssh user name that carries them too, is back in the game',
+  /Illegal name/.test(lg.text.slice(from)) ? 'the game refused the name as typed' : undefined);
+// The old gateway sent the name on as it came, and the game refused it.
+if (!mud.sessionNamed('Piper')) {
+  from = lg.mark();
+  lg.type('Piper');
+  await lg.see(/Password:\n/, null, from);
+  lg.type('secret2');
+  await until(() => mud.sessionNamed('Piper'));
+}
+const loggerSent = sentBy('Piper');
+from = lg.mark();
+lg.type('say c1\x9b bidi\u202e del\x7f.');
+await lg.see(/You say 'c1 bidi del\.'/, null, from);
+check(loggerSent.at(-1) === 'say c1 bidi del.', 'the line typed on the pty above reaches the game through a pipe without the C1 control, the bidi override or DEL', JSON.stringify(loggerSent.at(-1)));
+// A CR inside a pipe's line made it two commands, which client.mjs refuses by throwing, and the gateway logged the line as it came.
+from = lg.mark();
+lg.type(`say one${MARKS}\rtwo`);
+await lg.see(/You say 'one|went wrong in the gateway/, null, from);
+check(loggerSent.at(-1) === 'say one]0;owned 2J eviltwo', '...and so does one with ESC, BEL and a CR inside it', JSON.stringify(loggerSent.at(-1)));
+lg.type('quit');
+check(await lg.gone(6000), '...and quits');
+// A client's DISCONNECT may give a reason of its own making, which ssh2 makes the message of an 'error' the gateway logs.
+{
+  const d = new Client();
+  await new Promise((resolve, reject) => d.on('ready', resolve).on('error', reject).connect({ host: '127.0.0.1', port: gateway.port, username: 'x', readyTimeout: 5000 }));
+  let gone = false;
+  d.on('close', () => { gone = true; });
+  disconnectSaying(d, `farewell ${MARKS}\nforged: a line of the client's making ${'x'.repeat(8000)}`);
+  await until(() => gone, 3000);
+  d.end();
+}
+const farewell = gatewayLog.find((l) => l.includes('farewell'));
+check(!!farewell && farewell.length <= 300 && !farewell.includes('\n'), 'the reason a client gives in its DISCONNECT (8 KB, with a line break) is logged on one line and cut short', farewell ? `${farewell.length} characters` : 'not logged');
+const unloggable = gatewayLog.filter((l) => UNLOGGABLE.test(l));
+check(!unloggable.length, 'nothing the gateway has logged -- the refused command, the typed lines, the names, the DISCONNECT -- carries ESC, BEL, a C1 control, a bidi override or another control',
+  unloggable.length ? `${unloggable.length} of ${gatewayLog.length} lines do, as ${JSON.stringify(unloggable[0].slice(0, 70))}` : `${gatewayLog.length} lines`);
+
+console.log('\nA SECOND SHELL OR COMMAND ON A SESSION\'S CHANNEL');
+for (let until = Date.now() + 5000; gateway.openConnections() > 1 && Date.now() < until;) await pause(20);
+const twice = await session();
+await twice.see(/By what name do you wish to be known\? $/);
+// ssh2's client asks once a channel; its protocol object asks again, as any client may.
+twice.conn._protocol.shell(twice.stream.outgoing.id, false);
+twice.conn._protocol.exec(twice.stream.outgoing.id, 'ls', false);
+await pause(300);
+from = twice.mark();
+if (!twice.connClosed) twice.type('Twice');
+await twice.see(/Password: $/, 'a second shell and an exec asked for on a session\'s channel are ignored, and the session goes on', from);
+check(!twice.connClosed && !gatewayLog.some((l) => /Cannot read properties/.test(l)), '...on its connection, with nothing thrown in the gateway', gatewayLog.find((l) => /Cannot read properties/.test(l)));
+twice.conn.end();
+
+console.log('\nOUTPUT NOBODY READS');
+for (let until = Date.now() + 5000; gateway.openConnections() > 1 && Date.now() < until;) await pause(20);
+// A client that reads nothing has the gateway keep what it is sent once the window it gave is used up
+// (ssh2's client gives 2 MB more while its paused stream holds less than 2 MB): here the echo of
+// Enter at the name prompt, some 26 bytes for each byte typed.
+const o = await session();
+await o.see(/By what name do you wish to be known\? $/);
+o.stream.pause();
+const enters = Buffer.alloc(16 * 1024, '\r');
+for (let i = 0; i < 24 && !o.connClosed; i++) { o.stream.write(enters); await pause(20); }
+check(await until(() => o.connClosed, 10000), 'a terminal that keeps pressing Enter while its client reads nothing is cut');
+const outAt = gatewayLog.map((l) => /(\d+) bytes of output unsent, over (\d+); cut/.exec(l)).find(Boolean);
+check(!!outAt && +outAt[1] <= LIMITS.heldOutput + 64 * 1024, `...once it holds heldOutput (${LIMITS.heldOutput}) bytes unsent, and the gateway logs why`, outAt?.[0]);
+o.conn.end();
+
 console.log('\nA GATEWAY WITH TIGHT LIMITS');
 const tightLog = [];
 const tight = await startGateway({
@@ -438,6 +585,55 @@ await pause(500);
 process.off('uncaughtException', crashed);
 check(!crashes.length, '...and its reset after the cut does not take the gateway down', crashes.join('; ') || 'nothing uncaught');
 await tight.close();
+
+console.log('\nAN IPv6 /64 COUNTED AS ONE ADDRESS');
+const { limitKey } = storeModule;
+const keyed = typeof limitKey === 'function';
+check(keyed && limitKey('2001:db8:1:2::a') === limitKey('2001:db8:1:2:ffff:ffff:ffff:b') && limitKey('2001:db8:1:2::a') !== limitKey('2001:db8:1:3::a'),
+  'store.mjs limitKey gives two addresses in one IPv6 /64 one key, and an address in the next /64 another');
+check(keyed && limitKey('192.0.2.1') !== limitKey('192.0.2.2') && limitKey('::ffff:192.0.2.1') === limitKey('192.0.2.1'), '...an IPv4 address a key of its own, however it is written');
+check(keyed && mudModule.limitKey === limitKey, '...and mud.mjs counts by that same function');
+/** Two of this machine's own IPv6 addresses in one /64 (a secured and a temporary one, say), or null. */
+function sameSixtyFour() {
+  const by = new Map();
+  for (const a of Object.values(networkInterfaces()).flat()) {
+    const bits = a.family === 'IPv6' && !a.internal && a.scopeid === 0 ? storeModule.addrBits(a.address) : null;
+    if (bits === null || (bits >> 32n) === 0xffffn) continue;
+    by.set(bits >> 64n, [...(by.get(bits >> 64n) || []), a.address]);
+  }
+  return [...by.values()].find((list) => list.length >= 2) || null;
+}
+const pair = sameSixtyFour();
+if (!pair) console.log('  skip  the gateway\'s count over IPv6: this machine has no two IPv6 addresses in one /64 to connect from');
+else {
+  // A gateway on ::1 only, reached from two of this machine's own addresses; they are not printed.
+  const [A, B] = pair;
+  const v6 = await startGateway({
+    root, port: 0, host: '::1', game: url, keyPath: join(data, 'ssh_host_ed25519_key'), log: (text) => gatewayLog.push(text),
+    limits: { perSite: 1, perSiteHeld: 3, perMinute: 3, letGoMs: 300 },
+  });
+  const at = (localAddress) => ({ host: '::1', port: v6.port, localAddress });
+  const sA = await session(at(A));
+  await sA.see(/By what name do you wish to be known\? $/, 'a session from one of this machine\'s IPv6 addresses plays (a gateway on ::1, perSite 1 here)');
+  const sB = await session(at(B));
+  await sB.see(/There are already 1 connections from your address\./, '...and a second, from another address in the same /64, is refused in words');
+  sB.conn.end();
+  for (let until = Date.now() + 5000; v6.heldConnections() !== 1 && Date.now() < until;) await pause(20);
+  const three = [bare(v6.port, null, at(B)), bare(v6.port, null, at(B)), bare(v6.port, null, at(A))];
+  const n = await settled(three);
+  check(n.held === 2 && n.cut === 1, 'of three bare connections more, from the two addresses, two are held and one cut before the banner (perSiteHeld 3 here)', `${n.held} held, ${n.cut} cut`);
+  for (const r of three) r.sock.destroy();
+  for (let until = Date.now() + 5000; v6.heldConnections() !== 1 && Date.now() < until;) await pause(20);
+  // Two connections from the /64 have said who they are so far.
+  const idA = bare(v6.port, 'SSH-2.0-check\r\n', at(A));
+  await pause(150);
+  const idB = bare(v6.port, 'SSH-2.0-check\r\n', at(B));
+  await until(() => idB.ended, 3000);
+  check(!idA.ended && idB.ended, '...and of two more that say who they are, one from each address, the second is cut as the fourth from the /64 in a minute (perMinute 3 here)', `${[idA, idB].filter((r) => r.ended).length} cut`);
+  for (const r of [idA, idB]) r.sock.destroy();
+  sA.conn.end();
+  await v6.close();
+}
 
 console.log('\nQUITTING');
 from = a.mark();

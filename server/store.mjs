@@ -98,6 +98,21 @@ export function addrBits(text) {
   return groups.reduce((n, g) => (n << 16n) | BigInt(`0x${g}`), 0n);
 }
 
+/**
+ * What the per-address limits count by -- the socket cap, the login guard,
+ * new characters, and the terminal gateway's connections: an IPv4 address as
+ * it is, an IPv6 address by its /64. One line is given a /64 and privacy
+ * addresses rotate the low 64 bits, so counting whole IPv6 addresses gave one
+ * household 2^64 tries. Logs, `users`, the dashboard and bans still name the
+ * whole address. Anything unreadable counts as its own text.
+ */
+export function limitKey(host) {
+  const bits = addrBits(host);
+  if (bits === null) return String(host);
+  if ((bits >> 32n) === 0xffffn) return [24n, 16n, 8n, 0n].map((s) => (bits >> s) & 255n).join('.');
+  return `${[112n, 96n, 80n, 64n].map((s) => ((bits >> s) & 0xffffn).toString(16)).join(':')}::/64`;
+}
+
 /** `site` (an address or addr/len) as { bits, len } over 128 bits, or null when it is neither. */
 export function parseSite(site) {
   const [addr, lenText, extra] = String(site).split('/');

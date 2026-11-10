@@ -27,10 +27,15 @@ import ssh2 from 'ssh2';
 
 import { parseArea } from '../src/are.js';
 import { bootWorld } from './world.mjs';
-import { createTerm, clean } from './term.mjs';
+import { limitKey } from './store.mjs';
+import { createTerm, clean, quoted } from './term.mjs';
 
 const { Server, utils } = ssh2;
 
+/**
+ * What the per-address limits below count by is the address's `limitKey`, as the game server's
+ * do: an IPv4 address as it is, an IPv6 address by its /64, which one line is given whole.
+ */
 export const LIMITS = {
   /** Connections at once from one address: as mud.mjs `socketsPerSite`, which counts them again behind us. Past it a session is refused in words. */
   perSite: 4,
@@ -55,6 +60,13 @@ export const LIMITS = {
    * comes on a channel nobody reads (an exec, a refusal).
    */
   heldInput: 256 * 1024,
+  /**
+   * Bytes of output a connection may hold unsent -- in its channel while the client's window is
+   * shut, in its socket while the client does not read -- past which the connection is cut. A
+   * client that stops reading would otherwise have everything the game says to it, and the echo
+   * of everything it types (some fifty bytes for each Enter), kept here for as long as it stays.
+   */
+  heldOutput: 1024 * 1024,
 };
 /** From the end of a session to the gateway hanging up: OpenSSH hangs up by itself once the channel closes, and the game's last line stays the last thing it prints. */
 const HANG_UP_MS = 3000;
@@ -136,15 +148,16 @@ export async function startGateway({ root, port, host = '0.0.0.0', game, keyPath
 
   const tcp = createServer((socket) => {
     const ip = socket.remoteAddress;
-    const from = heldFrom.get(ip) || 0;
+    const site = limitKey(ip);
+    const from = heldFrom.get(site) || 0;
     if (from >= lim.perSiteHeld || held.size >= lim.totalHeld) {
       stats.cut += 1;
-      if (from >= lim.perSiteHeld && !warnedSites.has(ip)) { warnedSites.add(ip); log(`${ip}: holds ${from} connections; cutting more as they come`); }
+      if (from >= lim.perSiteHeld && !warnedSites.has(site)) { warnedSites.add(site); log(`${ip}: holds ${from} connections; cutting more as they come`); }
       if (held.size >= lim.totalHeld && !warnedFull) { warnedFull = true; log(`${held.size} connections held; cutting more as they come`); }
       socket.destroy();
       return;
     }
-    heldFrom.set(ip, from + 1);
+    heldFrom.set(site, from + 1);
     const key = `${ip} ${socket.remotePort}`;
     /** The connection: its socket, and once there, ssh2's connection, its one channel and the session played on it. */
     const c = { socket, client: null, channel: null, term: null, handshake: null };
@@ -154,9 +167,9 @@ export async function startGateway({ root, port, host = '0.0.0.0', game, keyPath
     socket.once('close', () => {
       clearTimeout(c.handshake);
       held.delete(key);
-      const n = heldFrom.get(ip) - 1;
-      if (n) heldFrom.set(ip, n); else heldFrom.delete(ip);
-      warnedSites.delete(ip);
+      const n = heldFrom.get(site) - 1;
+      if (n) heldFrom.set(site, n); else heldFrom.delete(site);
+      warnedSites.delete(site);
       warnedFull = false;
     });
     server.injectSocket(socket);
@@ -164,32 +177,37 @@ export async function startGateway({ root, port, host = '0.0.0.0', game, keyPath
 
   const server = new Server({ hostKeys: [hostKey(keyPath, log)], ident: 'diku3d' }, (client, info) => {
     const ip = info.ip;
+    const site = limitKey(ip);
     const c = held.get(`${ip} ${info.port}`);
     if (!c) throw new Error(`gateway.mjs: ssh2 has a connection from ${ip} port ${info.port} that the gateway did not accept`);
     c.client = client;
     // Before anything that can hang up: an 'error' with no listener (a reset after the cut) would take the gateway down.
-    client.on('error', (error) => { if (!/ECONNRESET|Handshake|Connection lost|Bad identification/i.test(error.message)) log(`${ip}: ${error.message}`); });
+    // A client's DISCONNECT names its own reason, and ssh2 makes that the error's message.
+    client.on('error', (error) => { if (!/ECONNRESET|Handshake|Connection lost|Bad identification/i.test(error.message)) log(`${ip}: ${quoted(error.message)}`); });
     stats.connections += 1;
     const now = Date.now();
-    const times = (recent.get(ip) || []).filter((t) => now - t < 60_000);
+    const times = (recent.get(site) || []).filter((t) => now - t < 60_000);
     times.push(now);
-    recent.set(ip, times);
+    recent.set(site, times);
     if (times.length > lim.perMinute) {
       stats.cut += 1;
       if (times.length === lim.perMinute + 1) log(`${ip}: over ${lim.perMinute} connections a minute; cutting them off before the key exchange`);
+      // Only the newest perMinute + 1 decide (the address is over while the oldest of them is under a
+      // minute old); an address that kept coming made every one of its connections filter a longer list.
+      else times.shift();
       hangUp(c);
       return;
     }
-    open.set(ip, (open.get(ip) || 0) + 1);
+    open.set(site, (open.get(site) || 0) + 1);
     let left = false;
     const leave = () => {
       if (left) return;
       left = true;
-      const n = (open.get(ip) || 1) - 1;
-      if (n) open.set(ip, n); else open.delete(ip);
+      const n = (open.get(site) || 1) - 1;
+      if (n) open.set(site, n); else open.delete(site);
     };
     // Too many: refused in words, once the session is open, so a person with one tab too many knows why.
-    const busy = open.get(ip) > lim.perSite ? `There are already ${lim.perSite} connections from your address.`
+    const busy = open.get(site) > lim.perSite ? `There are already ${lim.perSite} connections from your address.`
       : [...open.values()].reduce((a, b) => a + b, 0) > lim.total ? 'The game is full just now. Try again later.' : null;
 
     // ssh2 1.17.0 drops a client's data only when the channel's window is exactly 0 (server.js,
@@ -217,16 +235,23 @@ export async function startGateway({ root, port, host = '0.0.0.0', game, keyPath
         s.on('window-change', (ok) => { if (ok) ok(); });
         s.on('env', (ok) => { if (ok) ok(); });
         s.on('subsystem', (ok, no) => { if (no) no(); });
+        // ssh2's ok() gives nothing once the session has its channel: a second shell or exec on it is
+        // a client's doing, and taken as it was, it put that nothing in c.channel (no heldInput
+        // watch) and, for a shell after an exec, stopped the handshake's timer that let go of the exec.
         s.on('exec', (ok, no, e) => {
           const stream = ok();
+          if (!stream) return;
           c.channel = stream;
           stream.stderr.write(`diku3d takes no command on the ssh line ("${clean(e.command).slice(0, 40)}"); connect without one and the game asks for your name.\n`);
           stream.exit(1);
           stream.end();
+          // As a refused shell: otherwise only the handshake's 20 s let go of a client that stays.
+          setTimeout(() => hangUp(c), HANG_UP_MS).unref();
         });
         s.on('shell', (ok) => {
-          clearTimeout(c.handshake);
           const stream = ok();
+          if (!stream) return;
+          clearTimeout(c.handshake);
           c.channel = stream;
           if (busy) {
             stream.write(`${busy}${pty ? '\r\n' : '\n'}`);
@@ -240,7 +265,10 @@ export async function startGateway({ root, port, host = '0.0.0.0', game, keyPath
           stats.sessions += 1;
           // The session's end closes its channel, and ssh hangs up on that by itself; ending the
           // connection from here instead makes OpenSSH print "Received disconnect" after the game's last line.
-          const term = createTerm({ stream, pty, ip, world, game, greeting, log, onEnd: () => { terms.delete(term); setTimeout(() => hangUp(c), HANG_UP_MS).unref(); } });
+          const term = createTerm({
+            stream, pty, ip, world, game, greeting, log, socket: c.socket, heldOutput: lim.heldOutput,
+            onEnd: () => { terms.delete(term); setTimeout(() => hangUp(c), HANG_UP_MS).unref(); },
+          });
           c.term = term;
           terms.add(term);
         });
