@@ -271,7 +271,7 @@ if (opt.page) {
   if (!fs.existsSync(path.join(opt.repo, 'server/world.mjs'))) throw new Error(`doorways: --page needs --repo <the diku3d checkout>, not ${opt.repo}`);
   const { chromium } = await import('playwright');
   const RADIUS = 0.42, STEP_UP = 0.62, HEIGHT = 1.8, RES = 0.5;
-  const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+  const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
   const page = await browser.newPage({ viewport: { width: 480, height: 270 } });
   page.on('pageerror', (e) => console.log('pageerror', e.message));
   await page.goto(`http://localhost:${opt.port}/`);

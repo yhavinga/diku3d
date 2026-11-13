@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 const args = process.argv.slice(2);
 const opt = { port: 8211, mud: 'localhost:4011' };
 for (let i = 0; i < args.length; i++) { if (args[i] === '--port') opt.port = +args[++i]; else if (args[i] === '--mud') opt.mud = args[++i]; }
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 
 /**
  * Walk the page's player to room `to` by typed directions, a room at a time,

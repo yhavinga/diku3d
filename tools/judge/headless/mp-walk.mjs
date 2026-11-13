@@ -14,7 +14,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--steps') { opt.steps = +v; i++; } else if (a === '--name') { opt.name = v; i++; } else if (a === '--seed') { opt.seed = +v; i++; }
 }
 if (opt.out) fs.mkdirSync(opt.out, { recursive: true });
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const logs = [];
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));

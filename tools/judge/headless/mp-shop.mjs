@@ -14,7 +14,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--keeper') { opt.keeper = v; i++; }
 }
 fs.mkdirSync(opt.out, { recursive: true });
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const logs = [];
 
 async function enter(name) {

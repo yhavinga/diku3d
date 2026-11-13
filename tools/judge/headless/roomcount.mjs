@@ -304,7 +304,7 @@ async function main() {
   async function openPage() {
     if (page) return page;
     const { chromium } = await import('playwright');
-    browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+    browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
     page = await browser.newPage({ viewport: { width: 480, height: 270 } });
     page.on('pageerror', (e) => console.log('pageerror', e.message));
     await page.goto(`http://localhost:${opt.port}/`);

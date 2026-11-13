@@ -55,7 +55,7 @@ const pcOf = (n) => game.players.find((p) => p.ch.name === n);
 const run = (n, line) => game.withPlayer(pcOf(n), () => game.interpret(line));
 const put = (n, x, z) => { const pc = pcOf(n); pc.position.x = 312000 + x; pc.position.z = z; };
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const logs = [];
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message} ${String(e.stack).split('\n').slice(1, 4).join(' | ')}`));

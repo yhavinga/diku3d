@@ -15,7 +15,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--max') { opt.max = +v; i++; }
 }
 fs.mkdirSync(opt.out, { recursive: true });
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: opt.size[0], height: opt.size[1] } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));

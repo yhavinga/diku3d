@@ -102,7 +102,7 @@ const clock = `(() => {
   };
 })();`;
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: opt.w, height: opt.h }, deviceScaleFactor: opt.scale });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));

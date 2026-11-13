@@ -29,7 +29,7 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === '--zone') opt.zone = +args[++i];
 }
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
 page.on('pageerror', (e) => console.log('pageerror', e.message));
 await page.goto(`http://localhost:${opt.port}/`);

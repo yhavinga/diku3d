@@ -39,7 +39,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--out') { opt.out = v; i++; }
 }
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
 page.on('pageerror', (e) => console.log('pageerror', e.message));
 await page.goto(`http://localhost:${opt.port}/`);

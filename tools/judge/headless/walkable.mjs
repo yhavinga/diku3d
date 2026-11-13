@@ -177,7 +177,7 @@ for (const room of w.world.rooms.values()) {
 }
 const zoneIds = opt.zones === 'all' ? w.zones.map((z) => z.zone.id) : opt.zones.split(',');
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 480, height: 270 } });
 page.on('pageerror', (e) => console.log('pageerror', e.message));
 await page.goto(`http://localhost:${opt.port}/`);

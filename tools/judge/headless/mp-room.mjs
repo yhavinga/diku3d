@@ -64,7 +64,7 @@ const oldAt = (eye) => {
   return best;
 };
 const OLD_WRONG = 'the count before wave 17 would have failed it';
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
 const pageErrors = [];
 page.on('pageerror', (e) => pageErrors.push(e.message));

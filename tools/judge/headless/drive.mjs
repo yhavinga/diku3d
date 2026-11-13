@@ -34,6 +34,8 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const browser = await chromium.launch({
+  channel: 'chrome',
+  chromiumSandbox: true,
   headless: true,
   args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'],
 });

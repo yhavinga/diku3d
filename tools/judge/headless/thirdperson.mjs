@@ -84,7 +84,7 @@ for (let i = 0; i < args.length; i++) {
 const only = opt.places === 'all' ? null : new Set(opt.places.split(','));
 const list = PLACES.filter((p) => !only || only.has(p.name));
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 page.on('pageerror', (e) => console.log('pageerror', e.message));
 await page.goto(`http://localhost:${opt.port}/?${opt.query}`);

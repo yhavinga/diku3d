@@ -38,7 +38,7 @@ const { EX_CLOSED } = await import(pathToFileURL(path.join(opt.repo, 'src/are.js
 const data = opt.data || fs.mkdtempSync('/tmp/dk/w15-hatches-mud-');
 const log = [];
 const mud = await startMud({ root: opt.repo, dataDir: data, port: 0, seed: 7, log: (t) => log.push(t) });
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 let failed = 0;
 const check = (ok, what, detail = '') => {
   if (!ok) failed++;

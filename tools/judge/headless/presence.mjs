@@ -10,7 +10,7 @@
 import { chromium } from 'playwright';
 
 const port = Number((process.argv.indexOf('--port') > 0 && process.argv[process.argv.indexOf('--port') + 1]) || 8173);
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 let failed = false;
 const verdict = (name, ok, detail) => { if (!ok) failed = true; console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}  ${JSON.stringify(detail)}`); };
 

@@ -17,7 +17,7 @@ for (let i = 0; i < args.length; i++) {
   if (args[i] === '--port') opt.port = +args[++i];
 }
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 // A context of its own: nothing kept from any other run, as for a new player.
 const context = await browser.newContext({ viewport: { width: 960, height: 540 } });
 const page = await context.newPage();

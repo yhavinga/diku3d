@@ -1,6 +1,6 @@
 // The connect form with a new character's fields open, at two sizes.
 import { chromium } from 'playwright';
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ channel: 'chrome', chromiumSandbox: true, headless: true, args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 for (const [w, h] of [[1280, 720], [960, 540]]) {
   const page = await browser.newPage({ viewport: { width: w, height: h } });
   await page.goto('http://localhost:8211/');
