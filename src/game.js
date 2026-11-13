@@ -2192,9 +2192,12 @@ export function createGame({
    * A slower clock. Merc's mud hour is a point-pulse, 30 real seconds on
    * average, which makes a day of twelve minutes. The sky is drawn from this
    * clock now (main.js), and twelve minutes of sun would be a light that never
-   * holds still, so a mud hour here is `WEATHER_SECONDS`: two minutes, a day of
-   * 48, which is GTA V's and Red Dead Redemption 2's day. The weather walks
-   * once an hour as Merc's does, so it walks at that pace too.
+   * holds still, so a mud hour here is `WEATHER_SECONDS`, two minutes, by day,
+   * and `NIGHT_SECONDS`, one, in Merc's dark hours (20:00 to 5:00): a day of
+   * 39 minutes with nine of them night. GTA V and Red Dead Redemption 2 have
+   * a day of 48; Guild Wars 2 and ESO spend a third of theirs in the night and
+   * RDR2 runs its night faster. The weather walks once an hour as Merc's does,
+   * so it walks at that pace too.
    *
    * The shops read this hour (act_obj.c find_keeper reads time_info.hour),
    * so on a server every player keeps the same opening hours, and the sun the
@@ -2207,8 +2210,11 @@ export function createGame({
     return sum;
   };
 
-  /** How long a mud hour takes, in real seconds: see the note above. */
+  /** How long a mud hour takes, in real seconds, by day and in the dark hours: see the note above. */
   const WEATHER_SECONDS = 120;
+  const NIGHT_SECONDS = 60;
+  const hourSeconds = (hour) => (hour >= 20 || hour < 5 ? NIGHT_SECONDS : WEATHER_SECONDS);
+  const DAY_SECONDS = 9 * NIGHT_SECONDS + 15 * WEATHER_SECONDS;
 
   /**
    * db.c: the calendar is read off the wall clock at boot, counted from Merc's
@@ -2219,9 +2225,12 @@ export function createGame({
    * says, not at one a restart picked.
    */
   const MERC_EPOCH = 650336715;
-  const mudHours = (Date.now() / 1000 - MERC_EPOCH) / WEATHER_SECONDS;
-  const lhour = Math.floor(mudHours);
-  const lday = idiv(lhour, 24);
+  const sinceEpoch = Date.now() / 1000 - MERC_EPOCH;
+  const lday = Math.floor(sinceEpoch / DAY_SECONDS);
+  let intoHour = sinceEpoch - lday * DAY_SECONDS;
+  let hourOfDay = 0;
+  while (intoHour >= hourSeconds(hourOfDay)) intoHour -= hourSeconds(hourOfDay++);
+  const lhour = lday * 24 + hourOfDay;
   const lmonth = idiv(lday, 35);
   const weather = {
     hour: lhour % 24,
@@ -2241,7 +2250,7 @@ export function createGame({
   else weather.sky = SKY.CLOUDLESS;
   state.weather = weather;
 
-  let weatherAccum = (mudHours - lhour) * WEATHER_SECONDS;
+  let weatherAccum = intoHour;
   // A page playing alone may hold the clock at an hour (options.js): the
   // barometer still walks on its own two minutes, the hour does not move.
   let heldHour = null;
@@ -3331,8 +3340,8 @@ export function createGame({
     // runs the point-pulse four times as fast and a nap should not summon rain.
     weatherAccum += dt;
     let weatherGuard = 0;
-    while (weatherAccum >= WEATHER_SECONDS && weatherGuard++ < 8) {
-      weatherAccum -= WEATHER_SECONDS;
+    while (weatherAccum >= hourSeconds(weather.hour) && weatherGuard++ < 8) {
+      weatherAccum -= hourSeconds(weather.hour);
       weatherUpdate(room);
     }
   }
@@ -3702,8 +3711,8 @@ export function createGame({
     clock() {
       if (heldHour !== null) return heldHour;
       const into = puppet
-        ? mirroredHour.frac + (performance.now() - mirroredHour.at) / 1000 / WEATHER_SECONDS
-        : weatherAccum / WEATHER_SECONDS;
+        ? mirroredHour.frac + (performance.now() - mirroredHour.at) / 1000 / hourSeconds(weather.hour)
+        : weatherAccum / hourSeconds(weather.hour);
       return weather.hour + clamp(into, 0, 0.999);
     },
 
@@ -3715,7 +3724,7 @@ export function createGame({
     holdClock(hours) {
       if (puppet) throw new Error('game.holdClock: a server keeps this clock');
       if (hours === null) {
-        if (heldHour !== null) weatherAccum = (heldHour - Math.floor(heldHour)) * WEATHER_SECONDS;
+        if (heldHour !== null) weatherAccum = (heldHour - Math.floor(heldHour)) * hourSeconds(Math.floor(heldHour));
         heldHour = null;
         return;
       }

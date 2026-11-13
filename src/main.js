@@ -444,7 +444,7 @@ const CLIMATE = {
 };
 
 /**
- * The sun over the mud's clock (game.js `clock()`, a day of 48 minutes).
+ * The sun over the mud's clock (game.js `clock()`, a day of 39 minutes).
  *
  * db.c has the sun up from 6 to 19, so the arc runs between those, highest at
  * half past twelve at noon's own 58 degrees; below the horizon it is held at
@@ -492,7 +492,7 @@ function sunAzimuthAt(h) {
 
 // Above this the light is noon's, and below NIGHT_FROM night's. Noon from 35
 // degrees holds it from about 8:40 to 16:20, a quarter of an hour of the
-// day's 48 minutes; dawn and dusk each take about four to come and go.
+// day's 39 minutes; dawn and dusk each take about four to come and go.
 const NOON_FROM = 35;
 const NIGHT_FROM = -6;
 /** Which two presets an hour lies between, and how far: [from, to, t]. */
@@ -560,12 +560,33 @@ function chainAt(name, cover, climate) {
   return mixPreset(clear, over, cover);
 }
 
+// What lights the town at night when the sun does not: the hemisphere, the
+// sky's floor, how much of the bake to believe, and the exposure that goes
+// with them. Between night and dawn or dusk these are mixed on a clock of
+// their own, all night's by the time the sun is on the horizon. Mixed with
+// the rest, half night's at sunset, they left 19:00 at 27.8 of mean luma on
+// the Market Square against 33.1 for night and 46.5 for dusk: the dusk half
+// is a sky lit by a sun 9.5 degrees up, and with the sun on the horizon it
+// gives next to nothing. Taken from night one group at a time at 19:00 they
+// bought +3.5, +1.8, +0.4 and +1.2, and nothing else did. Night's share is
+// (1 - e / e0)^1.5 of the way down from the preset's own elevation e0: eased
+// instead, it came in early enough to lift 18:36 over dusk itself.
+const NIGHT_FILL = ['ambient', 'hemiSky', 'ground', 'hemiIndoor', 'skyFloor', 'skyFloorGain', 'env', 'exposure'];
+
 /** The light at hour `h` of the mud's day. */
 function presetAt(h, cover, climate) {
   const [from, to, t] = phaseAt(h);
-  const p = mixPreset(chainAt(from, cover, climate), chainAt(to, cover, climate), t);
+  const a = chainAt(from, cover, climate);
+  const b = chainAt(to, cover, climate);
+  const p = mixPreset(a, b, t);
   const elevation = sunElevationAt(h);
   const out = { ...p, elevation, azimuth: sunAzimuthAt(h) };
+  if (from === 'night' && to !== 'night') {
+    const low = TIMES[to].elevation;
+    const s = THREE.MathUtils.clamp(elevation / low, 0, 1);
+    const fill = mixPreset(a, b, 1 - (1 - s) ** 1.5);
+    for (const key of NIGHT_FILL) out[key] = fill[key];
+  }
   // One directional light is the sun by day and the moon by night. A sun on
   // the horizon lights next to nothing, so it fades out over its last four
   // degrees and the moon in over the sun's first four below: the light
@@ -1192,7 +1213,7 @@ async function boot() {
   // out of, so ordinary rain would have dried the streets.
   const WET_RAIN = 2.25;
   // Seconds to close 63% of the gap, so three times that is as good as arrived.
-  // A mud hour is two minutes and a shower a few of them: wet through inside
+  // A mud hour is a minute or two and a shower a few of them: wet through inside
   // the first, or a short one would stop before the street looked rained on. Drying is
   // nine times slower, which is the asymmetry anyone who has watched a pavement
   // after a shower already knows.
@@ -1282,8 +1303,8 @@ async function boot() {
 
   // `applyPreset` rebakes the environment, which is a cube render and a blur
   // chain and a new target: it is drawn again when the sun has gone a sixtieth
-  // of a mud hour (two seconds, a quarter of a degree) or the deck has come on
-  // a fiftieth, never once a frame.
+  // of a mud hour (two seconds by day and one by night, a quarter of a degree)
+  // or the deck has come on a fiftieth, never once a frame.
   const LIGHT_STEP = 1 / 60;
   const COVER_STEP = 0.02;
   // What was drawn last: a held preset's name, or null and the clock's hour.

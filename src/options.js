@@ -91,7 +91,7 @@ const FIELDS = [
   {
     key: 'clock',
     label: 'Time of day',
-    note: "Running is the mud's own clock: a mud hour every two minutes, a day of 48, the sun up at six and down at seven. An hour holds the clock there, and the shops' hours with it; running goes on from it. Keys 1 to 5. On a server, the server's clock.",
+    note: "Running is the mud's own clock: a mud hour every two minutes by day and one by night, a day of 39 with nine of them dark, the sun up at six and down at seven. An hour holds the clock there, and the shops' hours with it; running goes on from it. Keys 1 to 5. On a server, the server's clock.",
     options: [['running', 'running'], ['dawn', 'dawn'], ['noon', 'noon'], ['dusk', 'dusk'], ['night', 'night']],
   },
   {

@@ -576,15 +576,22 @@ console.log("\nTHE MUD'S CLOCK");
   const t = fresh();
   t.stand(3014);
   // update.c's sunlight lines, to someone outdoors, on the hour they strike.
-  // A mud hour is two minutes, so a run of one has exactly one strike in it.
   const SUN_LINES = [[4, 'The day has begun.'], [5, 'The sun rises in the east.'],
     [18, 'The sun slowly disappears in the west.'], [19, 'The night has begun.']];
   for (const [from, line] of SUN_LINES) {
     t.game.setMudHour(from);
     t.said.length = 0;
-    t.run(120);
+    for (let i = 0; i < 2400 && t.game.weather().hour === from; i++) t.game.update(0.05, t.eye, t.look);
     check(t.game.weather().hour === from + 1 && t.said.includes(line), `at ${from + 1}:00, "${line}"`, t.said.join(' | '));
   }
+  // Two minutes an hour by day, one in the dark hours (20:00 to 5:00).
+  const pace = (from) => { t.game.holdClock(from); t.game.holdClock(null); t.run(60); return t.game.clock(); };
+  const day = pace(10);
+  const night = pace(21);
+  const late = pace(4.5);
+  check(Math.abs(day - 10.5) < 0.01 && Math.abs(night - 22) < 0.01 && Math.abs(late - 5.25) < 0.01,
+    'a minute is half an hour at 10:00, an hour at 21:00, and from 4:30 the last half of a dark hour and a quarter of 5:00',
+    [day, night, late].map((h) => h.toFixed(3)).join(', '));
   // A page alone may hold the clock: the hour stays, and no sun rises in it.
   t.game.holdClock(12.5);
   t.said.length = 0;
