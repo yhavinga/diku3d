@@ -682,7 +682,6 @@ export async function startMud({
     ch.name = name;
     ch.displayName = name;
     ch.logon = Date.now();
-    ch.hour = 12;
     const vnum = w.built.rooms.has(room) && !w.built.rooms.get(room).unbuilt ? room : ROOM_VNUM_TEMPLE;
     const pc = game.addPlayer(ch, { id: nextPcId++ });
     game.placePlayer(pc, vnum, { quiet: true });
@@ -830,7 +829,7 @@ export async function startMud({
     kick: [], backstab: [], disarm: [], steal: [], rescue: [],
     drink: ['obj?'], eat: ['obj'], fill: ['obj'], sacrifice: ['obj'], dropGold: ['int'], dropAll: ['str?'],
     wearAll: [], value: ['obj'], compare: ['obj', 'obj?'],
-    setTimeOfDay: ['str'], focus: ['mob?'],
+    focus: ['mob?'],
   };
   function operation(s, { op, a = [] }) {
     if (typeof op !== 'string' || !Object.hasOwn(OPS, op) || typeof game[op] !== 'function') return sendError(s, `no such action ${JSON.stringify(op)}`);
@@ -1099,7 +1098,6 @@ export async function startMud({
     data.name = ch.name;
     data.title = ch.title || '';
     data.wait = ch.wait;
-    data.hour = ch.hour;
     data.trust = trustOf(ch);
     data.fighting = ch.fighting ? (ch.fighting.npc ? { m: slotIndex.get(ch.fighting.slot) } : { p: game.pcOf(ch.fighting)?.id ?? -1 }) : null;
     data.afk = !!ch.afk;
@@ -1293,10 +1291,13 @@ export async function startMud({
   function sendWeather(only = null) {
     const wx = game.weather();
     const text = JSON.stringify([wx.sky, wx.mmhg, wx.change, wx.hour, wx.day, wx.month, wx.year]);
+    // How far into the hour, so a page draws the sun where it is now: sent
+    // with the hour and not on its own, since the page runs it on itself.
+    const frac = Math.round((game.clock() - wx.hour) * 1e4) / 1e4;
     for (const s of only ? [only] : byPc.values()) {
       if (!s.pc || s.sent.weather === text) continue;
       s.sent.weather = text;
-      send(s, { t: 'weather', w: { sky: wx.sky, mmhg: wx.mmhg, change: wx.change, hour: wx.hour, day: wx.day, month: wx.month, year: wx.year } });
+      send(s, { t: 'weather', w: { sky: wx.sky, mmhg: wx.mmhg, change: wx.change, hour: wx.hour, day: wx.day, month: wx.month, year: wx.year, frac } });
     }
   }
 

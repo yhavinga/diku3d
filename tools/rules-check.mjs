@@ -570,6 +570,42 @@ console.log('\nSPEC_FUNS');
   check(!(s.affectedBy & 65536), 'and walking off the spot gives you away');
 }
 
+// ---------------------------------------------------------- the clock ----
+console.log("\nTHE MUD'S CLOCK");
+{
+  const t = fresh();
+  t.stand(3014);
+  // update.c's sunlight lines, to someone outdoors, on the hour they strike.
+  // A mud hour is two minutes, so a run of one has exactly one strike in it.
+  const SUN_LINES = [[4, 'The day has begun.'], [5, 'The sun rises in the east.'],
+    [18, 'The sun slowly disappears in the west.'], [19, 'The night has begun.']];
+  for (const [from, line] of SUN_LINES) {
+    t.game.setMudHour(from);
+    t.said.length = 0;
+    t.run(120);
+    check(t.game.weather().hour === from + 1 && t.said.includes(line), `at ${from + 1}:00, "${line}"`, t.said.join(' | '));
+  }
+  // A page alone may hold the clock: the hour stays, and no sun rises in it.
+  t.game.holdClock(12.5);
+  t.said.length = 0;
+  t.run(250);
+  check(t.game.weather().hour === 12 && t.game.clock() === 12.5 && !t.said.some((l) => SUN_LINES.some(([, line]) => l === line)),
+    'a held clock stays at 12:30 through two hours of weather', `${t.game.clock()}, ${t.said.join(' | ')}`);
+  t.game.holdClock(null);
+  t.run(60);
+  check(Math.abs(t.game.clock() - 13) < 0.01, 'let go, it runs on from where it was held', t.game.clock().toFixed(3));
+  // act_obj.c find_keeper: the shops keep the mud's hour. The jeweller opens 9 to 17.
+  const keeper = t.game.mobs.find((s) => s.proto.vnum === 3009 && s.record.shop);
+  const shopAt = { x: keeper.pos.x + 2, y: keeper.pos.y, z: keeper.pos.z };
+  t.game.update(0.05, shopAt, { x: -1, y: 0, z: 0 });
+  t.game.setMudHour(3);
+  const shut = t.game.shopHere();
+  const early = t.say('list');
+  t.game.setMudHour(12);
+  check(shut && !shut.open && /come back later/.test(early) && t.game.shopHere().open,
+    "the jeweller is shut at 3:00 and open at noon, by the mud's hour", early);
+}
+
 // -------------------------------------------------------------- skills ----
 console.log('\nSKILLS');
 {

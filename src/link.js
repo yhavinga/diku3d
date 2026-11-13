@@ -392,9 +392,7 @@ export function attachSocketLink(link, game, host, enter) {
     return { ok: true, text: '', pending: true };
   };
   // The page's own, from before any link wrapped them: a reconnect wraps again.
-  if (!pageOwn.has(game)) pageOwn.set(game, { setTimeOfDay: game.setTimeOfDay, focus: game.focus });
-  const setHour = pageOwn.get(game).setTimeOfDay;
-  game.setTimeOfDay = (name) => { setHour(name); link.send({ t: 'op', op: 'setTimeOfDay', a: [name] }); };
+  if (!pageOwn.has(game)) pageOwn.set(game, { focus: game.focus });
   let focused = null;
   const focus = pageOwn.get(game).focus;
   game.focus = (figure) => {

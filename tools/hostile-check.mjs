@@ -251,10 +251,11 @@ console.log('\nTHE VERBS THEMSELVES');
   await pause(300);
   check(shut.contains.includes(locked) && !mpc().ch.inventory.includes(locked), 'nothing is taken out of a shut container', mal.text(m).slice(-1)[0]);
 
-  mal.op('setTimeOfDay', '__proto__');
+  // The shops keep the server's hour, so a page has no hour of its own to set.
+  m = mal.mark();
+  mal.op('setTimeOfDay', 'noon');
   await pause(300);
-  check(typeof mpc().ch.hour === 'number', "setTimeOfDay('__proto__') leaves the hour a number", typeof mpc().ch.hour);
-  mpc().ch.hour = 12;
+  check(!!mal.line(/^no such action "setTimeOfDay"/, m), 'setTimeOfDay is no action: a client cannot set the hour the shops keep', mal.text(m).slice(-1)[0]);
 
   // A mobile of this zone well out of reach, by its index: the spell flies to it (and so lands within seconds).
   const here = w.zoneOfVnum(mpc().ch.roomVnum)?.zone.id;

@@ -444,6 +444,152 @@ const CLIMATE = {
 };
 
 /**
+ * The sun over the mud's clock (game.js `clock()`, a day of 48 minutes).
+ *
+ * db.c has the sun up from 6 to 19, so the arc runs between those, highest at
+ * half past twelve at noon's own 58 degrees; below the horizon it is held at
+ * night's -8, where the night preset was tuned, and the moon takes the light.
+ * The four presets above stay the only source of every number: an hour
+ * between two of them is a mix of the two, weighted by how high the sun
+ * stands, and the hour on one is that preset -- dawn where the sun is at 8
+ * degrees, noon at 58, dusk at 9.5. The azimuth runs through their own east,
+ * south and west, and on round the north by night.
+ */
+const SUNRISE = 6;
+const SUNSET = 19;
+const SUN_NOON = (SUNRISE + SUNSET) / 2;
+const sunElevationAt = (h) => Math.max(TIMES.night.elevation,
+  TIMES.noon.elevation * Math.sin(Math.PI * (h - SUNRISE) / (SUNSET - SUNRISE)));
+/** The hour of the morning, or the evening, at which the sun stands at `elevation`. */
+const sunAt = (elevation, evening) => {
+  const span = (SUNSET - SUNRISE) / Math.PI * Math.asin(elevation / TIMES.noon.elevation);
+  return evening ? SUNSET - span : SUNRISE + span;
+};
+/** The hour each preset is drawn at; a page alone holds its clock there (options.js). */
+const PRESET_HOUR = {
+  dawn: sunAt(TIMES.dawn.elevation, false),
+  noon: SUN_NOON,
+  dusk: sunAt(TIMES.dusk.elevation, true),
+  night: 0,
+};
+// East, south, west, and the north under the horizon: always turning the same way.
+const SUN_ARC = [
+  [PRESET_HOUR.dawn, TIMES.dawn.azimuth],
+  [PRESET_HOUR.noon, TIMES.noon.azimuth - 360],
+  [PRESET_HOUR.dusk, TIMES.dusk.azimuth - 360],
+  [PRESET_HOUR.dawn + 24, TIMES.dawn.azimuth - 360],
+];
+function sunAzimuthAt(h) {
+  const x = h < PRESET_HOUR.dawn ? h + 24 : h;
+  for (let i = 1; i < SUN_ARC.length; i++) {
+    const [h1, a1] = SUN_ARC[i];
+    if (x > h1) continue;
+    const [h0, a0] = SUN_ARC[i - 1];
+    return (a0 + (a1 - a0) * (x - h0) / (h1 - h0) + 720) % 360;
+  }
+  throw new Error(`sunAzimuthAt: ${h} is not an hour of the day`);
+}
+
+// Above this the light is noon's, and below NIGHT_FROM night's. Noon from 35
+// degrees holds it from about 8:40 to 16:20, a quarter of an hour of the
+// day's 48 minutes; dawn and dusk each take about four to come and go.
+const NOON_FROM = 35;
+const NIGHT_FROM = -6;
+/** Which two presets an hour lies between, and how far: [from, to, t]. */
+function phaseAt(h) {
+  const elevation = sunElevationAt(h);
+  const edge = h < SUN_NOON ? 'dawn' : 'dusk';
+  const low = TIMES[edge].elevation;
+  const ease = (t) => t * t * (3 - 2 * t);
+  if (elevation >= NOON_FROM) return ['noon', 'noon', 0];
+  if (elevation >= low) return [edge, 'noon', ease((elevation - low) / (NOON_FROM - low))];
+  if (elevation > NIGHT_FROM) return ['night', edge, ease((elevation - NIGHT_FROM) / (low - NIGHT_FROM))];
+  return ['night', 'night', 0];
+}
+
+const COLOUR_KEYS = new Set(['sun', 'sky', 'ground', 'fog', 'hemiSky', 'skyBleachTint', 'bounce', 'haze', 'shaftTint', 'skyFloor']);
+/** What `applyPreset` takes a key to be where a preset leaves it out. */
+const PRESET_DEFAULTS = {
+  hemiIndoor: 1, shadeLift: 1, skyBleach: 0, skyBleachTint: 0xffffff, skyBroad: 60,
+  skyFloor: 0x000000, skyFloorGain: 0, sunFraction: 1, wet: 1,
+  mie: [0.006, 0.86], stockCloud: [0.4, 0.4],
+};
+
+/**
+ * Two presets mixed, `t` of the way from `a` to `b`. At 0 and 1 it is the
+ * preset itself, the same object, so an hour held on a preset draws exactly
+ * what that preset always drew. Colours mix in linear light, exposure as a
+ * ratio (it is a stop scale), and a key only one side has (the moon) is the
+ * nearer side's.
+ */
+function mixPreset(a, b, t) {
+  if (t <= 0 || a === b) return a;
+  if (t >= 1) return b;
+  const out = {};
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const x = a[key] ?? PRESET_DEFAULTS[key];
+    const y = b[key] ?? PRESET_DEFAULTS[key];
+    if (x === undefined || y === undefined) out[key] = t < 0.5 ? x : y;
+    else if (COLOUR_KEYS.has(key)) out[key] = mixHex(x, y, t);
+    else if (Array.isArray(x)) out[key] = x.map((v, i) => v + (y[i] - v) * t);
+    else if (key === 'exposure') out[key] = x * (y / x) ** t;
+    else out[key] = x + (y - x) * t;
+  }
+  // The hemisphere is a colour times an intensity, and the presets mean
+  // different things by it: dawn's is a dim sky floor (0.082 of its sky
+  // colour), noon's a ground bounce of 32 under a black sky half. Mixed
+  // apart, half way between them is a sky half at 16, brighter than either;
+  // mixed as the light each half gives, it lies between them.
+  const half = (p, colour) => new THREE.Color(colour).multiplyScalar(p.ambient);
+  const up = half(a, a.hemiSky ?? a.sky).lerp(half(b, b.hemiSky ?? b.sky), t);
+  const down = half(a, a.ground).lerp(half(b, b.ground), t);
+  out.ambient = Math.max(up.r, up.g, up.b, down.r, down.g, down.b);
+  if (out.ambient > 0) {
+    out.hemiSky = up.multiplyScalar(1 / out.ambient).getHex();
+    out.ground = down.multiplyScalar(1 / out.ambient).getHex();
+  }
+  return out;
+}
+
+/** One preset under `cover` of overcast (0..1) and the zone's climate: what `applyPreset` draws. */
+function chainAt(name, cover, climate) {
+  const shape = CLIMATE[climate] || CLIMATE.temperate;
+  const clear = shape(WEATHER.clear(TIMES[name], name), name);
+  if (cover <= 0) return clear;
+  const over = shape(WEATHER.overcast(TIMES[name], name), name);
+  return mixPreset(clear, over, cover);
+}
+
+/** The light at hour `h` of the mud's day. */
+function presetAt(h, cover, climate) {
+  const [from, to, t] = phaseAt(h);
+  const p = mixPreset(chainAt(from, cover, climate), chainAt(to, cover, climate), t);
+  const elevation = sunElevationAt(h);
+  const out = { ...p, elevation, azimuth: sunAzimuthAt(h) };
+  // One directional light is the sun by day and the moon by night. A sun on
+  // the horizon lights next to nothing, so it fades out over its last four
+  // degrees and the moon in over the sun's first four below: the light
+  // changes over while it is all but out, and no shadow jumps across the town.
+  if (elevation > 0) {
+    // The sun of the dawn or the dusk, not half way to the moon's blue.
+    const lit = from === 'night' ? chainAt(to, cover, climate) : p;
+    const fade = THREE.MathUtils.smoothstep(elevation, 0, 4);
+    out.moon = undefined;
+    out.sun = lit.sun;
+    out.sunIntensity = lit.sunIntensity * fade;
+    out.sunFraction = (lit.sunFraction ?? 1) * fade;
+  } else {
+    const night = chainAt('night', cover, climate);
+    const fade = THREE.MathUtils.smoothstep(-elevation, 0, 4);
+    out.moon = night.moon;
+    out.sun = night.sun;
+    out.sunIntensity = night.sunIntensity * fade;
+    out.sunFraction = (night.sunFraction ?? 1) * fade;
+  }
+  return out;
+}
+
+/**
  * Diku's own direction order -- north, east, south, west, up, down -- on the
  * arrow keys, with the two vertical ones where a keyboard already puts "further
  * up" and "further down". WASD is taken by the body and every letter that would
@@ -512,9 +658,20 @@ const TONE_MAPPING = {
 };
 
 const weatherParam = params.get('weather');
+const timeParam = params.get('time');
+if (timeParam !== null && !Object.hasOwn(TIMES, timeParam)) {
+  console.warn(`main.js: ?time=${timeParam} is none of ${Object.keys(TIMES).join(', ')}; the light follows the clock`);
+}
 
 const state = {
-  time: params.get('time') || 'dusk',
+  // The preset nearest the light drawn now: what the sound and the stats read.
+  time: 'dusk',
+  // The options' clock (options.js): 'running', or a preset a page alone holds
+  // its clock and its light at. A server's page follows the server's clock.
+  timeMode: 'running',
+  // A preset the light is held at whatever the clock says: `?time=` and
+  // `diku.applyTime`, for a judge, a screenshot or a measurement.
+  pinned: timeParam !== null && Object.hasOwn(TIMES, timeParam) ? timeParam : null,
   // Two fields, because weather has an owner as well as a value. `weatherMode`
   // is who decides -- 'auto' is the mud's own weather_update in game.js, the
   // other two pin it by hand -- and `weather` is what is actually rendered,
@@ -858,7 +1015,7 @@ async function boot() {
   const audio = new Audio();
 
   const options = createOptions({
-    quality, applyTime: (n) => applyTime(n), applyWeather: (w) => applyWeather(w), audio, state,
+    quality, setClock: (mode) => setClock(mode), applyWeather: (w) => applyWeather(w), audio, state,
   });
   audio.onMusicToggle = (on) => {
     if (on) options.values.sound = true;
@@ -915,7 +1072,6 @@ async function boot() {
     }
     player.spawn(x, y, z, player.body.heading());
   };
-  game.setTimeOfDay(state.time);
 
   // do_quit, and back to the title. The page is the simplest whole state to
   // throw away: a reload brings the title up with "continue" from the save
@@ -1036,8 +1192,8 @@ async function boot() {
   // out of, so ordinary rain would have dried the streets.
   const WET_RAIN = 2.25;
   // Seconds to close 63% of the gap, so three times that is as good as arrived.
-  // A mud hour is 40 seconds and a shower is a few of them: wet through inside
-  // one, or the rain would stop before the street looked rained on. Drying is
+  // A mud hour is two minutes and a shower a few of them: wet through inside
+  // the first, or a short one would stop before the street looked rained on. Drying is
   // nine times slower, which is the asymmetry anyone who has watched a pavement
   // after a shower already knows.
   const WET_RISE = 11;
@@ -1062,6 +1218,10 @@ async function boot() {
    * is the truthful source -- it is already zero unless the weather is on auto,
    * so a hand-pinned clear sky cannot wet the streets.
    */
+  // Seconds for a shower to close 63% of the way to its strength: a downpour
+  // is falling in earnest about a quarter of a minute after the line says so.
+  const RAIN_TAU = 5;
+  let heardRain = 0;
   const wetness = {
     base: 1,      // what the hour's weather preset asks for
     value: 1,     // where the easing has got to
@@ -1102,18 +1262,105 @@ async function boot() {
     },
   };
 
-  state.climate = climateOf(zone);
-  applyTime(state.time);
+  /**
+   * How overcast the sky is, 0 to 1. The mud's barometer turns CLOUDLESS to
+   * CLOUDY in one hour's tick; the deck comes over in about a minute instead
+   * of in a frame. Set by hand (options, `forceRain`) it is there at once.
+   */
+  const COVER_TAU = 20;
+  const cover = {
+    value: state.weather === 'overcast' ? 1 : 0,
+    target() { return state.weather === 'overcast' ? 1 : 0; },
+    update(dt) {
+      const target = this.target();
+      const gap = target - this.value;
+      if (gap === 0) return;
+      this.value = Math.abs(gap) < 0.01 ? target : this.value + gap * (1 - Math.exp(-dt / COVER_TAU));
+    },
+    snap() { this.value = this.target(); },
+  };
 
+  // `applyPreset` rebakes the environment, which is a cube render and a blur
+  // chain and a new target: it is drawn again when the sun has gone a sixtieth
+  // of a mud hour (two seconds, a quarter of a degree) or the deck has come on
+  // a fiftieth, never once a frame.
+  const LIGHT_STEP = 1 / 60;
+  const COVER_STEP = 0.02;
+  // What was drawn last: a held preset's name, or null and the clock's hour.
+  const lit = { name: undefined, hours: null, cover: null, climate: null };
+
+  /** The preset the light is held at, or null when it follows the clock. */
+  function heldTime() {
+    if (state.pinned) return state.pinned;
+    if (game.mirror.puppet) return null; // a server keeps the clock
+    return state.timeMode === 'running' ? null : state.timeMode;
+  }
+
+  /** A page alone holds the mud's clock where its light is held, so the shops agree with the sky. */
+  function holdClock() {
+    if (game.mirror.puppet) return;
+    const held = heldTime();
+    game.holdClock(held ? PRESET_HOUR[held] : null);
+  }
+
+  /** Draw the light for now, if it has moved enough to be worth a rebake (or `force`). */
+  function relight(force = false) {
+    const held = heldTime();
+    const settled = cover.value === 0 || cover.value === 1;
+    const covered = cover.value !== lit.cover && (settled || Math.abs(cover.value - lit.cover) >= COVER_STEP);
+    const fresh = force || covered || state.climate !== lit.climate;
+    if (held) {
+      if (!fresh && lit.name === held) return;
+      applyPreset(chainAt(held, cover.value, state.climate));
+      Object.assign(lit, { name: held, hours: null });
+      state.time = held;
+    } else {
+      const hours = game.clock();
+      const gone = lit.hours === null ? Infinity : Math.abs(((hours - lit.hours) % 24 + 36) % 24 - 12);
+      if (!fresh && lit.name === null && gone < LIGHT_STEP) return;
+      applyPreset(presetAt(hours, cover.value, state.climate));
+      const [from, to, t] = phaseAt(hours);
+      Object.assign(lit, { name: null, hours });
+      state.time = t < 0.5 ? from : to;
+    }
+    lit.cover = cover.value;
+    lit.climate = state.climate;
+  }
+
+  state.climate = climateOf(zone);
+  holdClock();
+  relight(true);
+
+  /**
+   * Hold the light at one of the four presets, to the degree, whatever the
+   * clock says: `?time=`, a judge, a screenshot, a measurement. 'clock' lets
+   * it go. A page alone holds the mud's clock there too; a server's page only
+   * its own light -- the server's shops keep the server's hour.
+   */
   function applyTime(name, { quiet = false } = {}) {
-    const base = TIMES[name] || TIMES.dusk;
-    // The single choke point, and the reason weather is a modifier rather than
-    // a preset of its own: everything below reads `preset` and nothing below
-    // reads `state.weather`, so there is no way for the sky, the bake and the
-    // shadows to end up in different weather.
-    const preset = (CLIMATE[state.climate] || CLIMATE.temperate)((WEATHER[state.weather] || WEATHER.clear)(base, name), name);
-    state.time = name;
-    game.setTimeOfDay(name);
+    if (name === 'clock') state.pinned = null;
+    else if (Object.hasOwn(TIMES, name)) state.pinned = name;
+    else throw new Error(`applyTime: ${JSON.stringify(name)} is none of ${Object.keys(TIMES).join(', ')}, clock`);
+    holdClock();
+    relight(true);
+    if (!quiet) hud.toast(state.weather === 'clear' ? `${state.time}` : `${state.time} · ${state.weather}`);
+  }
+
+  /** The options' clock: 'running', or a preset to hold a page alone at. */
+  function setClock(mode) {
+    state.timeMode = mode === 'running' || Object.hasOwn(TIMES, mode) ? mode : 'running';
+    holdClock();
+    relight(true);
+  }
+
+  /**
+   * Everything the light is, from one preset. The single choke point, and the
+   * reason weather is a modifier rather than a preset of its own: everything
+   * below reads `preset` and nothing below reads `state.weather`, so there is
+   * no way for the sky, the bake and the shadows to end up in different
+   * weather.
+   */
+  function applyPreset(preset) {
     const phi = THREE.MathUtils.degToRad(90 - preset.elevation);
     const theta = THREE.MathUtils.degToRad(preset.azimuth);
     const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, phi, theta);
@@ -1248,20 +1495,26 @@ async function boot() {
     });
 
     shadowAnchor.set(Infinity, Infinity, Infinity); // the sun moved: redraw shadows
-    if (!quiet) hud.toast(state.weather === 'clear' ? `${name}` : `${name} · ${state.weather}`);
   }
 
   /**
-   * The other axis. Same hour, different sky; `applyTime` does all the work.
+   * The other axis. Same hour, different sky; `relight` does all the work.
    *
    * 'auto' is not a sky but an owner: it hands the choice to the mud's
-   * barometer and takes whatever that reads now. The two named values pin it.
+   * barometer and takes whatever that reads now. The two named values pin it,
+   * on a page alone: a server's page always has the server's sky.
    */
   function applyWeather(name) {
     state.weatherMode = name === 'auto' || WEATHER[name] ? name : 'clear';
-    const sky = state.weatherMode === 'auto' ? mudSky() : state.weatherMode;
+    const sky = skyMode() === 'auto' ? mudSky() : state.weatherMode;
     state.weather = WEATHER[sky] ? sky : 'clear';
-    applyTime(state.time);
+    cover.snap();
+    relight(true);
+  }
+
+  /** Who decides the sky: on a server its barometer, whatever the options say. */
+  function skyMode() {
+    return game.mirror.puppet ? 'auto' : state.weatherMode;
   }
 
   /**
@@ -1427,10 +1680,12 @@ async function boot() {
       event.preventDefault();
       hud.toggleProse();
     }
-    if (event.code === 'Digit1') applyTime('dawn');
-    if (event.code === 'Digit2') applyTime('noon');
-    if (event.code === 'Digit3') applyTime('dusk');
-    if (event.code === 'Digit4') applyTime('night');
+    // The options' clock, a key away: on a server its clock keeps the hour.
+    const clockKey = { Digit1: 'dawn', Digit2: 'noon', Digit3: 'dusk', Digit4: 'night', Digit5: 'running' }[event.code];
+    if (clockKey) {
+      options.set('clock', clockKey);
+      hud.toast(game.mirror.puppet ? "the server's clock keeps the hour" : clockKey === 'running' ? "the mud's clock" : clockKey);
+    }
     if (event.code === 'KeyO') {
       // The options screen needs the mouse, so it gives it back on the way out.
       if (options.toggle()) player.controls.unlock();
@@ -1721,7 +1976,7 @@ async function boot() {
     // The hour's light on this zone's mist, horizon and figures -- and its
     // climate, which is part of what the hour is here.
     state.climate = climateOf(zone);
-    applyTime(state.time, { quiet: true });
+    relight(true);
     state.worldStats = describeWorld();
   }
 
@@ -2246,6 +2501,13 @@ async function boot() {
     fps += ((1 / Math.max(dt, 0.0001)) - fps) * 0.08;
 
     if (!state.paused) player.update(dt);
+    // The sky follows the mud's clock and barometer (game.js), or a server's:
+    // the deck comes on and off at its own pace, and `relight` draws only when
+    // the sun or the deck has moved a step. Before the boss's fog below, which
+    // works from the fog this draws.
+    if (skyMode() === 'auto' && mudSky() !== state.weather) state.weather = mudSky();
+    cover.update(dt);
+    relight();
     {
       // The weight of a boss's attention. It touches the scene only while above 0,
       // and puts the preset's own fog back exactly when it has gone.
@@ -2271,22 +2533,23 @@ async function boot() {
     updateHeldLight();
     if (!state.paused) game.autosave(dt);
 
-    // The mud's barometer may have crossed a sky boundary in that update.
-    // `applyWeather` rebakes the whole environment, so it is called only when
-    // the value it would render actually changes -- never once a frame.
-    if (state.weatherMode === 'auto' && mudSky() !== state.weather) applyWeather('auto');
-
     // Rain falls out of the mud's sky, not the options screen: it only ever
-    // runs under auto, when the barometer says RAINING or worse. The streaks
-    // need open sky overhead; the sound stays on indoors -- audio halves it
-    // itself, and rain on the roof is half of what rain is for.
+    // runs under auto, when the barometer says RAINING or worse, and on a
+    // server always under the server's. The streaks need open sky overhead;
+    // the sound stays on indoors -- audio halves it itself, and rain on the
+    // roof is half of what rain is for.
     {
-      const sky = state.weatherMode === 'auto' ? game.weather().sky : SKY.CLOUDLESS;
+      const sky = skyMode() === 'auto' ? game.weather().sky : SKY.CLOUDLESS;
       // The override comes first, or the barometer would write over it every
       // frame -- which is exactly how a reviewer concluded rain did nothing.
-      const level = state.forcedRain ?? (sky === SKY.LIGHTNING ? 1 : sky === SKY.RAINING ? 0.65 : 0);
-      if (level !== state.rainLevel) {
-        state.rainLevel = level;
+      const target = state.forcedRain ?? (sky === SKY.LIGHTNING ? 1 : sky === SKY.RAINING ? 0.65 : 0);
+      // A shower builds and eases off over some seconds; forced, it is there at once.
+      const level = state.forcedRain !== null || Math.abs(target - state.rainLevel) < 0.01 ? target
+        : state.rainLevel + (target - state.rainLevel) * (1 - Math.exp(-dt / RAIN_TAU));
+      state.rainLevel = level;
+      // The sound ramps over 1.8 s itself (audio.js), so it is told in steps.
+      if (Math.abs(level - heardRain) >= 0.05 || (level === target && level !== heardRain)) {
+        heardRain = level;
         audio.setRain(level);
       }
       const outdoorNow = state.roomVnum !== null && (built.rooms.get(state.roomVnum)?.outdoor ?? true);
@@ -2443,6 +2706,7 @@ async function boot() {
       state.forcedRain = level > 0 ? Math.min(1, level) : null;
       if (state.forcedRain !== null && state.weather !== 'overcast') applyWeather('overcast');
       state.rainLevel = state.forcedRain ?? 0;
+      heardRain = state.rainLevel;
       audio.setRain(state.rainLevel);
       wetness.value = wetness.target();
       wetness.push();

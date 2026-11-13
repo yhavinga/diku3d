@@ -32,8 +32,8 @@ export const DEFAULTS = {
   shadow: null,
   bloom: null,
   lights: null,
-  time: 'dusk',
-  weather: 'clear',
+  clock: 'running',
+  sky: 'auto',
   sound: true,
   music: true,
   voices: true,
@@ -89,15 +89,15 @@ const FIELDS = [
     options: [[null, 'preset'], [6, '6'], [10, '10'], [14, '14'], [20, '20']],
   },
   {
-    key: 'time',
+    key: 'clock',
     label: 'Time of day',
-    note: null,
-    options: [['dawn', 'dawn'], ['noon', 'noon'], ['dusk', 'dusk'], ['night', 'night']],
+    note: "Running is the mud's own clock: a mud hour every two minutes, a day of 48, the sun up at six and down at seven. An hour holds the clock there, and the shops' hours with it; running goes on from it. Keys 1 to 5. On a server, the server's clock.",
+    options: [['running', 'running'], ['dawn', 'dawn'], ['noon', 'noon'], ['dusk', 'dusk'], ['night', 'night']],
   },
   {
-    key: 'weather',
+    key: 'sky',
     label: 'Weather',
-    note: "Auto is the mud's own weather: a barometer wandering between four sky states, a mud hour every forty seconds, announced in the log the way a player would read it.",
+    note: "Auto is the mud's own weather: a barometer wandering between four sky states once a mud hour, announced in the log the way a player would read it. On a server, the server's.",
     options: [['auto', 'auto'], ['clear', 'clear'], ['overcast', 'overcast']],
   },
   {
@@ -180,8 +180,14 @@ const CSS = `
 }
 `;
 
-export function createOptions({ quality, applyTime, applyWeather, audio, state }) {
+export function createOptions({ quality, setClock, applyWeather, audio, state }) {
   const stored = load();
+  // `time` and `weather` were the fields before the sky had a clock; a page
+  // saved every value whenever one changed, so nearly everyone has dusk and
+  // clear stored without having chosen them. They give way to the new
+  // defaults rather than hold every returning player at dusk under no rain.
+  delete stored.time;
+  delete stored.weather;
   const values = { ...DEFAULTS, ...stored };
 
   const style = document.createElement('style');
@@ -258,10 +264,10 @@ export function createOptions({ quality, applyTime, applyWeather, audio, state }
     quality.apply(values.preset);
     quality.setScale(values.renderScale === 'auto' ? null : values.renderScale);
 
-    if (values.time !== state.time) applyTime(values.time);
+    if (values.clock !== state.timeMode) setClock(values.clock);
     // Against the *mode*, not the rendered sky: under 'auto' the two differ by
     // design, and comparing them would rebake the environment on every apply.
-    if (values.weather !== state.weatherMode) applyWeather(values.weather);
+    if (values.sky !== state.weatherMode) applyWeather(values.sky);
     if (audio.muted === values.sound) audio.toggleMute();
     audio.setMusic(values.music);
     audio.setVoices(values.voices);

@@ -622,7 +622,7 @@ export function installInterp(k) {
       return null;
     }
     if (!shop.open) {
-      const said = state.hour < shop.hours[0] ? 'Sorry, come back later.' : 'Sorry, come back tomorrow.';
+      const said = k.weather().hour < shop.hours[0] ? 'Sorry, come back later.' : 'Sorry, come back tomorrow.';
       send(`${capitalise(shop.name)} says '${said}'`, { slot: shop.slot, said });
       return null;
     }

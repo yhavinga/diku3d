@@ -2182,23 +2182,23 @@ export function createGame({
    * real weather -- a barometer that wanders, and four sky states it walks
    * between -- so the viewer's sky comes from here rather than from a dial.
    *
-   * Three things about this are not the mud's:
+   * Two things about this are not the mud's:
    *
    * A generator of its own. Merc rolls the weather out of the one global
    * stream; here that stream is pinned by `seed` and driven by a test harness,
    * and a sky that quietly shifted every combat roll after it would be a poor
    * trade for a cloud.
    *
-   * A calendar of its own. `state.hour` is the *player's* hour -- whatever the
-   * time-of-day preset was last set to, which is what shop hours read -- and it
-   * does not advance. This one does, at `WEATHER_SECONDS` a mud hour, and only
-   * so the day and month can roll over, because the month is the season term in
-   * the pressure walk. The two are deliberately not the same clock: tying them
-   * would make an hour of weather also move the sun.
+   * A slower clock. Merc's mud hour is a point-pulse, 30 real seconds on
+   * average, which makes a day of twelve minutes. The sky is drawn from this
+   * clock now (main.js), and twelve minutes of sun would be a light that never
+   * holds still, so a mud hour here is `WEATHER_SECONDS`: two minutes, a day of
+   * 48, which is GTA V's and Red Dead Redemption 2's day. The weather walks
+   * once an hour as Merc's does, so it walks at that pace too.
    *
-   * No sunlight. weather_update also sets SUN_* and announces sunrise and
-   * sunset; the viewer's daylight is `applyTime` in main.js and belongs to the
-   * player, so porting a second one would put two suns in the state.
+   * The shops read this hour (act_obj.c find_keeper reads time_info.hour),
+   * so on a server every player keeps the same opening hours, and the sun the
+   * page draws is the one the shopkeeper sees.
    */
   const weatherRng = new Rng(seed === undefined ? undefined : (seed ^ 0x9e3779b9) >>> 0);
   const wdice = (number, size) => {
@@ -2207,13 +2207,20 @@ export function createGame({
     return sum;
   };
 
+  /** How long a mud hour takes, in real seconds: see the note above. */
+  const WEATHER_SECONDS = 120;
+
   /**
-   * db.c: the calendar is read off the wall clock at boot -- one mud hour per
-   * PULSE_TICK, counted from Merc's own epoch -- so a session started in the
-   * mud's month 11 gets month 11's weather, exactly as the 1993 server would.
+   * db.c: the calendar is read off the wall clock at boot, counted from Merc's
+   * own epoch, so a session started in the mud's month 11 gets month 11's
+   * weather as the 1993 server would. Read at this clock's own pace rather
+   * than Merc's, and with the part of the hour already gone: a server that
+   * restarts and a page playing alone come up at the hour the wall clock
+   * says, not at one a restart picked.
    */
   const MERC_EPOCH = 650336715;
-  const lhour = idiv(Date.now() / 1000 - MERC_EPOCH, PULSE_TICK / PULSE_PER_SECOND);
+  const mudHours = (Date.now() / 1000 - MERC_EPOCH) / WEATHER_SECONDS;
+  const lhour = Math.floor(mudHours);
   const lday = idiv(lhour, 24);
   const lmonth = idiv(lday, 35);
   const weather = {
@@ -2234,21 +2241,27 @@ export function createGame({
   else weather.sky = SKY.CLOUDLESS;
   state.weather = weather;
 
-  /**
-   * How long a mud hour of weather takes. Merc runs weather_update off the
-   * point-pulse, which reschedules itself with number_range(PULSE_TICK / 2,
-   * 3 * PULSE_TICK / 2) -- 15 to 45 real seconds, averaging 30. This sits
-   * inside that band, at the slow end: the sky here is a thing you notice
-   * while walking, not while standing still reading a shop list.
-   */
-  const WEATHER_SECONDS = 40;
-  let weatherAccum = 0;
+  let weatherAccum = (mudHours - lhour) * WEATHER_SECONDS;
+  // A page playing alone may hold the clock at an hour (options.js): the
+  // barometer still walks on its own two minutes, the hour does not move.
+  let heldHour = null;
+  // A server's page has the hour from the server, with how far into it the
+  // server was, and runs the rest of the hour on from when that arrived.
+  let mirroredHour = { frac: 0, at: 0 };
 
-  /** update.c: weather_update, minus the sunlight. `room` is where you stand. */
+  /** update.c: weather_update. `room` is where you stand. */
   function weatherUpdate(room) {
     const lines = [];
 
-    if (++weather.hour >= 24) { weather.hour = 0; weather.day++; }
+    if (heldHour === null) {
+      if (++weather.hour >= 24) { weather.hour = 0; weather.day++; }
+      // The sunlight half, which the sky now follows. db.c's boot reading
+      // has the sun up at 6 and down at 19; update.c's announcements:
+      if (weather.hour === 5) lines.push('The day has begun.');
+      if (weather.hour === 6) lines.push('The sun rises in the east.');
+      if (weather.hour === 19) lines.push('The sun slowly disappears in the west.');
+      if (weather.hour === 20) lines.push('The night has begun.');
+    }
     if (weather.day >= 35) { weather.day = 0; weather.month++; }
     if (weather.month >= 17) { weather.month = 0; weather.year++; }
 
@@ -3112,7 +3125,7 @@ export function createGame({
     if (!slot) return null;
     const mob = wake(slot);
     const shop = slot.record.shop;
-    const open = state.hour >= shop.openHour && state.hour <= shop.closeHour;
+    const open = weather.hour >= shop.openHour && weather.hour <= shop.closeHour;
     return {
       keeper: slot.proto.vnum,
       slot,
@@ -3143,8 +3156,8 @@ export function createGame({
     if (!slot) return { ok: false, text: "You can't do that here." };
     const shop = slot.record.shop;
     const keeper = wake(slot);
-    if (state.hour < shop.openHour) { say('Sorry, come back later.', keeper.name, slot); return { ok: false, text: 'closed' }; }
-    if (state.hour > shop.closeHour) { say('Sorry, come back tomorrow.', keeper.name, slot); return { ok: false, text: 'closed' }; }
+    if (weather.hour < shop.openHour) { say('Sorry, come back later.', keeper.name, slot); return { ok: false, text: 'closed' }; }
+    if (weather.hour > shop.closeHour) { say('Sorry, come back tomorrow.', keeper.name, slot); return { ok: false, text: 'closed' }; }
 
     const obj = keeper.inventory.find((o) => o.vnum === objVnum);
     const cost = getCost(shop, obj, true);
@@ -3680,11 +3693,35 @@ export function createGame({
 
     shopHere, buy, sell, practice, skills,
 
-    /** Where the sky is: shops keep the mud's opening hours. */
-    setTimeOfDay(name) {
-      const hours = { dawn: 6, noon: 12, dusk: 19, night: 1 };
-      // Own keys only: '__proto__' would make the hour an object.
-      state.hour = Object.hasOwn(hours, name) ? hours[name] : 12;
+    /**
+     * The mud's time of day in hours, 0 to 24, with the part of the hour
+     * gone: what main.js draws the sun from. On a server's page the hour is
+     * the server's and the part of it runs on from when it came, held under
+     * the next hour until the server says it has struck.
+     */
+    clock() {
+      if (heldHour !== null) return heldHour;
+      const into = puppet
+        ? mirroredHour.frac + (performance.now() - mirroredHour.at) / 1000 / WEATHER_SECONDS
+        : weatherAccum / WEATHER_SECONDS;
+      return weather.hour + clamp(into, 0, 0.999);
+    },
+
+    /**
+     * Hold the clock at `hours` (0 to 24), or let it go on from there with
+     * null: a page playing alone, set from its options. The shops, the mayor
+     * and `time` read the held hour as they read a running one.
+     */
+    holdClock(hours) {
+      if (puppet) throw new Error('game.holdClock: a server keeps this clock');
+      if (hours === null) {
+        if (heldHour !== null) weatherAccum = (heldHour - Math.floor(heldHour)) * WEATHER_SECONDS;
+        heldHour = null;
+        return;
+      }
+      if (!(hours >= 0 && hours < 24)) throw new Error(`game.holdClock: ${hours} is not an hour of the day`);
+      heldHour = hours;
+      weather.hour = Math.floor(hours);
     },
 
     /**
@@ -3967,8 +4004,12 @@ export function createGame({
 
   game.mirror = {
     mob: mirrorMob, ground: mirrorGround, self: mirrorSelf, resolve: resolveRef, remotes,
-    /** The weather the server's barometer is at. */
-    weather(w) { Object.assign(weather, w); },
+    /** The weather the server's barometer is at, and how far into its hour it is. */
+    weather(w) {
+      const { frac = 0, ...rest } = w;
+      Object.assign(weather, rest);
+      mirroredHour = { frac, at: performance.now() };
+    },
     /**
      * Whether each door is shut and locked, [room, direction, those two
      * bits]: the exit takes the server's word and its hinge swings, as the
@@ -3985,12 +4026,11 @@ export function createGame({
         kernel.setExitFlags(vnum, dir, bits, BITS & ~bits, sound);
       }
     },
-    /** Stop running the rules here: the server runs them. */
-    become() { puppet = true; },
+    /** Stop running the rules here: the server runs them, and keeps the clock. */
+    become() { puppet = true; heldHour = null; },
     get puppet() { return puppet; },
   };
 
-  state.hour = 12;
   game.grace(2);
   // A server starts with nobody in it: players come in through addPlayer.
   if (multi) game.removePlayer(pc0);

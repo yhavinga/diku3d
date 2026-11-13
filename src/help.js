@@ -65,7 +65,7 @@ const GROUPS = [
       [['`', '~or', 'dashboard'], "the implementor's dashboard, on a server at trust 40 — the same key closes it"],
     ] },
     { title: 'The world', rows: [
-      [['1', '2', '3', '4'], 'dawn, noon, dusk, night'],
+      [['1', '2', '3', '4', '5'], "hold the mud's clock at dawn, noon, dusk or night; 5 lets it run (playing alone: on a server, the server's clock)"],
       [['P'], 'quality: low, medium, high, max'],
       [['F'], 'frame rate, draw calls and room statistics'],
       [['M'], 'sound on or off'],
