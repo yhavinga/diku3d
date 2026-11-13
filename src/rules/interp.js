@@ -272,7 +272,9 @@ export function installInterp(k) {
     const room = world.rooms.get(state.roomVnum);
     if (!room) return;
     const auto = arg === 'auto';
-    const open = room.exits.map((e, d) => (e && !(e.locks & EX_CLOSED) ? d : -1)).filter((d) => d >= 0);
+    // do_exits lists only an exit with a to_room, and fix_exits gives none to
+    // an exit to room 0 or below: that is a view (look <dir>), not a way.
+    const open = room.exits.map((e, d) => (e && e.to > 0 && !(e.locks & EX_CLOSED) ? d : -1)).filter((d) => d >= 0);
     if (auto) return send(`[Exits:${open.length ? open.map((d) => ` ${DIR_NAME[d]}`).join('') : ' none'}]`);
     send('Obvious exits:');
     if (!open.length) return send('None.');

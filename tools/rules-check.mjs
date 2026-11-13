@@ -76,6 +76,11 @@ console.log('\nTHE COMMAND LINE');
   check(t.say('look') === 'In your dreams, or what?', 'position gates a command the way interp.c does');
   check(t.say('score').startsWith('You are'), '...and lets through one that needs no position');
   t.game.state.position = POS.STANDING;
+  // #3200's west leads to room -1: a view, not a way (db.c fix_exits).
+  t.game.state.roomVnum = 3200;
+  check(t.say('exits') === 'Obvious exits: | East  - On the River', 'exits leaves out an exit to room -1', t.say('exits'));
+  check(t.say('exits auto') === '[Exits: east]', '...and so does the room line', t.say('exits auto'));
+  check(t.say('look west') === 'You see the river flowing west into the Forest of Haon-Dor.', 'look <dir> still reads its words', t.say('look west'));
 }
 
 // ---------------------------------------------------------- socials -----

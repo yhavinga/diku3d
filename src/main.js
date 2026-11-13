@@ -1491,6 +1491,11 @@ async function boot() {
     const exit = room.exits[dir];
     const name = DIR_NAME[dir];
     if (!exit) return refuse(`no exit ${name}`, 'Alas, you cannot go that way.');
+    // An exit to room 0 or below is the stock files' way of writing a view
+    // with no way through it (The Fading Trail's east: "The trees are nearly
+    // trunk-to-trunk this way."): db.c fix_exits leaves its to_room NULL and
+    // move_char refuses it as if there were no exit at all.
+    if (exit.to <= 0) return refuse(`no exit ${name}`, 'Alas, you cannot go that way.');
     // Worth naming the room number. "Outside the loaded world" sounds like a
     // dead end and is not one: the exit is real in the mud and leads into an
     // area file this session did not load, so the vnum is exactly what you need
