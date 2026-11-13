@@ -331,7 +331,8 @@ choose.
   the sun at −8°, lighting nothing. Both are time-preset keys now
   (`skyBleach`, `moon`) — keep them when adding a preset.
 - **The sky follows the mud's clock** (game.js `clock()`: a mud hour is
-  `WEATHER_SECONDS`, 120 s, so a day is 48 minutes) and its barometer; on a
+  `WEATHER_SECONDS`, 120 s, by day and `NIGHT_SECONDS`, 60 s, from 20:00 to
+  5:00, so a day is 39 minutes with nine of them night) and its barometer; on a
   server the server's, whatever the page's options say (the `weather` message
   carries `frac`, and the page runs the rest of the hour on). main.js
   `presetAt` mixes the four TIMES presets by the sun's elevation (`phaseAt`,
@@ -341,7 +342,7 @@ choose.
   `COLOUR_KEYS`, and a colour *times* an intensity mixes as light (the
   hemisphere does: dawn's 0.082 of a sky colour and noon's 32 under a black
   sky half, mixed apart, put a sky half of 16 half way). `relight` rebakes
-  only per `LIGHT_STEP` (1/60 h, two seconds) or `COVER_STEP` of the deck,
+  only per `LIGHT_STEP` (1/60 h, two seconds by day) or `COVER_STEP` of the deck,
   never per frame. `diku.applyTime(name)` and `?time=` pin the light for the
   tools (`'clock'` lets go); the options' `clock` and keys 1-5 hold a page
   alone's clock. The shops read `weather.hour`; no client sets an hour of its

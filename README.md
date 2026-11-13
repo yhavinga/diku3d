@@ -70,8 +70,10 @@ behind a title card while the new one is laid out and built. Only the sky area
 cannot be entered yet: its rooms are all sector AIR, which nothing builds.
 
 The sky runs on the mud's own clock and barometer (update.c's
-`weather_update`). A mud hour takes two minutes, so a day takes 48, as in GTA V
-and Red Dead Redemption 2; the sun is up from six to seven, as db.c has it, and
+`weather_update`). A mud hour takes two minutes by day and one in the dark hours
+(20:00 to 5:00), so a day takes 39 minutes and nine of them are night: GTA V and
+Red Dead Redemption 2 have a day of 48, and Guild Wars 2 and ESO spend a third
+of theirs in the dark. The sun is up from six to seven, as db.c has it, and
 the light passes between four tuned frames (dawn, noon, dusk and night) as the
 sun climbs and sets. The log says when the day begins, when the sun rises and
 sets, when it starts to rain and when it stops, and the shops keep the mud's
@@ -210,7 +212,7 @@ frames rather than waking at the display's refresh rate; a title screen left
 in an unfocused window does the same; hide the tab and it stops drawing
 altogether. The sun's shadow map is snapped to a six-metre grid
 and only redrawn when you cross a line or the sun has moved a step (every two
-seconds), instead of every frame; the sky's lighting is baked again on the same
+seconds by day), instead of every frame; the sky's lighting is baked again on the same
 step, about 0.7 ms each time.
 
 `F` shows the live GPU figure. On a lightly loaded frame it reads higher than

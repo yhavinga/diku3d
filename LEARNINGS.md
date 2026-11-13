@@ -16,11 +16,18 @@ default was `clear`, so the log could say "It starts to rain." over a dry,
 clear street. The fix puts the sun on the mud's clock, changes the light
 gradually, and makes a server's page take the server's sky.
 
-- **A day of 48 minutes.** What other games do: GTA V, RDR1 and RDR2 48 min,
-  FFXIV 70, Guild Wars 2 two hours, ESO about six; Merc's point-pulse hour is
-  30 s, a day of 12 minutes. A mud hour here is 120 s, and the weather walks
-  once an hour as Merc's does, so a shower now lasts minutes rather than
-  seconds. The calendar is read off the wall clock at that pace, with the part
+- **A day of 39 minutes, nine of them dark.** What other games do: GTA V,
+  RDR1 and RDR2 48 min, FFXIV 70, Guild Wars 2 two hours, ESO about six;
+  Merc's point-pulse hour is 30 s, a day of 12 minutes. A mud hour here is
+  120 s by day and 60 s in Merc's dark hours (20:00 to 5:00). At an even
+  120 s the night look held from about 19:26 to 5:34, 20 minutes of 48 (42%),
+  where GW2 and ESO spend a third of theirs in the dark, Minecraft lets you
+  sleep through its night and RDR2 runs its night faster; now it is about 11
+  of 39. Making the night lighter was the other answer and was not taken: the
+  night look is what the judge rounds tuned, and it is already film's
+  day-for-night (blue moonlight, a sky floor, the lamps lit), mean luma 34 on
+  the Market Square against 46 at dusk. The weather walks once an hour as
+  Merc's does, so a shower lasts minutes rather than seconds. The calendar is read off the wall clock at that pace, with the part
   of the hour already gone, so a restarted server and a page alone come up at
   the same hour.
 - **Mix the tuned presets; don't write a fifth.** The light at an hour is the
@@ -35,9 +42,21 @@ gradually, and makes a server's page take the server's sky.
   light they give, and the intensity is taken back out.
 - **One directional light is the sun and the moon in turn.** Each fades over
   four degrees either side of the horizon, so the light changes over while it
-  is all but out. Measured on the Market Square facing west (mean luma, HUD
-  cropped out): dusk 47.6, 18:48 35.8, 19:00 26.4, 19:12 30.7, 21:00 33.1.
-  The changeover is a dip to 20% under the night, for about 40 seconds.
+  is all but out.
+- **The dip at sunset was not the light changing over.** On the Market
+  Square facing west (mean luma, HUD cropped out) 19:00 read 28.2 against
+  33.7 for night and 46.4 for dusk, and it was first put down to the sun and
+  the moon both being out. Zeroing the directional light moved every hour of
+  the twilight by 0 to 7%. Taking key groups from night one at a time at
+  19:00 found it: the hemisphere +3.5, the sky's floor +1.8, the exposure
+  +1.2, env +0.4, and nothing else up. The dusk half of the mix is a sky lit
+  by a sun 9.5 degrees up (the dusk preset whole at 19:00 reads 46.5), and
+  with the sun on the horizon it gives next to nothing, while night's fill
+  was in at two thirds. That fill (`NIGHT_FILL`) now mixes on a clock of its
+  own, all night's by the time the sun is on the horizon, night's share
+  (1 - e/e0)^1.5: 46.5, 45.0, 39.4, 38.0, 35.0, 34.0 down to 33.9 from dusk to
+  night, and 33.8, 34.2, 41, 52.6, 73.3 at dawn. Eased instead of the power,
+  it came in early enough to put 18:36 at 49.1, over dusk itself.
 - **A rebake every two seconds is cheap.** One relight, synced by a 1-pixel
   `readPixels`, costs 0.87 ms against 0.19 for the sync alone; a composited
   frame is 8.75 ms. `relight` redraws when the sun has gone 1/60 of a mud
@@ -52,10 +71,12 @@ gradually, and makes a server's page take the server's sky.
 - **Checked against a server in the same process** (a scratch script with
   `startMud` and a page that logs in), with `noon` and `clear` stored on the
   page: the page's clock is the server's within 0.0003 h; the server moved to
-  18:19 gives dusk; a second after the server's sky goes RAINING the page is
+  18:19 gives dusk, 21:30 night at an hour a minute (1.001) alongside the
+  server; a second after the server's sky goes RAINING the page is
   overcast with rain at 0.17 and building, at 0.65 25 s later; CLOUDLESS
   again leaves no rain and a clear sky 25 s later. rules-check has the four
-  sunlight lines, a held clock and the jeweller's 9-to-17 by the mud's hour.
+  sunlight lines, the pace by day and by night, a held clock and the
+  jeweller's 9-to-17 by the mud's hour.
 
 ## 2026-11-10 — a security review, and what a hostile client could do
 
