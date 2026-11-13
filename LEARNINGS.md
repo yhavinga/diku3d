@@ -6,6 +6,57 @@ are promoted from, with the measurements that settled each one. Add to the
 top, date the section, keep the numbers: a finding without its measurement
 is an opinion.
 
+## 2026-11-13 — the sky on the mud's clock
+
+The question was whether a page on a server sees the server's time and
+weather. It did not. The light was one of four presets the player picked
+(default dusk), and nothing read the mud hour the server sent with every
+weather message. Rain fell only under the Weather option's `auto`, whose
+default was `clear`, so the log could say "It starts to rain." over a dry,
+clear street. The fix puts the sun on the mud's clock, changes the light
+gradually, and makes a server's page take the server's sky.
+
+- **A day of 48 minutes.** What other games do: GTA V, RDR1 and RDR2 48 min,
+  FFXIV 70, Guild Wars 2 two hours, ESO about six; Merc's point-pulse hour is
+  30 s, a day of 12 minutes. A mud hour here is 120 s, and the weather walks
+  once an hour as Merc's does, so a shower now lasts minutes rather than
+  seconds. The calendar is read off the wall clock at that pace, with the part
+  of the hour already gone, so a restarted server and a page alone come up at
+  the same hour.
+- **Mix the tuned presets; don't write a fifth.** The light at an hour is the
+  two presets either side, weighted by the sun's elevation (night below -6°,
+  dawn or dusk at their own 8° and 9.5°, noon from 35°), and at a preset's own
+  hour the mix returns the preset object itself. So a held hour, `?time=` and
+  every tool that calls `applyTime` draw exactly what they drew before.
+- **A colour times an intensity mixes as light.** Dawn's hemisphere is 0.082
+  of its sky colour, noon's is 32 under a black sky half (the ground
+  bounce). Mixing the colour and the intensity separately puts a sky half of
+  16 half way, brighter than either end. The two halves are mixed as the
+  light they give, and the intensity is taken back out.
+- **One directional light is the sun and the moon in turn.** Each fades over
+  four degrees either side of the horizon, so the light changes over while it
+  is all but out. Measured on the Market Square facing west (mean luma, HUD
+  cropped out): dusk 47.6, 18:48 35.8, 19:00 26.4, 19:12 30.7, 21:00 33.1.
+  The changeover is a dip to 20% under the night, for about 40 seconds.
+- **A rebake every two seconds is cheap.** One relight, synced by a 1-pixel
+  `readPixels`, costs 0.87 ms against 0.19 for the sync alone; a composited
+  frame is 8.75 ms. `relight` redraws when the sun has gone 1/60 of a mud
+  hour or the deck has moved 0.02, and the shadow map with it.
+- **`game.puppet` does not exist.** The flag is `game.mirror.puppet`; read
+  as `game.puppet` it was undefined, and a connected page took itself for one
+  playing alone. The first connected run timed out on it.
+- **A stored option is not a choice.** options.js saves every value whenever
+  any one changes, so nearly every returning player had `time: 'dusk'` and
+  `weather: 'clear'` stored without having chosen them. The fields are now
+  `clock` and `sky`, and the old two are dropped on load.
+- **Checked against a server in the same process** (a scratch script with
+  `startMud` and a page that logs in), with `noon` and `clear` stored on the
+  page: the page's clock is the server's within 0.0003 h; the server moved to
+  18:19 gives dusk; a second after the server's sky goes RAINING the page is
+  overcast with rain at 0.17 and building, at 0.65 25 s later; CLOUDLESS
+  again leaves no rain and a clear sky 25 s later. rules-check has the four
+  sunlight lines, a held clock and the jeweller's 9-to-17 by the mud's hour.
+
 ## 2026-11-10 — a security review, and what a hostile client could do
 
 The repository is public and the server takes anyone. A read of `server/`,

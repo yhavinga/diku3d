@@ -330,6 +330,23 @@ choose.
   `setSkyBleach` took part of the hue out; and the night light used to be
   the sun at −8°, lighting nothing. Both are time-preset keys now
   (`skyBleach`, `moon`) — keep them when adding a preset.
+- **The sky follows the mud's clock** (game.js `clock()`: a mud hour is
+  `WEATHER_SECONDS`, 120 s, so a day is 48 minutes) and its barometer; on a
+  server the server's, whatever the page's options say (the `weather` message
+  carries `frac`, and the page runs the rest of the hour on). main.js
+  `presetAt` mixes the four TIMES presets by the sun's elevation (`phaseAt`,
+  `mixPreset`); at a preset's own hour (`PRESET_HOUR`) it is that preset, the
+  same object, so a held hour draws what it always drew. A key a preset may
+  leave out needs its default in `PRESET_DEFAULTS`, a colour key goes in
+  `COLOUR_KEYS`, and a colour *times* an intensity mixes as light (the
+  hemisphere does: dawn's 0.082 of a sky colour and noon's 32 under a black
+  sky half, mixed apart, put a sky half of 16 half way). `relight` rebakes
+  only per `LIGHT_STEP` (1/60 h, two seconds) or `COVER_STEP` of the deck,
+  never per frame. `diku.applyTime(name)` and `?time=` pin the light for the
+  tools (`'clock'` lets go); the options' `clock` and keys 1-5 hold a page
+  alone's clock. The shops read `weather.hour`; no client sets an hour of its
+  own. Whether the page is on a server is `game.mirror.puppet` -- there is no
+  `game.puppet`, and reading it took every server's page for one alone.
 - **A HemisphereLight has no occlusion, and three.js filters lights by the
   *camera's* layers, not the object's.** The noon ground-bounce hemisphere lit
   the temple's inside like the street; a layers split needs a second render
@@ -462,6 +479,8 @@ choose.
   AO denoise noise taking its place in the `Math.random` stream, fixed in
   `ScaledGTAOPass._generateNoise`.) Underground, SMAA's HDR edge threshold
   follows the exposure (`smaaThreshold`), or the hour shows in the outlines.
+  And the hour itself: without `?time=` (or `diku.applyTime`) the light
+  follows the mud's clock, and two loads are two hours.
 - **A ring around the world is never "far".** The camera is always inside
   the horizon's bounding sphere, so every distance-based exclusion (cull.js
   `AO_REACH`, culling) misses it. Its strips face the camera with normals

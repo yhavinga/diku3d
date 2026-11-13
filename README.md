@@ -69,6 +69,15 @@ into the High Tower, the West Gate into Moria) and the old zone is taken down
 behind a title card while the new one is laid out and built. Only the sky area
 cannot be entered yet: its rooms are all sector AIR, which nothing builds.
 
+The sky runs on the mud's own clock and barometer (update.c's
+`weather_update`). A mud hour takes two minutes, so a day takes 48, as in GTA V
+and Red Dead Redemption 2; the sun is up from six to seven, as db.c has it, and
+the light passes between four tuned frames (dawn, noon, dusk and night) as the
+sun climbs and sets. The log says when the day begins, when the sun rises and
+sets, when it starts to rain and when it stops, and the shops keep the mud's
+hours. Playing alone, the options (or `1` to `5`) can hold the clock at an hour;
+on a server the server's clock and weather are everyone's.
+
 Every exit the mud names has a doorway in its room, on the wall it names
 wherever the graph allows (`node tools/exit-check.mjs --strict`). An archway is
 built at both ends, set in a wall or a corner and closed with a dark threshold;
@@ -124,7 +133,7 @@ and south over the bridge off the Dump.
 | arrow keys | through your own eyes: take the exit north, east, south or west, and turn to face that way — the mud's own navigation, so north is north whichever way you were looking. Your pace carries over: step east while walking and you keep the same speed, now heading east |
 | `page up` / `page down` | take the exit up or down, leaving you looking where you were |
 | mouse | look, `E` to examine, open, unlock (with the key you carry), drink, search a body or pick up; `E` again closes it |
-| `1` – `4` | dawn, noon, dusk, night |
+| `1` – `5` | playing alone, hold the mud's clock at dawn, noon, dusk or night; `5` lets it run on from there (on a server its clock keeps the hour) |
 | `P` | cycle quality: low, medium, high, max (also grass density and reach) |
 | `F` | frame rate, draw calls, triangles, GPU milliseconds, and the room's vnum, sector and build statistics |
 | `V` | view: over the shoulder of your figure (where a new player starts) or through your own eyes; the browser keeps the choice |
@@ -148,7 +157,7 @@ and south over the bridge off the Dump.
 | `?areas=midgaard,school` | which `.are` files make up the home zone (default the nine listed above); every other area is still its own zone |
 | `?room=3001` | where to start; a room in another zone (`?room=3700`) starts you there |
 | `?max=400` | stop placing after this many rooms |
-| `?time=dusk` | `dawn`, `noon`, `dusk`, `night` |
+| `?time=dusk` | hold the light at `dawn`, `noon`, `dusk` or `night` whatever the clock says, for screenshots and measurements |
 | `?quality=medium` | `low`, `medium`, `high`, `max` |
 | `?class=mage` | start as `warrior`, `mage`, `cleric` or `thief` (also on the title screen) |
 | `?cull=off` | draw everything, for comparing against the measured visibility |
@@ -200,8 +209,9 @@ Release the mouse or switch tabs and it drops to 10 fps and sleeps between
 frames rather than waking at the display's refresh rate; a title screen left
 in an unfocused window does the same; hide the tab and it stops drawing
 altogether. The sun's shadow map is snapped to a six-metre grid
-and only redrawn when you cross a line or the time of day changes, instead of
-every frame.
+and only redrawn when you cross a line or the sun has moved a step (every two
+seconds), instead of every frame; the sky's lighting is baked again on the same
+step, about 0.7 ms each time.
 
 `F` shows the live GPU figure. On a lightly loaded frame it reads higher than
 the table above, because the GPU drops to a low clock between frames and the
